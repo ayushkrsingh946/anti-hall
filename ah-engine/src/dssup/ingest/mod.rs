@@ -2,7 +2,7 @@
 //! launchd / systemd unit per project) does, so the kit can uninstall those units.
 //!
 //! * [`Owner`] is the switch (`devswarm_ingest.mode`): `witness` (default) leaves the drain to the Node daemons and starts nothing;
-//!   `engine` makes the daemon run one drain thread per project. While a Node daemon still holds a project's lock the engine's
+//!   `engine` runs project drains through bounded worker slots. While a Node daemon still holds a project's lock the engine's
 //!   drain for that project waits (the lock is the single-consumer guard: it never takes a live holder's lock) and takes over the
 //!   moment the holder is gone. Nothing is ever double-drained.
 //! * [`drain`] is one project's drain, [`wal`] its delivery write-ahead log (Node's format, so a WAL left open by either side is
@@ -28,8 +28,8 @@ use drain::{Drainer, Project, Start};
 use serde_json::{Value, json};
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, mpsc};
 
 /// Who owns the drain.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -123,8 +123,7 @@ fn active_repo_keys(home: &Path, explicit: &str, now: i64) -> BTreeSet<String> {
     paths.into_iter().filter_map(|p| Project::resolve(&p).map(|pr| pr.repo_key)).collect()
 }
 
-struct Worker {
-    handle: std::thread::JoinHandle<()>,
+struct Assignment {
     stop: Arc<AtomicBool>,
     last_seen_ms: i64,
 }
@@ -142,7 +141,7 @@ struct Ledger {
 }
 
 impl Ledger {
-    fn sync(&self, running: &HashMap<String, Worker>) {
+    fn sync(&self, running: &HashMap<String, Assignment>) {
         let mut slots: Vec<WorkerSlot> =
             running.iter().map(|(repo_key, w)| WorkerSlot { repo_key: repo_key.clone(), stop: w.stop.clone(), last_seen_ms: w.last_seen_ms }).collect();
         slots.sort_by(|a, b| a.last_seen_ms.cmp(&b.last_seen_ms).then_with(|| a.repo_key.cmp(&b.repo_key)));
@@ -178,7 +177,106 @@ impl MemOwner for Ledger {
     }
 }
 
-fn startable_projects(projects: &[Project], running: &HashMap<String, Worker>, max_threads: usize) -> Vec<Project> {
+struct PoolWorker {
+    handle: std::thread::JoinHandle<()>,
+    stop: Arc<AtomicBool>,
+}
+
+struct Job {
+    project: Project,
+    st: Settings,
+    stop: Arc<AtomicBool>,
+}
+
+enum Msg {
+    Run(Job),
+    Stop,
+}
+
+fn spawn_pool_worker(home: PathBuf, stop: Arc<dyn Fn() -> bool + Send + Sync>, rx: Arc<Mutex<mpsc::Receiver<Msg>>>, done: mpsc::Sender<String>) -> PoolWorker {
+    let worker_stop = Arc::new(AtomicBool::new(false));
+    let worker_stop2 = worker_stop.clone();
+    let handle = std::thread::spawn(move || {
+        while !stop() && !worker_stop2.load(Ordering::Relaxed) {
+            let msg = {
+                let rx = rx.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                rx.recv_timeout(std::time::Duration::from_millis(defaults::num("devswarm_ingest.stop_poll_ms").max(1)))
+            };
+            match msg {
+                Ok(Msg::Run(job)) => {
+                    let key = job.project.repo_key.clone();
+                    let should_stop = || stop() || job.stop.load(Ordering::Relaxed);
+                    run_project(&home, &job.st, job.project, &System::configured(), &should_stop);
+                    let _sent = done.send(key); // keep: the manager may already be stopping
+                }
+                Ok(Msg::Stop) => {
+                    if stop() || worker_stop2.load(Ordering::Relaxed) {
+                        break;
+                    }
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+            }
+        }
+    });
+    PoolWorker { handle, stop: worker_stop }
+}
+
+fn reconcile_worker_count(
+    workers: &mut Vec<PoolWorker>,
+    max_worker_threads: usize,
+    home: &Path,
+    stop: Arc<dyn Fn() -> bool + Send + Sync>,
+    rx: &Arc<Mutex<mpsc::Receiver<Msg>>>,
+    tx: &mpsc::Sender<Msg>,
+    done: &mpsc::Sender<String>,
+) -> usize {
+    join_finished_workers(workers);
+    let excess = workers.len().saturating_sub(max_worker_threads);
+    let mut signaled = 0usize;
+    for w in workers.iter().rev().take(excess) {
+        w.stop.store(true, Ordering::Relaxed);
+        if tx.send(Msg::Stop).is_ok() {
+            signaled += 1;
+        }
+    }
+    while workers.len() < max_worker_threads {
+        workers.push(spawn_pool_worker(home.to_path_buf(), stop.clone(), rx.clone(), done.clone()));
+    }
+    signaled
+}
+
+fn join_finished_workers(workers: &mut Vec<PoolWorker>) {
+    let mut i = 0;
+    while i < workers.len() {
+        if workers[i].handle.is_finished() {
+            let w = workers.remove(i);
+            crate::discard::harmless(w.handle.join()); // keep: a panicked worker already reported itself
+        } else {
+            i += 1;
+        }
+    }
+}
+
+fn enforce_worker_cap_drop(workers: &mut Vec<PoolWorker>, max_worker_threads: usize, tx: &mpsc::Sender<Msg>) -> usize {
+    let mut signaled = 0usize;
+    while workers.len() > max_worker_threads {
+        let Some(w) = workers.pop() else { break };
+        w.stop.store(true, Ordering::Relaxed);
+        if tx.send(Msg::Stop).is_ok() {
+            signaled += 1;
+        }
+        crate::discard::harmless(w.handle.join()); // keep: a panicked worker already reported itself
+        join_finished_workers(workers);
+    }
+    signaled
+}
+
+fn worker_threads_for_cap(max_threads: usize) -> usize {
+    max_threads.saturating_sub(1)
+}
+
+fn startable_projects(projects: &[Project], running: &HashMap<String, Assignment>, max_threads: usize) -> Vec<Project> {
     let mut left = max_threads.saturating_sub(running.len());
     let mut out = Vec::new();
     for p in projects {
@@ -204,6 +302,30 @@ fn rotated_projects(projects: &[Project], cursor: usize) -> Vec<Project> {
 
 fn desired_project_keys(projects: &[Project], max_threads: usize, cursor: usize) -> BTreeSet<String> {
     rotated_projects(projects, cursor).into_iter().take(max_threads).map(|p| p.repo_key).collect()
+}
+
+fn stop_idle_workers(running: &mut HashMap<String, Assignment>, active: &BTreeSet<String>, now: i64, idle_ttl: i64) {
+    for key in active {
+        if let Some(w) = running.get_mut(key) {
+            w.last_seen_ms = now;
+        }
+    }
+    for (key, w) in running {
+        if !active.contains(key) && now.saturating_sub(w.last_seen_ms) >= idle_ttl {
+            w.stop.store(true, Ordering::Relaxed);
+        }
+    }
+}
+
+fn stop_workers_outside_cap(running: &HashMap<String, Assignment>, desired: &BTreeSet<String>, project_count: usize, max_threads: usize) {
+    if project_count <= max_threads {
+        return;
+    }
+    for (key, w) in running {
+        if !desired.contains(key) {
+            w.stop.store(true, Ordering::Relaxed);
+        }
+    }
 }
 
 /// A sleep that wakes at once when `stop` turns true, and re-stamps the lock and heartbeat while it waits. False: the lock was lost.
@@ -275,7 +397,8 @@ pub fn join_all() -> bool {
 }
 
 /// Start the drain in the daemon: nothing at all unless the mode is `engine`. One manager thread re-discovers the projects and
-/// keeps one drain thread per project; every thread ends when `stop` turns true (see [`join_all`]).
+/// keeps at most `mem.devswarm_ingest_max_threads` active drain workers; every worker ends when `stop` turns true (see
+/// [`join_all`]).
 pub fn start(home: &Path, state_dir: &Path, stop: Arc<dyn Fn() -> bool + Send + Sync>) {
     if owner() != Owner::Engine {
         return;
@@ -288,54 +411,44 @@ pub fn start(home: &Path, state_dir: &Path, stop: Arc<dyn Fn() -> bool + Send + 
         Arc::downgrade(&owner),
     );
     let handle = std::thread::spawn(move || {
-        let mut running: HashMap<String, Worker> = HashMap::new();
+        let (tx, rx) = mpsc::channel();
+        let rx = Arc::new(Mutex::new(rx));
+        let (done_tx, done_rx) = mpsc::channel();
+        let mut workers: Vec<PoolWorker> = Vec::new();
+        let mut running: HashMap<String, Assignment> = HashMap::new();
         let mut cursor = 0usize;
         while !stop() {
-            let done: Vec<String> = running.iter().filter(|(_, w)| w.handle.is_finished()).map(|(k, _)| k.clone()).collect();
-            for k in done {
-                if let Some(w) = running.remove(&k) {
-                    crate::discard::harmless(w.handle.join()); // keep: a panicked worker already reported itself
-                }
+            for key in done_rx.try_iter() {
+                running.remove(&key);
             }
             let st = Settings::from_env(&crate::reqenv::RequestEnv::capture());
             let explicit = crate::dswire::effective_text("devswarm_ingest.projects");
             let now = now_ms();
             let active = active_repo_keys(&home, &explicit, now);
             let idle_ttl = defaults::num("mem.devswarm_ingest_idle_ttl_ms") as i64;
-            for key in &active {
-                if let Some(w) = running.get_mut(key) {
-                    w.last_seen_ms = now;
-                }
-            }
-            for (key, w) in &running {
-                if !active.contains(key) && now.saturating_sub(w.last_seen_ms) >= idle_ttl {
+            stop_idle_workers(&mut running, &active, now, idle_ttl);
+            let max_threads = defaults::num("mem.devswarm_ingest_max_threads") as usize;
+            let max_worker_threads = worker_threads_for_cap(max_threads);
+            let projects = discover(&home, &state_dir, &explicit, now);
+            let ordered = rotated_projects(&projects, cursor);
+            let desired = desired_project_keys(&projects, max_worker_threads, cursor);
+            stop_workers_outside_cap(&running, &desired, projects.len(), max_worker_threads);
+            if running.len() > max_worker_threads {
+                for w in running.values() {
                     w.stop.store(true, Ordering::Relaxed);
                 }
             }
-            let max_threads = defaults::num("mem.devswarm_ingest_max_threads") as usize;
-            let projects = discover(&home, &state_dir, &explicit, now);
-            let ordered = rotated_projects(&projects, cursor);
-            let desired = desired_project_keys(&projects, max_threads, cursor);
-            if projects.len() > max_threads {
-                for (key, w) in &running {
-                    if !desired.contains(key) {
-                        w.stop.store(true, Ordering::Relaxed);
-                    }
-                }
-            }
-            for p in startable_projects(&ordered, &running, max_threads) {
-                let (h, st2, s2) = (home.clone(), st.clone(), stop.clone());
+            let _joined = enforce_worker_cap_drop(&mut workers, max_worker_threads, &tx);
+            let _signaled = reconcile_worker_count(&mut workers, max_worker_threads, &home, stop.clone(), &rx, &tx, &done_tx);
+            for p in startable_projects(&ordered, &running, max_worker_threads) {
                 let key = p.repo_key.clone();
                 let local_stop = Arc::new(AtomicBool::new(false));
-                let worker_stop = local_stop.clone();
-                let handle = std::thread::spawn(move || {
-                    let should_stop = || s2() || worker_stop.load(Ordering::Relaxed);
-                    run_project(&h, &st2, p, &System::configured(), &should_stop);
-                });
-                running.insert(key, Worker { handle, stop: local_stop, last_seen_ms: now });
+                if tx.send(Msg::Run(Job { project: p, st: st.clone(), stop: local_stop.clone() })).is_ok() {
+                    running.insert(key, Assignment { stop: local_stop, last_seen_ms: now });
+                }
             }
-            if !projects.is_empty() && max_threads > 0 {
-                cursor = (cursor + max_threads) % projects.len();
+            if !projects.is_empty() && max_worker_threads > 0 {
+                cursor = (cursor + max_worker_threads) % projects.len();
             }
             ledger.sync(&running);
             budget.observe();
@@ -349,7 +462,11 @@ pub fn start(home: &Path, state_dir: &Path, stop: Arc<dyn Fn() -> bool + Send + 
         for w in running.values() {
             w.stop.store(true, Ordering::Relaxed);
         }
-        for (_, w) in running {
+        for w in &workers {
+            w.stop.store(true, Ordering::Relaxed);
+            let _sent = tx.send(Msg::Stop); // keep: workers also see the global stop
+        }
+        for w in workers {
             crate::discard::harmless(w.handle.join()); // keep: a panicked worker already reported itself
         }
     });
@@ -401,8 +518,8 @@ mod tests {
         Project { worktree: format!("/tmp/{key}"), repo_key: key.to_string(), workspace_id: format!("primary-{key}") }
     }
 
-    fn worker() -> Worker {
-        Worker { handle: std::thread::spawn(|| {}), stop: Arc::new(AtomicBool::new(false)), last_seen_ms: 10 }
+    fn worker() -> Assignment {
+        Assignment { stop: Arc::new(AtomicBool::new(false)), last_seen_ms: 10 }
     }
 
     #[test]
@@ -423,6 +540,109 @@ mod tests {
         assert_eq!(second.iter().map(String::as_str).collect::<Vec<_>>(), vec!["c", "d"]);
         assert_eq!(first.len(), 2);
         assert_eq!(second.len(), 2);
+    }
+
+    #[test]
+    fn cap_enforcement_stops_workers_outside_the_desired_window() {
+        let mut running = HashMap::new();
+        running.insert("a".to_string(), worker());
+        running.insert("b".to_string(), worker());
+        running.insert("c".to_string(), worker());
+        let desired = BTreeSet::from(["a".to_string(), "b".to_string()]);
+        stop_workers_outside_cap(&running, &desired, 3, 2);
+        assert!(!running["a"].stop.load(Ordering::Relaxed));
+        assert!(!running["b"].stop.load(Ordering::Relaxed));
+        assert!(running["c"].stop.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn worker_pool_stays_at_or_under_the_configured_cap() {
+        let (tx, rx) = mpsc::channel();
+        let rx = Arc::new(Mutex::new(rx));
+        let (done_tx, _done_rx) = mpsc::channel();
+        let stopped = Arc::new(AtomicBool::new(false));
+        let stopped2 = stopped.clone();
+        let stop: Arc<dyn Fn() -> bool + Send + Sync> = Arc::new(move || stopped2.load(Ordering::Relaxed));
+        let mut workers = Vec::new();
+        let cap = 2usize;
+        let worker_cap = worker_threads_for_cap(cap);
+        let _signaled = reconcile_worker_count(&mut workers, worker_cap, &std::env::temp_dir(), stop.clone(), &rx, &tx, &done_tx);
+        assert!(workers.len() < cap);
+        let _signaled = reconcile_worker_count(&mut workers, worker_cap, &std::env::temp_dir(), stop.clone(), &rx, &tx, &done_tx);
+        assert!(workers.len() < cap);
+        stopped.store(true, Ordering::Relaxed);
+        for _ in 0..workers.len() {
+            let _sent = tx.send(Msg::Stop);
+        }
+        for w in workers {
+            crate::discard::harmless(w.handle.join());
+        }
+    }
+
+    #[test]
+    fn worker_pool_cap_drop_signals_every_excess_thread() {
+        let (tx, rx) = mpsc::channel();
+        let rx = Arc::new(Mutex::new(rx));
+        let (done_tx, _done_rx) = mpsc::channel();
+        let stopped = Arc::new(AtomicBool::new(false));
+        let stopped2 = stopped.clone();
+        let stop: Arc<dyn Fn() -> bool + Send + Sync> = Arc::new(move || stopped2.load(Ordering::Relaxed));
+        let mut workers = Vec::new();
+        let _signaled = reconcile_worker_count(&mut workers, 3, &std::env::temp_dir(), stop.clone(), &rx, &tx, &done_tx);
+        let stop_msgs = reconcile_worker_count(&mut workers, 1, &std::env::temp_dir(), stop.clone(), &rx, &tx, &done_tx);
+        stopped.store(true, Ordering::Relaxed);
+        for w in workers {
+            crate::discard::harmless(w.handle.join());
+        }
+        assert!(stop_msgs >= 2);
+    }
+
+    #[test]
+    fn worker_pool_cap_drop_joins_to_the_lowered_cap() {
+        let (tx, rx) = mpsc::channel();
+        let rx = Arc::new(Mutex::new(rx));
+        let (done_tx, _done_rx) = mpsc::channel();
+        let stopped = Arc::new(AtomicBool::new(false));
+        let stopped2 = stopped.clone();
+        let stop: Arc<dyn Fn() -> bool + Send + Sync> = Arc::new(move || stopped2.load(Ordering::Relaxed));
+        let mut workers = Vec::new();
+        let _signaled = reconcile_worker_count(&mut workers, 3, &std::env::temp_dir(), stop.clone(), &rx, &tx, &done_tx);
+        let signaled = enforce_worker_cap_drop(&mut workers, 1, &tx);
+        assert_eq!(workers.len(), 1);
+        assert_eq!(signaled, 2);
+        let _sent = tx.send(Msg::Stop);
+        std::thread::sleep(std::time::Duration::from_millis(defaults::num("devswarm_ingest.stop_poll_ms").max(1)));
+        join_finished_workers(&mut workers);
+        assert_eq!(workers.len(), 1);
+        assert!(!workers[0].handle.is_finished());
+        stopped.store(true, Ordering::Relaxed);
+        let _sent = tx.send(Msg::Stop);
+        for w in workers {
+            crate::discard::harmless(w.handle.join());
+        }
+    }
+
+    #[test]
+    fn configured_total_cap_of_one_starts_no_worker_threads() {
+        assert_eq!(worker_threads_for_cap(1), 0);
+        let (tx, rx) = mpsc::channel();
+        let rx = Arc::new(Mutex::new(rx));
+        let (done_tx, _done_rx) = mpsc::channel();
+        let stop: Arc<dyn Fn() -> bool + Send + Sync> = Arc::new(|| false);
+        let mut workers = Vec::new();
+        let _signaled = reconcile_worker_count(&mut workers, worker_threads_for_cap(1), &std::env::temp_dir(), stop, &rx, &tx, &done_tx);
+        assert!(workers.is_empty());
+    }
+
+    #[test]
+    fn idle_projects_are_stopped_after_the_configured_ttl() {
+        let mut running = HashMap::new();
+        running.insert("active".to_string(), Assignment { stop: Arc::new(AtomicBool::new(false)), last_seen_ms: 5 });
+        running.insert("idle".to_string(), Assignment { stop: Arc::new(AtomicBool::new(false)), last_seen_ms: 5 });
+        stop_idle_workers(&mut running, &BTreeSet::from(["active".to_string()]), 15, 10);
+        assert_eq!(running["active"].last_seen_ms, 15);
+        assert!(!running["active"].stop.load(Ordering::Relaxed));
+        assert!(running["idle"].stop.load(Ordering::Relaxed));
     }
 
     #[test]

@@ -14,6 +14,7 @@ use crate::mem::{Owner, Spec};
 use crate::metrics::Metrics;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
+use std::mem::size_of;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock, Weak};
 
@@ -62,11 +63,12 @@ impl Hold {
 
     fn generation_bytes_locked(generations: &mut Vec<Weak<Snapshot>>) -> usize {
         generations.retain(|w| w.strong_count() > 0);
-        generations.iter().filter_map(Weak::upgrade).map(|s| s.estimated_bytes()).sum()
+        generations.capacity().saturating_mul(size_of::<Weak<Snapshot>>())
+            + generations.iter().filter_map(Weak::upgrade).map(|s| s.estimated_bytes()).sum::<usize>()
     }
 
     fn edge_bytes_locked(edges: &VecDeque<Edge>) -> usize {
-        edges.iter().map(Edge::estimated_bytes).sum()
+        edges.capacity().saturating_mul(size_of::<Edge>()) + edges.iter().map(|e| e.ws.len() + e.from.len() + e.to.len()).sum::<usize>()
     }
 
     fn bytes_from_locks(generations: &mut Vec<Weak<Snapshot>>, edges: &VecDeque<Edge>) -> usize {
@@ -86,20 +88,17 @@ impl Hold {
         let mut edges = self.edges.lock().unwrap_or_else(|e| e.into_inner());
         let mut generations = self.generations.lock().unwrap_or_else(|e| e.into_inner());
         while Self::bytes_from_locks(&mut generations, &edges) > target && edges.pop_front().is_some() {}
-        if Self::bytes_from_locks(&mut generations, &edges) <= target {
-            return;
-        }
-        let mut cur = self.cur.write().unwrap_or_else(|e| e.into_inner());
-        let mut next = (**cur).clone();
-        while Self::edge_bytes_locked(&edges) + next.estimated_bytes() > target && next.workspaces.pop_last().is_some() {}
-        let next = Arc::new(next);
-        generations.push(Arc::downgrade(&next));
-        *cur = next;
+        edges.shrink_to_fit();
+        generations.shrink_to_fit();
     }
 
     fn clear(&self) {
-        self.edges.lock().unwrap_or_else(|e| e.into_inner()).clear();
-        self.set_current(Arc::new(Snapshot::default()));
+        let mut edges = self.edges.lock().unwrap_or_else(|e| e.into_inner());
+        edges.clear();
+        edges.shrink_to_fit();
+        let mut generations = self.generations.lock().unwrap_or_else(|e| e.into_inner());
+        generations.retain(|w| w.strong_count() > 0);
+        generations.shrink_to_fit();
     }
 }
 
@@ -335,6 +334,7 @@ mod tests {
     use super::*;
     use crate::devswarm_rt::state::{Activity, Field, Lifecycle, Paused, PrView, Src};
     use std::collections::BTreeMap;
+    use std::sync::Mutex as StdMutex;
 
     fn field<T>(value: T) -> Field<T> {
         Field { value, source: Src::AppDb, observed_ms: 1, sig: "sig".into() }
@@ -371,22 +371,22 @@ mod tests {
     }
 
     #[test]
-    fn holder_shrinks_edges_before_snapshot_to_byte_cap() {
+    fn holder_shrinks_recoverable_edges_but_preserves_current_snapshot() {
         let h = Hold::new();
         *h.edges.lock().unwrap() = VecDeque::from([edge(1), edge(2)]);
         let mut workspaces = BTreeMap::new();
         workspaces.insert("a".into(), workspace("a"));
         workspaces.insert("b".into(), workspace("b"));
         h.set_current(Arc::new(Snapshot { generation: 1, at_ms: 1, seeded: true, app_readable: true, workspaces }));
-        let empty = Snapshot::default().estimated_bytes();
-        h.shrink(empty);
-        assert!(h.bytes() <= empty);
+        let current_bytes = h.cur.read().unwrap().estimated_bytes();
+        h.shrink(current_bytes);
+        assert_eq!(h.cur.read().unwrap().workspaces.len(), 2);
         assert!(h.edges.lock().unwrap().is_empty());
-        assert!(h.cur.read().unwrap().workspaces.is_empty());
+        assert!(h.bytes() >= current_bytes);
     }
 
     #[test]
-    fn holder_recycle_clears_snapshot_and_edges() {
+    fn holder_recycle_clears_recoverable_edges_but_preserves_current_snapshot() {
         let h = Hold::new();
         *h.edges.lock().unwrap() = VecDeque::from([edge(1)]);
         let mut workspaces = BTreeMap::new();
@@ -394,7 +394,29 @@ mod tests {
         h.set_current(Arc::new(Snapshot { generation: 1, at_ms: 1, seeded: true, app_readable: true, workspaces }));
         h.recycle();
         assert!(h.edges.lock().unwrap().is_empty());
-        assert!(h.cur.read().unwrap().workspaces.is_empty());
+        assert_eq!(h.cur.read().unwrap().workspaces.len(), 1);
+    }
+
+    #[test]
+    fn shrink_and_recycle_release_recoverable_container_capacity() {
+        let h = Hold::new();
+        {
+            let mut edges = h.edges.lock().unwrap();
+            edges.reserve(64);
+            edges.extend([edge(1), edge(2)]);
+        }
+        let before = h.bytes();
+        h.shrink(0);
+        let after_shrink = h.bytes();
+        assert!(after_shrink < before);
+        assert_eq!(h.edges.lock().unwrap().capacity(), 0);
+        {
+            let mut edges = h.edges.lock().unwrap();
+            edges.reserve(64);
+            edges.extend([edge(3)]);
+        }
+        h.recycle();
+        assert_eq!(h.edges.lock().unwrap().capacity(), 0);
     }
 
     #[test]
@@ -406,8 +428,48 @@ mod tests {
         let old_bytes = old.estimated_bytes();
         h.set_current(old.clone());
         h.set_current(Arc::new(Snapshot::default()));
-        assert!(h.bytes() >= Snapshot::default().estimated_bytes() + old_bytes);
+        let with_old = h.bytes();
+        assert!(with_old >= Snapshot::default().estimated_bytes() + old_bytes);
         drop(old);
-        assert_eq!(h.bytes(), Snapshot::default().estimated_bytes());
+        h.shrink(usize::MAX);
+        let after_drop = h.bytes();
+        assert!(after_drop >= Snapshot::default().estimated_bytes());
+        assert!(after_drop < with_old);
+    }
+
+    #[test]
+    fn irreducible_current_snapshot_is_preserved_and_left_to_restart_policy() {
+        let h = Arc::new(Hold::new());
+        let mut workspaces = BTreeMap::new();
+        workspaces.insert("authoritative".into(), workspace("authoritative"));
+        h.set_current(Arc::new(Snapshot { generation: 7, at_ms: 1, seeded: true, app_readable: true, workspaces }));
+        let hard = h.bytes().saturating_sub(1) as u64;
+        let events = Arc::new(StdMutex::new(Vec::new()));
+        let events2 = events.clone();
+        let reg = crate::mem::Registry::new(
+            Box::new(move |key| match key {
+                "mem.devswarm_rt_soft_bytes" => hard,
+                "mem.devswarm_rt_hard_bytes" => hard,
+                "mem.devswarm_rt_low_water_pct" => 50,
+                "mem.global_soft_bytes" => 0,
+                "mem.global_hard_bytes" => 0,
+                "mem.global_low_water_pct" => 50,
+                "mem.global_restart_after_s" => 0,
+                "mem.global_log_min_interval_ms" => 0,
+                _ => 0,
+            }),
+            Box::new(move |e| events2.lock().unwrap().push((e.kind, e.holder.clone()))),
+        );
+        let owner: Arc<dyn Owner> = h.clone();
+        let budget = reg.register(
+            Spec::new("devswarm_rt", "mem.devswarm_rt_soft_bytes", "mem.devswarm_rt_hard_bytes", "mem.devswarm_rt_low_water_pct"),
+            Arc::downgrade(&owner),
+        );
+        budget.observe();
+        assert_eq!(h.cur.read().unwrap().workspaces.len(), 1);
+        let restart = reg.tick(0, 1).expect("irreducible holder should request restart after configured delay");
+        assert_eq!(restart.holder, "devswarm_rt");
+        assert_eq!(h.cur.read().unwrap().workspaces.len(), 1);
+        assert!(events.lock().unwrap().iter().any(|(kind, holder)| *kind == crate::mem::Kind::Restart && holder == "devswarm_rt"));
     }
 }
