@@ -33,6 +33,9 @@ impl Env {
     fn sock(&self) -> PathBuf {
         self.dir.join("eng").join("e.sock")
     }
+    fn eng(&self) -> PathBuf {
+        self.dir.join("eng")
+    }
     fn cmd(&self) -> Command {
         let mut c = Command::new(BIN);
         c.env("HOME", self.dir.join("home"))
@@ -258,11 +261,10 @@ fn a_daemon_thread_panic_restarts_until_the_cap_then_drains() {
     assert_ne!(second_pid, first_pid, "the client started a fresh daemon after the capped thread panic");
     let r = e.json(&["schedule", "run", "probe", "--json"]);
     assert_eq!(r["status"], "ok", "{r}");
-    e.ctl("stop");
-    let t = Instant::now();
-    while t.elapsed() < Duration::from_secs(5) && ah_engine::client::ping(&e.sock()).is_some() {
-        std::thread::sleep(Duration::from_millis(20));
-    }
+    let eng = e.eng();
+    common::reap(&eng, || {
+        ah_engine::discard::harmless(ah_engine::client::exchange(&e.sock(), b"CTL stop\n", Duration::from_millis(500)));
+    });
 }
 
 #[test]
