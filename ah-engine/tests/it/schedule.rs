@@ -11,6 +11,10 @@ use std::time::{Duration, Instant};
 
 const BIN: &str = env!("CARGO_BIN_EXE_ah-engine");
 
+fn plugin() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().unwrap().join("plugins/anti-hall")
+}
+
 struct Env {
     dir: PathBuf,
     daemon: Option<Child>,
@@ -36,6 +40,7 @@ impl Env {
             .env("AH_ENGINE_RULES", self.dir.join("rules.json"))
             .env("AH_ENGINE_VERSION", "0.1.0")
             .env("AH_ENGINE_NOSPAWN", "1")
+            .env("AH_ENGINE_PLUGIN_ROOT", plugin())
             .env("AH_ENGINE_TICK_MS", "20")
             .env("AH_ENGINE_TEST_HOOKS", "1");
         c
@@ -59,6 +64,14 @@ impl Env {
         let out = String::from_utf8_lossy(&o.stdout);
         serde_json::from_str(out.trim()).unwrap_or_else(|e| panic!("{args:?}: {e}: {out}"))
     }
+    fn ctl(&self, verb: &str) -> String {
+        let o = self.cmd().args(["ctl", verb]).output().unwrap();
+        assert!(o.status.success(), "ctl {verb}: {}", String::from_utf8_lossy(&o.stderr));
+        String::from_utf8_lossy(&o.stdout).trim().to_string()
+    }
+    fn log(&self) -> String {
+        std::fs::read_to_string(self.dir.join("eng").join("ah-engine.log")).unwrap_or_default()
+    }
     fn db(&self) -> rusqlite::Connection {
         rusqlite::Connection::open(self.dir.join("eng").join("hot.db")).unwrap()
     }
@@ -70,6 +83,9 @@ impl Env {
     }
     fn next_ms(&self, job: &str) -> i64 {
         self.db().query_row("SELECT next_ms FROM schedule_state WHERE job = ?1", [job], |r| r.get(0)).unwrap()
+    }
+    fn job(&self, list: &serde_json::Value, name: &str) -> serde_json::Value {
+        list["jobs"].as_array().unwrap().iter().find(|j| j["name"] == name).cloned().unwrap_or_else(|| panic!("missing {name}: {list}"))
     }
 }
 
@@ -158,6 +174,50 @@ fn a_hung_job_is_killed_at_its_timeout_and_the_next_run_still_happens() {
         let ppid = Command::new("ps").args(["-o", "ppid=", "-p", pid]).output().unwrap();
         assert_ne!(String::from_utf8_lossy(&ppid.stdout).trim(), "1", "a killed job left an orphaned sleep {pid}");
     }
+}
+
+#[test]
+fn an_injected_job_panic_clears_running_and_daemon_keeps_serving() {
+    let jobs = r#"{"jobs": {"panic_probe": {"kind": "engine", "action": "test_panic", "every_ms": 3600000, "timeout_ms": 2000, "retries": 0, "cooldown_ms": 0, "persist": true}}}"#;
+    let mut e = Env::new("panic", jobs);
+    e.start();
+    let r = e.json(&["schedule", "run", "panic_probe", "--json"]);
+    assert_eq!(r["status"], "failed", "{r}");
+    assert_eq!(r["detail"], ah_engine::defaults::text("msg.schedule_panic"));
+    assert!(ah_engine::client::ping(&e.sock()).is_some(), "daemon still serves ping after job panic");
+    let l = e.json(&["schedule", "list", "--json"]);
+    let job = e.job(&l, "panic_probe");
+    assert_eq!(job["running"], false, "{job}");
+    assert_eq!(job["last"]["status"], "failed", "{job}");
+    let s = e.json(&["status", "--json"]);
+    assert_eq!(s["running"], true, "{s}");
+    e.stop();
+}
+
+#[test]
+fn a_daemon_thread_panic_restarts_until_the_cap_then_drains() {
+    let mut e = Env::new("thread-panic", r#"{"jobs": {}}"#);
+    e.start();
+    e.ctl("thread_panic 1");
+    let t = Instant::now();
+    while t.elapsed() < Duration::from_secs(5) && !e.log().contains("\tthread_panic\twatchdog\t") {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(e.log().contains("\tthread_panic\twatchdog\t"), "watchdog panic logged: {}", e.log());
+    assert!(ah_engine::client::ping(&e.sock()).is_some(), "watchdog restarted after one panic");
+
+    let max = ah_engine::defaults::num("daemon.thread_restart_max");
+    e.ctl(&format!("thread_panic {}", max + 1));
+    let child = e.daemon.as_mut().expect("daemon child");
+    let t = Instant::now();
+    while t.elapsed() < Duration::from_secs(10) {
+        if child.try_wait().unwrap().is_some() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    assert!(child.try_wait().unwrap().is_some(), "daemon drained after the supervised panic cap; log: {}", e.log());
+    e.daemon = None;
 }
 
 #[test]

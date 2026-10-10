@@ -130,6 +130,7 @@ pub struct Shared {
     /// started or finished, the interpreter ran: [`crate::deadline::beat`]); the watchdog's stuck rule measures from it
     busy_since: Vec<Arc<AtomicU64>>,
     stall_ms: AtomicU64,
+    test_thread_panics: AtomicU64,
     /// Last sampled resident set, KB.
     pub rss_kb: AtomicU64,
     /// Highest sampled resident set since start, KB.
@@ -200,6 +201,7 @@ impl Shared {
             loop_beat: AtomicU64::new(0),
             busy_since: (0..workers).map(|_| Arc::new(AtomicU64::new(0))).collect(),
             stall_ms: AtomicU64::new(0),
+            test_thread_panics: AtomicU64::new(0),
             rss_kb: AtomicU64::new(0),
             rss_peak_kb: AtomicU64::new(0),
             last_request: AtomicU64::new(0),
@@ -493,6 +495,7 @@ fn test_verb(t: &str, sh: &Shared) -> (Reply, After) {
     match verb {
         "sleep" => std::thread::sleep(Duration::from_millis(ms)), // ms comes from the test caller, not a tunable
         "stall" => sh.stall_ms.store(ms, SeqCst),
+        "thread_panic" => sh.test_thread_panics.store(ms, SeqCst),
         "panic" => std::panic::resume_unwind(Box::new(defaults::text("msg.reply_test_panic").to_string())),
         _ => return (Reply::Err(defaults::text("msg.reply_unknown_request").into()), After::Continue),
     }
@@ -1014,6 +1017,10 @@ fn watchdog(sh: Arc<Shared>) {
         if sh.forced_timer.load(SeqCst) {
             continue;
         }
+        if sh.cfg().test_hooks && sh.test_thread_panics.load(SeqCst) > 0 {
+            sh.test_thread_panics.fetch_sub(1, SeqCst);
+            std::panic::resume_unwind(Box::new(defaults::text("msg.reply_test_panic").to_string()));
+        }
         let draining = sh.draining.load(SeqCst);
         let cfg = sh.cfg();
         let now = sh.ms();
@@ -1236,6 +1243,13 @@ pub fn serve() {
     }
     drain_spool(&sh); // writes spooled while the engine was down, before any new one
     let sh = Arc::new(sh);
+    {
+        let s = sh.clone();
+        crate::db::set_panic_restart(Some(Arc::new(move |thread| {
+            let why = defaults::render("msg.thread_panic_restart", &[("thread", &thread)]);
+            begin_drain(&s, &why, false);
+        })));
+    }
     // events from other processes (the hook dispatcher, one-shot commands) arrive through the inbox; events from inside
     // this process (Jev, health snapshots) go straight to the recorder
     sh.telemetry.set_inbox(crate::telemetry::emit::inbox_path());
@@ -1299,7 +1313,12 @@ fn start_devswarm(sh: &Arc<Shared>) {
     let stop: Arc<dyn Fn() -> bool + Send + Sync> = Arc::new(move || s.draining.load(SeqCst));
     crate::dswire::Wire::start(&home, &paths::dir(), sh.db.clone(), sink, stop.clone()); // None is the inert case: nothing was started
     // the native ingest drain: nothing at all unless devswarm_ingest.mode is `engine` (the Node ingest daemons drain otherwise)
-    crate::dssup::ingest::start(&home, &paths::dir(), stop);
+    let s = sh.clone();
+    let restart: Arc<dyn Fn(&str) + Send + Sync> = Arc::new(move |thread| {
+        let why = defaults::render("msg.thread_panic_restart", &[("thread", &thread)]);
+        begin_drain(&s, &why, false);
+    });
+    crate::dssup::ingest::start(&home, &paths::dir(), stop, restart);
 }
 
 /// Start the scheduler's ticker (D33). Its engine-side jobs (maintain, backup, the metrics snapshot, the spool drain)
@@ -1326,6 +1345,7 @@ fn start_scheduler(sh: &Arc<Shared>) {
                 };
                 crate::procwatch::run_job(&crate::paths::dir(), &home, &rec)
             }
+            "test_panic" if sh.cfg().test_hooks => std::panic::resume_unwind(Box::new(defaults::text("msg.reply_test_panic").to_string())),
             "devswarm_reconcile" => Ok(crate::dswire::scheduled()),
             "devswarm_supervisor" => Ok(crate::dssup::cli::scheduled()),
             "noop" => Ok(String::new()),

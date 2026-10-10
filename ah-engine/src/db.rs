@@ -259,6 +259,15 @@ fn lk<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+type PanicRestart = Arc<dyn Fn(&str) + Send + Sync>;
+
+static PANIC_RESTART: Mutex<Option<PanicRestart>> = Mutex::new(None);
+
+/// Install the daemon's clean-restart callback for capped DB-writer panics.
+pub fn set_panic_restart(callback: Option<PanicRestart>) {
+    *lk(&PANIC_RESTART) = callback;
+}
+
 /// The open databases and the writer thread.
 pub struct Db {
     tx: Mutex<Option<SyncSender<Job>>>,
@@ -428,6 +437,9 @@ fn writer_supervised(mut conn: Connection, rx: Receiver<Job>, mem: Arc<Mem>, win
             &defaults::render("msg.thread_panic", &[("thread", &"db_writer"), ("n", &panics), ("max", &max)]),
         );
         if panics > max {
+            if let Some(cb) = lk(&PANIC_RESTART).clone() {
+                cb("db_writer");
+            }
             return;
         }
         std::thread::sleep(defaults::millis("daemon.thread_restart_backoff_ms"));

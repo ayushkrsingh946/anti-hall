@@ -107,7 +107,10 @@ pub fn spawn_supervised(
             let max = defaults::num("daemon.thread_restart_max");
             health::log_event("thread_panic", name, &defaults::render("msg.thread_panic", &[("thread", &name), ("n", &panics), ("max", &max)]));
             health::record_failure("panic", "thread_panic", &defaults::render("msg.thread_panic", &[("thread", &name), ("n", &panics), ("max", &max)]));
-            if panics > max || should_stop() {
+            if should_stop() {
+                return;
+            }
+            if panics > max {
                 request_restart(name);
                 return;
             }
@@ -121,6 +124,12 @@ pub fn spawn_supervised(
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::{Mutex, OnceLock};
+
+    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(())).lock().unwrap_or_else(|e| e.into_inner())
+    }
 
     #[test]
     fn supervised_thread_restarts_after_a_panic() {
@@ -145,7 +154,25 @@ mod tests {
     }
 
     #[test]
+    fn supervised_thread_does_not_request_restart_during_shutdown() {
+        let restarts = Arc::new(AtomicUsize::new(0));
+        let r = restarts.clone();
+        let handle = spawn_supervised(
+            "test-thread-shutdown",
+            Arc::new(|| true),
+            Arc::new(move |_| {
+                r.fetch_add(1, Ordering::SeqCst);
+            }),
+            Arc::new(|| std::panic::resume_unwind(Box::new("shutdown panic"))),
+        )
+        .expect("thread spawned");
+        handle.join().expect("supervisor exits after shutdown panic");
+        assert_eq!(restarts.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
     fn panic_hook_writes_thread_and_breadcrumb_context() {
+        let _lock = env_lock();
         let d = crate::db::TempDir::new("panic-hook");
         // SAFETY: this test sets the engine state dir before spawning any helper thread that reads it.
         unsafe { std::env::set_var(crate::defaults::env_name("dir"), &d.0) };
@@ -162,6 +189,7 @@ mod tests {
 
     #[test]
     fn stale_run_marker_folds_abort_breadcrumb_into_last_crash() {
+        let _lock = env_lock();
         let d = crate::db::TempDir::new("abort-breadcrumb");
         // SAFETY: this test sets the engine state dir before using health state helpers.
         unsafe { std::env::set_var(crate::defaults::env_name("dir"), &d.0) };

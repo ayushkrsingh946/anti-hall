@@ -101,7 +101,7 @@ impl FileSource {
             },
         };
         let action = s("action");
-        let known = defaults::list("schedule.actions").contains(&action.as_str()) || (test_hooks && action == "test_sleep");
+        let known = defaults::list("schedule.actions").contains(&action.as_str()) || (test_hooks && matches!(action.as_str(), "test_sleep" | "test_panic"));
         if !known || (every_ms == 0 && every_key.is_empty()) {
             if !known {
                 crate::health::log_event(
@@ -432,7 +432,22 @@ impl Scheduler {
                         drop(state);
                         self.save(spec, &snapshot); // committed before the run: a restart cannot run it again
                         let (me, spec) = (self.clone(), spec.clone());
-                        std::thread::spawn(move || me.execute(&spec, due_ms, attempt, catch_up));
+                        let run_spec = spec.clone();
+                        if let Err(e) = std::thread::Builder::new()
+                            .name(format!("ah-schedule-{}", spec.name))
+                            .spawn(move || me.execute(&run_spec, due_ms, attempt, catch_up))
+                        {
+                            crate::discard::note("schedule_spawn", &e.to_string());
+                            let snapshot = {
+                                let mut state = lk(&self.state);
+                                let st = state.entry(spec.name.clone()).or_default();
+                                st.running = false;
+                                st.clone()
+                            };
+                            self.save(&spec, &snapshot);
+                            (self.observe)(&spec.name, "failed", catch_up);
+                            self.poke();
+                        }
                         continue;
                     }
                 }

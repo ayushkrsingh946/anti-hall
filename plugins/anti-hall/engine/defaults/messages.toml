@@ -96,10 +96,6 @@ value = "anti-hall: the Node hook was killed by signal {signal}; no decision was
 doc = "Log detail for `reset`."
 value = "operator reset"
 
-[msg.log_crash]
-doc = "Log detail when a daemon is found dead without a clean exit. Placeholder: {pid}."
-value = "daemon pid {pid} died without a clean exit"
-
 [msg.log_crash_context]
 doc = "Log detail when a daemon is found dead without a clean exit, with the last breadcrumb. Placeholders: {pid}, {context}."
 value = "daemon pid {pid} died without a clean exit; last context {context}"

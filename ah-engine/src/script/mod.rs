@@ -463,7 +463,8 @@ pub fn call_fn(name: &str, func: &str, args: &Value) -> Option<Value> {
     match r {
         Ok(v) => Some(v),
         Err(e) => {
-            crate::discard::note("script_error", &format!("{name}.{func} check={check} event={event}: {e}"));
+            let args: [(&str, &dyn std::fmt::Display); 5] = [("name", &name), ("func", &func), ("check", &check), ("event", &event), ("error", &e)];
+            crate::discard::note("script_error", &defaults::render("script.msg_call_error", &args));
             None
         }
     }
