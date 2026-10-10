@@ -11,11 +11,10 @@ use super::when::{SessionCond, SessionOp};
 use crate::defaults;
 use crate::mem::{Admit, Budget, Owner, Registry, Spec};
 use std::collections::HashMap;
+use std::mem;
 use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-
-const SLOT_OVERHEAD: usize = std::mem::size_of::<Slot>() + 96;
 
 struct Slot {
     count: u64,
@@ -35,11 +34,11 @@ impl SessionCore {
     }
 
     fn weight(session: &str, cond: &str) -> usize {
-        session.len().saturating_add(cond.len()).saturating_add(SLOT_OVERHEAD)
+        session.len().saturating_add(cond.len())
     }
 
     fn refresh_bytes(slots: &HashMap<(String, String), Slot>) -> usize {
-        slots.values().map(|s| s.weight).sum()
+        slots.capacity().saturating_mul(mem::size_of::<((String, String), Slot)>()).saturating_add(slots.values().map(|s| s.weight).sum::<usize>())
     }
 
     fn store_bytes(&self, slots: &HashMap<(String, String), Slot>) {
@@ -47,7 +46,11 @@ impl SessionCore {
     }
 
     fn evict_expired(slots: &mut HashMap<(String, String), Slot>, now: Instant, ttl: Duration) {
+        let before = slots.len();
         slots.retain(|_, s| now.saturating_duration_since(s.last) <= ttl);
+        if slots.len() != before {
+            slots.shrink_to_fit();
+        }
     }
 
     fn evict_oldest(slots: &mut HashMap<(String, String), Slot>) -> bool {
@@ -63,12 +66,14 @@ impl Owner for SessionCore {
     fn shrink(&self, target: usize) {
         let mut slots = self.lock();
         while Self::refresh_bytes(&slots) > target && Self::evict_oldest(&mut slots) {}
+        slots.shrink_to_fit();
         self.store_bytes(&slots);
     }
     fn recycle(&self) {
         let mut slots = self.lock();
         slots.clear();
-        self.bytes.store(0, SeqCst);
+        slots.shrink_to_fit();
+        self.store_bytes(&slots);
     }
 }
 
@@ -127,14 +132,23 @@ impl SessionStore {
         }
         let max = self.budget.max_entries();
         while max > 0 && slots.len() >= max && SessionCore::evict_oldest(&mut slots) {}
+        if max > 0 {
+            slots.shrink_to_fit();
+        }
         let weight = SessionCore::weight(session, &cond.name);
+        slots.reserve(1);
         self.core.store_bytes(&slots);
         drop(slots);
         if self.budget.admit(weight) == Admit::Refused {
+            let mut slots = self.core.lock();
+            slots.shrink_to_fit();
+            self.core.store_bytes(&slots);
             return holds(cond, 1);
         }
         let mut slots = self.core.lock();
         if max > 0 && slots.len() >= max {
+            slots.shrink_to_fit();
+            self.core.store_bytes(&slots);
             return holds(cond, 1);
         }
         slots.insert(key, Slot { count: 1, last: now, weight });
@@ -146,6 +160,7 @@ impl SessionStore {
     pub fn end(&self, session: &str) {
         let mut slots = self.core.lock();
         slots.retain(|(s, _), _| s != session);
+        slots.shrink_to_fit();
         self.core.store_bytes(&slots);
     }
 
@@ -247,7 +262,7 @@ mod tests {
     #[test]
     fn the_store_is_bounded() {
         let s = SessionStore::new();
-        let max = defaults::num("hooks.session_max_keys") as usize;
+        let max = defaults::num("mem.hook_sessions_max_entries") as usize;
         for i in 0..max + 50 {
             s.test(&format!("s{i}"), &cond("k", SessionOp::First, None));
         }
@@ -272,6 +287,35 @@ mod tests {
             s.test(&format!("session-{i}-{}", "x".repeat(80)), &c);
         }
         assert!(s.bytes() <= 1024, "{} > hard budget", s.bytes());
+    }
+
+    #[test]
+    fn lowering_the_entry_cap_is_honored_on_the_next_insert() {
+        let max_entries = Arc::new(AtomicU64::new(64));
+        let cap = max_entries.clone();
+        let reg = crate::mem::Registry::new(
+            Box::new(move |k| match k {
+                "mem.hook_sessions_soft_bytes" => 1_048_576,
+                "mem.hook_sessions_hard_bytes" => 1_048_576,
+                "mem.hook_sessions_low_water_pct" => 50,
+                "mem.hook_sessions_max_entries" => cap.load(Ordering::SeqCst),
+                _ => 0,
+            }),
+            Box::new(|_| {}),
+        );
+        let s = SessionStore::with_clock_and_registry(Instant::now, &reg);
+        let c = cond("k", SessionOp::First, None);
+        for i in 0..64 {
+            assert!(s.test(&format!("session-{i}"), &c));
+        }
+        assert_eq!(s.len(), 64);
+        let capacity_before = s.core.lock().capacity();
+
+        max_entries.store(2, Ordering::SeqCst);
+        assert!(s.test("after-lower", &c));
+        assert!(s.len() <= 2, "{} > lowered cap", s.len());
+        assert!(s.core.lock().capacity() < capacity_before, "lowering the cap must release retained HashMap capacity");
+        assert!(!s.test("after-lower", &c), "the insert that enforced the lowered cap was retained");
     }
 
     #[test]

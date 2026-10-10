@@ -584,6 +584,7 @@ impl Jev {
             + std::mem::size_of::<Jev>()
     }
 
+    #[cfg(test)]
     pub(crate) fn queue_bytes(&self) -> usize {
         self.queue_bytes.load(Ordering::SeqCst)
     }

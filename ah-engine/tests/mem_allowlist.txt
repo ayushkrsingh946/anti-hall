@@ -14,7 +14,10 @@ limits.rs | BucketOwners.buckets | weak references to live registered bucket map
 load.rs | Load.minutes | newest load.minutes_kept buckets, each bucket capped | per-minute request load
 tier.rs | Bus.subs | max_channels channels and a bounded queue per subscriber | pub/sub channels
 transcript/registry.rs | Indexes.slots | `max` slots, entries expire after ttl_ms (cfg) | transcript index slots; registry follow-up (transcript caches belong to another job)
-devswarm_rt/reconcile.rs | Rt.edges | cfg.edge_cap edges (pop_front past it) | recent state edges; count-capped, not byte-capped (audit item 5, follow-up)
+checks/guardkit/settings.rs | SEEN | at most guardkit.settings_seen_max + 1 entries; when len is already over the configured max, the next new-key insert clears first (max 0 still permits one) | unreadable settings-file verdict cache keyed by file metadata
+devswarm_rt/reconcile.rs | Hold.edges | registered as mem.devswarm_rt_* and cfg.edge_cap also limits retained edges | recent realtime edges are recoverable and evicted first
+devswarm_rt/reconcile.rs | Hold.generations | registered as mem.devswarm_rt_* and stale weak snapshots are pruned while accounting | old Arc-held snapshots stay charged until callers drop them
+dssup/ingest/mod.rs | Ledger.slots | registered as mem.devswarm_ingest_* and mem.devswarm_ingest_max_threads caps total resident ingest threads (manager plus project workers) | bounded resident ingest project slots; value 1 permits manager-only/no project workers
 schedule.rs | Scheduler.state | one entry per configured job (schedules.toml), fixed at load | job state
 schedule.rs | Scheduler.last | one entry per configured job | last-run state
 ghrt/repos.rs | NOTED | entries older than ttl dropped once past cap (arguments of note()) | recently noted working directories
@@ -22,11 +25,12 @@ watch/mod.rs | Shared.polled | one entry per watched directory that falls back t
 watch/notify.rs | Events.dirs | one entry per watched directory | realtime watch translation table
 dsact/events.rs | Dirty.set | one entry per workspace marked dirty; drained once quiet for the debounce | DevSwarm auto-archive debounce
 dsact/events.rs | IN_FLIGHT | one id per in-flight workspace trigger, removed on drop | in-flight lock set
-jev/shared.rs | LANES | one lane per Jev home directory (a handful per machine) | Jev lanes (audit item 10, follow-up)
+jev/shared.rs | LANES | registered as mem.jev_lanes_* with mem.jev_lanes_max_entries and idle TTL | Jev lanes; idle entries stop and externally held lanes remain charged
 jev/assist.rs | JevStats.calls | keyed by (backend, mode) labels from code | drained by the periodic flush
 jev/assist.rs | JevStats.verdicts | keyed by (integration id, verdict) | drained by the periodic flush
 jev/assist.rs | JevStats.latencies_us | one u64 per ask between flushes | drained by the periodic flush
 devswarm_rt/sources.rs | FsProbe.plans | one entry per workspace plan file; the probe lives for one reconcile | built once per probe
+meshw/mod.rs | WRITTEN | one command's write list, consumed by take_written() after the background witness reads it | per-command mesh write witness scratch
 
 # ---- fixed by the code or the shipped config -------------------------------------------------------------------------------
 daemon.rs | Shared.own | one string set at start | the engine version
@@ -48,6 +52,7 @@ jev/testkit.rs | Fake.timeouts | test double | not used by the daemon
 deadline.rs | STAGED | staged writes of the request in progress, taken and flushed or dropped when it ends | per-request
 load.rs | REQUEST | one (event, session) pair, replaced per request | per-request
 memdiag.rs | REPORTS | one report per worker, cleared at each snapshot | per-snapshot
+script/host.rs | CACHE | one cfgLive cache entry for the current defaults generation and one or two config file stamps | replaced when generation or config metadata changes
 script/host.rs | HELD | held handles of the script call in progress, capped by the host's script.lock_max_held, taken at the end of the call | per-call
 script/host_b3.rs | HEREDOC | one scratch parse state, replaced per call | per-call
 script/host_mesh.rs | OWED | cache writes owed by the call in progress, cleared at the start of each call | per-call

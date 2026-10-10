@@ -17,6 +17,7 @@ fn registry(cfg: &[(&str, u64)]) -> (Registry, Events) {
 
 const SPEC: Spec = Spec::new("t", "t.soft", "t.hard", "t.low").with_entries("t.max");
 const BASE: [(&str, u64); 5] = [("t.soft", 100), ("t.hard", 1000), ("t.low", 80), ("t.max", 0), ("mem.global_log_min_interval_ms", 0)];
+const CACHE_BASE: [(&str, u64); 5] = [("t.soft", 1_000_000), ("t.hard", 2_000_000), ("t.low", 80), ("t.max", 0), ("mem.global_log_min_interval_ms", 0)];
 
 fn kinds(e: &Events) -> Vec<Kind> {
     e.lock().unwrap().iter().map(|x| x.kind).collect()
@@ -24,27 +25,28 @@ fn kinds(e: &Events) -> Vec<Kind> {
 
 #[test]
 fn soft_eviction_goes_down_to_the_low_water_mark_oldest_first() {
-    let (reg, events) = registry(&BASE);
+    let (reg, events) = registry(&CACHE_BASE);
     let c: BoundedCache<u32, u32> = BoundedCache::new(&reg, SPEC);
     for i in 0..9 {
-        assert!(c.insert(i, i, 10));
+        assert!(c.insert(i, i, 100_000));
     }
-    assert_eq!((c.bytes(), c.len()), (90, 9), "under the soft limit nothing is evicted");
-    assert!(c.insert(9, 9, 10), "the insert that reaches soft is still stored");
-    // reaching 100 evicted down to 80 - 10 (room for the new entry), then stored: 80 bytes, the two oldest gone
-    assert_eq!(c.bytes(), 80);
-    assert!(c.get(&0).is_none() && c.get(&1).is_none() && c.get(&2).is_some() && c.get(&9).is_some());
+    assert_eq!(c.len(), 9, "under the soft limit nothing is evicted");
+    assert!(c.bytes() >= 900_000, "bytes include item weights plus retained collection storage");
+    assert!(c.insert(9, 9, 100_000), "the insert that reaches soft is still stored");
+    assert!(c.bytes() <= 1_000_000, "soft shrink accounts retained collection storage");
+    assert!(c.len() <= 8, "soft shrink evicted old entries down to the low-water target");
+    assert!(c.get(&0).is_none() && c.get(&1).is_none() && c.get(&9).is_some());
     assert_eq!(kinds(&events), vec![Kind::Soft], "logged once");
     assert_eq!(reg.snapshot()["holders"][0]["soft_trips"], 1);
 }
 
 #[test]
 fn a_hard_refusal_still_serves_the_request_and_recycles_the_holder() {
-    let (reg, events) = registry(&[("t.soft", 100), ("t.hard", 150), ("t.low", 80), ("mem.global_log_min_interval_ms", 0)]);
+    let (reg, events) = registry(&[("t.soft", 200_000), ("t.hard", 300_000), ("t.low", 80), ("mem.global_log_min_interval_ms", 0)]);
     let c: BoundedCache<u32, String> = BoundedCache::new(&reg, SPEC);
-    assert!(c.insert(1, "kept".into(), 40));
-    // a 200-byte value can never fit under hard 150: computed, returned, not stored
-    let got: Result<String, ()> = c.get_or_compute(&2, || Ok(("big".to_string(), 200)));
+    assert!(c.insert(1, "kept".into(), 40_000));
+    // a 400 KB value can never fit under hard 300 KB: computed, returned, not stored
+    let got: Result<String, ()> = c.get_or_compute(&2, || Ok(("big".to_string(), 400_000)));
     assert_eq!(got, Ok("big".to_string()), "the caller is served");
     assert!(c.get(&2).is_none(), "the refused value is not stored");
     assert!(c.is_empty() && c.bytes() == 0, "the holder was recycled");
@@ -55,7 +57,7 @@ fn a_hard_refusal_still_serves_the_request_and_recycles_the_holder() {
     );
     assert!(kinds(&events).contains(&Kind::Hard));
     // once recycled, normal inserts work again
-    assert!(c.insert(3, "ok".into(), 10));
+    assert!(c.insert(3, "ok".into(), 10_000));
 }
 
 #[test]
@@ -68,7 +70,7 @@ fn a_compute_error_is_returned_and_nothing_is_stored() {
 
 #[test]
 fn the_entry_count_cap_drops_the_least_recently_used() {
-    let mut cfg = BASE.to_vec();
+    let mut cfg = CACHE_BASE.to_vec();
     cfg.retain(|(k, _)| *k != "t.max");
     cfg.push(("t.max", 3));
     let (reg, _) = registry(&cfg);
@@ -154,7 +156,7 @@ const GLOBAL: [(&str, u64); 5] = [
 #[test]
 fn a_process_total_that_stays_over_the_global_hard_limit_requests_a_restart() {
     let mut cfg = GLOBAL.to_vec();
-    cfg.extend(BASE);
+    cfg.extend(CACHE_BASE);
     let (reg, events) = registry(&cfg);
     let c: BoundedCache<u32, u32> = BoundedCache::new(&reg, SPEC);
     c.insert(1, 1, 10);
@@ -224,7 +226,7 @@ fn an_instance_is_told_to_shrink_at_soft_and_recycle_over_hard() {
 #[test]
 fn the_snapshot_reports_each_holder_against_its_limits_and_the_global_totals() {
     let mut cfg = GLOBAL.to_vec();
-    cfg.extend(BASE);
+    cfg.extend(CACHE_BASE);
     let (reg, _) = registry(&cfg);
     let c: BoundedCache<u32, u32> = BoundedCache::new(&reg, SPEC);
     c.insert(1, 1, 30);
@@ -232,13 +234,12 @@ fn the_snapshot_reports_each_holder_against_its_limits_and_the_global_totals() {
     let s = reg.snapshot();
     let h = &s["holders"][0];
     assert_eq!(
-        (h["name"].as_str(), h["bytes"].as_u64(), h["soft_bytes"].as_u64(), h["hard_bytes"].as_u64(), h["level"].as_str()),
-        (Some("t"), Some(30), Some(100), Some(1000), Some("ok"))
+        (h["name"].as_str(), h["soft_bytes"].as_u64(), h["hard_bytes"].as_u64(), h["level"].as_str()),
+        (Some("t"), Some(1_000_000), Some(2_000_000), Some("ok"))
     );
-    assert_eq!(
-        (s["global"]["process_bytes"].as_u64(), s["global"]["soft_trips"].as_u64(), s["global"]["registered_bytes"].as_u64()),
-        (Some(1234), Some(1), Some(30))
-    );
+    assert!(h["bytes"].as_u64().is_some_and(|n| n >= 30), "holder bytes include retained collection storage");
+    assert_eq!((s["global"]["process_bytes"].as_u64(), s["global"]["soft_trips"].as_u64()), (Some(1234), Some(1)));
+    assert!(s["global"]["registered_bytes"].as_u64().is_some_and(|n| n >= 30), "global total includes retained collection storage");
 }
 
 #[test]

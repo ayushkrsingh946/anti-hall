@@ -77,6 +77,7 @@ impl Owner for BucketOwners {
             let Some((core, key, _)) = oldest else { break };
             let mut map = core.lock();
             map.remove(&key);
+            map.shrink_to_fit();
             core.store_bytes(&map);
         }
     }
@@ -84,7 +85,8 @@ impl Owner for BucketOwners {
         self.each(|core| {
             let mut map = core.map.lock().unwrap_or_else(|e| e.into_inner());
             map.clear();
-            core.bytes.store(0, SeqCst);
+            map.shrink_to_fit();
+            core.store_bytes(&map);
         });
     }
 }
@@ -103,7 +105,7 @@ impl BucketCore {
     }
 
     fn refresh_bytes(map: &HashMap<String, (f64, Instant)>) -> usize {
-        map.keys().map(|k| Self::weight(k)).sum()
+        map.capacity().saturating_mul(std::mem::size_of::<(String, (f64, Instant))>()).saturating_add(map.keys().map(|k| Self::weight(k)).sum::<usize>())
     }
 
     fn store_bytes(&self, map: &HashMap<String, (f64, Instant)>) {
@@ -162,6 +164,7 @@ impl Buckets {
         if map.len() >= self.cap && !map.contains_key(key) {
             let (rps, burst) = (self.rps, self.burst);
             map.retain(|_, (t, last)| *t + now.saturating_duration_since(*last).as_secs_f64() * rps < burst);
+            map.shrink_to_fit();
             self.core.store_bytes(&map);
             if map.len() >= self.cap {
                 return false; // under a key flood, refuse unknown keys rather than grow without bound

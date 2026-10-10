@@ -165,7 +165,7 @@ min = 1
 max = 100
 
 [mem.devswarm_ingest_max_threads]
-doc = "Maximum DevSwarm ingest worker threads the resident daemon starts for project drains."
+doc = "Maximum total DevSwarm ingest threads resident in the daemon, counting the manager thread plus project drain workers; value 1 permits only the manager and no project workers."
 value = 4
 min = 1
 

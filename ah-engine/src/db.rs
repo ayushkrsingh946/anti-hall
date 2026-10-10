@@ -226,6 +226,12 @@ impl Mem {
         lk(&self.budget).as_ref().is_none_or(|b| b.admit(size) == Admit::Ok)
     }
 
+    fn observe_budget(&self) {
+        if let Some(b) = lk(&self.budget).as_ref() {
+            b.observe();
+        }
+    }
+
     /// The write sequence now; pass it to [`Mem::promote`] after reading SQLite.
     pub fn seq(&self) -> u64 {
         self.seq.load(std::sync::atomic::Ordering::SeqCst)
@@ -246,6 +252,7 @@ impl Mem {
         let size = item_size(&k, &v);
         if self.admit(size) {
             lk(&self.kv).insert(k, v, size, expires_ms);
+            self.observe_budget();
         }
     }
 
@@ -261,6 +268,7 @@ impl Mem {
                 lk(&self.kv).remove(&k);
                 if self.admit(size) {
                     lk(&self.kv).insert(k, value.clone(), size, *expires_ms);
+                    self.observe_budget();
                 }
                 self.bus.publish(&channel, &serde_json::json!({"kind": "kv", "key": key}).to_string());
             }
@@ -272,10 +280,10 @@ impl Mem {
 
 impl Owner for Mem {
     fn bytes(&self) -> usize {
-        lk(&self.kv).bytes()
+        lk(&self.kv).retained_bytes()
     }
     fn shrink(&self, target: usize) {
-        lk(&self.kv).evict_to(target);
+        lk(&self.kv).evict_retained_to(target);
     }
     fn recycle(&self) {
         lk(&self.kv).clear();

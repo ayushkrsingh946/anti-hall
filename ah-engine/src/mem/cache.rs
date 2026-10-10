@@ -28,13 +28,13 @@ impl<K: Hash + Eq + Clone + Send + 'static, V: Clone + Send + 'static> Owner for
     }
     fn shrink(&self, target: usize) {
         let mut t = self.lock();
-        t.evict_to(target);
-        self.bytes.store(t.bytes(), SeqCst);
+        t.evict_retained_to(target);
+        self.bytes.store(t.retained_bytes(), SeqCst);
     }
     fn recycle(&self) {
         let mut t = self.lock();
         t.clear();
-        self.bytes.store(0, SeqCst);
+        self.bytes.store(t.retained_bytes(), SeqCst);
     }
 }
 
@@ -67,9 +67,11 @@ impl<K: Hash + Eq + Clone + Send + 'static, V: Clone + Send + 'static> BoundedCa
         let max = self.budget.max_entries();
         let mut t = self.core.lock();
         while max > 0 && t.len() >= max && !t.contains(&k) && t.pop_lru().is_some() {}
-        t.insert(k, v, weight, None);
-        self.core.bytes.store(t.bytes(), SeqCst);
-        true
+        t.insert(k.clone(), v, weight, None);
+        self.core.bytes.store(t.retained_bytes(), SeqCst);
+        drop(t);
+        self.budget.observe();
+        self.core.lock().contains(&k)
     }
 
     /// The cached value for `k`, or the one `compute` makes (outside any lock), stored when the registry allows it. A refused
@@ -97,7 +99,7 @@ impl<K: Hash + Eq + Clone + Send + 'static, V: Clone + Send + 'static> BoundedCa
         self.len() == 0
     }
 
-    /// Bytes held (the sum of the weights given to `insert`).
+    /// Estimated retained bytes: item weights plus allocated collection storage.
     pub fn bytes(&self) -> usize {
         self.core.bytes.load(SeqCst)
     }

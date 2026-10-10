@@ -9,6 +9,7 @@
 use super::{Env, Jev};
 use crate::defaults;
 use crate::mem::{Admit, Budget, Owner, Spec};
+use std::mem;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
@@ -43,13 +44,14 @@ impl Owner for LaneOwner {
     fn bytes(&self) -> usize {
         let mut g = LANES.lock().unwrap_or_else(|e| e.into_inner());
         prune_dropped(&mut g);
-        lane_bytes(&g)
+        lane_bytes(&g, g.capacity())
     }
 
     fn shrink(&self, target: usize) {
         let mut g = LANES.lock().unwrap_or_else(|e| e.into_inner());
         prune_dropped(&mut g);
-        while lane_bytes(&g) > target && evict_oldest_resident(&mut g) {}
+        while lane_bytes(&g, g.capacity()) > target && evict_oldest_resident(&mut g) {}
+        g.shrink_to_fit();
     }
 
     fn recycle(&self) {
@@ -59,6 +61,7 @@ impl Owner for LaneOwner {
             slot.resident = None;
         }
         prune_dropped(&mut g);
+        g.shrink_to_fit();
     }
 }
 
@@ -77,19 +80,21 @@ impl Owner for QueueOwner {
 }
 
 fn prune_dropped(g: &mut Vec<LaneSlot>) {
+    let before = g.len();
     g.retain(|slot| slot.jev.strong_count() > 0);
+    if g.len() != before {
+        g.shrink_to_fit();
+    }
 }
 
-fn lane_bytes(g: &[LaneSlot]) -> usize {
-    g.iter().filter_map(|slot| slot.jev.upgrade().map(|jev| slot.home.to_string_lossy().len() + jev.retained_bytes())).sum()
+fn lane_bytes(g: &[LaneSlot], capacity: usize) -> usize {
+    capacity
+        .saturating_mul(mem::size_of::<LaneSlot>())
+        .saturating_add(g.iter().filter_map(|slot| slot.jev.upgrade().map(|jev| slot.home.to_string_lossy().len() + jev.retained_bytes())).sum::<usize>())
 }
 
 fn live_count(g: &[LaneSlot]) -> usize {
     g.iter().filter(|slot| slot.jev.strong_count() > 0).count()
-}
-
-fn resident_count(g: &[LaneSlot]) -> usize {
-    g.iter().filter(|slot| slot.resident.is_some() && slot.jev.strong_count() > 0).count()
 }
 
 fn live_worker_count(g: &[LaneSlot]) -> usize {
@@ -115,6 +120,7 @@ fn make_live_room(g: &mut Vec<LaneSlot>) -> bool {
             return false;
         }
         prune_dropped(g);
+        g.shrink_to_fit();
         if g.iter().all(|slot| slot.resident.is_none()) && live_count(g) >= cap {
             return false;
         }
@@ -399,6 +405,26 @@ mod tests {
     }
 
     #[test]
+    fn queue_admission_uses_per_payload_max_and_remaining_hard_budget() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        reset_lanes();
+        let max = defaults::num("mem.jev_queue_max_bytes") as usize;
+        let hard = defaults::num("mem.jev_queue_hard_bytes") as usize;
+        assert!(max > 0, "queue payload max must come from mem.jev_queue_max_bytes");
+        assert!(hard > 2, "queue hard limit must come from mem.jev_queue_hard_bytes");
+
+        assert_eq!(admit_queue(max.saturating_add(1)), Admit::Refused, "one payload over mem.jev_queue_max_bytes is refused");
+        assert_eq!(QUEUE_RESERVED.load(Ordering::SeqCst), 0);
+
+        let bytes = hard / 2 + 1;
+        assert!(bytes <= max, "fixture mem.jev_queue_max_bytes must allow the hard-remaining regression");
+        assert_eq!(admit_queue(bytes), Admit::Ok);
+        assert_eq!(admit_queue(bytes), Admit::Refused, "remaining hard budget refuses a payload that fits the per-payload max");
+        release_queue(bytes);
+        reset_lanes();
+    }
+
+    #[test]
     fn evicted_lanes_with_external_arcs_stay_registered_until_drop() {
         let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         reset_lanes();
@@ -409,7 +435,7 @@ mod tests {
         let held = lane(&unique_home("held"), &env).unwrap();
         let held_bytes = held.retained_bytes();
         let mut residents = Vec::new();
-        for i in 0..cap {
+        for i in 0..cap.saturating_sub(1) {
             residents.push(lane(&unique_home(&format!("evict-{i}")), &env).unwrap());
         }
 
@@ -419,6 +445,34 @@ mod tests {
         drop(held);
         assert_eq!(lane_count(), cap - 1, "dropping the external Arc lets the weak evicted slot prune away");
         drop(residents);
+        reset_lanes();
+    }
+
+    #[test]
+    fn dropped_lanes_release_registry_capacity_from_the_memory_account() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        reset_lanes();
+        let env = Env::from_pairs(std::iter::empty::<(&str, &str)>());
+        let cap = lane_budget().max_entries();
+        assert!(cap > 1, "jev lane count cap must come from mem.jev_lanes_max_entries");
+
+        let kept = lane(&unique_home("kept"), &env).unwrap();
+        let mut residents = Vec::new();
+        for i in 0..cap.saturating_sub(1) {
+            residents.push(lane(&unique_home(&format!("drop-{i}")), &env).unwrap());
+        }
+        assert_eq!(lane_count(), cap);
+        let bytes_before = holder_bytes("jev_lanes");
+        let capacity_before = LANES.lock().unwrap_or_else(|e| e.into_inner()).capacity();
+
+        drop(residents);
+        LaneOwner.recycle();
+        assert_eq!(lane_count(), 1);
+        let bytes_after = holder_bytes("jev_lanes");
+        let capacity_after = LANES.lock().unwrap_or_else(|e| e.into_inner()).capacity();
+        assert!(bytes_after < bytes_before, "dropping lanes must lower the registered retained bytes");
+        assert!(capacity_after < capacity_before, "dropping lanes must release retained Vec capacity");
+        drop(kept);
         reset_lanes();
     }
 

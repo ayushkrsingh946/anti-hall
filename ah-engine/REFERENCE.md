@@ -374,7 +374,6 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 
 | Key | Default | Env override | Unit | What it is |
 |---|---|---|---|---|
-| `store.key_cache_cap` | `1024` |  |  | Most cwd-to-project-key mappings cached (cleared when full) so the hot path does not stat per request. |
 | `store.kv_cap` | `64` |  |  | Most active (unexpired) key-value pairs per project. |
 | `store.mailbox_cap` | `64` |  |  | Most pending (unconsumed) mailbox entries per project. |
 | `store.max_projects` | `256` |  |  | Most project partitions holding a key or a pending message; a write that would start one more is refused. |
@@ -1579,7 +1578,6 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `jev.key_file_roots` | `.config, .anti-hall` |  |  | Directories under the home directory a key file must really live in once symlinks are resolved (Node: readKeyFile). |
 | `jev.key_file_typesafe` | `.config/typesafe/key` |  |  | Default key file for the TypeSafe vendor, relative to the home directory; read only when jev.allowLegacyKeyRead is on (Node: defaultKeyFilePath). |
 | `jev.key_file_vercel` | `.config/vercel/ai-gateway-key` |  |  | Default key file for the Vercel vendor, relative to the home directory; read only when jev.allowLegacyKeyRead is on (Node: defaultKeyFilePath). |
-| `jev.lane_cap` | `8` |  |  | How many home directories keep a resident Jev lane at once (one per user in practice; the oldest is dropped past the cap). |
 | `jev.latency_samples_max` | `4096` |  |  | Most call-latency samples held between two metrics flushes; past it new samples are dropped until the flush drains them (a bound on memory if the flush stalls). |
 | `jev.legacy_file` | `jev.json` |  |  | The legacy Jev config file, relative to the anti-hall home directory, read below settings.json (Node: jev.json). |
 | `jev.legacy_on_default` | `speculation, triage` |  |  | Integrations that predate the per-integration modes and stay on by default; consulted only for an id missing from the table (Node: LEGACY_ON_DEFAULT). |
@@ -1961,7 +1959,6 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `hooks.outcomes` | `ran, skipped_predicate, skipped_max_rules, skipped_budget, shadowed, off` |  |  | The words the telemetry uses for what happened to a table entry in one dispatch, in this order: ran, skipped_predicate (its `when` was false), skipped_max_rules (cut by max_rules), skipped_budget (the event's budget had passed), shadowed (ran, never changed the outcome) and off (configured off, or a guard entry's engine check turned off so its Node hook decides). |
 | `hooks.project_file` | `.anti-hall/engine.toml` |  |  | The project-level hook configuration file, relative to the payload's cwd; read when it exists, below the user file in precedence. It may not configure guard events or guard entries. |
 | `hooks.reasons` | `23 entries` |  |  | Short reasons the config errors above quote in their {what} placeholder. |
-| `hooks.session_max_keys` | `4096` |  |  | The most session-condition counters kept at once; past it the oldest are dropped (a dropped counter starts again, which only makes its condition fire sooner). |
 | `hooks.session_ops` | `first, every, at_least` |  |  | The per-session counters a `session` condition may use: first (true the first time per session within the TTL), every (true on the 1st, then every Nth evaluation: a once-per-N-turns dedupe) and at_least (true once the evaluation count in the session reaches N). |
 | `hooks.session_ttl_s` | `3600` |  | s | How long the engine keeps a `session` condition's state after its last evaluation (a condition's own `ttl_s` overrides it). |
 | `hooks.transcript_facts` | `9 entries` |  |  | The transcript-index facts a `transcript` condition may read, with their types (int, bool or str). Only facts the index already computes: records, compact_boundaries, sidechain_rows, meta_rows (counts), has_last_prompt and has_last_assistant (whether the index holds them), last_tool (the newest tool use's name), terminal_agents (background agents with a terminal notification) and unresolved_agents (agents a compaction re-injected as live that no terminal notification closed). |
@@ -9304,14 +9301,46 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 
 | Key | Default | Env override | Unit | What it is |
 |---|---|---|---|---|
+| `mem.buckets_hard_bytes` | `1048576` |  | bytes | Estimated bytes of daemon session and project token-bucket keys at which unknown keys are refused and recoverable buckets are recycled. |
+| `mem.buckets_low_water_pct` | `80` |  |  | Percent of mem.buckets_soft_bytes token buckets are evicted down to when the soft limit is reached. |
+| `mem.buckets_soft_bytes` | `262144` |  | bytes | Estimated bytes of daemon session and project token-bucket keys held before idle/full buckets are evicted down to the low-water mark. |
+| `mem.db_kv_hard_bytes` | `8388608` |  | bytes | Estimated bytes of active project key-value items at which inserts are refused and the in-memory KV tier is recycled. |
+| `mem.db_kv_low_water_pct` | `80` |  |  | Percent of mem.db_kv_soft_bytes active project key-value items are evicted down to when the soft limit is reached. |
+| `mem.db_kv_soft_bytes` | `4194304` |  | bytes | Estimated bytes of active project key-value items held in memory before least recently used items are evicted down to the low-water mark. |
 | `mem.defaults_leak_hard_bytes` | `33554432` |  | bytes | Bytes of leaked config values past which the daemon requests a clean restart (after mem.global_restart_after_s), so repeated config reloads cannot grow the process without bound. |
 | `mem.defaults_leak_low_water_pct` | `80` |  |  | Percent of mem.defaults_leak_soft_bytes the leaked total must be at or under before the soft trigger re-arms (only a restart lowers it). |
 | `mem.defaults_leak_soft_bytes` | `16777216` |  | bytes | Bytes of config values leaked on purpose (the `'static` snapshots of the defaults, the previous generation of every derived cache) that are logged as a soft excursion. Only a restart frees them; one load of the shipped config leaks about 3.4 MB (measured), and a reload adds only what changed. |
+| `mem.devswarm_ingest_hard_bytes` | `1048576` |  | bytes | Estimated bytes held by DevSwarm ingest project scheduling state at which new idle project entries are refused and recoverable state is recycled. |
+| `mem.devswarm_ingest_idle_ttl_ms` | `600000` |  | ms | How long a DevSwarm ingest project may be idle before its resident drain worker is stopped and its slot becomes available. |
+| `mem.devswarm_ingest_low_water_pct` | `80` |  |  | Percent of mem.devswarm_ingest_soft_bytes the DevSwarm ingest project state is evicted down to when the soft limit is reached. |
+| `mem.devswarm_ingest_max_threads` | `4` |  |  | Maximum total DevSwarm ingest threads resident in the daemon, counting the manager thread plus project drain workers; value 1 permits only the manager and no project workers. |
+| `mem.devswarm_ingest_soft_bytes` | `524288` |  | bytes | Estimated bytes held by DevSwarm ingest project scheduling state before idle project entries are evicted down to the low-water mark. |
+| `mem.devswarm_rt_hard_bytes` | `8388608` |  | bytes | Estimated bytes of DevSwarm realtime snapshots and retained edges at which edge inserts are refused and recoverable state is recycled. |
+| `mem.devswarm_rt_low_water_pct` | `80` |  |  | Percent of mem.devswarm_rt_soft_bytes the DevSwarm realtime edge buffer is evicted down to when the soft limit is reached. |
+| `mem.devswarm_rt_max_edges` | `2048` |  |  | DevSwarm realtime edges retained at most; past it the oldest edge is dropped first. |
+| `mem.devswarm_rt_soft_bytes` | `4194304` |  | bytes | Estimated bytes of DevSwarm realtime snapshots and retained edges held before old edges are evicted down to the low-water mark. |
 | `mem.global_hard_bytes` | `125829120` |  | bytes | Process memory above which every holder is recycled and every cache insert is refused. If it is still above this `mem.global_restart_after_s` later, the daemon is asked to restart cleanly and the reason is recorded in the event log. |
 | `mem.global_log_min_interval_ms` | `60000` |  | ms | At most one soft or hard log line per holder per interval (the counters in `status --memory` still count every excursion), so a cache that cycles between its low-water mark and its soft limit cannot flood the event log. |
 | `mem.global_low_water_pct` | `90` |  |  | Percent of the global soft and hard limits that process memory must fall to before the global triggers re-arm (hysteresis, so a total hovering at a limit is one excursion, not many). |
 | `mem.global_restart_after_s` | `60` |  | s | How long the process total (or a holder that recycling cannot shrink, such as the defaults snapshots leaked on purpose) may stay over its hard limit after the recovery attempt before a clean restart is requested. |
 | `mem.global_soft_bytes` | `100663296` |  | bytes | Process memory (the figure `daemon.mem_metric` selects) at which every holder is asked to shrink to its low-water mark. Logged once per excursion. The RSS cap (`daemon.rss_cap_kb`) stays the absolute backstop above it. |
+| `mem.hook_sessions_hard_bytes` | `1048576` |  | bytes | Estimated bytes of hook session condition counters at which new counters are refused and the session store is recycled. |
+| `mem.hook_sessions_low_water_pct` | `80` |  |  | Percent of mem.hook_sessions_soft_bytes the hook session store is evicted down to when the soft limit is reached. |
+| `mem.hook_sessions_max_entries` | `4096` |  |  | Hook session condition counters kept at most; past it the least recently used or expired counter is dropped first. |
+| `mem.hook_sessions_soft_bytes` | `262144` |  | bytes | Estimated bytes of hook session condition counters held before idle counters are evicted down to the low-water mark. |
+| `mem.jev_lanes_hard_bytes` | `4194304` |  | bytes | Estimated bytes held by resident Jev lanes at which new lane or queue retention is refused and recoverable lanes are recycled. |
+| `mem.jev_lanes_idle_ttl_ms` | `600000` |  | ms | How long a resident Jev lane may be idle before its worker is stopped and its lane may be evicted. |
+| `mem.jev_lanes_low_water_pct` | `80` |  |  | Percent of mem.jev_lanes_soft_bytes resident Jev lanes are evicted down to when the soft limit is reached. |
+| `mem.jev_lanes_max_entries` | `16` |  |  | Resident Jev home lanes kept at most; past it the least recently used idle lane is dropped first. |
+| `mem.jev_lanes_soft_bytes` | `2097152` |  | bytes | Estimated bytes held by resident Jev lanes, including per-home settings, cache state and queued detached asks, before idle lanes are evicted down to the low-water mark. |
+| `mem.jev_queue_hard_bytes` | `1048576` |  | bytes | Estimated bytes of resident Jev async request payloads queued across lanes at which new async asks are logged busy instead of being retained. |
+| `mem.jev_queue_low_water_pct` | `80` |  |  | Percent of mem.jev_queue_soft_bytes the resident Jev async queue holder must fall to before soft and hard trips re-arm. |
+| `mem.jev_queue_max_bytes` | `1048576` |  | bytes | Estimated bytes of detached Jev ask payloads a resident lane queue may hold before further queued asks are answered busy. |
+| `mem.jev_queue_soft_bytes` | `524288` |  | bytes | Estimated bytes of resident Jev async request payloads queued across lanes before the holder reports a soft memory trip. |
+| `mem.key_cache_hard_bytes` | `1048576` |  | bytes | Estimated bytes of cached cwd-to-project keys at which new cache entries are refused and recoverable keys are recycled. |
+| `mem.key_cache_low_water_pct` | `80` |  |  | Percent of mem.key_cache_soft_bytes cwd-to-project keys are evicted down to when the soft limit is reached. |
+| `mem.key_cache_max_entries` | `4096` |  |  | Cwd-to-project cache entries kept at most; past it the least recently used cwd is dropped first. |
+| `mem.key_cache_soft_bytes` | `262144` |  | bytes | Estimated bytes of cached cwd-to-project keys held before least recently used paths are evicted down to the low-water mark. |
 | `mem.msg_exit_reason` | `memory: {holder} over its hard limit ({usage} over {limit} bytes) for {secs} ...` |  |  | Exit reason recorded when the daemon restarts because memory stayed over a hard limit. Placeholders: holder, usage, limit, secs. |
 | `mem.msg_hard` | `{holder} crossed its hard memory limit ({usage} over {limit} bytes): inserts ...` |  |  | Event-log line when a holder crosses its hard limit (the insert is refused and the holder recycled). Placeholders: holder, usage, limit. |
 | `mem.msg_restart` | `{holder} stayed over its hard memory limit ({usage} over {limit} bytes) after...` |  |  | Event-log line when a clean restart is requested because memory stayed over a hard limit. Placeholders: holder, usage, limit. |
