@@ -1,5 +1,6 @@
 //! Ratchets for the error-audit hardening rollout.
 #![allow(clippy::unwrap_used, clippy::expect_used)] // a test crate: a panic is the failure report, and E2 exempts tests
+#![allow(clippy::panic, clippy::unreachable)] // integration tests: a panic is the failure report; production crates deny these in Cargo.toml
 
 use std::path::Path;
 

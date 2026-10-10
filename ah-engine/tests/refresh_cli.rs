@@ -4,6 +4,7 @@
 //! layout, a handled request is not handled twice, the fallbacks of the Node scripts hold, and the reload repair honours
 //! its cooldown and lock.
 #![allow(clippy::unwrap_used, clippy::expect_used)] // a test crate: a panic is the failure report, and E2 exempts tests
+#![allow(clippy::panic, clippy::unreachable)] // integration tests: a panic is the failure report; production crates deny these in Cargo.toml
 
 use serde_json::Value;
 use std::os::unix::fs::PermissionsExt;

@@ -45,6 +45,11 @@ impl Env {
             .env("AH_ENGINE_TEST_HOOKS", "1");
         c
     }
+    fn spawning_cmd(&self) -> Command {
+        let mut c = self.cmd();
+        c.env_remove("AH_ENGINE_NOSPAWN");
+        c
+    }
     fn start(&mut self) {
         let child = self.cmd().arg("serve").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap();
         self.daemon = Some(child);
@@ -69,8 +74,25 @@ impl Env {
         assert!(o.status.success(), "ctl {verb}: {}", String::from_utf8_lossy(&o.stderr));
         String::from_utf8_lossy(&o.stdout).trim().to_string()
     }
+    fn hook_spawn(&self) {
+        use std::io::Write;
+        let payload = r#"{"session_id":"s","cwd":"/tmp","hook_event_name":"UserPromptSubmit","prompt":"restart probe"}"#;
+        let mut child = self.spawning_cmd().arg("hook").stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
+        child.stdin.take().unwrap().write_all(payload.as_bytes()).unwrap();
+        let out = child.wait_with_output().unwrap();
+        assert!(
+            out.status.success(),
+            "hook spawn exits cleanly: status={:?} stdout={} stderr={}",
+            out.status.code(),
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
     fn log(&self) -> String {
         std::fs::read_to_string(self.dir.join("eng").join("ah-engine.log")).unwrap_or_default()
+    }
+    fn pid(&self) -> u32 {
+        ah_engine::client::ping(&self.sock()).and_then(|p| p.split_whitespace().nth(2).and_then(|n| n.parse().ok())).expect("daemon ping pid")
     }
     fn db(&self) -> rusqlite::Connection {
         rusqlite::Connection::open(self.dir.join("eng").join("hot.db")).unwrap()
@@ -196,8 +218,10 @@ fn an_injected_job_panic_clears_running_and_daemon_keeps_serving() {
 
 #[test]
 fn a_daemon_thread_panic_restarts_until_the_cap_then_drains() {
-    let mut e = Env::new("thread-panic", r#"{"jobs": {}}"#);
+    let mut e =
+        Env::new("thread-panic", r#"{"jobs": {"probe": {"kind": "engine", "action": "noop", "every_ms": 3600000, "timeout_ms": 2000, "persist": true}}}"#);
     e.start();
+    let first_pid = e.pid();
     e.ctl("thread_panic 1");
     let t = Instant::now();
     while t.elapsed() < Duration::from_secs(5) && !e.log().contains("\tthread_panic\twatchdog\t") {
@@ -218,6 +242,21 @@ fn a_daemon_thread_panic_restarts_until_the_cap_then_drains() {
     }
     assert!(child.try_wait().unwrap().is_some(), "daemon drained after the supervised panic cap; log: {}", e.log());
     e.daemon = None;
+
+    e.hook_spawn();
+    let t = Instant::now();
+    while t.elapsed() < Duration::from_secs(5) && ah_engine::client::ping(&e.sock()).is_none() {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let second_pid = e.pid();
+    assert_ne!(second_pid, first_pid, "the client started a fresh daemon after the capped thread panic");
+    let r = e.json(&["schedule", "run", "probe", "--json"]);
+    assert_eq!(r["status"], "ok", "{r}");
+    e.ctl("stop");
+    let t = Instant::now();
+    while t.elapsed() < Duration::from_secs(5) && ah_engine::client::ping(&e.sock()).is_some() {
+        std::thread::sleep(Duration::from_millis(20));
+    }
 }
 
 #[test]
