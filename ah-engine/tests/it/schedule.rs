@@ -54,10 +54,16 @@ impl Env {
         let child = self.cmd().arg("serve").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap();
         self.daemon = Some(child);
         let t = Instant::now();
-        while t.elapsed() < Duration::from_secs(5) && ah_engine::client::ping(&self.sock()).is_none() {
+        while t.elapsed() < common::READY_CEILING && ah_engine::client::ping(&self.sock()).is_none() {
             std::thread::sleep(Duration::from_millis(10));
         }
-        assert!(ah_engine::client::ping(&self.sock()).is_some(), "daemon did not come up");
+        let status = self.daemon.as_mut().and_then(|c| c.try_wait().ok()).flatten();
+        assert!(
+            ah_engine::client::ping(&self.sock()).is_some(),
+            "daemon did not come up within {:?}; child_status={status:?}; log: {}",
+            common::READY_CEILING,
+            self.log()
+        );
     }
     fn stop(&mut self) {
         if let Some(mut c) = self.daemon.take() {
@@ -245,7 +251,7 @@ fn a_daemon_thread_panic_restarts_until_the_cap_then_drains() {
 
     e.hook_spawn();
     let t = Instant::now();
-    while t.elapsed() < Duration::from_secs(5) && ah_engine::client::ping(&e.sock()).is_none() {
+    while t.elapsed() < common::READY_CEILING && ah_engine::client::ping(&e.sock()).is_none() {
         std::thread::sleep(Duration::from_millis(20));
     }
     let second_pid = e.pid();
