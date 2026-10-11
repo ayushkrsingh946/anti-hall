@@ -149,6 +149,7 @@ surface = "hook/codex/SessionStart"
 script = "hooks/devswarm-child-role.js"
 lane = "L14b"
 reason = "the engine runs the Node twin of the child-role SessionStart check"
+optional = true
 [[node]]
 surface = "hook/codex/Stop"
 script = "hooks/devswarm-child-gate.js"
