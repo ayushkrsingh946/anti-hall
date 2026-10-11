@@ -724,13 +724,7 @@ fn run_rows(rig: &Rig, rows: Vec<Row>, conc: usize) -> (usize, Vec<String>, usiz
             .rev()
             .collect::<Vec<_>>()
             .join("\n");
-        let status = run_shell(
-            &format!("{} status --json", env!("CARGO_BIN_EXE_ah-engine")),
-            b"",
-            &rig.env("new", &[]),
-            Path::new("/tmp"),
-            5,
-        );
+        let status = run_shell(&format!("{} status --json", env!("CARGO_BIN_EXE_ah-engine")), b"", &rig.env("new", &[]), Path::new("/tmp"), 5);
         let clip = |s: &str, n: usize| s.chars().take(n).collect::<String>();
         format!(
             "\n\n--- thin-trigger diagnostics ---\nstate={}\nstatus code={} out={} err={}\nlog_tail=\n{}",

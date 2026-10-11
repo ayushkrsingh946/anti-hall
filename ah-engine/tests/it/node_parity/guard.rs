@@ -723,6 +723,7 @@ fn run_guard_with(o: &Opts, hooks: &Path, scenarios: &[Scenario], golden: &Golde
                                     claude_config_keys,
                                     clip(&log_tail, 4000)
                                 );
+                                eprintln!("guard parity diagnostic {} step {}: {}", sc.id, si, e.err);
                             }
                             mism.lock().unwrap().push(Mismatch {
                                 scenario: sc.id.clone(),
