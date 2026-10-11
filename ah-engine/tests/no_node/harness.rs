@@ -387,6 +387,14 @@ impl World {
         d.join(format!("{name}.json"))
     }
 
+    /// The daemon event log, newest lines last. Used by failed no-node reports to explain scripted deferrals without
+    /// rerunning locally.
+    pub fn event_log_tail(&self) -> Vec<String> {
+        let p = self.state.join(ah_engine::health::log_name());
+        let text = fs::read_to_string(p).unwrap_or_default();
+        text.lines().rev().take(80).map(str::to_string).collect::<Vec<_>>().into_iter().rev().collect()
+    }
+
     /// Stop the daemon (and any a client started anyway) before the world is removed.
     pub fn stop(&mut self) {
         if let Some(mut ch) = self.daemon.take() {
