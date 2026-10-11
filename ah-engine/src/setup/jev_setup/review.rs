@@ -87,7 +87,7 @@ impl State {
         State { path, top }
     }
 
-    fn integrations(&mut self) -> &mut Obj {
+    fn integrations(&mut self) -> Result<&mut Obj, String> {
         let idx = match self.top.iter().position(|(n, _)| n == k("integrations")) {
             Some(idx) => idx,
             None => {
@@ -95,18 +95,21 @@ impl State {
                 self.top.len() - 1
             }
         };
-        if !matches!(self.top[idx].1, J::Obj(_)) {
-            self.top[idx].1 = J::Obj(Vec::new());
+        let Some((_, value)) = self.top.get_mut(idx) else {
+            return Err(defaults::render("opcli.review_state_bad", &[("id", k("integrations"))]));
+        };
+        if !matches!(value, J::Obj(_)) {
+            *value = J::Obj(Vec::new());
         }
-        match &mut self.top[idx].1 {
-            J::Obj(o) => o,
-            _ => std::process::abort(),
+        match value {
+            J::Obj(o) => Ok(o),
+            _ => Err(defaults::render("opcli.review_state_bad", &[("id", k("integrations"))])),
         }
     }
 
     /// The entry of `id`, created empty when absent; an entry that is not an object cannot be updated.
     fn entry(&mut self, id: &str) -> Result<&mut Obj, String> {
-        let ints = self.integrations();
+        let ints = self.integrations()?;
         if !ints.iter().any(|(n, _)| n == id) {
             ints.push((id.to_string(), J::Obj(Vec::new())));
         }
