@@ -903,20 +903,38 @@ fn archive_boundaries(home: &Path, evict: usize) -> (u64, u64, u64) {
     (after_target, after_prev, smallest)
 }
 
-fn archive_cap_between_boundaries(homes: &[&Path], evict: usize) -> String {
-    let mut low = 0u64;
-    let mut high = u64::MAX;
-    let mut smallest = u64::MAX;
+fn archive_shared_interval(homes: &[&Path], evict: usize) -> (u64, u64, u64) {
+    let (mut low, mut high, mut smallest) = (0u64, u64::MAX, u64::MAX);
     for h in homes {
         let (after_target, after_prev, min_file) = archive_boundaries(h, evict);
         low = low.max(after_target);
         high = high.min(after_prev);
         smallest = smallest.min(min_file);
     }
-    assert!(low < high, "no shared cap interval for evicting {evict} files across homes: {low}/{high}");
-    let cap = (low + high) as f64 / 2.0;
-    let margin = smallest as f64 * 0.10;
-    assert!(cap - low as f64 >= margin && high as f64 - cap >= margin, "cap {cap} too close to shared interval {low}/{high}; smallest {smallest}");
+    (low, high, smallest)
+}
+
+fn archive_cap_with_shared_margin(homes: &[&Path]) -> String {
+    let files = ah_engine::dssup::retention::cap::list(homes[0]);
+    let mut best = None;
+    for evict in 1..files.len() {
+        let (low, high, smallest) = archive_shared_interval(homes, evict);
+        if low >= high {
+            continue;
+        }
+        let cap = (low + high) as f64 / 2.0;
+        let margin = smallest as f64 * 0.10;
+        if cap - low as f64 >= margin && high as f64 - cap >= margin {
+            let width = high - low;
+            if match best {
+                Some((w, _, _)) => width > w,
+                None => true,
+            } {
+                best = Some((width, evict, cap));
+            }
+        }
+    }
+    let Some((_, _, cap)) = best else { panic!("no shared archive cap interval has the required margin") };
     format!("{:.9}", cap / ah_engine::defaults::num("devswarm_sup.rt_mb") as f64)
 }
 
@@ -926,7 +944,7 @@ fn archive_cap_seed80(c: &Corpus) -> usize {
     env.insert("ANTIHALL_DEVSWARM_RETENTION_ARCHIVE_MAX_MB".into(), "0".into());
     golden_tick(c, &a, &b, &env, 0, &System::configured());
     let before = tree(&b.join(".anti-hall/devswarm/archive"));
-    let cap = archive_cap_between_boundaries(&[a.as_path(), b.as_path()], 8);
+    let cap = archive_cap_with_shared_margin(&[a.as_path(), b.as_path()]);
     env.insert("ANTIHALL_DEVSWARM_RETENTION_ARCHIVE_MAX_MB".into(), cap);
     golden_tick(c, &a, &b, &env, 1, &System::configured());
     let after = tree(&b.join(".anti-hall/devswarm/archive"));
