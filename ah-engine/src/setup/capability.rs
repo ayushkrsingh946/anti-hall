@@ -8,12 +8,12 @@
 //! detected without writing: a legacy progress or history file that has no identical copy in `.anti-hall/history/legacy`.
 use super::jsfmt::obj;
 use super::{SetupError, cwd, home_dir, io_err, list_dir, out, read_capped, take_root, text_of, warn, what};
-use crate::setup::read_text_or_warn;
 use crate::checks::guardkit::paths::{join, resolve, resolve_abs};
 use crate::checks::jsport::json::{J, stringify};
 use crate::cli::Parsed;
 use crate::defaults;
 use crate::jev::settings::Env;
+use crate::setup::read_text_or_warn;
 use std::io::Read;
 use std::path::Path;
 use std::process::{Command, Stdio};
