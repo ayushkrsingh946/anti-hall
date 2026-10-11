@@ -2698,7 +2698,7 @@ function isBoundedVerificationCommand(command, ctx) {
       }
     }
     if (hasDisallowedWriteRedirect(seg, ctx)) return false;
-    if (delims[idx] === '|' && hasFdDupAwayFromBoundedSink(seg)) return false;
+    if (hasFdDupAwayFromBoundedSink(seg)) return false;
     let kind;
     // `2>&1` only merges stderr INTO the pipe (still bounded by the sink), so
     // the check shape is judged without it. Any other `>&` fd-dup (`>&2`,
