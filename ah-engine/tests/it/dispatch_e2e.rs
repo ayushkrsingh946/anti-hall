@@ -29,7 +29,7 @@ impl Drop for HealthyErrDaemon {
     fn drop(&mut self) {
         self.alive.store(false, Ordering::Release);
         if let Some(thread) = self.thread.take() {
-            let _ = thread.join();
+            let _join_result = thread.join();
         }
     }
 }
