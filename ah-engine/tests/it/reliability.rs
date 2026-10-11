@@ -115,13 +115,7 @@ exec "$REAL_AH_ENGINE_BIN" "$@"
     }
     fn prime_defaults_cache(&self) {
         let mut c = self.cmd();
-        c.env("AH_ENGINE_NOSPAWN", "1")
-            .arg("hook")
-            .arg("--event")
-            .arg("Notification")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
+        c.env("AH_ENGINE_NOSPAWN", "1").arg("hook").arg("--event").arg("Notification").stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::null());
         let mut ch = c.spawn().unwrap();
         ch.stdin.take().unwrap().write_all(br#"{"hook_event_name":"Notification","message":"prime"}"#).unwrap();
         ah_engine::discard::harmless(ch.wait());
@@ -1155,11 +1149,7 @@ fn rss_over_cap_restarts_cleanly_and_next_client_respawns() {
     assert!(std::fs::read_to_string(e.eng().join("ah-engine.log")).unwrap().contains("rss"));
     let (out, code, _) = e.hook(DENY_IN, true);
     assert_eq!(code, 0, "first post-rss hook fails open while it restarts: {out}");
-    assert!(
-        wait_for(|| e.pid().is_some_and(|p| p != old)),
-        "next client must respawn the daemon after RSS exit; log:\n{}",
-        e.health_log()
-    );
+    assert!(wait_for(|| e.pid().is_some_and(|p| p != old)), "next client must respawn the daemon after RSS exit; log:\n{}", e.health_log());
     drop(e.ctl("stop"));
     ah_engine::discard::harmless(daemon.wait());
 }

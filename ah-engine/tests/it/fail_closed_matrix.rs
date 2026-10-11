@@ -21,8 +21,8 @@ use ah_engine::dispatch::table;
 use serde_json::Value;
 use std::io::Write;
 use std::path::PathBuf;
-use std::time::Duration;
 use std::process::{Command, Stdio};
+use std::time::Duration;
 
 /// What the dispatcher reads from stdin.
 #[derive(Clone, Copy)]
