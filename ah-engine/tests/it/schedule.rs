@@ -263,7 +263,7 @@ fn a_daemon_thread_panic_restarts_until_the_cap_then_drains() {
     assert_eq!(r["status"], "ok", "{r}");
     let eng = e.eng();
     common::reap(&eng, || {
-        ah_engine::discard::harmless(ah_engine::client::exchange(&e.sock(), b"CTL stop\n", Duration::from_millis(500)));
+        drop(ah_engine::client::exchange(&e.sock(), b"CTL stop\n", Duration::from_millis(500))); // best-effort stop; the reply is not needed
     });
 }
 
