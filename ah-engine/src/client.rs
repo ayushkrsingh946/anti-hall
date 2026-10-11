@@ -305,9 +305,7 @@ pub(crate) fn attempt(payload: &[u8], cfg: &ClientConfig, have_fallback: bool) -
             if health::crashloop_tripped(cfg) {
                 return None;
             }
-            let Some(_spawn_lock) = spawn_lock() else {
-                return None;
-            };
+            let _spawn_lock = spawn_lock()?;
             health::log_event("client_spawn_attempt", "singleflight", "absent");
             let Some(mut child) = spawn_daemon() else {
                 mark_daemon_down("spawn");
