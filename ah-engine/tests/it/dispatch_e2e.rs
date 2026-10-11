@@ -1373,11 +1373,7 @@ fn an_empty_home_defers_the_env_reading_checks_in_process_and_through_the_daemon
             if in_process {
                 assert_eq!((code, err.contains("NODE-RAN")), (2, true), "an empty HOME defers to Node in-process: {err:?}");
             } else {
-                assert_eq!(
-                    (code, err.contains("NODE-RAN")),
-                    (2, true),
-                    "an empty HOME with a healthy daemon defers to Node: {err:?}"
-                );
+                assert_eq!((code, err.contains("NODE-RAN")), (2, true), "an empty HOME with a healthy daemon defers to Node: {err:?}");
             }
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
