@@ -690,13 +690,13 @@ fn rss_over_cap_restarts_cleanly_and_next_client_respawns() {
 
 #[test]
 fn memory_limit_and_nice_are_applied_and_reported() {
-    let e = Env::new("mem", &[("AH_ENGINE_MEM_MB", "128"), ("AH_ENGINE_NICE", "7")]);
+    let e = Env::new("mem", &[("AH_ENGINE_MEM_MB", "64"), ("AH_ENGINE_NICE", "7")]);
     e.warm();
     let st = e.status();
-    assert!(st["mem_limit"].as_str().unwrap().starts_with("ok:128") || st["mem_limit"].as_str().unwrap().starts_with("err:"), "{st}");
+    assert!(st["mem_limit"].as_str().unwrap().starts_with("ok:64") || st["mem_limit"].as_str().unwrap().starts_with("err:"), "{st}");
     // macOS rejects setrlimit(RLIMIT_DATA) with EINVAL (verified with a C probe); there the RSS cap is the guard.
     if cfg!(target_os = "linux") {
-        assert_eq!(st["mem_limit"], "ok:128");
+        assert_eq!(st["mem_limit"], "ok:64");
     }
     let pid = e.pid().unwrap();
     let nice = Command::new("ps").args(["-o", "nice=", "-p", &pid.to_string()]).output().unwrap();
