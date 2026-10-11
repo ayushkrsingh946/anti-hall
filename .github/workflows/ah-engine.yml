@@ -78,6 +78,14 @@ jobs:
         run: ./test.sh
         env:
           AH_TEST_PROFILE: nightly
+      - name: Upload generated reference on mismatch
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ah-engine-generated-reference-${{ matrix.os }}
+          path: ${{ runner.temp }}/ah-engine-generated-reference.md
+          retention-days: 7
+          if-no-files-found: ignore
       - run: cargo doc --no-deps
         if: matrix.os == 'ubuntu-latest'
         env:
