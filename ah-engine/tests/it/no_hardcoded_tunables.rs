@@ -61,7 +61,13 @@ const ALLOW: &[(&str, &str, &str)] = &[
     ),
     ("src/docs.rs", "\"| `{}` |", "row layout of the generated Markdown reference"),
     ("src/docs.rs", "\\n## ", "section headings and intro lines of the generated Markdown reference: the generator's own format"),
-    ("src/memstat.rs", "static INNER", "the allocator the counters wrap: a compile-time choice by target, code not configuration"),
+    ("src/memstat.rs", "static JEMALLOC", "the allocator the counters may wrap: a target-gated allocator value, not configuration"),
+    ("src/memstat.rs", "static SYSTEM", "the allocator the counters may wrap: the platform allocator value, not configuration"),
+    (
+        "src/memstat.rs",
+        "AH_ENGINE_ALLOCATOR",
+        "the allocator selector env name must be read with libc getenv before defaults can be loaded, because loading defaults allocates",
+    ),
     ("src/main.rs", "static ALLOC", "the global allocator item: a language construct, not a value"),
     ("src/memdiag.rs", "static ON", "a thread-local flag initialised off: state, not a tunable"),
     (
@@ -125,7 +131,11 @@ const ALLOW: &[(&str, &str, &str)] = &[
     ),
     ("src/script/host_mesh.rs", "static OWED", "a thread-local list of the app-cache writes the call's lookups owe, initialised empty: state, not a tunable"),
     ("src/script/host.rs", "static CALL", "a thread-local slot for the request state of one script call, initialised empty: state, not a tunable"),
-    ("src/script/host.rs", "static RES", "a thread-local regex cache, initialised empty (its size bound is script.regex_cache_max): state, not a tunable"),
+    (
+        "src/script/recache.rs",
+        "static CACHE",
+        "the process-wide regex cache, initialised empty (its bounds are script.regex_cache_bytes and script.regex_cache_max): state, not a tunable",
+    ),
     ("src/watch/kq.rs", "const FFLAGS", "the kqueue vnode event flags the backend subscribes to: a kernel protocol constant, not a tunable"),
     ("src/watch/kq.rs", "const GONE", "the kqueue vnode event flags that mean the file went away: a kernel protocol constant, not a tunable"),
     ("src/deadline.rs", "static REQ", "a thread-local slot initialised empty (the request being served): state, not a tunable"),
