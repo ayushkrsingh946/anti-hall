@@ -9,9 +9,7 @@ fn committed_reference_matches_the_generated_one() {
     let committed = std::fs::read_to_string(&path).unwrap_or_default();
     let generated = ah_engine::docs::markdown();
     if committed != generated
-        && let Some(dir) = std::env::var_os("RUNNER_TEMP")
-            .or_else(|| std::env::var_os("TMPDIR"))
-            .or_else(|| std::env::var_os("TEMP"))
+        && let Some(dir) = std::env::var_os("RUNNER_TEMP").or_else(|| std::env::var_os("TMPDIR")).or_else(|| std::env::var_os("TEMP"))
     {
         let out = std::path::PathBuf::from(dir).join("ah-engine-generated-reference.md");
         match std::fs::write(&out, &generated) {
