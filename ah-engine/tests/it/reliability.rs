@@ -421,8 +421,6 @@ fn bad_replies_fail_open_never_block() {
         ("truncated", good[..good.len() - 3].to_vec()),
         ("header only", good[..10].to_vec()),
         ("garbage", b"{\"decision\":\"allow\"}".to_vec()),
-        ("busy", encode(Kind::Busy, "")),
-        ("err", encode(Kind::Err, "boom")),
         ("corrupt", {
             let mut g = good.clone();
             let n = g.len() - 12;
@@ -435,6 +433,18 @@ fn bad_replies_fail_open_never_block() {
         fake_server(&e, move || Some(reply.clone()));
         let (out, code, elapsed) = e.hook(DENY_IN, true);
         assert_eq!((out.as_str(), code), ("", 0), "case {name}");
+        assert!(elapsed < Duration::from_secs(1), "case {name} took {elapsed:?}");
+    }
+}
+
+#[test]
+fn healthy_non_ok_replies_use_the_fallback_contract() {
+    use ah_engine::frame::{Kind, encode};
+    for (name, reply) in [("busy", encode(Kind::Busy, "")), ("err", encode(Kind::Err, "boom"))] {
+        let e = Env::new("non-ok", &[("AH_ENGINE_NOSPAWN", "1")]);
+        fake_server(&e, move || Some(reply.clone()));
+        let (out, code, elapsed) = e.hook(DENY_IN, true);
+        assert_eq!((out.as_str(), code), ("NODE-FALLBACK", 2), "case {name}");
         assert!(elapsed < Duration::from_secs(1), "case {name} took {elapsed:?}");
     }
 }

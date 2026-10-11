@@ -3,9 +3,8 @@
 //! Order of events for `engine hook [--fallback <hook.js>]`:
 //!  1. ask the daemon (short deadline, framed reply, size-capped input);
 //!  2. a complete OK frame is the answer (its body may be empty = nothing to say);
-//!  3. anything else (no daemon, BUSY, ERR, timeout, truncated/corrupt frame, breaker open, crash-loop
-//!     stop) fails open: print nothing and exit 0;
-//!  4. Node fallback remains only for explicit `dispatch.defer_exit` answers or forced fallback paths such as invalid input.
+//!  3. no daemon, timeout, breaker open, or crash-loop stop fails open: print nothing and exit 0;
+//!  4. BUSY, ERR, and malformed verdict bodies are healthy negative replies, so the caller keeps its fallback/no-node policy.
 //!
 //! The fallback command is chosen by the caller (argument or env), never by anything in the payload.
 use crate::config::ClientConfig;
@@ -24,10 +23,19 @@ use std::time::{Duration, Instant};
 
 thread_local! {
     static LAST_NON_OK_REPLY: Cell<bool> = const { Cell::new(false) };
+    static LAST_UNAVAILABLE: Cell<bool> = const { Cell::new(false) };
 }
 
 pub(crate) fn take_non_ok_reply() -> bool {
     LAST_NON_OK_REPLY.replace(false)
+}
+
+pub(crate) fn take_unavailable() -> bool {
+    LAST_UNAVAILABLE.replace(false)
+}
+
+fn note_unavailable() {
+    LAST_UNAVAILABLE.set(true);
 }
 
 /// Result of one exchange with the daemon.
@@ -256,7 +264,10 @@ fn engine_attempt(raw: &str, cfg: &ClientConfig, have_fallback: bool) -> Option<
 /// Send one request (a hook `V` or a dispatch `D` request) to the daemon, starting it when none answers. `None` =
 /// fail open for hook callers; with `have_fallback` a cold start does not wait.
 pub(crate) fn attempt(payload: &[u8], cfg: &ClientConfig, have_fallback: bool) -> Option<String> {
+    LAST_NON_OK_REPLY.set(false);
+    LAST_UNAVAILABLE.set(false);
     if health::breaker_remaining().is_some() || health::crashloop_remaining().is_some() || daemon_down_marked() {
+        note_unavailable();
         return None;
     }
     let sock = paths::socket();
@@ -270,6 +281,7 @@ pub(crate) fn attempt(payload: &[u8], cfg: &ClientConfig, have_fallback: bool) -
             None
         }
         Exch::Failed(why) => {
+            note_unavailable();
             mark_daemon_down(&why);
             if let Some(_spawn_lock) = spawn_lock() {
                 health::log_event("client_spawn_attempt", "singleflight", &why);
@@ -279,6 +291,7 @@ pub(crate) fn attempt(payload: &[u8], cfg: &ClientConfig, have_fallback: bool) -
             None
         }
         Exch::Slow(why) => {
+            note_unavailable();
             mark_daemon_down(&why);
             if let Some(_spawn_lock) = spawn_lock() {
                 health::log_event("client_spawn_attempt", "singleflight", &why);
@@ -288,13 +301,18 @@ pub(crate) fn attempt(payload: &[u8], cfg: &ClientConfig, have_fallback: bool) -
             None
         }
         Exch::Absent => {
-            mark_daemon_down("absent");
+            note_unavailable();
             if health::crashloop_tripped(cfg) {
                 return None;
             }
-            let _spawn_lock = spawn_lock()?;
+            let Some(_spawn_lock) = spawn_lock() else {
+                return None;
+            };
             health::log_event("client_spawn_attempt", "singleflight", "absent");
-            let mut child = spawn_daemon()?;
+            let Some(mut child) = spawn_daemon() else {
+                mark_daemon_down("spawn");
+                return None;
+            };
             if have_fallback {
                 return None; // the Node hook answers this call; the daemon is up for the next one
             }
@@ -314,6 +332,7 @@ pub(crate) fn attempt(payload: &[u8], cfg: &ClientConfig, have_fallback: bool) -
                 }
                 std::thread::sleep(defaults::millis("client.cold_start_poll_ms"));
             }
+            mark_daemon_down("cold_start");
             None
         }
     }
@@ -562,10 +581,14 @@ fn run_bytes(raw: Vec<u8>, force_fallback: bool, fallback: Option<&Path>, rest: 
     let guard_without_fallback = fallback.is_none() && event_name.as_deref().is_some_and(guarded);
     let text = std::str::from_utf8(&raw).ok();
     if !force_fallback && let Some(raw) = text {
-        if let Some(o) = engine_attempt(raw, &cfg, fallback.is_some()).and_then(reply_outcome) {
+        if let Some(body) = engine_attempt(raw, &cfg, fallback.is_some())
+            && let Some(o) = reply_outcome(body)
+        {
             return o;
         }
-        if raw.len() as u64 <= defaults::num("daemon.max_request") {
+        let non_ok_reply = take_non_ok_reply();
+        let unavailable = take_unavailable() || fail_open_unavailable();
+        if !non_ok_reply && unavailable && raw.len() as u64 <= defaults::num("daemon.max_request") {
             return Outcome { out: env_advisory_output(raw, "").unwrap_or_default(), code: 0, err: String::new() };
         }
     }

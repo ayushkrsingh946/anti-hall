@@ -326,7 +326,7 @@ unit = "ms"
 
 [daemon.reply_slack_ms]
 doc = "Time kept back from a request's client deadline (client.deadline_ms, or what a dispatch request says) to write the reply: the inner budgets that could outlast the client's wait (a git call, a Jev consult) are clamped to the deadline minus this, so a slow dependency costs a fallback, not a lost answer."
-value = 500
+value = 50
 min = 0
 unit = "ms"
 
