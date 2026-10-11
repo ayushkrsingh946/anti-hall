@@ -601,21 +601,25 @@ fn golden_ticks(c: &Corpus, env: &HashMap<String, String>, ticks: usize, witness
     let (a, b) = (copy_home(c, "node-t"), copy_home(c, "engine-t"));
     let mut out = Vec::new();
     for i in 0..ticks {
-        let now = c.now + (i as i64) * 1000;
-        let nres = node_sweep(&a, now, env);
-        let eres = engine_duty(&b, now, env, witness);
-        assert!(eres["detail"].get("node").is_none(), "tick {i}: the engine must decide itself: {eres}");
-        let (da, db) = (mask(&dump(&a)).replace(&*a.to_string_lossy(), "<h>"), mask(&dump(&b)).replace(&*b.to_string_lossy(), "<h>"));
-        if da != db
-            && let Ok(d) = std::env::var("AH_TEST_DUMP_DIR")
-        {
-            std::fs::write(Path::new(&d).join("a.txt"), &da).unwrap();
-            std::fs::write(Path::new(&d).join("b.txt"), &db).unwrap();
-        }
-        assert_eq!(da, db, "tick {i}: the engine's store, archive, report, state or log differ from Node's\nnode: {nres}\nengine: {eres}");
-        out.push(eres);
+        out.push(golden_tick(c, &a, &b, env, i, witness));
     }
     out
+}
+
+fn golden_tick(c: &Corpus, a: &Path, b: &Path, env: &HashMap<String, String>, i: usize, witness: &dyn Runner) -> Value {
+    let now = c.now + (i as i64) * 1000;
+    let nres = node_sweep(a, now, env);
+    let eres = engine_duty(b, now, env, witness);
+    assert!(eres["detail"].get("node").is_none(), "tick {i}: the engine must decide itself: {eres}");
+    let (da, db) = (mask(&dump(a)).replace(&*a.to_string_lossy(), "<h>"), mask(&dump(b)).replace(&*b.to_string_lossy(), "<h>"));
+    if da != db
+        && let Ok(d) = std::env::var("AH_TEST_DUMP_DIR")
+    {
+        std::fs::write(Path::new(&d).join("a.txt"), &da).unwrap();
+        std::fs::write(Path::new(&d).join("b.txt"), &db).unwrap();
+    }
+    assert_eq!(da, db, "tick {i}: the engine's store, archive, report, state or log differ from Node's\nnode: {nres}\nengine: {eres}");
+    eres
 }
 
 #[test]
@@ -888,7 +892,7 @@ fn archive_home(tag: &str, seed: u32, n: u32) -> Corpus {
     c
 }
 
-fn archive_cap_between_boundaries(home: &Path, evict: usize) -> String {
+fn archive_boundaries(home: &Path, evict: usize) -> (u64, u64, u64) {
     let mut files = ah_engine::dssup::retention::cap::list(home);
     files.sort_by(|a, b| a.sort_key.as_bytes().cmp(b.sort_key.as_bytes()).then(a.mtime_ms.partial_cmp(&b.mtime_ms).unwrap_or(std::cmp::Ordering::Equal)));
     assert!(evict > 0 && evict < files.len(), "need an interior eviction boundary: {evict}/{}", files.len());
@@ -896,13 +900,38 @@ fn archive_cap_between_boundaries(home: &Path, evict: usize) -> String {
     let after_prev = total - files[..evict - 1].iter().map(|f| f.bytes).sum::<u64>();
     let after_target = after_prev - files[evict - 1].bytes;
     let smallest = files.iter().map(|f| f.bytes).min().unwrap();
-    let cap = (after_prev + after_target) as f64 / 2.0;
+    (after_target, after_prev, smallest)
+}
+
+fn archive_cap_between_boundaries(homes: &[&Path], evict: usize) -> String {
+    let mut low = 0u64;
+    let mut high = u64::MAX;
+    let mut smallest = u64::MAX;
+    for h in homes {
+        let (after_target, after_prev, min_file) = archive_boundaries(h, evict);
+        low = low.max(after_target);
+        high = high.min(after_prev);
+        smallest = smallest.min(min_file);
+    }
+    assert!(low < high, "no shared cap interval for evicting {evict} files across homes: {low}/{high}");
+    let cap = (low + high) as f64 / 2.0;
     let margin = smallest as f64 * 0.10;
-    assert!(
-        cap - after_target as f64 >= margin && after_prev as f64 - cap >= margin,
-        "cap {cap} too close to {after_target}/{after_prev}; smallest {smallest}"
-    );
-    format!("{:.9}", cap / ah_engine::defaults::num("devswarm_sup.rt_mb"))
+    assert!(cap - low as f64 >= margin && high as f64 - cap >= margin, "cap {cap} too close to shared interval {low}/{high}; smallest {smallest}");
+    format!("{:.9}", cap / ah_engine::defaults::num("devswarm_sup.rt_mb") as f64)
+}
+
+fn archive_cap_seed80(c: &Corpus) -> usize {
+    let (a, b) = (copy_home(c, "node-t"), copy_home(c, "engine-t"));
+    let mut env = env_of("30", "5", "100", "true");
+    env.insert("ANTIHALL_DEVSWARM_RETENTION_ARCHIVE_MAX_MB".into(), "0".into());
+    golden_tick(c, &a, &b, &env, 0, &System::configured());
+    let before = tree(&b.join(".anti-hall/devswarm/archive"));
+    let cap = archive_cap_between_boundaries(&[a.as_path(), b.as_path()], 8);
+    env.insert("ANTIHALL_DEVSWARM_RETENTION_ARCHIVE_MAX_MB".into(), cap);
+    golden_tick(c, &a, &b, &env, 1, &System::configured());
+    let after = tree(&b.join(".anti-hall/devswarm/archive"));
+    assert!(after.contains_key("README.txt"), "a file that is not an archive month was touched");
+    before.keys().filter(|k| !after.contains_key(*k)).count()
 }
 
 #[test]
@@ -911,17 +940,18 @@ fn the_archive_cap_evicts_what_node_evicts() {
         return;
     }
     let mut evicted = 0;
-    for (seed, cap) in [(80u32, None), (81, Some("0.002")), (82, Some("0.00001")), (83, Some("5"))] {
+    for (seed, cap) in [(81u32, "0.002"), (82, "0.00001"), (83, "5")] {
         let c = archive_home(&format!("rt-cap-{seed}"), seed, 30);
         let mut env = env_of("30", "5", "100", "true");
-        let cap = cap.map(str::to_string).unwrap_or_else(|| archive_cap_between_boundaries(&c.home, 8));
-        env.insert("ANTIHALL_DEVSWARM_RETENTION_ARCHIVE_MAX_MB".into(), cap);
+        env.insert("ANTIHALL_DEVSWARM_RETENTION_ARCHIVE_MAX_MB".into(), cap.into());
         let before = tree(&c.home.join(".anti-hall/devswarm/archive"));
         golden_ticks(&c, &env, 2, &System::configured());
         let after = tree(&c.dir.join("engine-t/.anti-hall/devswarm/archive"));
         evicted += before.keys().filter(|k| !after.contains_key(*k)).count();
         assert!(after.contains_key("README.txt"), "a file that is not an archive month was touched");
     }
+    let c = archive_home("rt-cap-80", 80, 30);
+    evicted += archive_cap_seed80(&c);
     assert!(evicted >= 30, "{evicted}");
 }
 
