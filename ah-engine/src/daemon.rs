@@ -318,6 +318,9 @@ impl Shared {
             "footprint_kb": limits::footprint_kb(),
             "mem_metric": defaults::text("daemon.mem_metric"),
             "mem_kb": limits::mem_kb(),
+            "allocator": crate::memstat::active_allocator().as_str(),
+            "allocator_config": self.cfg().effective.text("diagnostics.allocator"),
+            "allocator_stats": crate::memdiag::allocator_stats(),
             "heap_live_kb": heap.live / 1024,
             "heap_peak_kb": heap.peak / 1024,
             "allocs": heap.allocs,
@@ -385,6 +388,8 @@ impl Shared {
             "footprint_kb": limits::footprint_kb(),
             "mem_metric": defaults::text("daemon.mem_metric"),
             "mem_kb": limits::mem_kb(),
+            "allocator": crate::memstat::active_allocator().as_str(),
+            "allocator_config": self.cfg().effective.text("diagnostics.allocator"),
             "rss_peak_kb": self.rss_peak_kb.fetch_max(rss_now, SeqCst).max(rss_now),
             "memory": self.memory(),
             "load": self.load.report(health::now_ms()),
@@ -409,6 +414,7 @@ impl Shared {
             "rules": {"version": rules.version, "count": rules.rules.len(), "fingerprint": format!("{:016x}", rules.fingerprint())},
             "summary": self.telemetry.headline(),
             "mem_limit": self.rlimit,
+            "malloc_stack_logging": cfg.malloc_stack_logging,
             "storage": self.storage,
             "rss_cap_kb": cfg.rss_cap_kb,
             "inject_gate": {"sessions": gs.sessions, "slots": gs.slots, "bytes": gs.bytes, "evictions": gs.evictions,
@@ -794,13 +800,12 @@ pub fn drain_spool(sh: &Shared) -> crate::spool::Drained {
 
 /// Read a whole request within `read_deadline` and `max` bytes.
 fn read_request(s: &mut UnixStream, cfg: &Config) -> Result<Vec<u8>, &'static str> {
-    s.set_read_timeout(Some(defaults::millis("daemon.read_poll_ms"))).ok();
-    let start = Instant::now();
+    if s.set_nonblocking(true).is_err() {
+        return Err(defaults::text("msg.reply_read_error"));
+    }
+    let deadline = Instant::now() + cfg.read_deadline;
     let (mut buf, mut chunk) = (Vec::new(), vec![0u8; defaults::num("io.small_chunk_bytes") as usize]);
     loop {
-        if start.elapsed() > cfg.read_deadline {
-            return Err(defaults::text("msg.reply_read_deadline"));
-        }
         match s.read(&mut chunk) {
             Ok(0) => return Ok(buf),
             Ok(n) => {
@@ -809,7 +814,12 @@ fn read_request(s: &mut UnixStream, cfg: &Config) -> Result<Vec<u8>, &'static st
                     return Err(defaults::text("msg.reply_too_large"));
                 }
             }
-            Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut | std::io::ErrorKind::Interrupted) => continue,
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                if !wait_stream(s, libc::POLLIN, deadline) {
+                    return Err(defaults::text("msg.reply_read_deadline"));
+                }
+            }
             Err(_) => return Err(defaults::text("msg.reply_read_error")),
         }
     }
@@ -817,17 +827,65 @@ fn read_request(s: &mut UnixStream, cfg: &Config) -> Result<Vec<u8>, &'static st
 
 /// Write the reply; false when it could not be written (the client is gone or stopped reading).
 fn write_reply(s: &mut UnixStream, r: &Reply, cfg: &Config) -> bool {
-    if let Err(e) = s.set_write_timeout(Some(cfg.write_deadline)) {
-        health::log_event("reply", "set_timeout", &e.to_string());
-    }
-    // A failed write means the client sees a cut frame and falls back to Node (it never mistakes it for an answer); the
-    // cause is logged here so a pattern of them is visible, and `reply_write_errors` counts them.
-    if let Err(e) = s.write_all(&r.frame()) {
+    let frame = r.frame();
+    let mut written = 0;
+    let deadline = Instant::now() + cfg.write_deadline;
+    if let Err(e) = s.set_nonblocking(true) {
         REPLY_WRITE_ERRORS.fetch_add(1, SeqCst);
         health::log_event("reply", "write_failed", &e.to_string());
         return false;
     }
+    // A failed write means the client sees a cut frame and falls back to Node (it never mistakes it for an answer); the
+    // cause is logged here so a pattern of them is visible, and `reply_write_errors` counts them.
+    while written < frame.len() {
+        match s.write(&frame[written..]) {
+            Ok(0) => {
+                REPLY_WRITE_ERRORS.fetch_add(1, SeqCst);
+                health::log_event("reply", "write_failed", defaults::text("msg.reply_write_deadline"));
+                return false;
+            }
+            Ok(n) => written += n,
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                if !wait_stream(s, libc::POLLOUT, deadline) {
+                    REPLY_WRITE_ERRORS.fetch_add(1, SeqCst);
+                    health::log_event("reply", "write_failed", defaults::text("msg.reply_write_deadline"));
+                    return false;
+                }
+            }
+            Err(e) => {
+                REPLY_WRITE_ERRORS.fetch_add(1, SeqCst);
+                health::log_event("reply", "write_failed", &e.to_string());
+                return false;
+            }
+        }
+    }
     true
+}
+
+fn wait_stream(s: &UnixStream, events: libc::c_short, deadline: Instant) -> bool {
+    loop {
+        let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
+            return false;
+        };
+        let mut timeout = remaining.as_millis().min(i32::MAX as u128) as i32;
+        if timeout == 0 && !remaining.is_zero() {
+            timeout = 1;
+        }
+        let mut pfd = libc::pollfd { fd: s.as_raw_fd(), events, revents: 0 };
+        // SAFETY: `pfd` is a live, writable `pollfd` and the count passed is 1.
+        let n = unsafe { libc::poll(&mut pfd, 1, timeout) };
+        if n > 0 {
+            return true;
+        }
+        if n == 0 {
+            return false;
+        }
+        let e = std::io::Error::last_os_error();
+        if e.kind() != std::io::ErrorKind::Interrupted {
+            return false;
+        }
+    }
 }
 
 /// Replies finished after their client's deadline had passed (slow but healthy; counted apart from failures).
@@ -1083,23 +1141,62 @@ fn acquire_lock(lock_path: &Path, sock: &Path) -> Result<Option<std::fs::File>, 
     }
 }
 
-/// What a running daemon stands on: its state directory, the lock file it holds (by inode) and its executable.
+fn same_path(a: &Path, b: &Path) -> bool {
+    let canon = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    canon(a) == canon(b)
+}
+
+fn real_home() -> Option<std::path::PathBuf> {
+    // SAFETY: getpwuid reads the system passwd entry for this uid; a null result is handled below.
+    let pwd = unsafe { libc::getpwuid(libc::getuid()) };
+    if pwd.is_null() {
+        return None;
+    }
+    // SAFETY: `pwd` is non-null and `pw_dir` is a NUL-terminated C string owned by libc for the life of this call.
+    let dir = unsafe { std::ffi::CStr::from_ptr((*pwd).pw_dir) }.to_string_lossy();
+    (!dir.is_empty()).then(|| std::path::PathBuf::from(dir.as_ref()))
+}
+
+fn live_state_dir(dir: &Path) -> bool {
+    let Some(home) = real_home() else { return false };
+    [
+        home.join(defaults::text("paths.base_dir")).join(defaults::text("paths.state_dir")),
+        home.join(defaults::text("paths.base_dir")).join(defaults::text("paths.live_state_dir")),
+    ]
+    .iter()
+    .any(|p| same_path(dir, p))
+}
+
+/// What a running daemon stands on: its state directory, the lock file it holds (by inode), its socket, parent and executable.
 struct Footing {
     dir: std::path::PathBuf,
     lock: std::path::PathBuf,
     lock_ino: u64,
+    sock: Option<(std::path::PathBuf, u64)>,
+    parent: Option<libc::pid_t>,
     exe: Option<std::path::PathBuf>,
 }
 
 impl Footing {
     /// Why the daemon has lost its footing, if it has: the state directory or the executable is gone, or the lock file is
-    /// gone or replaced (a new daemon could then start beside this one).
+    /// gone or replaced (a new daemon could then start beside this one), or for non-live daemons the parent or socket is gone.
     fn lost(&self) -> Option<&'static str> {
         if !self.dir.is_dir() {
             return Some("state_dir_gone");
         }
         if std::fs::metadata(&self.lock).map(|m| m.ino()).ok() != Some(self.lock_ino) {
             return Some("lock_gone");
+        }
+        if let Some((sock, ino)) = &self.sock
+            && std::fs::symlink_metadata(sock).map(|m| m.ino()).ok() != Some(*ino)
+        {
+            return Some("socket_gone");
+        }
+        if let Some(parent) = self.parent {
+            // SAFETY: getppid takes no arguments and cannot fail.
+            if unsafe { libc::getppid() } != parent {
+                return Some("parent_gone");
+            }
         }
         if self.exe.as_ref().is_some_and(|e| !e.exists()) {
             return Some("binary_gone");
@@ -1109,7 +1206,7 @@ impl Footing {
 }
 
 /// Every `daemon.orphan_check_ms`, check the daemon's [`Footing`]; once lost, log why and drain (a clean exit). The idle exit
-/// (`daemon.idle_exit_s`) covers a daemon nobody talks to; this covers one whose files were removed under it.
+/// (`daemon.idle_exit_s`) covers a daemon nobody talks to; this covers one whose files, parent, or socket were removed under it.
 fn footing_watch(sh: Arc<Shared>, footing: Footing) {
     while !sh.draining.load(SeqCst) {
         std::thread::sleep(defaults::millis("daemon.orphan_check_ms"));
@@ -1137,6 +1234,9 @@ fn io_code(e: &std::io::Error) -> String {
 
 /// Run the daemon until it drains: take the singleton lock, bind the socket, start the workers and the watchdog.
 pub fn serve() {
+    // SAFETY: getppid takes no arguments and cannot fail. Capture it before any startup work so a scratch daemon whose
+    // launcher dies during config/defaults loading still knows which parent it was started by.
+    let initial_parent = unsafe { libc::getppid() };
     let sock = paths::socket();
     let lock_path = paths::lock_for(&sock);
     // state dir + socket dir: private (0700), ours, not a symlink
@@ -1233,8 +1333,17 @@ pub fn serve() {
     {
         // the daemon's footing, as it is now: a test (or an uninstall) that removes the state dir or the binary under a
         // running daemon must not leave it running for hours with nothing that can reach or stop it
-        let footing =
-            Footing { dir: paths::dir(), lock: lock_path.clone(), lock_ino: lock.metadata().map(|m| m.ino()).unwrap_or(0), exe: std::env::current_exe().ok() };
+        let non_live = !live_state_dir(&paths::dir());
+        let sock_footing = non_live.then(|| std::fs::symlink_metadata(&sock).ok().map(|m| (sock.clone(), m.ino()))).flatten();
+        let parent = non_live.then_some(initial_parent);
+        let footing = Footing {
+            dir: paths::dir(),
+            lock: lock_path.clone(),
+            lock_ino: lock.metadata().map(|m| m.ino()).unwrap_or(0),
+            sock: sock_footing,
+            parent,
+            exe: std::env::current_exe().ok(),
+        };
         let s = sh.clone();
         std::thread::spawn(move || footing_watch(s, footing));
     }
@@ -1409,6 +1518,7 @@ fn accept_loop(sh: &Arc<Shared>, listener: &UnixListener) {
         unsafe { libc::poll(&mut pfd, 1, timeout) };
         let mut got_any = false;
         loop {
+            sh.loop_beat.store(sh.ms(), SeqCst);
             let s = match listener.accept() {
                 Ok((s, _)) => s,
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break, // nothing pending: back to poll
@@ -1435,9 +1545,20 @@ fn accept_loop(sh: &Arc<Shared>, listener: &UnixListener) {
                 sh.stats.busy.fetch_add(1, SeqCst);
                 sh.telemetry.with_metrics(|m| m.inc("busy_replies", &[]));
                 let mut s = s;
-                s.set_nonblocking(false).ok();
-                s.set_write_timeout(Some(defaults::millis("daemon.busy_write_ms"))).ok();
-                crate::discard::harmless(s.write_all(&Reply::Busy.frame())); // keep: best effort, fail-open
+                s.set_nonblocking(true).ok();
+                let frame = Reply::Busy.frame();
+                match s.write(&frame) {
+                    Ok(n) if n == frame.len() => {}
+                    Ok(_) => {
+                        REPLY_WRITE_ERRORS.fetch_add(1, SeqCst);
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                        REPLY_WRITE_ERRORS.fetch_add(1, SeqCst);
+                    }
+                    Err(_) => {
+                        REPLY_WRITE_ERRORS.fetch_add(1, SeqCst);
+                    }
+                };
             } else {
                 // requests ahead of this one: the queued ones and those a worker is serving now
                 let in_flight = q.len() as u64 + sh.busy_since.iter().filter(|b| b.load(SeqCst) != 0).count() as u64;

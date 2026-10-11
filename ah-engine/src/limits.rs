@@ -120,17 +120,15 @@ pub fn rss_kb() -> u64 {
     crate::health::probe_output(crate::defaults::list("health.rss_probe"), std::process::id()).trim().parse().unwrap_or(0)
 }
 
-/// Cap the data segment. Returns a status word for `status`: `ok:<mb>`, `off`, or `err:<errno>`.
-/// NOTE: macOS accepts RLIMIT_DATA but the kernel may not enforce it, so the periodic RSS check is the
-/// real guard there; the status string tells the truth about whether the call succeeded, not enforcement.
+/// Cap the data segment. Returns a status word for `status`: `ok:<mb>`, `off`, `unsupported:rlimit_data`, or `err:<errno>`.
 pub fn apply_mem_limit(mb: u64) -> String {
     if mb == 0 {
         return "off".into();
     }
     #[cfg(target_os = "macos")]
     {
-        #[allow(clippy::needless_return)] // the cfg-gated block below is compiled out here, so this is the tail only on macOS
-        return "unsupported:macos".into();
+        // Darwin rejects setrlimit(RLIMIT_DATA) with EINVAL; RSS/footprint checks are the supported guard.
+        "unsupported:rlimit_data".into()
     }
     #[cfg(not(target_os = "macos"))]
     {
