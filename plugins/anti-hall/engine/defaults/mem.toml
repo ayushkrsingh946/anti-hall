@@ -60,8 +60,8 @@ value = 512
 min = 8
 
 [mem.quickjs_soft_bytes]
-doc = "What ONE worker thread's script interpreter may hold after loading a check (measured after a collection). At or above it the least recently called checks are unloaded down to the low-water mark and rebuilt from their files by their next call. All shipped checks loaded take about 5 MB per worker; a limit near 3 MB made the replay about twice as slow (the checks one request runs are reloaded again and again), 4 MB costs a few percent."
-value = 4194304
+doc = "What ONE worker thread's script interpreter may hold after loading a check (measured after a collection). At or above it the least recently called checks are unloaded down to the low-water mark and rebuilt from their files by their next call. All shipped checks loaded take about 5 MB per worker; the default keeps headroom above that cold set so the first hook call does not unload and rebuild checks while racing the client deadline. A limit near 3 MB made the replay about twice as slow (the checks one request runs are reloaded again and again), and 4 MB costs a few percent."
+value = 6291456
 min = 524288
 unit = "bytes"
 
