@@ -2656,6 +2656,22 @@ function hasDisallowedWriteRedirect(segment, ctx) {
 // for the full rule. No command-substitution/`bash -c`/`eval` unwrapping is
 // performed here on purpose — this exception is scoped to a literal, visible
 // command line only; anything obfuscated through those never qualifies.
+function hasBoundedVerificationFdDupEscape(command, ctx) {
+  if (typeof command !== 'string' || !command.trim()) return false;
+  const { segments, delims } = splitSegmentsDetailed(command);
+  for (let idx = 0; idx < segments.length; idx++) {
+    const seg = segments[idx].trim();
+    if (!seg || delims[idx] !== '|') continue;
+    if (!hasFdDupAwayFromBoundedSink(seg)) continue;
+    const checkSeg = seg
+      .replace(/(^|\s)2>&1(?=\s|$)/g, ' ')
+      .replace(/(^|\s)(?:[0-9]*)>&[0-9]+(?=\s|$)/g, ' ')
+      .trim();
+    if (isQualifyingSingleTargetCheck(checkSeg, ctx)) return true;
+  }
+  return false;
+}
+
 function isBoundedVerificationCommand(command, ctx) {
   if (typeof command !== 'string' || !command.trim()) return false;
   // An unquoted `#` starts a shell comment, which can hide the sink the
@@ -4663,7 +4679,7 @@ function main(payload, env) {
     // fail-open: never block a turn on a Bash edit parity bug.
   }
 
-  if (!isHeavyCommand(command)) {
+  if (!isHeavyCommand(command) && !hasBoundedVerificationFdDupEscape(command, { payload })) {
     return io.decision(0);
   }
 
