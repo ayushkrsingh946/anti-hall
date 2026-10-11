@@ -690,9 +690,39 @@ fn run_guard_with(o: &Opts, hooks: &Path, scenarios: &[Scenario], golden: &Golde
                         R::Other(mut e) => {
                             st.mismatch += 1;
                             if mode == "daemon" && e.code == "0" && e.out.is_empty() && e.err.is_empty() && n.code_is(2) {
-                                let d = run(ENGINE, &strs(&["status", "--json"]), b"", &denv, "/tmp").trimmed();
-                                e.err =
-                                    format!("daemon empty-allow after Node block; status code={} out={} err={}", d.code, clip(&d.out, 400), clip(&d.err, 400));
+                                let status = run(ENGINE, &strs(&["status", "--json"]), b"", &denv, "/tmp").trimmed();
+                                let log_tail = std::fs::read_to_string(dir.join("ah-engine.log"))
+                                    .unwrap_or_default()
+                                    .lines()
+                                    .rev()
+                                    .take(80)
+                                    .collect::<Vec<_>>()
+                                    .into_iter()
+                                    .rev()
+                                    .collect::<Vec<_>>()
+                                    .join("\n");
+                                let settings_keys = std::fs::read_to_string(home_e.join(".anti-hall/settings.json"))
+                                    .ok()
+                                    .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+                                    .and_then(|v| v.as_object().map(|m| m.keys().cloned().collect::<Vec<_>>().join(",")))
+                                    .unwrap_or_default();
+                                let claude_config_keys = std::fs::read_to_string(home_e.join(".claude/settings.json"))
+                                    .ok()
+                                    .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+                                    .and_then(|v| v.get("pluginConfigs").and_then(Value::as_object).map(|m| m.keys().cloned().collect::<Vec<_>>().join(",")))
+                                    .unwrap_or_default();
+                                e.err = format!(
+                                    "daemon empty-allow after Node block; status code={} out={} err={}; home={} transcript_path={}; env_keys={}; settings_keys={}; claude_plugin_configs={}; log_tail=\n{}",
+                                    status.code,
+                                    clip(&status.out, 400),
+                                    clip(&status.err, 400),
+                                    home_e.display(),
+                                    payload_e.get("transcript_path").and_then(Value::as_str).unwrap_or(""),
+                                    denv.iter().filter(|(_, v)| v.is_some()).map(|(k, _)| k.as_str()).collect::<Vec<_>>().join(","),
+                                    settings_keys,
+                                    claude_config_keys,
+                                    clip(&log_tail, 4000)
+                                );
                             }
                             mism.lock().unwrap().push(Mismatch {
                                 scenario: sc.id.clone(),

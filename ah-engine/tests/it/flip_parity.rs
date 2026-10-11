@@ -688,7 +688,7 @@ fn check(rig: &Rig, row: &Row, n: usize) -> Result<(), String> {
     }
 }
 
-fn run_rows(rig: &Rig, rows: Vec<Row>, conc: usize) -> (usize, Vec<String>, usize) {
+fn run_rows(rig: &Rig, rows: Vec<Row>, conc: usize) -> (usize, Vec<String>, usize, String) {
     let rows = Arc::new(rows);
     let next = Arc::new(AtomicUsize::new(0));
     let fails = Arc::new(Mutex::new(Vec::new()));
@@ -711,17 +711,43 @@ fn run_rows(rig: &Rig, rows: Vec<Row>, conc: usize) -> (usize, Vec<String>, usiz
         }
     });
     let f = fails.lock().unwrap().clone();
-    (rows.len(), f, stricter.load(Ordering::SeqCst))
+    let diag = if f.is_empty() {
+        String::new()
+    } else {
+        let log_tail = std::fs::read_to_string(rig.root.join("state/ah-engine.log"))
+            .unwrap_or_default()
+            .lines()
+            .rev()
+            .take(80)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect::<Vec<_>>()
+            .join("\n");
+        let status = run_shell(
+            &format!("{} status --json", env!("CARGO_BIN_EXE_ah-engine")),
+            b"",
+            &rig.env("new", &[]),
+            Path::new("/tmp"),
+            5,
+        );
+        let clip = |s: &str, n: usize| s.chars().take(n).collect::<String>();
+        format!(
+            "\n\n--- thin-trigger diagnostics ---\nstate={}\nstatus code={} out={} err={}\nlog_tail=\n{}",
+            rig.root.join("state").display(),
+            status.code.map_or("sig".into(), |c| c.to_string()),
+            clip(&status.out, 400),
+            clip(&status.err, 400),
+            clip(&log_tail, 4000)
+        )
+    };
+    (rows.len(), f, stricter.load(Ordering::SeqCst), diag)
 }
 
-fn report(name: &str, total: usize, fails: &[String], stricter: usize) {
+fn report(name: &str, total: usize, fails: &[String], stricter: usize, diag: &str) {
     println!("flip parity {name}: {}/{} rows identical ({} documented stricter fail-closed rows)", total - fails.len(), total, stricter);
-    assert!(
-        fails.is_empty(),
-        "{} of {total} rows differ between the old registry and the thin trigger:\n{}",
-        fails.len(),
-        fails.iter().take(12).cloned().collect::<Vec<_>>().join("\n")
-    );
+    let shown = fails.iter().take(12).cloned().collect::<Vec<_>>().join("\n");
+    assert!(fails.is_empty(), "{} of {total} rows differ between the old registry and the thin trigger:\n{}{}", fails.len(), shown, diag);
 }
 
 fn conc() -> usize {
@@ -777,8 +803,8 @@ fn recorded_commands_behave_identically_through_the_thin_trigger_with_the_real_n
             }
         }
     }
-    let (total, fails, stricter) = run_rows(&rig, rows, conc());
-    report("recorded commands (real Node hooks)", total, &fails, stricter);
+    let (total, fails, stricter, diag) = run_rows(&rig, rows, conc());
+    report("recorded commands (real Node hooks)", total, &fails, stricter, &diag);
 }
 
 // ---- corpus 2: combination fuzz with fake hooks ---------------------------------------------------------------------------
@@ -912,9 +938,9 @@ fn a_seeded_combination_fuzz_merges_identically_through_the_thin_trigger() {
             }
         }
     }
-    let (total, fails, stricter) = run_rows(&rig, rows, conc());
+    let (total, fails, stricter, diag) = run_rows(&rig, rows, conc());
     assert!(total >= 100, "the fuzz covers many (host, event, tool) targets: {total}");
-    report("combination fuzz (fake hooks)", total, &fails, stricter);
+    report("combination fuzz (fake hooks)", total, &fails, stricter, &diag);
 }
 
 // ---- corpus 3: payload classes on every event of the thin file --------------------------------------------------------------
@@ -987,9 +1013,9 @@ fn every_event_of_the_thin_file_answers_like_the_old_registry_for_every_payload_
     let rig = Rig::new("classes");
     let rows = class_rows(&rig);
     assert!(rows.iter().any(|r| r.class == "over-cap") && rows.iter().any(|r| r.class == "invalid-utf8"));
-    let (total, fails, stricter) = run_rows(&rig, rows, conc());
+    let (total, fails, stricter, diag) = run_rows(&rig, rows, conc());
     assert!(stricter > 0, "the documented stricter rows are present");
-    report("payload classes on every thin event", total, &fails, stricter);
+    report("payload classes on every thin event", total, &fails, stricter, &diag);
 }
 
 #[test]
