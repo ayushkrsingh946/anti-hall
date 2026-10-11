@@ -96,14 +96,14 @@ impl State {
             }
         };
         let Some((_, value)) = self.top.get_mut(idx) else {
-            return Err(defaults::render("opcli.review_state_bad", &[("id", k("integrations"))]));
+            return Err(defaults::render("opcli.review_state_bad", &[("id", &k("integrations"))]));
         };
         if !matches!(value, J::Obj(_)) {
             *value = J::Obj(Vec::new());
         }
         match value {
             J::Obj(o) => Ok(o),
-            _ => Err(defaults::render("opcli.review_state_bad", &[("id", k("integrations"))])),
+            _ => Err(defaults::render("opcli.review_state_bad", &[("id", &k("integrations"))])),
         }
     }
 
