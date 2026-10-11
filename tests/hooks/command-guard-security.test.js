@@ -44,7 +44,7 @@ function run(command, opts) {
   const home = o.home || own.home;
   try {
     return testHook(HOOK, payload(command, o.cwd || fs.realpathSync(os.tmpdir())), {
-      home, env: Object.assign({ CLAUDE_CODE_ENTRYPOINT: 'cli' }, o.env || {}),
+      home, env: { CLAUDE_CODE_ENTRYPOINT: 'cli' },
     });
   } finally {
     if (own) own.cleanup();
@@ -756,11 +756,8 @@ for (const c of B1_ALLOW) {
 }
 for (const c of B1_BLOCK) {
   test(`v0.116 B1 BLOCK: ${c}`, () => withScriptProject((cwd) => {
-    const env = c === 'python3 tools/x.py --check >&2 | tail -1'
-      ? { ANTIHALL_COMMAND_GUARD_TRACE_B1: '1' }
-      : undefined;
-    const r = run(c, { cwd, env });
-    assert.strictEqual(r.status, 2, r.stdout + r.stderr);
+    const r = run(c, { cwd });
+    assert.strictEqual(r.status, 2, r.stdout);
   }));
 }
 

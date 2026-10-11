@@ -2656,22 +2656,6 @@ function hasDisallowedWriteRedirect(segment, ctx) {
 // for the full rule. No command-substitution/`bash -c`/`eval` unwrapping is
 // performed here on purpose — this exception is scoped to a literal, visible
 // command line only; anything obfuscated through those never qualifies.
-function hasBoundedVerificationFdDupEscape(command, ctx) {
-  if (typeof command !== 'string' || !command.trim()) return false;
-  const { segments, delims } = splitSegmentsDetailed(command);
-  for (let idx = 0; idx < segments.length; idx++) {
-    const seg = segments[idx].trim();
-    if (!seg || delims[idx] !== '|') continue;
-    if (!hasFdDupAwayFromBoundedSink(seg)) continue;
-    const checkSeg = seg
-      .replace(/(^|\s)2>&1(?=\s|$)/g, ' ')
-      .replace(/(^|\s)(?:[0-9]*)>&[0-9]+(?=\s|$)/g, ' ')
-      .trim();
-    if (isQualifyingSingleTargetCheck(checkSeg, ctx)) return true;
-  }
-  return false;
-}
-
 function isBoundedVerificationCommand(command, ctx) {
   if (typeof command !== 'string' || !command.trim()) return false;
   // An unquoted `#` starts a shell comment, which can hide the sink the
@@ -3679,6 +3663,7 @@ function isBackgroundScratchScript(command, payload) {
     if (!BACKGROUND_CHAIN_DELIMS.has(delims[i])) return false;
     const seg = segments[i].trim();
     if (!seg) return false;
+    if (hasFdDupAwayFromBoundedSink(seg)) return false;
     if (isBackgroundScratchScriptSegment(seg, ctx)) {
       if (!background && !/(^|[^0-9&<>])>>?\s*\S/.test(neutralizeQuotedContents(seg).replace(/(^|\s)2>&1(?=\s|$)/g, ' '))) return false; // foreground: stdout must go to a file
       sawScript = true;
@@ -4496,36 +4481,6 @@ function classifyBashWorkImpl(command, payload, opts = {}, depth = 0, shared = n
 }
 
 
-const TRACE_B1_COMMAND = 'python3 tools/x.py --check >&2 | tail -1';
-function b1TraceEnabled(env, command) {
-  return !!(env && env.ANTIHALL_COMMAND_GUARD_TRACE_B1 === '1' && command === TRACE_B1_COMMAND);
-}
-function emitB1Trace(enabled, event) {
-  if (!enabled) return;
-  try {
-    process.stderr.write('[command-guard-b1] ' + JSON.stringify(event) + '\n');
-  } catch (_) {
-    // diagnostic-only: never alter guard behavior
-  }
-}
-function segmentB1Trace(seg, idx, delim, ctx) {
-  let hasFdDup = false;
-  let checkSeg = '';
-  let qualifies = false;
-  let qualifyError = null;
-  try { hasFdDup = hasFdDupAwayFromBoundedSink(seg); } catch (e) { qualifyError = 'hasFdDup:' + String(e && e.message || e); }
-  try {
-    checkSeg = String(seg || '')
-      .replace(/(^|\s)2>&1(?=\s|$)/g, ' ')
-      .replace(/(^|\s)(?:[0-9]*)>&[0-9]+(?=\s|$)/g, ' ')
-      .trim();
-    qualifies = isQualifyingSingleTargetCheck(checkSeg, ctx);
-  } catch (e) {
-    qualifyError = (qualifyError ? qualifyError + ';' : '') + 'qualifies:' + String(e && e.message || e);
-  }
-  return { idx, delim, segment: seg, hasFdDup, checkSeg, qualifies, qualifyError };
-}
-
 // Returns the decision ({exitCode, stdout, stderr}); every block is a RETURNED
 // io.blockDecision(), never an exit, so the fail-open try/catch blocks below
 // cannot swallow it. `payload` is the parsed stdin (undefined when unreadable).
@@ -4538,11 +4493,6 @@ function main(payload, env) {
   const isSkipped = (name) => skipGuard.isSkipped(name, env);
 
   const command = (payload && payload.tool_input && payload.tool_input.command) || '';
-  const traceB1 = b1TraceEnabled(env, command);
-  const allow = (returnReason, extra) => {
-    emitB1Trace(traceB1, Object.assign({ phase: 'main-exit0', returnReason }, extra || {}));
-    return io.decision(0);
-  };
 
   // DevSwarm destructive-read redirect branch. DIFFERENT protection goal from the
   // heavy-command gate below (data-loss / shell-hang vs coordinator context-hygiene),
@@ -4669,17 +4619,17 @@ function main(payload, env) {
   }
 
   // Escape hatch: honor an explicit, user-consented skip (~/.anti-hall/skip.json).
-  if (isSkipped('command-guard')) return allow('skip-command-guard');
+  if (isSkipped('command-guard')) return io.decision(0);
   // Settings switch safety.commandGuard (0.108.4, safety: set/reset need --confirmed).
   // Off -> the core heavy-command gate below no-ops; the data-safety
   // sub-guards above (DevSwarm read/send/mailbox, armed stash) already ran.
   // Fail-open: any error runs the gate.
-  try { if (!require('./lib/settings.js').enabled('safety', 'commandGuard', settingsOpts())) return allow('safety-commandGuard-disabled'); } catch (_) { /* run */ }
+  try { if (!require('./lib/settings.js').enabled('safety', 'commandGuard', settingsOpts())) return io.decision(0); } catch (_) { /* run */ }
   const { isCoordinator } = require('./coordinator-detect.js');
 
   // Only block heavy commands in coordinator context (subagents pass through).
   if (!isCoordinator(payload, env)) {
-    return allow('not-coordinator');
+    return io.decision(0);
   }
 
   // A DevSwarm CHILD workspace is a worker on its own branch (peer report,
@@ -4715,38 +4665,11 @@ function main(payload, env) {
     // fail-open: never block a turn on a Bash edit parity bug.
   }
 
-  {
-    let heavy = null;
-    let helper = null;
-    let heavyError = null;
-    let helperError = null;
-    let split = null;
-    let segmentTrace = [];
-    try { heavy = isHeavyCommand(command); } catch (e) { heavyError = String(e && e.message || e); }
-    try { helper = hasBoundedVerificationFdDupEscape(command, { payload }); } catch (e) { helperError = String(e && e.message || e); }
-    if (traceB1) {
-      try {
-        split = splitSegmentsDetailed(command);
-        segmentTrace = split.segments.map((seg, idx) => segmentB1Trace(seg.trim(), idx, split.delims[idx], { payload }));
-      } catch (e) {
-        split = { error: String(e && e.message || e) };
-      }
-      emitB1Trace(traceB1, {
-        phase: 'fastpath',
-        isHeavyCommand: heavy,
-        hasBoundedVerificationFdDupEscape: helper,
-        heavyError,
-        helperError,
-        split,
-        segmentTrace,
-      });
-    }
-    if (!heavy && !helper) {
-      return allow('fastpath-not-heavy-no-fddup-helper', { isHeavyCommand: heavy, hasBoundedVerificationFdDupEscape: helper, heavyError, helperError });
-    }
+  if (!isHeavyCommand(command)) {
+    return io.decision(0);
   }
 
-  try { if (childWorker && isChildGitSyncChain(command)) return allow('child-git-sync-chain'); } catch (_) { /* gated */ }
+  try { if (childWorker && isChildGitSyncChain(command)) return io.decision(0); } catch (_) { /* gated */ }
 
   // Narrow allow (owner-approved 2026-09-26): a bounded, single-target
   // read-only verification command is let through even though it classified
@@ -4755,10 +4678,9 @@ function main(payload, env) {
   // ordinary block below). See isBoundedVerificationCommand's header.
   try {
     if (settingsGet('guards', 'allowReadOnlyVerify') !== false && isBoundedVerificationCommand(command, { payload })) {
-      return allow('bounded-verification');
+      return io.decision(0);
     }
-  } catch (e) {
-    emitB1Trace(traceB1, { phase: 'bounded-verification-error', error: String(e && e.message || e) });
+  } catch (_) {
     // fail-closed: never let a bug in this carve-out bypass the heavy-command gate.
   }
 
@@ -4776,7 +4698,7 @@ function main(payload, env) {
         let repoTop = '';
         try { repoTop = require('../companion/lib/identity.js').resolveContext(cwd || process.cwd(), { missingPath: 'ancestor' }).toplevel || ''; } catch (_) { /* best-effort only */ }
         appendProjectCommandAllowAudit({ cwd, repo: repoTop, pattern: matched, command });
-        return allow('project-command-allow');
+        return io.decision(0);
       }
     }
   } catch (_) {
@@ -4792,7 +4714,7 @@ function main(payload, env) {
     if (settingsGet('guards', 'allowPlainPush') !== false) {
       const cwd = (payload && payload.cwd) || '';
       if (isAllowedPlainPushChain(command, cwd, payload)) {
-        return allow('plain-push-chain');
+        return io.decision(0);
       }
     }
   } catch (_) {
@@ -4801,7 +4723,7 @@ function main(payload, env) {
 
   // A pull/fetch in a clone outside the session's tree, chained only with light segments (issue #55). Fail-closed on any error.
   try {
-    if (isAllowedScratchCloneSync(command, payload)) return allow('scratch-clone-sync');
+    if (isAllowedScratchCloneSync(command, payload)) return io.decision(0);
   } catch (_) {
     // fail-closed: never let a bug in this carve-out bypass the heavy-command gate.
   }
@@ -4812,7 +4734,7 @@ function main(payload, env) {
   // See isBackgroundScratchScript's header. Fail-closed on any error.
   try {
     if (settingsGet('guards', 'allowBackgroundScratchScripts') !== false && isBackgroundScratchScript(command, payload)) {
-      return allow('background-scratch-script');
+      return io.decision(0);
     }
   } catch (_) {
     // fail-closed: never let a bug in this carve-out bypass the heavy-command gate.
@@ -4823,7 +4745,7 @@ function main(payload, env) {
   // isAllowedGcloudReadCommand's header. Fail-closed on any error.
   try {
     if (settingsGet('guards', 'allowGcloudReads') !== false && isAllowedGcloudReadCommand(command)) {
-      return allow('gcloud-read');
+      return io.decision(0);
     }
   } catch (_) {
     // fail-closed: never let a bug in this carve-out bypass the heavy-command gate.
