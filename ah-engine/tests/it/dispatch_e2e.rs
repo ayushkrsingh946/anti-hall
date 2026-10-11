@@ -368,6 +368,17 @@ fn assert_no_stop_counters(e: &Env) {
 const CTX_MERGE_GATE: &str = r#"printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"from merge-gate"}}\n'"#;
 const CTX_API_GUARD: &str = r#"printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"from api-guard"}}\n'"#;
 
+fn wait_for_daemon_native_block(e: &Env, args: &[&str], payload: &str, extra: &[(&str, &str)]) {
+    for _ in 0..50 {
+        let (code, _, err) = e.run_with(args, false, payload, true, extra);
+        if code == 2 && !err.contains("NODE-RAN") {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    panic!("control: the warm daemon did not answer the guard natively");
+}
+
 #[test]
 fn several_advisories_merge_in_hooks_json_order() {
     let e = Env::new("merge");
@@ -1291,6 +1302,11 @@ fn wrapper_and_engine_agree_on_unparsable_guard_payloads() {
         (o.status.code().unwrap(), String::from_utf8_lossy(&o.stderr).to_string())
     };
     let engine = env!("CARGO_BIN_EXE_ah-engine");
+    let warm_map = pretool_map(&e, &[("ship-it-guard", NODE_SHIPIT)], "true");
+    let warm_args = ["hook", "--event", "PreToolUse", "--fallback-map", warm_map.to_str().unwrap()];
+    let warm_payload = shipit_edit(&e);
+    let warm_env = [("ANTIHALL_SHIPIT_GATE", "1")];
+    wait_for_daemon_native_block(&e, &warm_args, &warm_payload, &warm_env);
     for (name, payload) in [("lone surrogate", surrogate), ("not JSON", b"{bad".to_vec())] {
         for (label, nodes, want) in [("allow", &allow, 0), ("block", &block, 2)] {
             let with_engine = run(engine, nodes, &payload);
@@ -1367,15 +1383,16 @@ fn an_empty_home_defers_the_env_reading_checks_in_process_and_through_the_daemon
         let map = pretool_map(&e, &[("ship-it-guard", NODE_SHIPIT)], "true");
         let args = ["hook", "--event", "PreToolUse", "--fallback-map", map.to_str().unwrap()];
         let p = shipit_edit(&e);
-        let extra = [("ANTIHALL_SHIPIT_GATE", "1"), ("HOME", "")];
-        for _ in 0..if in_process { 1 } else { 12 } {
-            let (code, _, err) = e.run_with(&args, in_process, &p, true, &extra);
-            if in_process {
-                assert_eq!((code, err.contains("NODE-RAN")), (2, true), "an empty HOME defers to Node in-process: {err:?}");
-            } else {
-                assert_eq!((code, err.contains("NODE-RAN")), (2, true), "an empty HOME with a healthy daemon defers to Node: {err:?}");
-            }
-            std::thread::sleep(std::time::Duration::from_millis(50));
+        if in_process {
+            let extra = [("ANTIHALL_SHIPIT_GATE", "1"), ("HOME", "")];
+            let (code, _, err) = e.run_with(&args, true, &p, true, &extra);
+            assert_eq!((code, err.contains("NODE-RAN")), (2, true), "an empty HOME defers to Node in-process: {err:?}");
+        } else {
+            let gate = [("ANTIHALL_SHIPIT_GATE", "1")];
+            wait_for_daemon_native_block(&e, &args, &p, &gate);
+            let extra = [("ANTIHALL_SHIPIT_GATE", "1"), ("HOME", "")];
+            let (code, _, err) = e.run_with(&args, false, &p, true, &extra);
+            assert_eq!((code, err.contains("NODE-RAN")), (2, true), "an empty HOME with a healthy daemon defers to Node: {err:?}");
         }
         e.stop();
     }
