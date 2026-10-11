@@ -138,19 +138,10 @@ fn compare(name: &str, node: &str, rust: &str, fx: (&Fx, &Fx)) {
     }
     // The statusline installer is retired; Node and the engine still report the same configured/missing state, but their
     // human severity prefix and legacy "custom" adjective differ while the owner is removing the feature.
-    let statusline_config = |line: &str| {
-        line.trim_start()
-            .trim_start_matches('✅')
-            .trim_start_matches("⚠️")
-            .trim_start()
-            .replace("custom statusline set", "statusline set")
-    };
+    let statusline_config =
+        |line: &str| line.trim_start().trim_start_matches('✅').trim_start_matches("⚠️").trim_start().replace("custom statusline set", "statusline set");
     let (n, r) = (section(&ns, "Statusline").unwrap(), section(&rs, "Statusline").unwrap());
-    assert_eq!(
-        n.first().map(|s| statusline_config(s)),
-        r.first().map(|s| statusline_config(s)),
-        "{name}: statusline configuration finding"
-    );
+    assert_eq!(n.first().map(|s| statusline_config(s)), r.first().map(|s| statusline_config(s)), "{name}: statusline configuration finding");
     // every repair row of the engine that Node also has is a row of Node's, with the same status and text
     let heading = |s: &[(String, Vec<String>)]| s.iter().find(|(t, _)| t.starts_with("Repair")).cloned();
     let (nr, rr) = (heading(&ns).expect("node repair section"), heading(&rs).expect("rust repair section"));

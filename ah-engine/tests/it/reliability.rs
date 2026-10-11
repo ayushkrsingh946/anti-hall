@@ -131,7 +131,12 @@ exec "$REAL_AH_ENGINE_BIN" "$@"
         let mut ch = c.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
         ch.stdin.take().unwrap().write_all(input.as_bytes()).unwrap();
         let o = ch.wait_with_output().unwrap();
-        (String::from_utf8_lossy(&o.stdout).trim().to_string(), String::from_utf8_lossy(&o.stderr).trim().to_string(), o.status.code().unwrap_or(-1), t.elapsed())
+        (
+            String::from_utf8_lossy(&o.stdout).trim().to_string(),
+            String::from_utf8_lossy(&o.stderr).trim().to_string(),
+            o.status.code().unwrap_or(-1),
+            t.elapsed(),
+        )
     }
     fn wrapper_cmd(&self) -> Command {
         let wrapper = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().join("plugins/anti-hall/hooks/ah-hook.sh");
@@ -164,11 +169,7 @@ exec "$REAL_AH_ENGINE_BIN" "$@"
     }
 
     fn diag(&self) -> String {
-        format!(
-            "\n--- ah-engine.log ---\n{}\n--- status ---\n{}",
-            self.health_log(),
-            self.ctl("status").unwrap_or_else(|| "<no status>".to_string())
-        )
+        format!("\n--- ah-engine.log ---\n{}\n--- status ---\n{}", self.health_log(), self.ctl("status").unwrap_or_else(|| "<no status>".to_string()))
     }
     fn ctl(&self, verb: &str) -> Option<String> {
         let o = self.cmd().args(["ctl", verb]).output().unwrap();

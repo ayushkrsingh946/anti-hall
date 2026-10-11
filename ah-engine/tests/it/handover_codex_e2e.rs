@@ -69,9 +69,7 @@ impl Env {
         let mut last = (0, String::new(), String::new());
         for _ in 0..80 {
             last = self.run(event, id, false, payload, extra);
-            if !last.1.contains("NODE-RAN")
-                && (last.0 != 0 || !last.1.is_empty() || !last.2.is_empty())
-            {
+            if !last.1.contains("NODE-RAN") && (last.0 != 0 || !last.1.is_empty() || !last.2.is_empty()) {
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(50));
@@ -81,14 +79,9 @@ impl Env {
 
     fn warm_daemon(&self) {
         self.write("bin/codex", "#!/bin/sh\n");
-        std::fs::set_permissions(
-            self.dir.join("bin/codex"),
-            std::os::unix::fs::PermissionsExt::from_mode(0o755),
-        )
-        .unwrap();
+        std::fs::set_permissions(self.dir.join("bin/codex"), std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
         let path = format!("{}:/usr/bin:/bin", self.dir.join("bin").display());
-        let payload = serde_json::json!({"session_id": "warm", "cwd": self.dir, "hook_event_name": "SessionStart", "source": "startup"})
-            .to_string();
+        let payload = serde_json::json!({"session_id": "warm", "cwd": self.dir, "hook_event_name": "SessionStart", "source": "startup"}).to_string();
         let (_, out, _) = self.run_daemon("SessionStart", "codex-availability", &payload, &[("PATH", &path)]);
         assert!(out.contains("Codex binary detected on PATH"), "{out}");
     }
