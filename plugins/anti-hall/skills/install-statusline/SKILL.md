@@ -5,6 +5,11 @@ description: Retired anti-hall statusline installer. Use only to explain removal
 
 # Install Statusline
 
+## When to use
+
+Use only when the user asks about the old anti-hall statusline installer or how
+to clean up an older Claude `statusLine` entry. Do not install or restore it.
+
 The anti-hall statusline has been retired. Do not add or restore a Claude
 `statusLine` entry for anti-hall.
 

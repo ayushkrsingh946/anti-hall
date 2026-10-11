@@ -332,7 +332,7 @@ pub(crate) fn attempt(payload: &[u8], cfg: &ClientConfig, have_fallback: bool) -
                 }
                 std::thread::sleep(defaults::millis("client.cold_start_poll_ms"));
             }
-            mark_daemon_down("cold_start");
+            health::log_event("client_down", "daemon", "cold_start");
             None
         }
     }
