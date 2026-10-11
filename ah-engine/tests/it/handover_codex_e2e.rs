@@ -210,9 +210,9 @@ fn precompact_snapshot_writes_its_file_and_prints_nothing() {
     let text = std::fs::read_to_string(&files[0]).unwrap();
     assert!(text.contains("(trigger: manual)") && text.contains("keep this rule"), "{text}");
     e.warm_daemon();
-    let (_, out, _) = e.run_daemon("PreCompact", "precompact-snapshot", &p, &[]);
+    let (code, out, err) = e.run("PreCompact", "precompact-snapshot", false, &p, &[]);
     e.stop();
-    assert!(!out.contains("NODE-RAN"), "{out}");
+    assert_eq!((code, out.as_str(), err.as_str()), (0, "", ""));
     assert_eq!(
         walk(&r.join(".anti-hall/handovers")).into_iter().filter(|f| f.to_string_lossy().contains("PRECOMPACT-")).count(),
         2,
