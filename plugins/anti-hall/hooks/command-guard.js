@@ -2625,7 +2625,13 @@ function isTriviallySafeSegment(segment) {
 
 // Any write redirect (`>`, `>>`) or `tee` target that resolves outside the
 // scratchpad/tmp disqualifies the whole command, `&>file`/`&>>file` included.
-// `2>&1`/`>&2` fd-dup targets (no real path) are ignored.
+// `2>&1` is harmless when it feeds the bounded sink. Other fd-dups
+// (`>&2`, `1>&2`) route output around the sink and disqualify the carve-out.
+function hasFdDupAwayFromBoundedSink(segment) {
+  const s = neutralizeQuotedContents(segment).replace(/(^|\s)2>&1(?=\s|$)/g, ' ');
+  return /(^|\s)(?:[0-9]*)>&[0-9]+(?=\s|$)/.test(s);
+}
+
 function hasDisallowedWriteRedirect(segment, ctx) {
   const re = /(^|[^<>&])(&?>>?)\s*(\S+)/g;
   let m;
@@ -2692,12 +2698,12 @@ function isBoundedVerificationCommand(command, ctx) {
       }
     }
     if (hasDisallowedWriteRedirect(seg, ctx)) return false;
+    if (delims[idx] === '|' && hasFdDupAwayFromBoundedSink(seg)) return false;
     let kind;
     // `2>&1` only merges stderr INTO the pipe (still bounded by the sink), so
     // the check shape is judged without it. Any other `>&` fd-dup (`>&2`,
     // `1>&2`) routes output AROUND the sink, so that segment never qualifies.
     const checkSeg = seg.replace(/(^|\s)2>&1(?=\s|$)/g, ' ').trim();
-    if (delims[idx] === '|' && /(^|\s)(?:\d*)>&\d+(?=\s|$)/.test(neutralizeQuotedContents(checkSeg))) return false;
     if (!/>&/.test(neutralizeQuotedContents(checkSeg)) && isQualifyingSingleTargetCheck(checkSeg, ctx)) {
       kind = 'check';
       sawQualifying = true;
