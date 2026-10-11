@@ -586,6 +586,7 @@ impl Rig {
             ("AH_ENGINE_DIR", self.root.join("state").display().to_string()),
             ("AH_ENGINE_VERSION", "flip-parity".to_string()),
             ("AH_ENGINE_DISPATCH_IN_PROCESS", "1".to_string()),
+            ("AH_ENGINE_WRAPPER_DIAG", self.root.join("wrapper-diag.log").display().to_string()),
         ];
         if row.class == "fuzz" {
             // checks down: no built-in check answers (the daemon is never started), every entry runs as its fake Node hook, so
@@ -714,24 +715,29 @@ fn run_rows(rig: &Rig, rows: Vec<Row>, conc: usize) -> (usize, Vec<String>, usiz
     let diag = if f.is_empty() {
         String::new()
     } else {
-        let log_tail = std::fs::read_to_string(rig.root.join("state/ah-engine.log"))
-            .unwrap_or_default()
-            .lines()
-            .rev()
-            .take(80)
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .collect::<Vec<_>>()
-            .join("\n");
+        let tail = |path: PathBuf| {
+            std::fs::read_to_string(path)
+                .unwrap_or_default()
+                .lines()
+                .rev()
+                .take(80)
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        let log_tail = tail(rig.root.join("state/ah-engine.log"));
+        let wrapper_tail = tail(rig.root.join("wrapper-diag.log"));
         let status = run_shell(&format!("{} status --json", env!("CARGO_BIN_EXE_ah-engine")), b"", &rig.env("new", &[]), Path::new("/tmp"), 5);
         let clip = |s: &str, n: usize| s.chars().take(n).collect::<String>();
         format!(
-            "\n\n--- thin-trigger diagnostics ---\nstate={}\nstatus code={} out={} err={}\nlog_tail=\n{}",
+            "\n\n--- thin-trigger diagnostics ---\nstate={}\nstatus code={} out={} err={}\nwrapper_tail=\n{}\nlog_tail=\n{}",
             rig.root.join("state").display(),
             status.code.map_or("sig".into(), |c| c.to_string()),
             clip(&status.out, 400),
             clip(&status.err, 400),
+            clip(&wrapper_tail, 4000),
             clip(&log_tail, 4000)
         )
     };

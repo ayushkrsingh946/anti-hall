@@ -1072,6 +1072,16 @@ run_fallback() {
   exit 0
 }
 
+wrapper_diag() {
+  [ "${AH_WRAPPER_TEST:-}" = 1 ] || return 0
+  [ -n "${AH_ENGINE_WRAPPER_DIAG:-}" ] || return 0
+  case $AH_ENGINE_WRAPPER_DIAG in
+    /*) ;;
+    *) return 0 ;;
+  esac
+  printf '%s\n' "$*" >>"$AH_ENGINE_WRAPPER_DIAG" 2>/dev/null || true
+}
+
 run_engine() {
   eng_out=$tmp/engine.out; eng_err=$tmp/engine.err; eng_timed=$tmp/engine.timed; eng_done=$tmp/engine.done
   rm -f "$eng_done"
@@ -1093,9 +1103,11 @@ run_engine() {
   settle_watchdog "$eng_timed"
   remove_child "$pid"
   if [ -f "$eng_timed" ]; then
+    wrapper_diag "engine_timed event=$event timeout_ms=$timeout rc=$rc done=$([ -e "$eng_done" ] && printf 1 || printf 0)"
     exit 0
   fi
   if [ "$group_pid" -eq 1 ] && kill -0 "-$pid" 2>/dev/null; then
+    wrapper_diag "engine_group_alive event=$event timeout_ms=$timeout rc=$rc done=$([ -e "$eng_done" ] && printf 1 || printf 0)"
     terminate_process_group "$pid" "$group_pid"
     exit 0
   fi
@@ -1108,6 +1120,7 @@ run_engine() {
       if [ -e "$eng_done" ]; then
         cat "$eng_out"; cat "$eng_err" >&2; exit "$rc"
       fi
+      wrapper_diag "engine_silent_exit event=$event timeout_ms=$timeout rc=$rc done=0"
       exit 0 ;;
   esac
 }
