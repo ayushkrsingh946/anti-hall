@@ -243,8 +243,8 @@ doc = "A live self-test the engine could not decide itself: the check defers thi
 value = "{check}: the engine defers this self-test to its Node hook, so it was not exercised here"
 
 [doctor_msg.statusline_installed]
-doc = "The statusline is the anti-hall dispatcher. Placeholder: {label}."
-value = "statusline installed ({label}) -> anti-hall dispatcher"
+doc = "A legacy anti-hall statusLine is still configured. Placeholder: {label}."
+value = "legacy anti-hall statusLine still configured ({label}) -> uninstall-statusline can clean it up"
 
 [doctor_msg.statusline_set]
 doc = "A custom statusline is configured. Placeholders: {label}, {command}."

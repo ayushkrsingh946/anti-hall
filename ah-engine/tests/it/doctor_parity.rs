@@ -208,7 +208,7 @@ fn workflow_templates_and_the_statusline_are_read_the_same_way() {
     let (_, node) = run_node(&a, &["--dry-run"]);
     let (_, rust) = run_rust(&b, &["--dry-run"]);
     compare("statusline-local", &node, &rust, (&a, &b));
-    assert!(section(&sections(&rust), "Statusline").unwrap()[0].contains("statusline installed (project-local)"));
+    assert!(section(&sections(&rust), "Statusline").unwrap()[0].contains("legacy anti-hall statusLine still configured (project-local)"));
 }
 
 #[test]
