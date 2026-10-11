@@ -109,19 +109,22 @@ impl Env {
         listener.set_nonblocking(true).unwrap();
         let alive = Arc::new(AtomicBool::new(true));
         let thread_alive = Arc::clone(&alive);
-        *guard = Some((alive, std::thread::spawn(move || {
-            while thread_alive.load(Ordering::Acquire) {
-                match listener.accept() {
-                    Ok((mut stream, _)) => {
-                        let mut body = Vec::new();
-                        ah_engine::discard::harmless(stream.read_to_end(&mut body));
-                        ah_engine::discard::harmless(stream.write_all(&ah_engine::frame::encode(ah_engine::frame::Kind::Err, "defer to node")));
+        *guard = Some((
+            alive,
+            std::thread::spawn(move || {
+                while thread_alive.load(Ordering::Acquire) {
+                    match listener.accept() {
+                        Ok((mut stream, _)) => {
+                            let mut body = Vec::new();
+                            ah_engine::discard::harmless(stream.read_to_end(&mut body));
+                            ah_engine::discard::harmless(stream.write_all(&ah_engine::frame::encode(ah_engine::frame::Kind::Err, "defer to node")));
+                        }
+                        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => std::thread::sleep(Duration::from_millis(10)),
+                        Err(_) => break,
                     }
-                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => std::thread::sleep(Duration::from_millis(10)),
-                    Err(_) => break,
                 }
-            }
-        })));
+            }),
+        ));
     }
 
     fn run_as(&self, in_process: bool, event: &str, map: &Path, payload: &str, extra: &[(&str, &str)]) -> (i32, String, String) {

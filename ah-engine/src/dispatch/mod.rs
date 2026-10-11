@@ -662,7 +662,9 @@ fn run_core(raw: &str, args: &Args, payload: Option<&File>, complete: bool, tele
         (Some(_), _) => match ask_daemon(&meta, raw) {
             Some(a) => a,
             None if crate::client::take_non_ok_reply() => Vec::new(),
-            None if crate::client::take_unavailable() || crate::client::fail_open_unavailable() => return Outcome { out: String::new(), code: 0, err: String::new() },
+            None if crate::client::take_unavailable() || crate::client::fail_open_unavailable() => {
+                return Outcome { out: String::new(), code: 0, err: String::new() };
+            }
             None => Vec::new(),
         },
     };
