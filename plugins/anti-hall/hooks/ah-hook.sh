@@ -1116,7 +1116,7 @@ if [ "$mem_mode" -eq 1 ]; then
   run_memory_mode
 fi
 
-if fresh_daemon_down_marker; then
+if [ "${AH_ENGINE_DISPATCH_IN_PROCESS:-}" != 1 ] && fresh_daemon_down_marker; then
   exit 0
 fi
 
