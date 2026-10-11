@@ -2697,6 +2697,7 @@ function isBoundedVerificationCommand(command, ctx) {
     // the check shape is judged without it. Any other `>&` fd-dup (`>&2`,
     // `1>&2`) routes output AROUND the sink, so that segment never qualifies.
     const checkSeg = seg.replace(/(^|\s)2>&1(?=\s|$)/g, ' ').trim();
+    if (delims[idx] === '|' && /(^|\s)(?:\d*)>&\d+(?=\s|$)/.test(neutralizeQuotedContents(checkSeg))) return false;
     if (!/>&/.test(neutralizeQuotedContents(checkSeg)) && isQualifyingSingleTargetCheck(checkSeg, ctx)) {
       kind = 'check';
       sawQualifying = true;

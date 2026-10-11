@@ -37,7 +37,7 @@ case "\$1" in
   version) echo $2 ;;
   stop) echo stop >>"\$HOME/.anti-hall/fake-calls" ;;
   serve) echo serve >>"\$HOME/.anti-hall/fake-calls" ;;
-  status) echo ok ;;
+  status) grep -q serve "\$HOME/.anti-hall/fake-calls" 2>/dev/null && echo ok || exit 1 ;;
 esac
 exit 0
 EOS

@@ -53,7 +53,7 @@ function makeHome() {
 function writeInstalledJson(home, version) {
   const p = path.join(home, '.claude', 'plugins', 'installed_plugins.json');
   fs.mkdirSync(path.dirname(p), { recursive: true });
-  fs.writeFileSync(p, JSON.stringify({ plugins: { 'anti-hall@anti-hall': { version, scope: 'user' } } }));
+  fs.writeFileSync(p, JSON.stringify({ plugins: { 'anti-hall@anti-hall': [{ version, scope: 'user' }] } }));
 }
 
 test('isStale: installed_plugins.json AHEAD of the running version -> true', () => {

@@ -116,6 +116,7 @@ const LOCKED_KEYS = [
   'safety.gitGuard', 'safety.commandGuard', 'safety.editGuard', 'safety.swarmGuard',
   'guards.stashGuard', 'guards.editGuardAllow', 'guards.allowSubagentMailbox',
   'guards.gitAliasResolve', 'guards.gitReusedMessageCheck',
+  'guards.broadKill',
   'devswarm.maintainerNotice.post',
 ];
 
@@ -137,6 +138,7 @@ const EXPECTED_WARNING = {
   'guards.stashGuard': 'Turning off stash-guard means git stash commands that can silently drop uncommitted work will no longer be blocked. Ask the user to confirm, then re-run with --confirmed.',
   'guards.gitAliasResolve': 'Turning off git-alias-resolve means a git alias (or a shell alias) that runs a force push or an AI-credited commit will no longer be seen through. Ask the user to confirm, then re-run with --confirmed.',
   'guards.gitReusedMessageCheck': 'Turning off git-reused-message-check means a commit that reuses an AI-credited message (-C/-c <rev>, --amend, a commit template) will no longer be blocked before it runs. Ask the user to confirm, then re-run with --confirmed.',
+  'guards.broadKill': 'Turning off broad-kill means a broad pkill, killall, kill -9 -1 or a pattern kill from any agent (including subagents) will no longer be blocked, and can take down the user\'s dev servers and other agents\' processes. Ask the user to confirm, then re-run with --confirmed.',
   'guards.editGuardAllow': 'Adding foo to edit-guard\'s allow list means those files can be edited without edit-guard\'s protection. Ask the user to confirm, then re-run with --confirmed.',
   'guards.allowSubagentMailbox': 'Turning on allow-subagent-mailbox means subagents can read/ack the Primary\'s mailbox, which is normally blocked. Ask the user to confirm, then re-run with --confirmed.',
   'devswarm.maintainerNotice.post': 'Turning on maintainer-notice.post means this checkout would be allowed to post a maintainer notice that every project\'s Primary sees — the checkout-name check is a mistake guard, not authentication, so only turn this on in the anti-hall dev checkout. Ask the user to confirm, then re-run with --confirmed.',
