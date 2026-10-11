@@ -687,8 +687,12 @@ fn run_guard_with(o: &Opts, hooks: &Path, scenarios: &[Scenario], golden: &Golde
                                 stopped = true;
                             }
                         }
-                        R::Other(e) => {
+                        R::Other(mut e) => {
                             st.mismatch += 1;
+                            if mode == "daemon" && e.code == "0" && e.out.is_empty() && e.err.is_empty() && n.code_is(2) {
+                                let d = run(ENGINE, &strs(&["status", "--json"]), b"", &denv, "/tmp").trimmed();
+                                e.err = format!("daemon empty-allow after Node block; status code={} out={} err={}", d.code, clip(&d.out, 400), clip(&d.err, 400));
+                            }
                             mism.lock().unwrap().push(Mismatch {
                                 scenario: sc.id.clone(),
                                 step: si,
