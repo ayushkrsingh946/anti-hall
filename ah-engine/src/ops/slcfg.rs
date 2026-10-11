@@ -761,10 +761,9 @@ fn finish(plan: Option<super::shadow::Plan>, result: Result<i32, String>, log: L
 
 /// `install-statusline [--user|--project] [--consolidate]`
 pub fn run_install(p: &Parsed) -> i32 {
-    let plan = super::shadow::begin_install(t("ops.verb_install"), t("ops.script_install"), &p.raw);
     let mut log = Log::default();
     let result = install(&env_snapshot(), &p.raw, &mut log);
-    finish(plan, result, log)
+    finish(None, result, log)
 }
 
 /// `uninstall-statusline [--user|--project] [--purge-base]`

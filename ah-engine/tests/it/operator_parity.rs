@@ -1367,16 +1367,14 @@ fn a_sampled_installer_run_is_replayed_on_a_scratch_copy_and_never_writes_twice(
     let cwd = project_cwd(&[(".claude/settings.json", r#"{"statusLine":{"type":"command","command":"echo committed"}}"#), (".gitignore", "x\n")], None)?;
     let state = home.path().join("state");
     let log = home.path().join("fake-node.log");
-    // Node agrees (the real script, on the scratch copy), for the user and the project scope and for the uninstaller
-    for args in [
-        vec!["install-statusline"],
-        vec!["install-statusline", "--project"],
-        vec!["install-statusline", "--consolidate"],
-        vec!["uninstall-statusline"],
-        vec!["uninstall-statusline", "--project", "--purge-base"],
-        vec!["install-statusline"],
-        vec!["install-statusline"],
-    ] {
+    // The retired installer does not start a shadow; uninstall still replays Node on the scratch copy.
+    for args in [vec!["install-statusline"], vec!["install-statusline", "--project"], vec!["install-statusline", "--consolidate"]] {
+        let o = engine_shadowed(home.path(), cwd.path(), None, &[], &args)?;
+        assert!(o.code == 0, "{args:?}: {} {}", o.stdout, o.stderr);
+        assert!(o.stdout.contains("statusline installation has been retired"), "{args:?}: {}", o.stdout);
+        assert!(shadow_dirs(&state).is_empty(), "{args:?}: retired installer starts no shadow");
+    }
+    for args in [vec!["uninstall-statusline"], vec!["uninstall-statusline", "--project", "--purge-base"]] {
         let o = engine_shadowed(home.path(), cwd.path(), None, &[], &args)?;
         assert!(o.code == 0, "{args:?}: {} {}", o.stdout, o.stderr);
         assert!(wait_shadow_done(&state), "the comparison finished: {args:?}");
@@ -1388,7 +1386,16 @@ fn a_sampled_installer_run_is_replayed_on_a_scratch_copy_and_never_writes_twice(
     fs::write(&fake, "#!/bin/sh\necho \"$HOME|$(pwd)\" >> \"$AH_FAKE_LOG\"\necho different\n")?;
     fs::set_permissions(&fake, fs::Permissions::from_mode(0o755))?;
     let before_cwd = snapshot(cwd.path())?;
+    let before_home = snapshot(home.path())?;
     let o = engine_shadowed(home.path(), cwd.path(), Some(&fake), &[("AH_FAKE_LOG", &log)], &["install-statusline", "--project"])?;
+    assert_eq!(o.code, 0);
+    assert!(o.stdout.contains("statusline installation has been retired"), "{}", o.stdout);
+    assert!(shadow_dirs(&state).is_empty(), "retired installer starts no shadow even with fake Node");
+    assert!(!log.exists(), "retired installer never calls Node");
+    assert_eq!(before_home, snapshot(home.path())?, "retired installer leaves user settings untouched");
+    assert_eq!(before_cwd, snapshot(cwd.path())?, "retired installer leaves project settings untouched");
+
+    let o = engine_shadowed(home.path(), cwd.path(), Some(&fake), &[("AH_FAKE_LOG", &log)], &["uninstall-statusline", "--project"])?;
     assert_eq!(o.code, 0);
     assert!(wait_shadow_done(&state), "the second comparison finished");
     let reports: Vec<_> = shadow_dirs(&state).into_iter().filter(|d| d.join("mismatch.txt").exists()).collect();
@@ -1399,9 +1406,7 @@ fn a_sampled_installer_run_is_replayed_on_a_scratch_copy_and_never_writes_twice(
     assert!(h.contains("/shadow/") && d.contains("/shadow/"), "Node ran in scratch directories: {seen}");
     assert_ne!(Path::new(h), home.path());
     assert_ne!(Path::new(d), cwd.path());
-    // The retired installer writes nothing even when the shadow disagrees.
-    let after_cwd = snapshot(cwd.path())?;
-    assert_eq!(before_cwd, after_cwd, "retired installer leaves project settings untouched");
+    assert_eq!(before_cwd, snapshot(cwd.path())?, "shadow leaves project settings untouched");
     assert_eq!(fs::read_to_string(cwd.path().join(".gitignore"))?.matches(".claude/settings.local.json").count(), 0);
     Ok(())
 }
@@ -1416,8 +1421,7 @@ fn an_installer_run_on_unreadable_settings_fails_like_node_and_leaves_no_shadow_
     assert_eq!(o.code, 0, "{} {}", o.stdout, o.stderr);
     assert!(o.stdout.contains("statusline installation has been retired"), "{}", o.stdout);
     assert_eq!(before, snapshot(home.path())?, "retired installer leaves legacy settings untouched");
-    assert!(wait_shadow_done(&state));
-    assert!(shadow_dirs(&state).is_empty(), "Node agreed with the retired no-op, so nothing is kept");
+    assert!(shadow_dirs(&state).is_empty(), "retired installer starts no shadow");
     Ok(())
 }
 
