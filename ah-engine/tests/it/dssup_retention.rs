@@ -888,16 +888,34 @@ fn archive_home(tag: &str, seed: u32, n: u32) -> Corpus {
     c
 }
 
+fn archive_cap_between_boundaries(home: &Path, evict: usize) -> String {
+    let mut files = ah_engine::dssup::retention::cap::list(home);
+    files.sort_by(|a, b| a.sort_key.as_bytes().cmp(b.sort_key.as_bytes()).then(a.mtime_ms.partial_cmp(&b.mtime_ms).unwrap_or(std::cmp::Ordering::Equal)));
+    assert!(evict > 0 && evict < files.len(), "need an interior eviction boundary: {evict}/{}", files.len());
+    let total: u64 = files.iter().map(|f| f.bytes).sum();
+    let after_prev = total - files[..evict - 1].iter().map(|f| f.bytes).sum::<u64>();
+    let after_target = after_prev - files[evict - 1].bytes;
+    let smallest = files.iter().map(|f| f.bytes).min().unwrap();
+    let cap = (after_prev + after_target) as f64 / 2.0;
+    let margin = smallest as f64 * 0.10;
+    assert!(
+        cap - after_target as f64 >= margin && after_prev as f64 - cap >= margin,
+        "cap {cap} too close to {after_target}/{after_prev}; smallest {smallest}"
+    );
+    format!("{:.9}", cap / ah_engine::defaults::num("devswarm_sup.rt_mb"))
+}
+
 #[test]
 fn the_archive_cap_evicts_what_node_evicts() {
     if !have_node_sqlite() {
         return;
     }
     let mut evicted = 0;
-    for (seed, cap) in [(80u32, "0.004"), (81, "0.002"), (82, "0.00001"), (83, "5")] {
+    for (seed, cap) in [(80u32, None), (81, Some("0.002")), (82, Some("0.00001")), (83, Some("5"))] {
         let c = archive_home(&format!("rt-cap-{seed}"), seed, 30);
         let mut env = env_of("30", "5", "100", "true");
-        env.insert("ANTIHALL_DEVSWARM_RETENTION_ARCHIVE_MAX_MB".into(), cap.into());
+        let cap = cap.map(str::to_string).unwrap_or_else(|| archive_cap_between_boundaries(&c.home, 8));
+        env.insert("ANTIHALL_DEVSWARM_RETENTION_ARCHIVE_MAX_MB".into(), cap);
         let before = tree(&c.home.join(".anti-hall/devswarm/archive"));
         golden_ticks(&c, &env, 2, &System::configured());
         let after = tree(&c.dir.join("engine-t/.anti-hall/devswarm/archive"));
