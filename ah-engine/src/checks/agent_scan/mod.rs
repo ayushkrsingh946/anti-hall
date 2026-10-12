@@ -129,7 +129,7 @@ impl<T> OMap<T> {
 }
 
 /// What `scanTranscript` returns (the parts the ported checks read).
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default)]
 pub struct Scan {
     /// Every launched agent, adopted agent and live teammate, in order.
     pub launched: OMap<Rec>,
@@ -567,6 +567,10 @@ impl Prefilter {
 struct ToolUse {
     name: Option<String>,
     input: Option<Value>,
+    /// Offset of the line that made the call (kept walks only).
+    off: u64,
+    /// Offset of the last line that looked this call up to judge its answer (kept walks only).
+    used: std::cell::Cell<u64>,
 }
 
 #[derive(Clone)]
@@ -596,6 +600,8 @@ struct Other {
     text: String,
     seq: u64,
     ts: f64,
+    /// Offset of the line the text came from (kept walks only).
+    off: u64,
 }
 
 #[derive(Clone)]
@@ -616,6 +622,11 @@ struct Walk {
     resume_seq: OMap<u64>,
     resume_full: HashSet<String>,
     resume_ts: HashMap<String, f64>,
+    /// Offset of the line being fed (kept walks only: a fresh scan never reads it).
+    cur_off: u64,
+    /// Offset of the first line that touched anything an answer is made of (launches, terminal notices, stops, teammate and resume
+    /// events); `u64::MAX` while none has.
+    rel_min: u64,
 }
 
 impl Walk {
@@ -637,15 +648,36 @@ impl Walk {
             resume_seq: OMap::default(),
             resume_full: HashSet::new(),
             resume_ts: HashMap::new(),
+            cur_off: 0,
+            rel_min: u64::MAX,
         }
     }
 
+    /// The line being fed touches what an answer is made of.
+    fn rel(&mut self) {
+        self.rel_min = self.rel_min.min(self.cur_off);
+    }
+
+    /// Does a call made before `from` have its answer judged by a line at or after `from`? (A scan starting at `from` sees that call as unseen.)
+    fn straddles(&self, from: u64) -> bool {
+        self.tool_uses.values().any(|c| c.off < from && c.used.get() >= from)
+    }
+
+    /// The call `id` made, noting the line that asks.
+    fn call(&self, id: Option<&str>) -> Option<&ToolUse> {
+        let c = id.and_then(|id| self.tool_uses.get(id))?;
+        c.used.set(self.cur_off);
+        Some(c)
+    }
+
     fn mark_terminal(&mut self, id: &str, seq: u64, ts: f64) {
+        self.rel();
         self.terminal.insert(id.to_string());
         self.terminal_ev.entry(id.to_string()).or_default().push((seq, ts));
     }
 
     fn team_event(&mut self, name: &str, kind: &'static str, ts: f64, seq: u64) {
+        self.rel();
         if !self.team_events.has(name) {
             self.team_events.set(name, Vec::new());
         }
@@ -656,7 +688,7 @@ impl Walk {
 
     /// `answersCall(toolUseId, names)`: true when the call is unseen or one of `names`.
     fn answers(&self, tool_use_id: Option<&str>, list: &str) -> bool {
-        match tool_use_id.and_then(|id| self.tool_uses.get(id)) {
+        match self.call(tool_use_id) {
             None => true,
             Some(c) => c.name.as_deref().is_some_and(|n| in_list(list, n)),
         }
@@ -670,7 +702,10 @@ impl Walk {
         {
             return Err(Unsupported);
         }
-        self.tool_uses.insert(id.to_string(), ToolUse { name: name.map(str::to_string), input: if keep { input.cloned() } else { None } });
+        self.tool_uses.insert(
+            id.to_string(),
+            ToolUse { name: name.map(str::to_string), input: if keep { input.cloned() } else { None }, off: self.cur_off, used: std::cell::Cell::new(0) },
+        );
         Ok(())
     }
 
@@ -711,6 +746,7 @@ impl Walk {
                             None => f64::NAN,
                         },
                     };
+                    self.rel();
                     self.launched.set(
                         task_id,
                         Rec {
@@ -779,6 +815,7 @@ impl Walk {
                     && let Some(tid) = sprop(inp, "task_id")
                     && !tid.is_empty()
                 {
+                    self.rel();
                     self.stops.push(Stop { id: tid.to_string(), seq, tool_use_id: sprop(b, "id").map(str::to_string), ts: entry_ts });
                 }
             }
@@ -822,6 +859,7 @@ impl Walk {
             let tuid = sprop(tr, "tool_use_id");
             if self.answers(tuid, "agent_scan.launch_tools") {
                 self.team_event(name, "spawn", entry_ts, seq);
+                self.rel();
                 self.team_info.set(name, TeamInfo { tool_use_id: tuid.map(str::to_string), agent_id: sprop(tur, "agent_id").unwrap_or("").to_string() });
             }
         }
@@ -866,6 +904,7 @@ impl Walk {
                     let sid = prop(&entry, "toolUseResult").and_then(|t| sprop(t, "agentId")).filter(|s| pats().hex_id.is_match(s)).map(str::to_string);
                     if let Some(id) = sid.or(idm) {
                         let of = pats().output_file.captures(&text).and_then(|c| c.get(1).map(|m| m.as_str().to_string())).unwrap_or_default();
+                        self.rel();
                         self.launched.set(
                             &id,
                             Rec {
@@ -886,6 +925,7 @@ impl Walk {
                 }
                 let resume = if is_tool_result && self.answers(tuid, "agent_scan.resume_tools") { parse_resume(&text)? } else { None };
                 if let Some((rid, full)) = resume {
+                    self.rel();
                     if full {
                         self.resume_full.insert(rid.clone());
                     }
@@ -907,7 +947,7 @@ impl Walk {
                 }
                 if is_tool_result {
                     // Only the answer to a delivery call (or to a call not seen) can ever be delivery evidence.
-                    let call = tuid.and_then(|id| self.tool_uses.get(id));
+                    let call = self.call(tuid);
                     if let Some(c) = call
                         && !c.name.as_deref().is_some_and(|n| in_list("agent_scan.delivery_tools", n))
                     {
@@ -920,7 +960,7 @@ impl Walk {
                     if self.other_bytes > defaults::num("agent_scan.retain_bytes") {
                         return Err(Unsupported);
                     }
-                    self.others.push(Other { tool_use_id: tuid.map(str::to_string), text, seq, ts: entry_ts });
+                    self.others.push(Other { tool_use_id: tuid.map(str::to_string), text, seq, ts: entry_ts, off: self.cur_off });
                 }
             }
         }
@@ -1094,6 +1134,10 @@ struct Kept {
     gen_: u64,
     dev: u64,
     ino: u64,
+    /// Where the walk starts: the first line of the window the walk was built for (0 when the whole file was walked).
+    base: u64,
+    /// Start of that window (`size - tail`, 0 when the file fitted) when the walk was built: a file that has shrunk below it is not the same file.
+    built_s: u64,
     off: u64,
     seq: u64,
     head: u64,
@@ -1101,21 +1145,8 @@ struct Kept {
     walk: Walk,
 }
 
-#[derive(Clone, Hash, PartialEq, Eq)]
-struct ScanKey {
-    path: String,
-    gen_: u64,
-    dev: u64,
-    ino: u64,
-    size: u64,
-    mtime_sec: i64,
-    mtime_nsec: i64,
-    tail: u64,
-    ignore_unanswered_stops: bool,
-}
-
-type WalkCache = BoundedCache<String, Kept>;
-type ResultCache = BoundedCache<ScanKey, Scan>;
+/// Kept walks by (transcript path, window size): scans of one file with different windows each keep their own walk.
+type WalkCache = BoundedCache<(String, u64), Kept>;
 
 fn walk_cache() -> &'static WalkCache {
     static CACHE: OnceLock<WalkCache> = OnceLock::new();
@@ -1128,22 +1159,11 @@ fn walk_cache() -> &'static WalkCache {
     })
 }
 
-fn result_cache() -> &'static ResultCache {
-    static CACHE: OnceLock<ResultCache> = OnceLock::new();
-    CACHE.get_or_init(|| {
-        BoundedCache::new(
-            crate::mem::global(),
-            Spec::new("agent_scan_result", "mem.agent_scan_result_soft_bytes", "mem.agent_scan_result_hard_bytes", "mem.agent_scan_result_low_water_pct")
-                .with_entries("agent_scan.cache_max_paths"),
-        )
-    })
-}
-
 /// (transcripts kept, their estimated bytes by the cache's own estimate, transcript bytes they have read) for the memory snapshot.
 pub fn kept_usage() -> (usize, u64, u64) {
     let c = walk_cache();
     let vals = c.values();
-    (c.len(), c.bytes() as u64, vals.iter().map(|k| k.off).sum())
+    (c.len(), c.bytes() as u64, vals.iter().map(|k| k.off - k.base).sum())
 }
 
 /// A cheap digest of `len` bytes of the file at `at` (None when they cannot be read).
@@ -1165,10 +1185,12 @@ fn walk_bytes(w: &Walk) -> u64 {
 
 /// `scanTranscript(transcriptPath, readTail(path, tail), opts)`. `Ok(None)` is JavaScript's `null` (unreadable).
 ///
-/// A transcript that fits the window is walked once: the walk over its complete lines is kept (per path, bounded by
-/// `agent_scan.cache_*`) and the next call reads only the bytes appended since, then finishes a copy of the kept walk. The
-/// kept walk is the very state a fresh scan of the whole file reaches, so the answer is identical; a file that is longer than
-/// the window slides its window with every append and is scanned afresh.
+/// The walk over the window's complete lines is kept (per path and window size, bounded by `agent_scan.cache_*`) and the next
+/// call reads only the bytes appended since, then finishes a copy of the kept walk. For a file that fits the window the kept
+/// walk is the very state a fresh scan reaches, so the answer is identical. A longer file slides its window with every append:
+/// the kept walk is used again only while it provably holds what a fresh scan of the new window holds (see [`scan_kept`]), and
+/// is rebuilt from the window start otherwise (`agent_scan.window_slack_pct` 0 turns this off: every scan then reads its window
+/// afresh).
 pub fn scan_transcript(path: &str, tail: u64, opts: &Opts) -> Res<Option<Scan>> {
     if !path.is_empty() && !path.starts_with('/') {
         // A relative path means the hook's own working directory, which the engine does not share.
@@ -1179,13 +1201,16 @@ pub fn scan_transcript(path: &str, tail: u64, opts: &Opts) -> Res<Option<Scan>> 
         && let Ok(f) = std::fs::File::open(path)
         && let Ok(m) = f.metadata()
         && m.len() > 0
+        && (m.len() <= tail || slack_of(tail) > 0)
     {
-        if m.len() <= tail {
-            return scan_kept(path, f, &m, opts);
-        }
-        return scan_cached_window(path, &m, tail, opts);
+        return scan_kept(path, tail, f, &m, opts);
     }
     scan_window(path, tail, opts)
+}
+
+/// How far before the window start a kept walk may begin before it is rebuilt: `agent_scan.window_slack_pct` percent of the window.
+fn slack_of(tail: u64) -> u64 {
+    tail / 100 * defaults::num("agent_scan.window_slack_pct")
 }
 
 /// [`scan_transcript`] without the kept walk: the scan of the last `tail` bytes, read afresh. The reference the kept walk is tested against.
@@ -1194,42 +1219,6 @@ pub fn scan_transcript_uncached(path: &str, tail: u64, opts: &Opts) -> Res<Optio
         return Err(Unsupported);
     }
     scan_window(path, tail, opts)
-}
-
-fn scan_key(path: &str, m: &std::fs::Metadata, tail: u64, opts: &Opts) -> ScanKey {
-    ScanKey {
-        path: path.to_string(),
-        gen_: defaults::generation(),
-        dev: m.dev(),
-        ino: m.ino(),
-        size: m.len(),
-        mtime_sec: m.mtime(),
-        mtime_nsec: m.mtime_nsec(),
-        tail,
-        ignore_unanswered_stops: opts.ignore_unanswered_stops,
-    }
-}
-
-fn scan_weight(scan: &Scan) -> usize {
-    let per = defaults::num("agent_scan.cache_entry_bytes") as usize;
-    per.saturating_mul(scan.launched.keys().count() + scan.terminal.len() + scan.pending.len()).max(per)
-}
-
-fn scan_cached_window(path: &str, m: &std::fs::Metadata, tail: u64, opts: &Opts) -> Res<Option<Scan>> {
-    let key = scan_key(path, m, tail, opts);
-    if let Some(scan) = result_cache().get_at(&key, now_ms() as u64) {
-        return Ok(Some(scan));
-    }
-    let scan = scan_window(path, tail, opts)?;
-    if let Some(scan) = &scan
-        && scan.pending.is_empty()
-    {
-        let ttl = defaults::num("agent_scan.cache_idle_ms");
-        let now = now_ms() as u64;
-        let exp = (ttl > 0).then(|| now.saturating_add(ttl));
-        result_cache().insert_with_ttl(key, scan.clone(), scan_weight(scan), exp);
-    }
-    Ok(scan)
 }
 
 /// The scan of the last `tail` bytes, read afresh.
@@ -1259,25 +1248,61 @@ fn scan_window(path: &str, tail: u64, opts: &Opts) -> Res<Option<Scan>> {
     finish(w, path, opts).map(Some)
 }
 
-/// The scan of a whole file that fits the window, resuming from the walk kept by the last scan when it is still valid.
-fn scan_kept(path: &str, f: std::fs::File, m: &std::fs::Metadata, opts: &Opts) -> Res<Option<Scan>> {
+/// Where the window `[size - tail, size)` begins: its first line, after the one [`Tail`] drops. `None` when the window holds no
+/// complete line.
+fn window_start(f: &std::fs::File, size: u64, tail: u64) -> Option<u64> {
+    if size <= tail {
+        return Some(0);
+    }
+    let s = size - tail;
+    let mut rd = std::io::BufReader::with_capacity(defaults::num("agent_scan.reader_buf_bytes") as usize, f);
+    rd.seek(SeekFrom::Start(s)).ok()?;
+    let mut first: Vec<u8> = Vec::new();
+    let n = rd.read_until(b'\n', &mut first).ok()?;
+    (first.last() == Some(&b'\n')).then_some(s + n as u64)
+}
+
+/// The scan of the window `[size - tail, size)`, resuming from the walk kept by the last scan of this file when it is still valid.
+///
+/// A kept walk begins at the window start of the scan that built it. The window then slides on as the file grows, and a fresh
+/// scan would no longer read the lines that left it, so the walk is used again only while it provably holds what a fresh scan
+/// of the new window holds:
+/// - no line before the new window start touched anything an answer is made of (a launch, a terminal notice, a stop, a
+///   teammate or resume event: `rel_min`), and none of the retained answer texts older than it is kept (they are dropped from
+///   the copy that is finished);
+/// - no call made before it has its answer judged after it (`straddles`): a fresh scan sees such a call as unseen;
+/// - it was not built more than `agent_scan.window_slack_pct` percent of the window before the window start (this only bounds
+///   what the walk holds).
+///
+/// Anything else, and any error the older lines raise, makes the scan read its window afresh, which is what it did before.
+fn scan_kept(path: &str, tail: u64, f: std::fs::File, m: &std::fs::Metadata, opts: &Opts) -> Res<Option<Scan>> {
     let size = m.len();
     let fp = defaults::num("agent_scan.cache_fingerprint_bytes").max(1);
     let gen_ = defaults::generation();
-    let taken = walk_cache().remove(&path.to_string());
+    let s = size.saturating_sub(tail);
+    let slack = slack_of(tail);
+    let Some(start) = window_start(&f, size, tail) else { return scan_window(path, tail, opts) };
+    let key = (path.to_string(), tail);
+    let taken = walk_cache().remove(&key);
     let mut k = match taken {
         Some(k)
             if k.gen_ == gen_
                 && k.dev == m.dev()
                 && k.ino == m.ino()
                 && k.off <= size
-                && digest_at(&f, 0, fp.min(k.off)) == Some(k.head)
-                && digest_at(&f, k.off - fp.min(k.off), fp.min(k.off)) == Some(k.back) =>
+                && k.built_s <= s
+                && k.base <= start
+                && start - k.base <= slack
+                && k.walk.rel_min >= start
+                && !k.walk.straddles(start)
+                && digest_at(&f, k.base, fp.min(k.off - k.base)) == Some(k.head)
+                && digest_at(&f, k.off - fp.min(k.off - k.base), fp.min(k.off - k.base)) == Some(k.back) =>
         {
             k
         }
-        _ => Kept { gen_, dev: m.dev(), ino: m.ino(), off: 0, seq: 0, head: 0, back: 0, walk: Walk::new() },
+        _ => Kept { gen_, dev: m.dev(), ino: m.ino(), base: start, built_s: s, off: start, seq: 0, head: 0, back: 0, walk: Walk::new() },
     };
+    let banded = k.base < start;
     let want = size - k.off;
     crate::load::note_scan(want);
     let mut rd = std::io::BufReader::with_capacity(defaults::num("agent_scan.reader_buf_bytes") as usize, &f);
@@ -1297,9 +1322,13 @@ fn scan_kept(path: &str, f: std::fs::File, m: &std::fs::Metadata, opts: &Opts) -
             Ok(n) => n,
             Err(_) => return Ok(None),
         };
+        k.walk.cur_off = k.off;
         if buf.last() == Some(&b'\n') {
             buf.pop();
-            feed(&mut k.walk, &mut k.seq, &buf)?;
+            if let Err(e) = feed(&mut k.walk, &mut k.seq, &buf) {
+                // what an older line raises is not an error of this window
+                return if banded { scan_window(path, tail, opts) } else { Err(e) };
+            }
             k.off += n as u64;
         } else {
             // the last line has no newline yet: it counts in this answer, but is walked for good once it is complete
@@ -1310,19 +1339,26 @@ fn scan_kept(path: &str, f: std::fs::File, m: &std::fs::Metadata, opts: &Opts) -
     let mut w = k.walk.clone();
     if let Some(p) = partial {
         let mut seq = k.seq;
-        feed(&mut w, &mut seq, &p)?;
+        w.cur_off = k.off;
+        if let Err(e) = feed(&mut w, &mut seq, &p) {
+            return if banded { scan_window(path, tail, opts) } else { Err(e) };
+        }
+    }
+    if k.base < start {
+        w.others.retain(|o| o.off >= start);
     }
     let scan = finish(w, path, opts).map(Some);
     // keep the walk for the next call, unless it grew past the cap
     if scan.is_ok() && walk_bytes(&k.walk) <= defaults::num("agent_scan.cache_max_bytes") {
         let now = now_ms() as u64;
-        if let (Some(head), Some(back)) = (digest_at(&f, 0, fp.min(k.off)), digest_at(&f, k.off - fp.min(k.off), fp.min(k.off))) {
+        let fpn = fp.min(k.off - k.base);
+        if let (Some(head), Some(back)) = (digest_at(&f, k.base, fpn), digest_at(&f, k.off - fpn, fpn)) {
             k.head = head;
             k.back = back;
             let ttl = defaults::num("agent_scan.cache_idle_ms");
             let exp = (ttl > 0).then(|| now.saturating_add(ttl));
             let weight = walk_bytes(&k.walk) as usize;
-            walk_cache().insert_with_ttl(path.to_string(), k, weight, exp);
+            walk_cache().insert_with_ttl(key, k, weight, exp);
         }
     }
     scan

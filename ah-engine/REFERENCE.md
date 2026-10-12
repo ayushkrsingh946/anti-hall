@@ -2619,7 +2619,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `agent_scan.cache_fingerprint_bytes` | `4096` |  | bytes | Bytes at the start of a transcript, and bytes just before the kept offset, hashed to notice a rewritten or rotated file; a kept walk whose file no longer matches is rebuilt from the start. |
 | `agent_scan.cache_idle_ms` | `900000` |  | ms | How long a kept walk may sit unused before it is dropped. |
 | `agent_scan.cache_max_bytes` | `16777216` |  | bytes | Largest estimated size of one kept walk; a walk that grows past it is not kept (the next scan reads the file afresh, as it did before the cache). |
-| `agent_scan.cache_max_paths` | `4` |  | count | How many transcripts the scan keeps a walk for between calls, so a Stop reads only the bytes appended since the last scan (0 turns the cache off). The least recently used one is dropped first. |
+| `agent_scan.cache_max_paths` | `12` |  | count | How many walks the scan keeps between calls (one per transcript and window size), so a Stop reads only the bytes appended since the last scan (0 turns the cache off). The least recently used one is dropped first. |
 | `agent_scan.delivery_tools` | `TaskOutput, SendMessage` |  |  | Tools whose tool_result can deliver an agent's result. |
 | `agent_scan.empty_object` | `{}` |  |  | What JSON.stringify gives for a missing tool input. |
 | `agent_scan.inbox_phrase` | `'s inbox` |  |  | Phrase of the result of a message sent to a teammate's inbox. |
@@ -2666,6 +2666,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `agent_scan.undefined_string` | `undefined` |  |  | What String() gives for a missing value. |
 | `agent_scan.utc_suffix` | ` UTC` |  |  | Suffix of a clock time in a note. |
 | `agent_scan.wide_tail_bytes` | `12582912` |  | bytes | Bytes read by the one widened scan that proves a zero running-agent count on a transcript longer than the default window (WIDE_TAIL_BYTES of hooks/lib/agent-scan.js). |
+| `agent_scan.window_slack_pct` | `25` |  | percent | How far, as a percent of the scan window, the kept walk of a transcript longer than the window may begin before the window start; past that it is rebuilt from the window start. The walk is used only while it provably gives the answer of a fresh scan of the exact window (nothing older than the window start touched a launch, a stop or a teammate event, and no call older than it has its answer inside it), so this only bounds what the walk holds. 0 reads every window afresh. |
 
 ### agent_controls.toml / ask_guard
 
@@ -9304,6 +9305,9 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 
 | Key | Default | Env override | Unit | What it is |
 |---|---|---|---|---|
+| `mem.agent_scan_walk_hard_bytes` | `33554432` |  | bytes | Bytes of retained transcript agent-scan walks at which an insert is refused and the cache is recycled. |
+| `mem.agent_scan_walk_low_water_pct` | `80` |  |  | Percent of mem.agent_scan_walk_soft_bytes the retained walk cache is evicted down to when the soft limit is reached. |
+| `mem.agent_scan_walk_soft_bytes` | `16777216` |  | bytes | Bytes of retained transcript agent-scan walks held before the least recently used are dropped down to the low-water mark. |
 | `mem.defaults_leak_hard_bytes` | `33554432` |  | bytes | Bytes of leaked config values past which the daemon requests a clean restart (after mem.global_restart_after_s), so repeated config reloads cannot grow the process without bound. |
 | `mem.defaults_leak_low_water_pct` | `80` |  |  | Percent of mem.defaults_leak_soft_bytes the leaked total must be at or under before the soft trigger re-arms (only a restart lowers it). |
 | `mem.defaults_leak_soft_bytes` | `16777216` |  | bytes | Bytes of config values leaked on purpose (the `'static` snapshots of the defaults, the previous generation of every derived cache) that are logged as a soft excursion. Only a restart frees them; one load of the shipped config leaks about 3.4 MB (measured), and a reload adds only what changed. |
