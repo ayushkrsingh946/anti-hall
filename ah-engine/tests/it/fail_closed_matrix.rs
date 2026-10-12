@@ -762,12 +762,14 @@ fn a_truly_absent_daemon_fails_open_without_running_hooks() {
             ah_engine::discard::harmless(std::fs::remove_dir_all(&case.dir));
             // the first run builds the defaults cache (slow in a debug binary on a busy box); the wrapper's watchdog bounds that
             // cold start, so the timing is asserted on the warm run
-            for (n, t0) in [(0, None), (1, Some(std::time::Instant::now()))] {
+            for n in 0..2 {
+                // the clock starts per run: building it in the loop header would start it before the cold run and time both
+                let t0 = (n == 1).then(std::time::Instant::now);
                 let r = run_kept(&case, &row, MARK, MARK2);
                 assert_eq!(r.code, 0, "[{host}/{event}] absent daemon must fail open: {:?}", r.err);
                 assert!(r.out.is_empty() && !r.marked, "[{host}/{event}] run {n}: no hook, no output on an unavailable daemon: {:?}", r.out);
                 if let Some(t0) = t0 {
-                    assert!(t0.elapsed() < Duration::from_secs(1), "[{host}/{event}] warm absent daemon took {:?}", t0.elapsed());
+                    assert!(t0.elapsed() < Duration::from_secs(1), "[{host}/{event}] warm absent daemon took {:?}: err {:?}", t0.elapsed(), r.err);
                 }
             }
         }
