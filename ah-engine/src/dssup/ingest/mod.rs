@@ -21,6 +21,7 @@ pub mod witness;
 
 use crate::checks::git::util::Settings;
 use crate::defaults;
+use crate::discard::Logged;
 use crate::dsact::runner::{Runner, System};
 use crate::meshw::idlock::devswarm_root;
 use drain::{Drainer, Project, Start};
@@ -162,7 +163,7 @@ pub fn join_all() -> bool {
     let Some(h) = handle else { return true };
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        crate::discard::harmless(h.join()); // keep: a panicked drain already reported itself
+        crate::discard::logged("ingest_manager_join", h.join().map_err(|_| "panic"));
         let _sent = tx.send(()); // keep: the receiver is gone only after its own timeout
     });
     rx.recv_timeout(defaults::millis("devswarm_ingest.shutdown_wait_ms")).is_ok()
@@ -170,38 +171,74 @@ pub fn join_all() -> bool {
 
 /// Start the drain in the daemon: nothing at all unless the mode is `engine`. One manager thread re-discovers the projects and
 /// keeps one drain thread per project; every thread ends when `stop` turns true (see [`join_all`]).
-pub fn start(home: &Path, state_dir: &Path, stop: Arc<dyn Fn() -> bool + Send + Sync>) {
+pub fn start(home: &Path, state_dir: &Path, stop: Arc<dyn Fn() -> bool + Send + Sync>, restart: Arc<dyn Fn(&str) + Send + Sync>) {
     if owner() != Owner::Engine {
         return;
     }
     let (home, state_dir) = (home.to_path_buf(), state_dir.to_path_buf());
-    let handle = std::thread::spawn(move || {
+    let stop_for_run = stop.clone();
+    let restart_for_run = restart.clone();
+    let run = Arc::new(move || {
         let mut running: std::collections::HashMap<String, std::thread::JoinHandle<()>> = std::collections::HashMap::new();
-        while !stop() {
-            running.retain(|_, h| !h.is_finished());
+        let mut panics: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+        while !stop_for_run() {
+            let done: Vec<String> = running.iter().filter(|(_, h)| h.is_finished()).map(|(k, _)| k.clone()).collect();
+            for key in done {
+                if let Some(h) = running.remove(&key) {
+                    match h.join() {
+                        Ok(()) => {
+                            panics.remove(&key);
+                        }
+                        Err(_) => {
+                            crate::discard::note("ingest_worker_join", "panic");
+                            let n = panics.entry(key.clone()).and_modify(|n| *n += 1).or_insert(1);
+                            let max = defaults::num("daemon.thread_restart_max");
+                            crate::health::log_event(
+                                "thread_panic",
+                                "devswarm_ingest_project",
+                                &defaults::render("msg.thread_panic", &[("thread", &"devswarm_ingest_project"), ("n", &*n), ("max", &max)]),
+                            );
+                            if *n > max {
+                                restart_for_run("devswarm_ingest_project");
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
             let st = Settings::from_env(&crate::reqenv::RequestEnv::capture());
             let explicit = crate::dswire::effective_text("devswarm_ingest.projects");
             for p in discover(&home, &state_dir, &explicit, now_ms()) {
                 if running.contains_key(&p.repo_key) {
                     continue;
                 }
-                let (h, st2, s2) = (home.clone(), st.clone(), stop.clone());
+                let (h, st2, s2) = (home.clone(), st.clone(), stop_for_run.clone());
                 let key = p.repo_key.clone();
-                running.insert(key, std::thread::spawn(move || run_project(&h, &st2, p, &System::configured(), &*s2)));
+                if let Some(handle) = std::thread::Builder::new()
+                    .name("ah-ingest-project".into())
+                    .spawn(move || {
+                        let _boundary = crate::crash::enter("thread", "", "", "", "devswarm_ingest_project");
+                        run_project(&h, &st2, p, &System::configured(), &*s2);
+                    })
+                    .ok_logged("ingest_worker_spawn")
+                {
+                    running.insert(key, handle);
+                }
             }
             let mut left = defaults::num("devswarm_ingest.discover_ms");
-            while left > 0 && !stop() {
+            while left > 0 && !stop_for_run() {
                 let nap = left.min(defaults::num("devswarm_ingest.stop_poll_ms").max(1));
                 std::thread::sleep(std::time::Duration::from_millis(nap));
                 left -= nap;
             }
         }
         for (_, h) in running {
-            crate::discard::harmless(h.join()); // keep: a panicked worker already reported itself
+            crate::discard::logged("ingest_worker_join", h.join().map_err(|_| "panic"));
         }
     });
+    let handle = crate::crash::spawn_supervised("devswarm_ingest", stop, restart, run);
     if let Ok(mut m) = MANAGER.lock() {
-        *m = Some(handle);
+        *m = handle;
     }
 }
 

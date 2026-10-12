@@ -3,7 +3,7 @@
 //! `cargo nextest run -E 'test(/^<name>::/)'`). Tests that set process-global state stay in their own binaries under
 //! `tests/` (`config_hotswap`, `runtime_config`, `jev_http`: they `set_var` HOME / proxy variables and rely on being alone in
 //! their process); see docs/DEVELOPMENT.md.
-#![allow(clippy::unwrap_used, clippy::expect_used)] // a test crate: a panic is the failure report, and E2 exempts tests
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable)] // a test crate: a panic is the failure report, and E2 exempts tests
 
 mod broad_kill;
 #[path = "../common/mod.rs"]

@@ -4,6 +4,7 @@
 //! bound: the script's OWN p95 over its whole golden corpus stays under the budget (the added latency cannot exceed it).
 //! Run in release, where the numbers mean something: `cargo test --release --test script_latency -- --nocapture`.
 #![allow(clippy::unwrap_used, clippy::expect_used)] // a test crate: a panic is the failure report, and E2 exempts tests
+#![allow(clippy::panic, clippy::unreachable)] // integration tests: a panic is the failure report; production crates deny these in Cargo.toml
 
 use ah_engine::reqenv::RequestEnv;
 use serde_json::Value;

@@ -1301,3 +1301,18 @@ fn status_reports_all_required_fields() {
     let o = down.cmd().args(["status", "--json"]).output().unwrap();
     assert!(String::from_utf8_lossy(&o.stdout).contains(r#""running":false"#));
 }
+
+#[test]
+fn abort_breadcrumb_is_reaped_on_next_start_and_reported_by_status() {
+    let e = Env::new("abortbc", &[]);
+    std::fs::create_dir_all(e.eng()).unwrap();
+    std::fs::write(e.eng().join("daemon.run"), "0").unwrap();
+    std::fs::write(e.eng().join("crash-breadcrumb.json"), r#"{"request":"D","event":"Stop","check":"task-guard","uptime_s":7,"memory":{"rss_kb":12}}"#)
+        .unwrap();
+    e.warm();
+    let st = e.status();
+    assert_eq!(st["health"]["last_crash"]["kind"], "crash", "{st}");
+    assert_eq!(st["health"]["last_crash"]["breadcrumb"]["request"], "D", "{st}");
+    assert_eq!(st["health"]["last_crash"]["breadcrumb"]["event"], "Stop", "{st}");
+    assert_eq!(st["health"]["last_crash"]["breadcrumb"]["check"], "task-guard", "{st}");
+}

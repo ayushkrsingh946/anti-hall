@@ -51,6 +51,10 @@ value = "__ahCheckEntries"
 doc = "Reason logged (then the failure policy applies) when a check's script defines no entry function. Placeholders: {check}, {entry}."
 value = "{check}: the script defines no {entry} function"
 
+[script.msg_call_error]
+doc = "Reason logged when a loaded script call fails. Placeholders: {name}, {func}, {check}, {event}, {error}."
+value = "{name}.{func} check={check} event={event}: {error}"
+
 [script.time_limit_ms]
 doc = "CPU-time limit of one script call (the interpreter thread's own CPU time, see script.wall_limit_factor for the wall-clock backstop); past it the interpreter is interrupted and the call defers to Node (never a silent allow)."
 value = 50

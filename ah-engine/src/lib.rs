@@ -1,5 +1,9 @@
 //! anti-hall engine: a tiny hook daemon + client. See README.md.
 #![deny(missing_docs)]
+#![cfg_attr(not(test), deny(clippy::panic, clippy::unreachable))]
+#![cfg_attr(test, allow(clippy::panic, clippy::unreachable))]
+// D12 stages indexing/slicing with a ratchet test while request-path sites are converted.
+#![allow(clippy::indexing_slicing)]
 #![recursion_limit = "256"]
 #![allow(rustdoc::broken_intra_doc_links, rustdoc::private_intra_doc_links, rustdoc::invalid_html_tags, rustdoc::redundant_explicit_links)]
 pub mod actlog;
@@ -12,6 +16,7 @@ pub mod checks;
 pub mod cli;
 pub mod client;
 pub mod config;
+pub mod crash;
 pub mod daemon;
 pub mod db;
 pub mod deadline;

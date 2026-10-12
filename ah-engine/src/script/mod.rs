@@ -473,6 +473,9 @@ pub fn call_fn(name: &str, func: &str, args: &Value) -> Option<Value> {
     let st = Settings::from_env(&env);
     let (libs, own) = resolve(name, &st.home)?;
     let key = format!("{name}#{func}");
+    let event = args.get("event").or_else(|| args.get("hookEventName")).or_else(|| args.pointer("/subject/event")).and_then(Value::as_str).unwrap_or("");
+    let check = args.get("checkId").or_else(|| args.get("check")).or_else(|| args.pointer("/check/id")).and_then(Value::as_str).unwrap_or(name);
+    let _boundary = crate::crash::enter("check", "", event, check, "");
     let r = POOL.with(|cell| -> Result<Value, String> {
         let mut slot = cell.borrow_mut();
         if slot.is_none() {
@@ -514,7 +517,8 @@ pub fn call_fn(name: &str, func: &str, args: &Value) -> Option<Value> {
     match r {
         Ok(v) => Some(v),
         Err(e) => {
-            crate::discard::note("script_error", &format!("{name}.{func}: {e}"));
+            let args: [(&str, &dyn std::fmt::Display); 5] = [("name", &name), ("func", &func), ("check", &check), ("event", &event), ("error", &e)];
+            crate::discard::note("script_error", &defaults::render("script.msg_call_error", &args));
             None
         }
     }
@@ -608,7 +612,7 @@ pub fn expand_now(s: &str, now_ms: f64) -> String {
             match (kind, delta) {
                 ("NOW", Some(d)) => Some((close, format!("{}", (now_ms + d) as i64))),
                 ("ISO", Some(d)) => Some((close, crate::checks::agent_scan::iso_utc(now_ms + d))),
-                ("DATE", Some(d)) => Some((close, crate::checks::agent_scan::iso_utc(now_ms + d)[..10].to_string())),
+                ("DATE", Some(d)) => Some((close, crate::checks::agent_scan::iso_utc(now_ms + d).get(..10).unwrap_or("").to_string())),
                 _ => None,
             }
         });

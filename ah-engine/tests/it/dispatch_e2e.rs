@@ -111,7 +111,13 @@ impl Env {
         }
         c.envs(extra.iter().copied());
         let mut ch = c.spawn().unwrap();
-        ch.stdin.take().unwrap().write_all(payload.as_bytes()).unwrap();
+        if let Some(mut stdin) = ch.stdin.take() {
+            match stdin.write_all(payload.as_bytes()) {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => {}
+                Err(e) => panic!("failed to write hook payload to stdin: {e}"),
+            }
+        }
         let o = ch.wait_with_output().unwrap();
         (o.status.code().unwrap_or(-1), String::from_utf8_lossy(&o.stdout).to_string(), String::from_utf8_lossy(&o.stderr).to_string())
     }

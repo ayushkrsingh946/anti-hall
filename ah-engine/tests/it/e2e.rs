@@ -148,11 +148,21 @@ fn newer_client_hands_off_to_new_build() {
     assert!(out.contains("deny"), "in-flight request must still be served: {out:?}");
     assert!(wait_for(|| !alive(old)), "old daemon must exit");
     // next client cold-starts the new build
-    assert!(wait_for(|| !e.hook("0.2.0", DENY_IN).0.is_empty()));
-    assert!(wait_for(|| e.pid().is_some()), "the new build answers a ping");
-    let ping = e.ctl("ping").unwrap();
+    let mut ping = String::new();
+    assert!(
+        wait_for(|| {
+            let (out, _) = e.hook("0.2.0", DENY_IN);
+            if !out.contains("deny") {
+                return false;
+            }
+            ping = e.ctl("ping").unwrap_or_default();
+            ping.starts_with("pong 0.2.0 ")
+        }),
+        "the new build answers a ping"
+    );
     assert!(ping.starts_with("pong 0.2.0 "), "{ping}");
-    assert_ne!(e.pid().unwrap(), old);
+    let new = ping.split_whitespace().nth(2).and_then(|p| p.parse::<u32>().ok()).unwrap();
+    assert_ne!(new, old);
 }
 
 #[test]

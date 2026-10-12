@@ -69,7 +69,10 @@ pub fn run_entry(entry: &Entry, meta: &Meta, p: &Value) -> Answer {
         prompt: p.get("prompt").and_then(Value::as_str),
     };
     let opts = json!({ "plugin_root": meta.root, "payload_sha1": meta.payload_sha1, "host": meta.host });
-    let verdict = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| checks::run_env_guarded(check, &subject, p, &opts, &meta.env)));
+    let verdict = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _boundary = crate::crash::enter("check", "D", &meta.event, &entry.id, "");
+        checks::run_env_guarded(check, &subject, p, &opts, &meta.env)
+    }));
     match verdict {
         Ok(v) => answer_of(&entry.id, v),
         Err(_) => Answer::Defer,

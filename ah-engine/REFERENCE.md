@@ -234,6 +234,8 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `daemon.stall_ms` | `5000` | `AH_ENGINE_STALL_MS` | ms | An accept loop silent for longer than this trips a drain and exit. |
 | `daemon.start_fail_exit_code` | `78` |  |  | Exit status when the daemon cannot start (sysexits EX_CONFIG, 78). |
 | `daemon.stuck_ms` | `8000` | `AH_ENGINE_STUCK_MS` | ms | A worker that makes no progress on its request for longer than this trips a drain and exit (a hung worker). Progress is a check starting or finishing and the script interpreter running, so a worker a loaded machine only slows down is not stuck; the time without progress is what a blocked host call (a lock, a child process, a disk sync) adds. |
+| `daemon.thread_restart_backoff_ms` | `100` |  | ms | Sleep before a supervised daemon service thread restarts after a panic. |
+| `daemon.thread_restart_max` | `3` |  |  | Panics a daemon service thread may recover from before the daemon requests a clean restart. |
 | `daemon.watchdog_tick_ms` | `250` | `AH_ENGINE_WATCHDOG_TICK_MS` | ms | How often the watchdog thread wakes to look at heartbeats. |
 | `daemon.worker_wait_ms` | `200` |  | ms | How long an idle worker sleeps on the queue before looking again. |
 | `daemon.workers` | `4` | `AH_ENGINE_WORKERS` |  | Worker threads evaluating requests. |
@@ -285,9 +287,11 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `files.advised_dir` | `advised` |  |  | Directory with one empty file per session that has already seen the failure advisory. |
 | `files.backups_dir` | `backups` |  |  | Directory inside the state directory that holds backups and pre-restore snapshots (D27); nothing in it is ever deleted by the engine. |
 | `files.breaker_until` | `breaker.until` |  |  | Marker holding the time (ms since the epoch) until which the client breaker stays open. |
+| `files.crash_breadcrumb` | `crash-breadcrumb.json` |  |  | Last request/job/check breadcrumb written at boundary entry so an abnormal exit can be reported with context on the next start. |
 | `files.crashloop_until` | `crashloop.until` |  |  | Marker holding the time until which respawning is stopped after a crash loop. |
 | `files.daemon_down_marker` | `daemon.down.until` |  |  | Short-lived client marker: when a hook client finds the daemon absent or hung, other clients skip connecting until this expires. |
 | `files.failure` | `failure.json` |  |  | Last recorded failure, for the once-per-session advisory. |
+| `files.last_crash` | `last-crash.json` |  |  | Last panic or stale-run-marker crash report, shown by status and doctor. |
 | `files.log` | `ah-engine.log` |  |  | Event log file name (state directory). |
 | `files.reaped_prefix` | `daemon.run.reaped.` |  |  | Prefix of the temporary name a stale run marker is renamed to when it is claimed (the pid is appended). |
 | `files.run_marker` | `daemon.run` |  |  | Written while a daemon runs; a leftover one with a dead pid is logged as one crash. |
@@ -4231,6 +4235,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `doctor_msg.kind_dir` | `a directory` |  |  | What a path turned out to be. |
 | `doctor_msg.kind_file` | `a regular file` |  |  | What a path turned out to be. |
 | `doctor_msg.kind_other` | `not a file` |  |  | What a path turned out to be. |
+| `doctor_msg.last_crash` | `last crash: {crash}` |  |  | DMN-12. Placeholder: {crash}. |
 | `doctor_msg.leak_example` | `{hash} -> {worktree}` |  |  | One leaked store. Placeholders: {hash}, {worktree}. |
 | `doctor_msg.leak_more` | `, +{n} more` |  |  | How many more leaked stores are not listed. Placeholder: {n}. |
 | `doctor_msg.leak_summary` | `(warn) leaked test-fixture stores: {count} (run doctor --repair-test-stores t...` |  |  | The leaked stores. Placeholders: {count}, {shown}, {more}. |
@@ -5343,6 +5348,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `script.lock_wait_max_ms` | `5000` |  | ms | Longest wait a script may ask `ah.state.lock` for in place of its group's wait. |
 | `script.logic_dir` | `engine/logic` |  |  | Directory of the shipped check scripts, relative to the plugin root. |
 | `script.msg_bad_verdict` | `unexpected verdict {value}` |  |  | Logged reason (then the call defers) when a script returns a value that is not a verdict. |
+| `script.msg_call_error` | `{name}.{func} check={check} event={event}: {error}` |  |  | Reason logged when a loaded script call fails. Placeholders: {name}, {func}, {check}, {event}, {error}. |
 | `script.msg_deadline_cut` | `{check} ({event}): past the client's deadline, deferred to its Node hook` |  |  | Log detail (code script_deadline, rate-limited) of a check cut or not started at its request's client deadline; it defers to its Node hook. Placeholders: {check}, {event}. |
 | `script.msg_env_incomplete` | `request environment incomplete` |  |  | Reason logged (then the failure policy applies) when the request's environment is incomplete, so no check can be evaluated. |
 | `script.msg_fail_closed` | `anti-hall {check}: BLOCKED. Its check script failed ({why}) and this guard ha...` |  |  | Block reason of an engine-only check on a guard event whose script could not answer. Placeholders: {check}, {why}. |
@@ -9381,7 +9387,7 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `msg.log_bind_fail` | Start-failure detail when binding the socket fails. Placeholders: {path}, {err}. |
 | `msg.log_budget` | Log detail when a rule evaluation exceeded its CPU budget. |
 | `msg.log_client_panic` | Log detail when the hook client hit an internal error (a panic) and failed open. |
-| `msg.log_crash` | Log detail when a daemon is found dead without a clean exit. Placeholder: {pid}. |
+| `msg.log_crash_context` | Log detail when a daemon is found dead without a clean exit, with the last breadcrumb. Placeholders: {pid}, {context}. |
 | `msg.log_daemon_killed` | Log detail when the daemon was killed by a signal while starting. |
 | `msg.log_daemon_spawn_failed` | Event-log detail (kind spawn_fail, code os<n>) when the client could not start the daemon (fork or exec failed: EAGAIN, ENOMEM, a missing executable). Placeholder: {err}. |
 | `msg.log_fallback_read_error` | Log detail when reading the Node fallback's stdout or stderr failed part-way. |
@@ -9404,6 +9410,7 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `msg.log_stuck` | Log detail when a worker is stuck. Placeholder: {i}. |
 | `msg.metrics_quantile_note` | Printed with every latency histogram: how to read its percentiles. |
 | `msg.no_price_for_model` | Said by `impact` for a model that is not in the price table, instead of a guessed figure. Placeholder: {model}. |
+| `msg.panic_payload_unknown` | Panic payload text when Rust did not carry a string. |
 | `msg.reason_breaker` | Recorded reason when the client breaker opens. Placeholders: {n}, {secs}, {why}. |
 | `msg.reason_crashloop` | Recorded reason when the daemon keeps dying. Placeholders: {n}, {secs}. |
 | `msg.regex_literal_invalid` | Panic text when a literal regular expression in the source does not compile (a bug the tests catch). |
@@ -9424,6 +9431,7 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `msg.schedule_agent_planned` | Result of an agent-targeted job until mailbox delivery exists (D45). |
 | `msg.schedule_daemon_gone` | An in-process job found the daemon gone (it was exiting). |
 | `msg.schedule_failed` | Event-log detail of a failed run. Placeholders: {job}, {detail}. |
+| `msg.schedule_panic` | Detail of a scheduled run panic caught at the job boundary. |
 | `msg.schedule_snapshot_failed` | The metrics snapshot job could not keep its snapshot. |
 | `msg.schedule_timeout` | Detail of a run that passed its timeout. |
 | `msg.schedule_unknown_action` | A job names an action the scheduler does not know; the job is ignored. Placeholders: {job}, {action}. |
@@ -9441,6 +9449,9 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `msg.tel_loss_window` | Printed with the telemetry summary: how much a crash can lose. Placeholder: {flush_ms}. |
 | `msg.tel_net_status` | Status shown with the model-routing saving once routing decisions exist. Placeholders: {n} decisions, {days} days. |
 | `msg.tel_no_db` | The telemetry rollup cannot run: storage did not open. |
+| `msg.thread_panic` | Log detail when a daemon service thread panics. Placeholders: {thread}, {n}, {max}. |
+| `msg.thread_panic_restart` | Clean restart reason when a daemon service thread exceeds its panic restart cap. Placeholder: {thread}. |
+| `msg.thread_unknown` | Thread name used in panic reports for unnamed threads. |
 | `git.msg_commit_credit` | Block: an inline commit message with an AI self-credit. |
 | `git.msg_commit_file_credit` | Block: a commit message read from a file or heredoc with an AI self-credit. |
 | `git.msg_commit_file_jev` | Block: Jev judged a commit message read from a file or heredoc to credit an AI assistant (paraphrased). |
