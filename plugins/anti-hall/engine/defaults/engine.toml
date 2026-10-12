@@ -522,13 +522,6 @@ value = 64
 doc = "Largest stored value."
 value = 65536
 unit = "bytes"
-
-[store.key_cache_cap]
-doc = "Most cwd-to-project-key mappings cached (cleared when full) so the hot path does not stat per request."
-value = 1024
-
-# ---- health and failure policy --------------------------------------------------------------------------
-
 [health.log_cap]
 doc = "Event log size above which it is trimmed to its last log_keep_lines lines."
 value = 65536
