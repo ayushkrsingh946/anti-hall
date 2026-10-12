@@ -587,6 +587,10 @@ impl Rig {
             ("AH_ENGINE_VERSION", "flip-parity".to_string()),
             ("AH_ENGINE_DISPATCH_IN_PROCESS", "1".to_string()),
             ("AH_ENGINE_WRAPPER_DIAG", self.root.join("wrapper-diag.log").display().to_string()),
+            // Contract: the production wrapper fails open after ~0.55 s (client.deadline_ms + slack + wrapper extra). This test proves
+            // parity of the ANSWERS of an in-process dispatch in a debug binary under many parallel rows, which can take longer than
+            // that on a loaded machine, so it runs the wrapper with the hook's own timeout as its budget (the test-only knob).
+            ("AH_HOOK_TIMEOUT_MS", (timeout * 1000).to_string()),
         ];
         if row.class == "fuzz" {
             // checks down: no built-in check answers (the daemon is never started), every entry runs as its fake Node hook, so
