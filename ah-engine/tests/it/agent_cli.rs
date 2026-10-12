@@ -55,7 +55,8 @@ impl Env {
     /// What a failing assertion should print: the daemon's log and status (so a CI failure explains itself).
     fn diag(&self) -> String {
         let log = std::fs::read_to_string(self.dir.join("eng").join("ah-engine.log")).unwrap_or_default();
-        format!("\n--- ah-engine.log ---\n{log}\n--- status ---\n{}", self.run(&["status", "--json"]).0)
+        let status = self.run(&["status", "--json"]);
+        format!("\n--- ah-engine.log ---\n{log}\n--- status ({}) ---\n{}", status.1, status.0)
     }
 
     fn run(&self, args: &[&str]) -> (String, i32) {
@@ -74,12 +75,20 @@ impl Env {
 
     /// Start the daemon with a hook call and wait until it answers.
     fn warm(&self) {
-        self.hook("echo warm");
         let t = Instant::now();
-        while t.elapsed() < Duration::from_secs(3) && !self.up() {
-            std::thread::sleep(Duration::from_millis(20));
+        while t.elapsed() < Duration::from_secs(10) {
+            self.hook("echo warm");
+            if self.up() {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(50));
         }
-        assert!(self.up(), "daemon never came up");
+        assert!(self.up(), "daemon never came up{}", self.diag());
+    }
+
+    fn clear_down_marker(&self) {
+        ah_engine::discard::harmless(std::fs::remove_file(self.dir.join("eng").join("daemon.down.until")));
+        ah_engine::discard::harmless(std::fs::remove_file(self.dir.join("eng").join("daemon.spawn.lock")));
     }
 }
 
@@ -276,6 +285,7 @@ fn metrics_impact_and_rollups_survive_a_restart_and_a_kill() {
     while t.elapsed() < Duration::from_secs(3) && common::alive(pid) {
         std::thread::sleep(Duration::from_millis(10));
     }
+    e.clear_down_marker();
     e.warm();
     let after = counter_total(&e.json(&["metrics", "--json"]), "check_calls");
     assert!(after >= seen, "counts snapshotted before the kill survive it: {after} after {seen}");

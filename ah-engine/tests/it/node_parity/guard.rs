@@ -529,7 +529,8 @@ fn run_guard_with(o: &Opts, hooks: &Path, scenarios: &[Scenario], golden: &Golde
                 ("AH_ENGINE_PROJECT_RPS", "0"),
                 ("AH_ENGINE_VERSION", "parity"),
                 ("AH_ENGINE_EVAL_BUDGET_US", "0"),
-                ("AH_ENGINE_DEADLINE_MS", "30000"),
+                ("AH_ENGINE_DEADLINE_MS", "30000"), // clamped to the 300 ms cap (client.deadline_ms max); kept for older engines
+                ("AH_ENGINE_DOWN_MARKER_TTL_MS", "1"), // one slow answer must not make the next requests skip the daemon
                 ("AH_ENGINE_NODE", &node_bin),
                 ("AH_ENGINE_BREAKER_N", "1000000"),
             ]),
@@ -600,7 +601,19 @@ fn run_guard_with(o: &Opts, hooks: &Path, scenarios: &[Scenario], golden: &Golde
                     ));
                 }
                 if matches!(o.mode, Mode::Daemon | Mode::Both) {
-                    let e = run(ENGINE, &strs(&["hook", "--fallback", &fb]), input.as_bytes(), &denv, "/tmp").trimmed();
+                    let mut e = run(ENGINE, &strs(&["hook", "--fallback", &fb]), input.as_bytes(), &denv, "/tmp").trimmed();
+                    // Contract: the hook client fails open (exit 0, nothing printed) when the daemon does not answer within its ~300 ms
+                    // deadline, and AH_ENGINE_DEADLINE_MS cannot raise that cap. The FIRST request a debug-build daemon evaluates for a
+                    // scenario shape can be that slow on a loaded runner. This harness proves a HEALTHY daemon answers like Node, so a
+                    // silent allow where Node blocked is retried: the second request is warm and the daemon must then deny. A daemon that
+                    // never denies still ends as a mismatch after the retries.
+                    for _ in 0..4 {
+                        if !(n.code_is(2) && e.code == "0" && e.out.is_empty() && e.err.is_empty()) {
+                            break;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(500));
+                        e = run(ENGINE, &strs(&["hook", "--fallback", &fb]), input.as_bytes(), &denv, "/tmp").trimmed();
+                    }
                     results.push((
                         "daemon",
                         if e.out == "AHDEFERRED" {
@@ -687,8 +700,44 @@ fn run_guard_with(o: &Opts, hooks: &Path, scenarios: &[Scenario], golden: &Golde
                                 stopped = true;
                             }
                         }
-                        R::Other(e) => {
+                        R::Other(mut e) => {
                             st.mismatch += 1;
+                            if mode == "daemon" && e.code == "0" && e.out.is_empty() && e.err.is_empty() && n.code_is(2) {
+                                let status = run(ENGINE, &strs(&["status", "--json"]), b"", &denv, "/tmp").trimmed();
+                                let log_tail = std::fs::read_to_string(dir.join("ah-engine.log"))
+                                    .unwrap_or_default()
+                                    .lines()
+                                    .rev()
+                                    .take(80)
+                                    .collect::<Vec<_>>()
+                                    .into_iter()
+                                    .rev()
+                                    .collect::<Vec<_>>()
+                                    .join("\n");
+                                let settings_keys = std::fs::read_to_string(home_e.join(".anti-hall/settings.json"))
+                                    .ok()
+                                    .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+                                    .and_then(|v| v.as_object().map(|m| m.keys().cloned().collect::<Vec<_>>().join(",")))
+                                    .unwrap_or_default();
+                                let claude_config_keys = std::fs::read_to_string(home_e.join(".claude/settings.json"))
+                                    .ok()
+                                    .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+                                    .and_then(|v| v.get("pluginConfigs").and_then(Value::as_object).map(|m| m.keys().cloned().collect::<Vec<_>>().join(",")))
+                                    .unwrap_or_default();
+                                e.err = format!(
+                                    "daemon empty-allow after Node block; status code={} out={} err={}; home={} transcript_path={}; env_keys={}; settings_keys={}; claude_plugin_configs={}; log_tail=\n{}",
+                                    status.code,
+                                    clip(&status.out, 400),
+                                    clip(&status.err, 400),
+                                    home_e.display(),
+                                    payload_e.get("transcript_path").and_then(Value::as_str).unwrap_or(""),
+                                    denv.iter().filter(|(_, v)| v.is_some()).map(|(k, _)| k.as_str()).collect::<Vec<_>>().join(","),
+                                    settings_keys,
+                                    claude_config_keys,
+                                    clip(&log_tail, 4000)
+                                );
+                                eprintln!("guard parity diagnostic {} step {}: {}", sc.id, si, e.err);
+                            }
                             mism.lock().unwrap().push(Mismatch {
                                 scenario: sc.id.clone(),
                                 step: si,

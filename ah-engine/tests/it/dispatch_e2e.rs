@@ -5,15 +5,33 @@
 
 use crate::common;
 
-use std::io::Write;
+use std::io::{Read, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 use std::time::{Duration, Instant};
 
 struct Env {
     dir: PathBuf,
+}
+
+struct HealthyErrDaemon {
+    alive: Arc<AtomicBool>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Drop for HealthyErrDaemon {
+    fn drop(&mut self) {
+        self.alive.store(false, Ordering::Release);
+        if let Some(thread) = self.thread.take() {
+            let _join_result = thread.join();
+        }
+    }
 }
 
 impl Env {
@@ -178,6 +196,30 @@ impl Env {
         bin
     }
 
+    fn start_healthy_err_daemon(&self) -> HealthyErrDaemon {
+        std::fs::create_dir_all(self.state()).unwrap();
+        let sock = ah_engine::paths::socket_in(&self.state());
+        ah_engine::discard::harmless(std::fs::remove_file(&sock));
+        let listener = std::os::unix::net::UnixListener::bind(&sock).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let alive = Arc::new(AtomicBool::new(true));
+        let thread_alive = Arc::clone(&alive);
+        let thread = std::thread::spawn(move || {
+            while thread_alive.load(Ordering::Acquire) {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        let mut body = Vec::new();
+                        ah_engine::discard::harmless(stream.read_to_end(&mut body));
+                        ah_engine::discard::harmless(stream.write_all(&ah_engine::frame::encode(ah_engine::frame::Kind::Err, "healthy defer")));
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => std::thread::sleep(Duration::from_millis(10)),
+                    Err(_) => break,
+                }
+            }
+        });
+        HealthyErrDaemon { alive, thread: Some(thread) }
+    }
+
     fn stop(&self) {
         let st = self.state();
         common::reap(&st, || {
@@ -325,6 +367,17 @@ fn assert_no_stop_counters(e: &Env) {
 
 const CTX_MERGE_GATE: &str = r#"printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"from merge-gate"}}\n'"#;
 const CTX_API_GUARD: &str = r#"printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"from api-guard"}}\n'"#;
+
+fn wait_for_daemon_native_block(e: &Env, args: &[&str], payload: &str, extra: &[(&str, &str)]) {
+    for _ in 0..50 {
+        let (code, _, err) = e.run_with(args, false, payload, true, extra);
+        if code == 2 && !err.contains("NODE-RAN") {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    panic!("control: the warm daemon did not answer the guard natively");
+}
 
 #[test]
 fn several_advisories_merge_in_hooks_json_order() {
@@ -1172,10 +1225,8 @@ fn two_clients_with_different_environments_get_answers_for_their_own() {
 #[test]
 fn a_finished_hooks_genuine_block_survives_a_check_whose_node_command_cannot_run() {
     let e = Env::new("deferred-block");
-    // On Stop, compact-advice-guard has no runnable Node command, and with no daemon (NOSPAWN) its built-in check defers;
-    // task-guard is a Node-only hook that ran, finished and blocked: its block must be handed back, not replaced by the generic
-    // fail-closed text. (Every PreToolUse entry has a built-in check now, so Stop is the event that still has Node-only hooks
-    // next to a check.)
+    // A healthy daemon can explicitly defer built-in checks to the Node fallback; a genuine Node block must then be
+    // handed back, not replaced by generic fail-open/fail-closed behavior.
     let ids: Vec<String> = ah_engine::dispatch::table::entries("claude", "Stop").into_iter().map(|x| x.id).collect();
     assert!(ids.iter().any(|i| i == "task-guard") && ids.iter().any(|i| i == "compact-advice-guard"), "{ids:?}");
     let m: serde_json::Map<String, serde_json::Value> = ids
@@ -1198,7 +1249,8 @@ fn a_finished_hooks_genuine_block_survives_a_check_whose_node_command_cannot_run
     std::fs::write(&map, serde_json::json!({ "Stop": m }).to_string()).unwrap();
     let args = ["hook", "--event", "Stop", "--fallback-map", map.to_str().unwrap()];
     let stop = serde_json::json!({"session_id": "e2e", "cwd": e.dir, "hook_event_name": "Stop"}).to_string();
-    let (code, out, err) = e.run_with(&args, false, &stop, true, &[("AH_ENGINE_NOSPAWN", "1")]);
+    let _daemon = e.start_healthy_err_daemon();
+    let (code, out, err) = e.run_with(&args, false, &stop, true, &[]);
     assert_eq!(code, 2, "{out:?} {err:?}");
     assert!(err.contains("sibling-blocks"), "the finished hook's own block text: {err:?}");
 }
@@ -1250,12 +1302,17 @@ fn wrapper_and_engine_agree_on_unparsable_guard_payloads() {
         (o.status.code().unwrap(), String::from_utf8_lossy(&o.stderr).to_string())
     };
     let engine = env!("CARGO_BIN_EXE_ah-engine");
+    let warm_map = pretool_map(&e, &[("ship-it-guard", NODE_SHIPIT)], "true");
+    let warm_args = ["hook", "--event", "PreToolUse", "--fallback-map", warm_map.to_str().unwrap()];
+    let warm_payload = shipit_edit(&e);
+    let warm_env = [("ANTIHALL_SHIPIT_GATE", "1")];
+    wait_for_daemon_native_block(&e, &warm_args, &warm_payload, &warm_env);
     for (name, payload) in [("lone surrogate", surrogate), ("not JSON", b"{bad".to_vec())] {
         for (label, nodes, want) in [("allow", &allow, 0), ("block", &block, 2)] {
             let with_engine = run(engine, nodes, &payload);
             let node_only = run("/nonexistent/ah-engine", nodes, &payload);
             assert_eq!(with_engine.0, want, "{name}, Node {label}, engine in front: {}", with_engine.1);
-            assert_eq!(node_only.0, want, "{name}, Node {label}, Node only: {}", node_only.1);
+            assert_eq!(node_only.0, 0, "{name}, Node {label}, absent engine fails open without Node hand-over: {}", node_only.1);
             if want == 2 {
                 assert!(with_engine.1.contains("node-blocked"), "{name}: the Node block text is returned verbatim: {}", with_engine.1);
             }
@@ -1326,11 +1383,16 @@ fn an_empty_home_defers_the_env_reading_checks_in_process_and_through_the_daemon
         let map = pretool_map(&e, &[("ship-it-guard", NODE_SHIPIT)], "true");
         let args = ["hook", "--event", "PreToolUse", "--fallback-map", map.to_str().unwrap()];
         let p = shipit_edit(&e);
-        let extra = [("ANTIHALL_SHIPIT_GATE", "1"), ("HOME", "")];
-        for _ in 0..if in_process { 1 } else { 12 } {
-            let (code, _, err) = e.run_with(&args, in_process, &p, true, &extra);
-            assert_eq!((code, err.contains("NODE-RAN")), (2, true), "an empty HOME defers to Node (in_process={in_process}): {err:?}");
-            std::thread::sleep(std::time::Duration::from_millis(50));
+        if in_process {
+            let extra = [("ANTIHALL_SHIPIT_GATE", "1"), ("HOME", "")];
+            let (code, _, err) = e.run_with(&args, true, &p, true, &extra);
+            assert_eq!((code, err.contains("NODE-RAN")), (2, true), "an empty HOME defers to Node in-process: {err:?}");
+        } else {
+            let gate = [("ANTIHALL_SHIPIT_GATE", "1")];
+            wait_for_daemon_native_block(&e, &args, &p, &gate);
+            let extra = [("ANTIHALL_SHIPIT_GATE", "1"), ("HOME", "")];
+            let (code, _, err) = e.run_with(&args, false, &p, true, &extra);
+            assert_eq!((code, err.contains("NODE-RAN")), (2, true), "an empty HOME with a healthy daemon defers to Node: {err:?}");
         }
         e.stop();
     }
@@ -1379,9 +1441,10 @@ fn one_agent_call_records_exactly_one_spawn_per_log() {
             assert_eq!(o.status.code(), Some(0), "{}", String::from_utf8_lossy(&o.stderr));
         }
         let lines = |rel: &str| std::fs::read_to_string(home.join(rel)).map(|t| t.lines().filter(|l| !l.trim().is_empty()).count()).unwrap_or(0);
-        let mode = if in_process { "checks answer in the client" } else { "checks down (every entry runs its Node hook)" };
-        assert_eq!(lines(".anti-hall/swarm-spawns.log"), calls, "swarm-spawns.log, {mode}");
-        assert_eq!(lines(".anti-hall/agent-spawns.log"), calls, "agent-spawns.log, {mode}");
+        let expected = if in_process { calls } else { 0 };
+        let mode = if in_process { "checks answer in the client" } else { "daemon absent (no Node hand-over)" };
+        assert_eq!(lines(".anti-hall/swarm-spawns.log"), expected, "swarm-spawns.log, {mode}");
+        assert_eq!(lines(".anti-hall/agent-spawns.log"), expected, "agent-spawns.log, {mode}");
     }
 }
 
@@ -1546,7 +1609,7 @@ fn a_built_in_block_and_a_deferred_node_block_both_reach_the_host() {
 #[test]
 fn deferred_stop_blocks_keep_every_reason_and_message() {
     let e = Env::new("two-blocks-stop");
-    // no daemon and not in process: every Stop check defers to its Node hook
+    // healthy daemon says the built-in checks defer, so the Node fallback hooks still decide
     let map = ids_map(
         &e,
         "Stop",
@@ -1558,7 +1621,8 @@ fn deferred_stop_blocks_keep_every_reason_and_message() {
     );
     let args = ["hook", "--event", "Stop", "--fallback-map", map.to_str().unwrap()];
     let stop = serde_json::json!({"session_id": "e2e", "cwd": e.dir, "hook_event_name": "Stop"}).to_string();
-    let (code, out, err) = e.run_with(&args, false, &stop, true, &[("AH_ENGINE_NOSPAWN", "1")]);
+    let _daemon = e.start_healthy_err_daemon();
+    let (code, out, err) = e.run_with(&args, false, &stop, true, &[]);
     assert_eq!(code, 2, "{out:?} {err:?}");
     let v: serde_json::Value = serde_json::from_str(out.trim()).unwrap_or_else(|_| panic!("one JSON object: {out:?}"));
     let joiner = ah_engine::defaults::text("dispatch.reason_joiner");
@@ -1577,7 +1641,8 @@ fn two_exit_two_blocks_on_an_advisory_event_keep_both_stderr_texts() {
     let map = ids_map(&e, "PostToolUse", &[("merge-side-pick:post", "echo FIRST >&2; exit 2"), ("output-verify-guard", "echo SECOND >&2; exit 2")]);
     let args = ["hook", "--event", "PostToolUse", "--fallback-map", map.to_str().unwrap()];
     let p = serde_json::json!({"session_id": "e2e", "cwd": e.dir, "hook_event_name": "PostToolUse", "tool_name": "Bash", "tool_input": {"command": "ls"}, "tool_response": {"stdout": ""}}).to_string();
-    let (code, out, err) = e.run_with(&args, false, &p, true, &[("AH_ENGINE_NOSPAWN", "1")]);
+    let _daemon = e.start_healthy_err_daemon();
+    let (code, out, err) = e.run_with(&args, false, &p, true, &[]);
     let joiner = ah_engine::defaults::text("dispatch.reason_joiner");
     assert_eq!((code, out.as_str(), err), (2, "", format!("FIRST{joiner}SECOND\n")));
 }
@@ -1637,11 +1702,12 @@ fn the_dispatcher_makes_the_speculation_judge_call_itself_after_the_daemon_defer
     assert!(out.contains("\"decision\":\"block\"") && out.contains("the cache is stale"), "{out:?} {err:?}");
     assert!(!err.contains("NODE-RAN"), "the Node hook must not run: {err:?}");
     assert_eq!(calls(), 1);
-    // through the daemon: its first call is answered through Node (D5), the later ones by the daemon, which defers this check
+    // through the daemon: the first call may fail open while the daemon starts; a later call is answered by the daemon,
+    // which defers this slow check back to the dispatcher without running the Node hook.
     let mut last = (0, String::new(), String::new());
     for i in 0..50 {
         last = e.run_with(&args, false, &payload(&format!("jc-d{i}")), true, &env);
-        if !last.2.contains("NODE-RAN") {
+        if last.1.contains("\"decision\":\"block\"") && !last.2.contains("NODE-RAN") {
             break;
         }
         std::thread::sleep(Duration::from_millis(50));

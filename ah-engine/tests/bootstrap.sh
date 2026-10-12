@@ -168,6 +168,9 @@ t_wrapper_spawns() {
   # hooks dir stands in for the plugin so the repo tree is not touched.
   newhome wrap
   mkdir -p "$tmp/plug/hooks"; cp "$wrapper" "$boot" "$repo"/plugins/anti-hall/hooks/ah-fallback.list "$repo"/plugins/anti-hall/hooks/ah-fallback.map.json "$tmp/plug/hooks/"
+  # Contract: the fail-fast wrapper reads its client deadlines from the plugin's shipped engine/defaults/engine.toml and exits 0
+  # (fail open) before anything else when that file is missing, so the stand-in plugin ships it like the real one does.
+  mkdir -p "$tmp/plug/engine/defaults"; cp "$repo"/plugins/anti-hall/engine/defaults/engine.toml "$tmp/plug/engine/defaults/"
   write_lock "$tmp/plug/ah-engine.lock" "$ver" "$triple" "$good"
   printf '{}' | AH_BOOTSTRAP_UNAME_S=Linux AH_BOOTSTRAP_UNAME_M=x86_64 AH_BOOTSTRAP_LIBC=gnu sh "$tmp/plug/hooks/ah-hook.sh" SessionStart >/dev/null 2>&1 || true
   n=0
