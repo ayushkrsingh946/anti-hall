@@ -900,6 +900,48 @@ fn fake_targets(host: &str) -> Vec<(String, Value)> {
     v
 }
 
+/// A listener on the engine socket that answers every request with a frame the dispatcher cannot use (see the fuzz test).
+struct GarbageDaemon {
+    sock: PathBuf,
+    stop: Arc<std::sync::atomic::AtomicBool>,
+    thread: std::thread::JoinHandle<()>,
+}
+
+impl GarbageDaemon {
+    fn stop(self) {
+        self.stop.store(true, Ordering::SeqCst);
+        ah_engine::discard::harmless(std::os::unix::net::UnixStream::connect(&self.sock)); // wakes the accept
+        ah_engine::discard::harmless(self.thread.join());
+        ah_engine::discard::harmless(std::fs::remove_file(&self.sock));
+    }
+}
+
+fn garbage_daemon(state: &std::path::Path) -> GarbageDaemon {
+    use ah_engine::frame::{Kind, encode};
+    let sock = ah_engine::paths::socket_in(state);
+    std::fs::create_dir_all(sock.parent().unwrap()).unwrap();
+    ah_engine::discard::harmless(std::fs::remove_file(&sock));
+    let listener = std::os::unix::net::UnixListener::bind(&sock).unwrap();
+    let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let flag = stop.clone();
+    let reply = encode(Kind::Ok, "this is not a dispatch reply");
+    let thread = std::thread::spawn(move || {
+        for s in listener.incoming().flatten() {
+            if flag.load(Ordering::SeqCst) {
+                return;
+            }
+            let reply = reply.clone();
+            std::thread::spawn(move || {
+                let mut s = s;
+                let mut b = Vec::new();
+                ah_engine::discard::harmless(s.read_to_end(&mut b));
+                ah_engine::discard::harmless(s.write_all(&reply));
+            });
+        }
+    });
+    GarbageDaemon { sock, stop, thread }
+}
+
 #[test]
 fn a_seeded_combination_fuzz_merges_identically_through_the_thin_trigger() {
     let rig = Rig::new("fuzz");
@@ -933,7 +975,12 @@ fn a_seeded_combination_fuzz_merges_identically_through_the_thin_trigger() {
             }
         }
     }
+    // Contract: an absent, hung or marked-down daemon makes the client fail open WITHOUT running any hook, so "checks down" can no
+    // longer be reached by not starting the daemon. A stand-in daemon that answers with something the dispatcher cannot use is what
+    // makes every entry run as its (fake) Node hook, which is what this fuzz needs to exercise the merge, cap and decision logic.
+    let stand_in = garbage_daemon(&rig.root.join("state"));
     let (total, fails, stricter, diag) = run_rows(&rig, rows, conc());
+    stand_in.stop();
     assert!(total >= 100, "the fuzz covers many (host, event, tool) targets: {total}");
     report("combination fuzz (fake hooks)", total, &fails, stricter, &diag);
 }
