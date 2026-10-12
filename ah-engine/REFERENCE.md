@@ -4326,7 +4326,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `doctor_msg.state_unwritable` | `state directory {dir} is not writable ({err}) - Fix: chmod u+w {dir}, or remo...` |  |  | ST-03. Placeholders: {dir}, {err}. |
 | `doctor_msg.state_windows_mount` | `{dir} is on a Windows drive ({mount}); file locks and sockets are unreliable ...` |  |  | ST-07. Placeholders: {dir}, {mount}. |
 | `doctor_msg.statusline_dispatcher_missing` | `statusline.js dispatcher missing` |  |  | The statusline dispatcher script is not installed. |
-| `doctor_msg.statusline_installed` | `statusline installed ({label}) -> anti-hall dispatcher` |  |  | The statusline is the anti-hall dispatcher. Placeholder: {label}. |
+| `doctor_msg.statusline_installed` | `legacy anti-hall statusLine still configured ({label}) -> uninstall-statuslin...` |  |  | A legacy anti-hall statusLine is still configured. Placeholder: {label}. |
 | `doctor_msg.statusline_no_output` | `statusline.js produced no output (exit {code})` |  |  | The statusline printed nothing, or failed. Placeholder: {code}. |
 | `doctor_msg.statusline_none` | `no anti-hall statusLine configured (installer retired)` |  |  | No statusLine is configured. |
 | `doctor_msg.statusline_one_line` | `statusline rendered only 1 line — line 2 (context gauge) did NOT render despi...` |  |  | The statusline printed only one line although the payload carried a context window. |
@@ -4459,7 +4459,6 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `setup.cap_hash_len` | `8` |  |  | The length of a per-worktree suffix, in hexadecimal digits. |
 | `setup.cap_how_companion` | `node "${CLAUDE_PLUGIN_ROOT}/companion/{file}"` |  |  | How a companion is enabled. Placeholder: file. |
 | `setup.cap_how_migrations` | `node "${CLAUDE_PLUGIN_ROOT}/scripts/migrate-state.js"` |  |  | How pending state migrations are applied. |
-| `setup.cap_how_statusline` | `retired: use uninstall-statusline to clean up older anti-hall statusLine inst...` |  |  | Statusline install is retired; cleanup is via uninstall-statusline. |
 | `setup.cap_installer_prefix` | `install-` |  |  | What a companion installer's file name starts with. |
 | `setup.cap_installer_suffix` | `.js` |  |  | What a companion installer's file name ends with. |
 | `setup.cap_key_max` | `40` |  |  | The longest head of a per-project suffix, in characters. |
@@ -4470,7 +4469,6 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `setup.cap_legacy_files` | `.anti-hall-progress.md, .anti-hall-history.md` |  |  | The legacy root progress and history files whose copy under .anti-hall/history/legacy is the state migration. |
 | `setup.cap_listing_fn` | `listInstalledIngestUnits` |  |  | The name of the installer export that lists every installed unit; an installer that exports it is checked with it (the per-worktree readback contract). |
 | `setup.cap_name_migrations` | `state-migrations` |  |  | The capability name of the state migrations. |
-| `setup.cap_name_statusline` | `statusline` |  |  | The capability name of the status line. |
 | `setup.cap_os_names` | `2 entries` |  |  | Operating-system names as Node reports them, by the name Rust reports. |
 | `setup.cap_plat_darwin` | `darwin` |  |  | The platform name of macOS. |
 | `setup.cap_plat_linux` | `linux` |  |  | The platform name of Linux. |
@@ -4479,11 +4477,6 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `setup.cap_service_suffix` | `.service` |  |  | The end of a systemd service file's name. |
 | `setup.cap_state_active` | `active` |  |  | How the text report says a capability is active. |
 | `setup.cap_state_inactive` | `available, not active` |  |  | How the text report says a capability is shipped but not active. |
-| `setup.cap_status_command_key` | `command` |  |  | The member of the status-line setting that holds its command. |
-| `setup.cap_status_key` | `statusLine` |  |  | The settings member that configures the status line. |
-| `setup.cap_status_project_files` | `.claude/settings.local.json, .claude/settings.json` |  |  | The project-scope settings files a status line may be configured in, strongest first, relative to the working directory. |
-| `setup.cap_status_user_files` | `.claude/settings.json` |  |  | The user-scope settings files a status line may be configured in, relative to the home directory. |
-| `setup.cap_statusline_marker` | `statusline.js` |  |  | The file name a legacy anti-hall status line command may contain when cleanup status is checked. |
 | `setup.cap_systemd_dir` | `.config/systemd/user` |  |  | The Linux per-user systemd directory, under the home directory. |
 | `setup.cap_timer_suffix` | `.timer` |  |  | The end of a systemd timer file's name. |
 | `setup.cap_unit_sep` | `-` |  |  | What separates a systemd unit name from its per-worktree or per-project suffix. |
