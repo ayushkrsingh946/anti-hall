@@ -335,7 +335,11 @@ test_signal_fallback() {
   out=$tmp/sig.out
   err=$tmp/sig.err
   AH_ENGINE_BIN="$e" AH_FALLBACK_LIST="$tmp/sig.list" sh "$wrapper" PreToolUse --tool-from-payload <"$payload" >"$out" 2>"$err"
-  [ ! -s "$out" ] && [ ! -s "$err" ]
+  # Contract: an engine killed by a signal fails open silently (exit 0, no output, no Node handoff).
+  if [ -s "$out" ] || [ -s "$err" ]; then
+    printf 'signal_fallback: out=[%s] err=[%s]\n' "$(cat "$out")" "$(cat "$err")" >&2
+    return 1
+  fi
 }
 
 test_engine_odd_exits_fallback() {
@@ -1127,6 +1131,8 @@ test_unmatched_tool_runs_nothing_but_unparseable_selects_all() {
 }
 
 test_killed_wrapper_orphans_are_reaped() {
+  # Contract: the wrapper has a ~0.5 s fail-open deadline by default; this test needs the engine to outlive it so the wrapper can be
+  # SIGKILLed mid-run, hence the explicit AH_HOOK_TIMEOUT_MS. What it guards (orphan reaping) is unchanged.
   parent=$tmp/orphanparent
   mkdir "$parent"
   started=$tmp/orphan.started
@@ -1134,7 +1140,7 @@ test_killed_wrapper_orphans_are_reaped() {
   rm -f "$started" "$pidfile"
   : >"$tmp/orphan.list"
   e=$(make_engine orphan-engine hang)
-  TMPDIR="$parent" AH_STARTED="$started" AH_PIDFILE="$pidfile" AH_SLEEP_S="$long_sleep" AH_ENGINE_BIN="$e" AH_FALLBACK_LIST="$tmp/orphan.list" AH_HOOK_TIMEOUT_S=60 sh "$wrapper" PreToolUse --tool-from-payload <"$payload" >"$tmp/orphan.out" 2>"$tmp/orphan.err" &
+  TMPDIR="$parent" AH_STARTED="$started" AH_PIDFILE="$pidfile" AH_SLEEP_S="$long_sleep" AH_ENGINE_BIN="$e" AH_FALLBACK_LIST="$tmp/orphan.list" AH_HOOK_TIMEOUT_S=60 AH_HOOK_TIMEOUT_MS=60000 sh "$wrapper" PreToolUse --tool-from-payload <"$payload" >"$tmp/orphan.out" 2>"$tmp/orphan.err" &
   wrapper_pid=$!
   wait_for_file "$started" "$poll_limit" && wait_for_nonempty_file "$pidfile" "$poll_limit" || {
     kill_test_tree "$wrapper_pid"
