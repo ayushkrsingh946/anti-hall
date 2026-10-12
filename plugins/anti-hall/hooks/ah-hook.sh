@@ -1093,6 +1093,10 @@ run_engine() {
   [ -n "$tool" ] && set -- "$@" --tool "$tool"
   set -- "$@" --host "$host" --fallback-map "$fallback_map"
   pid_file=$tmp/engine.pid; group_file=$tmp/engine.group
+  # A signal-killed engine makes the shell print "Killed: 9" for the job to ITS stderr, at reap time (which can precede our
+  # `wait`, so `wait 2>/dev/null` is not enough). The fail-open contract is silent, so the shell's stderr is parked while the
+  # engine job runs and restored before anything is passed through.
+  exec 4>&2 2>/dev/null
   launch_argv_group "$eng_out" "$eng_err" "$pid_file" "$group_file" "$@" || exit 0
   pid=$(cat "$pid_file"); group_pid=$(cat "$group_file")
   children="$children $pid"
@@ -1102,6 +1106,7 @@ run_engine() {
   rc=$?
   settle_watchdog "$eng_timed"
   remove_child "$pid"
+  exec 2>&4 4>&-
   if [ -f "$eng_timed" ]; then
     wrapper_diag "engine_timed event=$event timeout_ms=$timeout rc=$rc done=$([ -e "$eng_done" ] && printf 1 || printf 0)"
     exit 0
