@@ -942,11 +942,14 @@ fn archive_cap_seed80(c: &Corpus) -> usize {
     let (a, b) = (copy_home(c, "node-t"), copy_home(c, "engine-t"));
     let mut env = env_of("30", "5", "100", "true");
     env.insert("ANTIHALL_DEVSWARM_RETENTION_ARCHIVE_MAX_MB".into(), "0".into());
+    // tick 0 is the dry run, tick 1 prunes and writes the archive months (each side with its own compressor); the cap is
+    // only measured and applied on tick 2, once no further archive file can appear in the same tick
     golden_tick(c, &a, &b, &env, 0, &System::configured());
+    golden_tick(c, &a, &b, &env, 1, &System::configured());
     let before = tree(&b.join(".anti-hall/devswarm/archive"));
     let cap = archive_cap_with_shared_margin(&[a.as_path(), b.as_path()]);
     env.insert("ANTIHALL_DEVSWARM_RETENTION_ARCHIVE_MAX_MB".into(), cap);
-    golden_tick(c, &a, &b, &env, 1, &System::configured());
+    golden_tick(c, &a, &b, &env, 2, &System::configured());
     let after = tree(&b.join(".anti-hall/devswarm/archive"));
     assert!(after.contains_key("README.txt"), "a file that is not an archive month was touched");
     before.keys().filter(|k| !after.contains_key(*k)).count()
