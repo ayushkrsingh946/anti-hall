@@ -716,16 +716,7 @@ fn run_rows(rig: &Rig, rows: Vec<Row>, conc: usize) -> (usize, Vec<String>, usiz
         String::new()
     } else {
         let tail = |path: PathBuf| {
-            std::fs::read_to_string(path)
-                .unwrap_or_default()
-                .lines()
-                .rev()
-                .take(80)
-                .collect::<Vec<_>>()
-                .into_iter()
-                .rev()
-                .collect::<Vec<_>>()
-                .join("\n")
+            std::fs::read_to_string(path).unwrap_or_default().lines().rev().take(80).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join("\n")
         };
         let log_tail = tail(rig.root.join("state/ah-engine.log"));
         let wrapper_tail = tail(rig.root.join("wrapper-diag.log"));
