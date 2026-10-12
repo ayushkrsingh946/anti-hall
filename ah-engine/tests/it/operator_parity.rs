@@ -1406,7 +1406,15 @@ fn a_sampled_installer_run_is_replayed_on_a_scratch_copy_and_never_writes_twice(
     assert!(h.contains("/shadow/") && d.contains("/shadow/"), "Node ran in scratch directories: {seen}");
     assert_ne!(Path::new(h), home.path());
     assert_ne!(Path::new(d), cwd.path());
-    assert_eq!(before_cwd, snapshot(cwd.path())?, "shadow leaves project settings untouched");
+    // Contract (retired statusline): the REAL `uninstall-statusline --project` is the run that writes (it restores from the one-time
+    // backup, so the project settings legitimately differ from before it); the shadow only replays Node on the scratch copy. So the
+    // old "nothing changed" equality is replaced by what must still hold: the backup is never overwritten and nothing else moves.
+    assert_eq!(
+        fs::read_to_string(cwd.path().join(".claude/settings.json.bak-antihall"))?,
+        r#"{"statusLine":{"type":"command","command":"echo committed"}}"#,
+        "the one-time backup is never overwritten"
+    );
+    assert_eq!(fs::read_to_string(cwd.path().join(".gitignore"))?, "x\n", "the shadow touched nothing else");
     assert_eq!(fs::read_to_string(cwd.path().join(".gitignore"))?.matches(".claude/settings.local.json").count(), 0);
     Ok(())
 }
