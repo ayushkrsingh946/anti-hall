@@ -494,6 +494,50 @@ test_fallback_exit_code_matrix_rows() {
   done
 }
 
+# Several fallback hooks that each print one JSON object must reach the host as ONE valid JSON object.
+fb_merge_run() {
+  name=$1; shift
+  i=0; rows=
+  for body in "$@"; do
+    i=$((i + 1))
+    h=$(hook_script "$name-$i" "printf '%s\\n' '$body'")
+    rows="$rows*	$large_timeout	$h
+"
+  done
+  printf '@UserPromptSubmit\t%s\n%s' "$large_timeout" "$rows" >"$tmp/$name.list"
+  printf '{"hook_event_name":"UserPromptSubmit","prompt":"x"}' >"$tmp/$name.in"
+  AH_ENGINE_BIN=/no/such/engine AH_FALLBACK_LIST="$tmp/$name.list" sh "$wrapper" UserPromptSubmit <"$tmp/$name.in" >"$tmp/$name.out" 2>"$tmp/$name.err"
+}
+
+test_fallback_merges_json_outputs() {
+  command -v jq >/dev/null 2>&1 || { echo 'jq missing: skipping' >&2; return 0; }
+  a='{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"A"}}'
+  b='{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"B"}}'
+  fb_merge_run fbm "$a" "$b" || return 1
+  [ "$(jq -s length <"$tmp/fbm.out")" = 1 ] || return 1
+  [ "$(jq -r '.hookSpecificOutput.additionalContext' <"$tmp/fbm.out")" = "$(printf 'A\n\nB')" ] || return 1
+  [ "$(jq -r '.hookSpecificOutput.hookEventName' <"$tmp/fbm.out")" = UserPromptSubmit ] || return 1
+  # a systemMessage, a quote and a backslash survive; an empty context between them is dropped
+  c='{"systemMessage":"m1","hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"say \"hi\" \\ x"}}'
+  e='{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":""}}'
+  d='{"systemMessage":"m2","hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"D"}}'
+  fb_merge_run fbm3 "$c" "$e" "$d" || return 1
+  [ "$(jq -s length <"$tmp/fbm3.out")" = 1 ] || return 1
+  [ "$(jq -r '.hookSpecificOutput.additionalContext' <"$tmp/fbm3.out")" = "$(printf 'say "hi" \\ x\n\nD')" ] || return 1
+  [ "$(jq -r '.systemMessage' <"$tmp/fbm3.out")" = "$(printf 'm1\nm2')" ] || return 1
+}
+
+test_fallback_two_empty_contexts_say_nothing() {
+  e='{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":""}}'
+  fb_merge_run fbe "$e" "$e" || return 1
+  [ ! -s "$tmp/fbe.out" ] || return 1
+  # one empty + one real: only the real one, still one object
+  command -v jq >/dev/null 2>&1 || return 0
+  a='{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"A"}}'
+  fb_merge_run fbe2 "$e" "$a" || return 1
+  [ "$(jq -s length <"$tmp/fbe2.out")" = 1 ] && [ "$(jq -r '.hookSpecificOutput.additionalContext' <"$tmp/fbe2.out")" = A ]
+}
+
 test_fallback_exit1_host_nonblocking_rows() {
   i=0
   for body in 'printf out; exit 1' 'exit 1'; do
@@ -1293,6 +1337,8 @@ check tool_name_structural_scanner test_tool_name_structural_scanner
 check tool_name_invalid_selects_all_non_guard test_tool_name_invalid_selects_all_non_guard
 check tool_name_huge_payload_fast test_tool_name_huge_payload_fast
 check fallback_exit_code_matrix_rows test_fallback_exit_code_matrix_rows
+check fallback_merges_json_outputs test_fallback_merges_json_outputs
+check fallback_two_empty_contexts_say_nothing test_fallback_two_empty_contexts_say_nothing
 check fallback_exit1_host_nonblocking_rows test_fallback_exit1_host_nonblocking_rows
 check shell_started_126_127_are_host_nonblocking test_shell_started_126_127_are_host_nonblocking
 check exit0_json_block_wins_verbatim test_exit0_json_block_wins_verbatim
