@@ -152,5 +152,41 @@ wait "$ipid"
 check "bypass: the binary written behind the check's back stays in place" test "$(sha "$bin")" = "$O"
 check "bypass: nothing was set aside" sh -c '! ls "$0".rolledback-* >/dev/null 2>&1' "$bin"
 
+# ---- 6. two breakers of one stale lock: the late one must not move the lock the early one took, nor free it for a third ------
+# A stub mv on the late breaker's PATH parks it right before its break (it has read the dead holder) and right after it.
+mkdir -p "$tmp/parkbin"
+cat >"$tmp/parkbin/mv" <<EOS
+#!/bin/sh
+park() { [ -f "$tmp/gate\$1" ] || return 0; : >"$tmp/parked\$1"; while [ -f "$tmp/gate\$1" ]; do sleep 0.1; done; }
+case "\$1" in */install.lock|*/install.lock/owner) park 1; /bin/mv "\$@"; rc=\$?; park 2; exit \$rc ;; esac
+exec /bin/mv "\$@"
+EOS
+chmod 755 "$tmp/parkbin/mv"
+world reclaim
+sh -c 'exit 0' & gone=$!; wait "$gone"
+mkdir "$state/install.lock"; printf '%s %s\n' "$gone" "$(date +%s)" >"$state/install.lock/owner"
+: >"$tmp/gate1"; : >"$tmp/gate2"; rm -f "$tmp/parked1" "$tmp/parked2"
+HOME=$home AH_ENGINE_DIR=$state AH_ENGINE_PLUGIN_ROOT=$plug AH_ENGINE_INSTALL_LOCK_WAIT_S=1 PATH=$tmp/parkbin:$PATH \
+  sh "$integ" record </dev/null >/dev/null 2>&1 &
+apid=$!; bg="$bg $apid"
+check "reclaim: the late breaker parks after reading the dead holder" waitfor 100 test -f "$tmp/parked1"
+sleep 300 & bh=$!; bg="$bg $bh"; btok="$bh $(date +%s)"
+AH_ENGINE_INSTALL_LOCK_WAIT_S=1 integrity lock "$btok" >/dev/null 2>&1; brc=$?
+check "reclaim: the early breaker takes the lock" test "$brc" -eq 0
+check "reclaim: the early breaker owns it" test "$(cat "$state/install.lock/owner" 2>/dev/null)" = "$btok"
+rm -f "$tmp/gate1"
+check "reclaim: the late breaker acts on the lock" waitfor 100 test -f "$tmp/parked2"
+sleep 300 & ch=$!; bg="$bg $ch"; ctok="$ch $(date +%s)"
+AH_ENGINE_INSTALL_LOCK_WAIT_S=1 integrity lock "$ctok" >/dev/null 2>&1; crc=$?
+check "reclaim: a third taker does not get the lock the early breaker holds" test "$crc" -ne 0
+rm -f "$tmp/gate2"
+wait "$apid"
+check "reclaim: the early breaker still owns the lock" test "$(cat "$state/install.lock/owner" 2>/dev/null)" = "$btok"
+check "reclaim: the third taker does not own it" test "$(cat "$state/install.lock/owner" 2>/dev/null)" != "$ctok"
+integrity unlock "$btok"
+check "reclaim: the early breaker gives it back" test ! -e "$state/install.lock"
+check "reclaim: the dead holder's lock is set aside, not deleted" sh -c 'ls -d "$0".stale.* >/dev/null 2>&1' "$state/install.lock"
+kill "$bh" "$ch" 2>/dev/null; wait "$bh" 2>/dev/null; wait "$ch" 2>/dev/null
+
 printf '%s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
