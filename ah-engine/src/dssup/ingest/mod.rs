@@ -182,10 +182,14 @@ struct PoolWorker {
     stop: Arc<AtomicBool>,
 }
 
+/// What a worker runs for one job: the drain loop of its project until the stop test turns true.
+type DrainFn = Arc<dyn Fn(&Path, &Settings, Project, &dyn Fn() -> bool) + Send + Sync>;
+
 struct Job {
     project: Project,
     st: Settings,
     stop: Arc<AtomicBool>,
+    run: DrainFn,
 }
 
 enum Msg {
@@ -205,9 +209,10 @@ fn spawn_pool_worker(home: PathBuf, stop: Arc<dyn Fn() -> bool + Send + Sync>, r
             match msg {
                 Ok(Msg::Run(job)) => {
                     let key = job.project.repo_key.clone();
-                    let should_stop = || stop() || job.stop.load(Ordering::Relaxed);
+                    // The worker's own flag too: a lowered cap retires this worker while its job runs.
+                    let should_stop = || stop() || worker_stop2.load(Ordering::Relaxed) || job.stop.load(Ordering::Relaxed);
                     let _boundary = crate::crash::enter("thread", "", "", "", "devswarm_ingest_project");
-                    run_project(&home, &job.st, job.project, &System::configured(), &should_stop);
+                    (job.run)(&home, &job.st, job.project, &should_stop);
                     let _sent = done.send(key); // keep: the manager may already be stopping
                 }
                 Ok(Msg::Stop) => {
@@ -282,7 +287,9 @@ fn join_finished_workers(workers: &mut Vec<PoolWorker>) {
     }
 }
 
-fn enforce_worker_cap_drop(workers: &mut Vec<PoolWorker>, max_worker_threads: usize, tx: &mpsc::Sender<Msg>) -> usize {
+/// Retire workers above the cap: signal each, then wait at most `devswarm_ingest.shutdown_wait_ms` for it to finish its iteration.
+/// One still running then moves to `retiring` (its flag stays set; the manager joins it once it ends) so the manager never hangs.
+fn enforce_worker_cap_drop(workers: &mut Vec<PoolWorker>, max_worker_threads: usize, tx: &mpsc::Sender<Msg>, retiring: &mut Vec<PoolWorker>) -> usize {
     let mut signaled = 0usize;
     while workers.len() > max_worker_threads {
         let Some(w) = workers.pop() else { break };
@@ -290,10 +297,29 @@ fn enforce_worker_cap_drop(workers: &mut Vec<PoolWorker>, max_worker_threads: us
         if tx.send(Msg::Stop).is_ok() {
             signaled += 1;
         }
-        crate::discard::logged("ingest_worker_join", w.handle.join().map_err(|_| "panic"));
+        if wait_finished(&w.handle, defaults::millis("devswarm_ingest.shutdown_wait_ms")) {
+            crate::discard::logged("ingest_worker_join", w.handle.join().map_err(|_| "panic"));
+        } else {
+            crate::discard::note("ingest_worker_join", "running");
+            retiring.push(w);
+        }
         join_finished_workers(workers);
     }
     signaled
+}
+
+/// Wait at most `limit` for a thread to end, polling every `devswarm_ingest.stop_poll_ms`. True when it ended.
+fn wait_finished(handle: &std::thread::JoinHandle<()>, limit: std::time::Duration) -> bool {
+    let poll = std::time::Duration::from_millis(defaults::num("devswarm_ingest.stop_poll_ms").max(1));
+    let start = std::time::Instant::now();
+    while !handle.is_finished() {
+        let elapsed = start.elapsed();
+        if elapsed >= limit {
+            return false;
+        }
+        std::thread::sleep(poll.min(limit - elapsed));
+    }
+    true
 }
 
 fn worker_threads_for_cap(max_threads: usize) -> usize {
@@ -442,9 +468,11 @@ pub fn start(home: &Path, state_dir: &Path, stop: Arc<dyn Fn() -> bool + Send + 
         let rx = Arc::new(Mutex::new(rx));
         let (done_tx, done_rx) = mpsc::channel();
         let mut workers: Vec<PoolWorker> = Vec::new();
+        let mut retiring: Vec<PoolWorker> = Vec::new();
         let mut running: HashMap<String, Assignment> = HashMap::new();
         let mut cursor = 0usize;
         let mut panics = 0u64;
+        let drain: DrainFn = Arc::new(|home, st, project, stop| run_project(home, st, project, &System::configured(), stop));
         while !stop_for_run() {
             for key in done_rx.try_iter() {
                 running.remove(&key);
@@ -470,12 +498,13 @@ pub fn start(home: &Path, state_dir: &Path, stop: Arc<dyn Fn() -> bool + Send + 
                     w.stop.store(true, Ordering::Relaxed);
                 }
             }
-            let _joined = enforce_worker_cap_drop(&mut workers, max_worker_threads, &tx);
+            join_finished_workers(&mut retiring);
+            let _joined = enforce_worker_cap_drop(&mut workers, max_worker_threads, &tx, &mut retiring);
             let _signaled = reconcile_worker_count(&mut workers, max_worker_threads, &home, stop_for_run.clone(), &rx, &tx, &done_tx);
             for p in startable_projects(&ordered, &running, max_worker_threads) {
                 let key = p.repo_key.clone();
                 let local_stop = Arc::new(AtomicBool::new(false));
-                if tx.send(Msg::Run(Job { project: p, st: st.clone(), stop: local_stop.clone() })).is_ok() {
+                if tx.send(Msg::Run(Job { project: p, st: st.clone(), stop: local_stop.clone(), run: drain.clone() })).is_ok() {
                     running.insert(key, Assignment { stop: local_stop, last_seen_ms: now });
                 }
             }
@@ -498,7 +527,7 @@ pub fn start(home: &Path, state_dir: &Path, stop: Arc<dyn Fn() -> bool + Send + 
             w.stop.store(true, Ordering::Relaxed);
             let _sent = tx.send(Msg::Stop); // keep: workers also see the global stop
         }
-        for w in workers {
+        for w in workers.into_iter().chain(retiring) {
             crate::discard::logged("ingest_worker_join", w.handle.join().map_err(|_| "panic"));
         }
     });
@@ -640,7 +669,7 @@ mod tests {
         let stop: Arc<dyn Fn() -> bool + Send + Sync> = Arc::new(move || stopped2.load(Ordering::Relaxed));
         let mut workers = Vec::new();
         let _signaled = reconcile_worker_count(&mut workers, 3, &std::env::temp_dir(), stop.clone(), &rx, &tx, &done_tx);
-        let signaled = enforce_worker_cap_drop(&mut workers, 1, &tx);
+        let signaled = enforce_worker_cap_drop(&mut workers, 1, &tx, &mut Vec::new());
         assert_eq!(workers.len(), 1);
         assert_eq!(signaled, 2);
         let _sent = tx.send(Msg::Stop);
@@ -653,6 +682,49 @@ mod tests {
         for w in workers {
             crate::discard::harmless(w.handle.join());
         }
+    }
+
+    #[test]
+    fn lowering_the_cap_ends_an_active_job_on_a_removed_worker() {
+        let (tx, rx) = mpsc::channel();
+        let rx = Arc::new(Mutex::new(rx));
+        let (done_tx, done_rx) = mpsc::channel();
+        let released = Arc::new(AtomicBool::new(false)); // the global stop: only the failure path turns it on
+        let released2 = released.clone();
+        let stop: Arc<dyn Fn() -> bool + Send + Sync> = Arc::new(move || released2.load(Ordering::Relaxed));
+        let mut workers = Vec::new();
+        let _signaled = reconcile_worker_count(&mut workers, 1, &std::env::temp_dir(), stop.clone(), &rx, &tx, &done_tx);
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let run: DrainFn = Arc::new(move |_, _, _, should_stop| {
+            let _sent = entered_tx.send(());
+            while !should_stop() {
+                std::thread::yield_now();
+            }
+        });
+        let job = Job { project: project("a"), st: Settings::from_env(&crate::reqenv::RequestEnv::capture()), stop: Arc::new(AtomicBool::new(false)), run };
+        assert!(tx.send(Msg::Run(job)).is_ok());
+        assert!(entered_rx.recv().is_ok(), "the worker is inside the active job"); // the job's own stop flag stays off
+        let (joined_tx, joined_rx) = mpsc::channel();
+        let dropper = std::thread::spawn(move || {
+            let _signaled = enforce_worker_cap_drop(&mut workers, 0, &tx, &mut Vec::new());
+            let _sent = joined_tx.send(workers.len());
+        });
+        let deadline = defaults::millis("devswarm_ingest.shutdown_wait_ms");
+        let joined = joined_rx.recv_timeout(deadline.saturating_mul(2));
+        released.store(true, Ordering::Relaxed); // free a hung worker so the test ends either way
+        crate::discard::harmless(dropper.join());
+        assert_eq!(joined.ok(), Some(0), "the cap drop returned with the worker removed");
+        assert_eq!(done_rx.try_recv().ok().as_deref(), Some("a"), "the active job ended on the removed worker's stop flag");
+    }
+
+    #[test]
+    fn the_cap_drop_wait_is_bounded() {
+        let (go_tx, go_rx) = mpsc::channel::<()>();
+        let h = std::thread::spawn(move || crate::discard::harmless(go_rx.recv()));
+        assert!(!wait_finished(&h, std::time::Duration::ZERO), "a running thread is reported unfinished at the limit");
+        assert!(go_tx.send(()).is_ok());
+        assert!(wait_finished(&h, defaults::millis("devswarm_ingest.shutdown_wait_ms")), "an ended thread is reported finished");
+        assert!(h.join().is_ok());
     }
 
     #[test]
