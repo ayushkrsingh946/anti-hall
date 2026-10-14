@@ -240,6 +240,11 @@ impl Mem {
     /// Make a value read from SQLite active, unless a write happened since `seq` was taken (then the next read
     /// promotes the newer value instead).
     pub fn promote(&self, seq: u64, k: (String, String), v: String, expires_ms: Option<u64>) {
+        self.promote_with(seq, k, v, expires_ms, || {});
+    }
+
+    /// [`Mem::promote`], running `between` after the first checks and before the insert (a test pause point).
+    fn promote_with(&self, seq: u64, k: (String, String), v: String, expires_ms: Option<u64>, between: impl FnOnce()) {
         if self.seq() != seq {
             return;
         }
@@ -249,11 +254,21 @@ impl Mem {
                 return;
             }
         }
+        between();
         let size = item_size(&k, &v);
-        if self.admit(size) {
-            lk(&self.kv).insert(k, v, size, expires_ms);
-            self.observe_budget();
+        if !self.admit(size) {
+            return; // admission reads the cache size, so it runs before the final lock
         }
+        {
+            // A write that committed since the checks above bumped the sequence (before caching its value):
+            // recheck both under the lock that inserts, so a stale read never replaces an acknowledged write.
+            let mut kv = lk(&self.kv);
+            if self.seq() != seq || kv.contains(&k) {
+                return;
+            }
+            kv.insert(k, v, size, expires_ms);
+        }
+        self.observe_budget();
     }
 
     /// After a commit: make written items active and announce them.
@@ -821,5 +836,21 @@ mod tests {
             verb: ProjVerb::Set { key: "k".to_string(), value: "new-value-too-large".to_string(), expires_ms: None },
         });
         assert!(lk(&mem.kv).get(&key, crate::health::now_ms()).is_none(), "refused replacement must not leave stale memory");
+    }
+
+    #[test]
+    fn stale_promoter_never_overwrites_an_acknowledged_write() {
+        let mem = Arc::new(Mem::new());
+        let key = ("/p".to_string(), "k".to_string());
+        let seq = mem.seq(); // the reader takes its sequence, then reads the old row from SQLite
+        mem.promote_with(seq, key.clone(), "old".to_string(), None, || {
+            // a write commits and is cached after the promoter's first checks
+            mem.committed(&Op::Proj {
+                project: "/p".to_string(),
+                write_id: String::new(),
+                verb: ProjVerb::Set { key: "k".to_string(), value: "new".to_string(), expires_ms: None },
+            });
+        });
+        assert_eq!(lk(&mem.kv).get(&key, crate::health::now_ms()).as_deref(), Some("new"), "the acknowledged value stays active");
     }
 }
