@@ -177,6 +177,7 @@ static CUR: RwLock<Option<Arc<Backend>>> = RwLock::new(None);
 static CLIENT: AtomicBool = AtomicBool::new(false);
 static GENERATION: AtomicU64 = AtomicU64::new(0);
 static CACHE_WRITES: AtomicBool = AtomicBool::new(false);
+static AFTER_TO_DAEMON: AtomicBool = AtomicBool::new(false);
 
 /// Make [`init`] read the daemon's snapshot cache (the thin hook client) instead of parsing the plugin's files. Call before
 /// the first read.
@@ -202,10 +203,18 @@ fn cache_best_effort(d: &load::Data) {
     }
 }
 
+/// Make a load leave the heal and the last-known-good copy ([`load::after`]) to the daemon the hook client starts: that work
+/// writes and syncs every defaults file, over a second on a cold state directory, which ran out the wrapper's deadline before
+/// the client reached the daemon, so a cold call never started one. The daemon does it at its own start. A client that may
+/// not start a daemon (`env.nospawn`) still does it, as nothing else would.
+pub fn leave_after_load_to_daemon() {
+    AFTER_TO_DAEMON.store(true, Ordering::SeqCst);
+}
+
 /// What follows a load that may write (the daemon, a client that parsed the files): log its fallbacks, keep the
 /// last-known-good copy. In-process tests and one-off commands write nothing.
 fn after_load(report: &load::Report, root: &Path) {
-    if CACHE_WRITES.load(Ordering::SeqCst) {
+    if CACHE_WRITES.load(Ordering::SeqCst) && !(AFTER_TO_DAEMON.load(Ordering::SeqCst) && env_var("nospawn").is_none()) {
         load::after(report, root);
     }
 }
