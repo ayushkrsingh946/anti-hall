@@ -60,6 +60,11 @@ large_timeout=10
 short_timeout=3
 long_sleep=30
 poll_limit=20
+# Pin a load-proof hook budget for every case: without it the wrapper uses the shipped 560 ms client deadline and a case
+# whose stand-in engine is merely slow to start (loaded machine) is killed and fails open, a different case each run.
+# Cases that need another budget set AH_HOOK_TIMEOUT_S/_MS on their own command line.
+AH_HOOK_TIMEOUT_S=$large_timeout
+export AH_HOOK_TIMEOUT_S
 
 check() {
   name=$1

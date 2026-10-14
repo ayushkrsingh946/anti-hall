@@ -270,6 +270,9 @@ validate_positive_int "$timeout_env" AH_HOOK_TIMEOUT_S
 timeout_ms_env=${AH_HOOK_TIMEOUT_MS:-}
 if [ -n "$timeout_ms_env" ]; then
   validate_positive_int "$timeout_ms_env" AH_HOOK_TIMEOUT_MS
+elif [ -n "${AH_HOOK_TIMEOUT_S:-}" ]; then
+  # an explicit seconds override beats the shipped client deadline (the test suite pins a load-proof budget this way)
+  timeout_ms_env=$((timeout_env * 1000))
 else
   client_deadline_ms=$(engine_effective_num client.deadline_ms || true)
   client_deadline_slack_ms=$(engine_default_num client.deadline_slack_ms || true)
