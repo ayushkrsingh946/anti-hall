@@ -660,6 +660,79 @@ fn slow_sender_cannot_wedge_the_daemon() {
 
 // ---- 3. watchdog + breaker --------------------------------------------------------------------
 
+/// R0 P0: a daemon killed right after its start was not restarted by the wrapper. The single-flight spawn lock outlived the
+/// start it guarded (client.rs SpawnLock kept it for `client.spawn_lock_ttl_ms`), so every client in that window found the lock
+/// held and skipped the spawn. The TTL is stretched here so the window covers the whole test: the daemon must free the lock
+/// once it listens, and the first or second wrapper call after a `kill -9` must start a new daemon.
+#[test]
+fn wrapper_respawns_a_daemon_killed_right_after_its_start() {
+    let _timing = wrapper_timing_lock();
+    let e = Env::new("kill9", &[("AH_ENGINE_SPAWN_LOCK_TTL_MS", "600000")]);
+    let (code, _, _) = wrapper_once(&e);
+    assert_eq!(code, 0);
+    assert!(wait_for(|| e.pid().is_some()), "the first wrapper call did not start a daemon{}", e.diag());
+    let old = e.pid().unwrap();
+    // SAFETY: `kill` takes plain integers and has no memory-safety preconditions; the pid is this test's own daemon.
+    unsafe { libc::kill(old as i32, libc::SIGKILL) };
+    assert!(wait_for(|| !alive(old)), "kill -9 did not end the daemon");
+    let mut calls = 0;
+    let mut fresh = None;
+    while calls < 2 && fresh.is_none() {
+        calls += 1;
+        let (code, _, dt) = wrapper_once(&e);
+        assert_eq!(code, 0, "wrapper call {calls} after kill -9 must fail open");
+        assert!(dt < Duration::from_secs(1), "wrapper call {calls} after kill -9 took {dt:?}");
+        fresh = wait_for(|| e.pid().is_some_and(|p| p != old)).then(|| e.pid().unwrap());
+    }
+    assert!(fresh.is_some(), "no new daemon after {calls} wrapper calls following kill -9{}", e.diag());
+}
+
+/// R0 P0: on a fresh state directory the first wrapper calls started no daemon. The hook client, finding no snapshot cache,
+/// parsed the defaults and then kept the last-known-good copy and healed (one synced write per defaults file) BEFORE it asked
+/// the daemon: over a second, so the wrapper's watchdog killed it before the spawn. The client now leaves that copy to the
+/// daemon it starts, so the copy is written after the spawn attempt. Timestamps, not timing: this holds on any machine load.
+#[test]
+fn a_cold_hook_client_starts_the_daemon_before_any_last_known_good_copy_is_written() {
+    let e = Env::new_no_prime("coldorder", &[]);
+    let o = e
+        .cmd()
+        .args(["hook", "--event", "PreToolUse", "--host", "claude"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .and_then(|mut ch| {
+            ch.stdin.take().unwrap().write_all(DENY_IN.as_bytes())?;
+            ch.wait()
+        })
+        .unwrap();
+    assert_eq!(o.code(), Some(0), "a cold call fails open");
+    assert!(wait_for(|| e.pid().is_some()), "the cold call started no daemon{}", e.diag());
+    let stamp =
+        || std::fs::read_dir(e.eng().join("defaults.lkg")).ok()?.flatten().find_map(|d| std::fs::metadata(d.path().join("STAMP")).ok()?.modified().ok());
+    assert!(wait_for(|| stamp().is_some()), "the daemon kept no last-known-good copy{}", e.diag());
+    let stamp_ms = stamp().unwrap().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64;
+    let log = e.health_log();
+    let spawn_ms: u64 = log
+        .lines()
+        .find(|l| l.contains("\tclient_spawn_attempt\t"))
+        .and_then(|l| l.split('\t').next()?.parse().ok())
+        .unwrap_or_else(|| panic!("no spawn attempt logged{}", e.diag()));
+    assert!(stamp_ms >= spawn_ms, "the client wrote the last-known-good copy ({stamp_ms}) before it started the daemon ({spawn_ms})");
+}
+
+/// The same through the wrapper: the first call on a fresh state directory leaves a daemon starting. The wrapper deadline is
+/// widened (the test-only knob) because this debug build parses the defaults several times slower than a release build, and
+/// machine load slows it further; the ordering itself is pinned by the test above.
+#[test]
+fn a_cold_first_wrapper_call_starts_the_daemon() {
+    let _timing = wrapper_timing_lock();
+    let e = Env::new_no_prime("cold1", &[("AH_HOOK_TIMEOUT_MS", "5000")]);
+    let (code, out, _) = wrapper_once(&e);
+    assert_eq!((code, out.as_str()), (0, ""), "a cold first call fails open");
+    assert!(wait_for(|| e.pid().is_some()), "no daemon after the first cold wrapper call{}", e.diag());
+}
+
 #[test]
 fn stalled_loop_triggers_clean_exit_and_next_client_respawns() {
     let e = Env::new("stall", &[("AH_ENGINE_STALL_MS", "500"), ("AH_ENGINE_WATCHDOG_TICK_MS", "100")]);

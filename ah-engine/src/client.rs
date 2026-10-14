@@ -162,8 +162,15 @@ struct SpawnLock {
 
 impl Drop for SpawnLock {
     fn drop(&mut self) {
-        let _ = &self.path; // keep the single-flight marker until its config TTL expires
+        let _ = &self.path; // keep the single-flight marker until the daemon releases it on start, or its config TTL expires
     }
+}
+
+/// The daemon is listening: the start the single-flight lock guarded is over, so a death right after it is restarted by the
+/// next client instead of waiting out `client.spawn_lock_ttl_ms`. A daemon that dies before it listens never gets here, so its
+/// lock still throttles restarts (and the crash-loop rule still counts them).
+pub(crate) fn release_spawn_lock() {
+    crate::discard::harmless(std::fs::remove_file(state_file("spawn_lock"))); // keep: absent lock is the desired state
 }
 
 fn spawn_lock() -> Option<SpawnLock> {
