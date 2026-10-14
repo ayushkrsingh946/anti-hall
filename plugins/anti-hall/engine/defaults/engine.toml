@@ -933,3 +933,25 @@ value = ".sha256"
 [rollback.aside_infix]
 doc = "A binary set aside by a roll-back is renamed bin/ah-engine.rolledback-<UTC time>-<sha prefix>; this is the word between. Set-aside binaries are never deleted."
 value = ".rolledback-"
+
+[rollback.install_lock]
+doc = "Directory (inside the state directory) of the ONE lock every writer of the engine binary shares: the integrity script's check and roll-back, the bootstrap's and ah-update's install and roll-back, and the recording of the expected sha256. Taken and given back through the integrity script's lock and unlock verbs."
+value = "install.lock"
+
+[rollback.lock_wait_s]
+doc = "How long an install, a roll-back by ah-update, or the recording of the expected sha256 waits for the install lock before giving up (the installer then fails and keeps the old binary)."
+value = 60
+env = "AH_ENGINE_INSTALL_LOCK_WAIT_S"
+unit = "s"
+
+[rollback.lock_hook_wait_s]
+doc = "How long the integrity check started by the hook wrapper waits for the install lock before skipping (the next run checks). A held lock never holds a session."
+value = 2
+env = "AH_ENGINE_INSTALL_LOCK_HOOK_WAIT_S"
+unit = "s"
+
+[rollback.lock_stale_s]
+doc = "An install lock held longer than this is broken (one whose holder process is gone is broken at once). Longer than the slowest install: ah-update's go_live_timeout_s."
+value = 900
+env = "AH_ENGINE_INSTALL_LOCK_STALE_S"
+unit = "s"

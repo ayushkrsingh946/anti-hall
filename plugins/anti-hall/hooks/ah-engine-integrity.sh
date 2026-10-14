@@ -11,10 +11,20 @@
 #           the engine, or rollback.fail_n wrapper failures within rollback.fail_window_s)
 #   fail    the hook wrapper saw the engine time out, die by signal or answer nothing: count it, then check
 #   status  print what is known (expected, good, healthy, last roll-back)
+#   lock TOKEN    take the install lock for TOKEN ("<pid> <epoch>" of the caller), waiting up to rollback.lock_wait_s; exit 1 when
+#                 another holder kept it that long
+#   unlock TOKEN  give the install lock back (only when TOKEN holds it)
+#
+# The install lock (rollback.install_lock, a directory in the state directory) is ONE lock shared by every writer of bin/: this
+# script's check and roll-back, the bootstrap's and ah-update's install and roll-back, and the recording of the expected sha256.
+# An installer takes it with `lock`, swaps the binary, runs `record` with AH_ENGINE_INSTALL_LOCK_TOKEN set to its token (record
+# then runs under the caller's hold) and gives it back with `unlock`. record and accept wait up to rollback.lock_wait_s for it;
+# check and fail (run by the hook wrapper) wait only rollback.lock_hook_wait_s and then skip, so a held lock never holds a session.
+# A lock whose holder pid is gone, or that is older than rollback.lock_stale_s, is broken.
 #
 # A roll-back renames the bad binary to bin/ah-engine.rolledback-<UTC time>-<sha8> (never deleted) and restores bin/ah-engine.good.
 # Every name, threshold and path comes from the plugin's engine/defaults/engine.toml ([rollback.*], [files.*]); nothing is fixed here.
-# Never fails a session: every outcome exits 0 and is written to the integrity log in the state directory.
+# Never fails a session: every verb but `lock` exits 0, and every outcome is written to the integrity log in the state directory.
 
 verb=${1:-}
 here=$(CDPATH="" cd -- "$(dirname "$0")" 2>/dev/null && pwd) || exit 0
@@ -71,6 +81,11 @@ log_f=$(cfg_text files.integrity_log)
 for v in "$bin_dir" "$bin_name" "$good_sfx" "$exp_sfx" "$aside_mid" "$accepted_sfx" "$sha_sfx" "$healthy_f" "$request_f" "$last_f" "$fails_f" "$log_f"; do
   [ -n "$v" ] || exit 0 # the settings file lacks a key: nothing safe to do
 done
+lock_name=$(cfg_text rollback.install_lock)
+[ -n "$lock_name" ] || exit 0
+lock_wait=$(cfg_num rollback.lock_wait_s) || exit 0
+hook_wait=$(cfg_num rollback.lock_hook_wait_s) || exit 0
+lock_stale=$(cfg_num rollback.lock_stale_s) || exit 0
 fail_n=$(cfg_num rollback.fail_n) || exit 0
 fail_win=$(cfg_num rollback.fail_window_s) || exit 0
 on_mismatch=$(cfg_num rollback.on_mismatch) || exit 0
@@ -85,7 +100,8 @@ request=$state/$request_f
 last=$state/$last_f
 fails=$state/$fails_f
 log=$state/$log_f
-lockdir=$state/integrity.lock
+lockdir=$state/$lock_name
+owner_f=$lockdir/owner
 
 say() {
   printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >>"$log" 2>/dev/null
@@ -108,16 +124,68 @@ sha256_of() {
 first_word() { [ -f "$1" ] && sed -n '1{s/[[:space:]].*$//;p;}' "$1" 2>/dev/null; }
 
 mkdir -p "$state/$bin_dir" 2>/dev/null || exit 0
-if ! mkdir "$lockdir" 2>/dev/null; then
-  # a lock older than 10 minutes is stale
-  if [ -n "$(find "$lockdir" -maxdepth 0 -mmin +10 2>/dev/null)" ]; then
-    rmdir "$lockdir" 2>/dev/null
-    mkdir "$lockdir" 2>/dev/null || exit 0
-  else
-    exit 0
+
+# lock_stale: the install lock's holder is gone (dead pid) or has held it longer than rollback.lock_stale_s; it is then broken.
+# The lock is renamed away first (a rename succeeds for one breaker only) and its owner compared again, so a lock another waiter
+# took a moment ago is put back instead of broken.
+lock_stale() {
+  lo=$(cat "$owner_f" 2>/dev/null)
+  lnow=$(date +%s 2>/dev/null) || return 1
+  if [ -n "$lo" ]; then
+    lpid=${lo%% *}; lat=${lo#* }; lat=${lat%% *}
+    case "$lpid$lat" in *[!0-9]*) lpid=; lat=0 ;; esac
+    if [ -n "$lpid" ] && kill -0 "$lpid" 2>/dev/null && [ $((lnow - lat)) -le "$lock_stale" ]; then return 1; fi
+  else # no owner yet: being taken right now, unless the taker died between mkdir and writing it
+    [ -n "$(find "$lockdir" -maxdepth 0 -mmin +$(((lock_stale + 59) / 60)) 2>/dev/null)" ] || return 1
   fi
-fi
-trap 'rmdir "$lockdir" 2>/dev/null' 0
+  lbrk=$lockdir.stale.$$
+  mv "$lockdir" "$lbrk" 2>/dev/null || return 0 # gone already: try to take it again
+  if [ "$(cat "$lbrk/owner" 2>/dev/null)" != "$lo" ]; then
+    [ -e "$lockdir" ] || mv "$lbrk" "$lockdir" 2>/dev/null
+    return 1
+  fi
+  rm -f "$lbrk/owner"; rmdir "$lbrk" 2>/dev/null
+  say "lock: broke a stale install lock (holder '${lo:-none}')"
+  return 0
+}
+
+# lock_take TOKEN WAIT_S: 0 once TOKEN holds the install lock (also when it already did), 1 when another holder kept it WAIT_S seconds
+lock_take() {
+  lwaited=0
+  while :; do
+    if mkdir "$lockdir" 2>/dev/null; then
+      printf '%s\n' "$1" >"$owner_f" 2>/dev/null && return 0
+      rmdir "$lockdir" 2>/dev/null
+      return 1
+    fi
+    [ "$(cat "$owner_f" 2>/dev/null)" = "$1" ] && return 0
+    lock_stale && continue
+    [ "$lwaited" -lt "$2" ] || return 1
+    [ "$lwaited" -gt 0 ] || say "lock: waiting up to ${2}s for the install lock (holder '$(cat "$owner_f" 2>/dev/null)')"
+    sleep 1
+    lwaited=$((lwaited + 1))
+  done
+}
+
+# lock_give TOKEN: release the install lock when TOKEN holds it
+lock_give() {
+  [ "$(cat "$owner_f" 2>/dev/null)" = "$1" ] || return 0
+  rm -f "$owner_f"
+  rmdir "$lockdir" 2>/dev/null
+  return 0
+}
+
+# hold WAIT_S: run the rest of this verb under the install lock; an installer's own hold (AH_ENGINE_INSTALL_LOCK_TOKEN naming the
+# current holder) is used as is and left to the installer to release
+held_by=
+hold() {
+  if [ -n "${AH_ENGINE_INSTALL_LOCK_TOKEN:-}" ] && [ "$(cat "$owner_f" 2>/dev/null)" = "$AH_ENGINE_INSTALL_LOCK_TOKEN" ]; then return 0; fi
+  my_tok="$$ $(date +%s 2>/dev/null)"
+  lock_take "$my_tok" "$1" || return 1
+  held_by=$my_tok
+  return 0
+}
+trap '[ -z "$held_by" ] || lock_give "$held_by"' 0
 trap 'exit 0' HUP INT TERM
 
 write_atomic() { # write_atomic FILE TEXT
@@ -177,6 +245,11 @@ check() {
   short=$(printf '%s' "$cur" | cut -c1-8)
   aside=$bin$aside_mid$ts-$short
   mv -f "$bin" "$aside" 2>/dev/null || { say "rollback: cannot move $bin aside"; return 0; }
+  if [ "$(sha256_of "$aside")" != "$cur" ]; then # replaced since it was checked: it is not the binary judged damaged
+    if [ -e "$bin" ]; then say "rollback: $bin changed while it was checked and again after; the moved copy is kept as $aside"
+    else mv -f "$aside" "$bin" 2>/dev/null; say "rollback: $bin changed after it was checked; left in place, nothing rolled back"; fi
+    return 0
+  fi
   if cp -p "$good" "$bin.new.$$" 2>/dev/null && chmod 755 "$bin.new.$$" && [ "$(sha256_of "$bin.new.$$")" = "$gsha" ] && mv -f "$bin.new.$$" "$bin" 2>/dev/null; then
     write_atomic "$exp_f" "$gsha"
     write_atomic "$last" "$ts rolled back $cur (set aside as $aside) to the known-good $gsha"
@@ -191,19 +264,30 @@ check() {
 }
 
 case "$verb" in
-  record) record ;;
+  lock)
+    [ -n "${2:-}" ] || exit 0
+    lock_take "$2" "$lock_wait" || { say "lock: '$2' did not get the install lock within ${lock_wait}s (holder '$(cat "$owner_f" 2>/dev/null)')"; exit 1; }
+    ;;
+  unlock) [ -z "${2:-}" ] || lock_give "$2" ;;
+  record)
+    hold "$lock_wait" || { say "record: the install lock stayed held for ${lock_wait}s; the expected sha256 was NOT recorded (holder '$(cat "$owner_f" 2>/dev/null)')"; exit 0; }
+    record
+    ;;
   accept)
+    hold "$lock_wait" || { say "accept: the install lock stayed held for ${lock_wait}s; nothing was recorded (holder '$(cat "$owner_f" 2>/dev/null)')"; exit 0; }
     record
     [ -f "$bin" ] && write_atomic "$accepted_f" "$(sha256_of "$bin")" && say "accept: the operator vouched for the installed binary"
     ;;
   fail)
-    now=$(date +%s 2>/dev/null) && {
-      printf '%s\n' "$now" >>"$fails" 2>/dev/null
-      if [ "$(wc -l <"$fails" 2>/dev/null || echo 0)" -gt 200 ]; then tail -n 50 "$fails" >"$fails.new" 2>/dev/null && mv -f "$fails.new" "$fails" 2>/dev/null; fi
-    }
+    now=$(date +%s 2>/dev/null) && printf '%s\n' "$now" >>"$fails" 2>/dev/null
+    hold "$hook_wait" || { say "fail: counted; the install lock is held, so the check is left to the next run"; exit 0; }
+    if [ "$(wc -l <"$fails" 2>/dev/null || echo 0)" -gt 200 ]; then tail -n 50 "$fails" >"$fails.new" 2>/dev/null && mv -f "$fails.new" "$fails" 2>/dev/null; fi
     check
     ;;
-  check) check ;;
+  check)
+    hold "$hook_wait" || { say "check: the install lock is held; skipped (the next run checks)"; exit 0; }
+    check
+    ;;
   status)
     printf 'binary    %s\n' "$bin"
     printf 'installed %s\n' "$(sha256_of "$bin")"
@@ -212,6 +296,6 @@ case "$verb" in
     printf 'good      %s\n' "$(first_word "$good_sha_f")"
     printf 'last      %s\n' "$(cat "$last" 2>/dev/null)"
     ;;
-  *) printf 'usage: ah-engine-integrity.sh record|accept|check|fail|status\n' >&2 ;;
+  *) printf 'usage: ah-engine-integrity.sh record|accept|check|fail|status|lock TOKEN|unlock TOKEN\n' >&2 ;;
 esac
 exit 0
