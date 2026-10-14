@@ -1361,6 +1361,55 @@ fn interpreter_memory_stays_in_a_band_over_many_calls() {
     assert!(sizes[rounds - 1] as f64 <= sizes[1] as f64 * 1.05, "growth over calls: {sizes:?}");
 }
 
+/// R0 soak (train live18): cyclic garbage waited for QuickJS's own collector, which runs only at 1.5 times the size after its previous
+/// run, so a worker holding every check (~5.7 MB) kept up to ~2.8 MB of garbage the memory registry never saw, and the soak's footprint
+/// rose for the whole run. With `maintain` called after each request (as the daemon's worker loop does), the garbage waiting between
+/// calls stays within `script.gc_every_calls` calls' worth, however many calls are made. Measured WITHOUT a collection (the band test
+/// above measures after one, which is why it could not see this).
+#[test]
+fn cyclic_garbage_between_calls_stays_within_gc_every_calls() {
+    let h = home("gcevery");
+    let e = env(&h);
+    // ~2 MB held live (the entry keeps it referenced); each call leaves a few small cycles that only a collection frees
+    put_override(
+        &h,
+        "zz-cycles",
+        "var zzKeep = []; for (var i = 0; i < 4096; i++) zzKeep.push({i: i, s: 'k' + i, t: [i, i + 1, i + 2, i + 3, i + 4, i + 5, i + 6, i + 7]});\n\
+         function decide() { for (var j = 0; j < 2; j++) { var a = {n: j}; var b = {a: a}; a.b = b; } return zzKeep.length ? null : {block: 'empty'}; }",
+    );
+    let every = defaults::num("script.gc_every_calls") as i64;
+    let p = json!({"tool_name": "Write"});
+    let (one, worst) = std::thread::spawn(move || {
+        let now = || POOL.with(|c| c.borrow().as_ref().map(|p| p.rt.memory_usage().malloc_size)).expect("the thread ran scripts");
+        let gc = || POOL.with(|c| c.borrow().as_ref().map(|p| p.rt.run_gc()));
+        run_forced("zz-cycles", &p, &e);
+        gc();
+        // the collector's own threshold as QuickJS sets it after a run at this size (1.5x), independent of how this thread got here
+        let base = now();
+        POOL.with(|c| c.borrow().as_ref().map(|p| p.rt.set_gc_threshold(base as usize * 3 / 2)));
+        // one call's garbage, averaged over a few calls
+        let probe = 100;
+        for _ in 0..probe {
+            run_forced("zz-cycles", &p, &e);
+        }
+        let one = ((now() - base) / probe).max(1);
+        super::maintain(true);
+        let mut worst = 0;
+        for _ in 0..(5 * every) {
+            run_forced("zz-cycles", &p, &e);
+            super::maintain(false);
+            worst = worst.max(now() - base);
+        }
+        crate::discard::harmless(std::fs::remove_dir_all(&h)); // keep: cleanup
+        (one, worst)
+    })
+    .join()
+    .expect("the scripts ran");
+    // at most `every` calls' worth waits, plus one 4 KiB arena per QuickJS size class left partly used
+    let bound = every * one + 31 * 4096;
+    assert!(worst <= bound, "garbage waiting between calls grew to {worst} bytes, bound {bound} ({every} calls x {one} bytes + arenas)");
+}
+
 /// Issue #21: the regex cache is ONE cache bounded by estimated bytes: many distinct patterns cannot push it past its budget, and two
 /// threads asking for the same pattern share one compiled program.
 #[test]

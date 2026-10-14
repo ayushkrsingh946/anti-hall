@@ -130,6 +130,11 @@ doc = "Checks unloaded per collection while an interpreter is above mem.quickjs.
 value = 4
 min = 1
 
+[script.gc_every_calls]
+doc = "Calls after which a worker collects its script interpreter's garbage and reports the size to the memory registry (between requests, after the reply went out; also once when the worker goes idle). QuickJS frees most garbage at once but leaves cycles (closures, objects that point at each other) to its own collector, which runs only at 1.5 times the size after its last run: about 2.8 MB of waiting garbage per worker with every check loaded. The registry then unloads cold checks if the interpreter grew past mem.quickjs_soft_bytes."
+value = 1000
+min = 1
+
 [script.p95_budget_us]
 doc = "Latency a scripted check may ADD over its compiled port at the 95th percentile, per call (the D88 go/no-go gate measures against it; the primitives a script calls, such as a transcript read, cost the same either way)."
 value = 1000

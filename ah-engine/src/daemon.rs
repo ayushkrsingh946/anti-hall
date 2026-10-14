@@ -1037,12 +1037,14 @@ fn worker(sh: Arc<Shared>, idx: usize) {
             }
         };
         let Some((conn, wait, in_flight)) = conn else {
+            crate::script::maintain(true);
             crate::memdiag::worker_tick(idx);
             continue;
         };
         sh.busy_since[idx].store(sh.ms() + 1, SeqCst);
         let after = serve_conn(conn, &sh, wait, in_flight);
         sh.busy_since[idx].store(0, SeqCst);
+        crate::script::maintain(false);
         crate::memdiag::worker_tick(idx);
         if after == After::Exit {
             begin_drain(&sh, defaults::text("msg.exit_reason_handoff"), false);
