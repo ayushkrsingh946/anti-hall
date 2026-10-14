@@ -669,7 +669,7 @@ fn wrapper_respawns_a_daemon_killed_right_after_its_start() {
     let _timing = wrapper_timing_lock();
     let e = Env::new("kill9", &[("AH_ENGINE_SPAWN_LOCK_TTL_MS", "600000")]);
     let (code, _, _) = wrapper_once(&e);
-    assert_eq!(code, 0);
+    assert!(code == 0 || code == 2, "the first call waits for the cold daemon and may get its block (cold guard wait): {code}");
     assert!(wait_for(|| e.pid().is_some()), "the first wrapper call did not start a daemon{}", e.diag());
     let old = e.pid().unwrap();
     // SAFETY: `kill` takes plain integers and has no memory-safety preconditions; the pid is this test's own daemon.
@@ -694,7 +694,7 @@ fn twenty_concurrent_wrapper_calls_after_a_kill_leave_exactly_one_daemon() {
     let _timing = wrapper_timing_lock();
     let e = Env::new("storm20", &[("AH_HOOK_TIMEOUT_MS", "5000")]);
     let (code, _, _) = wrapper_once(&e);
-    assert_eq!(code, 0);
+    assert!(code == 0 || code == 2, "the first call waits for the cold daemon and may get its block (cold guard wait): {code}");
     assert!(wait_for(|| e.pid().is_some()), "the first wrapper call did not start a daemon{}", e.diag());
     let old = e.pid().unwrap();
     // SAFETY: `kill` takes plain integers and has no memory-safety preconditions; the pid is this test's own daemon.
