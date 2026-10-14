@@ -159,6 +159,9 @@ fn every_key_the_source_reads_is_shipped_and_every_shipped_key_is_read() {
             || k.starts_with("coordinator_work.lock_") // the lock timings of the coordinator-work-guard script, read as a group (`Params::from_group("coordinator_work")`)
             || k.starts_with("ctxbudget.ca_advice_") // regex sources named by the ctxbudget.ca_advice list
             || k.starts_with("client.wrapper_") // the shell wrapper (`hooks/ah-hook.sh`) reads these before Rust starts
+            || k.starts_with("client.cold_guard_") // the shell wrapper's cold-start wait for a guard event (the engine reads only the kick event's name)
+            || k == "files.cold_guard_notice" // the wrapper's once-per-session notice stamp
+            || k == "msg.cold_guard_notice" // the wrapper's notice text
             || k.starts_with("rollback.") // the integrity script (`hooks/ah-engine-integrity.sh`) reads its names and thresholds itself; the engine reads only script and shell
             || k == "files.integrity_log" // written by that script
             || k == "files.wrapper_fail_log" // written by that script, from the hook wrapper's failure reports

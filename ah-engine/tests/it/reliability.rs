@@ -720,6 +720,29 @@ fn twenty_concurrent_wrapper_calls_after_a_kill_leave_exactly_one_daemon() {
     assert_eq!(daemons.len(), 1, "exactly one daemon must be running, found {daemons:?}{}", e.diag());
 }
 
+/// The wrapper's cold-start kick (`client.cold_guard_kick_event`) names no hook: the engine answers it with nothing (exit 0, no
+/// output, no deferral to Node) and the call starts the daemon.
+#[test]
+fn the_cold_start_kick_starts_the_daemon_and_decides_nothing() {
+    let e = Env::new_no_prime("kick", &[("AH_HOOK_TIMEOUT_MS", "5000")]);
+    let o = e
+        .cmd()
+        .args(["hook", "--event", "ColdStartKick", "--host", "claude"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .and_then(|mut ch| {
+            ch.stdin.take().unwrap().write_all(br#"{"hook_event_name":"ColdStartKick"}"#)?;
+            ch.wait_with_output()
+        })
+        .unwrap();
+    assert_eq!(o.status.code(), Some(0), "the kick is a no-op, not a deferral: {}", String::from_utf8_lossy(&o.stderr));
+    assert!(o.stdout.is_empty() && o.stderr.is_empty(), "the kick prints nothing: {:?} {:?}", o.stdout, o.stderr);
+    assert!(wait_for(|| e.pid().is_some()), "the kick started no daemon{}", e.diag());
+    assert!(!e.health_log().contains("dispatch_defer"), "the kick must not be logged as a deferral{}", e.diag());
+}
+
 /// R0 P0: on a fresh state directory the first wrapper calls started no daemon. The hook client, finding no snapshot cache,
 /// parsed the defaults and then kept the last-known-good copy and healed (one synced write per defaults file) BEFORE it asked
 /// the daemon: over a second, so the wrapper's watchdog killed it before the spawn. The client now leaves that copy to the
@@ -762,7 +785,10 @@ fn a_cold_first_wrapper_call_starts_the_daemon() {
     let _timing = wrapper_timing_lock();
     let e = Env::new_no_prime("cold1", &[("AH_HOOK_TIMEOUT_MS", "5000")]);
     let (code, out, _) = wrapper_once(&e);
-    assert_eq!((code, out.as_str()), (0, ""), "a cold first call fails open");
+    // a guard event no longer runs against a daemon that is still starting: the wrapper kicks it, waits for the socket
+    // (client.cold_guard_wait_ms) and returns the engine's real decision (DENY_IN is a block)
+    assert_eq!(code, 2, "a cold first guard call waits for the daemon and gets its decision: {out}");
+    assert!(out.contains("\"decision\":\"block\""), "a cold first guard call gets the engine's block: {out}");
     assert!(wait_for(|| e.pid().is_some()), "no daemon after the first cold wrapper call{}", e.diag());
 }
 

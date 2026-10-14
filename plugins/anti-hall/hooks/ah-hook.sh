@@ -1372,8 +1372,9 @@ cold_guard_wait() {
   real_payload=$payload
   payload=$tmp/cold-kick.json
   printf '{"hook_event_name":"%s"}' "$cg_kick" >"$payload" 2>/dev/null || { payload=$real_payload; return 0; }
-  cg_kick_ms=$cg_eng
-  [ "$cg_kick_ms" -le "$cg_cap" ] || cg_kick_ms=$cg_cap
+  # the kick is the cold client: it parses the defaults before it starts the daemon (a release build needs ~0.6 s on a fresh state
+  # directory), so it gets the whole wait, not the guard engine attempt's budget, or the watchdog kills it before the daemon exists
+  cg_kick_ms=$cg_cap
   exec 4>&2 2>/dev/null
   if launch_argv_group "$tmp/kick.out" "$tmp/kick.err" "$tmp/kick.pid" "$tmp/kick.group" "$engine" hook --event "$cg_kick" --host "$host"; then
     cg_pid=$(cat "$tmp/kick.pid"); cg_group=$(cat "$tmp/kick.group")

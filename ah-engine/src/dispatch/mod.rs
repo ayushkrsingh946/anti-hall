@@ -544,7 +544,33 @@ fn unlisted(host: &str, event: &str) -> Option<Outcome> {
     }
 }
 
+/// The wrapper's cold-start kick (`client.cold_guard_kick_event`): an empty request that names no hook. Its only job is to make the
+/// client find the daemon absent and start it (single-flight, breaker and crash-loop rules as for any call), so a guard event can
+/// wait for a socket. It asks for no check (`only` is empty), decides nothing and prints nothing; the daemon answers it with no work.
+fn cold_start_kick(args: &Args) -> Option<Outcome> {
+    if args.event != defaults::text("client.cold_guard_kick_event") {
+        return None;
+    }
+    let meta = Meta {
+        host: args.host.clone(),
+        event: args.event.clone(),
+        tool: None,
+        root: table::plugin_root(&args.host),
+        env: crate::reqenv::RequestEnv::capture(),
+        only: Some(Vec::new()),
+        plan: Vec::new(),
+        cfg: String::new(),
+        payload_sha1: None,
+        deadline_ms: Some(crate::config::ClientConfig::from_env().deadline.as_millis() as u64),
+    };
+    ask_daemon(&meta, "{}"); // keep: the answer is empty by construction; the call is for the daemon start
+    Some(Outcome { out: String::new(), code: 0, err: String::new() })
+}
+
 fn run_core(raw: &str, args: &Args, payload: Option<&File>, complete: bool, tele: &mut plan::Tele) -> Outcome {
+    if let Some(o) = cold_start_kick(args) {
+        return o;
+    }
     if let Some(o) = unlisted(&args.host, &args.event) {
         return o;
     }
@@ -872,6 +898,11 @@ pub fn hook_main(args: &[String]) -> i32 {
         // payload looks like, even invalid UTF-8 or over the cap: answer the neutral no-op after letting the host finish writing
         // A missing or malformed row is a neutral no-op only when the wrapper's own list agrees; otherwise the Node hooks decide
         // (a lost row must never turn into an allow where the wrapper would run hooks).
+        if let Some(o) = cold_start_kick(&a) {
+            crate::discard::harmless(std::io::copy(&mut std::io::stdin().lock(), &mut std::io::sink())); // keep: a closed pipe leaves nobody to tell
+            mark_done();
+            return o.code;
+        }
         if let Some(o) = unlisted(&a.host, &a.event) {
             crate::discard::harmless(std::io::copy(&mut std::io::stdin().lock(), &mut std::io::sink())); // keep: a closed pipe leaves nobody to tell
             crate::discard::harmless(std::io::stderr().write_all(o.err.as_bytes())); // keep: a closed pipe leaves nobody to tell
