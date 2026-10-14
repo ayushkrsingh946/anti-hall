@@ -291,6 +291,35 @@ fn a_sliding_window_that_loses_the_call_of_an_answer_it_still_holds_answers_as_t
 }
 
 #[test]
+fn a_sliding_window_that_loses_a_pending_call_whose_answer_then_arrives_answers_as_the_exact_window() {
+    let dir = scratch("slide-straddle-new");
+    let path = dir.join("t.jsonl");
+    let call =
+        assistant_use("toolu_x", "Agent", json!({"description": "worker x", "prompt": "p", "run_in_background": true}), "2026-10-06T12:00:00.000Z") + "\n";
+    let text = "Async agent launched successfully. (internal metadata)\nagentId: abcdef0123456789a (internal ID)\noutput_file: /tmp/x/abcdef0123456789a.output";
+    let answer = result("toolu_x", text, "2026-10-06T12:00:01.000Z") + "\n";
+    let mut body: String = (0..400).map(plain).collect();
+    body.push_str(&call);
+    body.extend((400..550).map(plain));
+    std::fs::write(&path, body).unwrap();
+    // the window starts 30 lines before the call, which has no answer yet
+    let s = Slide { path, tail: (call.len() + 150 * plain(0).len() + 30 * plain(0).len()) as u64 };
+    settle(&s, false);
+    let (kept, fresh, _) = scans(&s, false);
+    assert_eq!(snap(&kept), snap(&fresh));
+    // forty lines and the answer arrive at once: the call is now out of the exact window, its answer is in it
+    let _ = append(&s, 40, 2000);
+    let mut f = std::fs::OpenOptions::new().append(true).open(&s.path).unwrap();
+    f.write_all(answer.as_bytes()).unwrap();
+    drop(f);
+    let (kept, fresh, _) = scans(&s, false);
+    assert_eq!(snap(&kept), snap(&fresh), "the newly completed result must not use a call the exact window no longer holds");
+    let described = |k: &Option<Scan>| k.as_ref().unwrap().rows().into_iter().map(|r| r.description).collect::<Vec<_>>();
+    assert_eq!(described(&fresh), [""]);
+    std::fs::remove_dir_all(s.path.parent().unwrap()).ok();
+}
+
+#[test]
 fn real_transcripts_cut_at_many_points_scan_the_same() {
     let Some(corpus) = std::env::var_os("AH_SCAN_CORPUS") else { return };
     let dir = scratch("corpus");
