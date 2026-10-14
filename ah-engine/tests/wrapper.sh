@@ -1592,7 +1592,34 @@ test_cold_guard_wait_respects_the_hook_budget_and_a_warm_daemon() {
   [ "$ok" -eq 1 ]
 }
 
+# The wait is only for a daemon that can actually start: spawning switched off, an engine that is missing or cannot run, and one
+# that exits at once (its kick fails) all fail open straight away, not after the 2 s cap.
+test_cold_guard_does_not_wait_when_no_daemon_can_start() {
+  cg_setup 2000
+  ok=1
+  # spawn disabled: no kick at all
+  cg_run PreToolUse sess-a AH_ENGINE_NOSPAWN=1
+  [ "$cg_rc" -eq 0 ] && [ "$cg_ms" -lt 1000 ] && ! grep -q ColdStartKick "$cg_log" || { ok=0; printf 'nospawn: rc=%s ms=%s\n' "$cg_rc" "$cg_ms" >&2; }
+  # a missing engine binary
+  cg_run PreToolUse sess-b AH_ENGINE_BIN="$cg_dir/no-such-engine"
+  [ "$cg_rc" -eq 0 ] && [ "$cg_ms" -lt 1000 ] || { ok=0; printf 'missing: rc=%s ms=%s\n' "$cg_rc" "$cg_ms" >&2; }
+  # an engine that cannot run (not executable)
+  printf '#!/bin/sh\nexit 0\n' >"$cg_dir/noexec"
+  chmod 644 "$cg_dir/noexec"
+  cg_run PreToolUse sess-c AH_ENGINE_BIN="$cg_dir/noexec"
+  [ "$cg_rc" -eq 0 ] && [ "$cg_ms" -lt 1000 ] || { ok=0; printf 'noexec: rc=%s ms=%s\n' "$cg_rc" "$cg_ms" >&2; }
+  # an engine that exits at once: its kick fails, so nothing is coming
+  printf '#!/bin/sh\ncat >/dev/null\nprintf "%%s\\n" "$*" >>"$AH_COLD_LOG"\nexit 1\n' >"$cg_dir/crash.sh"
+  chmod +x "$cg_dir/crash.sh"
+  : >"$cg_log"
+  cg_run PreToolUse sess-d AH_ENGINE_BIN="$cg_dir/crash.sh"
+  [ "$cg_rc" -eq 0 ] && [ "$cg_ms" -lt 1000 ] && grep -q ColdStartKick "$cg_log" || { ok=0; printf 'crash: rc=%s ms=%s log=%s\n' "$cg_rc" "$cg_ms" "$(cat "$cg_log")" >&2; }
+  cg_cleanup
+  [ "$ok" -eq 1 ]
+}
+
 check cold_guard_waits_for_a_daemon_that_comes_up test_cold_guard_waits_for_a_daemon_that_comes_up
+check cold_guard_does_not_wait_when_no_daemon_can_start test_cold_guard_does_not_wait_when_no_daemon_can_start
 check cold_guard_gives_up_at_the_cap_with_one_notice_per_session test_cold_guard_gives_up_at_the_cap_with_one_notice_per_session
 check cold_non_guard_event_never_waits test_cold_non_guard_event_never_waits
 check cold_guard_wait_respects_the_hook_budget_and_a_warm_daemon test_cold_guard_wait_respects_the_hook_budget_and_a_warm_daemon

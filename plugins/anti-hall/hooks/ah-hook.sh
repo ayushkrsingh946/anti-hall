@@ -255,7 +255,8 @@ fresh_state_marker() {
   [ -n "$marker_name" ] || return 1
   marker_dir=${AH_ENGINE_DIR:-"$HOME/.anti-hall/ah-engine"}
   [ -r "$marker_dir/$marker_name" ] || return 1
-  marker_until=$(sed -n '1s/[^0-9].*$//p' "$marker_dir/$marker_name" 2>/dev/null)
+  # the engine writes the time without a newline: `s///p` alone prints nothing when there is no non-digit to strip
+  marker_until=$(sed -n '1{s/[^0-9].*$//;p;}' "$marker_dir/$marker_name" 2>/dev/null)
   case "$marker_until" in
     ""|*[!0-9]*) return 1 ;;
   esac
@@ -1355,6 +1356,9 @@ cold_guard_wait() {
     case "$cg_v" in ""|*[!0-9]*|0) return 0 ;; esac
   done
   [ -n "$cg_kick" ] && [ -n "$cg_sock_name" ] || return 0
+  # spawning is switched off (the engine's env.nospawn): no daemon can come up, so there is nothing to wait for
+  cg_nospawn=$(engine_default_text env.nospawn || true)
+  if [ -n "$cg_nospawn" ] && printenv "$cg_nospawn" >/dev/null 2>&1; then return 0; fi
   cg_sock=${AH_ENGINE_DIR:-"$HOME/.anti-hall/ah-engine"}/$cg_sock_name
   # a path the engine shortens through a hashed private dir cannot be derived here
   [ "${#cg_sock}" -le "$cg_sock_max" ] || return 0
@@ -1375,6 +1379,7 @@ cold_guard_wait() {
   # the kick is the cold client: it parses the defaults before it starts the daemon (a release build needs ~0.6 s on a fresh state
   # directory), so it gets the whole wait, not the guard engine attempt's budget, or the watchdog kills it before the daemon exists
   cg_kick_ms=$cg_cap
+  cg_kick_rc=1
   exec 4>&2 2>/dev/null
   if launch_argv_group "$tmp/kick.out" "$tmp/kick.err" "$tmp/kick.pid" "$tmp/kick.group" "$engine" hook --event "$cg_kick" --host "$host"; then
     cg_pid=$(cat "$tmp/kick.pid"); cg_group=$(cat "$tmp/kick.group")
@@ -1382,6 +1387,7 @@ cold_guard_wait() {
     rm -f "$tmp/kick.pid" "$tmp/kick.group" "$tmp/kick.timed"
     start_watchdog_ms "$cg_pid" "$cg_kick_ms" "$cg_group" "$tmp/kick.timed"
     wait "$cg_pid" 2>/dev/null
+    cg_kick_rc=$?
     settle_watchdog "$tmp/kick.timed"
     remove_child "$cg_pid"
     if [ "$cg_group" -eq 1 ] && kill -0 "-$cg_pid" 2>/dev/null; then
@@ -1390,6 +1396,9 @@ cold_guard_wait() {
   fi
   exec 2>&4 4>&-
   payload=$real_payload
+  # the kick failed (a binary that is missing, cannot run, exits at once, or was cut by the watchdog): no daemon is coming, so the
+  # wait would only cost the cap; the real attempt below fails open the usual way
+  [ "$cg_kick_rc" -eq 0 ] || return 0
   while :; do
     [ -S "$cg_sock" ] && return 0
     cold_guard_halted && return 0
