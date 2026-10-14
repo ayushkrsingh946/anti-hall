@@ -19,6 +19,7 @@ mod cascade_judge;
 mod codex_apply_patch_e2e;
 mod codex_scripts_parity;
 mod compiled_logic_gate;
+mod crashloop_drill;
 mod ctxbudget_e2e;
 mod defaults_failover;
 mod defaults_keys;

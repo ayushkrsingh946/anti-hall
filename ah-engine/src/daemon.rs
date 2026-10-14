@@ -1151,6 +1151,7 @@ fn watchdog(sh: Arc<Shared>) {
                 }
             }
         }
+        crate::binguard::note_uptime(sh.started.elapsed());
         // Idle exit is off unless configured (D7): the engine stays resident so the scheduler and mailbox keep running.
         if let Some(idle) = cfg.idle_exit
             && last_idle_check.elapsed() >= defaults::millis("daemon.idle_check_ms")

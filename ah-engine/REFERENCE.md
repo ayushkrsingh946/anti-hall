@@ -26,7 +26,7 @@ Every command accepts `--json`. Read-only commands never change state.
 | `finding-dedup` | `[--file <findings.json>]` | yes | implemented | Advisory duplicate-finding detector for the deadly-loop reviewers (L03, the port of scripts/finding-dedup.js): reads a JSON array of findings (stdin or `--file`), asks Jev whether candidate pairs describe the same root cause, and prints `{groups}` on stdout and one `possible duplicates` line per confirmed pair on stderr. It never collapses anything; with Jev off or unkeyed it prints no groups. |
 | `gen-hooks` | `--host claude\|codex [--kind hooks\|registry\|list\|map]` | yes | implemented | Print a file generated from the dispatch table (D87): the thin hooks.json (one trigger per event), the per-hook registry, the wrapper's fallback list or its fallback map, for one host. |
 | `gh` | `<status\|segment\|poll> [--cwd <dir>] [--force]` | no | implemented | GitHub realtime (feature #20, independent of DevSwarm): `status` prints, from the state file with no network, what is followed (the repos of the working directories of live sessions, their pull request, review, CI and mergeability), the rate-limit budget, the hold in force (backoff, budget, gh missing, logged out or offline) and the measured rate-limit cost of 200 and 304 answers; `segment [--cwd <dir>]` prints the statusline piece for the repo that holds the directory (empty when there is nothing to say); `poll [--force]` runs one tick now. |
-| `gh_poll` | `` | no | implemented | The scheduled GitHub realtime tick (the `gh_poll` job): notices pushes, polls the followed repos that are due inside the rate budget and records the edges; prints its counts with --json and always exits 0. |
+| `gh_poll` | `` | no | implemented | The scheduled GitHub realtime tick (the `gh_poll` job): notices pushes, polls the followed repos that are due inside the rate budget and records the edges; prints its counts with --json; exits nonzero when recent sessions exist and the tick leaves gh missing/logged-out/offline so the scheduler backs off. |
 | `handovers` | `<index\|check\|search> [query] [--project <dir>] [--registered] [--force] [--limit <n>]` | no | implemented | The handover brief tree: `index` rebuilds the root brief and the per-day briefs (BRIEF.md plus a typed BRIEF.json) of the changed days under .anti-hall/handovers (`--registered` walks every project the SessionStart check has seen, `--force` rebuilds all days), `check` reports unindexed or stale handovers, missing briefs, malformed handovers and broken references without writing (exit 3 when there are any), `search <words> [date:..] [session:..] [decision:..] [file:..]` ranks entries from the sidecars. Never edits a handover file and never deletes. The logic is the plugin script handover-hygiene.js; the scheduled job `handovers` runs `index --registered`. |
 | `harvest` | `[--dir <path>] [--stale-days <n>]` | yes | implemented | Scan a code tree for deliberate-debt markers, `anti-hall: <ceiling>, <when>` in any comment syntax (D81, the port of scripts/harvest-debt.js), and flag the ones with no payback trigger or in files untouched for the stale window. |
 | `hook` | `[--fallback <hook.js>] \| --event <Event> [--tool <Tool>] [--host claude\|codex] [--fallback-map <file>]` | no | implemented | The hook client: read one hook payload from stdin, ask the daemon, print the answer; falls back to the Node hook given by --fallback. With --event it is the per-event dispatcher: it runs every hook entry hooks.json registers for that event and tool, built-in checks in the engine and the rest as their Node hooks (--fallback-map overrides their commands), and combines the results the way the host would. |
@@ -193,6 +193,8 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `client.max_reply` | `2097152` |  | bytes | Largest reply the client reads. |
 | `client.max_stdin` | `8388608` |  | bytes | Largest hook payload the client reads from stdin. |
 | `client.spawn_lock_ttl_ms` | `3000` | `AH_ENGINE_SPAWN_LOCK_TTL_MS` | ms | How old the single-flight daemon spawn lock may get before another client treats it as stale and may try one restart. |
+| `client.spawn_n` | `6` | `AH_ENGINE_SPAWN_N` |  | Daemon starts within the spawn window that count as a crash loop even when the daemon reported no crash (a binary that exits at once reports nothing). Respawning then stops for client.crash_cooldown_s. |
+| `client.spawn_window_s` | `60` | `AH_ENGINE_SPAWN_WINDOW_S` | s | Window in which daemon starts are counted for client.spawn_n. |
 | `client.wrapper_extra_ms` | `250` |  | ms | Extra shell watchdog budget beyond the client deadline and client slack; this lets the client write the daemon-down marker and release the single-flight spawn lock before the wrapper kills it. |
 | `client.wrapper_watchdog_poll_ms` | `2` |  | ms | Poll interval for the hook wrapper millisecond watchdog. |
 
@@ -204,13 +206,16 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `daemon.accept_poll_ms` | `200` |  | ms | Accept-loop poll interval while serving. |
 | `daemon.bucket_cap` | `4096` |  |  | Most distinct keys one token-bucket map tracks; idle full buckets are dropped first and unknown keys are refused under a key flood. |
 | `daemon.close_max_ms` | `30000` |  | ms | Longest a drain's exit timer waits for the database close (the commit of everything queued) once it has started, so a timer that fires during the close cannot lose queued commits. A close wedged longer than this is cut off. |
+| `daemon.cpu_check_ms` | `30000` |  | ms | How often the watchdog compares process CPU time to wall time for the sustained-CPU self-check; 0 disables the check. |
+| `daemon.cpu_warn_pct` | `80` |  | % | Warn and back off scheduled jobs when daemon CPU over daemon.cpu_check_ms exceeds this percent of one core; 0 disables the warning. |
 | `daemon.drain_grace_ms` | `1000` |  | ms | After a drain starts, a worker or loop that has not finished in this long is cut off. |
 | `daemon.drain_max_ms` | `10000` |  | ms | Longest a clean drain (handoff, stop, idle exit, SIGTERM) may take before the daemon exits anyway, so a worker stuck while draining can never keep the process (and the singleton lock) alive with its socket already gone. Above daemon.stuck_ms, so the stuck-worker check normally ends such a drain first. |
 | `daemon.drain_poll_ms` | `20` |  | ms | Accept-loop poll interval while draining. |
 | `daemon.eval_budget_us` | `200000` | `AH_ENGINE_EVAL_BUDGET_US` | us | Per-request thread CPU budget for rule evaluation; 0 turns the budget off. |
 | `daemon.forced_exit_code` | `75` |  |  | Exit status of a forced drain exit (sysexits EX_TEMPFAIL, 75); the next client call starts a fresh daemon. |
+| `daemon.healthy_after_s` | `30` | `AH_ENGINE_HEALTHY_AFTER_S` | s | How long the daemon must stay up before its binary is recorded as having run healthy (files.healthy_binary). A binary that dies earlier never earns the record, so a roll-back may replace it. |
 | `daemon.idle_check_ms` | `1000` |  | ms | How often the watchdog compares the last request time with idle_exit_s. |
-| `daemon.idle_exit_s` | `0` | `AH_ENGINE_IDLE_EXIT_S` | s | Seconds without any request after which the daemon exits (the next hook call starts a fresh one, and the scheduler catches up its missed jobs); 0 keeps it resident. 0 by default: the daemon is always resident so the scheduler and mailbox keep running after every session closes (D7). A daemon whose state dir, lock file or executable is gone still exits on its own (daemon.orphan_check_ms). |
+| `daemon.idle_exit_s` | `1800` | `AH_ENGINE_IDLE_EXIT_S` | s | Seconds without any request after which the daemon exits cleanly (the next hook call starts a fresh one, and the scheduler catches up its missed jobs); 0 keeps it resident. Default is 1800 (about 30 minutes), so a daemon with no sessions does not linger forever. A daemon whose state dir, lock file or executable is gone still exits on its own (daemon.orphan_check_ms). |
 | `daemon.lock_poll_ms` | `10` |  | ms | Poll interval while waiting for the singleton lock. |
 | `daemon.lock_wait_ms` | `1500` |  | ms | How long a starting daemon waits for an outgoing (version-handoff) daemon to release the singleton lock. |
 | `daemon.malloc_conf` | `narenas:1,dirty_decay_ms:0,muzzy_decay_ms:0` |  |  | Allocator purge tuning handed to the daemon at start (jemalloc `malloc_conf` syntax): one arena for the four worker threads (less fragmentation) and decay 0 (freed pages go back to the OS at once; the system allocators keep them, which left RSS at 2.5x the live heap). Measured on 1000 mixed calls, this Mac: system allocator 45-48 MB RSS, jemalloc with only decay 0 37 MB, with narenas:1 as well 32 MB (live heap 16 MB), adding tcache:false 27 MB but p50 call latency 10 ms against 6.5-7 ms, so tcache stays on. empty = the allocator's own defaults. A variable the caller already set is not overridden. |
@@ -288,12 +293,17 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `files.backups_dir` | `backups` |  |  | Directory inside the state directory that holds backups and pre-restore snapshots (D27); nothing in it is ever deleted by the engine. |
 | `files.breaker_until` | `breaker.until` |  |  | Marker holding the time (ms since the epoch) until which the client breaker stays open. |
 | `files.crash_breadcrumb` | `crash-breadcrumb.json` |  |  | Last request/job/check breadcrumb written at boundary entry so an abnormal exit can be reported with context on the next start. |
+| `files.crashloop_bin` | `crashloop.bin` |  |  | Holds the size, modification time and sha256 of the binary the crash-loop rule tripped on. A cooldown ends early when the binary is replaced by a different one. |
 | `files.crashloop_until` | `crashloop.until` |  |  | Marker holding the time until which respawning is stopped after a crash loop. |
 | `files.daemon_down_marker` | `daemon.down.until` |  |  | Short-lived client marker: when a hook client finds the daemon absent or hung, other clients skip connecting until this expires. |
 | `files.failure` | `failure.json` |  |  | Last recorded failure, for the once-per-session advisory. |
+| `files.healthy_binary` | `healthy.binary` |  |  | Holds the sha256 of the engine binary that last stayed up for daemon.healthy_after_s. The integrity script promotes that binary to the known-good copy; a binary with no entry here has never proven itself. |
+| `files.integrity_log` | `integrity.log` |  |  | Log of the integrity script (checks, promotions, roll-backs), inside the state directory. |
 | `files.last_crash` | `last-crash.json` |  |  | Last panic or stale-run-marker crash report, shown by status and doctor. |
 | `files.log` | `ah-engine.log` |  |  | Event log file name (state directory). |
 | `files.reaped_prefix` | `daemon.run.reaped.` |  |  | Prefix of the temporary name a stale run marker is renamed to when it is claimed (the pid is appended). |
+| `files.rollback_last` | `rollback.last` |  |  | One line the integrity script writes when it rolls the engine binary back (time, reason, which binary was set aside). Shown by status and doctor. |
+| `files.rollback_request` | `rollback.request` |  |  | Written when the crash-loop rule trips on a binary with no healthy history: asks the integrity script to restore the known-good binary. Holds the sha256 of the binary to replace. |
 | `files.run_marker` | `daemon.run` |  |  | Written while a daemon runs; a leftover one with a dead pid is logged as one crash. |
 | `files.schedules_override` | `schedules.json` |  |  | User overrides of the shipped schedules (D33): JSON, `{"jobs": {"<name>": {...}}}`; read when the daemon starts. |
 | `files.spawn_lock` | `daemon.spawn.lock` |  |  | Short-lived client single-flight lock: only the client that creates it attempts to restart a missing daemon. |
@@ -301,6 +311,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `files.spool_quarantine` | `spool.quarantine` |  |  | Spool records that could not be parsed or that the store refused for good, kept with their reason, never dropped (D24). |
 | `files.starts` | `starts` |  |  | Counter of daemon starts, surfaced as `starts` and `restarts` in status. |
 | `files.telemetry_inbox` | `telemetry-inbox.jsonl` |  |  | Events recorded by processes other than the daemon (the hook dispatcher, one-shot commands), one JSON line each, in the state directory; the daemon reads and empties it on every telemetry flush. |
+| `files.wrapper_fail_log` | `wrapper.fails` |  |  | Epoch seconds, one per line, of the hook wrapper's engine failures (timeout, signal death, no answer). The integrity script counts them against rollback.fail_n. |
 
 ### engine.toml / health
 
@@ -316,6 +327,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `health.diag_lines` | `8` |  |  | Event-log lines included in the diagnostic block of a permanent-failure advisory. |
 | `health.error_codes` | `3 entries, 3 entries, 3 entries, 3 entries, 3 entries` |  |  | Error-code classification: environment-class codes get a plain self-fix hint (a message key); every other code is a permanent failure that asks for an issue. |
 | `health.event_text_max` | `300` |  | chars | Longest kind, code or detail written to one log line (newlines and tabs become spaces). |
+| `health.judged_kinds` | `crashloop, crashloop_reset, reset` |  |  | Event kinds that mark a crash-loop judgement (a trip, a reset by a new binary, an operator reset): crashes and daemon starts logged before the latest of them no longer count toward the next trip. |
 | `health.log_cap` | `65536` |  | bytes | Event log size above which it is trimmed to its last log_keep_lines lines. |
 | `health.log_keep_lines` | `200` |  |  | Lines kept when the event log is trimmed. |
 | `health.pid_probe` | `ps, -p, {pid}, -o, command=` |  |  | Command used to read a process's command line when checking whether a pid is a live engine: the program, then its arguments with `{pid}` substituted. |
@@ -377,6 +389,26 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `request_env.incomplete_key` | `ah_env_incomplete` |  |  | Reserved name, never a forwardable variable, that carries the request's incomplete flag inside the forwarded environment object (the client's variables were dropped or it had no HOME), so the daemon's checks defer to the Node guards. |
 | `request_env.line_prefix` | `E ` |  |  | Prefix of the request line that carries the forwarded environment as one JSON object. |
 | `request_env.max_bytes` | `65536` |  | bytes | Largest forwarded environment (sum of names and values); a client whose allowed variables exceed it forwards none of them and the request is marked incomplete, so every check defers to the Node guard (a missing or empty HOME marks it incomplete too). |
+
+### engine.toml / rollback
+
+| Key | Default | Env override | Unit | What it is |
+|---|---|---|---|---|
+| `rollback.accepted_suffix` | `.accepted` |  |  | Suffix added to the expected-sha file for the note that the operator vouched for exactly that binary (`accept`): a vouched-for binary is never rolled back. |
+| `rollback.aside_infix` | `.rolledback-` |  |  | A binary set aside by a roll-back is renamed bin/ah-engine.rolledback-<UTC time>-<sha prefix>; this is the word between. Set-aside binaries are never deleted. |
+| `rollback.bin_dir` | `bin` |  |  | Directory inside the state directory that holds the engine binary and its copies. |
+| `rollback.bin_name` | `ah-engine` |  |  | File name of the installed engine binary. |
+| `rollback.expected_suffix` | `.expected` |  |  | Suffix of the file holding the sha256 the installer expects the installed binary to have (bin/ah-engine.expected). |
+| `rollback.fail_n` | `3` | `AH_ENGINE_ROLLBACK_FAIL_N` |  | Engine failures seen by the hook wrapper (timeout, signal death, no answer) within rollback.fail_window_s that roll a never-healthy binary back. The wrapper counts them because a hung binary cannot count its own. |
+| `rollback.fail_window_s` | `120` | `AH_ENGINE_ROLLBACK_FAIL_WINDOW_S` | s | Window in which the wrapper's engine failures are counted for rollback.fail_n. |
+| `rollback.field_sep` | ` ` |  |  | Separator between the fields of the crash-loop binary record (files.crashloop_bin: size, modification time, sha256). |
+| `rollback.good_suffix` | `.good` |  |  | Suffix of the known-good copy of the binary (bin/ah-engine.good) and of its sha256 file (.good.sha256). Never deleted. |
+| `rollback.hash_chunk` | `65536` |  | bytes | Bytes read at a time when the engine hashes its own binary (sha256). |
+| `rollback.line_end` | `\n` |  |  | Line terminator of the crash-loop binary record. |
+| `rollback.on_mismatch` | `1` | `AH_ENGINE_ROLLBACK_ON_MISMATCH` |  | 1 = a binary whose sha256 differs from the one the installer recorded (swapped by hand) and that has never run healthy is rolled back to the known-good binary at the next check. 0 = never roll back on a mismatch alone (a local build you are developing). `accept` records the installed binary as the expected one. |
+| `rollback.script` | `hooks/ah-engine-integrity.sh` |  |  | The integrity script, relative to the plugin root. verbs: record, accept, check, fail, status. |
+| `rollback.sha_suffix` | `.sha256` |  |  | Suffix of the file holding the sha256 of the known-good copy (bin/ah-engine.good.sha256). |
+| `rollback.shell` | `sh` |  |  | The shell that runs the integrity script. |
 
 ### engine.toml / store
 
@@ -982,12 +1014,14 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `schedule.actions` | `16 items` |  |  | Actions a job may name; anything else in a user override is refused and logged. |
 | `schedule.backoff_shift_max` | `30` |  |  | The largest doubling exponent of a failed job's retry delay (backoff_ms times 2^(failures-1), at most this power), before the job's backoff_max_ms cap; it keeps the shift from overflowing. |
 | `schedule.backup_ms` | `0` | `AH_ENGINE_BACKUP_MS` | ms | Interval of the backup job (D27); 0 (the default) turns it off. |
+| `schedule.cpu_backoff_ms` | `60000` |  | ms | How long scheduled jobs pause after the daemon sustained-CPU self-check warns; 0 logs only. |
 | `schedule.detail_max` | `2000` |  | chars | Longest result detail kept with a run in the history (longer text is cut). |
 | `schedule.handovers_ms` | `600000` | `AH_ENGINE_HANDOVERS_MS` | ms | Interval of the handovers job; 0 turns it off. |
 | `schedule.history_default` | `50` |  |  | Runs `schedule history` lists unless asked for more. |
 | `schedule.maintain_ms` | `86400000` | `AH_ENGINE_MAINTAIN_MS` | ms | Interval of the maintain job (D26); 0 turns it off. |
 | `schedule.procwatch_ms` | `30000` | `AH_ENGINE_PROCWATCH_MS` | ms | Interval of the process watch job (resource sampling; orphan scans run every procwatch.scan_every_s); 0 turns it off. |
 | `schedule.run_wait_ms` | `5000` |  | ms | How long `schedule run <job>` waits for the run it asked for before answering that it is still running; below daemon.stuck_ms. |
+| `schedule.skip_without_work` | `gh_poll, refresh` |  |  | Subprocess actions the scheduler skips when they have no recent session or pending-request work. The command itself still reports the skip reason for manual runs. |
 | `schedule.subprocess_actions` | `9 items` |  |  | Actions that run as an `ah-engine <action> --json` subprocess in its own process group, so a timeout kills it and everything it started. |
 | `schedule.telemetry_rollup_ms` | `86400000` | `AH_ENGINE_TELEMETRY_ROLLUP_MS` | ms | Interval of the telemetry rollup job (D78); 0 turns it off. |
 | `schedule.test_sleep_argv` | `sleep, 3600` |  |  | Command the test-only `test_sleep` action runs (accepted only when the test-hooks variable is set), to exercise timeouts. |
@@ -9090,7 +9124,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 
 | Key | Default | Env override | Unit | What it is |
 |---|---|---|---|---|
-| `host_spawn.deadline_reserve_ms` | `600` |  | ms | Time kept back from the request's deadline when a spawned program's timeout is cut to it: the other checks of the event and the reply still need it. |
+| `host_spawn.deadline_reserve_ms` | `60` |  | ms | Time kept back from the request's deadline when a spawned program's timeout is cut to it: the other checks of the event and the reply still need it. |
 | `host_spawn.default_path` | `/usr/bin:/bin` |  |  | The search path used when the request carries no PATH: the default of the C library's execvp, which is what Node's spawn falls back to. |
 | `host_spawn.max_calls` | `16` |  |  | Most programs one script call may start (api-guard: two version probes, one per module group up to api_guard_v1.max_modules, one Node probe, the version lines of the message). |
 | `host_spawn.min_run_ms` | `1` |  | ms | A spawn whose cut timeout is below this does not run at all (reported as skipped). |
@@ -9390,6 +9424,7 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `msg.client_no_fallback_guard` | Printed on stderr (exit dispatch.defer_exit) when the legacy `hook` command gets a guard event, the engine cannot answer and no Node fallback was given: the caller must run the Node hook, never take silence as an allow. |
 | `msg.client_timeout` | Exchange failure when the hard deadline passed. |
 | `msg.client_what_stat` | The step named in msg.client_io when the socket path cannot be examined (a permission or path error, not a missing socket). |
+| `msg.daemon_already_running` | Printed on stderr when a second daemon start finds an existing daemon/lock holder for the socket. Placeholders: {path}, {pid}, {live_engine}, {answers}. |
 | `msg.diagnostics` | Secret-scrubbed diagnostic block attached to a permanent-failure advisory. Placeholders: {version}, {os}, {arch}, {code}, {log}. |
 | `msg.dispatch_stdin_spool` | Reason (event log and stderr, with dispatch.defer_exit) when the hook's stdin payload cannot be read, or an over-cap payload cannot be spooled for the Node hooks. Placeholder: {err}. |
 | `msg.dispatch_stdin_utf8` | Reason in dispatch.msg_fail_closed when a guard event's stdin payload is not valid UTF-8. |
@@ -9444,7 +9479,10 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `msg.log_bind_fail` | Start-failure detail when binding the socket fails. Placeholders: {path}, {err}. |
 | `msg.log_budget` | Log detail when a rule evaluation exceeded its CPU budget. |
 | `msg.log_client_panic` | Log detail when the hook client hit an internal error (a panic) and failed open. |
+| `msg.log_cpu_sustained` | Event-log detail when the daemon CPU self-check observes sustained CPU and backs off scheduled jobs. Placeholders: {pct}, {ms}, {backoff_ms}. |
 | `msg.log_crash_context` | Log detail when a daemon is found dead without a clean exit, with the last breadcrumb. Placeholders: {pid}, {context}. |
+| `msg.log_crashloop_new_binary` | Log detail when a crash-loop cooldown ends because the binary was replaced. Placeholder: {sha}. |
+| `msg.log_crashloop_rollback` | Log detail added when a crash-loop trip also requested a roll-back. |
 | `msg.log_daemon_killed` | Log detail when the daemon was killed by a signal while starting. |
 | `msg.log_daemon_spawn_failed` | Event-log detail (kind spawn_fail, code os<n>) when the client could not start the daemon (fork or exec failed: EAGAIN, ENOMEM, a missing executable). Placeholder: {err}. |
 | `msg.log_fallback_read_error` | Log detail when reading the Node fallback's stdout or stderr failed part-way. |
@@ -9452,7 +9490,7 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `msg.log_fallback_signal` | Log detail when the Node fallback was killed by a signal (out of memory, a crash). |
 | `msg.log_fallback_timeout` | Log detail when the Node fallback did not finish in time. |
 | `msg.log_lock_fail` | Start-failure detail when the lock file cannot be opened. Placeholders: {path}, {err}. |
-| `msg.log_lock_no_daemon` | Log detail when a starting daemon gives up on the singleton lock while no daemon answers on the socket. Placeholders: {path}, {pid} (the pid the lock file names, may be empty). |
+| `msg.log_lock_no_daemon` | Log detail when a starting daemon gives up on the singleton lock while no daemon answers on the socket. Placeholders: {path}, {pid} (the pid the lock file names, may be empty), {live_engine}. |
 | `msg.log_not_socket` | Start-failure detail when something other than a socket sits at the socket path. Placeholder: {path}. |
 | `msg.log_operator_reset` | Log detail for `reset`. |
 | `msg.log_panic` | Log and failure detail when a request handler panicked. |
@@ -9461,6 +9499,7 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `msg.log_proc_unread` | Event-log detail (rate-limited, code proc_unread) when a helper exited but its output did not reach end of file within proc.read_grace_ms (a process it left behind held a pipe); its group was killed. Placeholder: {what}. |
 | `msg.log_pruned` | Event-log detail when maintenance forgets old applied write ids. Placeholder: {n}. |
 | `msg.log_restored` | Event-log detail of a restore. Placeholders: {from}, {kept}. |
+| `msg.log_rollback_request` | Log detail when the crash-loop rule asks for a roll-back. Placeholder: {sha}. |
 | `msg.log_rss` | Log detail when the daemon is over its memory cap. Placeholders: {rss}, {cap}. |
 | `msg.log_stall` | Log detail when the accept loop stalled. |
 | `msg.log_start` | Log detail for a daemon start. Placeholders: {version}, {pid}, {rlimit}. |
@@ -9488,7 +9527,9 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `msg.schedule_agent_planned` | Result of an agent-targeted job until mailbox delivery exists (D45). |
 | `msg.schedule_daemon_gone` | An in-process job found the daemon gone (it was exiting). |
 | `msg.schedule_failed` | Event-log detail of a failed run. Placeholders: {job}, {detail}. |
+| `msg.schedule_no_work` | Reason text when a scheduled job has no recent sessions or pending requests to handle. |
 | `msg.schedule_panic` | Detail of a scheduled run panic caught at the job boundary. |
+| `msg.schedule_skipped` | Event-log detail when a scheduled job skipped itself because there was no work. Placeholders: {job}, {detail}. |
 | `msg.schedule_snapshot_failed` | The metrics snapshot job could not keep its snapshot. |
 | `msg.schedule_timeout` | Detail of a run that passed its timeout. |
 | `msg.schedule_unknown_action` | A job names an action the scheduler does not know; the job is ignored. Placeholders: {job}, {action}. |
