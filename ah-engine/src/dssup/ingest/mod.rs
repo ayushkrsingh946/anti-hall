@@ -74,8 +74,8 @@ pub fn discover(home: &Path, state_dir: &Path, explicit: &str, now: i64) -> Vec<
             continue;
         }
         let Some(v) = read_json(&e.path()) else { continue };
-        let fresh = v["ts"].as_i64().is_some_and(|ts| now - ts <= defaults::num("devswarm_ingest.discover_max_age_ms") as i64);
-        if let (true, Some(dir)) = (fresh, v["workingDir"].as_str())
+        let fresh = v.get("ts").and_then(|t| t.as_i64()).is_some_and(|ts| now - ts <= defaults::num("devswarm_ingest.discover_max_age_ms") as i64);
+        if let (true, Some(dir)) = (fresh, v.get("workingDir").and_then(|d| d.as_str()))
             && Path::new(dir).is_dir()
         {
             paths.insert(dir.to_string());
@@ -113,8 +113,8 @@ fn active_repo_keys(home: &Path, explicit: &str, now: i64) -> BTreeSet<String> {
             continue;
         }
         let Some(v) = read_json(&e.path()) else { continue };
-        let fresh = v["ts"].as_i64().is_some_and(|ts| now - ts <= defaults::num("devswarm_ingest.discover_max_age_ms") as i64);
-        if let (true, Some(dir)) = (fresh, v["workingDir"].as_str())
+        let fresh = v.get("ts").and_then(|t| t.as_i64()).is_some_and(|ts| now - ts <= defaults::num("devswarm_ingest.discover_max_age_ms") as i64);
+        if let (true, Some(dir)) = (fresh, v.get("workingDir").and_then(|d| d.as_str()))
             && Path::new(dir).is_dir()
         {
             paths.insert(dir.to_string());
@@ -252,7 +252,7 @@ fn reconcile_worker_count(
 fn note_worker_panics(workers: &mut Vec<PoolWorker>, panics: &mut u64) -> bool {
     let mut i = 0;
     while i < workers.len() {
-        if !workers[i].handle.is_finished() {
+        if workers.get(i).is_some_and(|w| !w.handle.is_finished()) {
             i += 1;
             continue;
         }
@@ -273,7 +273,7 @@ fn note_worker_panics(workers: &mut Vec<PoolWorker>, panics: &mut u64) -> bool {
 fn join_finished_workers(workers: &mut Vec<PoolWorker>) {
     let mut i = 0;
     while i < workers.len() {
-        if workers[i].handle.is_finished() {
+        if workers.get(i).is_some_and(|w| w.handle.is_finished()) {
             let w = workers.remove(i);
             crate::discard::logged("ingest_worker_join", w.handle.join().map_err(|_| "panic"));
         } else {
@@ -321,7 +321,8 @@ fn rotated_projects(projects: &[Project], cursor: usize) -> Vec<Project> {
         return Vec::new();
     }
     let start = cursor % projects.len();
-    projects[start..].iter().chain(projects[..start].iter()).cloned().collect()
+    let (head, tail) = projects.split_at(start);
+    tail.iter().chain(head).cloned().collect()
 }
 
 fn desired_project_keys(projects: &[Project], max_threads: usize, cursor: usize) -> BTreeSet<String> {
