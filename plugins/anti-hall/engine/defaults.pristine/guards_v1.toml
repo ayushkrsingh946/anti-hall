@@ -58,6 +58,20 @@ value = 262144
 min = 1024
 unit = "bytes"
 
+[host_spawn.cache_enabled]
+doc = "Whether `ahHost.spawnProbeCached` keeps completed probe answers (an interpreter's version line) per daemon. Off: every call runs the program."
+value = true
+
+[host_spawn.cache_ttl_ms]
+doc = "How long a kept probe answer is served before the program is run again (a changed interpreter file re-probes at once, whatever this says)."
+value = 600000
+min = 1
+unit = "ms"
+
+[host_spawn.cache_key_env]
+doc = "Request environment variables whose values are part of a kept probe answer's key, because they pick the interpreter version behind a shim (pyenv, asdf, virtualenv, conda); a different value probes again."
+value = ["PATH", "PYENV_VERSION", "ASDF_PYTHON_VERSION", "VIRTUAL_ENV", "CONDA_PREFIX", "CONDA_DEFAULT_ENV"]
+
 # ---- the hook process (engine/logic/lib/78-hook-proc.js) -------------------------------------------------------------------------
 
 [hook_proc.cwd_envs]

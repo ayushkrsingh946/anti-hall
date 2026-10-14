@@ -340,6 +340,21 @@ fn home_key(home: &Path, norm: &Norm) -> String {
     norm.apply(&v.join("\n"))
 }
 
+/// `text` with the interpreter version in "installed runtime (...)" blanked (the api-guard block names it).
+fn runtime_blanked(text: &str) -> String {
+    const MARK: &str = "installed runtime (";
+    match text.find(MARK) {
+        Some(i) => {
+            let from = i + MARK.len();
+            match text[from..].find(')') {
+                Some(j) => format!("{}{}", &text[..from], &text[from + j..]),
+                None => text.to_string(),
+            }
+        }
+        None => text.to_string(),
+    }
+}
+
 /// Stop a group's daemon and wait for its process to exit (the pid its singleton lock file names; `common::reap` looks for an
 /// `ah-engine serve` command line, which a daemon the client spawned does not show, and then waited 2 s per group for nothing).
 /// SIGKILL after the ceiling, so a daemon never outlives its group.
@@ -609,7 +624,12 @@ fn run_guard_with(o: &Opts, hooks: &Path, scenarios: &[Scenario], golden: &Golde
                     // second request is warm and the daemon must then deny or advise. A daemon that
                     // never denies still ends as a mismatch after the retries.
                     for _ in 0..4 {
-                        if !((n.code_is(2) || !n.out.is_empty()) && e.code == "0" && e.out.is_empty() && e.err.is_empty()) {
+                        // a fail-open notice (a probe the cold daemon could not finish inside the request deadline) is the same
+                        // cold start: the probe goes on in the daemon and the answer is kept for the repeat
+                        let cold = e.code == "0" && e.out.is_empty() && (e.err.is_empty() || e.err.contains("verification skipped"));
+                        // the block itself was right but its interpreter version line was still being probed: the name stands in
+                        let unversioned = e.code == n.code && e.err == n.err && runtime_blanked(&e.out) == runtime_blanked(&n.out) && e.out != n.out;
+                        if !((n.code_is(2) || !n.out.is_empty() || !e.err.is_empty()) && (cold || unversioned) && !same(&e, &n)) {
                             break;
                         }
                         std::thread::sleep(std::time::Duration::from_millis(500));

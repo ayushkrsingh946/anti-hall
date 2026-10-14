@@ -17,6 +17,7 @@ checks/guardkit/settings.rs | SEEN | at most guardkit.settings_seen_max + 1 entr
 devswarm_rt/reconcile.rs | Hold.edges | registered as mem.devswarm_rt_* and cfg.edge_cap also limits retained edges | recent realtime edges are recoverable and evicted first
 devswarm_rt/reconcile.rs | Hold.generations | registered as mem.devswarm_rt_* and stale weak snapshots are pruned while accounting | old Arc-held snapshots stay charged until callers drop them
 dssup/ingest/mod.rs | Ledger.slots | registered as mem.devswarm_ingest_* and mem.devswarm_ingest_max_threads caps total resident ingest threads (manager plus project workers) | bounded resident ingest project slots; value 1 permits manager-only/no project workers
+script/host_spawn.rs | SET | one entry per probe a worker is running now, removed when it ends (host_spawn.timeout_max_ms ceiling, host_spawn.max_calls per request) | in-flight spawn-probe keys, so one probe is never started twice
 schedule.rs | Scheduler.state | one entry per configured job (schedules.toml), fixed at load | job state
 schedule.rs | Scheduler.last | one entry per configured job | last-run state
 ghrt/repos.rs | NOTED | entries older than ttl dropped once past cap (arguments of note()) | recently noted working directories

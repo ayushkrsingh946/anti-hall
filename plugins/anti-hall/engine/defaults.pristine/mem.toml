@@ -119,6 +119,29 @@ doc = "Transcript-tail answers the cache keeps at most; past it the least recent
 value = 256
 min = 1
 
+[mem.spawn_probe_soft_bytes]
+doc = "Bytes of kept spawn-probe answers (`spawnProbeCached`) held before the least recently used are dropped down to the low-water mark."
+value = 65536
+min = 1024
+unit = "bytes"
+
+[mem.spawn_probe_hard_bytes]
+doc = "Bytes of kept spawn-probe answers at which an insert is refused (the answer is returned, not kept) and the cache is recycled."
+value = 131072
+min = 1024
+unit = "bytes"
+
+[mem.spawn_probe_low_water_pct]
+doc = "Percent of mem.spawn_probe_soft_bytes the spawn-probe cache is evicted down to when the soft limit is reached."
+value = 80
+min = 1
+max = 100
+
+[mem.spawn_probe_max_entries]
+doc = "Spawn-probe answers the cache keeps at most; past it the least recently used is dropped first."
+value = 64
+min = 1
+
 [mem.hook_sessions_soft_bytes]
 doc = "Estimated bytes of hook session condition counters held before idle counters are evicted down to the low-water mark."
 value = 262144
