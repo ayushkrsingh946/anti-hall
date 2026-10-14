@@ -716,9 +716,10 @@ fn run_core(raw: &str, args: &Args, payload: Option<&File>, complete: bool, tele
                 pre_err.push_str(&stderr);
                 pre_err.push('\n');
             }
-            // a check whose answer needs a model call of seconds (the daemon deferred it: its deadline cannot wait): this process runs it
+            // a check whose answer needs a model call of seconds (the daemon explicitly deferred it: its deadline cannot wait; no answer at all
+            // means the daemon was down or unusable and every entry runs its Node hook): this process runs it
             // below, once the other hooks are running beside it; the Node hook only if it still defers
-            _ if parsed.is_some() && e.check.as_deref().is_some_and(|c| blocking_checks.contains(&c)) => blocking.push(i),
+            Some((_, Answer::Defer)) if parsed.is_some() && e.check.as_deref().is_some_and(|c| blocking_checks.contains(&c)) => blocking.push(i),
             _ => started.push((i, start_node_for(e, &args.event, raw.as_bytes(), payload))),
         }
     }
