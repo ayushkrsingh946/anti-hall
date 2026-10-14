@@ -187,11 +187,13 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `client.ctl_timeout_ms` | `1500` |  | ms | Deadline for a control exchange (ping, status, reload, stop, project ops). |
 | `client.deadline_ms` | `300` | `AH_ENGINE_DEADLINE_MS` | ms | Overall hook-client deadline for one engine exchange (connect, write, read); a hard watchdog thread enforces it so a hung daemon fails open quickly. |
 | `client.deadline_slack_ms` | `10` |  | ms | Extra wait for the exchange thread to report after the deadline before the client declares a timeout. |
-| `client.down_marker_ttl_ms` | `3000` | `AH_ENGINE_DOWN_MARKER_TTL_MS` | ms | How long other clients skip connecting after one client finds the daemon absent or hung; this prevents hook pile-ups while a restart is attempted. |
+| `client.down_marker_ttl_ms` | `3000` | `AH_ENGINE_DOWN_MARKER_TTL_MS` | ms | How long other clients skip connecting after one client finds the daemon absent or failed, or after client.slow_down_n consecutive slow replies; this prevents hook pile-ups while a restart is attempted. |
 | `client.fallback_ms` | `8000` | `AH_ENGINE_FALLBACK_MS` | ms | The Node fallback hook must finish, and its stdout and stderr must reach EOF, within this long. A hook still running at the deadline is killed (then plain allow, since it is unavailable); one that finished with output still unread is an error outcome, never an empty stdout. |
 | `client.fallback_poll_ms` | `2` |  | ms | Poll interval while the Node fallback runs. |
 | `client.max_reply` | `2097152` |  | bytes | Largest reply the client reads. |
 | `client.max_stdin` | `8388608` |  | bytes | Largest hook payload the client reads from stdin. |
+| `client.slow_down_n` | `5` | `AH_ENGINE_SLOW_DOWN_N` |  | Consecutive slow (late) daemon replies within client.slow_window_ms after which the daemon is treated as wedged and marked down. A single late reply never marks it down: that call runs its Node hooks and the next client asks the daemon again. |
+| `client.slow_window_ms` | `10000` | `AH_ENGINE_SLOW_WINDOW_MS` | ms | Window in which consecutive slow daemon replies are counted toward client.slow_down_n; a streak older than this starts over. |
 | `client.spawn_lock_ttl_ms` | `3000` | `AH_ENGINE_SPAWN_LOCK_TTL_MS` | ms | How old the single-flight daemon spawn lock may get before another client treats it as stale and may try one restart. |
 | `client.spawn_n` | `6` | `AH_ENGINE_SPAWN_N` |  | Daemon starts within the spawn window that count as a crash loop even when the daemon reported no crash (a binary that exits at once reports nothing). Respawning then stops for client.crash_cooldown_s. |
 | `client.spawn_window_s` | `60` | `AH_ENGINE_SPAWN_WINDOW_S` | s | Window in which daemon starts are counted for client.spawn_n. |
@@ -306,6 +308,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `files.rollback_request` | `rollback.request` |  |  | Written when the crash-loop rule trips on a binary with no healthy history: asks the integrity script to restore the known-good binary. Holds the sha256 of the binary to replace. |
 | `files.run_marker` | `daemon.run` |  |  | Written while a daemon runs; a leftover one with a dead pid is logged as one crash. |
 | `files.schedules_override` | `schedules.json` |  |  | User overrides of the shipped schedules (D33): JSON, `{"jobs": {"<name>": {...}}}`; read when the daemon starts. |
+| `files.slow_streak` | `daemon.slow.streak` |  |  | Client marker holding the count of consecutive slow (late) daemon replies and when the streak began; a normal reply removes it. |
 | `files.spawn_lock` | `daemon.spawn.lock` |  |  | Short-lived client single-flight lock: only the client that creates it attempts to restart a missing daemon. |
 | `files.spool` | `spool.log` |  |  | The write spool: project writes a client could not deliver, applied by the daemon in order (D24). |
 | `files.spool_quarantine` | `spool.quarantine` |  |  | Spool records that could not be parsed or that the store refused for good, kept with their reason, never dropped (D24). |
@@ -9433,6 +9436,7 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `msg.client_fallback_unavailable` | Printed on stderr when stdin cannot safely be sent to the engine and the Node fallback cannot answer. Guard events exit 2; non-guard events exit 0 with this note. |
 | `msg.client_io` | Exchange failure for another I/O step. Placeholders: {what}, {err}. |
 | `msg.client_no_fallback_guard` | Printed on stderr (exit dispatch.defer_exit) when the legacy `hook` command gets a guard event, the engine cannot answer and no Node fallback was given: the caller must run the Node hook, never take silence as an allow. |
+| `msg.client_skip` | Log detail for a hook call that skipped the daemon because a down marker, the breaker or the crash-loop cooldown was active. |
 | `msg.client_timeout` | Exchange failure when the hard deadline passed. |
 | `msg.client_what_stat` | The step named in msg.client_io when the socket path cannot be examined (a permission or path error, not a missing socket). |
 | `msg.daemon_already_running` | Printed on stderr when a second daemon start finds an existing daemon/lock holder for the socket. Placeholders: {path}, {pid}, {live_engine}, {answers}. |

@@ -285,6 +285,10 @@ value = "test panic"
 doc = "Exchange failure when the socket path is not a socket owned by this user."
 value = "socket is not a socket owned by this user"
 
+[msg.client_skip]
+doc = "Log detail for a hook call that skipped the daemon because a down marker, the breaker or the crash-loop cooldown was active."
+value = "skipped"
+
 [msg.client_timeout]
 doc = "Exchange failure when the hard deadline passed."
 value = "timeout"
