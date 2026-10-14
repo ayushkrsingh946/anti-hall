@@ -193,6 +193,8 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `client.max_reply` | `2097152` |  | bytes | Largest reply the client reads. |
 | `client.max_stdin` | `8388608` |  | bytes | Largest hook payload the client reads from stdin. |
 | `client.spawn_lock_ttl_ms` | `3000` | `AH_ENGINE_SPAWN_LOCK_TTL_MS` | ms | How old the single-flight daemon spawn lock may get before another client treats it as stale and may try one restart. |
+| `client.spawn_n` | `6` | `AH_ENGINE_SPAWN_N` |  | Daemon starts within the spawn window that count as a crash loop even when the daemon reported no crash (a binary that exits at once reports nothing). Respawning then stops for client.crash_cooldown_s. |
+| `client.spawn_window_s` | `60` | `AH_ENGINE_SPAWN_WINDOW_S` | s | Window in which daemon starts are counted for client.spawn_n. |
 | `client.wrapper_extra_ms` | `250` |  | ms | Extra shell watchdog budget beyond the client deadline and client slack; this lets the client write the daemon-down marker and release the single-flight spawn lock before the wrapper kills it. |
 | `client.wrapper_watchdog_poll_ms` | `2` |  | ms | Poll interval for the hook wrapper millisecond watchdog. |
 
@@ -209,6 +211,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `daemon.drain_poll_ms` | `20` |  | ms | Accept-loop poll interval while draining. |
 | `daemon.eval_budget_us` | `200000` | `AH_ENGINE_EVAL_BUDGET_US` | us | Per-request thread CPU budget for rule evaluation; 0 turns the budget off. |
 | `daemon.forced_exit_code` | `75` |  |  | Exit status of a forced drain exit (sysexits EX_TEMPFAIL, 75); the next client call starts a fresh daemon. |
+| `daemon.healthy_after_s` | `30` | `AH_ENGINE_HEALTHY_AFTER_S` | s | How long the daemon must stay up before its binary is recorded as having run healthy (files.healthy_binary). A binary that dies earlier never earns the record, so a roll-back may replace it. |
 | `daemon.idle_check_ms` | `1000` |  | ms | How often the watchdog compares the last request time with idle_exit_s. |
 | `daemon.idle_exit_s` | `0` | `AH_ENGINE_IDLE_EXIT_S` | s | Seconds without any request after which the daemon exits (the next hook call starts a fresh one, and the scheduler catches up its missed jobs); 0 keeps it resident. 0 by default: the daemon is always resident so the scheduler and mailbox keep running after every session closes (D7). A daemon whose state dir, lock file or executable is gone still exits on its own (daemon.orphan_check_ms). |
 | `daemon.lock_poll_ms` | `10` |  | ms | Poll interval while waiting for the singleton lock. |
@@ -288,12 +291,17 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `files.backups_dir` | `backups` |  |  | Directory inside the state directory that holds backups and pre-restore snapshots (D27); nothing in it is ever deleted by the engine. |
 | `files.breaker_until` | `breaker.until` |  |  | Marker holding the time (ms since the epoch) until which the client breaker stays open. |
 | `files.crash_breadcrumb` | `crash-breadcrumb.json` |  |  | Last request/job/check breadcrumb written at boundary entry so an abnormal exit can be reported with context on the next start. |
+| `files.crashloop_bin` | `crashloop.bin` |  |  | Holds the size, modification time and sha256 of the binary the crash-loop rule tripped on. A cooldown ends early when the binary is replaced by a different one. |
 | `files.crashloop_until` | `crashloop.until` |  |  | Marker holding the time until which respawning is stopped after a crash loop. |
 | `files.daemon_down_marker` | `daemon.down.until` |  |  | Short-lived client marker: when a hook client finds the daemon absent or hung, other clients skip connecting until this expires. |
 | `files.failure` | `failure.json` |  |  | Last recorded failure, for the once-per-session advisory. |
+| `files.healthy_binary` | `healthy.binary` |  |  | Holds the sha256 of the engine binary that last stayed up for daemon.healthy_after_s. The integrity script promotes that binary to the known-good copy; a binary with no entry here has never proven itself. |
+| `files.integrity_log` | `integrity.log` |  |  | Log of the integrity script (checks, promotions, roll-backs), inside the state directory. |
 | `files.last_crash` | `last-crash.json` |  |  | Last panic or stale-run-marker crash report, shown by status and doctor. |
 | `files.log` | `ah-engine.log` |  |  | Event log file name (state directory). |
 | `files.reaped_prefix` | `daemon.run.reaped.` |  |  | Prefix of the temporary name a stale run marker is renamed to when it is claimed (the pid is appended). |
+| `files.rollback_last` | `rollback.last` |  |  | One line the integrity script writes when it rolls the engine binary back (time, reason, which binary was set aside). Shown by status and doctor. |
+| `files.rollback_request` | `rollback.request` |  |  | Written when the crash-loop rule trips on a binary with no healthy history: asks the integrity script to restore the known-good binary. Holds the sha256 of the binary to replace. |
 | `files.run_marker` | `daemon.run` |  |  | Written while a daemon runs; a leftover one with a dead pid is logged as one crash. |
 | `files.schedules_override` | `schedules.json` |  |  | User overrides of the shipped schedules (D33): JSON, `{"jobs": {"<name>": {...}}}`; read when the daemon starts. |
 | `files.spawn_lock` | `daemon.spawn.lock` |  |  | Short-lived client single-flight lock: only the client that creates it attempts to restart a missing daemon. |
@@ -301,6 +309,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `files.spool_quarantine` | `spool.quarantine` |  |  | Spool records that could not be parsed or that the store refused for good, kept with their reason, never dropped (D24). |
 | `files.starts` | `starts` |  |  | Counter of daemon starts, surfaced as `starts` and `restarts` in status. |
 | `files.telemetry_inbox` | `telemetry-inbox.jsonl` |  |  | Events recorded by processes other than the daemon (the hook dispatcher, one-shot commands), one JSON line each, in the state directory; the daemon reads and empties it on every telemetry flush. |
+| `files.wrapper_fail_log` | `wrapper.fails` |  |  | Epoch seconds, one per line, of the hook wrapper's engine failures (timeout, signal death, no answer). The integrity script counts them against rollback.fail_n. |
 
 ### engine.toml / health
 
@@ -316,6 +325,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `health.diag_lines` | `8` |  |  | Event-log lines included in the diagnostic block of a permanent-failure advisory. |
 | `health.error_codes` | `3 entries, 3 entries, 3 entries, 3 entries, 3 entries` |  |  | Error-code classification: environment-class codes get a plain self-fix hint (a message key); every other code is a permanent failure that asks for an issue. |
 | `health.event_text_max` | `300` |  | chars | Longest kind, code or detail written to one log line (newlines and tabs become spaces). |
+| `health.judged_kinds` | `crashloop, crashloop_reset, reset` |  |  | Event kinds that mark a crash-loop judgement (a trip, a reset by a new binary, an operator reset): crashes and daemon starts logged before the latest of them no longer count toward the next trip. |
 | `health.log_cap` | `65536` |  | bytes | Event log size above which it is trimmed to its last log_keep_lines lines. |
 | `health.log_keep_lines` | `200` |  |  | Lines kept when the event log is trimmed. |
 | `health.pid_probe` | `ps, -p, {pid}, -o, command=` |  |  | Command used to read a process's command line when checking whether a pid is a live engine: the program, then its arguments with `{pid}` substituted. |
@@ -377,6 +387,26 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `request_env.incomplete_key` | `ah_env_incomplete` |  |  | Reserved name, never a forwardable variable, that carries the request's incomplete flag inside the forwarded environment object (the client's variables were dropped or it had no HOME), so the daemon's checks defer to the Node guards. |
 | `request_env.line_prefix` | `E ` |  |  | Prefix of the request line that carries the forwarded environment as one JSON object. |
 | `request_env.max_bytes` | `65536` |  | bytes | Largest forwarded environment (sum of names and values); a client whose allowed variables exceed it forwards none of them and the request is marked incomplete, so every check defers to the Node guard (a missing or empty HOME marks it incomplete too). |
+
+### engine.toml / rollback
+
+| Key | Default | Env override | Unit | What it is |
+|---|---|---|---|---|
+| `rollback.accepted_suffix` | `.accepted` |  |  | Suffix added to the expected-sha file for the note that the operator vouched for exactly that binary (`accept`): a vouched-for binary is never rolled back. |
+| `rollback.aside_infix` | `.rolledback-` |  |  | A binary set aside by a roll-back is renamed bin/ah-engine.rolledback-<UTC time>-<sha prefix>; this is the word between. Set-aside binaries are never deleted. |
+| `rollback.bin_dir` | `bin` |  |  | Directory inside the state directory that holds the engine binary and its copies. |
+| `rollback.bin_name` | `ah-engine` |  |  | File name of the installed engine binary. |
+| `rollback.expected_suffix` | `.expected` |  |  | Suffix of the file holding the sha256 the installer expects the installed binary to have (bin/ah-engine.expected). |
+| `rollback.fail_n` | `3` | `AH_ENGINE_ROLLBACK_FAIL_N` |  | Engine failures seen by the hook wrapper (timeout, signal death, no answer) within rollback.fail_window_s that roll a never-healthy binary back. The wrapper counts them because a hung binary cannot count its own. |
+| `rollback.fail_window_s` | `120` | `AH_ENGINE_ROLLBACK_FAIL_WINDOW_S` | s | Window in which the wrapper's engine failures are counted for rollback.fail_n. |
+| `rollback.field_sep` | ` ` |  |  | Separator between the fields of the crash-loop binary record (files.crashloop_bin: size, modification time, sha256). |
+| `rollback.good_suffix` | `.good` |  |  | Suffix of the known-good copy of the binary (bin/ah-engine.good) and of its sha256 file (.good.sha256). Never deleted. |
+| `rollback.hash_chunk` | `65536` |  | bytes | Bytes read at a time when the engine hashes its own binary (sha256). |
+| `rollback.line_end` | `\n` |  |  | Line terminator of the crash-loop binary record. |
+| `rollback.on_mismatch` | `1` | `AH_ENGINE_ROLLBACK_ON_MISMATCH` |  | 1 = a binary whose sha256 differs from the one the installer recorded (swapped by hand) and that has never run healthy is rolled back to the known-good binary at the next check. 0 = never roll back on a mismatch alone (a local build you are developing). `accept` records the installed binary as the expected one. |
+| `rollback.script` | `hooks/ah-engine-integrity.sh` |  |  | The integrity script, relative to the plugin root. verbs: record, accept, check, fail, status. |
+| `rollback.sha_suffix` | `.sha256` |  |  | Suffix of the file holding the sha256 of the known-good copy (bin/ah-engine.good.sha256). |
+| `rollback.shell` | `sh` |  |  | The shell that runs the integrity script. |
 
 ### engine.toml / store
 
@@ -5994,7 +6024,8 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `ops.table_headers_integrations` | `Integration, Effective, Configured, Source, Logs to` |  |  | The columns of the Jev integrations table. |
 | `ops.true_word` | `true` |  |  | The value `judge on` stores. |
 | `ops.trust_done` | `trusted {repo}/{rel} (sha256 {hash}):` |  |  | First line after a trust is recorded. Placeholders: repo, rel, hash. |
-| `ops.trust_exotic_breaks` | `,  ,  ` |  |  | Line-break characters that make a .git file's gitdir line ambiguous between the engine and JavaScript; a repository whose .git file holds one is refused. List of strings. |
+| `ops.trust_exotic_breaks` | `
+,  ,  ` |  |  | Line-break characters that make a .git file's gitdir line ambiguous between the engine and JavaScript; a repository whose .git file holds one is refused. List of strings. |
 | `ops.trust_missing` | `no {rel} in {top}` |  |  | No allowlist file. Placeholders: rel, top. |
 | `ops.trust_not_git` | `not inside a git repository: {target}` |  |  | No repository. Placeholder: target. |
 | `ops.trust_state` | `{rel} in {top} is {state}` |  |  | An unusable allowlist file. Placeholders: rel, top, state. |
@@ -7970,7 +8001,8 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_cli.rr_mb_grep_file_long` | `--file` |  |  | The long flag by which the pattern filter reads its patterns from a file (refused, with or without `=value`). |
 | `devswarm_cli.rr_mb_grep_file_short` | `f` |  |  | The short flag letter for the same (refused anywhere in a flag cluster). |
 | `devswarm_cli.rr_mb_inbox_word` | `inbox` |  |  | The word a mailbox cron prompt must contain (as a whole word) next to the CLI script name. |
-| `devswarm_cli.rr_mb_line_terms` | `\n  ` |  |  | The line terminator characters a script path may not contain (a regex dot does not cross them). |
+| `devswarm_cli.rr_mb_line_terms` | `\n
+  ` |  |  | The line terminator characters a script path may not contain (a regex dot does not cross them). |
 | `devswarm_cli.rr_mb_node` | `node` |  |  | The interpreter word a mailbox-class command starts with (companion/lib/devswarm-idle.js: a ping turn is made only of such calls). |
 | `devswarm_cli.rr_mb_pipe` | `\|` |  |  | The pipe character that separates a mailbox command from its read-only filters. |
 | `devswarm_cli.rr_mb_quotes` | `'"` |  |  | The two quote characters of a mailbox command, in this order: the literal quote, the string quote. |
@@ -9445,6 +9477,8 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `msg.log_budget` | Log detail when a rule evaluation exceeded its CPU budget. |
 | `msg.log_client_panic` | Log detail when the hook client hit an internal error (a panic) and failed open. |
 | `msg.log_crash_context` | Log detail when a daemon is found dead without a clean exit, with the last breadcrumb. Placeholders: {pid}, {context}. |
+| `msg.log_crashloop_new_binary` | Log detail when a crash-loop cooldown ends because the binary was replaced. Placeholder: {sha}. |
+| `msg.log_crashloop_rollback` | Log detail added when a crash-loop trip also requested a roll-back. |
 | `msg.log_daemon_killed` | Log detail when the daemon was killed by a signal while starting. |
 | `msg.log_daemon_spawn_failed` | Event-log detail (kind spawn_fail, code os<n>) when the client could not start the daemon (fork or exec failed: EAGAIN, ENOMEM, a missing executable). Placeholder: {err}. |
 | `msg.log_fallback_read_error` | Log detail when reading the Node fallback's stdout or stderr failed part-way. |
@@ -9461,6 +9495,7 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `msg.log_proc_unread` | Event-log detail (rate-limited, code proc_unread) when a helper exited but its output did not reach end of file within proc.read_grace_ms (a process it left behind held a pipe); its group was killed. Placeholder: {what}. |
 | `msg.log_pruned` | Event-log detail when maintenance forgets old applied write ids. Placeholder: {n}. |
 | `msg.log_restored` | Event-log detail of a restore. Placeholders: {from}, {kept}. |
+| `msg.log_rollback_request` | Log detail when the crash-loop rule asks for a roll-back. Placeholder: {sha}. |
 | `msg.log_rss` | Log detail when the daemon is over its memory cap. Placeholders: {rss}, {cap}. |
 | `msg.log_stall` | Log detail when the accept loop stalled. |
 | `msg.log_start` | Log detail for a daemon start. Placeholders: {version}, {pid}, {rlimit}. |

@@ -145,6 +145,15 @@ fn count_recent(kinds: &[&str], window: Duration) -> usize {
     events().iter().filter(|e| e.ts >= floor && kinds.contains(&e.kind.as_str())).count()
 }
 
+/// Like [`count_recent`], but events at or before the last crash-loop trip or reset do not count: a loop that was already
+/// judged (and then waited out, reset by an operator, or left behind by a new binary) must not trip again on the same events.
+fn count_recent_after_trip(kinds: &[&str], window: Duration) -> usize {
+    let all = events();
+    let judged = all.iter().filter(|e| defaults::list("health.judged_kinds").contains(&e.kind.as_str())).map(|e| e.ts).max().unwrap_or(0);
+    let floor = now_ms().saturating_sub(window.as_millis() as u64).max(judged.saturating_add(1));
+    all.iter().filter(|e| e.ts >= floor && kinds.contains(&e.kind.as_str())).count()
+}
+
 // ---- classification ----------------------------------------------------------------------------
 
 /// Who can fix a failure.
@@ -318,7 +327,19 @@ fn halt(key: &str, cooldown: Duration) {
 
 /// Time left in a crash-loop cooldown, if one is active.
 pub fn crashloop_remaining() -> Option<Duration> {
-    halted("crashloop_until")
+    let left = halted("crashloop_until")?;
+    if crate::binguard::cooldown_binary_replaced() {
+        clear_crashloop();
+        return None;
+    }
+    Some(left)
+}
+
+/// End the crash-loop cooldown (the binary was replaced, or the operator reset it): the stamp files go, the event log stays.
+fn clear_crashloop() {
+    for key in ["crashloop_until", "crashloop_bin", "rollback_request"] {
+        crate::discard::harmless(std::fs::remove_file(state_file(key))); // keep: cleanup that raced; an absent file is the goal state
+    }
 }
 
 /// Evaluate the crash-loop rule before (re)spawning: reap a dead daemon's marker, then if the daemon died
@@ -329,17 +350,26 @@ pub fn crashloop_tripped(cfg: &ClientConfig) -> bool {
         return true;
     }
     reap_marker();
-    let n = count_recent(&crashy(), cfg.crash_window);
-    if n < cfg.crash_n {
+    let n = count_recent_after_trip(&crashy(), cfg.crash_window);
+    // a binary that exits at once leaves no crash event, so the starts themselves are counted too: this many in this window
+    // is a loop whatever the daemon reported
+    let starts = count_recent_after_trip(&["client_spawn_attempt"], cfg.spawn_window);
+    if n < cfg.crash_n && starts < cfg.spawn_n {
         return false;
     }
+    // say which rule fired: the crashes within their window, or the starts within theirs
+    let (n, window) = if starts >= cfg.spawn_n && starts >= n { (starts, cfg.spawn_window) } else { (n, cfg.crash_window) };
     halt("crashloop_until", cfg.crash_cooldown);
+    let rolled = crate::binguard::on_crashloop_trip();
     // a crash loop caused by the environment keeps that cause; otherwise it is a permanent failure
     let env_code = events().into_iter().rev().find(|e| crashy().contains(&e.kind.as_str())).filter(|e| classify(&e.code).0 == Class::Env).map(|e| e.code);
-    let reason = defaults::render("msg.reason_crashloop", &[("n", &n.to_string()), ("secs", &cfg.crash_window.as_secs().to_string())]);
+    let reason = defaults::render("msg.reason_crashloop", &[("n", &n.to_string()), ("secs", &window.as_secs().to_string())]);
     let (kind, code) = ("crashloop".to_string(), env_code.unwrap_or_else(|| "crashloop".to_string()));
     log_event("crashloop", &code, &reason);
     record_failure(&kind, &code, &reason);
+    if rolled {
+        log_event("crashloop", "rollback_requested", defaults::text("msg.log_crashloop_rollback"));
+    }
     true
 }
 
@@ -365,7 +395,8 @@ pub fn breaker_failure(cfg: &ClientConfig, why: &str) {
 
 /// Operator reset: clear the breaker, the crash-loop cooldown and the failure record.
 pub fn reset() {
-    for key in ["breaker_until", "crashloop_until", "failure"] {
+    clear_crashloop();
+    for key in ["breaker_until", "failure"] {
         crate::discard::harmless(std::fs::remove_file(state_file(key))); // keep: cleanup that raced; an absent file is the goal state
     }
     log_event("reset", "-", defaults::text("msg.log_operator_reset"));
@@ -452,6 +483,7 @@ pub fn summary() -> Value {
         "restarts": {"total": total(&restarts), "by_reason": restarts, "last_rss_trip": last("rss"), "last_memory_breakdown": last("memory")},
         "crashloop": {"tripped": loop_left.is_some(), "remaining_s": loop_left.map(|d| d.as_secs() + 1), "last_trip": last("crashloop")},
         "breaker": {"open": breaker_left.is_some(), "remaining_s": breaker_left.map(|d| d.as_secs() + 1), "last_open": last("breaker_open")},
+        "rollback": {"last": crate::binguard::last_rollback(), "last_request": last("rollback_request")},
         "fallbacks": {"total": total(&fallbacks), "by_reason": fallbacks},
         "defaults": {"total": total(&defaults_fb), "by_reason": defaults_fb, "last": last_defaults},
         "last_crash": last_crash(),

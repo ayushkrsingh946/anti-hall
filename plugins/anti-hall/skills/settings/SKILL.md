@@ -279,7 +279,7 @@ The per-hook switches above (`guards.*`, `safety.*`, `context.*`, ...) are honou
 `engine/` directory plus the engine's `config.toml`. Show them with `ah-engine config --json` (each value with its source),
 validate an edit with `ah-engine config validate <file>`, restore a missing key with `ah-engine config heal`. A bad edit falls back
 to the last-known-good copy, then the pristine copy, then Node. Never edit `engine/defaults.pristine/`. Skipping the engine
-download is the setting `engine.bootstrap` (boolean, default true; `settings.js set engine.bootstrap false`), or the env var `AH_ENGINE_BOOTSTRAP=0`, which overrides the setting.
+download is the setting `engine.bootstrap` (boolean, default true; `settings.js set engine.bootstrap false`), or the env var `AH_ENGINE_BOOTSTRAP=0`, which overrides the setting. The crash-loop and roll-back switches are engine tunables too: `client.spawn_n` / `client.spawn_window_s` (daemon starts that stop respawning), `daemon.healthy_after_s` (uptime that makes a binary "known good") and `rollback.*` (`rollback.on_mismatch=0` turns the checksum roll-back off; `rollback.fail_n` / `rollback.fail_window_s` set how many wrapper failures count); list them with `settings tunables rollback`.
 
 ## Resetting a setting
 

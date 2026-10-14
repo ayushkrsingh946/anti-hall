@@ -470,6 +470,7 @@ if [ "$live" -eq 1 ]; then
     fail "the live kit could not apply the new bundle (go-live.sh exited with an error; its last lines are above)" "rolled back: the bundle that was current is back in place at $kit/bundle; the new one is kept as $kit/bundle.failed-$ts" "read the log (tail -n 30 $log), fix what go-live reports, then run again; to re-apply the current bundle by hand: sh $kit/go-live.sh $live_select"
   fi
   printf '%s live %s %s\n' "$(date +%s 2>/dev/null)" "$src_label" "$newsha" >"$dir/update.installed" 2>/dev/null
+  AH_ENGINE_DIR=$dir AH_ENGINE_PLUGIN_ROOT=$proot sh "$here/ah-engine-integrity.sh" record </dev/null >/dev/null 2>&1 || true
   say "updated through the live kit: engine $smoke_version${commit:+, plugin $commit}; previous bundle kept as $kit/bundle.pre-update-$ts (undo: ah-update.sh --rollback)"
   restart_daemon
   exit 0
@@ -486,6 +487,7 @@ if [ -f "$bin" ]; then
 fi
 mv -f "$bin.new.$$" "$bin" || { rm -f "$bin.new.$$"; fail "cannot move the new engine into place as $bin" "$(unchanged); the previous binary is kept as $bin.prev" "fix the permissions of $bindir, then run again; to put the previous binary back: ah-update.sh --rollback"; }
 printf '%s %s %s\n' "$(date +%s 2>/dev/null)" "$src_label" "$newsha" >"$dir/update.installed" 2>/dev/null
+AH_ENGINE_DIR=$dir AH_ENGINE_PLUGIN_ROOT=$proot sh "$here/ah-engine-integrity.sh" record </dev/null >/dev/null 2>&1 || true
 say "updated: $bin is engine $smoke_version from $src_label (sha256 $newsha)${cursha:+; previous kept as $bin.prev (undo: ah-update.sh --rollback)}"
 restart_daemon
 exit 0
