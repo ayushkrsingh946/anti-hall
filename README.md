@@ -20,7 +20,7 @@
 - Blocks risky git actions outright: force-pushes, and AI credit lines in commit messages and GitHub PR/issue/release text.
 - Keeps the main conversation responsive by pushing heavy commands and file edits to helper agents, and caps runaway agent spawning.
 - Adds skills you can call by name for debugging to a proven root cause, reviewing risky changes, and writing a session handover.
-- Works with Claude Code (plugin) and Codex (separate port). The core is a small Rust engine (`ah-engine`), downloaded once and checked against a pinned sha256; it answers hook calls without starting Node. The Node hooks are a temporary compatibility fallback during the migration and are removed in v1.0, when the engine is the only runtime.
+- Works with Claude Code (plugin) and Codex (separate port). The core is a small Rust engine (`ah-engine`), downloaded once and checked against a pinned sha256; it answers hook calls without starting Node. The Node hooks are a temporary compatibility fallback during the migration and are removed in v0.301, when the engine becomes the only runtime.
 
 ## Install
 
@@ -92,7 +92,9 @@ Building, testing and releasing the plugin and the Rust engine: [Development gui
 
 ## Roadmap
 
-**Later: native Windows support** — anti-hall currently supports macOS and Linux (including WSL). Native Windows support is planned for a future release, once the Rust engine has a Windows process-control layer and a non-shell hook wrapper.
+The ordered plan (engine back online, hardening, Node removal, features, then 1.0) with each release's exit gate is in [`docs/ROADMAP.md`](docs/ROADMAP.md).
+
+**Later (parked): native Windows support** — anti-hall currently supports macOS and Linux (including WSL). Native Windows support is parked, not promised: it would need a Windows process-control layer and a non-shell hook wrapper in the Rust engine.
 
 ## License
 

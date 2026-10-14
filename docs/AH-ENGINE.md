@@ -1,16 +1,16 @@
 # ah-engine
 
 `ah-engine` is anti-hall's core component: a small resident program that answers the hooks instead of a new Node process for every
-tool call. The Node hooks are a temporary compatibility fallback during the migration; v1.0 removes them and the engine is then the only runtime. This page explains what it is, why it exists, what works today and what is not built yet. Anything not built
+tool call. The Node hooks are a temporary compatibility fallback during the migration; v0.301 removes them and the engine is then the only runtime. This page explains what it is, why it exists, what works today and what is not built yet. Anything not built
 is marked **planned** with the number of its decision, for example planned (D33) for the scheduler; each number is an entry
 in [`ah-engine/DECISIONS.md`](../ah-engine/DECISIONS.md).
 The exact list of commands, settings, metrics and error codes is generated from the engine itself and lives in
 [`ah-engine/REFERENCE.md`](../ah-engine/REFERENCE.md).
 
-**Status: ready for release; the plugin installs it itself once a release pins it.** The plugin's hooks are one thin trigger
+**Status: being brought back online (release v0.300.3); see the [roadmap](ROADMAP.md). The plugin installs it itself once a release pins it.** The plugin's hooks are one thin trigger
 per event (`hooks/ah-hook.sh <Event>`). When the engine binary is installed, the trigger asks the engine, which decides
 natively what it can prove identical to the Node hook and hands every other case to that Node hook, so it is never weaker
-than Node. While the migration lasts, when the binary is absent or cannot answer, the trigger runs the temporary Node compatibility hooks (removed in v1.0). The binary is
+than Node. While the migration lasts, when the binary is absent or cannot answer, the trigger runs the temporary Node compatibility hooks (removed in v0.301). The binary is
 fetched by a shell bootstrap, checked against a sha256 pinned in the plugin ([Install, go-live and rollback](#install-go-live-and-rollback)).
 Supported platforms: macOS and Linux (including WSL, which runs the Linux build). Windows is not supported yet.
 
@@ -33,7 +33,7 @@ labelled with how it was measured in the README of `ah-engine/`.
    v
  ah-engine serve                                 (daemon, one per user, ~5 MB)
    |-- rules (JSON file)        regex rules: deny / warn / context
-   |-- checks (compiled in)     real logic a regex cannot express: the git and command checks
+   |-- checks (Rust + plugin JS)  real logic a regex cannot express: the git and command checks
    |-- telemetry                metrics (snapshots + rollups), the impact ledger, and the lock-free telemetry recorder, stored
    |-- project state            per-project mailbox and key-value pairs, in hot.db
    |-- memory layer             active key-value items (budgeted, TTL) + pub/sub channels

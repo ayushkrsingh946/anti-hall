@@ -131,7 +131,7 @@ Hooks are small per call but not free. On a quiet machine a bare `node -e 0` cos
 
 `ah-engine`, a small Rust program, is the core component: it answers the hook calls without starting Node per call. The plugin's hooks are one
 thin trigger per event; the engine decides natively what it can prove identical to the Node hook and defers the rest to Node (never
-weaker than Node). The Node hooks are a temporary fallback for a missing or failed binary and are removed in v1.0. The binary is downloaded once
+weaker than Node). The Node hooks are a temporary fallback for a missing or failed binary and are removed in v0.301. The binary is downloaded once
 from the GitHub Release by a shell bootstrap and installed only if its sha256 equals the one pinned in the plugin's `ah-engine.lock`
 (the setting `engine.bootstrap` = false, or `AH_ENGINE_BOOTSTRAP=0`, skips it). All its rules, settings and texts are plain files in `plugins/anti-hall/engine/`, read at run
 time with hot reload and fallbacks (edited, then last-known-good, then pristine, then Node), and `ah-engine config heal` restores a
