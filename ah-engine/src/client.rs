@@ -47,7 +47,9 @@ pub enum Exch {
     Absent,
     /// A daemon may be there but the exchange failed: unsafe socket, bad or truncated frame, an I/O error.
     Failed(String),
-    /// No reply within the deadline. Hook callers fail open immediately and mark the daemon down so clients cannot pile up.
+    /// No reply within the deadline (on macOS an SO_RCVTIMEO expiry reads as EAGAIN, os error 35). The daemon is alive but
+    /// late: this call gets no engine verdict and runs its Node hooks, but no down marker, spawn or breaker failure follows
+    /// unless `client.slow_down_n` slow replies come in a row (a wedged daemon).
     Slow(String),
 }
 
@@ -121,6 +123,33 @@ fn mark_daemon_down(reason: &str) {
     let until = health::now_ms().saturating_add(defaults::num("client.down_marker_ttl_ms"));
     crate::discard::logged("daemon_down_marker_write", crate::atomic::write(state_file("daemon_down_marker"), until.to_string()));
     health::log_event("client_down", "daemon", reason);
+}
+
+/// Count this slow reply into the streak file (`count first_ts_ms`); true once `client.slow_down_n` slow replies came in a
+/// row within `client.slow_window_ms`. A normal reply removes the file. Concurrent clients race on it, which only makes the
+/// count approximate, so an unreadable or unwritable streak counts as no streak.
+fn slow_streak_tripped() -> bool {
+    let (now, window) = (health::now_ms(), defaults::num("client.slow_window_ms"));
+    crate::discard::harmless(crate::limits::ensure_private_dir(&paths::dir())); // keep: the streak write below reports failure by absence
+    let path = state_file("slow_streak");
+    let prev = std::fs::read_to_string(&path).ok().and_then(|t| {
+        let mut it = t.split_whitespace().filter_map(|x| x.parse::<u64>().ok());
+        Some((it.next()?, it.next()?))
+    });
+    let (count, first) = match prev {
+        Some((c, f)) if now.saturating_sub(f) <= window => (c + 1, f),
+        _ => (1, now),
+    };
+    if count >= defaults::num("client.slow_down_n") {
+        clear_slow_streak();
+        return true;
+    }
+    crate::discard::logged("slow_streak_write", crate::atomic::write(&path, format!("{count} {first}")));
+    false
+}
+
+fn clear_slow_streak() {
+    crate::discard::harmless(std::fs::remove_file(state_file("slow_streak"))); // keep: absent streak is the desired state
 }
 
 fn clear_daemon_down_marker() {
@@ -268,12 +297,14 @@ pub(crate) fn attempt(payload: &[u8], cfg: &ClientConfig, have_fallback: bool) -
     LAST_UNAVAILABLE.set(false);
     if health::breaker_remaining().is_some() || health::crashloop_remaining().is_some() || daemon_down_marked() {
         note_unavailable();
+        health::log_event("client_skip", "daemon", defaults::text("msg.client_skip"));
         return None;
     }
     let sock = paths::socket();
     match exchange(&sock, payload, cfg.deadline) {
         Exch::Reply(Kind::Ok, body) => {
             clear_daemon_down_marker();
+            clear_slow_streak();
             Some(body)
         }
         Exch::Reply(_, _) => {
@@ -293,15 +324,12 @@ pub(crate) fn attempt(payload: &[u8], cfg: &ClientConfig, have_fallback: bool) -
             None
         }
         Exch::Slow(why) => {
-            note_unavailable();
-            mark_daemon_down(&why);
-            if !health::crashloop_tripped(cfg)
-                && let Some(_spawn_lock) = spawn_lock()
-            {
-                health::log_event("client_spawn_attempt", "singleflight", &why);
-                let _ = spawn_daemon();
+            // late, not down: hand THIS call to its Node hooks (the non-OK-reply path), never a silent allow
+            health::log_event("client_slow", "daemon", &why);
+            LAST_NON_OK_REPLY.set(true);
+            if slow_streak_tripped() {
+                mark_daemon_down(&why); // wedged: later clients skip it; this call still runs its Node hooks
             }
-            health::breaker_failure(cfg, &why);
             None
         }
         Exch::Absent => {

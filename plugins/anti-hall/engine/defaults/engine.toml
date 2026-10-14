@@ -158,6 +158,10 @@ value = "daemon.run"
 doc = "Short-lived client marker: when a hook client finds the daemon absent or hung, other clients skip connecting until this expires."
 value = "daemon.down.until"
 
+[files.slow_streak]
+doc = "Client marker holding the count of consecutive slow (late) daemon replies and when the streak began; a normal reply removes it."
+value = "daemon.slow.streak"
+
 [files.spawn_lock]
 doc = "Short-lived client single-flight lock: only the client that creates it attempts to restart a missing daemon."
 value = "daemon.spawn.lock"
@@ -453,9 +457,21 @@ value = 10
 unit = "ms"
 
 [client.down_marker_ttl_ms]
-doc = "How long other clients skip connecting after one client finds the daemon absent or hung; this prevents hook pile-ups while a restart is attempted."
+doc = "How long other clients skip connecting after one client finds the daemon absent or failed, or after client.slow_down_n consecutive slow replies; this prevents hook pile-ups while a restart is attempted."
 value = 3000
 env = "AH_ENGINE_DOWN_MARKER_TTL_MS"
+unit = "ms"
+
+[client.slow_down_n]
+doc = "Consecutive slow (late) daemon replies within client.slow_window_ms after which the daemon is treated as wedged and marked down. A single late reply never marks it down: that call runs its Node hooks and the next client asks the daemon again."
+value = 5
+env = "AH_ENGINE_SLOW_DOWN_N"
+min = 1
+
+[client.slow_window_ms]
+doc = "Window in which consecutive slow daemon replies are counted toward client.slow_down_n; a streak older than this starts over."
+value = 10000
+env = "AH_ENGINE_SLOW_WINDOW_MS"
 unit = "ms"
 
 [client.spawn_lock_ttl_ms]

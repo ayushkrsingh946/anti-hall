@@ -369,6 +369,16 @@ fn settle_after_cold(e: &Env) {
     assert!(dt < Duration::from_secs(1), "warm follow-up wrapper took {dt:?}");
 }
 
+/// [`settle_after_cold`] for a daemon that is late rather than absent: the warm call runs its Node hook (a late reply is
+/// no verdict, R0 P0) or, inside the down marker of the call before, is skipped, so the answer is a block or an allow.
+fn settle_after_cold_slow(e: &Env) {
+    e.prime_defaults_cache();
+    let (code, _, dt) = wrapper_once(e);
+    println!("TIMING wrapper warm-cache follow-up wall_ms={:.1}", dt.as_secs_f64() * 1000.0);
+    assert!(code == 0 || code == 2, "warm follow-up wrapper exited {code}");
+    assert!(dt < Duration::from_secs(3), "warm follow-up wrapper took {dt:?}");
+}
+
 fn clamped_num(key: &str, value: u64) -> u64 {
     let e = ah_engine::defaults::all().iter().find(|e| e.key == key).unwrap();
     let min = e.min.map(|n| n.max(0) as u64).unwrap_or(0);
@@ -403,17 +413,18 @@ fn ah_hook_wrapper_failfast_no_daemon_hung_daemon_and_restart_loop() {
     assert_twenty_wrappers_exit(&down);
     assert_eq!(down.spawn_attempt_count(), 1, "fresh marker should make concurrent no-daemon wrappers skip spawning");
 
-    let hung = Env::new_no_prime("wrap-hung", &[("AH_ENGINE_NOSPAWN", "1")]);
+    let hung = Env::new_no_prime("wrap-hung", &[("AH_ENGINE_NOSPAWN", "1"), ("AH_ENGINE_SLOW_DOWN_N", "1")]);
     fake_server(&hung, || None);
     let (code, out, dt) = wrapper_once(&hung);
     println!("TIMING wrapper hung-daemon wall_ms={:.1}", dt.as_secs_f64() * 1000.0);
-    assert_eq!((code, out.as_str()), (0, ""));
-    assert!(dt < Duration::from_secs(1), "hung-daemon wrapper took {dt:?}");
-    settle_after_cold(&hung);
-    assert!(hung.fresh_down_marker(), "hung wrapper did not leave a fresh daemon-down marker");
-    assert_eq!(hung.spawn_attempt_count(), 1, "hung first client should be the only spawn single-flight holder");
+    // a late reply is no verdict: the call runs its Node hook (a block here), or is allowed when the cold wrapper was cut first
+    assert!(code == 0 || code == 2, "{code} {out}");
+    assert!(dt < Duration::from_secs(3), "hung-daemon wrapper took {dt:?}");
+    settle_after_cold_slow(&hung);
+    assert!(hung.fresh_down_marker(), "a slow reply (slow_down_n = 1) did not leave a fresh daemon-down marker");
+    assert_eq!(hung.spawn_attempt_count(), 0, "a slow daemon is alive: it is never restarted");
     assert_twenty_wrappers_exit(&hung);
-    assert_eq!(hung.spawn_attempt_count(), 1, "fresh marker should make concurrent hung wrappers skip spawning");
+    assert_eq!(hung.spawn_attempt_count(), 0, "a slow daemon is never restarted by concurrent wrappers");
 
     let looping = Env::new_no_prime("wrap-loop", &[("AH_ENGINE_NOSPAWN", "1")]);
     std::fs::create_dir_all(looping.eng()).unwrap();
@@ -527,7 +538,7 @@ fn hung_engine_times_out_then_falls_back() {
     fake_server(&e, || None);
     let (out, _, code, dt) = e.hook(DENY_IN, true);
     println!("TIMING client hung-daemon wall_ms={:.1}", dt.as_secs_f64() * 1000.0);
-    assert_eq!((out.as_str(), code), ("", 0));
+    assert_eq!((out.as_str(), code), ("NODE-FALLBACK", 2), "a late reply is no verdict: the Node hook decides");
     // Gave up at the configured, clamped client deadline rather than waiting for the server's 30 s hang.
     assert!(dt >= Duration::from_millis(effective_deadline_ms) && dt < Duration::from_secs(1), "took {dt:?}");
 }
@@ -537,7 +548,7 @@ fn default_client_deadline_is_under_one_second() {
     let e = Env::new("hang2", &[("AH_ENGINE_NOSPAWN", "1")]);
     fake_server(&e, || None);
     let (out, _, _, dt) = e.hook(DENY_IN, true);
-    assert_eq!(out, "");
+    assert_eq!(out, "NODE-FALLBACK");
     assert!(dt >= Duration::from_millis(300) && dt < Duration::from_secs(1), "took {dt:?}");
 }
 
@@ -554,47 +565,47 @@ fn wrapper_fails_open_under_one_second_with_no_daemon() {
 #[test]
 fn wrapper_fails_open_under_one_second_when_daemon_accepts_and_never_replies() {
     let _timing = wrapper_timing_lock();
-    let e = Env::new_no_prime("wraphung", &[("AH_ENGINE_NOSPAWN", "1")]);
+    let e = Env::new_no_prime("wraphung", &[("AH_ENGINE_NOSPAWN", "1"), ("AH_ENGINE_SLOW_DOWN_N", "1")]);
     fake_server(&e, || None);
     let (out, code, dt) = e.wrapper_hook(DENY_IN);
     println!("TIMING wrapper hung-daemon separate wall_ms={:.1}", dt.as_secs_f64() * 1000.0);
-    assert_eq!((out.as_str(), code), ("", 0));
-    assert!(dt < Duration::from_secs(1), "wrapper took {dt:?}");
-    settle_after_cold(&e);
+    assert!(code == 0 || code == 2, "{code} {out}"); // the Node hook decides a late reply (a block here); a cold wrapper may be cut first
+    assert!(dt < Duration::from_secs(3), "wrapper took {dt:?}");
+    settle_after_cold_slow(&e);
     assert!(e.fresh_down_marker(), "hung wrapper did not write daemon-down marker");
-    assert_eq!(e.spawn_attempt_count(), 1, "hung wrapper should make exactly one spawn attempt");
+    assert_eq!(e.spawn_attempt_count(), 0, "a slow daemon is never restarted");
 }
 
 #[test]
 fn wrapper_deadline_clamps_high_env_override_and_keeps_lower_override() {
     let _timing = wrapper_timing_lock();
-    let high = Env::new_no_prime("wrapenvdeadline-high", &[("AH_ENGINE_NOSPAWN", "1"), ("AH_ENGINE_DEADLINE_MS", "5000")]);
+    let high = Env::new_no_prime("wrapenvdeadline-high", &[("AH_ENGINE_NOSPAWN", "1"), ("AH_ENGINE_DEADLINE_MS", "5000"), ("AH_ENGINE_SLOW_DOWN_N", "1")]);
     fake_server(&high, || None);
     let (out, code, dt) = high.wrapper_hook(DENY_IN);
     println!("TIMING wrapper hung-daemon env-deadline-5000-clamped wall_ms={:.1}", dt.as_secs_f64() * 1000.0);
-    assert_eq!((out.as_str(), code), ("", 0));
-    assert!(dt < Duration::from_secs(1), "wrapper took {dt:?}");
-    settle_after_cold(&high);
+    assert!(code == 0 || code == 2, "{code} {out}");
+    assert!(dt < Duration::from_secs(3), "wrapper took {dt:?}");
+    settle_after_cold_slow(&high);
     assert!(high.fresh_down_marker(), "wrapper killed client before it wrote the daemon-down marker");
-    assert_eq!(high.spawn_attempt_count(), 1, "high env-deadline hung wrapper should make exactly one spawn attempt");
+    assert_eq!(high.spawn_attempt_count(), 0, "a slow daemon is never restarted");
 
-    let lower = Env::new_no_prime("wrapenvdeadline-low", &[("AH_ENGINE_NOSPAWN", "1"), ("AH_ENGINE_DEADLINE_MS", "200")]);
+    let lower = Env::new_no_prime("wrapenvdeadline-low", &[("AH_ENGINE_NOSPAWN", "1"), ("AH_ENGINE_DEADLINE_MS", "200"), ("AH_ENGINE_SLOW_DOWN_N", "1")]);
     fake_server(&lower, || None);
     let (out, code, dt) = lower.wrapper_hook(DENY_IN);
     println!("TIMING wrapper hung-daemon env-deadline-200 wall_ms={:.1}", dt.as_secs_f64() * 1000.0);
-    assert_eq!((out.as_str(), code), ("", 0));
-    assert!(dt < Duration::from_secs(1), "wrapper took {dt:?}");
+    assert!(code == 0 || code == 2, "{code} {out}");
+    assert!(dt < Duration::from_secs(3), "wrapper took {dt:?}");
     lower.prime_defaults_cache();
     let (_, _, warm) = wrapper_once(&lower);
-    assert!(warm < Duration::from_secs(1), "warm wrapper took {warm:?}");
+    assert!(warm < Duration::from_secs(3), "warm wrapper took {warm:?}");
     assert!(lower.fresh_down_marker(), "wrapper killed lower-deadline client before it wrote the daemon-down marker");
-    assert_eq!(lower.spawn_attempt_count(), 1, "lower env-deadline hung wrapper should make exactly one spawn attempt");
+    assert_eq!(lower.spawn_attempt_count(), 0, "a slow daemon is never restarted");
 }
 
 #[test]
 fn twenty_parallel_wrappers_leave_no_clients_alive_after_two_seconds() {
     let _timing = wrapper_timing_lock();
-    let e = Env::new_no_prime("wrap20", &[("AH_ENGINE_NOSPAWN", "1")]);
+    let e = Env::new_no_prime("wrap20", &[("AH_ENGINE_NOSPAWN", "1"), ("AH_ENGINE_SLOW_DOWN_N", "1")]);
     fake_server(&e, || None);
     let mut children: Vec<_> = (0..20)
         .map(|_| {
@@ -769,8 +780,9 @@ fn a_full_descriptor_table_backs_the_accept_loop_off_instead_of_spinning() {
 }
 
 #[test]
-fn a_slow_daemon_is_marked_down_so_hook_clients_do_not_pile_up() {
-    // P0 fail-fast: a hook client does not spend a second probe on a daemon that missed the request deadline.
+fn a_wedged_daemon_is_marked_down_only_after_a_streak_of_slow_replies() {
+    // one late reply is not a down daemon (R0 P0); client.slow_down_n (5) slow replies in a row are: those calls run their Node
+    // hook, then later clients skip the daemon and nothing is respawned.
     let e = Env::new("slowok", &[("AH_ENGINE_NOSPAWN", "1"), ("AH_ENGINE_DEADLINE_MS", "150"), ("AH_ENGINE_BREAKER_N", "3")]);
     std::fs::create_dir_all(e.eng()).unwrap();
     let l = UnixListener::bind(e.eng().join("e.sock")).unwrap();
@@ -788,13 +800,14 @@ fn a_slow_daemon_is_marked_down_so_hook_clients_do_not_pile_up() {
             });
         }
     });
-    for _ in 0..5 {
-        assert_eq!(e.hook(DENY_IN, true).0, "");
+    for i in 0..5 {
+        assert_eq!(e.hook(DENY_IN, true).0, "NODE-FALLBACK", "slow call {i} runs its Node hook");
+        assert_eq!(e.fresh_down_marker(), i == 4, "the marker appears with the 5th slow reply, not before (call {i})");
     }
-    assert!(e.fresh_down_marker(), "a daemon that misses the deadline is marked down for following clients");
-    assert_eq!(e.spawn_attempt_count(), 1, "slow daemon restart attempt should be single-flight");
+    assert_eq!(e.hook(DENY_IN, true).0, "", "a marked-down daemon is skipped");
+    assert_eq!(e.spawn_attempt_count(), 0, "a slow daemon is never restarted");
     let log = std::fs::read_to_string(e.eng().join("ah-engine.log")).unwrap_or_default();
-    assert!(!log.contains("client_slow"), "hook path should not spend an extra ping probe: {log}");
+    assert!(log.contains("client_slow") && !log.contains("client_spawn_attempt"), "{log}");
 }
 
 #[test]
@@ -851,21 +864,19 @@ fn no_daemon_of_this_build_outlives_its_test_run() {
 fn breaker_opens_after_repeated_failures_and_skips_engine() {
     let e =
         Env::new("brk", &[("AH_ENGINE_NOSPAWN", "1"), ("AH_ENGINE_DEADLINE_MS", "150"), ("AH_ENGINE_BREAKER_N", "3"), ("AH_ENGINE_DOWN_MARKER_TTL_MS", "1")]);
-    fake_server(&e, || None);
-    // each of these waits out the 150 ms deadline against the hung server
-    let mut waited = Vec::new();
+    // a late reply is not an engine failure (R0 P0); a reply that is not a frame is
+    fake_server(&e, || Some(b"not a frame".to_vec()));
     for _ in 0..3 {
-        let (out, _, _, dt) = e.hook(DENY_IN, true);
+        let (out, _, _, _) = e.hook(DENY_IN, true);
         assert_eq!(out, "");
-        waited.push(dt);
         std::thread::sleep(Duration::from_millis(5));
     }
     assert!(e.eng().join("breaker.until").exists(), "breaker should be open");
-    let (out, _, _, dt) = e.hook(DENY_IN, true);
+    let fails = || e.health_log().lines().filter(|l| l.contains("\tclient_fail\t")).count();
+    let before = fails();
+    let (out, _, _, _) = e.hook(DENY_IN, true);
     assert_eq!(out, "");
-    // relative, not absolute: an open breaker skips the wait, so it must be faster than every call that did wait
-    let fastest_wait = waited.iter().min().unwrap();
-    assert!(dt < *fastest_wait, "open breaker goes straight to fallback, took {dt:?} against {waited:?}");
+    assert_eq!(fails(), before, "an open breaker skips the engine: no new failure is counted");
     let st: serde_json::Value =
         serde_json::from_str(&e.cmd().args(["status", "--json"]).output().map(|o| String::from_utf8_lossy(&o.stdout).to_string()).unwrap()).unwrap();
     assert!(st["breaker"].as_str().unwrap().starts_with("open"), "{st}");

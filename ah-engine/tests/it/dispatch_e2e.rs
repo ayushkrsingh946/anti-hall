@@ -1724,3 +1724,114 @@ fn the_dispatcher_makes_the_speculation_judge_call_itself_after_the_daemon_defer
     let tel = std::fs::read_to_string(home.join(".anti-hall/logs/judge-calls.ndjson")).unwrap();
     assert!(tel.lines().all(|l| l.contains("\"integration\":\"speculation\"") && l.contains("\"decision\":\"block\"")) && tel.lines().count() >= 2, "{tel}");
 }
+
+// ---- a slow daemon reply is late, not down (R0 P0: guards failed open for 3 s after one reply past the deadline) ---------
+
+/// A stub daemon that answers connection `i` after `script[i].0` ms with `script[i].1` (the last step repeats); every
+/// connection is handled on its own thread and counted when its request has been read.
+struct ScriptedDaemon {
+    alive: Arc<AtomicBool>,
+    seen: Arc<std::sync::atomic::AtomicUsize>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl ScriptedDaemon {
+    fn seen(&self) -> usize {
+        self.seen.load(Ordering::Acquire)
+    }
+}
+
+impl Drop for ScriptedDaemon {
+    fn drop(&mut self) {
+        self.alive.store(false, Ordering::Release);
+        if let Some(t) = self.thread.take() {
+            let _join_result = t.join();
+        }
+    }
+}
+
+fn scripted_daemon(e: &Env, script: Vec<(u64, ah_engine::frame::Kind, &'static str)>) -> ScriptedDaemon {
+    std::fs::create_dir_all(e.state()).unwrap();
+    let sock = ah_engine::paths::socket_in(&e.state());
+    ah_engine::discard::harmless(std::fs::remove_file(&sock));
+    let listener = std::os::unix::net::UnixListener::bind(&sock).unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let alive = Arc::new(AtomicBool::new(true));
+    let seen = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let (a, s) = (Arc::clone(&alive), Arc::clone(&seen));
+    let thread = std::thread::spawn(move || {
+        while a.load(Ordering::Acquire) {
+            match listener.accept() {
+                Ok((mut stream, _)) => {
+                    let i = s.fetch_add(1, Ordering::AcqRel);
+                    let (delay, kind, body) = script[i.min(script.len() - 1)];
+                    std::thread::spawn(move || {
+                        stream.set_nonblocking(false).unwrap();
+                        let mut req = Vec::new();
+                        ah_engine::discard::harmless(stream.read_to_end(&mut req));
+                        std::thread::sleep(Duration::from_millis(delay));
+                        ah_engine::discard::harmless(stream.write_all(&ah_engine::frame::encode(kind, body)));
+                    });
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => std::thread::sleep(Duration::from_millis(5)),
+                Err(_) => break,
+            }
+        }
+    });
+    ScriptedDaemon { alive, seen, thread: Some(thread) }
+}
+
+const SLOW: (u64, ah_engine::frame::Kind, &str) = (400, ah_engine::frame::Kind::Ok, "[]");
+const FAST_OK: (u64, ah_engine::frame::Kind, &str) = (0, ah_engine::frame::Kind::Ok, "[]");
+
+/// One blocking-guard dispatch against the stub with a 100 ms client deadline.
+fn slow_call(e: &Env, map: &Path, extra: &[(&str, &str)]) -> (i32, String, String) {
+    let args = ["hook", "--event", "PreToolUse", "--fallback-map", map.to_str().unwrap()];
+    let mut env = vec![("AH_ENGINE_DEADLINE_MS", "100"), ("AH_ENGINE_NOSPAWN", "1")];
+    env.extend_from_slice(extra);
+    e.run_with(&args, false, &bash("ls", &e.dir), true, &env)
+}
+
+fn engine_log(e: &Env) -> String {
+    std::fs::read_to_string(e.state().join("ah-engine.log")).unwrap_or_default()
+}
+
+#[test]
+fn a_late_reply_is_not_a_down_daemon_and_the_guard_still_blocks() {
+    let e = Env::new("slow-not-down");
+    let map = event_map(&e, "PreToolUse", "echo NODEBLOCK >&2; exit 2", "true");
+    let d = scripted_daemon(&e, vec![SLOW, FAST_OK]);
+    let (code, out, err) = slow_call(&e, &map, &[]);
+    assert_eq!(code, 2, "the slow call runs its Node hooks, the guard decides: {out:?} {err:?}");
+    assert!(err.contains("NODEBLOCK"), "{err:?}");
+    assert!(!e.state().join("daemon.down.until").exists(), "one late reply must not mark the daemon down");
+    let log = engine_log(&e);
+    assert!(log.contains("client_slow"), "{log}");
+    assert!(!log.contains("client_spawn_attempt") && !log.contains("client_fail") && !log.contains("client_down"), "{log}");
+    // the very next call asks the daemon again (it was a silent allow for 3 s before)
+    let (code, _, err) = slow_call(&e, &map, &[]);
+    assert_eq!(d.seen(), 2, "the second call must reach the daemon");
+    assert_eq!(code, 2, "{err:?}");
+}
+
+#[test]
+fn consecutive_slow_replies_mark_a_wedged_daemon_down_and_a_normal_reply_resets_the_count() {
+    let e = Env::new("slow-streak");
+    let map = event_map(&e, "PreToolUse", "echo NODEBLOCK >&2; exit 2", "true");
+    let n = [("AH_ENGINE_SLOW_DOWN_N", "2")];
+    // slow, normal, slow: the normal reply in between resets the count, so nothing is marked
+    let d = scripted_daemon(&e, vec![SLOW, FAST_OK, SLOW, SLOW]);
+    for _ in 0..3 {
+        let (code, _, err) = slow_call(&e, &map, &n);
+        assert_eq!(code, 2, "{err:?}");
+    }
+    assert!(!e.state().join("daemon.down.until").exists(), "{}", engine_log(&e));
+    // the second slow in a row trips it; that call still runs its Node hooks
+    let (code, _, err) = slow_call(&e, &map, &n);
+    assert_eq!(code, 2, "{err:?}");
+    assert!(e.state().join("daemon.down.until").exists(), "two slow replies in a row mark the daemon down: {}", engine_log(&e));
+    // marked down: the next call does not reach the daemon
+    let before = d.seen();
+    slow_call(&e, &map, &n);
+    assert_eq!(d.seen(), before);
+}
