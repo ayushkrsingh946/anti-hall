@@ -1597,5 +1597,25 @@ check cold_guard_gives_up_at_the_cap_with_one_notice_per_session test_cold_guard
 check cold_non_guard_event_never_waits test_cold_non_guard_event_never_waits
 check cold_guard_wait_respects_the_hook_budget_and_a_warm_daemon test_cold_guard_wait_respects_the_hook_budget_and_a_warm_daemon
 
+# The seconds override is a test knob: without AH_WRAPPER_TEST=1 it is dropped and the shipped 560 ms engine budget still applies.
+test_timeout_override_needs_the_test_gate() {
+  tg=$tmp/tgate-bin
+  mkdir -p "$tg"
+  printf '#!/bin/sh\ncat >/dev/null; sleep 3; exit 2\n' >"$tg/ah-engine"
+  chmod +x "$tg/ah-engine"
+  set +e
+  AH_WRAPPER_TEST= AH_HOOK_TIMEOUT_S=10 PATH="$tg:$PATH" sh "$wrapper" PreToolUse <"$payload" >"$tmp/tgate.out" 2>"$tmp/tgate.err"
+  rc=$?
+  set -e
+  [ "$rc" -eq 0 ] || return 1
+  # with the gate the same override lets the engine finish and its exit 2 through
+  set +e
+  AH_HOOK_TIMEOUT_S=10 PATH="$tg:$PATH" sh "$wrapper" PreToolUse <"$payload" >"$tmp/tgate2.out" 2>"$tmp/tgate2.err"
+  rc=$?
+  set -e
+  [ "$rc" -eq 2 ]
+}
+check timeout_override_needs_the_test_gate test_timeout_override_needs_the_test_gate
+
 printf 'wrapper tests: %s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
