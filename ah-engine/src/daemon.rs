@@ -466,7 +466,7 @@ pub fn handle_request_with(req: &[u8], sh: &Shared, cfg: &crate::cfgstore::Snaps
         return (reply, if newer { After::Exit } else { After::Continue });
     }
     if let Some(v) = head.strip_prefix("D ") {
-        let reply = dispatch(body, sh);
+        let reply = dispatch(body, sh, cfg);
         let newer = crate::version_cmp(v.trim(), &sh.own) == std::cmp::Ordering::Greater;
         return (reply, if newer { After::Exit } else { After::Continue });
     }
@@ -604,6 +604,21 @@ fn reply_outcome(r: &Reply) -> (crate::telemetry::event::Outcome, u64) {
     }
 }
 
+fn cpu_budget(cfg: &Config) -> (u64, u64) {
+    (limits::thread_cpu_us(), cfg.eval_budget_us)
+}
+
+fn over_cpu_budget(start: u64, budget: u64) -> bool {
+    budget > 0 && limits::thread_cpu_us().saturating_sub(start) > budget
+}
+
+fn record_budget_trip(sh: &Shared, project: &str, detail: &str) {
+    sh.stats.budget_trips.fetch_add(1, SeqCst);
+    sh.telemetry.with_metrics(|m| m.inc("budget_trips", &[]));
+    sh.telemetry.fallback("budget", project);
+    health::log_event("budget", "-", detail);
+}
+
 fn hook(body: &str, env: &crate::reqenv::RequestEnv, sh: &Shared, cfg: &Config) -> Reply {
     let started = Instant::now();
     let Ok(p) = serde_json::from_str::<serde_json::Value>(body) else {
@@ -632,18 +647,15 @@ fn hook(body: &str, env: &crate::reqenv::RequestEnv, sh: &Shared, cfg: &Config) 
         return Reply::Busy;
     }
     let rules = sh.rules.read().unwrap_or_else(|e| e.into_inner()).clone();
-    let (start, budget) = (limits::thread_cpu_us(), cfg.eval_budget_us);
-    let over = move || budget > 0 && limits::thread_cpu_us().saturating_sub(start) > budget;
+    let (start, budget) = cpu_budget(cfg);
+    let over = move || over_cpu_budget(start, budget);
     let event = crate::hookio::event_of(&p).unwrap_or(defaults::text("telemetry.no_event_label"));
     let obs = DaemonObserver { t: &sh.telemetry, project: &phash, event };
     let reply = match crate::hookio::respond_observed(&p, &rules, &over, &obs, env) {
         Ok(out) if out == crate::hookio::FALLBACK => Reply::Err(defaults::text("msg.reply_defer").into()),
         Ok(out) => Reply::Ok(out),
         Err(_) => {
-            sh.stats.budget_trips.fetch_add(1, SeqCst);
-            sh.telemetry.with_metrics(|m| m.inc("budget_trips", &[]));
-            sh.telemetry.fallback("budget", &phash);
-            health::log_event("budget", "-", defaults::text("msg.log_budget"));
+            record_budget_trip(sh, &phash, defaults::text("msg.log_budget"));
             Reply::Err(defaults::text("msg.reply_budget").into())
         }
     };
@@ -656,7 +668,7 @@ fn hook(body: &str, env: &crate::reqenv::RequestEnv, sh: &Shared, cfg: &Config) 
 
 /// `D <client-version>\n<meta JSON>\n<payload>`: the built-in checks of one event's dispatch table (D58), under the
 /// same rate limits and telemetry as a hook request. The reply lists each check's answer; the client runs the rest.
-fn dispatch(body: &str, sh: &Shared) -> Reply {
+fn dispatch(body: &str, sh: &Shared, cfg: &Config) -> Reply {
     let started = Instant::now();
     let (meta, raw) = body.split_once('\n').unwrap_or((body, ""));
     let (Ok(meta), Ok(p)) = (serde_json::from_str::<crate::dispatch::native::Meta>(meta), serde_json::from_str::<serde_json::Value>(raw)) else {
@@ -714,7 +726,12 @@ fn dispatch(body: &str, sh: &Shared) -> Reply {
         crate::memdiag::note_check(check);
         sh.telemetry.observe_check(check, &e.id, &v, micros, &phash);
     };
-    let answers = crate::dispatch::native::evaluate(&meta, &p, &observe);
+    let (start_cpu, budget) = cpu_budget(cfg);
+    let over = || over_cpu_budget(start_cpu, budget);
+    let answers = crate::dispatch::native::evaluate(&meta, &p, &over, &observe);
+    if over() {
+        record_budget_trip(sh, &phash, defaults::text("msg.log_budget"));
+    }
     sh.telemetry.observe_hook(&meta.event, started.elapsed().as_micros() as u64);
     Reply::Ok(crate::dispatch::native::encode(&answers))
 }
@@ -1074,6 +1091,8 @@ fn await_close(closing: &AtomicBool, closed: &AtomicBool, max: Duration, poll: D
 fn watchdog(sh: Arc<Shared>) {
     let mut last_rss = Instant::now();
     let mut last_idle_check = Instant::now();
+    let mut last_cpu_check = Instant::now();
+    let mut last_cpu_secs = limits::process_cpu_secs();
     loop {
         std::thread::sleep(sh.cfg().watchdog_tick);
         // the stall and stuck checks keep running while draining: a drain waits for its workers, so one stuck there would
@@ -1107,6 +1126,30 @@ fn watchdog(sh: Arc<Shared>) {
         }
         if draining {
             continue;
+        }
+        let cpu_check = defaults::millis("daemon.cpu_check_ms");
+        if !cpu_check.is_zero() && last_cpu_check.elapsed() >= cpu_check {
+            let wall = last_cpu_check.elapsed().as_secs_f64();
+            let cpu_now = limits::process_cpu_secs();
+            let cpu_delta = (cpu_now - last_cpu_secs).max(0.0);
+            last_cpu_check = Instant::now();
+            last_cpu_secs = cpu_now;
+            let warn_pct = cfg.effective.num("daemon.cpu_warn_pct") as f64;
+            if warn_pct > 0.0 && wall > 0.0 {
+                let pct = cpu_delta * 100.0 / wall;
+                if pct >= warn_pct {
+                    let backoff_ms = cfg.effective.num("schedule.cpu_backoff_ms");
+                    if let Some(sched) = sh.sched.get() {
+                        sched.backoff_for(backoff_ms);
+                    }
+                    let pct_s = format!("{pct:.1}");
+                    health::log_event(
+                        "cpu",
+                        "sustained",
+                        &defaults::render("msg.log_cpu_sustained", &[("pct", &pct_s), ("ms", &cpu_check.as_millis()), ("backoff_ms", &backoff_ms)]),
+                    );
+                }
+            }
         }
         // Idle exit is off unless configured (D7): the engine stays resident so the scheduler and mailbox keep running.
         if let Some(idle) = cfg.idle_exit
@@ -1159,32 +1202,44 @@ fn cfg_snapshot_on(sh: &Shared) -> bool {
     sh.cfg().effective.boolean("diagnostics.mem_snapshot")
 }
 
+struct LockHolder {
+    pid: String,
+    live_engine: bool,
+    answers: bool,
+}
+
 /// Take the singleton lock. Waits briefly for an outgoing (version-handoff) daemon to release it, but
 /// gives up at once if a live daemon is already answering on the socket.
-fn acquire_lock(lock_path: &Path, sock: &Path) -> Result<Option<std::fs::File>, std::io::Error> {
+fn acquire_lock(lock_path: &Path, sock: &Path) -> Result<Result<std::fs::File, LockHolder>, std::io::Error> {
     let f = std::fs::OpenOptions::new().create(true).read(true).write(true).truncate(false).open(lock_path)?;
     let start = Instant::now();
     loop {
         // SAFETY: `f` is an open file owned by this scope, so its descriptor is valid; `flock` takes only the descriptor and a flag.
         if unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
-            return Ok(Some(f));
+            return Ok(Ok(f));
         }
-        if crate::client::ping(sock).is_some() {
-            return Ok(None);
+        let holder = lock_holder(lock_path, sock);
+        if holder.answers {
+            return Ok(Err(holder));
         }
         if start.elapsed() > defaults::millis("daemon.lock_wait_ms") {
             // the lock is held but nothing answers on the socket: a daemon that is draining, wedged, or gone without
             // releasing it; this start gives up (the client falls back to Node), and the line says why
-            let holder = std::fs::read_to_string(lock_path).unwrap_or_default();
             health::log_event(
                 "lock_wait",
                 "no_daemon",
-                &defaults::render("msg.log_lock_no_daemon", &[("path", &lock_path.display()), ("pid", &holder.trim())]),
+                &defaults::render("msg.log_lock_no_daemon", &[("path", &lock_path.display()), ("pid", &holder.pid), ("live_engine", &holder.live_engine)]),
             );
-            return Ok(None);
+            return Ok(Err(holder));
         }
         std::thread::sleep(defaults::millis("daemon.lock_poll_ms"));
     }
+}
+
+fn lock_holder(lock_path: &Path, sock: &Path) -> LockHolder {
+    let pid = std::fs::read_to_string(lock_path).unwrap_or_default().trim().to_string();
+    let live_engine = pid.parse::<u32>().is_ok_and(health::pid_is_engine);
+    LockHolder { pid, live_engine, answers: crate::client::ping(sock).is_some() }
 }
 
 fn same_path(a: &Path, b: &Path) -> bool {
@@ -1295,8 +1350,17 @@ pub fn serve() {
         }
     }
     let lock = match acquire_lock(&lock_path, &sock) {
-        Ok(Some(l)) => l,
-        Ok(None) => return, // a live daemon owns the socket (or the handoff is not done): not an error
+        Ok(Ok(l)) => l,
+        Ok(Err(holder)) => {
+            eprintln!(
+                "{}",
+                defaults::render(
+                    "msg.daemon_already_running",
+                    &[("path", &sock.display()), ("pid", &holder.pid), ("live_engine", &holder.live_engine), ("answers", &holder.answers)]
+                )
+            );
+            return;
+        }
         Err(e) => start_fail(&io_code(&e), &defaults::render("msg.log_lock_fail", &[("path", &lock_path.display()), ("err", &e)])),
     };
     // We hold the flock, so no other daemon owns this socket. Verify before touching anything: if the
