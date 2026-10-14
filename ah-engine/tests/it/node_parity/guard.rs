@@ -605,10 +605,11 @@ fn run_guard_with(o: &Opts, hooks: &Path, scenarios: &[Scenario], golden: &Golde
                     // Contract: the hook client fails open (exit 0, nothing printed) when the daemon does not answer within its ~300 ms
                     // deadline, and AH_ENGINE_DEADLINE_MS cannot raise that cap. The FIRST request a debug-build daemon evaluates for a
                     // scenario shape can be that slow on a loaded runner. This harness proves a HEALTHY daemon answers like Node, so a
-                    // silent allow where Node blocked is retried: the second request is warm and the daemon must then deny. A daemon that
+                    // silent allow where Node blocked or advised is retried (a lost git-audit advisory was measured returning at 311 ms, the deadline plus slack): the
+                    // second request is warm and the daemon must then deny or advise. A daemon that
                     // never denies still ends as a mismatch after the retries.
                     for _ in 0..4 {
-                        if !(n.code_is(2) && e.code == "0" && e.out.is_empty() && e.err.is_empty()) {
+                        if !((n.code_is(2) || !n.out.is_empty()) && e.code == "0" && e.out.is_empty() && e.err.is_empty()) {
                             break;
                         }
                         std::thread::sleep(std::time::Duration::from_millis(500));
