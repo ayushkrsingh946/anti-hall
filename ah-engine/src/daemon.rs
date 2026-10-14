@@ -1405,6 +1405,7 @@ pub fn serve() {
     health::clear_env_failure();
     let starts = next_start_count();
     health::log_event("start", "-", &defaults::render("msg.log_start", &[("version", &crate::version()), ("pid", &std::process::id()), ("rlimit", &rlimit)]));
+    crate::client::release_spawn_lock();
     crate::dispatch::sweep_stale_spool();
 
     crate::mem::register_defaults_leak();

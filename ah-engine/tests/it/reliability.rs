@@ -649,6 +649,33 @@ fn slow_sender_cannot_wedge_the_daemon() {
 
 // ---- 3. watchdog + breaker --------------------------------------------------------------------
 
+/// R0 P0: a daemon killed right after its start was not restarted by the wrapper. The single-flight spawn lock outlived the
+/// start it guarded (client.rs SpawnLock kept it for `client.spawn_lock_ttl_ms`), so every client in that window found the lock
+/// held and skipped the spawn. The TTL is stretched here so the window covers the whole test: the daemon must free the lock
+/// once it listens, and the first or second wrapper call after a `kill -9` must start a new daemon.
+#[test]
+fn wrapper_respawns_a_daemon_killed_right_after_its_start() {
+    let _timing = wrapper_timing_lock();
+    let e = Env::new("kill9", &[("AH_ENGINE_SPAWN_LOCK_TTL_MS", "600000")]);
+    let (code, _, _) = wrapper_once(&e);
+    assert_eq!(code, 0);
+    assert!(wait_for(|| e.pid().is_some()), "the first wrapper call did not start a daemon{}", e.diag());
+    let old = e.pid().unwrap();
+    // SAFETY: `kill` takes plain integers and has no memory-safety preconditions; the pid is this test's own daemon.
+    unsafe { libc::kill(old as i32, libc::SIGKILL) };
+    assert!(wait_for(|| !alive(old)), "kill -9 did not end the daemon");
+    let mut calls = 0;
+    let mut fresh = None;
+    while calls < 2 && fresh.is_none() {
+        calls += 1;
+        let (code, _, dt) = wrapper_once(&e);
+        assert_eq!(code, 0, "wrapper call {calls} after kill -9 must fail open");
+        assert!(dt < Duration::from_secs(1), "wrapper call {calls} after kill -9 took {dt:?}");
+        fresh = wait_for(|| e.pid().is_some_and(|p| p != old)).then(|| e.pid().unwrap());
+    }
+    assert!(fresh.is_some(), "no new daemon after {calls} wrapper calls following kill -9{}", e.diag());
+}
+
 #[test]
 fn stalled_loop_triggers_clean_exit_and_next_client_respawns() {
     let e = Env::new("stall", &[("AH_ENGINE_STALL_MS", "500"), ("AH_ENGINE_WATCHDOG_TICK_MS", "100")]);
