@@ -190,7 +190,8 @@ engine_default_env() {
 
 engine_default_text() {
   key=$1
-  [ -f "$defaults_file" ] || return 1
+  text_file=${2:-$defaults_file}
+  [ -f "$text_file" ] || return 1
   awk -v want="[$key]" '
     $0 == want { in_key = 1; next }
     in_key && /^\[/ { exit }
@@ -203,7 +204,7 @@ engine_default_text() {
         exit
       }
     }
-  ' "$defaults_file"
+  ' "$text_file"
 }
 
 engine_effective_num() {
@@ -248,8 +249,9 @@ now_ms() {
   perl -MTime::HiRes=time -e 'printf "%.0f\n", time() * 1000' 2>/dev/null || awk 'BEGIN { srand(); print systime() * 1000 }'
 }
 
-fresh_daemon_down_marker() {
-  marker_name=$(engine_default_text files.daemon_down_marker || true)
+# True while the state-dir marker named by the files.<key> default holds a time (ms since the epoch) still in the future.
+fresh_state_marker() {
+  marker_name=$(engine_default_text "files.$1" || true)
   [ -n "$marker_name" ] || return 1
   marker_dir=${AH_ENGINE_DIR:-"$HOME/.anti-hall/ah-engine"}
   [ -r "$marker_dir/$marker_name" ] || return 1
@@ -258,6 +260,10 @@ fresh_daemon_down_marker() {
     ""|*[!0-9]*) return 1 ;;
   esac
   [ "$marker_until" -gt "$(now_ms)" ]
+}
+
+fresh_daemon_down_marker() {
+  fresh_state_marker daemon_down_marker
 }
 
 case "${AH_KILL_GRACE_S:-1}" in
@@ -270,6 +276,9 @@ validate_positive_int "$timeout_env" AH_HOOK_TIMEOUT_S
 timeout_ms_env=${AH_HOOK_TIMEOUT_MS:-}
 if [ -n "$timeout_ms_env" ]; then
   validate_positive_int "$timeout_ms_env" AH_HOOK_TIMEOUT_MS
+elif [ -n "${AH_HOOK_TIMEOUT_S:-}" ]; then
+  # an explicit seconds override beats the shipped client deadline (the test suite pins a load-proof budget this way)
+  timeout_ms_env=$((timeout_env * 1000))
 else
   client_deadline_ms=$(engine_effective_num client.deadline_ms || true)
   client_deadline_slack_ms=$(engine_default_num client.deadline_slack_ms || true)
@@ -1327,6 +1336,91 @@ fi
 if [ "${AH_ENGINE_DISPATCH_IN_PROCESS:-}" != 1 ] && fresh_daemon_down_marker; then
   exit 0
 fi
+
+# Cold start (owner decision): a guard event does not run against a daemon that is still starting, where the engine would answer
+# from its failure mode. It starts the daemon with an empty kick request, waits for the daemon socket up to
+# client.cold_guard_wait_ms (never past what the hook's own timeout leaves after the engine attempt), then runs the real
+# attempt. Not ready by the cap: exit 0 with one stderr notice per session. Prompts and advisories never wait. Without a
+# readable config, a derivable socket path or a temp dir, there is no wait at all.
+cold_guard_wait() {
+  [ "$guard_event" -eq 1 ] && [ -n "$engine" ] && [ -n "$tmp" ] || return 0
+  cg_cap=$(engine_default_num client.cold_guard_wait_ms || true)
+  case "$cg_cap" in ""|*[!0-9]*|0) return 0 ;; esac
+  cg_poll=$(engine_default_num client.cold_guard_poll_ms || true)
+  cg_sock_max=$(engine_default_num paths.socket_max_len || true)
+  cg_margin=$(engine_default_num client.wrapper_extra_ms || true)
+  cg_kick=$(engine_default_text client.cold_guard_kick_event || true)
+  cg_sock_name=$(engine_default_text paths.socket_file || true)
+  for cg_v in "$cg_poll" "$cg_sock_max" "$cg_margin"; do
+    case "$cg_v" in ""|*[!0-9]*|0) return 0 ;; esac
+  done
+  [ -n "$cg_kick" ] && [ -n "$cg_sock_name" ] || return 0
+  cg_sock=${AH_ENGINE_DIR:-"$HOME/.anti-hall/ah-engine"}/$cg_sock_name
+  # a path the engine shortens through a hashed private dir cannot be derived here
+  [ "${#cg_sock}" -le "$cg_sock_max" ] || return 0
+  [ -S "$cg_sock" ] && return 0
+  cg_eng=$(event_timeout_ms)
+  validate_positive_int "$cg_eng" engine_timeout_ms
+  cg_total=$(event_timeout)
+  case "$cg_total" in ""|*[!0-9]*|0) cg_total=$timeout_env ;; esac
+  cg_room=$((cg_total * 1000 - cg_eng - cg_margin))
+  [ "$cg_room" -gt 0 ] || return 0
+  [ "$cg_cap" -le "$cg_room" ] || cg_cap=$cg_room
+  cg_start=$(now_ms)
+  cold_guard_halted && return 0
+  # the kick: the engine client finds no daemon and starts one (single-flight, crash-loop and breaker rules intact)
+  real_payload=$payload
+  payload=$tmp/cold-kick.json
+  printf '{"hook_event_name":"%s"}' "$cg_kick" >"$payload" 2>/dev/null || { payload=$real_payload; return 0; }
+  cg_kick_ms=$cg_eng
+  [ "$cg_kick_ms" -le "$cg_cap" ] || cg_kick_ms=$cg_cap
+  exec 4>&2 2>/dev/null
+  if launch_argv_group "$tmp/kick.out" "$tmp/kick.err" "$tmp/kick.pid" "$tmp/kick.group" "$engine" hook --event "$cg_kick" --host "$host"; then
+    cg_pid=$(cat "$tmp/kick.pid"); cg_group=$(cat "$tmp/kick.group")
+    children="$children $cg_pid"
+    rm -f "$tmp/kick.pid" "$tmp/kick.group" "$tmp/kick.timed"
+    start_watchdog_ms "$cg_pid" "$cg_kick_ms" "$cg_group" "$tmp/kick.timed"
+    wait "$cg_pid" 2>/dev/null
+    settle_watchdog "$tmp/kick.timed"
+    remove_child "$cg_pid"
+    if [ "$cg_group" -eq 1 ] && kill -0 "-$cg_pid" 2>/dev/null; then
+      terminate_process_group "$cg_pid" "$cg_group"
+    fi
+  fi
+  exec 2>&4 4>&-
+  payload=$real_payload
+  while :; do
+    [ -S "$cg_sock" ] && return 0
+    cold_guard_halted && return 0
+    [ $(( $(now_ms) - cg_start )) -lt "$cg_cap" ] || break
+    sleep "$(engine_default_sleep "$cg_poll")"
+  done
+  wrapper_diag "cold_guard_gave_up event=$event cap_ms=$cg_cap"
+  cold_guard_notice
+  exit 0
+}
+
+# The engine itself will not start or answer (down marker, open breaker, crash-loop stop): waiting would only cost the cap.
+cold_guard_halted() {
+  fresh_daemon_down_marker || fresh_state_marker breaker_until || fresh_state_marker crashloop_until
+}
+
+# One stderr notice per session: the state dir remembers the session id that already got it.
+cold_guard_notice() {
+  cg_text=$(engine_default_text msg.cold_guard_notice "${defaults_file%/*}/messages.toml" || true)
+  [ -n "$cg_text" ] || return 0
+  cg_name=$(engine_default_text files.cold_guard_notice || true)
+  cg_sid=$(sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$payload" 2>/dev/null | head -n 1)
+  [ -n "$cg_sid" ] || cg_sid=none
+  if [ -n "$cg_name" ]; then
+    cg_dir=${AH_ENGINE_DIR:-"$HOME/.anti-hall/ah-engine"}
+    [ "$(cat "$cg_dir/$cg_name" 2>/dev/null)" = "$cg_sid" ] && return 0
+    mkdir -p "$cg_dir" 2>/dev/null && printf '%s\n' "$cg_sid" >"$cg_dir/$cg_name" 2>/dev/null
+  fi
+  printf '%s\n' "$cg_text" | sed "s/{event}/$event/g" >&2
+}
+
+cold_guard_wait
 
 if [ -n "$engine" ]; then
   run_engine

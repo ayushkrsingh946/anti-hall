@@ -285,6 +285,10 @@ value = "test panic"
 doc = "Exchange failure when the socket path is not a socket owned by this user."
 value = "socket is not a socket owned by this user"
 
+[msg.cold_guard_notice]
+doc = "Printed once per session on stderr when a guard event gave up waiting for a cold-starting daemon and was let through unchecked; {event} is the event name."
+value = "anti-hall: the engine was still starting, so this {event} was not checked; the guards apply again once it is up"
+
 [msg.client_skip]
 doc = "Log detail for a hook call that skipped the daemon because a down marker, the breaker or the crash-loop cooldown was active."
 value = "skipped"
