@@ -9124,6 +9124,9 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 
 | Key | Default | Env override | Unit | What it is |
 |---|---|---|---|---|
+| `host_spawn.cache_enabled` | `true` |  |  | Whether `ahHost.spawnProbeCached` keeps completed probe answers (an interpreter's version line) per daemon. Off: every call runs the program. |
+| `host_spawn.cache_key_env` | `PATH, PYENV_VERSION, ASDF_PYTHON_VERSION, VIRTUAL_ENV, CONDA_PREFIX, CONDA_DE...` |  |  | Request environment variables whose values are part of a kept probe answer's key, because they pick the interpreter version behind a shim (pyenv, asdf, virtualenv, conda); a different value probes again. |
+| `host_spawn.cache_ttl_ms` | `600000` |  | ms | How long a kept probe answer is served before the program is run again (a changed interpreter file re-probes at once, whatever this says). |
 | `host_spawn.deadline_reserve_ms` | `60` |  | ms | Time kept back from the request's deadline when a spawned program's timeout is cut to it: the other checks of the event and the reply still need it. |
 | `host_spawn.default_path` | `/usr/bin:/bin` |  |  | The search path used when the request carries no PATH: the default of the C library's execvp, which is what Node's spawn falls back to. |
 | `host_spawn.max_calls` | `16` |  |  | Most programs one script call may start (api-guard: two version probes, one per module group up to api_guard_v1.max_modules, one Node probe, the version lines of the message). |
@@ -9395,6 +9398,10 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `mem.regex_low_water_pct` | `80` |  |  | Percent of mem.regex_soft_bytes the `ah.re.*` cache is evicted down to when the soft limit is reached. |
 | `mem.regex_max_entries` | `512` |  |  | Compiled regular expressions the process-wide `ah.re.*` cache keeps at most (all workers share one cache); past it the least recently used pattern is dropped first. |
 | `mem.regex_soft_bytes` | `8388608` |  | bytes | Estimated bytes of compiled regular expressions the shared `ah.re.*` cache may hold before it evicts the least recently used down to its low-water mark (an entry weighs script.regex_entry_base_bytes plus script.regex_bytes_per_src_byte per byte of its translated source). The shipped patterns are about 3.3 MB compiled, so the default keeps all of them. |
+| `mem.spawn_probe_hard_bytes` | `131072` |  | bytes | Bytes of kept spawn-probe answers at which an insert is refused (the answer is returned, not kept) and the cache is recycled. |
+| `mem.spawn_probe_low_water_pct` | `80` |  |  | Percent of mem.spawn_probe_soft_bytes the spawn-probe cache is evicted down to when the soft limit is reached. |
+| `mem.spawn_probe_max_entries` | `64` |  |  | Spawn-probe answers the cache keeps at most; past it the least recently used is dropped first. |
+| `mem.spawn_probe_soft_bytes` | `65536` |  | bytes | Bytes of kept spawn-probe answers (`spawnProbeCached`) held before the least recently used are dropped down to the low-water mark. |
 | `mem.transcript_tail_hard_bytes` | `8388608` |  | bytes | Bytes of cached transcript-tail answers at which an insert is refused (the answer is returned, not kept) and the cache is recycled. |
 | `mem.transcript_tail_low_water_pct` | `80` |  |  | Percent of mem.transcript_tail_soft_bytes the transcript-tail cache is evicted down to when the soft limit is reached. |
 | `mem.transcript_tail_max_entries` | `256` |  |  | Transcript-tail answers the cache keeps at most; past it the least recently used is dropped first. |
