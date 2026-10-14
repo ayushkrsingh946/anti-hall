@@ -125,9 +125,22 @@ first_word() { [ -f "$1" ] && sed -n '1{s/[[:space:]].*$//;p;}' "$1" 2>/dev/null
 
 mkdir -p "$state/$bin_dir" 2>/dev/null || exit 0
 
-# lock_stale: the install lock's holder is gone (dead pid) or has held it longer than rollback.lock_stale_s; it is then broken.
-# The lock is renamed away first (a rename succeeds for one breaker only) and its owner compared again, so a lock another waiter
-# took a moment ago is put back instead of broken.
+# The install lock is the directory $lockdir; its holder is the token in $lockdir/owner. The owner file is only ever created with
+# ln (atomic, fails when it exists) and only ever taken away with a rename (atomic, one taker wins), so whoever moved it away
+# holds the only copy and can compare it: a breaker or a giver that finds another token in it links it straight back. The
+# directory is never moved while an owner may be live, so no taker can find the path free while another holder is inside.
+
+# own TOKEN: link TOKEN in as the owner of the existing lock directory; 1 when there is an owner already (or no directory)
+own() {
+  printf '%s\n' "$1" >"$lockdir.tok.$$" 2>/dev/null || { rm -f "$lockdir.tok.$$"; return 1; }
+  ln "$lockdir.tok.$$" "$owner_f" 2>/dev/null; lrc=$?
+  rm -f "$lockdir.tok.$$" # the second name of the token just written; the owner file keeps it
+  return $lrc
+}
+
+# lock_stale TOKEN: the install lock's holder is gone (dead pid) or has held it longer than rollback.lock_stale_s; it is then
+# broken and TOKEN takes it over (0). The stale owner file is renamed aside (kept, never deleted) and compared again: a token that
+# is not the one judged stale belongs to a holder that took the lock a moment ago and is linked straight back (1).
 lock_stale() {
   lo=$(cat "$owner_f" 2>/dev/null)
   lnow=$(date +%s 2>/dev/null) || return 1
@@ -135,17 +148,18 @@ lock_stale() {
     lpid=${lo%% *}; lat=${lo#* }; lat=${lat%% *}
     case "$lpid$lat" in *[!0-9]*) lpid=; lat=0 ;; esac
     if [ -n "$lpid" ] && kill -0 "$lpid" 2>/dev/null && [ $((lnow - lat)) -le "$lock_stale" ]; then return 1; fi
+    lbrk=$lockdir.stale.$$.$lnow
+    mv "$owner_f" "$lbrk" 2>/dev/null || return 1 # another breaker or the holder got it first: look again
+    if [ "$(cat "$lbrk" 2>/dev/null)" != "$lo" ]; then
+      if ln "$lbrk" "$owner_f" 2>/dev/null; then rm -f "$lbrk" # put back: the aside name is a second name of the live owner file
+      else say "lock: could not put back the owner '$(cat "$lbrk" 2>/dev/null)' (kept as $lbrk)"; fi
+      return 1
+    fi
   else # no owner yet: being taken right now, unless the taker died between mkdir and writing it
     [ -n "$(find "$lockdir" -maxdepth 0 -mmin +$(((lock_stale + 59) / 60)) 2>/dev/null)" ] || return 1
   fi
-  lbrk=$lockdir.stale.$$
-  mv "$lockdir" "$lbrk" 2>/dev/null || return 0 # gone already: try to take it again
-  if [ "$(cat "$lbrk/owner" 2>/dev/null)" != "$lo" ]; then
-    [ -e "$lockdir" ] || mv "$lbrk" "$lockdir" 2>/dev/null
-    return 1
-  fi
-  rm -f "$lbrk/owner"; rmdir "$lbrk" 2>/dev/null
-  say "lock: broke a stale install lock (holder '${lo:-none}')"
+  own "$1" || return 1 # another taker linked its owner in first, or the lock was given back: look again
+  say "lock: broke a stale install lock (holder '${lo:-none}'${lo:+, kept as $lbrk})"
   return 0
 }
 
@@ -154,12 +168,13 @@ lock_take() {
   lwaited=0
   while :; do
     if mkdir "$lockdir" 2>/dev/null; then
-      printf '%s\n' "$1" >"$owner_f" 2>/dev/null && return 0
+      own "$1" && return 0
+      [ -f "$owner_f" ] && continue # a breaker took the fresh directory over: wait for it like any holder
       rmdir "$lockdir" 2>/dev/null
       return 1
     fi
     [ "$(cat "$owner_f" 2>/dev/null)" = "$1" ] && return 0
-    lock_stale && continue
+    lock_stale "$1" && return 0
     [ "$lwaited" -lt "$2" ] || return 1
     [ "$lwaited" -gt 0 ] || say "lock: waiting up to ${2}s for the install lock (holder '$(cat "$owner_f" 2>/dev/null)')"
     sleep 1
@@ -167,11 +182,19 @@ lock_take() {
   done
 }
 
-# lock_give TOKEN: release the install lock when TOKEN holds it
+# lock_give TOKEN: release the install lock when TOKEN holds it; the owner file is renamed away first, so a breaker that took the
+# lock over meanwhile gets its own owner file linked straight back instead of losing it
 lock_give() {
   [ "$(cat "$owner_f" 2>/dev/null)" = "$1" ] || return 0
-  rm -f "$owner_f"
-  rmdir "$lockdir" 2>/dev/null
+  lgv=$lockdir.give.$$
+  mv "$owner_f" "$lgv" 2>/dev/null || return 0
+  if [ "$(cat "$lgv" 2>/dev/null)" = "$1" ]; then
+    rm -f "$lgv"
+    rmdir "$lockdir" 2>/dev/null
+  else
+    if ln "$lgv" "$owner_f" 2>/dev/null; then rm -f "$lgv"
+    else say "lock: could not put back the owner '$(cat "$lgv" 2>/dev/null)' (kept as $lgv)"; fi
+  fi
   return 0
 }
 
