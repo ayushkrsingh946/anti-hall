@@ -31,7 +31,7 @@ unit = "ms"
 
 [host_spawn.deadline_reserve_ms]
 doc = "Time kept back from the request's deadline when a spawned program's timeout is cut to it: the other checks of the event and the reply still need it."
-value = 600
+value = 60
 min = 0
 unit = "ms"
 
