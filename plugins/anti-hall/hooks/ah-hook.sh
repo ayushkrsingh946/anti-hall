@@ -283,7 +283,13 @@ else
     timeout_ms_env=$((timeout_env * 1000))
   fi
 fi
+# The poll interval comes from the shipped defaults. An incomplete install (defaults unreadable) must not block a guard event before
+# the engine-absent fail-open is reached: it falls back to the same last-resort 1 s granularity the timeouts above use
+# (AH_HOOK_TIMEOUT_S default), and an unusable value in a readable file is still rejected by validation.
 watchdog_poll_ms=$(engine_default_num client.wrapper_watchdog_poll_ms || true)
+if [ -z "$watchdog_poll_ms" ] && [ ! -r "$defaults_file" ]; then
+  watchdog_poll_ms=1000
+fi
 validate_positive_int "$watchdog_poll_ms" client.wrapper_watchdog_poll_ms
 watchdog_poll_s=$(engine_default_sleep "$watchdog_poll_ms")
 sweep_age=${AH_HOOK_SWEEP_AGE_S:-1800}
@@ -824,6 +830,8 @@ launch_shell_group() {
   printf '0\n' >"$group_file"
 }
 
+# The host stderr parked on fd 4 by run_engine stays in the wrapper: a child holding it would keep the host's stderr pipe open
+# (host waits for EOF) until a detached daemon exits, defeating the client deadline. Every child launch closes it (4>&-).
 launch_argv_group() {
   out=$1
   err=$2
@@ -831,20 +839,20 @@ launch_argv_group() {
   group_file=$4
   shift 4
   if command -v setsid >/dev/null 2>&1; then
-    setsid "$@" <"$payload" >"$out" 2>"$err" &
+    setsid "$@" <"$payload" >"$out" 2>"$err" 4>&- &
     printf '%s\n' "$!" >"$pid_file"
     printf '1\n' >"$group_file"
     return
   fi
   if ( set -m ) 2>/dev/null; then
     set -m 2>/dev/null || true
-    { "$@" <"$payload" >"$out" 2>"$err" & } 2>/dev/null
+    { "$@" <"$payload" >"$out" 2>"$err" 4>&- & } 2>/dev/null
     printf '%s\n' "$!" >"$pid_file"
     printf '1\n' >"$group_file"
     set +m 2>/dev/null || true
     return
   fi
-  "$@" <"$payload" >"$out" 2>"$err" &
+  "$@" <"$payload" >"$out" 2>"$err" 4>&- &
   printf '%s\n' "$!" >"$pid_file"
   printf '0\n' >"$group_file"
 }
@@ -904,7 +912,7 @@ start_watchdog_ms() {
     done
     : >"$w_timed"
     terminate_process_group "$w_pid" "$w_group"
-  ) </dev/null >/dev/null 2>&1 &
+  ) </dev/null >/dev/null 2>&1 4>&- &
   watch=$!
 }
 
@@ -1046,12 +1054,21 @@ flush_fallback() {
       P_e = i; P_v = substr(t, RSTART + RLENGTH, i - RSTART - RLENGTH)
       return 1
     }
-    # remove the "key":"..." pair of t with one adjoining comma
-    function strip(t, key) {
+    # remove the "key":"..." pair of t with one adjoining comma; JSON whitespace may sit between the pair and that comma
+    function strip(t, key,   a, b) {
       if (!find(t, key)) return t
-      if (substr(t, P_e + 1, 1) == ",") return substr(t, 1, P_s - 1) substr(t, P_e + 2)
-      if (substr(t, P_s - 1, 1) == ",") return substr(t, 1, P_s - 2) substr(t, P_e + 1)
+      a = P_e + 1
+      while (substr(t, a, 1) ~ /[ \t]/) a++
+      if (substr(t, a, 1) == ",") return substr(t, 1, P_s - 1) substr(t, a + 1)
+      b = P_s - 1
+      while (b > 0 && substr(t, b, 1) ~ /[ \t]/) b--
+      if (substr(t, b, 1) == ",") return substr(t, 1, b - 1) substr(t, P_e + 1)
       return substr(t, 1, P_s - 1) substr(t, P_e + 1)
+    }
+    # cheap structural check of a merged object: with the strings blanked, no comma may sit next to a brace/bracket or another comma
+    function sane(t) {
+      gsub(/"([^"\\]|\\.)*"/, "\"\"", t)
+      return !(t ~ /,[ \t]*[}\]]/ || t ~ /[{\[][ \t]*,/ || t ~ /,[ \t]*,/)
     }
     function residual(t) {
       gsub(/"hookSpecificOutput"[ \t]*:[ \t]*\{/, "", t)
@@ -1118,7 +1135,9 @@ flush_fallback() {
         T = "{\"systemMessage\":\"" M "\"" (inner == "" ? "" : "," inner) "}"
       }
       inner = T; sub(/^\{[ \t]*/, "", inner); sub(/[ \t]*\}$/, "", inner)
-      if (inner != "") print T
+      if (inner == "") exit 0
+      if (!sane(T)) { print "anti-hall: fallback merge produced an invalid object; kept the first hook'"'"'s output" > "/dev/stderr"; T = obj[1] }
+      print T
     }
   ' $fb_files >"$tmp/fb.merged" || fb_rc=$?
   if [ "$fb_rc" -eq 0 ]; then

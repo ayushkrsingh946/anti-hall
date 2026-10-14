@@ -533,6 +533,59 @@ test_fallback_merges_json_outputs() {
   [ "$(jq -r '.systemMessage' <"$tmp/fbm3.out")" = "$(printf 'm1\nm2')" ] || return 1
 }
 
+test_fallback_merges_pretty_printed_json_outputs() {
+  command -v jq >/dev/null 2>&1 || { echo 'jq missing: skipping' >&2; return 0; }
+  a='{
+  "hookSpecificOutput": {
+    "hookEventName": "UserPromptSubmit",
+    "additionalContext": "A"
+  }
+}'
+  b='{
+  "hookSpecificOutput": {
+    "hookEventName": "UserPromptSubmit",
+    "additionalContext": "B"
+  }
+}'
+  fb_merge_run fbpp "$a" "$b" || return 1
+  [ "$(jq -s length <"$tmp/fbpp.out")" = 1 ] || return 1
+  [ "$(jq -r '.hookSpecificOutput.additionalContext' <"$tmp/fbpp.out")" = "$(printf 'A\n\nB')" ] || return 1
+  # a comma after the pair, with whitespace in between, must go too
+  c='{ "systemMessage" : "m" , "hookSpecificOutput": { "additionalContext" : "C" , "hookEventName": "UserPromptSubmit" } }'
+  fb_merge_run fbpp2 "$c" "$a" || return 1
+  [ "$(jq -s length <"$tmp/fbpp2.out")" = 1 ] || return 1
+  [ "$(jq -r '.hookSpecificOutput.additionalContext' <"$tmp/fbpp2.out")" = "$(printf 'C\n\nA')" ] || return 1
+}
+
+test_cold_engine_does_not_hold_host_stderr_open() {
+  # A host that collects the hook's stderr waits for EOF on that pipe. The wrapper keeps the host's stderr on fd 4 while the
+  # engine runs; the engine (and the daemon it detaches) must not inherit it, or EOF only arrives when the daemon exits.
+  # the stand-in detaches a sleeper into its own process group, as the daemon does, so the wrapper's group kill cannot reach it
+  p=$tmp/leak-engine.sh
+  cat >"$p" <<'ENGINE'
+#!/bin/sh
+cat >/dev/null
+( set -m; sleep 8 </dev/null >/dev/null 2>&1 & )
+exit 0
+ENGINE
+  chmod +x "$p"
+  start=$(date +%s)
+  AH_ENGINE_BIN="$p" AH_HOOK_TIMEOUT_S="$large_timeout" sh "$wrapper" PreToolUse --tool-from-payload <"$payload" 2>&1 >/dev/null | cat >/dev/null
+  end=$(date +%s)
+  [ $((end - start)) -lt 4 ]
+}
+
+test_missing_engine_and_missing_defaults_fail_open() {
+  mkdir -p "$tmp/no-defaults-root"
+  for ev in PreToolUse Stop; do
+    set +e
+    AH_ENGINE_PLUGIN_ROOT="$tmp/no-defaults-root" AH_ENGINE_BIN=/no/such/engine AH_FALLBACK_LIST="$tmp/no-list" sh "$wrapper" "$ev" --tool-from-payload <"$payload" >"$tmp/nodef.out" 2>"$tmp/nodef.err"
+    rc=$?
+    set -e
+    [ "$rc" -eq 0 ] || return 1
+  done
+}
+
 test_fallback_two_empty_contexts_say_nothing() {
   e='{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":""}}'
   fb_merge_run fbe "$e" "$e" || return 1
@@ -1356,6 +1409,9 @@ check tool_name_invalid_selects_all_non_guard test_tool_name_invalid_selects_all
 check tool_name_huge_payload_fast test_tool_name_huge_payload_fast
 check fallback_exit_code_matrix_rows test_fallback_exit_code_matrix_rows
 check fallback_merges_json_outputs test_fallback_merges_json_outputs
+check fallback_merges_pretty_printed_json_outputs test_fallback_merges_pretty_printed_json_outputs
+check cold_engine_does_not_hold_host_stderr_open test_cold_engine_does_not_hold_host_stderr_open
+check missing_engine_and_missing_defaults_fail_open test_missing_engine_and_missing_defaults_fail_open
 check fallback_two_empty_contexts_say_nothing test_fallback_two_empty_contexts_say_nothing
 check fallback_exit1_host_nonblocking_rows test_fallback_exit1_host_nonblocking_rows
 check shell_started_126_127_are_host_nonblocking test_shell_started_126_127_are_host_nonblocking
