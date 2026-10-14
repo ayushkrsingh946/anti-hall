@@ -1,6 +1,6 @@
 #!/bin/sh
 # go-live.sh [<comma-separated entry ids | all-agreeing | none>] [--dry-run]     (default: all-agreeing)
-# Switches this machine from "Node hooks decide, engine shadows" to "engine decides per check, Node as fallback", and adds the
+# Switches this machine from "Node hooks decide, engine shadows" to "engine decides per check; an unhealthy engine fails open (no Node fallback)", and adds the
 # reverse witness (node-shadow.sh: Node runs silently beside the engine and logs what it would have decided).
 # Reversible with rollback.sh (byte-identical restore). Read README.md for the exact effect and the safety properties.
 . "$(CDPATH= cd -- "$(dirname "$0")" && pwd)/lib.sh"
@@ -15,6 +15,8 @@ ENG=$BUNDLE/ah-engine
 # a plugin-shipped ah-engine.lock makes ah-hook.sh run ah-engine-bootstrap.sh on SessionStart, which would replace the bundled binary
 # with a release download: the kit could then no longer say which engine is live, and rollback would see bin/ah-engine as edited
 [ ! -e "$BUNDLE_ROOT/ah-engine.lock" ] || die "bundled plugin ships ah-engine.lock (the bootstrap would replace the bundled engine); rebuild bundle/ without it"
+INTEG=$(integ_script)
+[ -f "$INTEG" ] || die "bundled plugin has no $(basename "$INTEG") (crash-loop roll-back would be inert after go-live); rebuild bundle/ from a plugin tree that ships hooks/ah-engine-integrity.sh. Nothing was changed"
 PVER=$(node -p 'require(process.argv[1]).version' "$BUNDLE/plugin/.claude-plugin/plugin.json") || die "cannot read bundled plugin version"
 
 # --- preflight (nothing is changed until all of this passes) -----------------------------------------------------------
@@ -83,6 +85,7 @@ if [ "$dry" = 1 ]; then
   else
     note "0 back up to $STATE/backup/: $SETTINGS (sha $(sha "$SETTINGS" | cut -c1-12))$([ -f "$CONFIG_TOML" ] && echo ", $CONFIG_TOML")$([ -e "$LIVE_ENGINE_BIN" ] && echo ", $LIVE_ENGINE_BIN"); ledger $LIVE_JSON"
     note "1 engine binary: $LIVE_ENGINE_BIN  $(sha "$LIVE_ENGINE_BIN" | cut -c1-12) -> $(sha "$ENG" | cut -c1-12) (bundle)"
+    note "1b integrity record: $(basename "$INTEG") record -> expected sha256 $(sha "$ENG")"
     note "2 $CONFIG_TOML ($([ -f "$CONFIG_TOML" ] && echo "exists, sha $(sha "$CONFIG_TOML" | cut -c1-12); content outside the managed block kept" || echo "created")): managed block with $(wc -l <"$OFF" | tr -d " ") guard entries mode=\"off\""
     note "3 local marketplace $LIVE_MKT at $MKT_DIR (plugins/anti-hall = bundle/plugin $PVER), checked with: $CLAUDE_BIN plugin validate"
     note "4 $CLAUDE_BIN plugin marketplace add $MKT_DIR ; $CLAUDE_BIN plugin install $LIVE_KEY   (CLI writes installed_plugins.json, known_marketplaces.json, the plugin cache, settings.json enabledPlugins/extraKnownMarketplaces)"
@@ -155,6 +158,12 @@ fi
 apply() {
   # 1 engine binary where ah-hook.sh looks for it
   mkdir -p "$(dirname "$LIVE_ENGINE_BIN")" && cp "$ENG" "$LIVE_ENGINE_BIN.new" && chmod 755 "$LIVE_ENGINE_BIN.new" && mv "$LIVE_ENGINE_BIN.new" "$LIVE_ENGINE_BIN" || return 1
+  # 1b tell the integrity script which binary is the expected one (without it the crash-loop roll-back has nothing to compare and stays inert);
+  #    it exits 0 even when it cannot act, so confirm through its own status that the recorded sha is this binary
+  integ_run record >/dev/null 2>&1
+  _want=$(sha "$LIVE_ENGINE_BIN"); _got=$(integ_run status 2>/dev/null | awk '$1=="expected" {print $2}')
+  if [ "$_got" = "$_want" ]; then note "integrity: expected sha256 recorded ($(printf %s "$_want" | cut -c1-12))"
+  else klog W_INTEGRITY_RECORD "integrity record did not take (expected='$_got' installed='$_want')"; note "warning: integrity record did not take (the bundled engine.toml lacks the [rollback.*] settings?); crash-loop roll-back stays inert until: sh $INTEG record"; fi
   # 2 per-check config (guard entries not promoted keep Node as their decider)
   cp "$CAND" "$CONFIG_TOML" || return 1
   # 3 a local marketplace built from the bundle (distinct name, so the real "anti-hall" marketplace and its install are untouched)

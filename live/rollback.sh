@@ -127,6 +127,23 @@ if [ "$rc_cli" -ne 0 ]; then
 fi
 restore_settings || { klog E_SETTINGS_RESTORE "restore_settings failed (rc=$?)"; rc_cli=1; echo "WARNING: settings.json was not reverted (see $STATE/kit.log); no edit of yours was touched" >&2; }   # kit keys only; owner edits kept
 restore config; restore bin
+# the integrity state describes the go-live binary: left in place it could "roll back" the restored one forward to the go-live copy. Moved aside (never deleted);
+# names come from the bundled engine.toml exactly as hooks/ah-engine-integrity.sh reads them.
+integ_aside() {
+  [ -f "$BUNDLE_ROOT/engine/defaults/engine.toml" ] || { klog W_INTEGRITY_ASIDE "no $BUNDLE_ROOT/engine/defaults/engine.toml: integrity state not moved aside"; note "warning: cannot find the integrity file names (bundle engine.toml missing); check $ENGINE_DIR for ah-engine.good/.expected and move them aside by hand"; return 0; }
+  _bin=$ENGINE_DIR/$(integ_cfg rollback.bin_dir)/$(integ_cfg rollback.bin_name)
+  _gs=$(integ_cfg rollback.good_suffix); _es=$(integ_cfg rollback.expected_suffix); _as=$(integ_cfg rollback.accepted_suffix); _ss=$(integ_cfg rollback.sha_suffix)
+  { [ -n "$_gs" ] && [ -n "$_es" ] && [ -n "$_as" ] && [ -n "$_ss" ]; } || { klog W_INTEGRITY_ASIDE "rollback.* keys missing in engine.toml: nothing moved aside"; return 0; }
+  _list="$_bin$_gs $_bin$_gs$_ss $_bin$_es $_bin$_es$_as"
+  for _k in files.healthy_binary files.rollback_request files.wrapper_fail_log files.crashloop_until files.crashloop_bin files.breaker_until; do
+    _v=$(integ_cfg "$_k"); [ -z "$_v" ] || _list="$_list $ENGINE_DIR/$_v"
+  done
+  for _f in $_list; do
+    [ -e "$_f" ] || continue
+    mkdir -p "$RB/integrity" && mv "$_f" "$RB/integrity/" && klog I_INTEGRITY_ASIDE "$_f -> $RB/integrity/" || { klog E_INTEGRITY_ASIDE "cannot move $_f"; note "warning: could not move $_f aside"; }
+  done
+}
+integ_aside
 node -e 'process.exit(require(process.argv[1]).files.shadowall?0:1)' "$LIVE_JSON" && restore shadowall   # the old Mac shadow trigger go-live neutralised
 [ -d "$MKT_DIR" ] && { mkdir -p "$RB" && mv "$MKT_DIR" "$RB/marketplace"; }
 [ "${fb:-0}" = 1 ] || while IFS='	' read -r _k _v; do [ -n "$_k" ] || continue; [ "$(plugin_state "$_k")" = "enabled	$_v" ] || { echo "WARNING: $_k is not enabled at $_v after rollback (check: claude plugin list)" >&2; rc_cli=1; }; done <<EOF2

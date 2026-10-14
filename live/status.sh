@@ -37,7 +37,7 @@ if [ -x "$LIVE_ENGINE_BIN" ]; then
   echo "binary: $LIVE_ENGINE_BIN sha256=$(sha "$LIVE_ENGINE_BIN" | cut -c1-12) (bundle $(sha "$BUNDLE/ah-engine" | cut -c1-12))"
   echo "  plugin root for engine calls: $(live_root)"
   eng "$LIVE_ENGINE_BIN" status 2>&1 | grep -E '^(running|pid|requests|errors|panics|breaker|crashloop|starts|restarts):' | sed 's/^/  /'
-else echo "binary: absent ($LIVE_ENGINE_BIN): ah-hook.sh runs the Node fallback for every event"; fi
+else echo "binary: absent ($LIVE_ENGINE_BIN): ah-hook.sh fails open (no Node fallback)"; fi
 echo "== config.toml managed block (entries forced to Node)"
 managed_off | tr '\t' '/' | sed 's/^/  off: /'; [ -z "$(managed_off)" ] && echo "  (none)"
 echo "== per-check owner (guard events; non-guard entries are engine-first with Node on defer)"

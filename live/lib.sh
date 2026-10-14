@@ -123,3 +123,18 @@ eng() { _b=$1; shift; _lr=$(live_root); ( AH_ENGINE_DIR=$ENGINE_DIR; AH_ENGINE_P
 count_shadow() {
   node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));let n=0;const ms=process.argv[2].split(" ");for(const g of Object.values(s.hooks||{}))for(const m of g)for(const h of m.hooks)if(ms.some(k=>String(h.command).includes(k)))n++;console.log(n)' "$SETTINGS" "$SHADOW_MARKS"
 }
+
+# integ_cfg KEY: the value of [KEY] in the bundled plugin's engine/defaults/engine.toml (same lookup hooks/ah-engine-integrity.sh uses; the
+# kit hardcodes none of the integrity file names). Prints nothing when the file or key is absent.
+integ_cfg() {
+  [ -f "$BUNDLE_ROOT/engine/defaults/engine.toml" ] || return 0
+  awk -v want="[$1]" '
+    $0 == want { in_key = 1; next }
+    in_key && /^\[/ { exit }
+    in_key && $1 == "value" && $2 == "=" { v = $0; sub(/^[^"]*"/, "", v); sub(/".*$/, "", v); print v; exit }
+  ' "$BUNDLE_ROOT/engine/defaults/engine.toml"
+}
+# integ_script: the bundled integrity script (path relative to the plugin root comes from rollback.script, default hooks/ah-engine-integrity.sh)
+integ_script() { _s=$(integ_cfg rollback.script); printf '%s' "$BUNDLE_ROOT/${_s:-hooks/ah-engine-integrity.sh}"; }
+# integ_run VERB: run the bundled integrity script against the real state dir (it always exits 0 and logs to its own integrity.log)
+integ_run() { ( AH_ENGINE_DIR=$ENGINE_DIR; AH_ENGINE_PLUGIN_ROOT=$BUNDLE_ROOT; export AH_ENGINE_DIR AH_ENGINE_PLUGIN_ROOT; lim 30 sh "$(integ_script)" "$1" </dev/null ); }
