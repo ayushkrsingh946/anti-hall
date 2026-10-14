@@ -211,7 +211,8 @@ fn crashloop_trip_on_a_tampered_never_healthy_binary_rolls_it_back_end_to_end() 
     std::fs::write(w.state.join("bin/ah-engine.good.sha256"), format!("{good_sha}\n")).unwrap();
     std::fs::write(w.state.join("bin/ah-engine.expected"), format!("{}\n", "a".repeat(64))).unwrap();
     w.run_to_trip(12);
-    wait_for("the roll-back", || asides(&w) == 1);
+    // the script sets the bad binary aside first and records the roll-back last: wait for the record, not the rename
+    wait_for("the roll-back", || asides(&w) == 1 && w.state.join("rollback.last").exists());
     assert!(w.state.join("rollback.last").exists(), "the roll-back is recorded");
     assert_eq!(sha_of(&w.state.join("bin/ah-engine")), good_sha, "the known-good binary is back in place");
     assert!(w.log().contains("\trollback_request\tcrashloop\t"), "{}", w.log());
