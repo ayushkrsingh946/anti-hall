@@ -10,6 +10,7 @@ the update.
 
 ### Fixed
 
+- **One install lock for every writer of the engine binary.** The integrity script's check and roll-back, the bootstrap's and ah-update's install and roll-back, and the recording of the expected sha256 now share one lock (`rollback.install_lock`, `rollback.lock_wait_s`, `rollback.lock_hook_wait_s`, `rollback.lock_stale_s`); a lock whose holder is gone is broken at once, a held lock never holds a session, and the hook wrapper's check skips instead of waiting.
 - **Crash-loop breaker now catches a binary that exits at once (#158).** Such a daemon reports no crash, so the existing rule never counted it and every hook respawned it. The daemon starts are counted too (`client.spawn_n` / `client.spawn_window_s`, default 6 in 60 s); the stop also gates the failed and slow client paths, ends early when the binary is replaced, and events from before a trip or reset no longer re-trip it.
 
 ### Added
