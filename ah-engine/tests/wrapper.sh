@@ -510,7 +510,9 @@ fb_merge_run() {
   done
   printf '@UserPromptSubmit\t%s\n%s' "$large_timeout" "$rows" >"$tmp/$name.list"
   printf '{"hook_event_name":"UserPromptSubmit","prompt":"x"}' >"$tmp/$name.in"
-  AH_ENGINE_BIN=/no/such/engine AH_FALLBACK_LIST="$tmp/$name.list" sh "$wrapper" UserPromptSubmit <"$tmp/$name.in" >"$tmp/$name.out" 2>"$tmp/$name.err"
+  # the fallback runs when the engine asks for it (exit 75); a missing engine now fails open silently (#159)
+  fe=$(make_engine "$name-engine" seventyfive)
+  AH_ENGINE_BIN="$fe" AH_FALLBACK_LIST="$tmp/$name.list" sh "$wrapper" UserPromptSubmit <"$tmp/$name.in" >"$tmp/$name.out" 2>"$tmp/$name.err"
 }
 
 test_fallback_merges_json_outputs() {
