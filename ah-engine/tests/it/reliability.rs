@@ -687,6 +687,39 @@ fn wrapper_respawns_a_daemon_killed_right_after_its_start() {
     assert!(fresh.is_some(), "no new daemon after {calls} wrapper calls following kill -9{}", e.diag());
 }
 
+/// R0: after the daemon is killed, twenty wrapper calls at once must leave exactly ONE daemon running (an earlier lane had 56
+/// engine processes alive at once). Counted from the process table: every `serve` process whose environment names this state directory.
+#[test]
+fn twenty_concurrent_wrapper_calls_after_a_kill_leave_exactly_one_daemon() {
+    let _timing = wrapper_timing_lock();
+    let e = Env::new("storm20", &[("AH_HOOK_TIMEOUT_MS", "5000")]);
+    let (code, _, _) = wrapper_once(&e);
+    assert_eq!(code, 0);
+    assert!(wait_for(|| e.pid().is_some()), "the first wrapper call did not start a daemon{}", e.diag());
+    let old = e.pid().unwrap();
+    // SAFETY: `kill` takes plain integers and has no memory-safety preconditions; the pid is this test's own daemon.
+    unsafe { libc::kill(old as i32, libc::SIGKILL) };
+    assert!(wait_for(|| !alive(old)), "kill -9 did not end the daemon");
+    let children: Vec<_> = (0..20).map(|_| wrapper_child(&e)).collect();
+    for ch in children {
+        let o = ch.wait_with_output().unwrap();
+        assert!(matches!(o.status.code(), Some(0) | Some(2)), "a wrapper call after the kill must fail open or fall back, got {:?}", o.status.code());
+    }
+    assert!(wait_for(|| e.pid().is_some_and(|p| p != old)), "no new daemon after 20 wrapper calls following kill -9{}", e.diag());
+    std::thread::sleep(Duration::from_secs(3)); // a spawn storm shows up as late extra daemons
+    // every `serve` process of THIS state directory (the daemon may fork away from the logged pid, so ask the process table)
+    let ps = Command::new("ps").args(["-axww", "-E", "-o", "pid=,command="]).output().unwrap();
+    let mine = format!("AH_ENGINE_DIR={}", e.eng().display());
+    let mut daemons: Vec<u32> = String::from_utf8_lossy(&ps.stdout)
+        .lines()
+        .filter(|l| l.contains(" serve") && l.contains(&mine))
+        .filter_map(|l| l.split_whitespace().next()?.parse().ok())
+        .collect();
+    daemons.sort_unstable();
+    daemons.dedup();
+    assert_eq!(daemons.len(), 1, "exactly one daemon must be running, found {daemons:?}{}", e.diag());
+}
+
 /// R0 P0: on a fresh state directory the first wrapper calls started no daemon. The hook client, finding no snapshot cache,
 /// parsed the defaults and then kept the last-known-good copy and healed (one synced write per defaults file) BEFORE it asked
 /// the daemon: over a second, so the wrapper's watchdog killed it before the spawn. The client now leaves that copy to the
