@@ -976,6 +976,160 @@ run_hook_command() {
   return "$wait_rc"
 }
 
+# One value of a [dispatch.<name>] table in the plugin's shipped defaults (D88: the joiners are config, not code).
+# Empty when the file or key is absent; the caller then uses the same default the file ships.
+dispatch_cfg() {
+  [ -r "$dir/../engine/defaults/dispatch.toml" ] || return 0
+  awk -v sec="[dispatch.$1]" '
+    $0 == sec { f = 1; next }
+    /^\[/ { f = 0 }
+    f && /^value[ \t]*=/ { sub(/^value[ \t]*=[ \t]*/, ""); print; exit }
+  ' "$dir/../engine/defaults/dispatch.toml" 2>/dev/null
+}
+
+# Emit what the fallback hooks printed as ONE answer (mirrors ah-engine/src/dispatch/combine.rs `sequential` + `merge` + `tidy`;
+# the host reads a hook's whole stdout as one JSON object or as plain text, so several JSON lines are rejected).
+#   - no JSON object among them: the plain texts, one after another (unchanged);
+#   - one non-empty stdout: verbatim;
+#   - several: additionalContext values joined by dispatch.context_joiner, systemMessage values by dispatch.message_joiner,
+#     empty contexts dropped, an object left with nothing is no output; plain text next to JSON is folded into the context on
+#     dispatch.plain_context_events, else moved to stderr. Field order: the first object's, minus the merged fields.
+#   Limitation vs the engine: fields other than additionalContext/systemMessage/hookEventName are taken from the FIRST object;
+#   a later object that carries a different set of them is noted on stderr (the engine defers the call in that case).
+flush_fallback() {
+  [ -n "$fb_ids" ] || return 0
+  fb_files=
+  fb_count=0
+  for fb_id in $fb_ids; do
+    fb_files="$fb_files $tmp/fb.out.$fb_id"
+    fb_count=$((fb_count + 1))
+  done
+  if [ "$fb_count" -eq 1 ]; then
+    cat "$tmp/fb.out.${fb_ids# }"
+    return 0
+  fi
+  fb_cj=$(dispatch_cfg context_joiner); fb_cj=${fb_cj#\"}; fb_cj=${fb_cj%\"}; [ -n "$fb_cj" ] || fb_cj='\n\n'
+  fb_mj=$(dispatch_cfg message_joiner); fb_mj=${fb_mj#\"}; fb_mj=${fb_mj%\"}; [ -n "$fb_mj" ] || fb_mj='\n'
+  fb_plain_ctx=0
+  case "$(dispatch_cfg plain_context_events)" in *\"$event\"*) fb_plain_ctx=1 ;; esac
+  fb_rc=0
+  # shellcheck disable=SC2086
+  # the joiners are JSON-escaped text: ENVIRON, because awk -v would turn their backslash escapes into raw control bytes
+  FB_CJ=$fb_cj FB_MJ=$fb_mj LC_ALL=C awk -v pc="$fb_plain_ctx" -v ev="$event" '
+    function trim(s) { gsub(/^[ \t\r\n]+/, "", s); gsub(/[ \t\r\n]+$/, "", s); return s }
+    function esc(s,   o, i, c, n) {
+      o = ""; n = length(s)
+      for (i = 1; i <= n; i++) {
+        c = substr(s, i, 1)
+        if (c == "\\") o = o "\\\\"
+        else if (c == "\"") o = o "\\\""
+        else if (c == "\n") o = o "\\n"
+        else if (c == "\r") o = o "\\r"
+        else if (c == "\t") o = o "\\t"
+        else if (c < " ") o = o sprintf("\\u%04x", ord[c])
+        else o = o c
+      }
+      return o
+    }
+    # locate the string value of "key" in t: sets P_s (start of the key), P_e (index of the closing quote), P_v (raw escaped text)
+    function find(t, key,   re, i, n, c) {
+      re = "\"" key "\"[ \t]*:[ \t]*\""
+      if (!match(t, re)) return 0
+      P_s = RSTART; i = RSTART + RLENGTH; n = length(t)
+      while (i <= n) {
+        c = substr(t, i, 1)
+        if (c == "\\") { i += 2; continue }
+        if (c == "\"") break
+        i++
+      }
+      if (i > n) return 0
+      P_e = i; P_v = substr(t, RSTART + RLENGTH, i - RSTART - RLENGTH)
+      return 1
+    }
+    # remove the "key":"..." pair of t with one adjoining comma
+    function strip(t, key) {
+      if (!find(t, key)) return t
+      if (substr(t, P_e + 1, 1) == ",") return substr(t, 1, P_s - 1) substr(t, P_e + 2)
+      if (substr(t, P_s - 1, 1) == ",") return substr(t, 1, P_s - 2) substr(t, P_e + 1)
+      return substr(t, 1, P_s - 1) substr(t, P_e + 1)
+    }
+    function residual(t) {
+      gsub(/"hookSpecificOutput"[ \t]*:[ \t]*\{/, "", t)
+      gsub(/"hookEventName"[ \t]*:[ \t]*"[^"]*"/, "", t)
+      gsub(/[{}, \t]/, "", t)
+      return t
+    }
+    BEGIN { cj = ENVIRON["FB_CJ"]; mj = ENVIRON["FB_MJ"]; for (i = 1; i < 32; i++) ord[sprintf("%c", i)] = i }
+    FNR == 1 { nf++; body[nf] = "" }
+    { body[nf] = body[nf] (FNR > 1 ? "\n" : "") $0 }
+    END {
+      nj = 0; np = 0; nctx = 0; nmsg = 0; ename = ""
+      for (f = 1; f <= nf; f++) {
+        t = trim(body[f])
+        if (substr(t, 1, 1) == "{" && substr(t, length(t), 1) == "}") {
+          gsub(/\n/, " ", t)
+          nj++; obj[nj] = t
+          if (match(t, /"hookEventName"[ \t]*:[ \t]*"[^"]*"/) && ename == "") { e = substr(t, RSTART, RLENGTH); sub(/^[^:]*:[ \t]*"/, "", e); sub(/"$/, "", e); ename = e }
+          item[f] = "J"
+        } else { item[f] = "P"; np++ }
+      }
+      if (nj == 0) exit 3
+      for (f = 1; f <= nf; f++) {
+        if (item[f] == "P") {
+          if (pc) { p = body[f]; sub(/\n+$/, "", p); if (p != "") ctx[++nctx] = esc(p) }
+          else { p = body[f]; printf "%s%s", p, (p ~ /\n$/ ? "" : "\n") > "/dev/stderr" }
+          continue
+        }
+        j++; t = obj[j]
+        if (find(t, "additionalContext") && P_v != "") ctx[++nctx] = P_v
+        t = strip(t, "additionalContext")
+        if (find(t, "systemMessage") && P_v != "") msg[++nmsg] = P_v
+        t = strip(t, "systemMessage")
+        st[j] = t
+      }
+      T = st[1]
+      for (k = 2; k <= nj; k++) if (residual(st[k]) != residual(T)) { print "anti-hall: fallback merge kept the first hook'"'"'s other fields; a later hook set different ones" > "/dev/stderr"; break }
+      # an hookSpecificOutput left with only its event name says nothing
+      if (match(T, /"hookSpecificOutput"[ \t]*:[ \t]*\{[ \t]*("hookEventName"[ \t]*:[ \t]*"[^"]*")?[ \t]*\}/)) {
+        e = substr(T, RSTART + RLENGTH, 1)
+        if (e == ",") T = substr(T, 1, RSTART - 1) substr(T, RSTART + RLENGTH + 1)
+        else if (substr(T, RSTART - 1, 1) == ",") T = substr(T, 1, RSTART - 2) substr(T, RSTART + RLENGTH)
+        else T = substr(T, 1, RSTART - 1) substr(T, RSTART + RLENGTH)
+      }
+      J = ""; for (k = 1; k <= nctx; k++) J = J (k > 1 ? cj : "") ctx[k]
+      M = ""; for (k = 1; k <= nmsg; k++) M = M (k > 1 ? mj : "") msg[k]
+      if (J != "") {
+        if (match(T, /"hookSpecificOutput"[ \t]*:[ \t]*\{/)) {
+          at = RSTART + RLENGTH; sep = ""
+          if (match(substr(T, at), /^[ \t]*"hookEventName"[ \t]*:[ \t]*"[^"]*"/)) { at += RLENGTH; sep = "," }
+          rest = substr(T, at); r = rest; sub(/^[ \t]+/, "", r)
+          if (substr(r, 1, 1) == ",") { rest = substr(r, 2); tail = "," }
+          else if (substr(r, 1, 1) == "}") tail = ""
+          else tail = ","
+          T = substr(T, 1, at - 1) sep "\"additionalContext\":\"" J "\"" tail rest
+        } else {
+          hso = "\"hookSpecificOutput\":{" (ename != "" ? "\"hookEventName\":\"" ename "\"," : "\"hookEventName\":\"" ev "\",") "\"additionalContext\":\"" J "\"}"
+          inner = T; sub(/^\{[ \t]*/, "", inner); sub(/[ \t]*\}$/, "", inner)
+          T = "{" (inner == "" ? "" : inner ",") hso "}"
+        }
+      }
+      if (M != "") {
+        inner = T; sub(/^\{[ \t]*/, "", inner); sub(/[ \t]*\}$/, "", inner)
+        T = "{\"systemMessage\":\"" M "\"" (inner == "" ? "" : "," inner) "}"
+      }
+      inner = T; sub(/^\{[ \t]*/, "", inner); sub(/[ \t]*\}$/, "", inner)
+      if (inner != "") print T
+    }
+  ' $fb_files >"$tmp/fb.merged" || fb_rc=$?
+  if [ "$fb_rc" -eq 0 ]; then
+    cat "$tmp/fb.merged"
+  else
+    # no JSON among them (exit 3), or awk failed: print them as they were, one after another
+    # shellcheck disable=SC2086
+    cat $fb_files
+  fi
+}
+
 run_fallback() {
   reason=$1
   if [ ! -r "$list" ] || { [ "$guard_event" -eq 1 ] && [ ! -s "$list" ]; }; then
@@ -983,7 +1137,7 @@ run_fallback() {
     fallback_note "$reason"
     exit 0
   fi
-  selected=0; ran=0; first_block_err=; hard_failure=0; code=0; in_event=0; event_seen=0; event_empty=0
+  selected=0; fb_ids=; ran=0; first_block_err=; hard_failure=0; code=0; in_event=0; event_seen=0; event_empty=0
   timeout_default=$(event_timeout)
   [ -n "$timeout_default" ] || timeout_default=$timeout_env
   validate_positive_int "$timeout_default" event_timeout
@@ -1022,17 +1176,21 @@ run_fallback() {
     esac
     ran=1
     if [ "$rc" -eq 2 ]; then
+      flush_fallback
       cat "$out"
       cat "$err" >&2
       exit 2
     fi
     if json_blocks_file "$out"; then
+      # a JSON block is the whole answer, byte for byte (earlier advisories are dropped: two JSON objects are not one answer)
       cat "$out"
       cat "$err" >&2
       exit 0
     fi
-    cat "$out"
+    # non-blocking stdout is buffered and emitted once, merged, after the last hook (flush_fallback)
+    [ -s "$out" ] && fb_ids="$fb_ids $selected"
   done <"$list"
+  flush_fallback
   if [ "$code" -eq 2 ]; then
     [ -n "$first_block_err" ] && cat "$first_block_err" >&2
     exit 2
