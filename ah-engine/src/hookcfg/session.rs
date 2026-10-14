@@ -20,6 +20,8 @@ struct Slot {
     count: u64,
     last: Instant,
     weight: usize,
+    /// The TTL of the condition that owns this counter: only it decides when the counter is idle.
+    ttl: Duration,
 }
 
 #[derive(Default)]
@@ -45,9 +47,9 @@ impl SessionCore {
         self.bytes.store(Self::refresh_bytes(slots), SeqCst);
     }
 
-    fn evict_expired(slots: &mut HashMap<(String, String), Slot>, now: Instant, ttl: Duration) {
+    fn evict_expired(slots: &mut HashMap<(String, String), Slot>, now: Instant) {
         let before = slots.len();
-        slots.retain(|_, s| now.saturating_duration_since(s.last) <= ttl);
+        slots.retain(|_, s| now.saturating_duration_since(s.last) <= s.ttl);
         if slots.len() != before {
             slots.shrink_to_fit();
         }
@@ -119,15 +121,8 @@ impl SessionStore {
         let ttl = Duration::from_secs(cond.ttl_s.unwrap_or_else(|| defaults::num("hooks.session_ttl_s")));
         let key = (session.to_string(), cond.name.clone());
         let mut slots = self.core.lock();
-        SessionCore::evict_expired(&mut slots, now, ttl);
-        if let Some(slot) = slots.get_mut(&key) {
-            if now.saturating_duration_since(slot.last) > ttl {
-                slot.count = 0;
-            }
-            slot.last = now;
-            slot.count = slot.count.saturating_add(1);
-            let count = slot.count;
-            self.core.store_bytes(&slots);
+        SessionCore::evict_expired(&mut slots, now);
+        if let Some(count) = self.bump(&mut slots, &key, now, ttl) {
             return holds(cond, count);
         }
         let max = self.budget.max_entries();
@@ -146,14 +141,32 @@ impl SessionStore {
             return holds(cond, 1);
         }
         let mut slots = self.core.lock();
+        // another call may have created this counter while the lock was released: count on it instead of starting again
+        if let Some(count) = self.bump(&mut slots, &key, now, ttl) {
+            return holds(cond, count);
+        }
         if max > 0 && slots.len() >= max {
             slots.shrink_to_fit();
             self.core.store_bytes(&slots);
             return holds(cond, 1);
         }
-        slots.insert(key, Slot { count: 1, last: now, weight });
+        slots.insert(key, Slot { count: 1, last: now, weight, ttl });
         self.core.store_bytes(&slots);
         holds(cond, 1)
+    }
+
+    /// Count one more on an existing counter (a counter idle longer than `ttl` starts again); `None` when there is none.
+    fn bump(&self, slots: &mut HashMap<(String, String), Slot>, key: &(String, String), now: Instant, ttl: Duration) -> Option<u64> {
+        let slot = slots.get_mut(key)?;
+        if now.saturating_duration_since(slot.last) > ttl {
+            slot.count = 0;
+        }
+        slot.last = now;
+        slot.ttl = ttl;
+        slot.count = slot.count.saturating_add(1);
+        let count = slot.count;
+        self.core.store_bytes(slots);
+        Some(count)
     }
 
     /// Forget every counter of a session (it ended).
@@ -241,6 +254,33 @@ mod tests {
         ms.store(1_001, Ordering::SeqCst);
         assert!(s.test("other", &c), "a later request prunes the idle session");
         assert_eq!(s.len(), 1);
+    }
+
+    #[test]
+    fn a_short_ttl_condition_does_not_expire_a_long_ttl_counter() {
+        let ms = Arc::new(AtomicU64::new(0));
+        let base = Instant::now();
+        let m = ms.clone();
+        let s = SessionStore::with_clock(move || base + Duration::from_millis(m.load(Ordering::SeqCst)));
+        let (long, short) = (cond("a", SessionOp::First, Some(3600)), cond("b", SessionOp::First, Some(1)));
+        assert!(s.test("s", &long));
+        ms.store(2_000, Ordering::SeqCst);
+        assert!(s.test("s", &short));
+        assert!(!s.test("s", &long), "the long counter is still inside its own TTL");
+    }
+
+    #[test]
+    fn a_first_observation_that_lost_the_race_counts_on_the_existing_counter() {
+        let s = SessionStore::new();
+        let c = cond("a", SessionOp::AtLeast(3), None);
+        let key = ("s".to_string(), "a".to_string());
+        let now = Instant::now();
+        assert!(!s.test("s", &c));
+        // the interleaving: this call saw no counter, another created it (and counted), then this call reaches the final lock
+        assert!(!s.test("s", &c));
+        let mut slots = s.core.lock();
+        assert_eq!(s.bump(&mut slots, &key, now, Duration::from_secs(60)), Some(3), "the counter is kept, not reset to 1");
+        assert_eq!(s.bump(&mut slots, &("s".into(), "none".into()), now, Duration::from_secs(60)), None);
     }
 
     #[test]

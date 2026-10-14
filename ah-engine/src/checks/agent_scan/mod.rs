@@ -1345,6 +1345,11 @@ fn scan_kept(path: &str, tail: u64, f: std::fs::File, m: &std::fs::Metadata, opt
             return if banded { scan_window(path, tail, opts) } else { Err(e) };
         }
     }
+    // the appended lines (the unfinished one included) may judge, by an answer, a call that already left the exact window: such a
+    // walk no longer holds what a fresh scan of the window holds, so the window is read afresh
+    if w.straddles(start) {
+        return scan_window(path, tail, opts);
+    }
     if k.base < start {
         w.others.retain(|o| o.off >= start);
     }
