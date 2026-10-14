@@ -179,6 +179,9 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `client.breaker_cooldown_s` | `60` | `AH_ENGINE_BREAKER_COOLDOWN_S` | s | How long the breaker stays open once tripped. |
 | `client.breaker_n` | `5` | `AH_ENGINE_BREAKER_N` |  | Engine failures within the window that open the breaker (the client then skips the engine). |
 | `client.breaker_window_s` | `60` | `AH_ENGINE_BREAKER_WINDOW_S` | s | Window in which breaker failures are counted. |
+| `client.cold_guard_kick_event` | `ColdStartKick` |  |  | Event name of the empty request the wrapper sends to start a cold daemon before a guard event waits for it; it names no hook, so it decides nothing. |
+| `client.cold_guard_poll_ms` | `50` |  | ms | Poll interval of the cold-start wait for a guard event (the daemon socket appearing). |
+| `client.cold_guard_wait_ms` | `2000` |  | ms | How long a guard event (PreToolUse, PermissionRequest, Stop, SubagentStop) waits for a cold-starting daemon before it is let through with one notice per session; 0 turns the wait off. Prompts and advisories never wait. The wait never exceeds what the hook's own timeout leaves after the engine attempt. |
 | `client.cold_start_poll_ms` | `1` |  | ms | Poll interval while waiting for a cold-started daemon. |
 | `client.cold_start_wait_ms` | `40` |  | ms | How long a client with no fallback waits for a cold-started daemon before giving up (prints nothing). |
 | `client.crash_cooldown_s` | `1800` | `AH_ENGINE_CRASH_COOLDOWN_S` | s | How long respawning stays stopped after a crash loop. |
@@ -294,6 +297,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `files.advised_dir` | `advised` |  |  | Directory with one empty file per session that has already seen the failure advisory. |
 | `files.backups_dir` | `backups` |  |  | Directory inside the state directory that holds backups and pre-restore snapshots (D27); nothing in it is ever deleted by the engine. |
 | `files.breaker_until` | `breaker.until` |  |  | Marker holding the time (ms since the epoch) until which the client breaker stays open. |
+| `files.cold_guard_notice` | `cold-guard.notice` |  |  | Holds the session id that already got the cold-start notice, so the notice is shown once per session (the next session overwrites it). |
 | `files.crash_breadcrumb` | `crash-breadcrumb.json` |  |  | Last request/job/check breadcrumb written at boundary entry so an abnormal exit can be reported with context on the next start. |
 | `files.crashloop_bin` | `crashloop.bin` |  |  | Holds the size, modification time and sha256 of the binary the crash-loop rule tripped on. A cooldown ends early when the binary is replaced by a different one. |
 | `files.crashloop_until` | `crashloop.until` |  |  | Marker holding the time until which respawning is stopped after a crash loop. |

@@ -1463,5 +1463,139 @@ check temp_removed_on_int test_temp_removed_on_int
 check no_node_hook_events_allow_without_engine test_no_node_hook_events_allow_without_engine
 check event_with_node_guards_stays_fail_closed_without_engine test_event_with_node_guards_stays_fail_closed_without_engine
 
+# ---- cold start: guard events wait for the daemon (client.cold_guard_wait_ms), everything else stays instant ----
+# cg_setup <wait_ms>: a short state dir (the socket path must stay under the socket limit), a plugin root whose defaults carry
+# the wait under test, and a stand-in engine. The stand-in logs every call; a kick (the wrapper's empty cold-start request) makes a
+# detached "daemon" bind the socket after $AH_COLD_READY_S; with the socket up a PreToolUse is denied, cold it fails open.
+cg_setup() {
+  cg_wait=$1
+  cg_dir=$(mktemp -d /tmp/ahcg.XXXXXX)
+  cg_root=$cg_dir/root
+  mkdir -p "$cg_root/engine"
+  cp -R "$repo/plugins/anti-hall/engine/defaults" "$cg_root/engine/defaults"
+  sed "/^\[client.cold_guard_wait_ms\]/,/^\$/s/^value = .*/value = $cg_wait/" "$repo/plugins/anti-hall/engine/defaults/engine.toml" >"$cg_root/engine/defaults/engine.toml"
+  cg_state=$cg_dir/s
+  mkdir -p "$cg_state"
+  cg_log=$cg_dir/calls.log
+  : >"$cg_log"
+  cg_engine=$cg_dir/engine.sh
+  cat >"$cg_engine" <<'ENG'
+#!/bin/sh
+payload=$(cat)
+printf '%s | %s\n' "$*" "$payload" >>"$AH_COLD_LOG"
+sock=$AH_ENGINE_DIR/e.sock
+case "$payload" in
+  *ColdStartKick*)
+    if [ -n "${AH_COLD_READY_S:-}" ] && [ ! -S "$sock" ]; then
+      perl -MPOSIX -MIO::Socket::UNIX -e 'exit 0 if fork; POSIX::setsid(); select(undef, undef, undef, $ARGV[1]); unlink $ARGV[0]; $s = IO::Socket::UNIX->new(Local => $ARGV[0], Listen => 1); sleep 4' "$sock" "$AH_COLD_READY_S" </dev/null >/dev/null 2>&1
+    fi
+    exit 0 ;;
+esac
+if [ -S "$sock" ]; then
+  case "$payload" in
+    *PreToolUse*) printf 'denied-by-daemon\n' >&2; exit 2 ;;
+  esac
+fi
+exit 0
+ENG
+  chmod +x "$cg_engine"
+  printf '@PreToolUse\t10\n*\t10\ttrue\n@Stop\t10\n*\t10\ttrue\n@UserPromptSubmit\t10\n*\t10\ttrue\n' >"$cg_dir/list"
+}
+
+cg_cleanup() {
+  [ -n "${cg_dir:-}" ] && rm -rf "$cg_dir"
+  cg_dir=
+}
+
+# cg_run <event> <session> [env...]: runs the wrapper against the stand-in; prints "<rc> <ms>"; stdout/stderr land in $cg_dir/out, err
+cg_run() {
+  cg_ev=$1; cg_sid=$2; shift 2
+  printf '{"hook_event_name":"%s","session_id":"%s","tool_name":"Bash"}' "$cg_ev" "$cg_sid" >"$cg_dir/in"
+  cg_t0=$(perl -MTime::HiRes=time -e 'printf "%.0f", time() * 1000')
+  set +e
+  env AH_ENGINE_DIR="$cg_state" AH_ENGINE_PLUGIN_ROOT="$cg_root" AH_COLD_LOG="$cg_log" AH_ENGINE_BIN="$cg_engine" AH_FALLBACK_LIST="$cg_dir/list" \
+    AH_HOOK_TIMEOUT_S=10 AH_HOOK_TIMEOUT_MS=3000 "$@" sh "$wrapper" "$cg_ev" <"$cg_dir/in" >"$cg_dir/out" 2>"$cg_dir/err"
+  cg_rc=$?
+  set -e
+  cg_t1=$(perl -MTime::HiRes=time -e 'printf "%.0f", time() * 1000')
+  cg_ms=$((cg_t1 - cg_t0))
+}
+
+test_cold_guard_waits_for_a_daemon_that_comes_up() {
+  cg_setup 2000
+  cg_run PreToolUse sess-a AH_COLD_READY_S=0.5
+  ok=1
+  # the daemon's real decision (deny) is returned, within the cap (the 2000 ms wait plus the stand-in's own start-up)
+  [ "$cg_rc" -eq 2 ] && grep -q denied-by-daemon "$cg_dir/err" || ok=0
+  [ "$cg_ms" -lt 2000 ] || ok=0
+  [ "$(grep -c ColdStartKick "$cg_log")" -eq 1 ] || ok=0
+  [ "$ok" -eq 1 ] || printf 'cold guard ready: rc=%s ms=%s err=%s log=%s\n' "$cg_rc" "$cg_ms" "$(cat "$cg_dir/err")" "$(cat "$cg_log")" >&2
+  cg_cleanup
+  [ "$ok" -eq 1 ]
+}
+
+test_cold_guard_gives_up_at_the_cap_with_one_notice_per_session() {
+  cg_setup 600
+  ok=1
+  cg_run PreToolUse sess-a
+  [ "$cg_rc" -eq 0 ] && [ ! -s "$cg_dir/out" ] || ok=0
+  grep -q 'was not checked' "$cg_dir/err" || ok=0
+  grep -q 'PreToolUse' "$cg_dir/err" || ok=0
+  # never past the cap (plus load slack), and not before it
+  [ "$cg_ms" -ge 500 ] && [ "$cg_ms" -lt 2500 ] || ok=0
+  first_ms=$cg_ms
+  # same session: waits again but stays quiet; another session: notice again
+  cg_run Stop sess-a
+  [ "$cg_rc" -eq 0 ] && ! grep -q 'was not checked' "$cg_dir/err" || ok=0
+  cg_run PreToolUse sess-b
+  [ "$cg_rc" -eq 0 ] && grep -q 'was not checked' "$cg_dir/err" || ok=0
+  [ "$ok" -eq 1 ] || printf 'cold guard cap: first_ms=%s rc=%s err=%s\n' "$first_ms" "$cg_rc" "$(cat "$cg_dir/err")" >&2
+  cg_cleanup
+  [ "$ok" -eq 1 ]
+}
+
+test_cold_non_guard_event_never_waits() {
+  cg_setup 2000
+  cg_run UserPromptSubmit sess-a
+  ok=1
+  [ "$cg_rc" -eq 0 ] || ok=0
+  # no kick and one plain engine call: the cold daemon costs a prompt nothing
+  ! grep -q ColdStartKick "$cg_log" || ok=0
+  [ "$(wc -l <"$cg_log" | tr -d ' ')" -eq 1 ] || ok=0
+  [ ! -s "$cg_dir/err" ] || ok=0
+  [ "$ok" -eq 1 ] || printf 'cold prompt: rc=%s ms=%s err=%s log=%s\n' "$cg_rc" "$cg_ms" "$(cat "$cg_dir/err")" "$(cat "$cg_log")" >&2
+  cg_cleanup
+  [ "$ok" -eq 1 ]
+}
+
+test_cold_guard_wait_respects_the_hook_budget_and_a_warm_daemon() {
+  cg_setup 2000
+  ok=1
+  # a hook budget that leaves no room after the engine attempt: no wait, no kick
+  printf '@PreToolUse\t1\n*\t1\ttrue\n' >"$cg_dir/list"
+  cg_run PreToolUse sess-a AH_HOOK_TIMEOUT_MS=900
+  [ "$cg_rc" -eq 0 ] && ! grep -q ColdStartKick "$cg_log" || ok=0
+  # a warm daemon (socket already bound): straight to the engine, no kick
+  : >"$cg_log"
+  printf '@PreToolUse\t10\n*\t10\ttrue\n' >"$cg_dir/list"
+  perl -MIO::Socket::UNIX -e '$s = IO::Socket::UNIX->new(Local => $ARGV[0], Listen => 1) or exit 1' "$cg_state/e.sock" || ok=0
+  cg_run PreToolUse sess-a
+  [ "$cg_rc" -eq 2 ] && ! grep -q ColdStartKick "$cg_log" || ok=0
+  # the wait is off at 0
+  rm -f "$cg_state/e.sock"
+  : >"$cg_log"
+  sed "/^\[client.cold_guard_wait_ms\]/,/^\$/s/^value = .*/value = 0/" "$repo/plugins/anti-hall/engine/defaults/engine.toml" >"$cg_root/engine/defaults/engine.toml"
+  cg_run PreToolUse sess-a
+  [ "$cg_rc" -eq 0 ] && ! grep -q ColdStartKick "$cg_log" || ok=0
+  [ "$ok" -eq 1 ] || printf 'cold guard budget: rc=%s log=%s\n' "$cg_rc" "$(cat "$cg_log")" >&2
+  cg_cleanup
+  [ "$ok" -eq 1 ]
+}
+
+check cold_guard_waits_for_a_daemon_that_comes_up test_cold_guard_waits_for_a_daemon_that_comes_up
+check cold_guard_gives_up_at_the_cap_with_one_notice_per_session test_cold_guard_gives_up_at_the_cap_with_one_notice_per_session
+check cold_non_guard_event_never_waits test_cold_non_guard_event_never_waits
+check cold_guard_wait_respects_the_hook_budget_and_a_warm_daemon test_cold_guard_wait_respects_the_hook_budget_and_a_warm_daemon
+
 printf 'wrapper tests: %s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
