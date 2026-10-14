@@ -699,6 +699,16 @@ else
   engine=$(command -v ah-engine 2>/dev/null || true)
 fi
 
+# The integrity script (ah-engine-integrity.sh) counts engine failures and rolls a damaged, never-healthy binary back to the known-good
+# one. Detached and silent: it never delays the hook. Only for the installed engine, never for an AH_ENGINE_BIN test double.
+integrity_run() {
+  [ -z "${AH_ENGINE_BIN:-}" ] && [ -f "$dir/ah-engine-integrity.sh" ] || return 0
+  { sh "$dir/ah-engine-integrity.sh" "$1" </dev/null >/dev/null 2>&1 & } 2>/dev/null
+  return 0
+}
+
+[ "$event" = SessionStart ] && integrity_run check
+
 # Keep the engine installed and current: once per SessionStart, detached (never delays or fails the hook). The script
 # compares the plugin's ah-engine.lock with what is installed and does nothing when they match; see ah-engine-bootstrap.sh.
 if [ "$event" = SessionStart ] && [ -z "${AH_ENGINE_BIN:-}" ] && [ -f "$dir/../ah-engine.lock" ] && [ -f "$dir/ah-engine-bootstrap.sh" ]; then
@@ -1109,10 +1119,12 @@ run_engine() {
   exec 2>&4 4>&-
   if [ -f "$eng_timed" ]; then
     wrapper_diag "engine_timed event=$event timeout_ms=$timeout rc=$rc done=$([ -e "$eng_done" ] && printf 1 || printf 0)"
+    integrity_run fail
     exit 0
   fi
   if [ "$group_pid" -eq 1 ] && kill -0 "-$pid" 2>/dev/null; then
     wrapper_diag "engine_group_alive event=$event timeout_ms=$timeout rc=$rc done=$([ -e "$eng_done" ] && printf 1 || printf 0)"
+    integrity_run fail
     terminate_process_group "$pid" "$group_pid"
     exit 0
   fi
@@ -1126,6 +1138,7 @@ run_engine() {
         cat "$eng_out"; cat "$eng_err" >&2; exit "$rc"
       fi
       wrapper_diag "engine_silent_exit event=$event timeout_ms=$timeout rc=$rc done=0"
+      integrity_run fail
       exit 0 ;;
   esac
 }

@@ -6,6 +6,16 @@ no `version` to avoid the silent-precedence trap where `plugin.json` wins silent
 behavioral change MUST bump `plugin.json` `version` or installed users will not receive
 the update.
 
+## Unreleased
+
+### Fixed
+
+- **Crash-loop breaker now catches a binary that exits at once (#158).** Such a daemon reports no crash, so the existing rule never counted it and every hook respawned it. The daemon starts are counted too (`client.spawn_n` / `client.spawn_window_s`, default 6 in 60 s); the stop also gates the failed and slow client paths, ends early when the binary is replaced, and events from before a trip or reset no longer re-trip it.
+
+### Added
+
+- **Checksum roll-back of a damaged engine binary (#158).** `hooks/ah-engine-integrity.sh` (POSIX sh; verbs `record`, `accept`, `check`, `fail`, `status`) keeps `bin/ah-engine.good` (a binary that ran healthy for `daemon.healthy_after_s`) and restores it when the installed binary differs from the installer's recorded sha256, never ran healthy and keeps failing. The set-aside binary is renamed `ah-engine.rolledback-<UTC time>-<sha8>`, never deleted. Wired into the hook wrapper (failure counting, SessionStart check), the bootstrap and `ah-update.sh` (record). All names and thresholds are in `engine.toml` (`[rollback.*]`).
+
 ## 0.300.1 (2026-10-10)
 
 Docs, site and repo patch. No engine or hook behavior changes.

@@ -283,7 +283,9 @@ pub(crate) fn attempt(payload: &[u8], cfg: &ClientConfig, have_fallback: bool) -
         Exch::Failed(why) => {
             note_unavailable();
             mark_daemon_down(&why);
-            if let Some(_spawn_lock) = spawn_lock() {
+            if !health::crashloop_tripped(cfg)
+                && let Some(_spawn_lock) = spawn_lock()
+            {
                 health::log_event("client_spawn_attempt", "singleflight", &why);
                 let _ = spawn_daemon();
             }
@@ -293,7 +295,9 @@ pub(crate) fn attempt(payload: &[u8], cfg: &ClientConfig, have_fallback: bool) -
         Exch::Slow(why) => {
             note_unavailable();
             mark_daemon_down(&why);
-            if let Some(_spawn_lock) = spawn_lock() {
+            if !health::crashloop_tripped(cfg)
+                && let Some(_spawn_lock) = spawn_lock()
+            {
                 health::log_event("client_spawn_attempt", "singleflight", &why);
                 let _ = spawn_daemon();
             }

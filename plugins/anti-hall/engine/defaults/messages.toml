@@ -46,6 +46,19 @@ value = "--- anti-hall ah-engine diagnostics ---\nversion: {version}\nos: {os} {
 doc = "Recorded reason when the daemon keeps dying. Placeholders: {n}, {secs}."
 value = "daemon died {n} times in {secs} s"
 
+[msg.log_rollback_request]
+doc = "Log detail when the crash-loop rule asks for a roll-back. Placeholder: {sha}."
+value = "binary {sha} never ran healthy; asked the integrity script to restore the known-good binary"
+
+[msg.log_crashloop_rollback]
+doc = "Log detail added when a crash-loop trip also requested a roll-back."
+value = "roll-back to the known-good binary requested"
+
+[msg.log_crashloop_new_binary]
+doc = "Log detail when a crash-loop cooldown ends because the binary was replaced. Placeholder: {sha}."
+value = "binary replaced ({sha}); respawning allowed again"
+
+
 [msg.reason_breaker]
 doc = "Recorded reason when the client breaker opens. Placeholders: {n}, {secs}, {why}."
 value = "{n} engine failures in {secs} s (last: {why})"

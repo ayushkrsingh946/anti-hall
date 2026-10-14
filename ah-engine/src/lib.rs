@@ -6,6 +6,7 @@ pub mod actlog;
 pub mod agents;
 pub mod atomic;
 pub mod backup;
+pub mod binguard;
 pub mod bootstrap;
 pub mod cfgstore;
 pub mod checks;

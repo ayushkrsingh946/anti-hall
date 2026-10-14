@@ -264,6 +264,8 @@ fi
 binsha=$(sha256_of "$tmp/ah-engine")
 mv -f "$tmp/ah-engine" "$bin" 2>/dev/null || fail "cannot install $bin"
 printf '%s %s\n' "$want" "$binsha" >"$marker"
+# remember this binary as the expected one, so a later damaged copy can be told apart (and rolled back); never fails the install
+[ ! -f "$here/ah-engine-integrity.sh" ] || AH_ENGINE_DIR=$dir sh "$here/ah-engine-integrity.sh" record </dev/null >/dev/null 2>&1
 rm -f "$attempt"
 say "ok: installed ah-engine $version ($triple) at $bin"
 exit 0
