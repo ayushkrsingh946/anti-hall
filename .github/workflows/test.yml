@@ -101,6 +101,21 @@ jobs:
         env:
           ANTIHALL_REQUIRE_NX: '1'
 
+  # `claude plugin validate` (Claude Code 2.1.290+) checks the plugin and marketplace manifests. It
+  # needs no login and no network beyond the free npm install of the CLI. Not part of tests-passed:
+  # a CLI release that tightens validation must not block unrelated merges. Bump the pin on purpose.
+  plugin-validate:
+    name: claude plugin validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.x
+      - run: npm install --global --ignore-scripts @anthropic-ai/claude-code@2.1.299
+      - run: claude plugin validate plugins/anti-hall
+
   # The ruleset on main requires this single check, so the shard layout can
   # change without editing the ruleset.
   tests-passed:
