@@ -222,6 +222,9 @@ pub fn run(args: &[String]) -> i32 {
         // nothing can be answered without settings: a hook defers to Node through the wrapper, anything else is a plain failure
         return if hook { crate::bootstrap::UNAVAILABLE_EXIT } else { 70 };
     }
+    // #195: every `defaults::*` read answers the owner's settings.json and config.toml, not only the shipped value (a daemon's
+    // config store takes this over with its own snapshots, see `cfgstore::ConfigStore::load`)
+    crate::cfgstore::install_process_overlay();
     let infos = commands();
     let Some(info) = infos.iter().find(|c| c.name == p.command) else {
         let names: Vec<String> = infos.iter().map(|c| c.name.clone()).collect();

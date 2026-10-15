@@ -913,7 +913,8 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 |---|---|---|---|---|
 | `config.debounce_ms` | `300` | `AH_ENGINE_CONFIG_DEBOUNCE_MS` | ms | A change must stay unchanged this long before it is loaded, so a half-written or rapidly edited file is read once. |
 | `config.false_tokens` | `0, off, false, no` |  |  | Words a settings.json boolean may be written as to mean false (matches FALSE_TOKENS in hooks/lib/settings-schema.js). |
-| `config.restart_only` | `7 items` |  |  | Settings (or key prefixes ending in a dot) that only take effect when the daemon starts; an edit is held as pending until then. |
+| `config.locked` | `7 items` |  |  | Settings (exact keys, or prefixes ending in a dot or in *) the owner's files may not change: the names of the environment variables (the contract between the wrapper, the client and the daemon), the settings that say where the config files are, these two lists, the dispatch table (the generated hooks.json is built from it; hooks are configured in [events.*] and [entries.*], whose guard rules keep a guard from being turned off) and the command registry (its read-only flags feed the role gate). config.toml naming one is invalid; settings.json naming one is ignored. |
+| `config.restart_only` | `10 items` |  |  | Settings (or key prefixes ending in a dot) that only take effect when the daemon starts, because the daemon reads them once when a thread starts (the file watcher reads realtime.*, the DevSwarm wire thread its wait and reconcile gap); an edit is held as pending (config --json lists it under pending_restart) until the next start. |
 | `config.settings_file` | `settings.json` |  |  | Name of anti-hall's settings file inside the base directory (the file hooks/lib/settings.js reads). |
 | `config.true_tokens` | `1, on, true, yes` |  |  | Words a settings.json boolean may be written as to mean true (matches TRUE_TOKENS in hooks/lib/settings-schema.js). |
 | `config.user_file` | `config.toml` |  |  | Name of the engine's own user config (TOML) inside the state directory. |
@@ -9609,6 +9610,7 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `git.msg_trailer_remap` | Block: a trailer remap to an AI self-credit key. |
 | `msg.cfg_err_hooks` | A hook configuration section ([events.*], [entries.*]) is invalid (D87). |
 | `msg.cfg_err_io` | A config file could not be read. |
+| `msg.cfg_err_locked` | A config file sets a setting listed in config.locked. |
 | `msg.cfg_err_not_object` | settings.json is valid JSON but not an object. |
 | `msg.cfg_err_parse` | A config file is not valid TOML or JSON. |
 | `msg.cfg_err_range` | A numeric config value is outside the setting's bounds. |
