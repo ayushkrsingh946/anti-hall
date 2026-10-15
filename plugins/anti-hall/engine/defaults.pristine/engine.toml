@@ -444,6 +444,10 @@ value = 50
 min = 0
 unit = "ms"
 
+[daemon.skip_when_client_gone]
+doc = "Stop running the remaining checks of a request once its client has closed the connection (an ack-mode client keeps it open until it has the verdict, so an end-of-stream means it gave up and nobody reads the reply). Off runs them all."
+value = true
+
 [daemon.accept_poll_ms]
 doc = "Accept-loop poll interval while serving."
 value = 200

@@ -473,6 +473,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `daemon.rules_check_ms` | `200` |  | ms | How often the daemon checks the rules file (and SIGHUP) for a change. |
 | `daemon.session_burst` | `200` | `AH_ENGINE_SESSION_BURST` |  | Token-bucket burst per session. |
 | `daemon.session_rps` | `50` | `AH_ENGINE_SESSION_RPS` |  | Sustained requests per second allowed per session; 0 = unlimited. |
+| `daemon.skip_when_client_gone` | `true` |  |  | Stop running the remaining checks of a request once its client has closed the connection (an ack-mode client keeps it open until it has the verdict, so an end-of-stream means it gave up and nobody reads the reply). Off runs them all. |
 | `daemon.stall_ms` | `5000` | `AH_ENGINE_STALL_MS` | ms | An accept loop silent for longer than this trips a drain and exit. |
 | `daemon.start_fail_exit_code` | `78` |  |  | Exit status when the daemon cannot start (sysexits EX_CONFIG, 78). |
 | `daemon.stuck_ms` | `8000` | `AH_ENGINE_STUCK_MS` | ms | A worker that makes no progress on its request for longer than this trips a drain and exit (a hung worker). Progress is a check starting or finishing and the script interpreter running, so a worker a loaded machine only slows down is not stuck; the time without progress is what a blocked host call (a lock, a child process, a disk sync) adds. |
@@ -10170,6 +10171,7 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `check_calls` | counter | runs | check | Built-in check runs, by check. |
 | `check_decisions` | counter | runs | check, decision | Built-in check outcomes, by check and decision (allow, block, advisory, defer). |
 | `check_latency_us` | histogram | us | check | Wall time of a built-in check run, by check. |
+| `client_gone_skipped` | counter | checks |  | Checks not run because the request's client had already closed its connection (daemon.skip_when_client_gone). |
 | `db_archive_bytes` | gauge | bytes |  | Size of archive.db (0 until it is first used). |
 | `db_archive_wal_bytes` | gauge | bytes |  | Size of archive.db's write-ahead log. |
 | `db_commits` | gauge | commits |  | hot.db transactions the writer committed since the daemon started; fewer than db_writes means group commit is sharing syncs. |
