@@ -102,7 +102,10 @@ fn edit(plugin: &Path, v: u64) {
     std::fs::write(f, out).unwrap();
 }
 
+// The heap cap (8 KB per reload) is a release-build figure: measured on 88db1bd6 at load ~23, a debug build grows 32-33 KB per
+// reload (the memory branch's own tip too, so not a merge effect) and a release build 2 KB. Run it with `cargo test --release`.
 #[test]
+#[cfg_attr(debug_assertions, ignore = "the heap cap is a release-build figure; run with --release")]
 fn fifty_defaults_reloads_do_not_keep_a_copy_of_the_defaults_each() {
     let b: toml::Table = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/budgets.toml")).unwrap().parse().unwrap();
     let b = &b["mem_reload"];
