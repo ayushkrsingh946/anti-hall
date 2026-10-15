@@ -85,7 +85,11 @@ value = "T00:00:00Z"
 
 [opcli.review_keys]
 doc = "Names of the JSON members of the review state, a decision row and a rollup."
-value = { integrations = "integrations", shadow_since = "shadowSince", last_reviewed = "lastReviewedAt", snoozed_until = "snoozedUntil", due_since = "dueSince", id = "id", type = "type", day = "day", groups = "groups", n = "n", ts = "ts", days = "days", decisions = "decisions", latency = "latencyMs", reviewed_type = "reviewed" }
+value = { integrations = "integrations", shadow_since = "shadowSince", last_reviewed = "lastReviewedAt", snoozed_until = "snoozedUntil", due_since = "dueSince", id = "id", type = "type", day = "day", groups = "groups", n = "n", ts = "ts", days = "days", decisions = "decisions", latency = "latencyMs", reviewed_type = "reviewed", ids = "ids" }
+
+[opcli.review_shown_type]
+doc = "The `type` of the review metrics row that records a SessionStart reminder."
+value = "reminder-shown"
 
 [opcli.review_none]
 doc = "`review-due` when nothing is due. Placeholders: {after}, {min}."

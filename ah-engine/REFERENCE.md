@@ -349,7 +349,7 @@ Rule fields (JSON): `id`, `events`, `tools`, `field`, `pattern` (regex), `check`
 | `devswarm-comms-guard` | Blocks SendMessage to a peer session whose cwd is a DevSwarm workspace while DevSwarm is active, and labels other known targets (port of devswarm-comms-guard.js). |
 | `swarm-guard` | Blocks an agent spawn past the spawn-rate cap or under critical memory pressure, and adds the shared-tree advisory to an allowed write-capable spawn that shares a working tree with a running write-capable agent (port of swarm-guard.js and lib/shared-tree-note.js). |
 | `jev-weekly-scorecard` | Stays silent when the weekly Jev scorecard notice cannot be due (Jev off, notice off, child workspace, checked within a week); when the check is due and the Jev decision log holds no rows it stamps the weekly latch itself; otherwise defers to the Node hook, which builds the report (port of jev-weekly-scorecard.js). |
-| `jev-review-reminder` | Stays silent when no session-start Jev notice can be due (Jev and the semantic judge off, the recommend notice off or shown within 30 days, a subagent turn, a non-interactive run); shows the recommend-Jev notice and stamps its latch itself when that is the only notice due; otherwise defers to the Node hook (port of jev-review-reminder.js). |
+| `jev-review-reminder` | SessionStart notices of Jev: the one-time legacy-key notice, the recommend-Jev notice (Jev off) and the review-due line (Jev on), with their state files kept by the engine; answers every case itself (port of hooks/jev-review-reminder.js). |
 | `repair-on-reload` | Stays silent when no repair can start (switch off, subagent turn, skipped, nothing pending at the running version, cooldown); otherwise defers to the Node hook, which takes the lock and starts the detached repair (port of the gates of repair-on-reload.js). |
 | `codex-availability` | SessionStart: probes PATH for a real codex executable, records it, folds a Codex job-log usage-limit error into the quota record and tells the session (port of codex-availability.js). |
 | `codex-quota-detect` | Advisory: records a Codex quota or rate-limit exhaustion reported by a codex:codex-rescue Agent result, once, in the shared availability file (port of codex-quota-detect.js). |
@@ -636,6 +636,8 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `request_env.incomplete_key` | `ah_env_incomplete` |  |  | Reserved name, never a forwardable variable, that carries the request's incomplete flag inside the forwarded environment object (the client's variables were dropped or it had no HOME), so the daemon's checks defer to the Node guards. |
 | `request_env.line_prefix` | `E ` |  |  | Prefix of the request line that carries the forwarded environment as one JSON object. |
 | `request_env.max_bytes` | `65536` |  | bytes | Largest forwarded environment (sum of names and values); a client whose allowed variables exceed it forwards none of them and the request is marked incomplete, so every check defers to the Node guard (a missing or empty HOME marks it incomplete too). |
+| `request_env.presence_only` | `AI_GATEWAY_API_KEY, TYPESAFE_API_KEY, ANTHROPIC_API_KEY` |  |  | Environment variables whose PRESENCE the checks need but whose value they must never see (a secret): the client forwards the presence text when one is set and non-empty, nothing otherwise, and the value never leaves the client. These are the legacy API-key variables the session-start key notice looks for (credentials.js legacyKeyPresent). |
+| `request_env.presence_text` | `1` |  |  | The value a presence-only variable carries on the wire. |
 
 ### engine.toml / rollback
 
@@ -3189,15 +3191,28 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 
 | Key | Default | Env override | Unit | What it is |
 |---|---|---|---|---|
+| `jev_review.after_days_fallback` | `7` |  |  | The days used when the resolved jev.reviewAfterDays is zero or not a number (Node: `Number(x) \|\| 7`). |
+| `jev_review.after_days_setting` | `8 entries` |  |  | The setting jev.reviewAfterDays: days an integration must have been in shadow (and since its last review) before a review is due. |
 | `jev_review.headless_setting` | `6 entries` |  |  | The setting jev.recommendNoticeHeadless (off by default): show the recommend notice in a non-interactive run too. |
 | `jev_review.latch_key` | `lastShownTs` |  |  | The key of the recommend notice latch that holds the time it was last shown. |
+| `jev_review.line_ellipsis` | `…` |  |  | Ends a review line that is still over the limit after naming one integration. |
+| `jev_review.line_item` | `{id} ({days}d, {decisions} decisions)` |  |  | How one due integration is named in the review line. Placeholders: {id}, {days}, {decisions}. |
+| `jev_review.line_joiner` | `\n` |  |  | Between the notices of the session start (the legacy-key notice, the recommend notice and the review line). |
+| `jev_review.line_list_joiner` | `, ` |  |  | Between the named integrations of the review line. |
+| `jev_review.line_more` | `, +{n} more` |  |  | Appended to the list of the review line when more integrations are due than are named. Placeholder: {n}. |
+| `jev_review.line_text` | `💡 anti-hall · jev-review: review due for {list}.\nDo instead: tell the owner ...` |  |  | The review line (hooks/jev-review-reminder.js buildLine), byte for byte. Placeholder: {list}. |
+| `jev_review.max_line_chars` | `320` |  |  | The longest the review line may be (UTF-16 units); it names fewer integrations before it is cut. |
+| `jev_review.max_named` | `3` |  |  | How many due integrations the review line names before it says how many more there are. |
+| `jev_review.min_decisions_fallback` | `30` |  |  | The decisions used when the resolved jev.reviewMinDecisions is not a finite number (Node: `Number.isFinite(x) ? x : 30`). |
+| `jev_review.min_decisions_setting` | `8 entries` |  |  | The setting jev.reviewMinDecisions: decisions an integration must have logged before a review is due. |
 | `jev_review.protocol_full` | `full` |  |  | The protocol level that turns the headless recommend notice on by default. |
 | `jev_review.protocol_level_setting` | `7 entries` |  |  | The setting context.protocolLevel; while jev.recommendNoticeHeadless is not set anywhere, the full level turns the headless notice on. |
 | `jev_review.recommend_latch_file` | `state/jev-recommend-notice.json` |  |  | The recommend notice latch, relative to the anti-hall directory: the time it was last shown. |
 | `jev_review.recommend_notice` | `Tell the user now, verbatim, bold kept:\n**Recommended: enable Jev, the optio...` |  |  | The recommend-Jev notice the session receives (hooks/lib/jev-recommend.js: the directive line, then shortNotice()), byte for byte. |
 | `jev_review.recommend_setting` | `6 entries` |  |  | The setting jev.recommendNotice (on by default): the one-in-30-days notice recommending Jev while it is off. |
 | `jev_review.remind_every_ms` | `2592000000` |  | ms | How long after it was shown the recommend notice stays quiet. |
-| `jev_review.summary` | `Stays silent when no session-start Jev notice can be due (Jev and the semanti...` |  |  | One-line description of the jev-review-reminder check in the generated reference. |
+| `jev_review.reminder_setting` | `6 entries` |  |  | The setting jev.reviewReminder (on by default): the session-start line that says a Jev shadow review is due. |
+| `jev_review.summary` | `SessionStart notices of Jev: the one-time legacy-key notice, the recommend-Je...` |  |  | One-line description of the jev-review-reminder check in the generated reference. |
 
 ### session_gates.toml / jev_weekly
 
@@ -3227,6 +3242,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | Key | Default | Env override | Unit | What it is |
 |---|---|---|---|---|
 | `session_gates.agent_key_markers` | `agent_id, agent_type` |  |  | Payload keys whose presence (with a value other than null) marks a subagent turn. |
+| `session_gates.allow_anthropic_setting` | `7 entries` |  |  | The home-only setting guards.allowAnthropicEnvKey: whether ANTHROPIC_API_KEY may count as a key (off by default; no env name, no plugin option). |
 | `session_gates.allow_real_home_env` | `ANTIHALL_ALLOW_REAL_HOME_TEST` |  |  | Environment variable that lets a test run use the real home directory anyway. |
 | `session_gates.anti_hall_dir` | `.anti-hall` |  |  | The anti-hall directory under the home directory. |
 | `session_gates.child_branch_env` | `DEVSWARM_SOURCE_BRANCH` |  |  | Environment variable DevSwarm sets in a child workspace (a non-blank value marks the session as a child). |
@@ -3234,12 +3250,30 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `session_gates.codex_tool` | `apply_patch` |  |  | The tool name only Codex has; its presence marks a Codex payload. |
 | `session_gates.default_event` | `SessionStart` |  |  | The hook event name an advisory carries when the payload names none (a non-empty string hook_event_name wins). |
 | `session_gates.entrypoint_env` | `CLAUDE_CODE_ENTRYPOINT` |  |  | Environment variable that names how the host was started. |
+| `session_gates.generic_vendor_member` | `genericKeyVendor` |  |  | The member of the Jev settings that records which vendor the generic key is bound to (jev.genericKeyVendor). |
 | `session_gates.headless_prefix` | `sdk-` |  |  | Entry point names starting with this are non-interactive (SDK) runs. |
 | `session_gates.jev_config_file` | `jev.json` |  |  | The legacy Jev configuration file, relative to the anti-hall directory. |
 | `session_gates.jev_enabled_setting` | `8 entries` |  |  | The setting jev.enabled (off by default; a legacy jev.json value is honoured). |
 | `session_gates.jev_semantic_judge_setting` | `6 entries` |  |  | The setting jev.semanticJudge (off by default). |
 | `session_gates.judge_child_env` | `ANTIHALL_JUDGE_CHILD` |  |  | Environment variable the judge child process runs with; every one of these hooks does nothing in it. |
 | `session_gates.judge_child_value` | `1` |  |  | The value of that variable that marks the judge child. |
+| `session_gates.key_binding_member` | `jevBinding` |  |  | The member of `shown` that records the generic-key binding note. |
+| `session_gates.key_binding_note` | `your generic Jev key (jev_api_key / jev.keyFile) is bound to {vendor} and is ...` |  |  | The note that a generic Jev key is bound to the default vendor while the transport is typesafe. Placeholder: {vendor}. |
+| `session_gates.key_default_vendor` | `vercel` |  |  | The vendor a generic Jev key stays bound to until it is bound explicitly (the schema default of jev.transport). |
+| `session_gates.key_kind_anthropic` | `anthropic` |  |  | The name of the Anthropic kind in the legacy-key notice state. |
+| `session_gates.key_kind_jev` | `jev` |  |  | The name of the Jev kind in the legacy-key notice state. |
+| `session_gates.key_migration_note` | `a legacy {what} exists but anti-hall no longer reads credentials from this ma...` |  |  | The legacy-key notice for one kind (hooks/lib/credentials.js migrationNotice). Placeholders: {what}, {option}, {setting}. |
+| `session_gates.key_notice_joiner` | ` ` |  |  | Between the parts of the one-time legacy-key notice. |
+| `session_gates.key_notice_prefix` | `anti-hall (shown once): ` |  |  | Starts the one-time legacy-key notice. |
+| `session_gates.key_option_anthropic` | `anthropic_api_key` |  |  | The plugin option that holds the Anthropic key. |
+| `session_gates.key_option_jev` | `jev_api_key` |  |  | The plugin option that holds the Jev key. |
+| `session_gates.key_setting_anthropic` | `guards.allowAnthropicEnvKey` |  |  | The opt-in setting that keeps a legacy Anthropic key in use. |
+| `session_gates.key_setting_jev` | `jev.allowLegacyKeyRead` |  |  | The opt-in setting that keeps a legacy Jev key in use. |
+| `session_gates.key_shown_member` | `shown` |  |  | The member of the legacy-key notice state that holds the time each kind was named. |
+| `session_gates.key_state_file` | `legacy-key-notice-state.json` |  |  | The legacy-key notice state, relative to the anti-hall directory: which kinds were already named. |
+| `session_gates.key_what_anthropic` | `ANTHROPIC_API_KEY env var` |  |  | How the legacy-key notice calls a legacy Anthropic key. |
+| `session_gates.key_what_jev` | `Jev key file/env var` |  |  | How the legacy-key notice calls a legacy Jev key. |
+| `session_gates.settings_jev_member` | `jev` |  |  | The member of the home settings file that holds the Jev settings. |
 | `session_gates.sidechain_flags` | `isSidechain, is_sidechain` |  |  | Payload keys that mark a sidechain (subagent) turn when exactly true. |
 | `session_gates.test_markers` | `NODE_TEST_CONTEXT, ANTIHALL_TEST, ANTIHALL_TEST_ISOLATION` |  |  | Environment variables that mark a test run; with one set, the Node hook refuses to use the real (password database) home directory (companion/lib/test-home-guard.js). |
 
@@ -9179,7 +9213,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `opcli.review_head` | `jev review-due:` |  |  | `review-due` heading above the due integrations. |
 | `opcli.review_hour_ms` | `3600000` |  |  | Milliseconds in an hour (the due-to-reviewed latency is said in hours). |
 | `opcli.review_json_flag` | `--json` |  |  | The argument that makes `review-due` print JSON. |
-| `opcli.review_keys` | `15 entries` |  |  | Names of the JSON members of the review state, a decision row and a rollup. |
+| `opcli.review_keys` | `16 entries` |  |  | Names of the JSON members of the review state, a decision row and a rollup. |
 | `opcli.review_max_time_ms` | `8640000000000000` |  |  | The largest instant a date can hold, in milliseconds (a snooze past it has no date). |
 | `opcli.review_metrics_file` | `logs/jev-review.ndjson` |  |  | The shadow-review metrics log (one JSON row per event), relative to the anti-hall home directory. |
 | `opcli.review_min_decisions_default` | `30` |  |  | jev.reviewMinDecisions when the setting is not a finite number. |
@@ -9187,6 +9221,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `opcli.review_none` | `jev review-due: nothing due (reviewAfterDays={after}, reviewMinDecisions={min})` |  |  | `review-due` when nothing is due. Placeholders: {after}, {min}. |
 | `opcli.review_rollup_midnight` | `T00:00:00Z` |  |  | The suffix that turns a rollup's day into its UTC midnight. |
 | `opcli.review_row` | `  {id} ({days}d, {decisions} decisions)` |  |  | `review-due` line of one due integration. Placeholders: {id}, {days}, {decisions}. |
+| `opcli.review_shown_type` | `reminder-shown` |  |  | The `type` of the review metrics row that records a SessionStart reminder. |
 | `opcli.review_state_bad` | `review state: the entry of {id} is not an object; fix or remove ~/.anti-hall/...` |  |  | The review state holds an entry that is not an object, which the verb cannot update (nothing is written). Placeholder: {id}. |
 | `opcli.review_state_file` | `jev-review-state.json` |  |  | The durable shadow-review state, relative to the anti-hall home directory. |
 | `opcli.review_write_failed` | `⚠️ anti-hall · jev-setup: could not save the review state: {error}` |  |  | A review-state write that failed after the verb was answered (best effort, as in Node: said, not fatal). Placeholder: {error}. |

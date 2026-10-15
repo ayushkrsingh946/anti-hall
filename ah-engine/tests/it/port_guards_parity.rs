@@ -869,7 +869,7 @@ fn review_cases() -> Vec<Case> {
         p[k] = v;
         p
     };
-    vec![
+    let mut out = vec![
         Case::json("first-run-recommend-due", session_start(), ex),
         Case::json("shown-yesterday-silent", session_start(), ex).file(l, &shown(DAY)),
         Case::json("shown-29-days-silent", session_start(), ex).file(l, &shown(29 * DAY)),
@@ -882,12 +882,15 @@ fn review_cases() -> Vec<Case> {
         Case::json("recommend-off-env", session_start(), ex).env("ANTIHALL_JEV_RECOMMEND_NOTICE", "off"),
         Case::json("recommend-off-plugin-option", session_start(), ex).env("CLAUDE_PLUGIN_OPTION_JEV_RECOMMEND_NOTICE", "false"),
         Case::json("recommend-garbage-stays-on", session_start(), ex).file(".anti-hall/settings.json", r#"{"jev":{"recommendNotice":"perhaps"}}"#),
-        Case::json("jev-on-defers", session_start(), df).file(".anti-hall/settings.json", r#"{"jev":{"enabled":true}}"#),
-        Case::json("jev-on-legacy-defers", session_start(), df).file(".anti-hall/jev.json", r#"{"enabled":true}"#),
-        Case::json("jev-on-env-defers", session_start(), df).env("ANTIHALL_JEV", "1"),
-        Case::json("jev-on-but-recent-latch-still-defers", session_start(), df).env("ANTIHALL_JEV", "1").file(l, &shown(DAY)),
-        Case::json("semantic-judge-on-defers", session_start(), df).file(".anti-hall/settings.json", r#"{"jev":{"semanticJudge":true}}"#).file(l, &shown(DAY)),
-        Case::json("semantic-judge-env-defers", session_start(), df).env("ANTIHALL_SEMANTIC_JUDGE", "1").file(l, &shown(DAY)),
+        Case::json("jev-on-nothing-due", session_start(), ex).file(".anti-hall/settings.json", r#"{"jev":{"enabled":true}}"#),
+        Case::json("jev-on-legacy-nothing-due", session_start(), ex).file(".anti-hall/jev.json", r#"{"enabled":true}"#),
+        Case::json("jev-on-env-nothing-due", session_start(), ex).env("ANTIHALL_JEV", "1"),
+        Case::json("jev-on-ignores-the-recommend-latch", session_start(), ex).env("ANTIHALL_JEV", "1").file(l, &shown(DAY)),
+        Case::json("semantic-judge-on-recent-latch", session_start(), ex)
+            .file(".anti-hall/settings.json", r#"{"jev":{"semanticJudge":true}}"#)
+            .file(l, &shown(DAY)),
+        Case::json("semantic-judge-on-recommend-due", session_start(), ex).file(".anti-hall/settings.json", r#"{"jev":{"semanticJudge":true}}"#),
+        Case::json("semantic-judge-env-recent-latch", session_start(), ex).env("ANTIHALL_SEMANTIC_JUDGE", "1").file(l, &shown(DAY)),
         Case::json("jev-explicitly-off-recent-latch-silent", session_start(), ex)
             .file(".anti-hall/settings.json", r#"{"jev":{"enabled":false}}"#)
             .file(l, &shown(DAY)),
@@ -975,15 +978,193 @@ fn review_cases() -> Vec<Case> {
         Case::new("garbage-stdin-defers", "{nope", df),
         Case::new("payload-null", "null", ex),
         Case::json("payload-array", json!([1]), ex),
+    ];
+    out.extend(review_due_cases());
+    out.extend(key_notice_cases());
+    out
+}
+
+const ON: &str = r#"{"jev":{"enabled":true}}"#;
+const SETTINGS: &str = ".anti-hall/settings.json";
+const LOG: &str = ".anti-hall/logs/jev-assist.ndjson";
+const STATE: &str = ".anti-hall/jev-review-state.json";
+const METRICS: &str = ".anti-hall/logs/jev-review.ndjson";
+const KEY_STATE: &str = ".anti-hall/legacy-key-notice-state.json";
+
+/// `n` decision rows of integration `id`, logged long ago.
+fn rows_of(id: &str, n: usize) -> String {
+    (0..n).map(|i| format!("{{\"ts\":\"2026-01-0{}T00:00:00.000Z\",\"id\":\"{id}\",\"mode\":\"shadow\"}}\n", 1 + i % 9)).collect()
+}
+
+/// The Jev-on review line: the shadow review state, the decision log and the settings behind it.
+fn review_due_cases() -> Vec<Case> {
+    let ex = Expect::Same;
+    let on = |name: &str| Case::json(name, session_start(), ex).file(SETTINGS, ON);
+    let many: String = ["newRequest", "claimLedger", "outputVerifyGuard", "gitGuardSelfCredit", "modelRouting"].iter().map(|id| rows_of(id, 31)).collect();
+    vec![
+        on("review-one-due").file(LOG, &rows_of("newRequest", 31)),
+        on("review-exactly-min-decisions-due").file(LOG, &rows_of("newRequest", 30)),
+        on("review-one-below-min-silent").file(LOG, &rows_of("newRequest", 29)),
+        on("review-five-due-more-line").file(LOG, &many),
+        on("review-two-integrations-due").file(LOG, &(rows_of("newRequest", 31) + &rows_of("tasklistTrivial", 40))),
+        on("review-on-integration-is-not-shadow").file(LOG, &rows_of("speculation", 99)),
+        on("review-off-integration-is-not-shadow").file(LOG, &rows_of("postHandoverGate", 99)),
+        on("review-integration-forced-off-by-env").env("ANTIHALL_JEV_NEW_REQUEST", "0").file(LOG, &rows_of("newRequest", 31)),
+        on("review-integration-promoted-on-in-settings")
+            .file(SETTINGS, r#"{"jev":{"enabled":true,"integrations":{"newRequest":"on"}}}"#)
+            .file(LOG, &rows_of("newRequest", 31)),
+        on("review-rows-without-id-or-with-type-ignored").file(LOG, &format!("{}{{\"ts\":\"2026-01-01T00:00:00.000Z\",\"type\":\"x\",\"id\":\"newRequest\"}}\nnot json\n\n", rows_of("newRequest", 10))),
+        on("review-rollup-only-history").file(".anti-hall/logs/jev-daily/2026-01-01.json", r#"{"day":"2026-01-01","groups":[{"id":"newRequest","n":40}]}"#),
+        on("review-rollup-covered-by-raw-rows")
+            .file(".anti-hall/logs/jev-daily/2026-01-05.json", r#"{"day":"2026-01-05","groups":[{"id":"newRequest","n":40}]}"#)
+            .file(LOG, &rows_of("newRequest", 31)),
+        on("review-rollup-garbage-skipped").file(".anti-hall/logs/jev-daily/2026-01-01.json", "{torn").file(LOG, &rows_of("newRequest", 31)),
+        on("review-state-shadow-since-recent-silent")
+            .file(STATE, r#"{"integrations":{"newRequest":{"shadowSince":"2099-01-01T00:00:00.000Z"}}}"#)
+            .file(LOG, &rows_of("newRequest", 31)),
+        on("review-state-reviewed-recently-silent")
+            .file(STATE, r#"{"integrations":{"newRequest":{"shadowSince":"2026-01-01T00:00:00.000Z","lastReviewedAt":"2099-01-01T00:00:00.000Z","dueSince":"2026-02-01T00:00:00.000Z"}}}"#)
+            .file(LOG, &rows_of("newRequest", 31)),
+        on("review-state-reviewed-long-ago-due")
+            .file(STATE, r#"{"integrations":{"newRequest":{"shadowSince":"2026-01-01T00:00:00.000Z","lastReviewedAt":"2026-01-02T00:00:00.000Z"}}}"#)
+            .file(LOG, &rows_of("newRequest", 31)),
+        on("review-state-snoozed-silent")
+            .file(STATE, r#"{"integrations":{"newRequest":{"shadowSince":"2026-01-01T00:00:00.000Z","snoozedUntil":"2099-01-01T00:00:00.000Z"}}}"#)
+            .file(LOG, &rows_of("newRequest", 31)),
+        on("review-state-snooze-expired-due")
+            .file(STATE, r#"{"integrations":{"newRequest":{"shadowSince":"2026-01-01T00:00:00.000Z","snoozedUntil":"2026-01-02T00:00:00.000Z"}}}"#)
+            .file(LOG, &rows_of("newRequest", 31)),
+        on("review-state-due-since-kept")
+            .file(STATE, r#"{"integrations":{"newRequest":{"shadowSince":"2026-01-01T00:00:00.000Z","dueSince":"2026-02-01T00:00:00.000Z"},"other":{"x":1}},"extra":true}"#)
+            .file(LOG, &rows_of("newRequest", 31)),
+        on("review-state-garbage-starts-fresh").file(STATE, "{torn").file(LOG, &rows_of("newRequest", 31)),
+        on("review-state-array-starts-fresh").file(STATE, "[1]").file(LOG, &rows_of("newRequest", 31)),
+        on("review-state-integrations-not-object").file(STATE, r#"{"integrations":[1]}"#).file(LOG, &rows_of("newRequest", 31)),
+        on("review-state-integrations-string").file(STATE, r#"{"integrations":"x"}"#).file(LOG, &rows_of("newRequest", 31)),
+        on("review-state-entry-null-replaced").file(STATE, r#"{"integrations":{"newRequest":null}}"#).file(LOG, &rows_of("newRequest", 31)),
+        on("review-state-entry-zero-replaced").file(STATE, r#"{"integrations":{"newRequest":0}}"#).file(LOG, &rows_of("newRequest", 31)),
+        on("review-state-entry-string-is-silent").file(STATE, r#"{"integrations":{"newRequest":"x"}}"#).file(LOG, &rows_of("newRequest", 31)),
+        on("review-state-shadow-since-not-a-date").file(STATE, r#"{"integrations":{"newRequest":{"shadowSince":"soon"}}}"#).file(LOG, &rows_of("newRequest", 31)),
+        on("review-reminder-off-settings")
+            .file(SETTINGS, r#"{"jev":{"enabled":true,"reviewReminder":false}}"#)
+            .file(LOG, &rows_of("newRequest", 31)),
+        on("review-reminder-off-env").env("ANTIHALL_JEV_REVIEW_REMINDER", "0").file(LOG, &rows_of("newRequest", 31)),
+        on("review-min-decisions-env").env("ANTIHALL_JEV_REVIEW_MIN_DECISIONS", "100").file(LOG, &rows_of("newRequest", 31)),
+        on("review-min-decisions-zero-due").env("ANTIHALL_JEV_REVIEW_MIN_DECISIONS", "0"),
+        on("review-min-decisions-garbage").env("ANTIHALL_JEV_REVIEW_MIN_DECISIONS", "many").file(LOG, &rows_of("newRequest", 31)),
+        on("review-after-days-long-silent")
+            .file(SETTINGS, r#"{"jev":{"enabled":true,"reviewAfterDays":365}}"#)
+            .file(STATE, r#"{"integrations":{"newRequest":{"shadowSince":"2099-01-01T00:00:00.000Z"}}}"#)
+            .file(LOG, &rows_of("newRequest", 31)),
+        on("review-after-days-below-minimum-ignored").env("ANTIHALL_JEV_REVIEW_AFTER_DAYS", "0").file(LOG, &rows_of("newRequest", 31)),
+        on("review-after-days-garbage").env("ANTIHALL_JEV_REVIEW_AFTER_DAYS", "x").file(LOG, &rows_of("newRequest", 31)),
+        on("review-metrics-appended").file(METRICS, "{\"ts\":\"2026-01-01T00:00:00.000Z\",\"type\":\"reviewed\",\"id\":\"x\"}\n").file(LOG, &rows_of("newRequest", 31)),
+        Case::json("review-event-name-echoed", {
+            let mut p = session_start();
+            p["hook_event_name"] = json!("Other");
+            p
+        }, ex)
+        .file(SETTINGS, ON)
+        .file(LOG, &rows_of("newRequest", 31)),
+        Case::json("review-subagent-silent-and-untouched", {
+            let mut p = session_start();
+            p["agent_id"] = json!("a1");
+            p
+        }, ex)
+        .file(SETTINGS, ON)
+        .file(LOG, &rows_of("newRequest", 31)),
+        Case::json("review-judge-child-silent", session_start(), ex).env("ANTIHALL_JUDGE_CHILD", "1").file(SETTINGS, ON).file(LOG, &rows_of("newRequest", 31)),
+        Case::json("review-legacy-file-on-due", session_start(), ex).file(".anti-hall/jev.json", r#"{"enabled":true}"#).file(LOG, &rows_of("newRequest", 31)),
+        Case::json("review-env-on-due", session_start(), ex).env("ANTIHALL_JEV", "1").file(LOG, &rows_of("newRequest", 31)),
+    ]
+}
+
+/// The one-time legacy-key notice (Jev or the semantic judge on).
+fn key_notice_cases() -> Vec<Case> {
+    let ex = Expect::Same;
+    let df = Expect::Defer;
+    let on = |name: &str| Case::json(name, session_start(), ex).file(SETTINGS, ON);
+    let judge = |name: &str| {
+        Case::json(name, session_start(), ex)
+            .file(SETTINGS, r#"{"jev":{"semanticJudge":true}}"#)
+            .file(".anti-hall/state/jev-recommend-notice.json", r#"{"lastShownTs":99999999999999}"#)
+    };
+    let typesafe = r#"{"jev":{"enabled":true,"transport":"typesafe"}}"#;
+    vec![
+        on("key-none-present"),
+        on("key-vercel-env-notice").env("AI_GATEWAY_API_KEY", "k"),
+        on("key-vercel-env-empty-is-absent").env("AI_GATEWAY_API_KEY", ""),
+        on("key-anthropic-env-notice").env("ANTHROPIC_API_KEY", "k"),
+        on("key-both-env-notice").env("AI_GATEWAY_API_KEY", "k").env("ANTHROPIC_API_KEY", "k"),
+        on("key-typesafe-var-ignored-for-vercel").env("TYPESAFE_API_KEY", "k"),
+        Case::json("key-typesafe-var-for-typesafe", session_start(), ex).file(SETTINGS, typesafe).env("TYPESAFE_API_KEY", "k"),
+        Case::json("key-vercel-var-ignored-for-typesafe", session_start(), ex).file(SETTINGS, typesafe).env("AI_GATEWAY_API_KEY", "k"),
+        on("key-default-file-notice").file(".config/vercel/ai-gateway-key", "k\n"),
+        on("key-default-file-empty-is-absent").file(".config/vercel/ai-gateway-key", ""),
+        on("key-default-file-is-a-directory").file(".config/vercel/ai-gateway-key/x", "k"),
+        Case::json("key-typesafe-default-file-notice", session_start(), ex).file(SETTINGS, typesafe).file(".config/typesafe/key", "k"),
+        on("key-configured-file-notice").file(SETTINGS, r#"{"jev":{"enabled":true,"keyFile":"{HOME}/mykey"}}"#).file("mykey", "k"),
+        on("key-configured-file-home-expanded").file(SETTINGS, r#"{"jev":{"enabled":true,"keyFile":"~/mykey"}}"#).file("mykey", "k"),
+        on("key-shown-already-silent").env("AI_GATEWAY_API_KEY", "k").env("ANTHROPIC_API_KEY", "k").file(KEY_STATE, r#"{"shown":{"jev":1,"anthropic":2}}"#),
+        on("key-shown-jev-only-names-anthropic").env("AI_GATEWAY_API_KEY", "k").env("ANTHROPIC_API_KEY", "k").file(KEY_STATE, r#"{"shown":{"jev":1}}"#),
+        on("key-shown-zero-counts-as-unshown").env("AI_GATEWAY_API_KEY", "k").file(KEY_STATE, r#"{"shown":{"jev":0,"other":7}}"#),
+        on("key-state-order-kept").env("ANTHROPIC_API_KEY", "k").file(KEY_STATE, r#"{"shown":{"zeta":1,"jev":1}}"#),
+        on("key-state-garbage-fresh").env("AI_GATEWAY_API_KEY", "k").file(KEY_STATE, "{torn"),
+        on("key-state-null-fresh").env("AI_GATEWAY_API_KEY", "k").file(KEY_STATE, "null"),
+        on("key-state-array-fresh").env("AI_GATEWAY_API_KEY", "k").file(KEY_STATE, "[1]"),
+        on("key-state-shown-string-fresh").env("AI_GATEWAY_API_KEY", "k").file(KEY_STATE, r#"{"shown":"x"}"#),
+        on("key-state-shown-null-fresh").env("AI_GATEWAY_API_KEY", "k").file(KEY_STATE, r#"{"shown":null}"#),
+        on("key-state-other-members-dropped").env("AI_GATEWAY_API_KEY", "k").file(KEY_STATE, r#"{"shown":{},"extra":1}"#),
+        Case::json("key-state-shown-array-defers", session_start(), df).file(SETTINGS, ON).env("AI_GATEWAY_API_KEY", "k").file(KEY_STATE, r#"{"shown":[1]}"#),
+        Case::json("key-state-dir-is-a-file-defers", session_start(), df)
+            .file(SETTINGS, ON)
+            .env("AI_GATEWAY_API_KEY", "k")
+            .file(".anti-hall/legacy-key-notice-state.json/x", "y"),
+        on("key-opt-in-silences-jev").env("AI_GATEWAY_API_KEY", "k").file(SETTINGS, r#"{"jev":{"enabled":true,"allowLegacyKeyRead":true}}"#),
+        on("key-opt-in-silences-jev-but-not-anthropic")
+            .env("AI_GATEWAY_API_KEY", "k")
+            .env("ANTHROPIC_API_KEY", "k")
+            .file(SETTINGS, r#"{"jev":{"enabled":true,"allowLegacyKeyRead":true}}"#),
+        on("key-opt-in-env-is-ignored").env("AI_GATEWAY_API_KEY", "k").env("ANTIHALL_JEV_ALLOW_LEGACY_KEY_READ", "1"),
+        on("key-anthropic-opt-in-silences-anthropic")
+            .env("ANTHROPIC_API_KEY", "k")
+            .file(SETTINGS, r#"{"jev":{"enabled":true},"guards":{"allowAnthropicEnvKey":true}}"#),
+        judge("key-judge-only-anthropic-env").env("ANTHROPIC_API_KEY", "k"),
+        judge("key-judge-only-ignores-jev-key").env("AI_GATEWAY_API_KEY", "k"),
+        Case::json("key-judge-only-opt-in-silences", session_start(), ex)
+            .file(SETTINGS, r#"{"jev":{"semanticJudge":true},"guards":{"allowAnthropicEnvKey":true}}"#)
+            .file(".anti-hall/state/jev-recommend-notice.json", r#"{"lastShownTs":99999999999999}"#)
+            .env("ANTHROPIC_API_KEY", "k"),
+        Case::json("key-judge-and-recommend-due", session_start(), ex).file(SETTINGS, r#"{"jev":{"semanticJudge":true}}"#).env("ANTHROPIC_API_KEY", "k"),
+        on("key-then-review-line-order").env("AI_GATEWAY_API_KEY", "k").file(LOG, &rows_of("newRequest", 31)),
+        // a generic key bound to the default vendor while the transport is typesafe
+        Case::json("binding-note-key-file", session_start(), ex).file(SETTINGS, r#"{"jev":{"enabled":true,"transport":"typesafe","keyFile":"{HOME}/k"}}"#),
+        Case::json("binding-note-plugin-option", session_start(), ex).file(SETTINGS, typesafe).env("CLAUDE_PLUGIN_OPTION_JEV_API_KEY", "g"),
+        Case::json("binding-note-blank-option-is-absent", session_start(), ex).file(SETTINGS, typesafe).env("CLAUDE_PLUGIN_OPTION_JEV_API_KEY", "  "),
+        Case::json("binding-note-needs-typesafe", session_start(), ex).file(SETTINGS, ON).env("CLAUDE_PLUGIN_OPTION_JEV_API_KEY", "g"),
+        Case::json("binding-note-vendor-recorded-silent", session_start(), ex)
+            .file(SETTINGS, r#"{"jev":{"enabled":true,"transport":"typesafe","genericKeyVendor":"typesafe"}}"#)
+            .env("CLAUDE_PLUGIN_OPTION_JEV_API_KEY", "g"),
+        Case::json("binding-note-vendor-recorded-null-silent", session_start(), ex)
+            .file(SETTINGS, r#"{"jev":{"enabled":true,"transport":"typesafe","genericKeyVendor":null}}"#)
+            .env("CLAUDE_PLUGIN_OPTION_JEV_API_KEY", "g"),
+        Case::json("binding-note-shown-already-silent", session_start(), ex)
+            .file(SETTINGS, typesafe)
+            .env("CLAUDE_PLUGIN_OPTION_JEV_API_KEY", "g")
+            .file(KEY_STATE, r#"{"shown":{"jevBinding":5}}"#),
+        Case::json("binding-note-with-legacy-key", session_start(), ex)
+            .file(SETTINGS, typesafe)
+            .env("CLAUDE_PLUGIN_OPTION_JEV_API_KEY", "g")
+            .env("TYPESAFE_API_KEY", "k"),
     ]
 }
 
 #[test]
 fn jev_review_reminder_matches_node() {
     let rows = review_cases();
-    assert!(rows.len() >= 30, "need at least 30 rows, got {}", rows.len());
+    assert!(rows.len() >= 145, "need at least 145 rows, got {}", rows.len());
     let (same, deferred) = check_rows("jev-review-reminder.js", "jev-review-reminder", rows);
-    assert!(same >= 55 && deferred >= 7);
+    assert!(same >= 140 && deferred == 4, "answered {same} deferred {deferred}");
 }
 
 // ---- repair-on-reload ----------------------------------------------------------------------------------------

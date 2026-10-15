@@ -9,7 +9,7 @@
 //! The engine's Jev resolver (`jev::settings`, `jev::credentials`) answers every "what would the hooks use" question, so
 //! `status` cannot show a value the hooks are not using. `test` (a real gateway call per transport) lives in `jev_setup/test.rs`
 //! and the shadow-review verbs `review-due`, `reviewed` and `snooze` in `jev_setup/review.rs`; every verb is answered here.
-mod review;
+pub(crate) mod review;
 mod test;
 
 use super::jsfmt::{keys, pretty, to_fixed2};

@@ -1032,7 +1032,10 @@ fn orch_cases() -> Vec<Case> {
     v.push(ds(case("devswarm-primary-level-full-codex", start(json!({"turn_id":"t"})))).env("ANTIHALL_PROTOCOL_LEVEL", "full"));
     v.push(ds(case("devswarm-primary-mode-off", dflt())).env("ANTIHALL_ORCH_FULL_ON", "off"));
     v.push(ds(case("devswarm-primary-mode-spawn", dflt())).env("ANTIHALL_ORCH_FULL_ON", "spawn"));
-    v.push(ds(case("devswarm-primary-clears-pending", dflt())).file(".anti-hall/orch-full/orch-full-S1.json", "{\"epochId\":\"1\",\"decision\":\"pending\",\"sentAt\":1}"));
+    v.push(
+        ds(case("devswarm-primary-clears-pending", dflt()))
+            .file(".anti-hall/orch-full/orch-full-S1.json", "{\"epochId\":\"1\",\"decision\":\"pending\",\"sentAt\":1}"),
+    );
     v.push(ds(case("devswarm-child-baseline", dflt())).env("DEVSWARM_SOURCE_BRANCH", "feat/x"));
     v.push(ds(case("devswarm-child-blank-branch-is-primary", dflt())).env("DEVSWARM_SOURCE_BRANCH", "  "));
     v.push(ds(case("devswarm-tier-text-off", dflt())).seed(Seed::Settings(json!({"devswarm":{"dispatchTierText":false}}))));
@@ -1049,12 +1052,14 @@ fn orch_cases() -> Vec<Case> {
     );
     v.push(ds(case("devswarm-cwd-missing-dir", start(json!({"cwd":"$HOME/gone"})))));
     v.push(ds(case("devswarm-cwd-not-string", start(json!({"cwd":5})))));
-    v.push(ds(case("devswarm-no-cwd-defers", {
-        let mut p = dflt();
-        p.as_object_mut().unwrap().remove("cwd");
-        p
-    }))
-    .defer());
+    v.push(
+        ds(case("devswarm-no-cwd-defers", {
+            let mut p = dflt();
+            p.as_object_mut().unwrap().remove("cwd");
+            p
+        }))
+        .defer(),
+    );
     v.push(ds(case("devswarm-relative-cwd-defers", start(json!({"cwd":"proj"})))).defer());
     v.push(ok(case("devswarm-kill-switch-proceeds", dflt())).env("DEVSWARM_REPO_ID", "r").env("DISABLE_ANTIHALL_DEVSWARM", "1"));
     v.push(ok(case("devswarm-supervisor-off-proceeds", dflt())).env("DEVSWARM_REPO_ID", "r").env("ANTIHALL_DEVSWARM_SUPERVISOR", "off"));

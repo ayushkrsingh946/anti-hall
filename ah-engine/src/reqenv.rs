@@ -11,7 +11,13 @@ use crate::defaults;
 
 /// Whether `name` is on the forwarding allowlist (`request_env.allow`; a trailing `*` matches a prefix).
 pub fn allowed(name: &str) -> bool {
-    defaults::list("request_env.allow").into_iter().any(|a| a.strip_suffix('*').map_or(a == name, |prefix| name.starts_with(prefix)))
+    presence_only(name) || defaults::list("request_env.allow").into_iter().any(|a| a.strip_suffix('*').map_or(a == name, |prefix| name.starts_with(prefix)))
+}
+
+/// Whether `name` is forwarded as a presence flag only (`request_env.presence_only`): a secret the checks must be able to tell is set
+/// but must never see. A non-empty value travels as the presence text, an empty one is dropped.
+pub fn presence_only(name: &str) -> bool {
+    defaults::list("request_env.presence_only").contains(&name)
 }
 
 /// The allowlisted environment of one request.
@@ -43,7 +49,16 @@ impl From<BTreeMap<String, String>> for RequestEnv {
     /// (flagged incomplete) when the rest would exceed `request_env.max_bytes`.
     fn from(m: BTreeMap<String, String>) -> Self {
         let flagged = m.contains_key(defaults::text("request_env.incomplete_key"));
-        let kept: BTreeMap<String, String> = m.into_iter().filter(|(k, _)| allowed(k)).collect();
+        let kept: BTreeMap<String, String> = m
+            .into_iter()
+            .filter(|(k, _)| allowed(k))
+            .filter_map(|(k, v)| {
+                if !presence_only(&k) {
+                    return Some((k, v));
+                }
+                (!v.is_empty()).then(|| (k, defaults::text("request_env.presence_text").to_string()))
+            })
+            .collect();
         let size: usize = kept.iter().map(|(k, v)| k.len() + v.len()).sum();
         if size as u64 > defaults::num("request_env.max_bytes") {
             return RequestEnv { vars: BTreeMap::new(), incomplete: true };
@@ -120,6 +135,20 @@ mod tests {
         assert_eq!(e.get("CLAUDE_PLUGIN_OPTION_A"), Some("b"));
         assert_eq!(e.get("SECRET_TOKEN"), None);
         assert_eq!(e.get("AWS_KEY"), None);
+    }
+
+    #[test]
+    fn a_presence_only_secret_travels_as_a_flag_and_never_as_its_value() {
+        let secret = "sk-very-secret";
+        for name in defaults::list("request_env.presence_only") {
+            let e = RequestEnv::from_pairs([(name, secret)]);
+            assert_eq!(e.get(name), Some(defaults::text("request_env.presence_text")), "{name} must read as set");
+            assert!(!e.to_line().contains(secret), "{name}: the value must not reach the wire");
+            assert_eq!(RequestEnv::from_pairs([(name, "")]).get(name), None, "{name}: an empty value reads as unset");
+            // the daemon filters again whatever the wire carried: the flag survives, nothing is added
+            let (back, _) = split_request(&format!("{}\n{{}}", e.to_line()));
+            assert_eq!(back.get(name), Some(defaults::text("request_env.presence_text")));
+        }
     }
 
     #[test]
