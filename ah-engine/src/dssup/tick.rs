@@ -178,6 +178,17 @@ fn run_node_duty(name: &str, d: &V, ctx: &Ctx, runner: &dyn Runner) -> Value {
     }
 }
 
+/// [`run_duty_w`] with the duty's wall time and this thread's CPU time (ms) added to its record as `ms` and `cpuMs`.
+fn timed_duty(name: &str, ctx: &Ctx, runner: &dyn Runner) -> (Value, Option<super::witness::Job>) {
+    let (t, cpu) = (std::time::Instant::now(), crate::limits::thread_cpu_us());
+    let (mut rec, job) = run_duty_w(name, ctx, runner);
+    if let Some(o) = rec.as_object_mut() {
+        o.insert("ms".into(), json!(t.elapsed().as_millis() as u64));
+        o.insert("cpuMs".into(), json!(crate::limits::thread_cpu_us().saturating_sub(cpu) / 1000));
+    }
+    (rec, job)
+}
+
 /// [`run_duty_w`] with the witness comparison finished at once (no lock to wait for).
 pub fn run_duty(name: &str, ctx: &Ctx, runner: &dyn Runner) -> Value {
     let (rec, job) = run_duty_w(name, ctx, runner);
@@ -209,7 +220,7 @@ pub fn run(ctx: &Ctx, owner: Owner, runner: &dyn Runner) -> Value {
     let (first, rest) = names.split_first().map_or((None, &[][..]), |(f, r)| (Some(*f), r));
     let mut jobs: Vec<(usize, super::witness::Job)> = Vec::new();
     if let Some(f) = first {
-        let (rec, job) = run_duty_w(f, ctx, runner);
+        let (rec, job) = timed_duty(f, ctx, runner);
         out.push(rec);
         jobs.extend(job.map(|j| (out.len() - 1, j)));
     }
@@ -221,7 +232,7 @@ pub fn run(ctx: &Ctx, owner: Owner, runner: &dyn Runner) -> Value {
             out.push(json!({"duty": name, "outcome": "skipped", "reason": defaults::text("devswarm_sup.msg_budget")}));
             continue;
         }
-        let (rec, job) = run_duty_w(name, ctx, runner);
+        let (rec, job) = timed_duty(name, ctx, runner);
         out.push(rec);
         jobs.extend(job.map(|j| (out.len() - 1, j)));
     }

@@ -7693,6 +7693,9 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_sup.lv_field_ts` | `ts` |  |  | The field of a heartbeat record that holds its time. |
 | `devswarm_sup.lv_git_args` | `-C, {worktree}, log, -1, --format=%ct` |  |  | The arguments of the last-commit-time call; {worktree} is the workspace's worktree. |
 | `devswarm_sup.lv_git_bin` | `git` |  |  | The git executable (resolved on PATH). |
+| `devswarm_sup.lv_git_cache_max_entries` | `4096` |  |  | Most worktrees whose last-commit time is remembered; past it the memory is cleared and refilled by the next sweep. |
+| `devswarm_sup.lv_git_cache_max_ms` | `600000` |  | ms | The longest a remembered last-commit time is kept without asking git again, whatever the files say (a safety net for a repository that keeps no reflog). |
+| `devswarm_sup.lv_git_sig_files` | `HEAD, logs/HEAD` |  |  | Files of a worktree's git directory that change when its HEAD moves (a checkout rewrites HEAD, a commit appends to its reflog). The last-commit-time answer is remembered while their size and modification time are unchanged. |
 | `devswarm_sup.lv_git_timeout_ms` | `4000` |  | ms | Bound of the git call that reads a worktree's last commit time (liveness.js GIT_TIMEOUT_MS). |
 | `devswarm_sup.lv_grace_skew_ms` | `5000` |  | ms | A descriptor written up to this far in the future (clock jitter) still counts as just spawned (Node SKEW_TOLERANCE_MS). |
 | `devswarm_sup.lv_heartbeat_fresh_ms` | `900000` |  | ms | How recent a heartbeat must be to count as proof the workspace is alive (liveness.js DEFAULT_HEARTBEAT_FRESH_MS, 15 minutes). |

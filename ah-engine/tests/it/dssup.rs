@@ -949,3 +949,93 @@ fn the_witness_logs_a_mismatch_when_the_engine_and_node_disagree() {
     // the live files were never touched by the witness
     assert!(tree(&f).contains(&"reaped/old.ndjson".to_string()));
 }
+
+/// A recording runner that answers a `git log -1` call with a fixed commit time.
+struct GitCount(Mutex<usize>);
+impl Runner for GitCount {
+    fn run(&self, _spec: &RunSpec) -> RunResult {
+        *self.0.lock().unwrap() += 1;
+        RunResult { ok: true, status: Some(0), stdout: "1700000000\n".into(), ..RunResult::default() }
+    }
+}
+
+#[test]
+fn the_liveness_sweep_asks_git_for_a_worktree_only_when_its_head_moved() {
+    use ah_engine::dssup::liveness::worktree_activity;
+    ah_engine::defaults::init().unwrap();
+    let t = TempDir::new("lv-git-cache");
+    let wt = std::fs::canonicalize(&t.0).unwrap().join("wt");
+    let git = |args: &[&str]| {
+        let o = Command::new("git")
+            .args(args)
+            .current_dir(&wt)
+            .env("GIT_AUTHOR_NAME", "t")
+            .env("GIT_AUTHOR_EMAIL", "t@t")
+            .env("GIT_COMMITTER_NAME", "t")
+            .env("GIT_COMMITTER_EMAIL", "t@t")
+            .output()
+            .unwrap();
+        assert!(o.status.success(), "{args:?}");
+    };
+    std::fs::create_dir_all(&wt).unwrap();
+    git(&["init", "-q"]);
+    git(&["commit", "-q", "--allow-empty", "-m", "a"]);
+    let w = wt.to_string_lossy().into_owned();
+    let r = GitCount(Mutex::new(0));
+    assert_eq!(worktree_activity(&r, &w), Some(1_700_000_000_000.0));
+    worktree_activity(&r, &w);
+    worktree_activity(&r, &w);
+    assert_eq!(*r.0.lock().unwrap(), 1, "an unchanged HEAD is asked about once");
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    git(&["commit", "-q", "--allow-empty", "-m", "b"]);
+    worktree_activity(&r, &w);
+    assert_eq!(*r.0.lock().unwrap(), 2, "a new commit is asked about again");
+    let gone = t.0.join("gone").to_string_lossy().into_owned();
+    assert_eq!(worktree_activity(&r, &gone), None);
+    assert_eq!(*r.0.lock().unwrap(), 2, "a worktree that is gone is not worth a git process");
+}
+
+#[test]
+fn an_unchanged_liveness_verdict_is_not_written_again() {
+    use std::os::unix::fs::MetadataExt;
+    let f = fx("lv-nowrite", true);
+    let st = settings(&f, &[]);
+    let verdict = f.home.join(".anti-hall/devswarm/liveness/ws-1.json");
+    tick::run_duty("verdicts", &ctx(&f, &st, true), &Rec::default());
+    let first = std::fs::read_to_string(&verdict).expect("the first sweep writes the verdict");
+    let ino = std::fs::metadata(&verdict).unwrap().ino();
+    tick::run_duty("verdicts", &ctx(&f, &st, true), &Rec::default());
+    assert_eq!(std::fs::metadata(&verdict).unwrap().ino(), ino, "an identical verdict is left alone (no temporary file, no fsync, no rename)");
+    // a changed one is still written
+    std::fs::write(&verdict, first.replace("alive", "stale")).unwrap();
+    tick::run_duty("verdicts", &ctx(&f, &st, true), &Rec::default());
+    assert_eq!(std::fs::read_to_string(&verdict).unwrap(), first, "a verdict that differs from the computed one is rewritten");
+}
+
+/// Measurement, not a gate: where one tick's CPU goes at live weight (700 old workspaces, 10 live ones), duty by duty.
+#[test]
+#[ignore = "measurement: cargo test --release --test it -- --ignored --nocapture where_a_supervisor_tick_spends_its_cpu"]
+fn where_a_supervisor_tick_spends_its_cpu() {
+    let f = fx("tickprof", true);
+    for i in 0..700 {
+        put(&dev(&f).join(format!("heartbeats/old-{i}.json")), &json!({"ts": now() - 86_400_000}));
+        put(&dev(&f).join(format!("workspaces/old-{i}.json")), &json!({"id": format!("old-{i}"), "worktreePath": format!("/gone/{i}"), "sessionId": format!("{i}"), "status": "done"}));
+        put(&dev(&f).join(format!("summaries/old-{i}.json")), &json!({"workspaces": {}}));
+        put(&dev(&f).join(format!("plans/old-{i}.json")), &json!({"steps": []}));
+    }
+    for i in 2..=10 {
+        let wt = f.home.join(format!("wt-{i}"));
+        std::fs::create_dir_all(&wt).unwrap();
+        put(&dev(&f).join(format!("workspaces/ws-{i}.json")), &json!({"id": format!("ws-{i}"), "worktreePath": wt, "sessionId": format!("{i}1111111-2222-3333-4444-555555555555")}));
+        put(&dev(&f).join(format!("heartbeats/ws-{i}.json")), &json!({"ts": now()}));
+    }
+    let st = settings(&f, &[]);
+    for round in 0..3 {
+        let out = tick::run(&ctx(&f, &st, true), Owner::Engine, &Rec::default());
+        let per: Vec<String> = out["duties"]
+            .as_array()
+            .map(|d| d.iter().map(|x| format!("{}={}ms/{}ms-cpu({})", x["duty"].as_str().unwrap_or("?"), x["ms"], x["cpuMs"], x["outcome"].as_str().unwrap_or("?"))).collect())
+            .unwrap_or_default();
+        eprintln!("TICKPROF round {round}: ran={} {}", out["ran"], per.join(" "));
+    }
+}

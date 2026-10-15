@@ -154,7 +154,54 @@ pub(crate) fn registration_ts(home: &Path, id: &str) -> Option<f64> {
 }
 
 /// `worktreeActivityMtime(wt)`: the last commit time in ms (`git -C wt log -1 --format=%ct`), `None` when git cannot say.
-pub(crate) fn worktree_activity(runner: &dyn Runner, wt: &str) -> Option<f64> {
+///
+/// The answer is what `git log -1` prints for the worktree's HEAD, which changes only when HEAD moves; so it is remembered per worktree
+/// against the size and modification time of the files in `devswarm_sup.lv_git_sig_files` (for at most `lv_git_cache_max_ms`), and a
+/// worktree directory that is gone is answered without running git (git cannot say there either). The sweep visits every descriptor
+/// on every tick; one `git` process per descriptor per tick was most of its CPU (live19).
+pub fn worktree_activity(runner: &dyn Runner, wt: &str) -> Option<f64> {
+    if !Path::new(wt).is_dir() {
+        return None; // `git -C <missing dir>` fails: git cannot say
+    }
+    let Some(sig) = git_signature(wt) else { return run_git_activity(runner, wt) };
+    let now = crate::health::now_ms() as i64;
+    let max_age = defaults::num("devswarm_sup.lv_git_cache_max_ms") as i64;
+    if let Some(c) = ACTIVITY.lock().unwrap_or_else(|e| e.into_inner()).get(wt)
+        && c.sig == sig
+        && now - c.at < max_age
+    {
+        return c.value;
+    }
+    let value = run_git_activity(runner, wt);
+    let mut cache = ACTIVITY.lock().unwrap_or_else(|e| e.into_inner());
+    if cache.len() >= defaults::num("devswarm_sup.lv_git_cache_max_entries") as usize {
+        cache.clear(); // bounded: the next sweep refills it
+    }
+    cache.insert(wt.to_string(), Cached { sig, value, at: now });
+    value
+}
+
+/// What was last read for a worktree.
+struct Cached {
+    sig: Vec<Option<(i64, u64)>>,
+    value: Option<f64>,
+    at: i64,
+}
+
+static ACTIVITY: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, Cached>>> = std::sync::LazyLock::new(Default::default);
+
+/// Modification time (ns) and size of each file that moves when the worktree's HEAD does; `None` when its git directory is unknown.
+fn git_signature(wt: &str) -> Option<Vec<Option<(i64, u64)>>> {
+    let dir = crate::dswire::facts::git_dir(wt)?;
+    Some(
+        defaults::list("devswarm_sup.lv_git_sig_files")
+            .iter()
+            .map(|f| std::fs::metadata(dir.join(f)).ok().map(|m| (m.mtime() * 1_000_000_000 + m.mtime_nsec(), m.len())))
+            .collect(),
+    )
+}
+
+fn run_git_activity(runner: &dyn Runner, wt: &str) -> Option<f64> {
     let wt_owned = wt.to_string();
     let args: Vec<String> = defaults::list("devswarm_sup.lv_git_args").iter().map(|a| a.replace("{worktree}", &wt_owned)).collect();
     let r = runner.run(&RunSpec {
@@ -536,7 +583,11 @@ pub fn sweep(inv: &Inv, t: Thresholds, runner: &dyn Runner, dry: bool) -> Outcom
                             ],
                         );
                     }
-                    write_verdict(&inv.home, &d.id, &c);
+                    // an identical verdict is not written again: each write is a temporary file, an fsync and a rename, and the sweep
+                    // visits every descriptor on every tick (700 fsyncs a tick was the supervisor's CPU in live19)
+                    if prev_text.as_deref() != Some(c.verdict.stringify().as_str()) {
+                        write_verdict(&inv.home, &d.id, &c);
+                    }
                 }
                 out.prev.push((d.id.clone(), prev_text));
                 out.written.push((d.id.clone(), c.verdict.stringify()));
