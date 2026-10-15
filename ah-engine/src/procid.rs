@@ -51,7 +51,8 @@ pub fn exe(pid: u32) -> Option<PathBuf> {
     let mut buf = vec![0u8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
     // SAFETY: `buf` is a live, writable buffer of the length passed.
     let n = unsafe { libc::proc_pidpath(pid as libc::c_int, buf.as_mut_ptr().cast(), buf.len() as u32) };
-    (n > 0).then(|| PathBuf::from(std::ffi::OsStr::from_bytes(&buf[..n as usize])))
+    let len = usize::try_from(n).ok().filter(|&len| len > 0)?;
+    buf.get(..len).map(|path| PathBuf::from(std::ffi::OsStr::from_bytes(path)))
 }
 
 /// No executable path on other systems: generation identity cannot be established, so nothing is signalled.
