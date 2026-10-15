@@ -831,7 +831,12 @@ fn a_done_mark_without_the_wait_marker_extends_the_budget_and_the_answer_is_deli
         Some(&e),
         &[("AH_HOOK_TIMEOUT_MS", "700")],
     );
-    assert_eq!((o.code, o.out.as_slice()), (0, b"ANSWER".as_slice()), "{}", env.log());
+    assert_eq!(
+        (o.code, o.out.as_slice()),
+        (0, b"ANSWER".as_slice()),
+        "{}",
+        env.log()
+    );
     assert!(
         !env.log().contains("engine_timed") && !env.diag().contains("engine_timed"),
         "no timeout may be logged for a call that answered: {} {}",
@@ -844,7 +849,10 @@ fn a_done_mark_without_the_wait_marker_extends_the_budget_and_the_answer_is_deli
 #[test]
 fn an_answered_engine_cut_at_the_hard_deadline_still_delivers_its_output() {
     let env = Env::new("race-cut");
-    let e = engine(&env, "printf ANSWER\n: >\"$AH_ENGINE_DONE_FILE\"\nexec sleep 60");
+    let e = engine(
+        &env,
+        "printf ANSWER\n: >\"$AH_ENGINE_DONE_FILE\"\nexec sleep 60",
+    );
     let o = env.run(
         "SessionStart",
         PAYLOAD,
@@ -854,7 +862,12 @@ fn an_answered_engine_cut_at_the_hard_deadline_still_delivers_its_output() {
             ("AH_ENGINE_SLOW_FALLBACK_MAX_MS", "2500"),
         ],
     );
-    assert_eq!((o.code, o.out.as_slice()), (0, b"ANSWER".as_slice()), "{}", env.log());
+    assert_eq!(
+        (o.code, o.out.as_slice()),
+        (0, b"ANSWER".as_slice()),
+        "{}",
+        env.log()
+    );
     assert!(!env.log().contains("engine_timed"), "{}", env.log());
 }
 
@@ -899,7 +912,11 @@ fn the_soft_wall_is_a_per_event_table_and_logs_the_wall_time() {
     }
     let log = env.log();
     let soft: Vec<&str> = log.lines().filter(|l| l.contains("soft_limit")).collect();
-    assert_eq!(soft.len(), 1, "only SessionStart is over its soft wall: {log}");
+    assert_eq!(
+        soft.len(),
+        1,
+        "only SessionStart is over its soft wall: {log}"
+    );
     assert!(
         soft[0].contains("event=SessionStart") && soft[0].contains("wall_ms="),
         "{log}"

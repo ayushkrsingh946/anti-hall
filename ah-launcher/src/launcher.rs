@@ -467,7 +467,7 @@ impl L {
             feed,
             budget: Duration::from_millis(left),
             wait_file: None,
-                done_file: None,
+            done_file: None,
             slow_max: Duration::ZERO,
             grace: self.grace,
             drain: Duration::from_millis(self.s.num("launcher.io_drain_ms")),
@@ -1042,11 +1042,10 @@ pub fn run() -> i32 {
     let slow_ms = l.s.num("client.slow_fallback_max_ms").min(ev_ms);
     let grace_ms = l.grace.as_millis() as u64;
     // the soft wall is a per-event setting; 0 (or no entry) keeps the fail-fast formula
-    let soft_ms = l
-        .s
-        .num_for("launcher.wall_soft_ms", &l.event)
-        .filter(|n| *n > 0)
-        .unwrap_or_else(|| cold_ms.saturating_add(eng_ms));
+    let soft_ms =
+        l.s.num_for("launcher.wall_soft_ms", &l.event)
+            .filter(|n| *n > 0)
+            .unwrap_or_else(|| cold_ms.saturating_add(eng_ms));
     let planned = cold_ms
         .saturating_add(eng_ms.max(slow_ms))
         .saturating_add(grace_ms.saturating_mul(2));

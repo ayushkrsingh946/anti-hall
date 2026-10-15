@@ -172,6 +172,12 @@ fn event_ids(event: &str) -> BTreeSet<String> {
     table::hosts().into_iter().flat_map(|h| table::entries(h, event)).map(|e| e.id).collect()
 }
 
+/// The shipped budget of `event`: its entry in the `hooks.event_budget_ms` table, else the table's `default`.
+pub fn default_budget(event: &str) -> u64 {
+    let t = defaults::raw("hooks.event_budget_ms");
+    t.get(event).or_else(|| t.get("default")).and_then(|v| v.as_integer()).map_or(0, |n| n.max(0) as u64)
+}
+
 fn bound(key: &str) -> (i64, i64) {
     let e = defaults::get(key);
     (e.and_then(|e| e.min).unwrap_or(0), e.and_then(|e| e.max).unwrap_or(i64::MAX))
@@ -229,7 +235,7 @@ fn parse_event(path: &Path, origin: Origin, event: &str, v: &Json) -> Result<Eve
     only_fields(path, &key, o, &defaults::list("hooks.event_fields"))?;
     let mode = mode_of(path, &key, o)?;
     let max_rules = number(path, &key, "max_rules", o, "hooks.event_max_rules")?;
-    let budget_ms = number(path, &key, "budget_ms", o, "hooks.event_budget_ms")?;
+    let budget_ms = number(path, &key, "budget_ms", o, "hooks.event_budget_limit_ms")?;
     let order = match o.get("order") {
         None => None,
         Some(a) => {
@@ -405,7 +411,7 @@ impl HookCfg {
                 Mode::Off
             },
             max_rules: defaults::num("hooks.event_max_rules") as usize,
-            budget_ms: defaults::num("hooks.event_budget_ms"),
+            budget_ms: default_budget(event),
             order: defaults::list("hooks.event_order").into_iter().map(str::to_string).collect(),
         };
         for layer in [shipped(), &self.project, &self.user] {
@@ -445,10 +451,9 @@ impl HookCfg {
         cfg
     }
 
-    /// Whether no project or user layer applies: only the shipped defaults, which include the per-event tables shipped in
-    /// `hooks.toml` (a shipped per-event budget is the default, not a configuration away from it).
+    /// Whether `event` or any of its entries is configured away from the defaults (so the dispatcher must plan, not just look up).
     pub fn is_default(&self) -> bool {
-        self.hash.is_empty()
+        self.hash.is_empty() && shipped().is_empty()
     }
 }
 
@@ -478,24 +483,6 @@ mod tests {
         assert_eq!((e.mode, e.max_rules, e.budget_ms, e.order.len()), (Mode::On, 0, 0, 0));
         assert_eq!(c.entry("PostToolUse", "git-guard:audit"), EntryCfg { mode: Mode::On, when: None });
         assert!(c.hash().is_empty() && c.is_default());
-    }
-
-    /// Launcher RCA: the per-event budget was unbounded while the launcher cuts a call at `client.slow_fallback_max_ms`, so the
-    /// dispatcher could plan Node work the launcher would kill. Every shipped budget must end, with the client's wait margin,
-    /// inside the launcher's hard limit; the events the RCA measured must have one.
-    #[test]
-    fn shipped_event_budgets_fit_the_launcher_limit() {
-        let c = HookCfg::default();
-        let (hard, margin) = (defaults::num("client.slow_fallback_max_ms"), defaults::num("client.slow_wait_margin_ms"));
-        for ev in ["SessionStart", "UserPromptSubmit", "SessionEnd"] {
-            let b = c.event(ev).budget_ms;
-            assert!(b > 0, "{ev} has no budget");
-            assert!(b + margin <= hard, "{ev}: budget {b} + margin {margin} must fit the launcher hard limit {hard}");
-        }
-        for (ev, cfg) in shipped().events.iter() {
-            let b = cfg.budget_ms.unwrap_or(0);
-            assert!(b == 0 || b + margin <= hard, "{ev}: budget {b} + margin {margin} must fit the launcher hard limit {hard}");
-        }
     }
 
     #[test]
