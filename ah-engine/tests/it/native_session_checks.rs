@@ -256,15 +256,33 @@ fn session_start(host: &str, orch_check: &str) {
         false,
         &["ORCHESTRATION DISCIPLINE", "W. DEVSWARM PRIMARY", "devswarm-comms", "jev-review: review due for newRequest"],
         &["verify-first-orch", "jev-review-reminder", "devswarm-child-role"],
-        &[(orch_check, "verify_first_orch_p50_ms"), ("jev-review-reminder", "jev_review_reminder_p50_ms"), ("devswarm-child-role", "devswarm_child_role_p50_ms")],
+        &[
+            (orch_check, "verify_first_orch_p50_ms"),
+            ("jev-review-reminder", "jev_review_reminder_p50_ms"),
+            ("devswarm-child-role", "devswarm_child_role_p50_ms"),
+        ],
     );
 }
 
 fn prompt(host: &str, child: bool) {
     if child {
-        run_event(host, "UserPromptSubmit", true, &["devswarm-child-workspace", "devswarm-autonomy", "devswarm-child-reception"], &["devswarm-child-turn"], &[("devswarm-child-turn", "devswarm_child_turn_p50_ms")]);
+        run_event(
+            host,
+            "UserPromptSubmit",
+            true,
+            &["devswarm-child-workspace", "devswarm-autonomy", "devswarm-child-reception"],
+            &["devswarm-child-turn"],
+            &[("devswarm-child-turn", "devswarm_child_turn_p50_ms")],
+        );
     } else {
-        run_event(host, "UserPromptSubmit", false, &["devswarm-comms: mesh only"], &["devswarm-parent-inbox"], &[("devswarm-parent-inbox", "devswarm_parent_inbox_p50_ms")]);
+        run_event(
+            host,
+            "UserPromptSubmit",
+            false,
+            &["devswarm-comms: mesh only"],
+            &["devswarm-parent-inbox"],
+            &[("devswarm-parent-inbox", "devswarm_parent_inbox_p50_ms")],
+        );
     }
 }
 

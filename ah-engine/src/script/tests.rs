@@ -1203,9 +1203,11 @@ fn jev_weekly_scorecard_script_matches_the_compiled_port() {
 #[test]
 fn jev_review_reminder_script_matches_the_compiled_port() {
     let kinds = golden::assert_script_matches("jev-review-reminder");
-    for k in ["advisory", "allow", "defer"] {
+    // the Jev-on path is answered here now: only a payload no script can read still defers
+    for k in ["advisory", "allow"] {
         assert!(kinds.get(k).copied().unwrap_or(0) >= 10, "a corpus that exercises {k}: {kinds:?}");
     }
+    assert!(kinds.get("defer").copied().unwrap_or(0) >= 1, "a corpus that exercises defer: {kinds:?}");
 }
 
 #[test]
