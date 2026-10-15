@@ -35,10 +35,8 @@ function decide(p) {
   } else {
     // the final text is the turn's last part: a cheap exact test on the host first, then the whole turn's text (a superset of it)
     var hint = ah.cfg('ctxbudget.advice_prefilter');
-    var tail = ah.fs.readTail(tp, tailBytes);
-    if (tail === null) return 'allow';
-    var lower = tail.toLowerCase();
-    if (tail.indexOf('\\u') === -1 && !hint.some(function (w) { return lower.indexOf(w.toLowerCase()) !== -1; })) return 'allow';
+    var seen = ah.fs.tailHasAny(tp, tailBytes, ['\\u'], hint.map(function (w) { return w.toLowerCase(); }));
+    if (seen === null || !seen) return 'allow';
     var tt = ah.transcript.turnText(tp, cb.n('ctxbudget.tail_bytes'), '');
     if (tt !== null && !tt.unsure && tt.parts && !cadv.mayAdvise(tt.parts.join('\n'))) return 'allow';
   }

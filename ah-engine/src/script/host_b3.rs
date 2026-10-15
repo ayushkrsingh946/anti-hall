@@ -11,6 +11,7 @@
 //! | `platform()` | the operating system the engine runs on (`macos`, `linux`, ...) |
 //! | `readTail(path, window)` | the last `window` bytes of a file as text (lossy UTF-8), the possibly partial first line dropped when the file is larger; `null` when unreadable |
 //! | `tailLines(path, window, crlf, needles)` | the lines of that same window (split on `\n`, or on `\r?\n` when `crlf`), only those holding one of `needles` when any are given; `null` when unreadable |
+//! | `tailHasAny(path, window, needles, lowerNeedles)` | whether that same window holds one of `needles`, or its lower-cased text one of `lowerNeedles`; `null` when unreadable |
 //! | `maskQuoted(text)` | the reply with its quoted material blanked (the speculation guard's `maskQuotedText`) |
 //! | `jevMode(id)` | the mode (`on`, `shadow`, `off`) of Jev integration `id` for this request |
 //! | `judgeCliCall(spec)` | the speculation judge's model call (`{transcript, message}` as JSON text): the model's parsed answer as JSON text, or `null` when the call must be left to the Node hook (see [`crate::judge::host`]) |
@@ -92,6 +93,20 @@ fn tail_lines_matching(path: &str, window: u64, crlf: bool, needles: &[String]) 
         }
     }
     Some(out)
+}
+
+/// `tailHasAny(path, window, needles, lowerNeedles)`: `readTail(path, window)` holds one of `needles` (`indexOf`), or
+/// `readTail(...).toLowerCase()` holds one of `lowerNeedles`. `None` where `readTail` answers `null`.
+fn tail_has_any(path: &str, window: u64, needles: &[String], lower_needles: &[String]) -> Option<bool> {
+    let text = read_tail(path, window)?;
+    if needles.iter().any(|n| text.contains(n.as_str())) {
+        return Some(true);
+    }
+    if lower_needles.is_empty() {
+        return Some(false);
+    }
+    let lower = text.to_lowercase();
+    Some(lower_needles.iter().any(|n| lower.contains(n.as_str())))
 }
 
 fn read_tail(path: &str, window: u64) -> Option<String> {
@@ -256,6 +271,10 @@ pub fn install<'a>(c: &Ctx<'a>, h: &Object<'a>) -> rquickjs::Result<()> {
         "tailLines",
         Function::new(c.clone(), |p: String, w: f64, crlf: bool, needles: Vec<String>| tail_lines_matching(&p, w.max(0.0) as u64, crlf, &needles))?,
     )?;
+    h.set(
+        "tailHasAny",
+        Function::new(c.clone(), |p: String, w: f64, needles: Vec<String>, lower: Vec<String>| tail_has_any(&p, w.max(0.0) as u64, &needles, &lower))?,
+    )?;
     h.set("maskQuoted", Function::new(c.clone(), |t: String| crate::checks::guardkit::mask::mask_quoted_text(&t))?)?;
     h.set("jevMode", Function::new(c.clone(), |id: String| jev_mode(&id))?)?;
     h.set("jevAskSpec", Function::new(c.clone(), |spec: String| jev_ask(&spec))?)?;
@@ -315,6 +334,23 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn the_host_answers_whether_the_tail_holds_a_needle_as_the_script_search_did() {
+        let p = file("has", "Alpha \u{4e2d} KELVIN \u{212a} tail \\u0041\nsecond LINE".as_bytes());
+        let has = |raw: &[&str], low: &[&str]| tail_has_any(&p, 1 << 20, &raw.iter().map(|s| s.to_string()).collect::<Vec<_>>(), &low.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+        let reference = |raw: &[&str], low: &[&str]| {
+            let t = read_tail(&p, 1 << 20)?;
+            let l = t.to_lowercase();
+            Some(raw.iter().any(|n| t.contains(n)) || low.iter().any(|n| l.contains(n)))
+        };
+        for (raw, low) in [(vec!["\\u"], vec![]), (vec![], vec!["alpha"]), (vec![], vec!["Alpha"]), (vec![], vec!["k tail"]), (vec!["zzz"], vec!["line"]), (vec![], vec![]), (vec!["second"], vec!["nope"])] {
+            assert_eq!(has(&raw, &low), reference(&raw, &low), "{raw:?} {low:?}");
+        }
+        assert_eq!(has(&["\\u"], &[]), Some(true));
+        assert_eq!(has(&[], &["alpha"]), Some(true), "case folded");
+        assert_eq!(tail_has_any("/no/such/ah-transcript", 10, &[], &[]), None);
     }
 
     #[test]

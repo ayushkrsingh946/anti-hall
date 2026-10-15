@@ -169,10 +169,15 @@ function decide(p) {
 
   var payloadText = typeof p.last_assistant_message === 'string' && p.last_assistant_message.trim() ? p.last_assistant_message : null;
   var mask = ah.text.maskQuoted;
-  var tailLines;
+  var tailLines, asstLines;
+  // the lines lastAssistant reads: entries that name `assistant` (or spell it with an escape); the host hands over just those
+  function assistantLines() {
+    if (asstLines === undefined) asstLines = rp.lines(transcript, ah.cfgNum('speculation_guard.window_bytes'), ['assistant', '\\u']);
+    return asstLines;
+  }
   function fromTranscript(map) {
-    if (tailLines === undefined) tailLines = rp.lines(transcript, ah.cfgNum('speculation_guard.window_bytes'));
-    return tailLines === null ? { text: null } : rp.lastAssistant(tailLines, map);
+    var al = assistantLines();
+    return al === null ? { text: null } : rp.lastAssistant(al, map);
   }
   var lastText;
   if (payloadText !== null) lastText = payloadText;
@@ -208,8 +213,8 @@ function decide(p) {
     // (a text Node falls back from to the legacy one when the deduplicated read finds none)
     var jevFull = payloadText;
     if (jevFull === null) {
-      if (tailLines === undefined) tailLines = rp.lines(transcript, ah.cfgNum('speculation_guard.window_bytes'));
-      var dd = tailLines === null ? { text: null } : rp.lastAssistant(tailLines, undefined, true);
+      var al2 = assistantLines();
+      var dd = al2 === null ? { text: null } : rp.lastAssistant(al2, undefined, true);
       if (dd.unsure) return 'defer';
       jevFull = dd.text ? dd.text : lastText;
       if (jx.loneSurrogate(jevFull)) return 'defer';

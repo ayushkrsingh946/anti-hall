@@ -204,6 +204,8 @@ pub fn usage() -> (usize, u64) {
 #[cfg(test)]
 mod tests {
     use super::super::host_ts::{evidence, evidence_uncached};
+    use super::usage;
+    use crate::defaults;
     use serde_json::json;
     use std::io::Write;
 
@@ -352,5 +354,44 @@ mod tests {
         assert!(second < more.len() as u64 + 70_000, "the second call read {second} bytes for {} appended", more.len());
         assert!(second < first / 2, "{second} vs {first}");
         crate::discard::harmless(std::fs::remove_file(&p)); // keep: cleanup; an absent file is the goal state
+    }
+
+    #[test]
+    fn concurrent_calls_on_one_transcript_agree_and_never_block_each_other() {
+        let p = path("conc");
+        let body: String = (0..1500).map(line).collect();
+        std::fs::write(&p, &body).unwrap();
+        let want = evidence_uncached(&p, 120_000);
+        let handles: Vec<_> = (0..8)
+            .map(|_| {
+                let p = p.clone();
+                std::thread::spawn(move || (0..20).map(|_| evidence(&p, 120_000.0)).collect::<Vec<_>>())
+            })
+            .collect();
+        for h in handles {
+            for got in h.join().unwrap() {
+                assert_eq!(got, want);
+            }
+        }
+        crate::discard::harmless(std::fs::remove_file(&p)); // keep: cleanup; an absent file is the goal state
+    }
+
+    #[test]
+    fn more_transcripts_than_the_cap_keep_answering_exactly() {
+        let n = defaults::num("transcript.evidence_cache_max_paths") as usize * 3;
+        let paths: Vec<String> = (0..n).map(|i| path(&format!("cap{i}"))).collect();
+        for (i, p) in paths.iter().enumerate() {
+            let body: String = (i * 7..i * 7 + 90).map(line).collect();
+            std::fs::write(p, body).unwrap();
+        }
+        for round in 0..3 {
+            for p in &paths {
+                same(p, 50_000, &format!("round {round}"));
+            }
+        }
+        assert!(usage().0 as u64 <= defaults::num("transcript.evidence_cache_max_paths"), "the cache holds at most its path cap");
+        for p in &paths {
+            crate::discard::harmless(std::fs::remove_file(p)); // keep: cleanup; an absent file is the goal state
+        }
     }
 }
