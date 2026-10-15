@@ -182,7 +182,7 @@ fn jev_ask(spec: &str) -> rquickjs::Result<Option<String>> {
             }
             return Ok(Some(req.baseline.to_string()));
         };
-        let d = lane.ask(&req);
+        let d = lane.ask_in_time(&req);
         super::host::credit_blocking(started);
         return Ok(Some(shape(&d)));
     }

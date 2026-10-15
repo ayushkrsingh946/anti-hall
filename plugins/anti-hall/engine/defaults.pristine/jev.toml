@@ -207,6 +207,17 @@ value = ["speculation", "triage"]
 doc = "Id of the integration that the pre-integrations-map triage switch (jev.triage set to false) still turns off."
 value = "triage"
 
+[jev.sync_min_ms]
+doc = "Least time a request must still have for a check inside it to wait on Jev; with less, the check keeps its baseline, the question goes out asynchronously and its answer is cached for the next ask of the same text. Jev answered in 300-680 ms in live use while a hook client waits about 250 ms, so a shorter wait could only time out and open the breaker."
+value = 700
+min = 1
+max = 3000
+unit = "ms"
+
+[jev.breaker_scope_sep]
+doc = "Joins a vendor and an integration id in the breaker file (`vendor/integration`), so one integration's failures open only its own breaker. A call that names no integration uses the bare vendor key, which the Node hooks also read and write."
+value = "/"
+
 [jev.relax_sync_cap_ms]
 doc = "Longest a relax-block consult inside a hook that is about to nudge or block waits for Jev when the integration is on; a slower answer keeps today's verdict (Node: RELAX_SYNC_CAP_MS)."
 value = 1500

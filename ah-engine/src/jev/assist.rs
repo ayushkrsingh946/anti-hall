@@ -651,12 +651,38 @@ impl Jev {
             let r = self.cascade(&s, req, CallResult::answered(c.answer, c.confidence, 0), cache_key.as_ref());
             return self.finish(&s, req, mode, Some(r), true, true);
         }
-        let r = self.client.decide(&s, &req.question, &req.state, req.budget_ms);
+        let r = self.client.decide_for(&s, Some(&req.id), &req.question, &req.state, req.budget_ms);
         if let (Some(a), Some((ck, chain))) = (&r.answer, &cache_key) {
             self.cache.put(ck, Cached { answer: a.clone(), confidence: r.confidence, chain: Some(chain.clone()) });
         }
         let r = self.cascade(&s, req, r, cache_key.as_ref());
         self.finish(&s, req, mode, Some(r), false, true)
+    }
+
+    /// [`Jev::ask`] for a caller inside a daemon request, which must answer inside the time its client still waits. When that
+    /// time is below `jev.sync_min_ms` (Jev answered in 300-680 ms live, the client waits about 250) a synchronous call could
+    /// only time out and feed the breaker, so the caller gets its baseline at once and the question goes out asynchronously:
+    /// the answer lands in the cache and the log, and the next ask of the same text is answered from the cache. With enough
+    /// time left, or outside a request, it is [`Jev::ask`].
+    pub fn ask_in_time(&self, req: &AskRequest) -> Decision {
+        let affordable = crate::deadline::remaining().is_none_or(|left| left >= defaults::millis("jev.sync_min_ms"));
+        if affordable {
+            return self.ask(req);
+        }
+        let s = self.settings.get(req.env.as_ref());
+        let mode = s.mode(&req.id, false);
+        if mode == Mode::Off || (req.trust == Trust::RelaxBlock && req.baseline != Value::Bool(true)) {
+            return self.ask(req); // needs no network: nothing to defer
+        }
+        let cached = self.cache_key_of(&s, req).filter(|_| resolve_key(&s, s.transport).key.is_some()).is_some_and(|(ck, chain)| {
+            self.cache.get(&ck).is_some_and(|c| c.chain.as_ref().is_none_or(|x| *x == chain))
+        });
+        if cached {
+            return self.ask(req); // a cached answer costs no wait
+        }
+        let baseline = self.finish(&s, req, mode, None, false, false);
+        self.ask_async(req.clone());
+        baseline
     }
 
     /// The Jev-first cascade (see [`super::cascade`]): a Jev answer under the integration's escalation threshold is judged
@@ -1084,7 +1110,7 @@ impl Jev {
             (Some(_), None) => Outcome::Allow,
         };
         let asked = r.is_some() && backend != Backend::Cache;
-        let breaker = if asked && self.breaker_open(s.transport) { "open" } else { "closed" };
+        let breaker = if asked && self.client.breaker_open_for(s.transport, Some(&req.id)) { "open" } else { "closed" };
         let error = reason.map(ToString::to_string);
         emit::jev_call(&emit::JevCall {
             integration: &req.id,
@@ -1371,6 +1397,36 @@ mod tests {
         assert_eq!(f.seen.lock().unwrap().len(), 1);
         assert_eq!(log.0.lock().unwrap().len(), 1);
         assert_eq!(jev.cache.len(), 1);
+    }
+
+    #[test]
+    fn an_in_request_ask_that_cannot_finish_in_time_is_answered_later_never_waited_for() {
+        // live triage: Jev needs 300-680 ms, the request had ~250 ms left, so every sync ask timed out and fed the breaker
+        let _ = defaults::num("client.deadline_ms"); // load the defaults outside the request window
+        let (jev, f, log) = lane(&ON, vec![ok(200, &answer(0.99))]);
+        crate::deadline::begin(std::time::Instant::now());
+        let d = jev.ask_in_time(&req("speculation", Trust::AddBlock, json!(false)));
+        crate::deadline::end();
+        assert_eq!(d.outcome, json!(false), "the baseline decides now");
+        assert_eq!(d.backend, Backend::BaselineOnly);
+        assert!(jev.drain(Duration::from_secs(5)));
+        assert_eq!(f.seen.lock().unwrap().len(), 1, "the ask still goes out, asynchronously");
+        assert_eq!(log.0.lock().unwrap().len(), 1, "one row, written by the async ask");
+        assert_eq!(jev.cache.len(), 1, "the answer is kept for the next ask of the same text");
+        // the next ask of the same text is answered from the cache inside the same tight window
+        crate::deadline::begin(std::time::Instant::now());
+        let again = jev.ask_in_time(&req("speculation", Trust::AddBlock, json!(false)));
+        crate::deadline::end();
+        assert_eq!(again.backend, Backend::Cache);
+        assert_eq!(again.outcome, json!(true));
+    }
+
+    #[test]
+    fn outside_a_request_the_ask_is_synchronous_as_before() {
+        let (jev, f, _) = lane(&ON, vec![ok(200, &answer(0.99))]);
+        let d = jev.ask_in_time(&req("speculation", Trust::AddBlock, json!(false)));
+        assert_eq!(d.backend, Backend::Jev);
+        assert_eq!(f.seen.lock().unwrap().len(), 1);
     }
 
     #[test]
