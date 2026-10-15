@@ -132,6 +132,7 @@ const ALLOW: &[(&str, &str, &str)] = &[
         "a thread-local slot for the heredoc scan of the command being walked, initialised empty: state, not a tunable",
     ),
     ("src/script/host_mesh.rs", "static OWED", "a thread-local list of the app-cache writes the call's lookups owe, initialised empty: state, not a tunable"),
+    ("src/script/host_childturn.rs", "static PLANNED", "a thread-local slot for the registration the call planned, initialised empty: state, not a tunable"),
     ("src/script/host.rs", "static CALL", "a thread-local slot for the request state of one script call, initialised empty: state, not a tunable"),
     ("src/mem/registry.rs", "pub const fn new(", "the constructor signature of a holder's identity (its config keys are the arguments)"),
     ("src/mem/registry.rs", "pub const fn with_entries(", "the constructor signature of a holder's identity"),

@@ -112,6 +112,73 @@ function ctPlanSegment(id, home, root, cli, wroot) {
   }
 }
 
+// `formatRelative(ts, now)` of companion/lib/ingest-health.js.
+function ctRelative(ts, now) {
+  if (typeof ts !== 'number' || !isFinite(ts) || ts <= 0) return ah.cfg('devswarm_prompt.relative_none');
+  var secs = Math.floor(Math.max(0, now - ts) / 1000);
+  if (secs < 60) return secs + 's';
+  var mins = Math.floor(secs / 60);
+  if (mins < 60) return mins + 'm';
+  var hours = Math.floor(mins / 60);
+  return hours < 24 ? hours + 'h' : Math.floor(hours / 24) + 'd';
+}
+
+// `launchdDisabledLabel(repoKey)`: the label of this project's ingest job when launchd lists it disabled (macOS only; never under a test).
+function ctDisabledLabel(key) {
+  if (ahHost.platform() !== ah.cfg('devswarm_prompt.launchd_platform') || !key) return null;
+  var marks = ah.cfg('devswarm_prompt.test_markers');
+  for (var i = 0; i < marks.length; i++) if (ah.env.get(marks[i])) return null;
+  var r = ah.exec('launchctl', ah.cfg('devswarm_prompt.launchctl_args').map(function (a) { return a.replace('{uid}', String(ah.uid())); }), { timeoutMs: ah.cfgNum('devswarm_prompt.launchctl_timeout_ms') });
+  if (r === null || r.status !== 0 || r.truncated) return null;
+  var label = ah.cfg('devswarm_prompt.launchd_label_prefix') + key;
+  var esc = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp('"' + esc + '"\\s*=>\\s*(?:disabled|true)\\b').test(r.stdout) ? label : null;
+}
+
+// `normalizeStaleBanner` / `normalizeMonitorFaultBanner`: the age is bucketed (or masked) before the text is hashed, so a banner that only grew older is a repeat.
+function ctNormStale(t) {
+  return String(t).replace(/last alive (—|\d+)([smhd]?) ago/, function (m, n, u) {
+    var tier = 'unknown';
+    if (u) {
+      var v = Number(n);
+      if (u === 's' || (u === 'm' && v < 15)) tier = 't0';
+      else if (u === 'm') tier = 't1';
+      else if (u === 'h') tier = v < 6 ? 't2' : 't3';
+      else tier = 't4';
+    }
+    return 'last alive ' + tier + ' ago';
+  });
+}
+function ctNormFault(t) {
+  return String(t).replace(/(—|\d+[smhd]?) ago/g, 'N ago').replace(/\d+x in a row/g, 'Nx in a row');
+}
+
+// The ingest-daemon banner of this turn: {content, opts, forget}. content is the text (null for none) and opts the emit-dedupe options of
+// its record; forget lists the dedupe keys of episodes that are over. A hand-over in progress (a fresh heartbeat of a live lock) says nothing.
+function ctIngestBanner(h, key, now, sid, tp) {
+  var o = { sessionId: sid, transcriptPath: tp, keepaliveTurns: ah.cfgNum('devswarm_prompt.banner_keepalive') };
+  if (h.status === 'failed') {
+    var f = h.fault, what;
+    var rel = function (t) { return ctRelative(t, now); };
+    if (f.noOkSinceStart) what = text.render(ah.cfg('devswarm_prompt.fault_no_ok'), { rel: rel(f.startedAtMs) });
+    else if (f.okStale) what = text.render(ah.cfg('devswarm_prompt.fault_ok_stale'), { rel: rel(f.lastOkMs) });
+    else what = text.render(ah.cfg('devswarm_prompt.fault_failing'), { n: typeof f.consecutive === 'number' && isFinite(f.consecutive) ? f.consecutive : '?' });
+    var err = f.error ? text.render(ah.cfg('devswarm_prompt.fault_error'), { error: String(f.error).slice(0, ah.cfgNum('devswarm_prompt.fault_error_max')) }) : '';
+    o.key = ah.cfg('devswarm_prompt.fault_key'); o.normalize = ctNormFault;
+    o.content = text.render(ah.cfg(f.code ? 'devswarm_prompt.fault_config' : 'devswarm_prompt.fault_banner'), { beat: rel(f.heartbeatTs), what: what, err: err, code: f.code || '' });
+    return { content: o.content, opts: o, forget: [] };
+  }
+  if (h.status !== 'stale') return { content: null, opts: null, forget: [ah.cfg('devswarm_prompt.fault_key'), ah.cfg('devswarm_prompt.stale_key')] };
+  var beatTs = typeof h.beatTs === 'number' && isFinite(h.beatTs) ? h.beatTs : null;
+  var gone = [ah.cfg('devswarm_prompt.fault_key')];
+  if (beatTs !== null && now - beatTs < ah.cfgNum('devswarm_prompt.banner_grace_ms') && h.liveLock) return { content: null, opts: null, forget: gone };
+  var label = ctDisabledLabel(key);
+  var tail = label ? text.render(ah.cfg('devswarm_prompt.stale_disabled'), { label: label, uid: String(ah.uid()) }) : ah.cfg('devswarm_prompt.stale_doctor');
+  o.key = ah.cfg('devswarm_prompt.stale_key'); o.normalize = ctNormStale;
+  o.content = text.render(ah.cfg('devswarm_prompt.stale_banner'), { age: ctRelative(beatTs, now), tail: tail });
+  return { content: o.content, opts: o, forget: gone };
+}
+
 // `buildMeshDirectSegment(count, id, urgencyMax, oldestTs)`: the nudge for mesh mail addressed to this child, the loudest wording for an urgent one.
 function ctMeshDirect(count, id, entry, cli) {
   var oldest = typeof entry.oldestDirectUnreadTs === 'number' && isFinite(entry.oldestDirectUnreadTs) ? entry.oldestDirectUnreadTs : null;
@@ -188,7 +255,7 @@ function ctDecide(p, opts) {
     if (ctSafeId(builder) && sid !== null && new RegExp(ah.cfg('devswarm_prompt.uuid_truncated_re'), 'i').test(builder) && !new RegExp(ah.cfg('devswarm_prompt.uuid_full_re'), 'i').test(builder)) return ctDefer('truncated-builder-id');
     var inCheckout = top !== null;
     var reg = inCheckout && ctSafeId(builder) && sid !== null; // the hook registers the child's descriptor and registry row
-    var wkey = null;
+    var wkey = null, banner = null;
     if (inCheckout) {
       if (reg) {
         var arch = ctArchivedNow(builder, top, sid);
@@ -196,11 +263,12 @@ function ctDecide(p, opts) {
         var prep = JSON.parse(ahHost.ctPrepare(cwd, builder, sid));
         if (prep.unsure) return ctDefer('prepare');
       }
-      // the ingest daemon of the project: a healthy one says nothing; a stopped one or one whose monitor fails gets a banner from Node
+      // the ingest daemon of the project: its banner (once per episode) when it is stopped or its monitor fails
       wkey = wroot === null ? null : ah.mesh.repoKey(wroot);
       if (wkey !== null) {
-        var health = JSON.parse(ahHost.ctHealthy(wkey));
-        if (health.unsure || !health.healthy) return ctDefer('ingest-health');
+        var health = JSON.parse(ahHost.ctIngest(wkey));
+        if (health.unsure) return ctDefer('ingest-health');
+        banner = ctIngestBanner(health, wkey, ah.clock.now(), sid, tp);
       }
     }
     var plan = ctPlanSegment(builder, home, root, cli, wroot);
@@ -213,7 +281,7 @@ function ctDecide(p, opts) {
     var staticOpts = { sessionId: sid, key: ah.cfg('devswarm_prompt.child_static_key'), content: block.join(ah.cfg('devswarm_prompt.child_block_joiner')), transcriptPath: tp, keepaliveTurns: isFinite(every) && every > 0 ? every : 0 };
     var planOpts = plan === null ? null : { sessionId: sid, key: ah.cfg('devswarm_prompt.child_plan_key'), content: plan, transcriptPath: tp, keepaliveTurns: ah.cfgNum('devswarm_prompt.child_plan_keepalive') };
     var dedupeOn = sid !== null && !dedupe.disabled();
-    if (dedupeOn && (!dedupe.canDecide(staticOpts) || (planOpts !== null && !dedupe.canDecide(planOpts)))) return ctDefer('dedupe-undecidable');
+    if (dedupeOn && ((banner !== null && banner.opts !== null && banner.content !== null && !dedupe.canDecide(banner.opts)) || !dedupe.canDecide(staticOpts) || (planOpts !== null && !dedupe.canDecide(planOpts)))) return ctDefer('dedupe-undecidable');
     // the push state of the checkout (a read), then the writes: the heartbeat first (its failure never stops the turn), the registration, the dedupe records
     var push = inCheckout ? ctPushState(top) : null;
     ah.commit();
@@ -226,9 +294,10 @@ function ctDecide(p, opts) {
       var done = JSON.parse(ahHost.ctRegister(cwd, builder, sid));
       if (done.unsure) return ctDefer('register'); // before the first registration write (the lock stayed busy, or the state changed since the plan)
     }
-    if (wkey !== null) { // healthy: an earlier banner episode is over
-      ctForget(sid, ah.cfg('devswarm_prompt.fault_key'));
-      ctForget(sid, ah.cfg('devswarm_prompt.stale_key'));
+    var bannerText = null;
+    if (banner !== null) {
+      banner.forget.forEach(function (k) { ctForget(sid, k); });
+      if (banner.content !== null && (!dedupeOn || dedupe.shouldEmit(banner.opts))) bannerText = banner.content;
     }
     // the mailbox summary the registration just refreshed: mail addressed to this child by mesh, and a parent's request to archive
     var archiveRequested = false, meshDirect = null;
@@ -255,6 +324,7 @@ function ctDecide(p, opts) {
     }
     var info = ctUnread(builder, home);
     var segments = [];
+    if (bannerText !== null) segments.push(bannerText);
     if (!dedupeOn || dedupe.shouldEmit(staticOpts)) segments = segments.concat(block);
     if (meshDirect !== null) segments.push(meshDirect);
     if (plan !== null && (!dedupeOn || dedupe.shouldEmit(planOpts))) segments.push(plan);

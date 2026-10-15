@@ -9,7 +9,7 @@
 //! | `ctPrepare(cwd, id, session)` | reads everything the registration depends on and answers `{ok: true}`, or `{unsure: true}` when Node would do something the engine does not (a second registry row of the worktree, a phantom descriptor to retire, a row at another worktree, a missing or foreign store, a summary it cannot reproduce); writes nothing |
 //! | `ctRegister(cwd, id, session)` | performs the registration `ctPrepare` planned: lock, descriptor, cursor and inbox, registry row, summary |
 //! | `ctArchived(id, top, session)` | `{archived}`: the archive marker or the DevSwarm app's own verdict names this workspace |
-//! | `ctHealthy(key)` | `{healthy}`: the project's ingest daemon is alive and its monitor is answering |
+//! | `ctIngest(key)` | the project's ingest daemon as `daemonHealth` reads it: `{status: healthy \| stale \| failed, liveLock, beatTs, fault}` |
 //! | `ctReaders(key, id)` | `{declared}`: some reader other than the floor holds a cursor of the partition (whose view of the unread count a hook can only tell from its own process ancestry) |
 //! | `ctFindPlan(id, root)` | `{plan}`: the step plan of the workspace (by the worktree's key, then by id), `null` for none |
 use super::host::with_settings;
@@ -32,17 +32,25 @@ struct Plan {
     desc: OVal,
     row: RegistryRow,
     /// The project key of the worktree and the store it names (none: the hook registers no row).
-    store: Option<(String, MeshStore)>,
+    store: Option<(String, Store)>,
+}
+
+/// The project's store as the plan found it.
+enum Store {
+    /// A store Node opened before.
+    Open(MeshStore),
+    /// A project that has none yet: the registration creates it (the `BACKEND` marker, then the file with Node's tables).
+    New,
 }
 
 thread_local! {
     /// The plan of this call (a script call runs on one thread).
-    static PLANNED: RefCell<Option<Plan>> = const { RefCell::new(None) };
+    static PLANNED: RefCell<Vec<Plan>> = const { RefCell::new(Vec::new()) };
 }
 
 /// A new script call starts: no plan is held.
 pub(super) fn reset_call() {
-    PLANNED.with(|p| *p.borrow_mut() = None);
+    PLANNED.with(|p| p.borrow_mut().clear());
 }
 
 fn unsure() -> String {
@@ -117,6 +125,33 @@ fn phantom_present(ws_dir: &Path, keep_id: &str, top: &str) -> R<bool> {
     Ok(false)
 }
 
+/// Whether the project has no store at all, the case where Node's `resolveStoreBackend` writes the marker and creates the file: no
+/// backend forced, no marker, no database, no journal. A store that exists in any other state is left to `open_store` (and to Node).
+fn store_is_new(inv: &Inv, key: &str) -> R<bool> {
+    if inv.env.get(defaults::text("mesh_write.env_store_backend")).is_some_and(|v| !v.trim().is_empty()) {
+        return Ok(false);
+    }
+    let dir = crate::meshw::union::store_dir(&inv.home, key);
+    if dir.join(defaults::text("mesh.backend_marker")).exists() {
+        return Ok(false);
+    }
+    let has_db = std::fs::metadata(dir.join(defaults::text("mesh_write.store_file"))).map(|m| m.len() > 0).unwrap_or(false);
+    let has_journal = std::fs::read_dir(dir.join(defaults::text("devswarm_role.pg_journal_dir"))).is_ok_and(|mut d| d.next().is_some());
+    if has_db || has_journal {
+        return defer("store-backend");
+    }
+    Ok(true)
+}
+
+/// `writeBackendMarker(dir, 'sqlite')`: a temporary file, then a rename.
+fn write_marker(dir: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dir)?;
+    let marker = dir.join(defaults::text("mesh.backend_marker"));
+    let tmp = dir.join(format!("{}.{}.{}{}", defaults::text("mesh.backend_marker"), std::process::id(), common::now_ms(), defaults::text("mesh_write.tmp_suffix")));
+    std::fs::write(&tmp, defaults::text("mesh.backend_sqlite"))?;
+    std::fs::rename(&tmp, marker)
+}
+
 fn plan(inv: &Inv, id: &str, session: &str) -> R<Plan> {
     let ctx = ident::resolve_context(&inv.cwd, true)?;
     let Some(top) = ctx.toplevel else { return defer("no-checkout") };
@@ -147,6 +182,13 @@ fn plan(inv: &Inv, id: &str, session: &str) -> R<Plan> {
     };
     let mut store = None;
     if let Some(key) = ident::repo_key_for_worktree(&top)? {
+        if store_is_new(inv, &key)? {
+            // no rows to collide with or to fold: nothing to check before the registration creates the store
+            if phantom_present(&ws_dir, id, &top)? {
+                return defer("phantom-descriptor");
+            }
+            return Ok(Plan { id: id.to_string(), desc, row, store: Some((key, Store::New)) });
+        }
         let s = common::open_store(inv, &key)?;
         summary::check(&s, inv, None)?;
         let reader = crate::meshw::tick::open_reader(inv, &key)?.ok_or_else(|| ident::Defer("no-store".into()))?;
@@ -157,7 +199,7 @@ fn plan(inv: &Inv, id: &str, session: &str) -> R<Plan> {
         if crate::meshw::lifeverbs::has_duplicate_rows(inv, &key, id, Some(&top))? {
             return defer("duplicate-registry-rows");
         }
-        store = Some((key, s));
+        store = Some((key, Store::Open(s)));
     }
     if phantom_present(&ws_dir, id, &top)? {
         return defer("phantom-descriptor");
@@ -172,19 +214,94 @@ fn perform(inv: &Inv, p: Plan) -> R<()> {
     pull::precreate(&p.desc);
     // a descriptor that cannot be written ends the registration, as in Node (the turn goes on without a row)
     let written = pull::write_descriptor(inv, &p.id, &p.desc).is_ok();
-    if written && let Some((key, store)) = &p.store {
-        match store.upsert_registry(&p.row, inv.now, |a, b| a == b) {
-            Ok(_) => {
-                if let Some(why) = summary::derive_after_write(store, inv, key) {
-                    crate::meshw::log_summary_failure(defaults::text("devswarm_prompt.log_verb"), &why);
-                }
+    if written && let Some((key, sel)) = &p.store {
+        let created: Option<MeshStore> = match sel {
+            Store::Open(_) => None,
+            Store::New => {
+                let dir = crate::meshw::union::store_dir(&inv.home, key);
+                let made = write_marker(&dir).map_err(|e| e.to_string()).and_then(|()| MeshStore::open(&dir.join(defaults::text("mesh_write.store_file"))).map_err(|e| e.to_string()));
+                // Node's registerStoreDescriptor swallows a store it cannot create; the next turn retries
+                made.map_err(|e| crate::discard::note("childturn.store_create", &e)).ok()
             }
-            // Node's registerStoreDescriptor swallows it and the next turn retries
-            Err(e) => crate::discard::note("childturn.registry_upsert", &e.to_string()),
+        };
+        let store = match sel {
+            Store::Open(s) => Some(s),
+            Store::New => created.as_ref(),
+        };
+        if let Some(store) = store {
+            match store.upsert_registry(&p.row, inv.now, |a, b| a == b) {
+                Ok(_) => {
+                    if let Some(why) = summary::derive_after_write(store, inv, key) {
+                        crate::meshw::log_summary_failure(defaults::text("devswarm_prompt.log_verb"), &why);
+                    }
+                }
+                // Node's registerStoreDescriptor swallows it and the next turn retries
+                Err(e) => crate::discard::note("childturn.registry_upsert", &e.to_string()),
+            }
         }
     }
     lock.release();
     Ok(())
+}
+
+fn json_of(path: &Path) -> Option<OVal> {
+    OVal::parse(&String::from_utf8_lossy(&std::fs::read(path).ok()?))
+}
+
+fn finite(v: Option<&OVal>) -> Option<f64> {
+    match v {
+        Some(OVal::Num(n)) if n.is_finite() => Some(*n),
+        _ => None,
+    }
+}
+
+fn alive(pid: f64) -> bool {
+    if !(pid.is_finite() && pid > 0.0 && pid <= f64::from(i32::MAX)) || pid.fract() != 0.0 {
+        return false;
+    }
+    // SAFETY: signal 0 only probes for the process.
+    let rc = unsafe { libc::kill(pid as i32, 0) };
+    rc == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
+fn text_of(v: Option<&OVal>) -> Value {
+    match v {
+        Some(OVal::Str(t)) => json!(t),
+        _ => Value::Null,
+    }
+}
+
+/// `daemonHealth(home, repoKey)` (companion/lib/ingest-health.js) with the monitor fault `doctor-repair.js` `monitorFaultFor` reads
+/// from the same heartbeat: the status, whether the project lock is held by a live process, the heartbeat's time and the fault.
+fn ingest_detail(inv: &Inv, key: &str) -> R<Value> {
+    let root = idlock::devswarm_root(&inv.home);
+    let json_suffix = json_suffix();
+    let beat = json_of(&root.join(defaults::text("mesh_write.dir_heartbeats")).join(format!("{}{key}{json_suffix}", defaults::text("mesh_write.ingest_beat_prefix"))));
+    let beat_ts = beat.as_ref().and_then(|b| finite(b.get("ts")));
+    let beat_pid = beat.as_ref().and_then(|b| finite(b.get("pid")));
+    let now = inv.now as f64;
+    let fresh = beat_ts.is_some_and(|t| now - t <= defaults::num("mesh_write.ingest_beat_stale_ms") as f64);
+    let lock = json_of(&root.join(defaults::text("mesh_write.dir_locks")).join(format!("{}{key}{}", defaults::text("mesh_write.ingest_lock_prefix"), defaults::text("mesh_write.lock_suffix"))));
+    let lock_pid = lock.as_ref().and_then(|l| finite(l.get("pid")));
+    let live_lock = lock_pid.is_some_and(alive);
+    let healthy = fresh && live_lock && beat_pid.is_some() && beat_pid == lock_pid;
+    let mut fault = Value::Null;
+    if healthy && let Some(b) = &beat && let Some(consecutive) = finite(b.get("consecutiveMonitorFailures")) {
+        let last_ok = finite(b.get("lastMonitorOkMs"));
+        let started = finite(b.get("startedAtMs"));
+        let min = crate::checks::guardkit::settings::get_number(&inv.settings(), defaults::raw("mesh_write.setting_monitor_no_ok_fail_min"));
+        let window = if min.is_finite() && min > 0.0 { min * defaults::num("mesh_write.ms_per_minute") as f64 } else { return defer("monitor-window") };
+        let ok_stale = last_ok.is_some_and(|l| now - l > window);
+        let no_ok_since_start = last_ok.is_none() && started.is_some_and(|s| now - s > window);
+        if consecutive >= defaults::num("mesh_write.monitor_failure_threshold") as f64 || ok_stale || no_ok_since_start {
+            fault = json!({
+                "consecutive": consecutive, "code": text_of(b.get("lastMonitorErrorCode")), "error": text_of(b.get("lastMonitorError")),
+                "lastOkMs": last_ok, "okStale": ok_stale, "noOkSinceStart": no_ok_since_start, "startedAtMs": started, "heartbeatTs": beat_ts,
+            });
+        }
+    }
+    let status = if !fault.is_null() { "failed" } else if healthy { "healthy" } else { "stale" };
+    Ok(json!({"status": status, "liveLock": live_lock, "beatTs": beat_ts, "fault": fault}))
 }
 
 fn archived(inv: &Inv, id: &str, top: &str, session: &str) -> R<bool> {
@@ -218,7 +335,7 @@ pub(super) fn install<'js>(c: &Ctx<'js>, h: &Object<'js>) -> rquickjs::Result<()
             with_settings(|st| {
                 let inv = inv_of(st, &cwd);
                 answer(plan(&inv, &id, &session).map(|p| {
-                    PLANNED.with(|slot| *slot.borrow_mut() = Some(p));
+                    PLANNED.with(|slot| *slot.borrow_mut() = vec![p]);
                     json!({"ok": true})
                 }))
             })
@@ -229,7 +346,7 @@ pub(super) fn install<'js>(c: &Ctx<'js>, h: &Object<'js>) -> rquickjs::Result<()
         Function::new(c.clone(), |cwd: String, id: String, session: String| -> rquickjs::Result<String> {
             with_settings(|st| {
                 let inv = inv_of(st, &cwd);
-                let planned = PLANNED.with(|slot| slot.borrow_mut().take()).filter(|p| p.id == id);
+                let planned = PLANNED.with(|slot| slot.borrow_mut().pop()).filter(|p| p.id == id);
                 answer(planned.map_or_else(|| plan(&inv, &id, &session), Ok).and_then(|p| perform(&inv, p)).map(|()| json!({"ok": true})))
             })
         })?,
@@ -241,10 +358,8 @@ pub(super) fn install<'js>(c: &Ctx<'js>, h: &Object<'js>) -> rquickjs::Result<()
         })?,
     )?;
     h.set(
-        "ctHealthy",
-        Function::new(c.clone(), |key: String| -> rquickjs::Result<String> {
-            with_settings(|st| answer(common::daemon_healthy(&inv_of(st, ""), Some(&key)).map(|h| json!({"healthy": h}))))
-        })?,
+        "ctIngest",
+        Function::new(c.clone(), |key: String| -> rquickjs::Result<String> { with_settings(|st| answer(ingest_detail(&inv_of(st, ""), &key))) })?,
     )?;
     h.set(
         "ctReaders",

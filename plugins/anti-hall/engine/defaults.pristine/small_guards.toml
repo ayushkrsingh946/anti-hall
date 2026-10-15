@@ -1881,6 +1881,89 @@ value = 60000
 min = 1
 unit = "ms"
 
+[devswarm_prompt.relative_none]
+doc = "How an unknown or unset time reads in a banner (companion/lib/ingest-health.js formatRelative)."
+value = "—"
+
+[devswarm_prompt.launchd_platform]
+doc = "The platform name (as the host reports it) on which the ingest job is a launchd job whose disabled state the stale banner looks up."
+value = "macos"
+
+[devswarm_prompt.test_markers]
+doc = "Environment variables that mark a test run; under one the service manager is never asked (companion/lib/test-home-guard.js TEST_MARKERS)."
+value = ["NODE_TEST_CONTEXT", "ANTIHALL_TEST_ISOLATION"]
+
+[devswarm_prompt.launchctl_args]
+doc = "The arguments of the launchd query that lists the disabled jobs of the user's domain. Placeholder: {uid}."
+value = ["print-disabled", "gui/{uid}"]
+
+[devswarm_prompt.launchctl_timeout_ms]
+doc = "How long the launchd query may run (companion/lib/ingest-health.js launchdDisabledLabel)."
+value = 3000
+min = 10
+unit = "ms"
+
+[devswarm_prompt.launchd_label_prefix]
+doc = "The prefix of a project's ingest job label; the project key follows."
+value = "com.anti-hall.devswarm-ingest."
+
+[devswarm_prompt.banner_keepalive]
+doc = "Delivered turns after which an unchanged ingest banner is sent again (companion/lib/ingest-health.js STALE_KEEPALIVE_TURNS)."
+value = 50
+min = 0
+max = 100000
+
+[devswarm_prompt.banner_grace_ms]
+doc = "A stale ingest heartbeat younger than this, with the daemon's lock held by a live process, is a hand-over in progress and gets no banner (companion/lib/ingest-health.js BANNER_GRACE_MS)."
+value = 300000
+min = 0
+unit = "ms"
+
+[devswarm_prompt.stale_banner]
+doc = "The ingest-daemon stale banner (companion/lib/ingest-health.js buildStaleBanner). Placeholders: {age}, {tail}."
+value = '''
+⚠️ anti-hall · devswarm-stale-data: ingest daemon last alive {age} ago — roster/app-state freshness may be stale (the daemon may have stopped or never started for this worktree). Mesh sends are written directly to the store and are NOT affected. {tail}Shown once per stale episode.'''
+
+[devswarm_prompt.stale_doctor]
+doc = "The stale banner's advice when the daemon's launchd job is not disabled."
+value = "Run /anti-hall:doctor to check the DevSwarm ingest daemon. "
+
+[devswarm_prompt.stale_disabled]
+doc = "The stale banner's advice when launchd lists the daemon's job disabled. Placeholders: {label}, {uid}."
+value = "The launchd job {label} is DISABLED, so it cannot auto-start and self-heal is skipped; if that was not intentional, re-enable with: launchctl enable gui/{uid}/{label} (anti-hall never does this for you). "
+
+[devswarm_prompt.fault_banner]
+doc = "The banner for a live ingest daemon whose app monitor is not answering and that is not a configuration fault (buildMonitorFaultBanner). Placeholders: {beat}, {what}, {err}."
+value = '''
+⚠️ anti-hall · devswarm-ingest-failing: the ingest daemon is healthy (heartbeat {beat} ago) but the DevSwarm app's `hivecontrol workspace monitor` is not answering ({what}{err}). Native-queue ingestion is paused until it answers; anti-hall mesh messages sent through the shared store are not affected. /anti-hall:doctor cannot repair this — check or restart the DevSwarm app.'''
+
+[devswarm_prompt.fault_config]
+doc = "The banner for a live ingest daemon whose monitor fails with a configuration error code. Placeholders: {beat}, {what}, {code}, {err}."
+value = '''
+⚠️ anti-hall · devswarm-ingest-failing: the daemon is alive (heartbeat {beat} ago) but {what} ({code}){err} — ingesting NOTHING. Run /anti-hall:doctor to repair the ingest daemon.'''
+
+[devswarm_prompt.fault_no_ok]
+doc = "What a monitor fault says when no poll has succeeded since the daemon started. Placeholder: {rel}."
+value = "no monitor poll has succeeded since the daemon started {rel} ago"
+
+[devswarm_prompt.fault_ok_stale]
+doc = "What a monitor fault says when the last successful poll is too old. Placeholder: {rel}."
+value = "the last successful monitor poll was {rel} ago"
+
+[devswarm_prompt.fault_failing]
+doc = "What a monitor fault says otherwise. Placeholder: {n}."
+value = "`hivecontrol workspace monitor` has failed {n}x in a row"
+
+[devswarm_prompt.fault_error]
+doc = "The last monitor error, appended to a fault banner. Placeholder: {error}."
+value = "; last error: {error}"
+
+[devswarm_prompt.fault_error_max]
+doc = "The most characters of the last monitor error a fault banner quotes."
+value = 160
+min = 1
+max = 4096
+
 [guardkit.render_reserve]
 doc = "Extra bytes reserved beyond a message template's length when its placeholders are filled (a capacity hint, not a limit)."
 value = 32

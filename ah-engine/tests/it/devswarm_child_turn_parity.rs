@@ -172,8 +172,18 @@ fn dump_db(p: &Path) -> String {
         }
     }
     let c = Connection::open(&tmp).unwrap();
-    let tables: Vec<String> = c.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").unwrap().query_map([], |r| r.get(0)).unwrap().map(Result::unwrap).collect();
     let mut out = String::new();
+    // the schema as Node created it: tables and indexes, without SQLite's own bookkeeping
+    let ddl: Vec<String> = c
+        .prepare("SELECT sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' ORDER BY name")
+        .unwrap()
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    out.push_str(&ddl.join("\n"));
+    out.push('\n');
+    let tables: Vec<String> = c.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").unwrap().query_map([], |r| r.get(0)).unwrap().map(Result::unwrap).collect();
     for t in tables {
         let mut st = c.prepare(&format!("SELECT * FROM \"{t}\"")).unwrap();
         let n = st.column_count();
@@ -275,6 +285,23 @@ fn now_ms() -> i64 {
 fn write(p: &Path, t: &str) {
     std::fs::create_dir_all(p.parent().unwrap()).unwrap();
     std::fs::write(p, t).unwrap();
+}
+
+fn ingest_key(home: &Path) -> String {
+    std::fs::read_dir(ds(home).join("store")).unwrap().next().unwrap().unwrap().file_name().to_string_lossy().into_owned()
+}
+
+/// The ingest daemon's heartbeat and lock, as the daemon would leave them (`beat` is merged over a live, fresh one).
+fn daemon(beat_age_ms: i64, beat_pid: u32, lock_pid: u32, extra: Value) -> impl Fn(&Path) {
+    move |h| {
+        let key = ingest_key(h);
+        let mut b = json!({"ts": now_ms() - beat_age_ms, "pid": beat_pid});
+        for (k, v) in extra.as_object().unwrap() {
+            b[k] = v.clone();
+        }
+        write(&ds(h).join(format!("heartbeats/ingest-{key}.json")), &b.to_string());
+        write(&ds(h).join(format!("locks/ingest-project-{key}.lock")), &json!({"pid": lock_pid}).to_string());
+    }
 }
 
 fn inbox(lines: &[&str], cursor: &'static str) -> impl Fn(&Path) {
@@ -426,16 +453,32 @@ fn scenes() -> Vec<Scene> {
             write(&ds(h).join(format!("workspaces/{id}.json")), &json!({"id": id, "worktreePath": h.join("proj"), "sessionId": "x"}).to_string());
         }),
         {
-            let mut s = scene("ingest-unhealthy", Defer);
+            let mut s = scene("ingest-never-ran", Same);
             s.healthy = false;
             s
         },
         {
-            let mut s = scene("first-turn-no-store", Defer);
+            let mut s = scene("ingest-never-ran-repeat", Same);
+            s.healthy = false;
+            s.repeat = 2;
+            s.transcript = true;
+            s
+        },
+        {
+            let mut s = scene("first-turn-creates-the-store", Same);
             s.warm = false;
             s.healthy = false;
             s
         },
+        scene("ingest-stale-hour", Same).seed(daemon(3_600_000, 999_998, 999_999, json!({}))),
+        scene("ingest-stale-minutes", Same).seed(daemon(600_000, 999_998, 999_999, json!({}))),
+        scene("ingest-stale-days", Same).seed(daemon(3 * 86_400_000, 999_998, 999_999, json!({}))),
+        scene("ingest-handover-in-progress", Same).seed(daemon(240_000, 999_998, std::process::id(), json!({}))),
+        scene("ingest-fault-config", Same).seed(daemon(1_000, std::process::id(), std::process::id(), json!({"consecutiveMonitorFailures": 5, "lastMonitorErrorCode": "ENOENT", "lastMonitorError": "spawn hivecontrol ENOENT"}))),
+        scene("ingest-fault-slow", Same).seed(daemon(1_000, std::process::id(), std::process::id(), json!({"consecutiveMonitorFailures": 3}))),
+        scene("ingest-fault-ok-stale", Same).seed(daemon(1_000, std::process::id(), std::process::id(), json!({"consecutiveMonitorFailures": 0, "lastMonitorOkMs": now_ms() - 1_200_000}))),
+        scene("ingest-fault-no-ok-since-start", Same).seed(daemon(1_000, std::process::id(), std::process::id(), json!({"consecutiveMonitorFailures": 1, "startedAtMs": now_ms() - 1_800_000}))),
+        scene("ingest-monitor-starting-up", Same).seed(daemon(1_000, std::process::id(), std::process::id(), json!({"consecutiveMonitorFailures": 1, "startedAtMs": now_ms() - 60_000}))),
     ];
     v.shrink_to_fit();
     v
@@ -562,5 +605,5 @@ fn engine_and_node_agree_for_a_child_in_a_checkout() {
     }
     eprintln!("scenes {}: native {native}, deferred {deferred}", all.len());
     assert!(problems.is_empty(), "{} problems:\n{}", problems.len(), problems.join("\n"));
-    assert!(native >= 20 && deferred >= 6, "corpus too small: native {native}, deferred {deferred}");
+    assert!(native >= 30 && deferred >= 5, "corpus too small: native {native}, deferred {deferred}");
 }

@@ -132,12 +132,6 @@ optional = true
 # --- hook/claude/UserPromptSubmit
 [[node]]
 surface = "hook/claude/UserPromptSubmit"
-script = "hooks/devswarm-child-turn.js"
-lane = "L14b"
-reason = "the engine defers a DevSwarm child turn to the Node hook"
-optional = true
-[[node]]
-surface = "hook/claude/UserPromptSubmit"
 script = "hooks/devswarm-parent-inbox.js"
 lane = "L14a"
 reason = "the engine defers the active-Primary case to the Node hook"

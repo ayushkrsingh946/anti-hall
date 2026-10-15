@@ -251,8 +251,8 @@ value = 10000
 min = 16
 
 [script.exec_programs]
-doc = "Program names `ah.exec` may run (bare names, resolved through the request's PATH). Anything else answers null."
-value = ["git"]
+doc = "Program names `ah.exec` may run (bare names, resolved through the request's PATH). Anything else answers null. `launchctl` is the read-only query of the launchd jobs a banner names."
+value = ["git", "launchctl"]
 
 [script.exec_timeout_max_ms]
 doc = "Longest wall-clock time one `ah.exec` run may take whatever the script asks for; the run's process group is killed at the limit."
