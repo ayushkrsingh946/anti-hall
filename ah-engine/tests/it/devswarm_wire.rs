@@ -601,6 +601,7 @@ fn an_ingest_daemon_heartbeat_is_not_a_reconcile_hint() {
 #[ignore = "measurement: cargo test --release --test it -- --ignored --nocapture where_a_periodic_reconcile_spends_its_cpu"]
 fn where_a_periodic_reconcile_spends_its_cpu() {
     let w = world("prof");
+    // SAFETY: an ignored measurement run by hand, single-threaded at this point; nothing else reads the environment concurrently.
     unsafe { std::env::set_var("AH_ENGINE_DIR", &w.state) };
     let root = w.home.join(".anti-hall/devswarm");
     let c = Connection::open(&w.db).unwrap();
@@ -1250,7 +1251,7 @@ fn drive(tag: &str, n: usize, warm: Duration, window: Duration) -> (f64, f64, f6
                 if tick % 50 == (*i as u64) % 50 {
                     write(&home.join(format!(".anti-hall/devswarm/heartbeats/ws-{i}.json")), &json!({"ts": now()}));
                 }
-                if tick % 20 == 0 && *i <= 2 {
+                if tick.is_multiple_of(20) && *i <= 2 {
                     // the Node ingest companions beat every ~2 s into the same directory; no reconcile reads these files
                     write(&home.join(format!(".anti-hall/devswarm/heartbeats/ingest-proj{i}.json")), &json!({"ts": now()}));
                 }
