@@ -347,6 +347,7 @@ impl Telemetry {
         let body = {
             let mut m = lk(&self.metrics);
             self.rec.mirror_into(&mut m);
+            crate::jev::shared::drain_stats(&mut m);
             m.export()
         };
         let now = now_ms();
@@ -372,6 +373,7 @@ impl Telemetry {
         let snap = self.snapshot_ms.load(std::sync::atomic::Ordering::SeqCst);
         let mut m = lk(&self.metrics);
         self.rec.mirror_into(&mut m);
+        crate::jev::shared::drain_stats(&mut m);
         for (n, v) in gauges {
             m.set(n, *v);
         }
