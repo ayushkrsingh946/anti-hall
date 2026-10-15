@@ -400,8 +400,15 @@ fn backend() -> Arc<Backend> {
 /// count, no lock (an arc-swap guard here cost about 30 ns a read, measured, on top of the snapshot load every read already does).
 /// The leak is one table per applied config change (a few hundred bytes for a large file), recorded with `mem::note_leak`.
 /// Writers are serialized by [`OVERLAY_W`].
-static OVERLAY: AtomicPtr<Vec<(&'static str, &'static V)>> = AtomicPtr::new(std::ptr::null_mut());
-static OVERLAY_W: Mutex<()> = Mutex::new(());
+static OVERLAY: AtomicPtr<Table> = AtomicPtr::new(std::ptr::null_mut());
+/// Every value and table ever installed, so a config that goes back to an earlier content (a reload loop, an editor's undo) reuses
+/// what it leaked then: the leak is bounded by the number of DISTINCT contents, not by the number of reloads.
+type Table = Vec<(&'static str, &'static V)>;
+struct Pool {
+    values: Vec<(&'static str, &'static V)>,
+    tables: Vec<&'static Table>,
+}
+static OVERLAY_W: Mutex<Pool> = Mutex::new(Pool { values: Vec::new(), tables: Vec::new() });
 
 fn overlay_table() -> Option<&'static [(&'static str, &'static V)]> {
     let p = OVERLAY.load(Ordering::Acquire);
@@ -445,18 +452,19 @@ fn leak_value(j: &Json) -> Option<V> {
 /// the one already installed for its key is reused, so the leak is bounded by the number of distinct edits. A change bumps
 /// [`generation`], so values derived from settings ([`Cache`]) are rebuilt. Keys that are not shipped are ignored.
 pub fn set_overlay(values: &[(&str, Json)]) {
-    let _w = OVERLAY_W.lock().unwrap_or_else(|e| e.into_inner());
-    let prev: Vec<(&'static str, &'static V)> = overlay();
-    let mut next: Vec<(&'static str, &'static V)> = Vec::with_capacity(values.len());
+    let mut pool = OVERLAY_W.lock().unwrap_or_else(|e| e.into_inner());
+    let mut next: Table = Vec::with_capacity(values.len());
     for (key, j) in values {
         let Some(e) = find(key) else { continue };
-        let reuse = prev.binary_search_by(|(k, _)| (*k).cmp(e.key)).ok().map(|i| prev[i].1).filter(|v| v.to_json() == *j);
+        let reuse = pool.values.iter().find(|(k, v)| *k == e.key && v.to_json() == *j).map(|(_, v)| *v);
         let v = match reuse {
             Some(v) => v,
             None => match leak_value(j) {
                 Some(v) => {
                     crate::mem::note_leak(std::mem::size_of::<V>());
-                    &*Box::leak(Box::new(v))
+                    let v: &'static V = Box::leak(Box::new(v));
+                    pool.values.push((e.key, v));
+                    v
                 }
                 None => continue,
             },
@@ -465,14 +473,24 @@ pub fn set_overlay(values: &[(&str, Json)]) {
     }
     next.sort_by(|a, b| a.0.cmp(b.0));
     next.dedup_by(|a, b| a.0 == b.0);
-    if next.len() == prev.len() && next.iter().zip(&prev).all(|(a, b)| a.0 == b.0 && std::ptr::eq(a.1, b.1)) {
+    let same = |t: &Table| t.len() == next.len() && t.iter().zip(&next).all(|(a, b)| a.0 == b.0 && std::ptr::eq(a.1, b.1));
+    let cur = OVERLAY.load(Ordering::Acquire);
+    // SAFETY: as in `overlay_table`: a non-null pointer is a leaked, never-written table
+    let unchanged = if cur.is_null() { next.is_empty() } else { same(unsafe { &*cur }) };
+    if unchanged {
         return;
     }
-    let table = if next.is_empty() {
+    let table: *mut Table = if next.is_empty() {
         std::ptr::null_mut()
+    } else if let Some(t) = pool.tables.iter().find(|t| same(t)) {
+        std::ptr::from_ref::<Table>(t).cast_mut()
     } else {
         crate::mem::note_leak(next.len() * std::mem::size_of::<(&str, &V)>());
-        Box::leak(Box::new(next)) as *mut _
+        let t: &'static mut Table = Box::leak(Box::new(next));
+        let p = std::ptr::from_mut(t);
+        // SAFETY: `p` is the just-leaked table, valid for 'static and never written again
+        pool.tables.push(unsafe { &*p });
+        p
     };
     OVERLAY.store(table, Ordering::Release);
     GENERATION.fetch_add(1, Ordering::SeqCst);

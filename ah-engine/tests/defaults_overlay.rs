@@ -130,6 +130,23 @@ fn defaults_reads_follow_the_config_layers_and_reloads() {
     fresh.publish();
     assert_eq!(defaults::num(HELD), held0 + 1, "the next start applies it");
 
+    // reloads do not accumulate memory: going back and forth between two contents 50 times leaks nothing after each is seen once,
+    // and a reload of an unchanged file installs nothing
+    let a = format!("[telemetry]\nhealth_snapshot_ms = {}\n", num0 + 6);
+    let b = format!("[telemetry]\nhealth_snapshot_ms = {}\n", num0 + 7);
+    put(&paths.user, &a);
+    fresh.reload();
+    put(&paths.user, &b);
+    fresh.reload();
+    let (leaked, g) = (ah_engine::mem::leaked_bytes(), defaults::generation());
+    for i in 0..50 {
+        put(&paths.user, if i % 2 == 0 { &a } else { &b });
+        assert!(matches!(fresh.reload(), Reload::Applied(_)));
+        assert_eq!(defaults::num(NUM), num0 + if i % 2 == 0 { 6 } else { 7 });
+    }
+    assert_eq!(ah_engine::mem::leaked_bytes(), leaked, "50 reloads between two contents leaked bytes");
+    assert!(defaults::generation() > g);
+
     // no files at all: every read is the shipped value again
     std::fs::remove_file(&paths.user).unwrap();
     assert!(matches!(fresh.reload(), Reload::Applied(_)));
