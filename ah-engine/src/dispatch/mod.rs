@@ -75,19 +75,10 @@ pub fn parse_args(args: &[String]) -> Result<Args, DispatchError> {
     Ok(Args { host, event: flag(args, "--event").unwrap_or_default(), tool: flag(args, "--tool"), map: flag(args, "--fallback-map").map(PathBuf::from) })
 }
 
-/// Ends the wrapper-visible wait (the client's wait marker) when the call's final result is ready, on every return path: an OK
-/// reply whose answers defer to Node leaves the marker in place while those hooks run, so a Node deny that lands after the fail-fast
-/// budget is still waited for.
-struct WaitRelease;
-
-impl Drop for WaitRelease {
-    fn drop(&mut self) {
-        crate::client::release_wait_marker();
-    }
-}
-
 /// Ask the daemon for the built-in checks; `None` when it cannot answer (the checks then run as Node hooks). `hold_wait` leaves the
-/// client's wait marker in place after an OK reply (the caller releases it, see [`WaitRelease`]).
+/// client's wait marker in place after an OK reply (the caller releases it with `release_wait_marker`: `hook_main` after the
+/// answer is written and the done mark made, so the wrapper sees the wait marker or the done mark at every instant; `run` once it
+/// has the result).
 fn ask_daemon(meta: &Meta, raw: &str, hold_wait: bool) -> Option<Vec<(String, Answer)>> {
     let cfg = crate::config::ClientConfig::from_env();
     let meta = serde_json::to_string(meta).ok()?;
@@ -507,7 +498,9 @@ fn over_cap(args: &Args, results: &[combine::HookResult], joined: &str) -> Optio
 /// hooks and one process cannot join is delivered one after another, or (over the host's context cap) handed back to the
 /// wrapper with `dispatch.defer_exit`.
 pub fn run(raw: &str, args: &Args) -> Outcome {
-    run_inner(raw, args, None, true)
+    let o = run_inner(raw, args, None, true);
+    crate::client::release_wait_marker(); // nothing is written after this result: the final result is ready
+    o
 }
 
 fn start_node(e: &table::Entry, raw: &[u8], payload: Option<&File>) -> node::Running {
@@ -693,7 +686,6 @@ fn run_core(raw: &str, args: &Args, payload: Option<&File>, complete: bool, tele
         // the daemon clamps its inner budgets (git, Jev) to what this client still waits (review finding 4)
         deadline_ms: Some(crate::config::ClientConfig::from_env().deadline.as_millis() as u64),
     };
-    let _wait = WaitRelease;
     let answers = match (&parsed, complete) {
         // A payload serde_json cannot read falls back to Node (JS may still parse it, e.g. a lone surrogate escape): the
         // engine must not be a worse guard than Node (D74). Only a guard entry with no runnable Node command blocks.
@@ -967,9 +959,13 @@ pub fn hook_main(args: &[String]) -> i32 {
         crate::discard::harmless(so.write_all(o.out.as_bytes())); // keep: a closed pipe leaves nobody to tell
         crate::discard::harmless(so.flush()); // keep: a closed pipe leaves nobody to tell
         mark_done();
+        // Last step: until here the wrapper finds the wait marker (the answer is still being delivered) and from here the done mark
+        // (launcher RCA: releasing it when `run_core` returned left a window with neither, in which a finished answer was killed).
+        crate::client::release_wait_marker();
         o.code
     });
     res.unwrap_or_else(|_| {
+        crate::client::release_wait_marker(); // a panic after the daemon was asked must not leave the marker behind
         let o = on_panic(&event, guard);
         crate::discard::harmless(std::io::stderr().write_all(o.err.as_bytes())); // keep: a closed pipe leaves nobody to tell
         o.code

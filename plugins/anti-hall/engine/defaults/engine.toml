@@ -1216,6 +1216,11 @@ value = 5
 min = 1
 unit = "s"
 
+[launcher.wall_soft_ms]
+doc = "Per hook event, the wall time (ms, from the launcher start) past which a call is logged as a soft wall hit and counted; nothing is cut. `default` applies to an event not listed; 0 means the fail-fast formula (client.cold_guard_wait_ms on a guard event plus the engine budget), which flags every call that uses the slow-reply extension. Set from the measured per-event distribution; the hard limits (client.slow_fallback_max_ms, launcher.wall_hard_margin_ms) are separate and higher."
+value = { default = 0, SessionStart = 1100, UserPromptSubmit = 900, SessionEnd = 800, Stop = 3000 }
+unit = "ms"
+
 [launcher.wall_hard_margin_ms]
 doc = "Margin added to the longest planned path of a call (cold wait, engine budget, kill grace) to get the wall-clock backstop (SIGALRM): at it the launcher stops the engine and lets the hook through. Never beyond the event's hook timeout."
 value = 500

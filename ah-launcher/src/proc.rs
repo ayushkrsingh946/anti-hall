@@ -401,6 +401,10 @@ pub struct Opts<'a> {
     pub budget: Duration,
     /// while this file exists at the soft deadline the deadline moves, once, to `slow_max`
     pub wait_file: Option<&'a Path>,
+    /// the engine's done mark: it exists from the moment the answer is written until the engine exits, so it also moves the
+    /// deadline (the engine drops the wait file only after the done mark is made, so one of the two exists at every instant); a
+    /// child killed with it present has already answered, and its captured output is delivered
+    pub done_file: Option<&'a Path>,
     pub slow_max: Duration,
     pub grace: Duration,
     /// how long after the child has exited its output pipes may take to reach end of file
@@ -693,20 +697,35 @@ pub fn run_child(o: &Opts) -> Run {
     let mut status = wrx
         .recv_timeout(o.budget.saturating_sub(start.elapsed()))
         .ok();
-    if status.is_none() && o.slow_max > o.budget && o.wait_file.is_some_and(Path::exists) {
+    if status.is_none()
+        && o.slow_max > o.budget
+        && (o.wait_file.is_some_and(Path::exists) || o.done_file.is_some_and(Path::exists))
+    {
         status = wrx
             .recv_timeout(o.slow_max.saturating_sub(start.elapsed()))
             .ok();
     }
-    let Some(status) = status else {
-        kill_group(pgid, libc::SIGTERM);
-        if wrx.recv_timeout(o.grace).is_err() || group_alive(pgid) {
-            kill_group(pgid, libc::SIGKILL);
+    // The answer is already written when the done mark exists: a child that is still not gone at the hard deadline is cut, but
+    // what it printed is delivered (with its exit code when it leaves within the grace, else 0) instead of being dropped.
+    let mut answered_cut = false;
+    let status = match status {
+        Some(st) => Some(st),
+        None => {
+            let answered = o.done_file.is_some_and(Path::exists);
+            kill_group(pgid, libc::SIGTERM);
+            let late = wrx.recv_timeout(o.grace);
+            if late.is_err() || group_alive(pgid) {
+                kill_group(pgid, libc::SIGKILL);
+            }
+            if !answered {
+                finish(reaper);
+                return Run::TimedOut;
+            }
+            answered_cut = true;
+            late.ok()
         }
-        finish(reaper);
-        return Run::TimedOut;
     };
-    if group_alive(pgid) && !o.strict_group {
+    if group_alive(pgid) && (!o.strict_group || answered_cut) {
         kill_group(pgid, libc::SIGKILL);
     } else if group_alive(pgid) {
         // a helper of the engine outlived it in its group: it may still hold the pipes, and its answer is not the engine's
@@ -718,8 +737,10 @@ pub fn run_child(o: &Opts) -> Run {
     }
     finish(reaper);
     let code = match status {
-        Ok(st) => st.code().unwrap_or_else(|| 128 + st.signal().unwrap_or(0)),
-        Err(_) => return Run::SpawnFailed { errno: None },
+        Some(Ok(st)) if answered_cut => st.code().unwrap_or(0),
+        Some(Ok(st)) => st.code().unwrap_or_else(|| 128 + st.signal().unwrap_or(0)),
+        None if answered_cut => 0,
+        _ => return Run::SpawnFailed { errno: None },
     };
     let wait = o.drain;
     let (Ok((out, o1)), Ok((err, o2))) = (orx.recv_timeout(wait), erx.recv_timeout(wait)) else {

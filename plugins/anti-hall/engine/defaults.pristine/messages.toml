@@ -850,3 +850,4 @@ value = "request shed under load"
 [msg.client_closed_before_ack]
 doc = "Exchange text: the daemon closed the connection before it acknowledged the request."
 value = "closed before ACK(req)"
+

@@ -386,6 +386,7 @@ impl L {
                 feed: self.feed_memory(body.as_bytes()),
                 budget: Duration::from_millis(kick_ms),
                 wait_file: None,
+                done_file: None,
                 slow_max: Duration::ZERO,
                 grace,
                 drain: Duration::from_millis(self.s.num("launcher.io_drain_ms")),
@@ -466,6 +467,7 @@ impl L {
             feed,
             budget: Duration::from_millis(left),
             wait_file: None,
+            done_file: None,
             slow_max: Duration::ZERO,
             grace: self.grace,
             drain: Duration::from_millis(self.s.num("launcher.io_drain_ms")),
@@ -572,6 +574,7 @@ impl L {
             feed: self.feed_stream(spool.clone()),
             budget: Duration::from_millis(eng_ms),
             wait_file,
+            done_file: done.as_deref(),
             slow_max: Duration::from_millis(slow_max),
             grace: self.grace,
             drain: Duration::from_millis(self.s.num("launcher.io_drain_ms")),
@@ -643,8 +646,10 @@ impl L {
                     u8::from(done_marked)
                 ));
                 self.log_line(&format!(
-                    "engine_timed event={} timeout_ms={eng_ms}",
-                    self.event
+                    "engine_timed event={} timeout_ms={eng_ms} wall_ms={} done={}",
+                    self.event,
+                    self.t0.elapsed().as_millis(),
+                    u8::from(done_marked)
                 ));
                 self.integrity("fail");
                 0
@@ -731,9 +736,10 @@ impl L {
         }
         if !hits.is_empty() {
             self.log_line(&format!(
-                "soft_limit event={} {} {}",
+                "soft_limit event={} {} wall_ms={} {}",
                 self.event,
                 hits.join(","),
+                self.t0.elapsed().as_millis(),
                 limits::render_counters()
             ));
         }
@@ -1061,7 +1067,11 @@ pub fn run() -> i32 {
     };
     let slow_ms = l.s.num("client.slow_fallback_max_ms").min(ev_ms);
     let grace_ms = l.grace.as_millis() as u64;
-    let soft_ms = cold_ms.saturating_add(eng_ms);
+    // the soft wall is a per-event setting; 0 (or no entry) keeps the fail-fast formula
+    let soft_ms =
+        l.s.num_for("launcher.wall_soft_ms", &l.event)
+            .filter(|n| *n > 0)
+            .unwrap_or_else(|| cold_ms.saturating_add(eng_ms));
     let planned = cold_ms
         .saturating_add(eng_ms.max(slow_ms))
         .saturating_add(grace_ms.saturating_mul(2));

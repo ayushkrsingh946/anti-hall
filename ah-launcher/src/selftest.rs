@@ -156,6 +156,7 @@ fn check_engine(s: &Settings, state_dir: &Path, engine: Option<String>) -> Resul
         ),
         budget: Duration::from_millis(ms),
         wait_file: None,
+        done_file: None,
         slow_max: Duration::ZERO,
         grace: Duration::from_millis(s.num("client.wrapper_kill_grace_ms")),
         strict_group: true,

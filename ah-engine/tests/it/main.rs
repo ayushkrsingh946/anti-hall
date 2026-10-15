@@ -8,6 +8,7 @@
 mod broad_kill;
 #[path = "../common/mod.rs"]
 mod common;
+mod event_budgets;
 mod replies;
 mod roles;
 mod transcript_support;

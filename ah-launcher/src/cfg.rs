@@ -108,6 +108,22 @@ impl Settings {
         v
     }
 
+    /// One field of a per-field table setting (`{ default = 0, SessionStart = 1100, ... }`): the file's entry for `field`, else the
+    /// file's `default`, else the built-in table's entry and `default`. `None` when no table is there at all.
+    pub fn num_for(&self, key: &str, field: &str) -> Option<u64> {
+        let file = |f: &str| {
+            self.table(key)
+                .value(key)
+                .and_then(|v| v.as_table())
+                .and_then(|t| t.get(f))
+                .and_then(nonneg)
+        };
+        file(field)
+            .or_else(|| file("default"))
+            .or_else(|| builtin::table_num(key, field))
+            .or_else(|| builtin::table_num(key, "default"))
+    }
+
     pub fn text(&self, key: &str) -> String {
         self.table(key)
             .value(key)
