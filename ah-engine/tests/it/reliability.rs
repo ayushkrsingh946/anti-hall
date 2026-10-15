@@ -1099,6 +1099,37 @@ fn a_late_reply_is_the_daemons_decision_and_no_node_hook_runs() {
     assert!(!e.fresh_down_marker());
 }
 
+/// A crash-looping daemon: it accepts, then dies before any reply byte (`reset` = the connection is reset, else a plain close).
+fn dying_server(e: &Env, reset: bool) {
+    std::fs::create_dir_all(e.eng()).unwrap();
+    let l = UnixListener::bind(e.eng().join("e.sock")).unwrap();
+    std::thread::spawn(move || {
+        for s in l.incoming().flatten() {
+            if reset {
+                let lin = libc::linger { l_onoff: 1, l_linger: 0 };
+                // SAFETY: `s` is a live socket fd and `lin` is a valid `linger` of the size passed.
+                unsafe { libc::setsockopt(std::os::fd::AsRawFd::as_raw_fd(&s), libc::SOL_SOCKET, libc::SO_LINGER, (&raw const lin).cast(), std::mem::size_of::<libc::linger>() as libc::socklen_t) };
+            }
+            drop(s);
+        }
+    });
+}
+
+#[test]
+fn a_daemon_that_accepts_then_dies_fails_fast_not_after_the_slow_window() {
+    // R0: only a slow-but-ALIVE daemon may take the slow window; one that closes or resets the connection before any reply byte
+    // (a crash loop) fails the call at once, and counts as a failed exchange, not a slow one
+    for reset in [false, true] {
+        let e = Env::new(if reset { "dyingrst" } else { "dyingeof" }, &[("AH_ENGINE_NOSPAWN", "1"), ("AH_ENGINE_SLOW_DOWN_N", "9")]);
+        dying_server(&e, reset);
+        let (out, err, code, dt) = e.hook(DENY_IN, true);
+        assert!(dt < Duration::from_secs(1), "reset={reset}: a dying daemon must fail fast: {dt:?} {err:?}");
+        assert!(!out.contains("late deny"), "reset={reset}: no reply byte ever arrived: {out:?} {err:?}");
+        let log = e.health_log();
+        assert!(!log.contains("client_late") && !log.contains("client_slow"), "reset={reset}: not treated as slow: {log}");
+    }
+}
+
 #[test]
 fn a_reply_that_never_comes_fails_open_within_the_window_without_node() {
     let e = Env::new("latenever", &[("AH_ENGINE_NOSPAWN", "1"), ("AH_ENGINE_SLOW_DOWN_N", "9"), ("AH_ENGINE_SLOW_FALLBACK_MAX_MS", "1100")]);
@@ -1218,6 +1249,9 @@ fn wrapper_restart_loop_fails_open_under_one_second() {
     let now = ah_engine::health::now_ms();
     let log = (0..3).map(|_| format!("{now}\tcrash\tunknown\ttest\n")).collect::<String>();
     std::fs::write(e.eng().join("ah-engine.log"), log).unwrap();
+    // the first exec of a freshly linked binary is slow on macOS (~0.4 s, measured: 0.9-1.0 s on the first run after a rebuild, 0.52 s on
+    // every later one, identical before and after the slow-wait change); that is the OS, not the call, so it is paid before the timing
+    let _ = e.ctl("ping");
     let (out, code, dt) = e.wrapper_hook(DENY_IN);
     assert_eq!((out.as_str(), code), ("", 0));
     assert!(dt < Duration::from_secs(1), "wrapper took {dt:?}");
