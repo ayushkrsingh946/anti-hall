@@ -4809,6 +4809,9 @@ function guarded(fn) {
 function mainFlow(payload) {
   const isSkipped = (name) => cmdSkipped(name);
   const command = (payload && payload.tool_input && payload.tool_input.command) || '';
+  // a command over the classify cap is judged in parts by the Node hook (a head/tail scan the engine does not reproduce): defer it
+  // before any parsing (the edit prefilter is false for it, so a gate behind that prefilter never fired)
+  if (command.length > T.maxLen) unsure();
   const bm = LIB['./lib/block-message.js'];
   let hit;
   hit = guarded(() => {
@@ -4868,7 +4871,6 @@ function mainFlow(payload) {
       && settings.enabled('safety', 'editGuard')
       && !isSkipped(ah.cfg('command.edit_guard_name'))
       && !matchedProjectCommandAllowPattern(command, (payload && payload.cwd) || '')) {
-      if (command.length > T.maxLen) unsure(); // a very large command is judged in parts, which the engine does not reproduce
       if (classifyBashWork(command, payload, { editOnly: true }).editBlocks.length) {
         // a DevSwarm child workspace is a worker (hooks/lib/devswarm-role.js isChildWorker, which reads the disk): Node decides
         if (LIB['./lib/devswarm-role.js'].isChildWorkspace()) unsure();

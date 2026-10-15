@@ -590,6 +590,31 @@ fn command_script_matches_the_compiled_port() {
     golden_report("command", 12);
 }
 
+// `command.max_classify_len` (DECISIONS.md, deliberate differences): Node judges a longer command in parts (a head/tail scan) the
+// script does not reproduce, so the script defers it before parsing it. The gate used to sit behind the edit prefilter, which is
+// false for such a command: a big heredoc write was allowed where Node blocks it, and a big heavy command was parsed whole (about
+// 4.5 us of interpreter time per character in release), deferring only when the time limit happened to cut it.
+#[test]
+fn a_command_over_the_classify_cap_defers_before_it_is_parsed() {
+    let h = home("cmd-cap");
+    let e = env(&h);
+    let proj = format!("{h}/proj");
+    std::fs::create_dir_all(format!("{proj}/.git/refs/heads")).unwrap();
+    std::fs::create_dir_all(format!("{proj}/src")).unwrap();
+    std::fs::write(format!("{proj}/.git/HEAD"), "ref: refs/heads/main\n").unwrap();
+    let body = "b".repeat(defaults::num("command.max_classify_len") as usize);
+    let bash = |command: String| json!({"tool_name": "Bash", "session_id": "s", "cwd": proj, "tool_input": {"command": command}});
+    // the runtime and the script are loaded by a small call first, so the measured calls count only their own work
+    assert!(run_forced("command", &bash("ls".into()), &e).is_some());
+    for (what, p) in [("heredoc write", bash(format!("cat > {proj}/src/x.rs <<'EOF'\n{body}\nEOF"))), ("heavy", bash(format!("echo {body} && npm test")))] {
+        let cpu = crate::limits::thread_cpu_us();
+        assert_eq!(run_forced("command", &p, &e), Some(Some(Verdict::Defer)), "{what}: a command over the cap is Node's to judge");
+        let used_ms = crate::limits::thread_cpu_us().saturating_sub(cpu) / 1000;
+        assert!(used_ms < defaults::num("script.time_limit_ms"), "{what}: deferred after {used_ms} ms of cpu, so it was parsed first");
+    }
+    crate::discard::harmless(std::fs::remove_dir_all(&h)); // keep: cleanup
+}
+
 // The coordinator-work-guard corpus was written from the script and replayed against hooks/coordinator-work-guard.js (the PreToolUse
 // cases; the PostToolUse ones are compared by the coordinator_post parity lane, which runs both hooks through whole sessions).
 #[test]
