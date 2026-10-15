@@ -34,6 +34,7 @@ struct Hook {
 const INBOX: Hook = Hook { script: "inbox-read-guard.js", check: "inbox-read-guard", argv: &[] };
 const PHASE: Hook = Hook { script: "phase-tracker.js", check: "phase-tracker", argv: &[] };
 const SPAWN: Hook = Hook { script: "orch-on-spawn.js", check: "orch-on-spawn", argv: &[] };
+const CHILD_TURN: Hook = Hook { script: "devswarm-child-turn.js", check: "devswarm-child-turn", argv: &[] };
 const PARENT_INBOX: Hook = Hook { script: "devswarm-parent-inbox.js", check: "devswarm-parent-inbox", argv: &[] };
 const ORCH: Hook = Hook { script: "verify-first-orch.js", check: "verify-first-orch", argv: &["--host=claude"] };
 /// The Codex hook entry: the same script without the `--host=claude` flag.
@@ -233,7 +234,10 @@ fn norm(s: &str, now: u128) -> String {
     let re_tmp = regex::Regex::new(r"\.\d+\.[0-9a-f]{8}\.tmp\.json").unwrap();
     // the emit-dedupe store keys a record by a hash of the transcript path, which holds the (different) home of each side
     let re_tp = regex::Regex::new(r#""tp":"[0-9a-f]{16}""#).unwrap();
-    re_tp.replace_all(&re_tmp.replace_all(&out, ".<PID>.<RND>.tmp.json"), r#""tp":"<TP>""#).to_string()
+    // and by hashes of the emitted text, which may name a path under the home
+    let re_hash = regex::Regex::new(r#""(hash|ch)":"[0-9a-f]{40}""#).unwrap();
+    let out = re_tp.replace_all(&re_tmp.replace_all(&out, ".<PID>.<RND>.tmp.json"), r#""tp":"<TP>""#).to_string();
+    re_hash.replace_all(&out, r#""$1":"<HASH>""#).to_string()
 }
 
 fn norm_path_keys(m: BTreeMap<String, String>) -> BTreeMap<String, String> {
@@ -278,7 +282,10 @@ fn run(mut cmd: Command, input: &[u8]) -> Out {
 fn base_env(c: &mut Command, home: &Path, extra: &[(String, String)], now: u128) {
     c.env_clear().env("PATH", std::env::var("PATH").unwrap_or_default()).env("HOME", home).env("USERPROFILE", home).env("ANTIHALL_TEST_ISOLATION", "1");
     for (k, v) in extra {
-        c.env(k, subst(v, home, now));
+        match k.strip_prefix('-') {
+            Some(name) => c.env_remove(name), // `-NAME` removes a variable set earlier
+            None => c.env(k, subst(v, home, now)),
+        };
     }
 }
 
@@ -351,8 +358,10 @@ fn drive(name: &str, h: Hook, cases: Vec<Case>) -> Tally {
         } else {
             assert_ne!(String::from_utf8_lossy(&eng.1), FALLBACK, "{}", ctx("the engine deferred but this case expects an answer"));
             assert_eq!(eng.0, node.0, "{}", ctx("exit code"));
-            assert_eq!(eng.1, node.1, "{}", ctx("stdout bytes"));
-            assert_eq!(eng.2, node.2, "{}", ctx("stderr bytes"));
+            // an answer may name a path under the home, which differs between the two sides
+            let unhome = |b: &[u8], home: &Path| String::from_utf8_lossy(b).replace(&home.to_string_lossy().to_string(), "<HOME>");
+            assert_eq!(unhome(&eng.1, &he), unhome(&node.1, &hn), "{}", ctx("stdout bytes"));
+            assert_eq!(unhome(&eng.2, &he), unhome(&node.2, &hn), "{}", ctx("stderr bytes"));
             assert_eq!(after_e, after_n, "{}", ctx("state files"));
             t.same += 1;
             if node.0 == 2 {
@@ -1207,6 +1216,161 @@ fn devswarm_parent_inbox_without_a_checkout_matches_node() {
     assert!(t.stdout_nonempty >= 18, "the corpus must exercise the emitted reminder: {}", t.stdout_nonempty);
     assert!(t.state_changed >= 20, "the corpus must exercise the dedupe state: {}", t.state_changed);
     assert_eq!(t.deferred, 9, "deferred {}", t.deferred);
+}
+
+// ------------------------------------------------------------------------------------------------------------------
+// devswarm-child-turn: an active child workspace with no git checkout around its working directory
+// ------------------------------------------------------------------------------------------------------------------
+
+fn child_turn_cases() -> Vec<Case> {
+    let repo_dir = repo().to_string_lossy().into_owned();
+    let child = |c: Case| {
+        c.env("DEVSWARM_REPO_ID", "r")
+            .env("DEVSWARM_SOURCE_BRANCH", "feat/x")
+            .env("DEVSWARM_BUILDER_ID", "child-1")
+            .seed(Seed::Dir("proj".into()))
+            .seed(Seed::Dir(".claude/projects/-p".into()))
+    };
+    let dflt = || prompt(json!({}));
+    let without = |k: &str| {
+        let mut p = dflt();
+        p.as_object_mut().unwrap().remove(k);
+        p
+    };
+    let plan = |body: &str| Seed::File(".anti-hall/devswarm/plans/child-1.json".into(), body.as_bytes().to_vec(), 0);
+    let desc = |body: &str| Seed::File(".anti-hall/devswarm/workspaces/child-1.json".into(), body.as_bytes().to_vec(), 0);
+    let launcher = Seed::File(".anti-hall/bin/devswarm.js".into(), b"// launcher\n".to_vec(), 0);
+    let steps = |s: &str| format!("{{\"steps\":{s}}}");
+    vec![
+        child(case("first-turn", dflt())),
+        child(case("first-turn-stable-launcher", dflt())).seed(launcher.clone()),
+        child(case("stable-launcher-switched-off", dflt())).seed(launcher.clone()).env("ANTIHALL_DEVSWARM_STABLE_LAUNCHER", "0"),
+        child(case("launcher-is-a-directory", dflt())).seed(Seed::Dir(".anti-hall/bin/devswarm.js".into())),
+        child(case("second-turn-suppressed", dflt())).prime(),
+        child(case("second-turn-other-session", prompt(json!({"session_id":"S2"})))).prime(),
+        child(case("second-turn-launcher", dflt())).prime().seed(launcher.clone()),
+        child(case("repeat-every-zero", dflt())).prime().env("ANTIHALL_INJECTION_REPEAT_EVERY", "0"),
+        child(case("dedupe-off", dflt())).prime().seed(Seed::Settings(json!({"guards":{"emitDedupe":false}}))),
+        // identities: the heartbeat's file name and the id in the reminders
+        child(case("builder-id-unsafe", dflt())).env("DEVSWARM_BUILDER_ID", "a b"),
+        child(case("builder-id-missing", dflt())).env("-DEVSWARM_BUILDER_ID", ""),
+        child(case("builder-id-dotdot", dflt())).env("DEVSWARM_BUILDER_ID", "a..b"),
+        child(case("builder-id-uuid", dflt())).env("DEVSWARM_BUILDER_ID", "0a1b2c3d-1111-2222-3333-444455556666"),
+        child(case("builder-id-truncated-uuid-defers", dflt())).env("DEVSWARM_BUILDER_ID", "0a1b2c3d-1111-2222-3333-4444").defer(),
+        child(case("builder-id-truncated-uuid-no-session", without("session_id"))).env("DEVSWARM_BUILDER_ID", "0a1b2c3d-1111-2222-3333-4444"),
+        child(case("builder-name", dflt())).env("DEVSWARM_BUILDER_NAME", "Fix the thing"),
+        child(case("branch-long-unsafe", dflt()))
+            .env("DEVSWARM_SOURCE_BRANCH", "feature/some very long branch name with spaces and \u{fc}nicode ".repeat(3).as_str())
+            .env("DEVSWARM_BUILDER_ID", "x y"),
+        child(case("branch-dots", dflt())).env("DEVSWARM_SOURCE_BRANCH", "...hidden").env("DEVSWARM_BUILDER_ID", "x y"),
+        child(case("repo-id-absent-supervisor-on", dflt())).env("-DEVSWARM_REPO_ID", "").env("ANTIHALL_DEVSWARM_SUPERVISOR", "on"),
+        // the step plan
+        child(case("plan-doing", dflt())).seed(plan(&steps(
+            r#"[{"n":1,"text":"first","status":"done","ts":1},{"n":2,"text":"second","status":"doing","ts":5},{"n":3,"text":"third","status":"todo"}]"#,
+        ))),
+        child(case("plan-blocked", dflt()))
+            .seed(plan(&steps(r#"[{"n":1,"text":"first","status":"blocked","ts":9},{"n":2,"text":"second","status":"doing","ts":5}]"#))),
+        child(case("plan-latest-touched-wins", dflt())).seed(plan(&steps(
+            r#"[{"n":1,"text":"a","status":"doing","ts":5},{"n":2,"text":"b","status":"doing","ts":5},{"n":3,"text":"c","status":"blocked","ts":4}]"#,
+        ))),
+        child(case("plan-no-active-step", dflt())).seed(plan(&steps(r#"[{"n":1,"text":"a","status":"todo"},{"n":2,"text":"b","status":"todo"}]"#))),
+        child(case("plan-all-done", dflt())).seed(plan(&steps(r#"[{"n":1,"text":"a","status":"done"},{"n":2,"text":"b","status":"done"}]"#))),
+        child(case("plan-all-done-launcher", dflt())).seed(launcher.clone()).seed(plan(&steps(r#"[{"n":1,"text":"a","status":"done"}]"#))),
+        child(case("plan-empty-steps", dflt())).seed(plan(&steps("[]"))),
+        child(case("plan-empty-steps-required", dflt())).seed(plan(&steps("[]"))).env("ANTIHALL_DEVSWARM_PLAN_REQUIRED", "1"),
+        child(case("plan-missing-required", dflt())).env("ANTIHALL_DEVSWARM_PLAN_REQUIRED", "1"),
+        child(case("plan-missing-required-launcher", dflt())).env("ANTIHALL_DEVSWARM_PLAN_REQUIRED", "1").seed(launcher.clone()),
+        child(case("plan-tracking-off", dflt())).seed(plan(&steps(r#"[{"n":1,"text":"a","status":"doing"}]"#))).env("ANTIHALL_DEVSWARM_PLAN_TRACKING", "0"),
+        child(case("plan-tracking-off-required", dflt())).env("ANTIHALL_DEVSWARM_PLAN_TRACKING", "0").env("ANTIHALL_DEVSWARM_PLAN_REQUIRED", "1"),
+        child(case("plan-garbage", dflt())).seed(plan("{torn")).env("ANTIHALL_DEVSWARM_PLAN_REQUIRED", "1"),
+        child(case("plan-array-root", dflt())).seed(plan("[1]")).env("ANTIHALL_DEVSWARM_PLAN_REQUIRED", "1"),
+        child(case("plan-steps-not-array", dflt())).seed(plan(r#"{"steps":"x"}"#)).env("ANTIHALL_DEVSWARM_PLAN_REQUIRED", "1"),
+        child(case("plan-step-null-entry", dflt())).seed(plan(&steps(r#"[null]"#))),
+        child(case("plan-step-text-quotes", dflt())).seed(plan(&steps(r#"[{"n":1,"text":"say \"hi\" \u00e9","status":"doing"}]"#))),
+        child(case("plan-second-turn-suppressed", dflt())).prime().seed(plan(&steps(r#"[{"n":1,"text":"a","status":"doing"}]"#))),
+        child(case("plan-for-another-id", dflt())).seed(Seed::File(
+            ".anti-hall/devswarm/plans/other.json".into(),
+            b"{\"steps\":[{\"n\":1,\"text\":\"a\",\"status\":\"doing\"}]}".to_vec(),
+            0,
+        )),
+        // the mailbox
+        child(case("mail-none-unread", dflt()))
+            .seed(desc(r#"{"inboxPath":"$HOME/in.ndjson","cursorPath":"$HOME/in.cursor"}"#))
+            .file("in.ndjson", "{\"a\":1}\n{\"a\":2}\n")
+            .file("in.cursor", "2"),
+        child(case("mail-unread-defers", dflt()))
+            .seed(desc(r#"{"inboxPath":"$HOME/in.ndjson","cursorPath":"$HOME/in.cursor"}"#))
+            .file("in.ndjson", "{\"a\":1}\n{\"a\":2}\n")
+            .file("in.cursor", "1")
+            .defer(),
+        child(case("mail-cursor-json-line", dflt()))
+            .seed(desc(r#"{"inboxPath":"$HOME/in.ndjson","cursorPath":"$HOME/in.cursor"}"#))
+            .file("in.ndjson", "{\"a\":1}\n")
+            .file("in.cursor", "{\"line\":1}"),
+        child(case("mail-cursor-json-unread-defers", dflt()))
+            .seed(desc(r#"{"inboxPath":"$HOME/in.ndjson","cursorPath":"$HOME/in.cursor"}"#))
+            .file("in.ndjson", "{\"a\":1}\n")
+            .file("in.cursor", "{\"line\":0}")
+            .defer(),
+        child(case("mail-cursor-garbage", dflt()))
+            .seed(desc(r#"{"inboxPath":"$HOME/in.ndjson","cursorPath":"$HOME/in.cursor"}"#))
+            .file("in.ndjson", "{\"a\":1}\n")
+            .file("in.cursor", "x"),
+        child(case("mail-cursor-negative", dflt()))
+            .seed(desc(r#"{"inboxPath":"$HOME/in.ndjson","cursorPath":"$HOME/in.cursor"}"#))
+            .file("in.ndjson", "{\"a\":1}\n")
+            .file("in.cursor", "-1"),
+        child(case("mail-cursor-past-end", dflt()))
+            .seed(desc(r#"{"inboxPath":"$HOME/in.ndjson","cursorPath":"$HOME/in.cursor"}"#))
+            .file("in.ndjson", "{\"a\":1}\n")
+            .file("in.cursor", "9"),
+        child(case("mail-cursor-missing", dflt()))
+            .seed(desc(r#"{"inboxPath":"$HOME/in.ndjson","cursorPath":"$HOME/in.cursor"}"#))
+            .file("in.ndjson", "{\"a\":1}\n"),
+        child(case("mail-inbox-missing", dflt())).seed(desc(r#"{"inboxPath":"$HOME/in.ndjson","cursorPath":"$HOME/in.cursor"}"#)).file("in.cursor", "0"),
+        child(case("mail-blank-lines-do-not-count", dflt()))
+            .seed(desc(r#"{"inboxPath":"$HOME/in.ndjson","cursorPath":"$HOME/in.cursor"}"#))
+            .file("in.ndjson", "{\"a\":1}\n\n  \n")
+            .file("in.cursor", "1"),
+        child(case("mail-descriptor-garbage", dflt())).seed(desc("{torn")),
+        child(case("mail-descriptor-array", dflt())).seed(desc("[1]")),
+        child(case("mail-descriptor-without-inbox", dflt())).seed(desc(r#"{"id":"child-1"}"#)),
+        child(case("mail-descriptor-no-cursor-path", dflt())).seed(desc(r#"{"inboxPath":"$HOME/in.ndjson"}"#)).file("in.ndjson", "{\"a\":1}\n"),
+        child(case("mail-relative-inbox-defers", dflt())).seed(desc(r#"{"inboxPath":"in.ndjson","cursorPath":"in.cursor"}"#)).defer(),
+        child(case("mail-inbox-path-not-a-string-defers", dflt())).seed(desc(r#"{"inboxPath":5}"#)).defer(),
+        // the working directory, the session, the transcript
+        child(case("no-cwd-defers", without("cwd"))).defer(),
+        child(case("cwd-relative-defers", prompt(json!({"cwd":"proj"})))).defer(),
+        child(case("cwd-numeric-defers", prompt(json!({"cwd":5})))).defer(),
+        child(case("cwd-in-a-checkout-defers", prompt(json!({"cwd":repo_dir})))).defer(),
+        child(case("cwd-nonexistent", prompt(json!({"cwd":"$HOME/gone/deeper"})))),
+        child(case("no-session", without("session_id"))),
+        child(case("session-empty", prompt(json!({"session_id":""})))),
+        child(case("session-numeric-defers", prompt(json!({"session_id":7})))).defer(),
+        child(case("no-transcript", without("transcript_path"))),
+        child(case("transcript-relative-defers", prompt(json!({"transcript_path":"x/S1.jsonl"})))).defer(),
+        child(case("transcript-numeric-defers", prompt(json!({"transcript_path":3})))).defer(),
+        child(case("transcript-null", prompt(json!({"transcript_path":Value::Null})))),
+        child(Case::raw("payload-garbage-defers", "{nope")).defer(),
+        // the gates in front of it
+        child(case("switch-off", dflt())).seed(Seed::Settings(json!({"devswarm":{"childTurn":false}}))),
+        child(case("kill-switch", dflt())).env("DISABLE_ANTIHALL_DEVSWARM", "1"),
+        child(case("judge-child", dflt())).env("ANTIHALL_JUDGE_CHILD", "1"),
+        child(case("primary-env-silent", dflt())).env("-DEVSWARM_SOURCE_BRANCH", ""),
+        case("not-devswarm", dflt()).seed(Seed::Dir("proj".into())).env("DEVSWARM_SOURCE_BRANCH", "b"),
+    ]
+}
+
+#[test]
+fn devswarm_child_turn_without_a_checkout_matches_node() {
+    let cases = child_turn_cases();
+    assert!(cases.len() >= 70, "the corpus must stay broad");
+    let n_defer = cases.iter().filter(|c| c.defer).count();
+    let t = drive("child-turn", CHILD_TURN, cases);
+    assert_eq!(t.blocks, 0);
+    assert!(t.stdout_nonempty >= 35, "the corpus must exercise the emitted turn: {}", t.stdout_nonempty);
+    assert!(t.state_changed >= 40, "the corpus must exercise the heartbeat and the dedupe state: {}", t.state_changed);
+    assert_eq!(t.deferred, n_defer, "deferred {}", t.deferred);
 }
 
 // ------------------------------------------------------------------------------------------------------------------
