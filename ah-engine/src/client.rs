@@ -211,11 +211,17 @@ fn slow_streak_tripped() -> bool {
 fn wait_marker(set: bool) {
     if let Some(p) = defaults::env_var("wait_file").filter(|p| !p.is_empty()) {
         if set {
-            crate::discard::logged("wait_file_write", crate::atomic::write(p, b"")); // the wrapper only tests that the file exists
+            crate::discard::logged("wait_file_write", create_marker(std::path::Path::new(&p)));
         } else {
             crate::discard::harmless(std::fs::remove_file(p)); // keep: an absent marker is the desired state
         }
     }
+}
+
+/// Create the empty wait marker in place. The wrapper only tests that the file exists and a lost marker at a crash costs
+/// nothing, so there is no temp file, rename or fsync (the atomic write cost 3-5 ms on every hook).
+fn create_marker(p: &std::path::Path) -> std::io::Result<()> {
+    std::fs::File::create(p).map(drop)
 }
 
 fn clear_slow_streak() {
@@ -901,6 +907,20 @@ fn panic_code(_args: &[String]) -> i32 {
 mod tests {
     use super::*;
     use crate::checks::Exact;
+
+    #[test]
+    fn the_wait_marker_is_one_plain_empty_file_with_no_temp_file_left() {
+        let dir = std::env::temp_dir().join(format!("ah-client-marker-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let marker = dir.join("wait");
+        create_marker(&marker).unwrap();
+        create_marker(&marker).unwrap(); // a second call over an existing marker is fine
+        assert_eq!(std::fs::metadata(&marker).unwrap().len(), 0);
+        let names: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name()).collect();
+        assert_eq!(names.len(), 1, "no temp file next to the marker: {names:?}");
+        assert!(create_marker(&dir.join("no-such-dir").join("wait")).is_err(), "a failure is reported to the caller, which logs it");
+        crate::discard::harmless(std::fs::remove_dir_all(&dir)); // keep: cleanup that raced; an absent file is the goal state
+    }
 
     #[test]
     fn only_a_missing_socket_means_no_daemon() {
