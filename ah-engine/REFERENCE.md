@@ -4008,6 +4008,13 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `doctor.installed_max_bytes` | `4194304` |  |  | The largest plugin registry file read when scanning other plugins. |
 | `doctor.installed_plugins_rel` | `.claude/plugins/installed_plugins.json` |  |  | The host's registry of installed plugins, relative to the home directory. |
 | `doctor.intel_name` | `x86_64` |  |  | The architecture name of 64-bit Intel/AMD. |
+| `doctor.jev_check` | `1` |  |  | 1 = when Jev is enabled, the doctor makes one minimal test call to it and reports OK, WARN or FAIL by latency and error; 0 skips the check. |
+| `doctor.jev_fail_ms` | `2000` |  | ms | Latency of the doctor's Jev test call from which the report is a FAIL; it is also the call's time budget, so a timeout is a FAIL. |
+| `doctor.jev_no` | `the text is anything else` |  |  | The no criterion of the doctor's Jev test call. |
+| `doctor.jev_question` | `Is this text a plain health check?` |  |  | The question of the doctor's Jev test call. |
+| `doctor.jev_state` | `anti-hall doctor health check` |  |  | The text of the doctor's Jev test call (no user content). |
+| `doctor.jev_warn_ms` | `800` |  | ms | Latency of the doctor's Jev test call from which the report is a WARN (a slow Jev). |
+| `doctor.jev_yes` | `the text is a health check` |  |  | The yes criterion of the doctor's Jev test call. |
 | `doctor.kind_base` | `legacy-base` |  |  | The kind of a unit whose name has no suffix. |
 | `doctor.kind_hash` | `hash` |  |  | The kind of a unit named for a worktree hash. |
 | `doctor.kind_key` | `repoKey` |  |  | The kind of a unit named for a project key. |
@@ -4264,6 +4271,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `doctor_msg.head_hooks` | `Hooks (present)` |  |  | The heading of the hooks section. |
 | `doctor_msg.head_install` | `Engine install` |  |  | Section heading. |
 | `doctor_msg.head_integrations` | `Integrations` |  |  | The heading of the notes about companions that are not installed (oh-my-claudecode, the Codex port). |
+| `doctor_msg.head_jev` | `Jev` |  |  | The heading of the Jev health section (shown only when Jev is enabled). |
 | `doctor_msg.head_leaks` | `leaked test-fixture stores` |  |  | The heading of the report of leaked test-fixture stores. |
 | `doctor_msg.head_logs` | `Logs and telemetry` |  |  | Section heading. |
 | `doctor_msg.head_omc` | `OMC (oh-my-claudecode) — detected` |  |  | The heading of the oh-my-claudecode section. |
@@ -4287,6 +4295,12 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `doctor_msg.hooks_valid` | `hooks.json is valid JSON ({n} hook script(s) registered)` |  |  | hooks.json and its registry parse. Placeholder: {n}. |
 | `doctor_msg.inbox_corrupt` | `{n} of the last {m} lines of {file} are not JSON` |  |  | LG-04. Placeholders: {n}, {m}, {file}. |
 | `doctor_msg.inbox_huge` | `{file} is {mb} MB (cap {cap_mb} MB) - Fix: ah-engine maintain` |  |  | LG-03. Placeholders: {file}, {mb}, {cap_mb}. |
+| `doctor_msg.jev_fail` | `Jev call failed via {transport}: {why} (after {ms} ms)` |  |  | Finding: the Jev test call failed. Placeholders: {why}, {ms}, {transport}. |
+| `doctor_msg.jev_no_key` | `Jev is enabled but has no API key for {transport}` |  |  | Finding: Jev is enabled but no API key resolves for its transport, so the test call was not made. Placeholder: {transport}. |
+| `doctor_msg.jev_ok` | `Jev answered in {ms} ms ({transport})` |  |  | Finding: the Jev test call answered in time. Placeholders: {ms}, {transport}, {limit}. |
+| `doctor_msg.jev_slow_fail` | `Jev is too slow: {ms} ms via {transport} (limit {limit} ms)` |  |  | Finding: the Jev test call answered, but past the fail limit. Placeholders: {ms}, {transport}, {limit}. |
+| `doctor_msg.jev_slow_warn` | `Jev is slow: {ms} ms via {transport} (fails at {limit} ms)` |  |  | Finding: the Jev test call answered, but slowly. Placeholders: {ms}, {transport}, {limit}. |
+| `doctor_msg.jev_timeout` | `no answer within {limit} ms` |  |  | The reason shown when the Jev test call ran out of its budget. Placeholders: {ms}, {transport}, {limit}. |
 | `doctor_msg.kind_dangling` | `a symlink to nothing` |  |  | What a path turned out to be. |
 | `doctor_msg.kind_dir` | `a directory` |  |  | What a path turned out to be. |
 | `doctor_msg.kind_file` | `a regular file` |  |  | What a path turned out to be. |

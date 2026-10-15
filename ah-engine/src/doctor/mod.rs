@@ -28,6 +28,7 @@ mod detect;
 mod devswarm;
 mod facts;
 mod install;
+mod jev;
 mod logs;
 mod orphans;
 mod plugin;
@@ -512,6 +513,7 @@ pub fn run_doctor(p: &Parsed) -> i32 {
         logs::section(&mut doc, &ctx);
     }
     audit_section(&mut doc);
+    jev::section(&mut doc, Path::new(&ctx.home), &ctx.env);
     if do_repair {
         repair_section(&mut doc, &ctx, &f, &fixes, root_path);
     } else if !f.check && f.explicit.is_empty() {
