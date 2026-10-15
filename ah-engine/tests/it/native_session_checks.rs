@@ -354,3 +354,26 @@ fn the_claude_child_prompt_port_in_a_checkout_starts_no_node_and_stays_inside_it
 fn the_codex_child_prompt_port_in_a_checkout_starts_no_node_and_stays_inside_its_budget() {
     child_in_checkout("codex");
 }
+
+/// A Primary inside a git checkout whose project holds nothing to show: the reminder only, with no Node process.
+fn primary_in_checkout(host: &str) {
+    run_event(
+        host,
+        "UserPromptSubmit",
+        false,
+        true,
+        &["devswarm-comms: mesh only"],
+        &["devswarm-parent-inbox"],
+        &[("devswarm-parent-inbox", "devswarm_parent_inbox_checkout_p50_ms")],
+    );
+}
+
+#[test]
+fn the_claude_primary_prompt_port_in_a_checkout_starts_no_node_and_stays_inside_its_budget() {
+    primary_in_checkout("claude");
+}
+
+#[test]
+fn the_codex_primary_prompt_port_in_a_checkout_starts_no_node_and_stays_inside_its_budget() {
+    primary_in_checkout("codex");
+}

@@ -1,0 +1,20 @@
+# ah-engine shipped defaults for the DevSwarm Primary prompt hook (`ah-engine check devswarm-parent-inbox`, script
+# `logic/devswarm-parent-inbox.js`), the engine's port of `hooks/devswarm-parent-inbox.js` for a Primary that runs inside a git
+# checkout. Format: see the header of engine.toml. The texts are the Node hook's own, word for word; a `{name}` is filled in at
+# run time. Keys shared with the other prompt hooks stay in small_guards.toml (devswarm_prompt.*).
+
+[devswarm_parent.defer_log_kind]
+doc = "The kind of the engine event-log line a deferral of the Primary prompt hook to its Node hook writes (the line's text names the cause, so every deferral is countable)."
+value = "parent-inbox-defer"
+
+[devswarm_parent.notices_file]
+doc = "The maintainer-notice feed (companion/lib/devswarm-maintainer-notice.js noticesPath), under the DevSwarm directory. While it exists the hook's notice segment may speak, which the engine leaves to Node."
+value = "maintainer-notices.jsonl"
+
+[devswarm_parent.escalation_banner]
+doc = "The segment that names supervisor escalations parked because this Primary is not registered in the mesh store (companion/lib/recovery.js parkedEscalationSegment). Placeholders: {count}, {kids} (the child ids, JSON-quoted and comma-separated), {parent}, {cli}."
+value = "⚠️ anti-hall · devswarm-escalations: not delivered ({count}): the supervisor escalated {kids} (idle — reassign or archive), but this Primary ({parent}) is not registered in the mesh store (or its lock was busy), so the notice is PARKED. Run `node {cli} register-primary` — the next supervisor sweep then delivers it."
+
+[devswarm_parent.segment_joiner]
+doc = "Between the segments of the Primary prompt hook's answer (additionalContext)."
+value = "\n\n"

@@ -22,6 +22,7 @@ verify_first_orch_p50_ms = 5
 jev_review_reminder_p50_ms = 10
 devswarm_child_role_p50_ms = 5
 devswarm_parent_inbox_p50_ms = 10
+devswarm_parent_inbox_checkout_p50_ms = 40
 devswarm_child_turn_p50_ms = 10
 devswarm_child_turn_checkout_p50_ms = 40
 debug_factor = 10

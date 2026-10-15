@@ -1131,7 +1131,7 @@ fn verify_first_orch_codex_matches_node() {
 }
 
 // ------------------------------------------------------------------------------------------------------------------
-// devswarm-parent-inbox: an active Primary with no git checkout around its working directory
+// devswarm-parent-inbox: an active Primary with no git checkout around its working directory (the checkout cases are in devswarm_parent_inbox_parity)
 // ------------------------------------------------------------------------------------------------------------------
 
 fn prompt(extra: Value) -> Value {
@@ -1170,8 +1170,8 @@ fn parent_inbox_cases() -> Vec<Case> {
         primary(case("cwd-nonexistent", prompt(json!({"cwd":"$HOME/gone/deeper"})))),
         primary(case("cwd-root", prompt(json!({"cwd":"/"})))),
         primary(case("cwd-relative-defers", prompt(json!({"cwd":"proj"})))).defer(),
-        primary(case("cwd-in-a-checkout-defers", prompt(json!({"cwd":repo_dir})))).defer(),
-        primary(case("cwd-in-a-checkout-subdir-defers", prompt(json!({"cwd":format!("{repo_dir}/ah-engine/src")})))).defer(),
+        primary(case("cwd-in-a-checkout", prompt(json!({"cwd":repo_dir})))),
+        primary(case("cwd-in-a-checkout-subdir", prompt(json!({"cwd":format!("{repo_dir}/ah-engine/src")})))),
         primary(case("no-session", without("session_id"))),
         primary(case("session-empty", prompt(json!({"session_id":""})))),
         primary(case("session-numeric", prompt(json!({"session_id":7})))),
@@ -1215,7 +1215,7 @@ fn devswarm_parent_inbox_without_a_checkout_matches_node() {
     assert_eq!(t.blocks, 0);
     assert!(t.stdout_nonempty >= 18, "the corpus must exercise the emitted reminder: {}", t.stdout_nonempty);
     assert!(t.state_changed >= 20, "the corpus must exercise the dedupe state: {}", t.state_changed);
-    assert_eq!(t.deferred, 9, "deferred {}", t.deferred);
+    assert_eq!(t.deferred, 7, "deferred {}", t.deferred);
 }
 
 // ------------------------------------------------------------------------------------------------------------------

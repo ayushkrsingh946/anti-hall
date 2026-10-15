@@ -28,6 +28,7 @@ mod dep_budget;
 mod devswarm_act_witness;
 mod devswarm_child_turn_parity;
 mod devswarm_gates_parity;
+mod devswarm_parent_inbox_parity;
 mod devswarm_prompt_parity;
 mod devswarm_readside_parity;
 mod devswarm_role_parity;

@@ -1603,7 +1603,7 @@ value = "apply_patch"
 
 [devswarm_prompt.parent_summary]
 doc = "One-line description of the devswarm-parent-inbox check in the generated reference."
-value = "DevSwarm Primary prompt hook: answers the silent cases (not a Primary, DevSwarm inactive, switch off, judge child) and an active Primary with no git checkout around its working directory (its communication-override reminder through the emit-dedupe store) in the engine; a Primary in a checkout defers to the Node hook, which owns the roster, mailbox and dedupe state (port of devswarm-parent-inbox.js)."
+value = "DevSwarm Primary prompt hook: answers the silent cases (not a Primary, DevSwarm inactive, switch off, judge child) and an active Primary with no git checkout around its working directory (its communication-override reminder through the emit-dedupe store) in the engine; a Primary in a checkout is answered the same way while its project has no summary, workspace descriptor, maintainer notice or app database (plus the parked supervisor escalations); a Primary with a roster, mailbox or any of those defers to the Node hook, which owns them (port of devswarm-parent-inbox.js)."
 
 [devswarm_prompt.child_summary]
 doc = "One-line description of the devswarm-child-turn check in the generated reference."
