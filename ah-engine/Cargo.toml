@@ -78,6 +78,23 @@ debug = "line-tables-only"
 split-debuginfo = "packed"
 # panic stays "unwind": the client wraps everything in catch_unwind so a bug fails open (exit 0), never SIGABRT.
 
+# A release-equivalent build whose binary carries its own symbols and line tables, for `samply record` / `sample` / Instruments on a
+# build you made yourself (`cargo build --profile profiling`, binary in target/profiling/). The shipped release stays stripped with
+# its symbols separate (above); this profile exists so a profile of a local build needs no dSYM juggling.
+[profile.profiling]
+inherits = "release"
+strip = false
+debug = "line-tables-only"
+split-debuginfo = "packed"
+
+[profile.profiling.package.rquickjs-sys]
+opt-level = 3
+
+# Debug builds (what `cargo test` without --release uses): line tables are enough for backtraces and breakpoints, and the
+# build and link are faster than with full debuginfo.
+[profile.dev]
+debug = "line-tables-only"
+
 # The QuickJS-NG interpreter (C, built by rquickjs-sys) is the hot loop of every scripted check: build it for speed, not size
 # (D88 spike, measured: the interpreter runs about 2.4x faster at opt-level 3 than at "z").
 [profile.release.package.rquickjs-sys]
