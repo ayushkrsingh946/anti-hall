@@ -3026,6 +3026,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `silent_nudge.ack_subject_sep` | `,` |  |  | Separator between the sorted agent ids the stop-ack signature is computed over. |
 | `silent_nudge.agents_dir` | `.anti-hall/agents` |  |  | Directory of subagent heartbeat files, relative to the home directory. |
 | `silent_nudge.control_re` | `[\x00-\x1f\x7f-\u{9f}]` |  |  | Rust regex source of the control characters turned into spaces in a name the nudge shows. |
+| `silent_nudge.daemon_re` | `\b(daemon\|throttle\|watchdog\|watcher\|keep-?alive\|heartbeat\|server\|listener\|pol...` |  |  | JavaScript regex source (case-insensitive) of the description of a background SHELL that is a long-running daemon: quiet by design, so it is never nudged as silent (an agent is judged by silence alone). |
 | `silent_nudge.ellipsis` | `…` |  |  | Text appended to a name that was cut. |
 | `silent_nudge.ever_key` | `everNudged` |  |  | Field of the state file that holds the once-per-agent records. |
 | `silent_nudge.ever_nudged_ttl_ms` | `2592000000` |  | ms | How long a once-per-agent nudge record is kept (30 days). |
@@ -3065,6 +3066,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `silent_nudge.shell_task_type` | `local_bash` |  |  | The task_status taskType of a background shell (anything else adopted is an agent). |
 | `silent_nudge.sidechain_file_prefix` | `agent-` |  |  | Prefix of an agent's own sidechain transcript file name. |
 | `silent_nudge.signature_len` | `16` |  |  | Hex characters of the SHA-1 a stop-ack signature keeps. |
+| `silent_nudge.stale_max_ms` | `86400000` |  | ms | A background task or heartbeat quiet for at least this long (24 hours) is a record that outlived its agent (carried over a restart or a compaction), not a silent agent: it is expired and never nudged. 0 turns the expiry off. |
 | `silent_nudge.state_file` | `.anti-hall/silent-agent-nudge-state.json` |  |  | Nudge state file, relative to the home directory. |
 | `silent_nudge.summary` | `Stop: nudges once per silent background agent (the block text, the nudge stat...` |  |  | One-line description of the silent-agent-nudge check in the generated reference. |
 | `silent_nudge.tasks_dir` | `tasks` |  |  | The directory name that holds a session's task output files (<session id>/tasks/<id>.output). |

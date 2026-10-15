@@ -454,6 +454,15 @@ value = "devswarm-"
 doc = "Heartbeat statuses (case-insensitive, whole text) that mean the agent finished."
 value = "done complete completed finished stopped success succeeded error failed"
 
+[silent_nudge.stale_max_ms]
+doc = "A background task or heartbeat quiet for at least this long (24 hours) is a record that outlived its agent (carried over a restart or a compaction), not a silent agent: it is expired and never nudged. 0 turns the expiry off."
+value = 86400000
+unit = "ms"
+
+[silent_nudge.daemon_re]
+doc = "JavaScript regex source (case-insensitive) of the description of a background SHELL that is a long-running daemon: quiet by design, so it is never nudged as silent (an agent is judged by silence alone)."
+value = '\b(daemon|throttle|watchdog|watcher|keep-?alive|heartbeat|server|listener|poller|supervisor)\b'
+
 [silent_nudge.ever_nudged_ttl_ms]
 doc = "How long a once-per-agent nudge record is kept (30 days)."
 value = 2592000000

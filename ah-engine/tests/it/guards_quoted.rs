@@ -199,3 +199,45 @@ fn the_task_guard_treats_an_owner_that_is_a_running_named_agent_as_attended() {
     assert!(node.1.contains("\"decision\":\"block\""), "node: {}", node.1);
     assert!(eng.1.contains("\"decision\":\"block\"") || eng.1.trim() == "AHFALLBACK", "engine: {}", eng.1);
 }
+
+// ---- #178: silent-agent-nudge expires a days-old record and leaves a quiet daemon alone ----
+
+/// A Stop whose transcript carries one adopted background task (a compaction's `task_status` attachment) whose output file was last
+/// written `age_min` minutes ago. Returns (engine, node) answers, each in its own home.
+fn silent_stop(tag: &str, task_type: &str, description: &str, age_min: i64) -> ((i32, String), (i32, String)) {
+    let dir = scratch(tag);
+    let out = dir.join("task.output");
+    std::fs::write(&out, "x").unwrap();
+    let when = std::time::SystemTime::now() - std::time::Duration::from_secs(age_min as u64 * 60);
+    std::fs::OpenOptions::new().write(true).open(&out).unwrap().set_modified(when).unwrap();
+    let att = json!({"type": "attachment", "timestamp": stamp(age_min + 5), "attachment": {"type": "task_status", "taskId": "bg1", "taskType": task_type,
+        "description": description, "status": "running", "outputFilePath": out.to_string_lossy()}});
+    let tp = dir.join("t.jsonl");
+    std::fs::write(&tp, att.to_string() + "\n").unwrap();
+    let p = json!({"hook_event_name": "Stop", "session_id": "s1", "cwd": dir.to_string_lossy(), "transcript_path": tp.to_string_lossy(), "stop_hook_active": false});
+    both("silent-agent-nudge", "silent-agent-nudge.js", &dir, &p)
+}
+
+fn nudged(out: &str) -> bool {
+    out.contains("\"decision\":\"block\"")
+}
+
+/// A record about 63 hours old is gone, not silent; one of a few hours still is.
+#[test]
+fn the_silent_agent_nudge_expires_a_record_older_than_the_configured_age() {
+    let (eng, node) = silent_stop("sn-stale", "local_agent", "Spike scripted checks go/no-go", 3785);
+    assert!(!nudged(&eng.1), "engine nudged a 63 h old record: {}", eng.1);
+    assert!(!nudged(&node.1), "node nudged a 63 h old record: {}", node.1);
+    let (eng, node) = silent_stop("sn-fresh", "local_agent", "Spike scripted checks go/no-go", 29);
+    assert!(nudged(&eng.1) && nudged(&node.1), "a 29 min silent agent is still nudged: {} / {}", eng.1, node.1);
+}
+
+/// A background shell whose description says it is a daemon is quiet by design; the same silence of an ordinary shell or agent is not.
+#[test]
+fn the_silent_agent_nudge_exempts_a_quiet_daemon_by_the_configured_rule() {
+    let (eng, node) = silent_stop("sn-daemon", "local_bash", "Restart the build-load throttle daemon", 29);
+    assert!(!nudged(&eng.1), "engine nudged a daemon: {}", eng.1);
+    assert!(!nudged(&node.1), "node nudged a daemon: {}", node.1);
+    let (eng, node) = silent_stop("sn-shell", "local_bash", "Run the full test suite", 29);
+    assert!(nudged(&eng.1) && nudged(&node.1), "an ordinary silent shell is still nudged: {} / {}", eng.1, node.1);
+}

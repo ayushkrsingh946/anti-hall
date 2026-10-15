@@ -161,6 +161,10 @@ function sidechainMtimeMs(transcriptPath, id) {
 }
 
 
+// A record quiet this long outlived its agent; a background shell whose description names a daemon is quiet by design.
+const STALE_MAX_MS = 24 * 60 * 60 * 1000;
+const DAEMON_RE = /\b(daemon|throttle|watchdog|watcher|keep-?alive|heartbeat|server|listener|poller|supervisor)\b/i;
+
 // transcriptCandidates(transcriptPath, sessionId, now, thresholdMs) -> [{ key, id, label, age, snapshot }]
 // `snapshot` is the dedupe key: output_file mtime in ms, or 'missing'.
 // fromOtherSession(outputFile, sessionId) -> true when the output file sits in another session's task
@@ -231,6 +235,8 @@ function transcriptCandidates(transcriptPath, sessionId, now, thresholdMs) {
 
     const age = now - referenceMs;
     if (!(age >= thresholdMs)) continue; // fresh, or unparseable reference -> nothing
+    if (age >= STALE_MAX_MS) continue; // a record this old outlived its agent (carried over a restart or a compaction)
+    if (rec.taskType === 'local_bash' && DAEMON_RE.test(rec.description || '')) continue; // a daemon is quiet by design
 
     out.push({
       key: 't:' + id,
@@ -300,6 +306,7 @@ function heartbeatCandidates(home, now, thresholdMs, sessionId) {
 
     const age = now - ts;
     if (age < thresholdMs) continue; // fresh -> nothing
+    if (age >= STALE_MAX_MS) continue; // a heartbeat this old outlived its agent
 
     out.push({
       key: 'h:' + id,
