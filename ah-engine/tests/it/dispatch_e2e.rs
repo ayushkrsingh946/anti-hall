@@ -1504,6 +1504,9 @@ fn the_gate_cuts_a_repeated_reminder_through_the_daemon_and_off_it_is_the_node_o
     std::fs::write(&map, serde_json::json!({ "UserPromptSubmit": m }).to_string()).unwrap();
     let args = ["hook", "--event", "UserPromptSubmit", "--fallback-map", map.to_str().unwrap()];
     let on = [("ANTIHALL_INJECT_GATE_TASK_EVERY", "3"), ("DEVSWARM_REPO_ID", "r")];
+    // the Primary's own prompt hook (it says its override reminder once per session) is switched off, so the stand-in is the only voice
+    std::fs::create_dir_all(e.dir.join("home/.anti-hall")).unwrap();
+    std::fs::write(e.dir.join("home/.anti-hall/settings.json"), r#"{"devswarm":{"parentInbox":false}}"#).unwrap();
     warm(&e, &args, &on);
     let seen: Vec<String> = (0..5).map(|_| context_of(&e.run_with(&args, false, &ups_payload("sess-on"), true, &on).1)).collect();
     // turn 1 is the first injection of the session; 2 and 3 are suppressed; 4 is the keepalive; 5 suppressed again
