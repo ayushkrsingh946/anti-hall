@@ -10,6 +10,7 @@
 //! | `ctRegister(cwd, id, session)` | performs the registration `ctPrepare` planned: lock, descriptor, cursor and inbox, registry row, summary |
 //! | `ctArchived(id, top, session)` | `{archived}`: the archive marker or the DevSwarm app's own verdict names this workspace |
 //! | `ctHealthy(key)` | `{healthy}`: the project's ingest daemon is alive and its monitor is answering |
+//! | `ctReaders(key, id)` | `{declared}`: some reader other than the floor holds a cursor of the partition (whose view of the unread count a hook can only tell from its own process ancestry) |
 //! | `ctFindPlan(id, root)` | `{plan}`: the step plan of the workspace (by the worktree's key, then by id), `null` for none |
 use super::host::with_settings;
 use crate::checks::git::util::Settings;
@@ -195,6 +196,14 @@ fn archived(inv: &Inv, id: &str, top: &str, session: &str) -> R<bool> {
     Ok(verdict == Some(true))
 }
 
+/// Whether a reader of this partition other than the floor has a cursor row: only then does the unread count depend on which reader asks.
+fn readers_declared(inv: &Inv, key: &str, id: &str) -> R<bool> {
+    let Some(reader) = crate::meshw::tick::open_reader(inv, key)? else { return Ok(false) };
+    let rows = reader.reader_cursors(id).map_err(|e| ident::Defer(format!("reader-cursors:{e}")))?;
+    let floor = defaults::text("mesh_write.floor_reader");
+    Ok(rows.iter().any(|r| r["reader"].as_str() != Some(floor)))
+}
+
 fn find_plan(inv: &Inv, id: &str, root: &str) -> R<Value> {
     Ok(match crate::meshw::plan::find_for(inv, id, Some(root).filter(|r| !r.is_empty()))? {
         Some(f) => json!({"plan": f.plan.stringify()}),
@@ -235,6 +244,12 @@ pub(super) fn install<'js>(c: &Ctx<'js>, h: &Object<'js>) -> rquickjs::Result<()
         "ctHealthy",
         Function::new(c.clone(), |key: String| -> rquickjs::Result<String> {
             with_settings(|st| answer(common::daemon_healthy(&inv_of(st, ""), Some(&key)).map(|h| json!({"healthy": h}))))
+        })?,
+    )?;
+    h.set(
+        "ctReaders",
+        Function::new(c.clone(), |key: String, id: String| -> rquickjs::Result<String> {
+            with_settings(|st| answer(readers_declared(&inv_of(st, ""), &key, &id).map(|d| json!({"declared": d}))))
         })?,
     )?;
     h.set(

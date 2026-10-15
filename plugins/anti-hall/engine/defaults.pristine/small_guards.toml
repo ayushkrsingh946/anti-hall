@@ -1857,6 +1857,30 @@ value = "child-turn"
 doc = "The event-log kind of the line the child-turn check writes when it hands a turn to the Node hook; the line's text is the cause."
 value = "child-turn-defer"
 
+[devswarm_prompt.mesh_direct]
+doc = "The child's nudge for mesh mail addressed to it (hooks/devswarm-child-turn.js buildMeshDirectSegment). Placeholders: {count}, {age}, {cli}, {id}."
+value = '''
+⚠️ anti-hall · devswarm-mesh-direct: you have {count} unread mesh direct message(s){age} addressed to you. Read them via `node {cli} inbox read-primary {id}` (read-only; after handling, run the `ackCommand` it returns).'''
+
+[devswarm_prompt.mesh_direct_urgent]
+doc = "The loudest form of the mesh-direct nudge, for urgent or high-urgency mail. Placeholders: {count}, {age}, {cli}, {id}."
+value = '''
+⚠️ anti-hall · devswarm-mesh-direct: urgent — you have {count} unread mesh direct message(s){age} addressed to you. STOP and read them FIRST via `node {cli} inbox read-primary {id}` (read-only; after handling, run the `ackCommand` it returns), before continuing.'''
+
+[devswarm_prompt.mesh_direct_age]
+doc = "The age of the oldest unread mesh mail, appended to the nudge. Placeholder: {minutes}."
+value = " (oldest {minutes}m)"
+
+[devswarm_prompt.urgent_levels]
+doc = "The urgency values (the summary's urgencyMax) that make the mesh-direct nudge loud."
+value = ["urgent", "high"]
+
+[devswarm_prompt.ms_per_minute]
+doc = "Milliseconds in the minute the age of unread mail is counted in."
+value = 60000
+min = 1
+unit = "ms"
+
 [guardkit.render_reserve]
 doc = "Extra bytes reserved beyond a message template's length when its placeholders are filled (a capacity hint, not a limit)."
 value = 32

@@ -112,6 +112,18 @@ function ctPlanSegment(id, home, root, cli, wroot) {
   }
 }
 
+// `buildMeshDirectSegment(count, id, urgencyMax, oldestTs)`: the nudge for mesh mail addressed to this child, the loudest wording for an urgent one.
+function ctMeshDirect(count, id, entry, cli) {
+  var oldest = typeof entry.oldestDirectUnreadTs === 'number' && isFinite(entry.oldestDirectUnreadTs) ? entry.oldestDirectUnreadTs : null;
+  var age = '';
+  if (oldest !== null && oldest > 0) {
+    var delta = ah.clock.now() - oldest;
+    if (delta >= 0) age = text.render(ah.cfg('devswarm_prompt.mesh_direct_age'), { minutes: Math.floor(delta / ah.cfgNum('devswarm_prompt.ms_per_minute')) });
+  }
+  var urgent = ah.cfg('devswarm_prompt.urgent_levels').indexOf(entry.urgencyMax || null) >= 0;
+  return text.render(ah.cfg(urgent ? 'devswarm_prompt.mesh_direct_urgent' : 'devswarm_prompt.mesh_direct'), { count: count, age: age, cli: cli, id: id });
+}
+
 // `gitPushState(worktree)` of companion/lib/devswarm-git-truth.js: {noUpstream, unpushed}, or null when the probe did not complete or the
 // directory is no repository (an unknown, not a fact).
 function ctPushState(top) {
@@ -218,20 +230,25 @@ function ctDecide(p, opts) {
       ctForget(sid, ah.cfg('devswarm_prompt.fault_key'));
       ctForget(sid, ah.cfg('devswarm_prompt.stale_key'));
     }
-    // the mailbox summary the registration just refreshed: a child with mesh-direct unread mail is Node's (the reader-identity correction)
-    var archiveRequested = false;
+    // the mailbox summary the registration just refreshed: mail addressed to this child by mesh, and a parent's request to archive
+    var archiveRequested = false, meshDirect = null;
     if (wkey !== null && ctSafeId(builder)) {
-      var sraw = null;
       var spath = home + '/' + ah.cfg('paths.base_dir') + '/' + ah.cfg('devswarm_prompt.summary_dir') + '/' + wkey + '.json';
       var ssize = ah.fs.size(spath);
       if (ssize !== null && ssize > ah.cfgNum('script.read_max_bytes')) throw gates.UNDECIDABLE;
-      sraw = ssize === null ? null : ah.fs.readText(spath);
+      var sraw = ssize === null ? null : ah.fs.readText(spath);
       if (sraw !== null) {
         var entry = null;
         try { var summary = sraw.trim() ? JSON.parse(sraw.trim()) : null; entry = summary && summary.workspaces && summary.workspaces[builder]; } catch (e) { entry = null; }
         if (entry) {
           var rawDirect = typeof entry.directUnread === 'number' && isFinite(entry.directUnread) ? entry.directUnread : (typeof entry.unread === 'number' && isFinite(entry.unread) ? entry.unread : 0);
-          if (rawDirect > 0) return ctDefer('mesh-direct-unread');
+          if (rawDirect > 0) {
+            // Node corrects the count by this reader's own cursor, which it finds from its process ancestry; the daemon sees another tree. The
+            // correction can only change the count when some reader of the partition has a cursor of its own, so only then is the turn Node's.
+            var rd = JSON.parse(ahHost.ctReaders(wkey, builder));
+            if (rd.unsure || rd.declared) return ctDefer('own-reader');
+            meshDirect = ctMeshDirect(rawDirect, builder, entry, cli);
+          }
           if (entry.archive_requested) archiveRequested = true;
         }
       }
@@ -239,6 +256,7 @@ function ctDecide(p, opts) {
     var info = ctUnread(builder, home);
     var segments = [];
     if (!dedupeOn || dedupe.shouldEmit(staticOpts)) segments = segments.concat(block);
+    if (meshDirect !== null) segments.push(meshDirect);
     if (plan !== null && (!dedupeOn || dedupe.shouldEmit(planOpts))) segments.push(plan);
     var archiveSegment = false;
     if (info !== null) {
