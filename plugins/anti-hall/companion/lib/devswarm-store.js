@@ -1751,6 +1751,8 @@ function openJournal(home, workspaceId, fsi, lockOpts, opts) {
           ts: Number.isFinite(m && m.ts) ? m.ts : Date.now(),
           hash,
           body: (m && m.body != null) ? String(m.body) : '',
+          // sender (additive, only when known): rows written without one keep their old shape.
+          ...(m && m.sender != null ? { sender: String(m.sender) } : {}),
         });
         return { inserted: true };
       };

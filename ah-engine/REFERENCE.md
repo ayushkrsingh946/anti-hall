@@ -1550,6 +1550,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `merge_side_pick.head_ref_re` | `^ref:\s*refs/heads/[^\s]+` |  |  | Regex source: the ref line of a HEAD file (a detached HEAD has none, and the branch is then unknown). |
 | `merge_side_pick.head_word` | `HEAD` |  |  | The refspec word that means the current branch. |
 | `merge_side_pick.heads_prefix` | `refs/heads/` |  |  | The prefix of a full local branch ref in a refspec. |
+| `merge_side_pick.heredoc_open` | `<<-?[ \t]*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\1` |  |  | JavaScript regex source for the opener of a heredoc (<<TAG, <<-TAG, <<'TAG'; capture 1 = the optional quote, capture 2 = the tag). The lines up to the tag line are text, blanked before a command is split into segments. |
 | `merge_side_pick.msg_instead` | `run the tests first, review the discarded side in `git diff`, then push.` |  |  | Advisory advice. |
 | `merge_side_pick.msg_what` | `pushing after a conflict was resolved by taking one side wholesale ({pick}) w...` |  |  | Advisory headline; {pick} is the recorded side-pick command. |
 | `merge_side_pick.msg_why` | `taking --ours/--theirs (or -X ours/theirs) silently drops the other side's ch...` |  |  | Advisory reason. |
@@ -1557,7 +1558,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `merge_side_pick.plain_branch_re` | `^[A-Za-z0-9][A-Za-z0-9._/@-]*$` |  |  | Regex source: a plain local branch name in a refspec (anything else, such as a tag, a sha or a revision, keeps the advisory). |
 | `merge_side_pick.push_tail` | `push\b` |  |  | Regex source appended to git_prefix that recognises a push. |
 | `merge_side_pick.push_unscoped_opts_re` | `^(?:--(?:all\|mirror\|tags\|follow-tags\|prune\|branches\|push-option\|repo\|receive-...` |  |  | Regex source: a push argument that pushes more than the named refs or takes its value as the next word (--all, --mirror, --tags, --follow-tags, --prune, --branches, -o, --push-option, --repo, --receive-pack, --exec). The advisory stays for such a push. |
-| `merge_side_pick.quote_masks` | `\x27[^\x27\n]*\x27, "(?:[^"\\\n]\\|\\.)*"` |  |  | Regexes whose matches (quoted spans) are blanked before a command is split into segments, so quoted text is never mistaken for a command (maskShellQuotes). |
+| `merge_side_pick.quote_masks` | `\x27[^\x27]*\x27\\|"(?:[^"\\]\\|\\.)*"` |  |  | Regexes whose matches (quoted spans, which may span lines such as a multi-line commit message) are blanked before a command is split into segments, so quoted text is never mistaken for a command (maskShellQuotes). One alternation, so the quote that opens first wins. |
 | `merge_side_pick.scope_unknown_re` | `(?:^\|\s)(?:cd\|pushd\|GIT_DIR=\|GIT_WORK_TREE=\|--git-dir\|--work-tree)(?:\s\|=\|$)` |  |  | Regex source: a segment after which the checkout a git command runs in cannot be told (cd, pushd, GIT_DIR, GIT_WORK_TREE, --git-dir, --work-tree). A push then keeps the advisory. |
 | `merge_side_pick.segment_split` | `[;&\|\n]+` |  |  | Regex that splits a masked command into segments (semicolon, ampersand, pipe, newline). |
 | `merge_side_pick.setting` | `6 entries` |  |  | Where the on/off switch is read from (guards.mergeSidePickAdvisory, default on). |

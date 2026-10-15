@@ -690,3 +690,34 @@ test('F-C: migrateOne reports verified:false (not a false success) when the regi
     } finally { s2.close(); }
   } finally { rm(home); }
 });
+
+// R1 GUARDS B6 (#181, `from: null`): the legacy durable inbox is the NDJSON `inbox pull` mirrored, and each line carries its sender
+// and/or the branch that names it. The import kept only the raw line, so every migrated row read back `sender: null` and
+// `read-primary` printed `from: null`. The import now stamps the sender (line sender, else the one workspace checked out under the
+// named branch); a plain line or an unknown branch stays unattributed, never guessed.
+for (const backend of ['journal', 'sqlite']) {
+  let ok = true;
+  if (backend === 'sqlite') { try { require('node:sqlite'); } catch (_) { ok = false; } }
+  (ok ? test : test.skip)(`migrate stamps the sender of a legacy NDJSON inbox line (${backend})`, () => {
+    const home = tmpHome();
+    try {
+      writeWorkspace(home, 'fix-child', { lines: ['c1'], cursor: 0 });
+      writeWorkspace(home, 'zz-parent', {
+        lines: [
+          JSON.stringify({ _h: 'h1', fromBranch: 'fix/child', message: 'DONE: fix/child - repo@main@abc', createdAt: '2026-01-01T00:00:00Z', sender: 'fix-child' }),
+          JSON.stringify({ _h: 'h2', fromBranch: 'fix/child', message: 'DONE: fix/child - repo@main@def', createdAt: '2026-01-01T00:00:01Z', sender: null }),
+          JSON.stringify({ _h: 'h3', fromBranch: 'ghost/none', message: 'hello', createdAt: '2026-01-01T00:00:02Z' }),
+          'plain legacy line',
+        ],
+        cursor: 0,
+      });
+      const o = { home, backend, env: {} };
+      assert.equal(migrate.migrateToStore(o).ok, true);
+      const s = storeLib.openStore({ home, workspaceId: 'zz-parent', backend });
+      try {
+        const rows = s.listMessages('zz-parent');
+        assert.deepEqual(rows.map((r) => r.sender), ['fix-child', 'fix-child', null, null], 'line sender, then branch-resolved, then unknown stays null');
+      } finally { s.close(); }
+    } finally { rm(home); }
+  });
+}

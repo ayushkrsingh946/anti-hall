@@ -17,12 +17,28 @@ const path = require('node:path');
 
 const PREFIX = 'merge-side-pick';
 
-// Blank '...' and "..." spans (same length) so a quoted commit message or echo
-// argument cannot be mistaken for a command. Unclosed quotes mask nothing.
+// Blank heredoc bodies (`<<TAG` ... `TAG`) and quoted spans (same length) so text a command only carries (a commit message, a
+// heredoc note, an echo argument) cannot be mistaken for a command. A body is text however many lines it spans, so newlines
+// inside it stay but its characters go. Unclosed quotes mask nothing; an unterminated heredoc runs to the end, as the shell reads it.
+const HEREDOC_OPEN = /<<-?[ \t]*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\1/g;
+function maskHeredocs(cmd) {
+  const blank = (t) => t.replace(/[^\n]/g, ' ');
+  let s = cmd, from = 0;
+  for (;;) {
+    HEREDOC_OPEN.lastIndex = from;
+    const m = HEREDOC_OPEN.exec(s);
+    if (!m) return s;
+    if (m.index > 0 && s[m.index - 1] === '<') { from = HEREDOC_OPEN.lastIndex; continue; }
+    const nl = s.indexOf('\n', HEREDOC_OPEN.lastIndex);
+    if (nl < 0) return s;
+    const end = new RegExp('\\n[ \\t]*' + m[2] + '[ \\t]*(?=\\n|$)').exec(s.slice(nl));
+    const stop = end ? nl + end.index : s.length;
+    s = s.slice(0, nl + 1) + blank(s.slice(nl + 1, stop)) + s.slice(stop);
+    from = stop;
+  }
+}
 function maskShellQuotes(cmd) {
-  return String(cmd || '')
-    .replace(/'[^'\n]*'/g, (m) => ' '.repeat(m.length))
-    .replace(/"(?:[^"\\\n]|\\.)*"/g, (m) => ' '.repeat(m.length));
+  return maskHeredocs(String(cmd || '')).replace(/'[^']*'|"(?:[^"\\]|\\.)*"/g, (m) => m.replace(/[^\n]/g, ' '));
 }
 
 // Command segments split on ; & | and newlines (quotes already masked).
