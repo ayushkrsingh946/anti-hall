@@ -16,6 +16,11 @@ on:
 permissions:
   contents: read
 
+# A newer push to the same branch or pull request cancels the superseded run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
 jobs:
   no-node:
     name: no-node (${{ matrix.os }})
@@ -25,7 +30,8 @@ jobs:
       fail-fast: false
       matrix:
         # macOS arm64 and Linux x86_64 first (issue checklist); macOS Intel and Linux arm64 follow with the platform lane.
-        os: [macos-latest, ubuntu-latest]
+        # A pull request runs the Linux leg only; macOS runs on push to engine-proto and on dispatch.
+        os: ${{ fromJSON(github.event_name == 'pull_request' && '["ubuntu-latest"]' || '["macos-latest","ubuntu-latest"]') }}
     defaults:
       run:
         working-directory: ah-engine

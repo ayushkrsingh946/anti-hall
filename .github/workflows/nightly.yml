@@ -7,7 +7,7 @@ name: nightly
 # On failure ONE issue titled "Nightly test failure" is opened or commented on.
 on:
   schedule:
-    - cron: '23 3 * * *'
+    - cron: '23 5 * * *'
   workflow_dispatch:
 
 permissions:
