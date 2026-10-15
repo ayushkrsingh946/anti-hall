@@ -1188,6 +1188,10 @@ fn drive(tag: &str, n: usize, warm: Duration, window: Duration) -> (f64, f64, f6
                 if tick % 50 == (*i as u64) % 50 {
                     write(&home.join(format!(".anti-hall/devswarm/heartbeats/ws-{i}.json")), &json!({"ts": now()}));
                 }
+                if tick % 20 == 0 && *i <= 2 {
+                    // the Node ingest companions beat every ~2 s into the same directory; no reconcile reads these files
+                    write(&home.join(format!(".anti-hall/devswarm/heartbeats/ingest-proj{i}.json")), &json!({"ts": now()}));
+                }
                 if tick % 100 == (*i as u64) % 100 {
                     let key = facts::repo_key(wt.to_str().unwrap()).unwrap();
                     let db = home.join(".anti-hall/devswarm/store").join(key).join("devswarm.db");
