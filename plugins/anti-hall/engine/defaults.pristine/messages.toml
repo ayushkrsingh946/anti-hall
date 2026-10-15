@@ -646,3 +646,55 @@ value = "Every flag in a command's arguments, with the commands that take it. A 
 [msg.docs_env_intro]
 doc = "Introduction of the Environment variables section of the generated reference."
 value = "Every `AH_ENGINE_*` variable the engine or its wrappers read. A variable that overrides a setting names that setting."
+
+[msg.log_debug_on]
+doc = "Event-log detail when debug mode turns on (the setting, the environment variable or the flag)."
+value = "debug mode on: verbose module logs, invariant checks, per-thread CPU and memory samples go to the debug log"
+
+[msg.log_debug_off]
+doc = "Event-log detail when debug mode turns off (the setting was switched off and neither the environment variable nor the flag holds it on)."
+value = "debug mode off"
+
+[msg.log_budget_cpu]
+doc = "Event-log detail when the daemon CPU budget is breached or back within budget. Placeholders: {state}, {value} (percent of one core over the last window), {limit} (the budget, percent)."
+value = "daemon CPU budget {state}: {value}% of one core (budget {limit}%)"
+
+[msg.log_budget_mem]
+doc = "Event-log detail when the daemon memory budget is breached or back within budget. Placeholders: {state}, {value} (MB), {limit} (the budget, MB)."
+value = "daemon memory budget {state}: {value} MB (budget {limit} MB)"
+
+[msg.state_budget_over]
+doc = "The word for a resource budget that has just been breached."
+value = "breached"
+
+[msg.state_budget_within]
+doc = "The word for a resource budget that is back within its limit."
+value = "back within budget"
+
+[msg.dbg_request]
+doc = "Debug-log line for a served daemon request. Placeholders: {request}, {event}, {depth} (queued connections), {busy} (busy workers)."
+value = "{request} {event} served, queue {depth} busy {busy}"
+
+[msg.dbg_hook]
+doc = "Debug-log line for one finished hook invocation of the client. Placeholders: {code} (exit code), {out} and {err} (bytes written), {us} (microseconds spent)."
+value = "exit {code} out {out} B err {err} B in {us} us"
+
+[msg.dbg_cpu_window]
+doc = "Debug-log line for one CPU self-check window of the daemon. Placeholders: {ms} (window length), {pct} (percent of one core)."
+value = "window {ms} ms: {pct}% of one core"
+
+[msg.inv_queue_pop]
+doc = "Invariant violation: after a worker took a connection, the queue-depth counter and the queue length differ. Placeholders: {depth}, {len}."
+value = "depth counter {depth} != queue length {len} after a pop"
+
+[msg.inv_queue_push]
+doc = "Invariant violation: after the accept loop queued a connection, the queue-depth counter and the queue length differ. Placeholders: {depth}, {len}."
+value = "depth counter {depth} != queue length {len} after a push"
+
+[msg.inv_busy_workers]
+doc = "Invariant violation: more workers are marked busy than there are workers. Placeholder: {workers}."
+value = "more workers busy than the {workers} there are"
+
+[msg.inv_violated]
+doc = "Debug-log line for a violated runtime invariant (checked only in debug mode). Placeholder: {what}, the specific check that failed."
+value = "INVARIANT VIOLATED: {what}"

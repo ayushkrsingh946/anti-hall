@@ -793,7 +793,12 @@ pub fn hook_main(args: &[String]) -> i32 {
         let rest = (force_fallback && cap_hit).then_some(stdin);
         // a stdin I/O error is an internal fault and fails open; an oversize or non-UTF-8 payload is deliberate and stays fail-closed on guards
         let fail_closed_unavailable = force_fallback && read.is_ok() && event_from_lossy(&raw).is_none_or(|event| guarded(&event));
+        let started = std::time::Instant::now();
         let o = run_bytes(raw, force_fallback, fallback.as_deref(), rest, fail_closed_unavailable);
+        crate::debug_log!(
+            "client/hook",
+            defaults::render("msg.dbg_hook", &[("code", &o.code), ("out", &o.out.len()), ("err", &o.err.len()), ("us", &started.elapsed().as_micros())])
+        );
         if !o.err.is_empty() {
             let mut se = std::io::stderr();
             crate::discard::harmless(se.write_all(o.err.as_bytes())); // keep: a closed pipe leaves nobody to tell

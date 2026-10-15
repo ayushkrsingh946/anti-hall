@@ -12,6 +12,7 @@ pub mod atomic;
 pub mod backup;
 pub mod binguard;
 pub mod bootstrap;
+pub mod budget;
 pub mod cfgstore;
 pub mod checks;
 pub mod cli;
@@ -21,6 +22,7 @@ pub mod crash;
 pub mod daemon;
 pub mod db;
 pub mod deadline;
+pub mod debug;
 pub mod defaults;
 pub mod devswarm_rt;
 #[cfg(feature = "diag")]

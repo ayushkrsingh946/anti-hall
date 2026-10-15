@@ -575,6 +575,31 @@ new files produced one rescan.
 Intel macOS and WSL2 are covered by CI builds and by fixture tests of the mount-table parser (`tests/` of `fstype.rs`), not run.
 FSEvents replays changes made a moment before a stream starts; they are hints, and a consumer reconciles at start anyway.
 
+## Debug logging backend (lane B, 2026-10-15)
+
+Question: for debug mode (`src/debug.rs`), the `tracing` + `tracing-subscriber` stack (reloadable `EnvFilter`) against a small leveled
+log on the engine's own append-only NDJSON pattern. Both were built in the real release profile (`opt-level = "z"`, LTO, one codegen
+unit) from the same tree; the tracing variant is kept as a patch in the lane's work directory (`tracing-variant.patch`). Measured on
+macOS arm64 under a load average of 30 to 40 from other lanes, so wall time is noise and the table uses instructions and CPU time.
+
+| | base (no debug mode) | own log (shipped) | tracing |
+|---|---|---|---|
+| binary size | 9,911,792 B | 9,928,320 B (+16,528) | 10,111,536 B (+199,744) |
+| distinct crates in the normal graph (macOS arm64, engine excluded) | 60 | 60 (+0) | 68 (+8: tracing, tracing-core, tracing-subscriber, sharded-slab, thread_local, matchers, lazy_static, pin-project-lite) |
+| hook client, debug off: instructions per call (hyperfine 2.0, 300 runs, mean) | 48.69 to 48.84 M | 48.69 to 48.71 M | 48.91 M |
+| hook client, debug on: instructions per call | n/a | 49.03 M | 49.22 M |
+| daemon idle CPU, debug off (120 s) | 0.373 % of a core | 0.370 % | not measured at 120 s (30 s: same as own) |
+| daemon RSS after 300 requests | 38 to 39 MB | 38 to 39 MB | 39 MB |
+
+Decision: the own log. Equal CPU, RSS and start-up within noise; tracing costs eight crates (68 on macOS and 75 on the Linux hosts against `max_crates = 67` in
+`deps-budget.toml`, so it would need a raise) and about 12 times the binary growth for features the debug log does not use (spans,
+subscribers, layers). The client never installs a subscriber when debug mode is off in either variant, so the start-up comparison is
+the binary size and relocation cost only. Revisit only if per-request spans are wanted.
+
+mach2 (macOS thread_info bindings) was not adopted for `status --threads`: `libc` already exposes the calls used (`task_threads`,
+`thread_info`, `THREAD_BASIC_INFO`), mach2 would add one crate to the macOS graph, and the call cost is the kernel's, not the binding's
+(inference; not benchmarked).
+
 ## Revision log
 
 - **1.0** (2026-10-04): initial record, D1–D43.

@@ -131,6 +131,8 @@ pub struct Shared {
     busy_since: Vec<Arc<AtomicU64>>,
     stall_ms: AtomicU64,
     test_thread_panics: AtomicU64,
+    /// CPU and memory against their budgets (`diagnostics.budget_*`), updated by the watchdog.
+    budget: Mutex<crate::budget::State>,
     /// Last sampled resident set, KB.
     pub rss_kb: AtomicU64,
     /// Highest sampled resident set since start, KB.
@@ -206,6 +208,7 @@ impl Shared {
             busy_since: (0..workers).map(|_| Arc::new(AtomicU64::new(0))).collect(),
             stall_ms: AtomicU64::new(0),
             test_thread_panics: AtomicU64::new(0),
+            budget: Mutex::new(crate::budget::State::default()),
             rss_kb: AtomicU64::new(0),
             rss_peak_kb: AtomicU64::new(0),
             rss_tripped: AtomicBool::new(false),
@@ -376,11 +379,17 @@ impl Shared {
         let load = self.load.report(health::now_ms());
         let degraded = health::summary()["degraded"].as_bool().unwrap_or(false);
         let busy = self.busy_since.iter().filter(|b| b.load(SeqCst) != 0).count() as u64;
+        let (cpu_permille, budget_mask) = {
+            let b = lk(&self.budget);
+            (b.cpu_permille(), b.mask())
+        };
         crate::telemetry::emit::daemon_snapshot(
             degraded,
             &[
                 ("rss_kb", limits::rss_kb()),
                 ("rss_cap_kb", cfg.rss_cap_kb),
+                ("cpu_permille", cpu_permille),
+                ("budget_breach", budget_mask),
                 ("heap_live_kb", crate::memstat::heap().live / 1024),
                 ("restarts", self.starts.saturating_sub(1)),
                 ("queue_depth", self.depth.load(SeqCst) as u64),
@@ -439,6 +448,8 @@ impl Shared {
             "malloc_stack_logging": cfg.malloc_stack_logging,
             "storage": self.storage,
             "rss_cap_kb": cfg.rss_cap_kb,
+            "budget": lk(&self.budget).report(cfg.effective.num("diagnostics.budget_cpu_pct"), cfg.effective.num("diagnostics.budget_mem_mb")),
+            "debug": crate::debug::stats(),
             "inject_gate": {"sessions": gs.sessions, "slots": gs.slots, "bytes": gs.bytes, "evictions": gs.evictions,
                 "max_sessions": defaults::num("inject_gate.max_sessions"), "max_slots": defaults::num("inject_gate.max_slots")},
             "config": {"version": cfg.version, "pending_restart": cfg.pending_restart, "last_error": cfg.last_error},
@@ -987,6 +998,18 @@ fn serve_conn(mut s: UnixStream, sh: &Shared, wait: Duration, in_flight: u64) ->
         sh.telemetry.with_metrics(|m| m.add("script_soft", &[], soft_scripts));
     }
     let mem_after = mem_before.is_some().then(crate::memdiag::measure_after);
+    crate::debug_log!(
+        "daemon/request",
+        defaults::render(
+            "msg.dbg_request",
+            &[
+                ("request", &request),
+                ("event", &event),
+                ("depth", &sh.depth.load(SeqCst)),
+                ("busy", &sh.busy_since.iter().filter(|b| b.load(SeqCst) != 0).count())
+            ]
+        )
+    );
     let late = crate::deadline::soft_remaining() == Some(Duration::ZERO);
     let delivered = write_reply(&mut s, &reply, &cfg);
     if delivered {
@@ -1050,6 +1073,11 @@ fn worker(sh: Arc<Shared>, idx: usize) {
             loop {
                 if let Some((c, queued_at, in_flight)) = q.pop_front() {
                     sh.depth.fetch_sub(1, SeqCst);
+                    crate::invariant!(
+                        "daemon/queue",
+                        sh.depth.load(SeqCst) == q.len(),
+                        defaults::render("msg.inv_queue_pop", &[("depth", &sh.depth.load(SeqCst)), ("len", &q.len())])
+                    );
                     break Some((c, queued_at.elapsed(), in_flight));
                 }
                 let (g, _) = sh.cv.wait_timeout(q, defaults::millis("daemon.worker_wait_ms")).unwrap_or_else(|e| e.into_inner());
@@ -1118,6 +1146,7 @@ fn watchdog(sh: Arc<Shared>) {
     let mut last_idle_check = Instant::now();
     let mut last_cpu_check = Instant::now();
     let mut last_cpu_secs = limits::process_cpu_secs();
+    let mut debug_sampler = crate::debug::Sampler::new();
     loop {
         std::thread::sleep(sh.cfg().watchdog_tick);
         // the stall and stuck checks keep running while draining: a drain waits for its workers, so one stuck there would
@@ -1134,6 +1163,16 @@ fn watchdog(sh: Arc<Shared>) {
         let draining = sh.draining.load(SeqCst);
         let cfg = sh.cfg();
         let now = sh.ms();
+        // debug mode follows the setting without a restart; while on, the samplers log per-thread CPU and memory
+        if let Some(on) = crate::debug::apply_config(cfg.effective.boolean("diagnostics.debug_mode")) {
+            health::log_event("debug", if on { "on" } else { "off" }, defaults::text(if on { "msg.log_debug_on" } else { "msg.log_debug_off" }));
+        }
+        debug_sampler.tick(|| sh.memory());
+        crate::invariant!(
+            "daemon/watchdog",
+            sh.busy_since.iter().filter(|b| b.load(SeqCst) != 0).count() <= cfg.workers,
+            defaults::render("msg.inv_busy_workers", &[("workers", &cfg.workers)])
+        );
         if now.saturating_sub(sh.loop_beat.load(SeqCst)) > cfg.stall.as_millis() as u64 {
             health::log_event("watchdog", "stall", defaults::text("msg.log_stall"));
             health::record_failure("watchdog", "stall", defaults::text("msg.failure_stall"));
@@ -1160,20 +1199,21 @@ fn watchdog(sh: Arc<Shared>) {
             last_cpu_check = Instant::now();
             last_cpu_secs = cpu_now;
             let warn_pct = cfg.effective.num("daemon.cpu_warn_pct") as f64;
-            if warn_pct > 0.0 && wall > 0.0 {
-                let pct = cpu_delta * 100.0 / wall;
-                if pct >= warn_pct {
-                    let backoff_ms = cfg.effective.num("schedule.cpu_backoff_ms");
-                    if let Some(sched) = sh.sched.get() {
-                        sched.backoff_for(backoff_ms);
-                    }
-                    let pct_s = format!("{pct:.1}");
-                    health::log_event(
-                        "cpu",
-                        "sustained",
-                        &defaults::render("msg.log_cpu_sustained", &[("pct", &pct_s), ("ms", &cpu_check.as_millis()), ("backoff_ms", &backoff_ms)]),
-                    );
+            let pct = if wall > 0.0 { cpu_delta * 100.0 / wall } else { 0.0 };
+            crate::debug_log!("daemon/cpu", defaults::render("msg.dbg_cpu_window", &[("ms", &format!("{:.0}", wall * 1000.0)), ("pct", &format!("{pct:.2}"))]));
+            let edge = lk(&sh.budget).cpu_window(pct, cfg.effective.num("diagnostics.budget_cpu_pct"), cfg.effective.num("diagnostics.budget_cpu_windows"));
+            report_budget_edge(edge, &format!("{pct:.1}"), cfg.effective.num("diagnostics.budget_cpu_pct"), "msg.log_budget_cpu");
+            if warn_pct > 0.0 && pct >= warn_pct {
+                let backoff_ms = cfg.effective.num("schedule.cpu_backoff_ms");
+                if let Some(sched) = sh.sched.get() {
+                    sched.backoff_for(backoff_ms);
                 }
+                let pct_s = format!("{pct:.1}");
+                health::log_event(
+                    "cpu",
+                    "sustained",
+                    &defaults::render("msg.log_cpu_sustained", &[("pct", &pct_s), ("ms", &cpu_check.as_millis()), ("backoff_ms", &backoff_ms)]),
+                );
             }
         }
         crate::binguard::note_uptime(sh.started.elapsed());
@@ -1194,6 +1234,9 @@ fn watchdog(sh: Arc<Shared>) {
             let mem = limits::mem_kb();
             sh.rss_kb.store(rss, SeqCst);
             sh.rss_peak_kb.fetch_max(rss, SeqCst);
+            let mem_limit = cfg.effective.num("diagnostics.budget_mem_mb");
+            let edge = lk(&sh.budget).mem_sample(mem, mem_limit);
+            report_budget_edge(edge, &(mem / 1024).to_string(), mem_limit, "msg.log_budget_mem");
             // the memory registry's process-wide check: shrink at the global soft limit, recycle at the hard one, and a clean
             // restart (the same drain as the cap below, with the reason recorded) when it stays over the hard limit
             if let Some(r) = crate::mem::global().tick(mem.saturating_mul(1024), now) {
@@ -1220,6 +1263,15 @@ fn watchdog(sh: Arc<Shared>) {
                 }
             }
         }
+    }
+}
+
+/// Log the start or the end of a budget breach (one line per change, never one per sample).
+fn report_budget_edge(edge: crate::budget::Edge, value: &str, limit: u64, msg: &str) {
+    if let Some((bit, began)) = edge {
+        let which = bit.name();
+        let state = defaults::text(if began { "msg.state_budget_over" } else { "msg.state_budget_within" });
+        health::log_event("budget", which, &defaults::render(msg, &[("state", &state), ("value", &value), ("limit", &limit)]));
     }
 }
 
@@ -1729,6 +1781,11 @@ fn accept_loop(sh: &Arc<Shared>, listener: &UnixListener) {
                 let in_flight = q.len() as u64 + sh.busy_since.iter().filter(|b| b.load(SeqCst) != 0).count() as u64;
                 q.push_back((s, Instant::now(), in_flight));
                 sh.depth.fetch_add(1, SeqCst);
+                crate::invariant!(
+                    "daemon/queue",
+                    sh.depth.load(SeqCst) == q.len(),
+                    defaults::render("msg.inv_queue_push", &[("depth", &sh.depth.load(SeqCst)), ("len", &q.len())])
+                );
                 drop(q);
                 sh.cv.notify_one();
             }
@@ -2038,5 +2095,25 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(ok(&handle_request(b"CTL telemetry summary window=1d\n", &sh).0)).unwrap();
         assert_eq!(v["detail"]["daemon"]["snapshots"], 1);
         assert_eq!(v["detail"]["daemon"]["latest"]["rss_cap_kb"], sh.cfg().rss_cap_kb);
+    }
+    #[test]
+    fn a_budget_breach_shows_in_the_health_event_and_in_status() {
+        let sh = shared();
+        let fields = |ev: &crate::telemetry::event::Event| {
+            let crate::telemetry::event::Extras::Fields(f) = &ev.extras else { panic!("fields") };
+            (f.get_num("cpu_permille"), f.get_num("budget_breach"))
+        };
+        assert_eq!(fields(&sh.health_event()), (Some(0), Some(0)), "within budget at the start");
+        {
+            let mut b = lk(&sh.budget);
+            b.cpu_window(7.5, 2, 1);
+            b.mem_sample(300 * 1024, 100);
+        }
+        assert_eq!(fields(&sh.health_event()), (Some(75), Some(3)));
+        let st: serde_json::Value = serde_json::from_str(&sh.status()).unwrap();
+        assert_eq!(st["budget"]["breached"], serde_json::json!(["cpu", "mem"]));
+        assert_eq!(st["budget"]["cpu_budget_pct"], sh.cfg().effective.num("diagnostics.budget_cpu_pct"));
+        assert_eq!(st["budget"]["mem_budget_mb"], sh.cfg().effective.num("diagnostics.budget_mem_mb"));
+        assert!(st["debug"]["enabled"].is_boolean());
     }
 }
