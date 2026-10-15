@@ -1343,6 +1343,7 @@ fn io_code(e: &std::io::Error) -> String {
 
 /// Run the daemon until it drains: take the singleton lock, bind the socket, start the workers and the watchdog.
 pub fn serve() {
+    crate::crash::mark_daemon(true);
     // SAFETY: getppid takes no arguments and cannot fail. Capture it before any startup work so a scratch daemon whose
     // launcher dies during config/defaults loading still knows which parent it was started by.
     let initial_parent = unsafe { libc::getppid() };

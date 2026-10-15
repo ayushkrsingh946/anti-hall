@@ -207,6 +207,16 @@ pub fn write_crash_report(v: &Value) {
     crate::discard::logged("crash_report_write", crate::atomic::write(state_file("last_crash"), v.to_string()));
 }
 
+/// Write the latest crash report of a non-daemon process (CLI verb or hook client); never counted as a daemon crash.
+pub fn write_cli_crash_report(v: &Value) {
+    crate::discard::logged("cli_crash_report_write", crate::atomic::write(state_file("cli_crash"), v.to_string()));
+}
+
+/// The last crash report of a non-daemon process.
+pub fn cli_crash() -> Option<Value> {
+    read_json("cli_crash")
+}
+
 /// The last recorded crash report.
 pub fn last_crash() -> Option<Value> {
     read_json("last_crash")

@@ -16,6 +16,7 @@ mod agent_cli;
 mod agent_controls_parity;
 mod agent_scan_kept;
 mod cascade_judge;
+mod cli_pipe;
 mod codex_apply_patch_e2e;
 mod codex_scripts_parity;
 mod compiled_logic_gate;
