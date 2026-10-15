@@ -4,7 +4,8 @@ AH_WRAPPER_TEST=1
 export AH_WRAPPER_TEST
 
 repo=$(CDPATH= cd -- "$(dirname "$0")/../.." && pwd)
-wrapper=$repo/plugins/anti-hall/hooks/ah-hook.sh
+# AH_WRAPPER_UNDER_TEST runs the suite against another implementation of the same contract (the ah-hook launcher shim)
+wrapper=${AH_WRAPPER_UNDER_TEST:-$repo/plugins/anti-hall/hooks/ah-hook.sh}
 tmp=${TMPDIR:-/tmp}/ah-wrapper-test.$$
 mkdir -p "$tmp"
 : >"$tmp/homefile"

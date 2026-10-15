@@ -596,6 +596,19 @@ value = 250
 min = 1
 unit = "ms"
 
+[client.wrapper_kill_grace_ms]
+doc = "How long the hook launcher (ah-hook) waits after SIGTERM to a timed-out engine's process group before it sends SIGKILL. The soft stop lets the client write its markers; the hard stop bounds the call."
+value = 200
+min = 0
+max = 5000
+unit = "ms"
+
+[client.wrapper_default_timeout_s]
+doc = "Last-resort hook budget for the hook launcher (ah-hook) when the fallback list has no row for the event: the event's hook timeout it assumes, which also caps the slow-daemon window and the cold-start wait."
+value = 10
+min = 1
+unit = "s"
+
 [client.wrapper_watchdog_poll_ms]
 doc = "Poll interval for the hook wrapper millisecond watchdog."
 value = 2

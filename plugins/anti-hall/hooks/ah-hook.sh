@@ -62,9 +62,12 @@ case "$event" in
   PreToolUse|PostToolUse|PostToolUseFailure|PermissionRequest) tool_from_payload=1 ;;
 esac
 host=claude
+fallback_only=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --tool-from-payload) tool_from_payload=1 ;;
+    # the hook launcher (ah-hook) got dispatch.defer_exit from the engine: run this event's fallback rows only, no engine call
+    --fallback-only) fallback_only=1 ;;
     --host)
       case "${2:-}" in
         claude|codex) host=$2; shift ;;
@@ -1368,6 +1371,10 @@ run_engine() {
 
 if [ "$mem_mode" -eq 1 ]; then
   run_memory_mode
+fi
+
+if [ "$fallback_only" -eq 1 ]; then
+  run_fallback "engine requested fallback"
 fi
 
 if [ "${AH_ENGINE_DISPATCH_IN_PROCESS:-}" != 1 ] && fresh_daemon_down_marker; then
