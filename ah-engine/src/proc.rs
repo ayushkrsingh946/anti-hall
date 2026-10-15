@@ -154,9 +154,18 @@ fn kill_group(child: &mut std::process::Child) {
 ///
 /// # Errors
 /// See [`Error`].
-pub fn run(mut cmd: Command, what: &str, timeout: Duration, poll: Duration) -> Result<Output, Error> {
+pub fn run(cmd: Command, what: &str, timeout: Duration, poll: Duration) -> Result<Output, Error> {
+    run_with_stdin(cmd, Stdio::null(), what, timeout, poll)
+}
+
+/// [`run`] with `stdin` as the child's standard input instead of /dev/null (a file or pipe the caller prepared). `run` itself
+/// always uses /dev/null: a `Command` cannot report an stdin set on it, so a caller that needs one passes it here.
+///
+/// # Errors
+/// See [`Error`].
+pub fn run_with_stdin(mut cmd: Command, stdin: Stdio, what: &str, timeout: Duration, poll: Duration) -> Result<Output, Error> {
     apply_git_env(&mut cmd);
-    cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).process_group(0);
+    cmd.stdin(stdin).stdout(Stdio::piped()).stderr(Stdio::piped()).process_group(0);
     let mut child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => {
@@ -250,6 +259,17 @@ mod tests {
         let o = run(sh("head -c 300000 /dev/zero; head -c 200000 /dev/zero >&2"), "test", Duration::from_secs(10), Duration::from_millis(5)).unwrap();
         assert!(o.status.success());
         assert_eq!((o.stdout.len(), o.stderr.len()), (300_000, 200_000));
+    }
+
+    #[test]
+    fn a_provided_stdin_reaches_the_child_and_run_still_gives_dev_null() {
+        let f = std::env::temp_dir().join(format!("ah-proc-stdin-{}", std::process::id()));
+        std::fs::write(&f, b"payload").unwrap();
+        let o = run_with_stdin(sh("cat"), Stdio::from(std::fs::File::open(&f).unwrap()), "test", Duration::from_secs(10), Duration::from_millis(5)).unwrap();
+        assert_eq!(o.stdout, b"payload");
+        let o = run(sh("cat"), "test", Duration::from_secs(10), Duration::from_millis(5)).unwrap();
+        assert!(o.stdout.is_empty(), "run reads /dev/null");
+        crate::discard::harmless(std::fs::remove_file(&f)); // keep: test cleanup
     }
 
     /// A stand-in named `git` that behaves like `git status` on a stale index: unless GIT_OPTIONAL_LOCKS=0 it takes
