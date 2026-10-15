@@ -668,12 +668,23 @@ fn a_fail_open_the_engine_reported_in_its_reply_is_counted_and_logged() {
     );
     let o = env.run("UserPromptSubmit", PAYLOAD, Some(&e), &[]);
     assert_eq!(o.code, 0, "{}", o.err);
-    assert!(env.log().contains("engine_fail_open") && env.log().contains("reason=deadline_cut"), "{}", env.log());
+    assert!(
+        env.log().contains("engine_fail_open") && env.log().contains("reason=deadline_cut"),
+        "{}",
+        env.log()
+    );
     // and nothing is left behind in the run directory
-    let quiet = env.script("quiet.sh", "cat >/dev/null\n: > \"$AH_ENGINE_DONE_FILE\"\nexit 0");
+    let quiet = env.script(
+        "quiet.sh",
+        "cat >/dev/null\n: > \"$AH_ENGINE_DONE_FILE\"\nexit 0",
+    );
     let before = env.log();
     env.run("UserPromptSubmit", PAYLOAD, Some(&quiet), &[]);
-    assert_eq!(env.log(), before, "a call that did not fail open adds nothing to the log");
+    assert_eq!(
+        env.log(),
+        before,
+        "a call that did not fail open adds nothing to the log"
+    );
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------
