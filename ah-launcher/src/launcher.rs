@@ -510,6 +510,13 @@ impl L {
         let done = run_dir.map(|d| d.join(self.key("launcher.run_done_file")));
         let wait = run_dir.map(|d| d.join(self.key("launcher.run_wait_file")));
         let spool = run_dir.map(|d| d.join(self.key("launcher.run_spool_file")));
+        let fail_open = run_dir.map(|d| d.join(self.key("launcher.run_fail_open_file")));
+        if let (Some(name), Some(p)) = (
+            Some(self.key("env.fail_open_file")).filter(|n| !n.is_empty()),
+            &fail_open,
+        ) {
+            envs.push((name, p.display().to_string()));
+        }
         if let (Some(name), Some(p)) = (
             Some(self.key("env.done_file")).filter(|n| !n.is_empty()),
             &done,
@@ -553,6 +560,7 @@ impl L {
                 c(done.as_deref()?)?,
                 c(wait.as_deref()?)?,
                 c(spool.as_deref()?)?,
+                c(fail_open.as_deref()?)?,
                 c(d)?,
             ])
         });
@@ -573,6 +581,9 @@ impl L {
             retry: self.retry(),
             reaper: self.reaper_on().then(|| cleanup.unwrap_or_default()),
         });
+        if let Some(p) = &fail_open {
+            self.count_reported_fail_opens(p);
+        }
         let done_marked = done.as_deref().is_some_and(Path::exists);
         let defer = self.s.num("dispatch.defer_exit") as i32;
         match r {
@@ -658,6 +669,21 @@ impl L {
                 }
                 0
             }
+        }
+    }
+
+    /// The engine told its client (in the reply) that it failed open for these calls: count each one and keep the reason in the
+    /// local log, which is only ever written on a failure path. Bounded by `launcher.err_cap_bytes`; a missing file is no fail-open.
+    fn count_reported_fail_opens(&self, path: &Path) {
+        use std::io::Read;
+        let cap = self.s.num("launcher.err_cap_bytes");
+        let mut text = String::new();
+        if let Ok(f) = std::fs::File::open(path) {
+            let _ = f.take(cap).read_to_string(&mut text); // best effort: an unreadable marker is no fail-open
+        }
+        for line in text.lines().filter(|l| !l.is_empty()) {
+            limits::bump(Ctr::FailOpen);
+            self.log_line(&format!("engine_fail_open event={} {line}", self.event));
         }
     }
 

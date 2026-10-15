@@ -483,7 +483,7 @@ memory layer `tier_items`, `tier_bytes`, `tier_hits`, `tier_misses`, `tier_evict
 and `bus_dropped`, for the writer `db_commits` and `db_writes` (fewer commits than writes means group commit is sharing syncs), and for
 the spool `spool_applied` and `spool_quarantined`, for the scheduler `schedule_runs` and `schedule_missed`, and for
 size control `db_hot_bytes`, `db_hot_wal_bytes`,
-`db_archive_bytes`, `db_archive_wal_bytes`, `maintain_runs` and `maintain_last_ms`, and for the Jev lane `jev_calls`, `jev_verdicts`, `jev_cost_micro_usd`, `jev_timeouts`, `jev_cooldowns`, `jev_changed` and `jev_latency_us`, and for the injection gate `inject_emitted`, `inject_emitted_bytes`, `inject_keepalive`, `inject_suppressed`, `inject_suppressed_bytes` (by cut) and the memory gauges `inject_gate_sessions`, `inject_gate_slots`, `inject_gate_bytes` and `inject_gate_evictions`.
+`db_archive_bytes`, `db_archive_wal_bytes`, `maintain_runs` and `maintain_last_ms`, and for the Jev lane `jev_calls`, `jev_verdicts`, `jev_cost_micro_usd`, `jev_timeouts`, `jev_cooldowns`, `jev_changed` and `jev_latency_us`, and for the injection gate `inject_emitted`, `inject_emitted_bytes`, `inject_keepalive`, `inject_suppressed`, `inject_suppressed_bytes` (by cut) and the memory gauges `inject_gate_sessions`, `inject_gate_slots`, `inject_gate_bytes` and `inject_gate_evictions`, and for the ack protocol and fail-opens (see below) `hook_phase_us`, `wire_events`, `launcher_counter` and `fail_open`.
 
 **Impact events** record what the engine did to a call: `block`, `advisory`, `warning`, `context` and `fallback`. They
 are stored in `hot.db` with exact per-combination totals, so counts survive a restart; the project is only ever a short
@@ -500,6 +500,25 @@ and histograms are snapshotted into `hot.db`, and the same snapshot is rolled up
 (`telemetry.rollups`: per minute kept 24 h, per hour kept 30 days; pruned by `ah-engine maintain`). A new daemon starts
 from the last snapshot, so counts survive a restart; after a crash they lose at most what came after the last snapshot.
 Gauges are live readings and are not kept. `ah-engine metrics --rollup minute --since 3600` lists the stored rollups.
+
+
+Ack protocol and phase telemetry (GitHub #199, #201; defaults file `wire.toml`). A hook client that finds the daemon's announcement
+(`wire.caps_file`) opts a request in by adding its body length to the head line's version suffix (`V <ver>-w1.<n>`; a daemon that predates
+the protocol ignores everything after the first `-`, and a client that finds no announcement uses the original exchange, so both directions
+stay compatible). The daemon answers `AHK1 REQ` the moment the request is read and parsed, then the reply frame; the client answers
+`AHK1 RES` after the verdict is handed to the host, carrying its own timings (connect, request to ACK, ACK to response) and the launcher's
+counters (`launcher.stats_env`). No ACK(req) within `wire.ack_timeout_ms` means the daemon has not started on the request: the client
+closes the connection and resends once (a daemon that finds the client gone when it writes ACK(req) judges nothing, so the resend is the
+only judging); an acked request is never resent. A reply with no ACK(res) within `wire.res_wait_ms` is an `undelivered_verdict` fail-open.
+`status --json` shows `phases` (per event: `connect`, `req_ack`, `ack_response`, `delivery`, `queue_wait`, `judge`, `launcher_startup`, each
+with count, p50, p95 and max; per-check time under `checks`), `wire` (acked, delivered, retries, abandoned, ack timeouts) and `fail_open`.
+`hook_phase_us` holds the phase histograms, `wire_events` the protocol counts and `launcher_counter` the launcher's counters by name.
+
+Engine fail-opens (GitHub #201; `fail_open.*` in `wire.toml`). Every time the engine answers without a check's verdict for a reason that is
+its own (missing config key, deadline cut, script timeout, Jev breaker open, busy, internal error, undelivered verdict) it counts
+`fail_open{reason,check}`, writes one health-log line and, to an ack-mode client, sends the reason and check in the reply. More than
+`fail_open.soft_per_window` of them in `fail_open.window_s` seconds makes `status` report `degraded` and the doctor warn (past
+`fail_open.hard_per_window` it fails); a one-line notice tells the session. The engine never blocks a session because of it.
 
 ## Mesh verbs: the exit-code contract and per-verb telemetry (D45 stage 2)
 

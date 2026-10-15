@@ -2227,3 +2227,11 @@ value = "wake-watch limit-skips: {n} (rearm-cues.jsonl, trigger limit-skip — L
 [doctor_msg.ds_cron_missing]
 doc = "\"Mailbox cron missing\" warnings shown. Placeholder: {n}."
 value = "mailbox-cron-missing warnings shown: {n} (cron-missing-warned.jsonl — a cron that keeps going missing after restores may need a supervisor-level recreate instead of relying on the per-session Stop-gate nudge)"
+
+[doctor_msg.fail_open_soft]
+doc = "Finding: the engine has failed open more often than the soft limit in the recent window. Placeholders: {n}, {window}, {top}."
+value = "the engine failed open {n} times in the last {window}s (most often {top}): checks are being skipped; see `ah-engine status` (fail_open) and the event log"
+
+[doctor_msg.fail_open_hard]
+doc = "Finding: the engine has failed open more often than the hard limit in the recent window. Placeholders: {n}, {window}, {top}."
+value = "the engine failed open {n} times in the last {window}s (most often {top}), past the hard limit: most checks are not running; see `ah-engine status` (fail_open) and the event log"

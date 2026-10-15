@@ -71,19 +71,27 @@ fn rearm_read_timeout(s: &UnixStream, left: Duration) {
     }
 }
 
-fn exchange_inner(sock: &Path, payload: &[u8], deadline: Duration, window: Duration) -> Exch {
+/// Open the daemon socket after checking it is a socket of ours: `Err` carries the exchange result to return.
+fn connect_checked(sock: &Path) -> Result<UnixStream, Exch> {
     match std::fs::symlink_metadata(sock) {
         // only a missing socket means "no daemon"; any other error (EACCES, ENOTDIR, ELOOP, EIO) is a failed exchange the
         // breaker counts and the log names, never a reason to start a second daemon (review finding 18)
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Exch::Absent,
-        Err(e) => return Exch::Failed(defaults::render("msg.client_io", &[("what", &defaults::text("msg.client_what_stat")), ("err", &e)])),
-        Ok(m) if !m.file_type().is_socket() || m.uid() != crate::limits::uid() => return Exch::Failed(defaults::text("msg.client_bad_socket").into()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Err(Exch::Absent),
+        Err(e) => return Err(Exch::Failed(defaults::render("msg.client_io", &[("what", &defaults::text("msg.client_what_stat")), ("err", &e)]))),
+        Ok(m) if !m.file_type().is_socket() || m.uid() != crate::limits::uid() => return Err(Exch::Failed(defaults::text("msg.client_bad_socket").into())),
         Ok(_) => {}
     }
-    let mut s = match UnixStream::connect(sock) {
+    match UnixStream::connect(sock) {
+        Ok(s) => Ok(s),
+        Err(e) if matches!(e.kind(), std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::NotFound) => Err(Exch::Absent),
+        Err(e) => Err(Exch::Failed(defaults::render("msg.client_connect", &[("err", &e)]))),
+    }
+}
+
+fn exchange_inner(sock: &Path, payload: &[u8], deadline: Duration, window: Duration) -> Exch {
+    let mut s = match connect_checked(sock) {
         Ok(s) => s,
-        Err(e) if matches!(e.kind(), std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::NotFound) => return Exch::Absent,
-        Err(e) => return Exch::Failed(defaults::render("msg.client_connect", &[("err", &e)])),
+        Err(e) => return e,
     };
     let io = |r: std::io::Result<()>, what: &str| r.map_err(|e| Exch::Failed(defaults::render("msg.client_io", &[("what", &what), ("err", &e)])));
     if let Err(e) = io(s.set_read_timeout(Some(deadline)), defaults::text("msg.client_what_timeout"))
@@ -118,19 +126,189 @@ fn exchange_inner(sock: &Path, payload: &[u8], deadline: Duration, window: Durat
     }
 }
 
+/// The verdict the client holds, with the socket it came on, until the host has it (see [`finish_ack`]).
+struct Pending {
+    stream: UnixStream,
+    phases: crate::wire::ClientPhases,
+}
+
+static PENDING: std::sync::Mutex<Option<Pending>> = std::sync::Mutex::new(None);
+
+/// ACK(res): the verdict has been written to the host. A no-op when the call did not use the ack protocol. Best effort and
+/// bounded (`wire.res_wait_ms`): a daemon that cannot take it counts the verdict undelivered, nothing else changes.
+pub fn finish_ack() {
+    let Some(Pending { mut stream, phases }) = PENDING.lock().unwrap_or_else(|e| e.into_inner()).take() else { return };
+    if let Err(e) = stream.set_write_timeout(Some(defaults::millis("wire.res_wait_ms"))).and_then(|_| stream.write_all(&crate::wire::ack_res(&phases))) {
+        health::log_event("client_ack_res", "write_failed", &e.to_string());
+    }
+}
+
+/// The daemon said the reply is a fail-open: log it, and hand it to the launcher through the file it named (`env.fail_open_file`).
+fn note_reply_fail_open(reason: &str, check: &str) {
+    health::log_event("client_fail_open", reason, check);
+    if let Some(p) = defaults::env_var("fail_open_file").filter(|p| !p.is_empty()) {
+        let line = format!("reason={reason} check={check}\n");
+        let r = std::fs::OpenOptions::new().create(true).append(true).open(&p).and_then(|mut f| f.write_all(line.as_bytes()));
+        crate::discard::logged("fail_open_file_write", r);
+    }
+}
+
+/// One attempt of an ack-mode exchange.
+enum Once {
+    Done(Exch),
+    /// The daemon did not acknowledge the request within `wire.ack_timeout_ms`.
+    NoAck,
+    /// The request does not take part in the protocol (a control verb): use the original exchange.
+    Legacy,
+}
+
+fn once_ack(sock: &Path, payload: &[u8], deadline: Duration, window: Duration, retries: u64) -> Once {
+    let Some(tagged) = crate::wire::tag_request(payload) else { return Once::Legacy };
+    let t0 = Instant::now();
+    let mut s = match connect_checked(sock) {
+        Ok(s) => s,
+        Err(e) => return Once::Done(e),
+    };
+    let connect_us = t0.elapsed().as_micros() as u64;
+    let io = |r: std::io::Result<()>, what: &str| r.map_err(|e| Exch::Failed(defaults::render("msg.client_io", &[("what", &what), ("err", &e)])));
+    if let Err(e) = io(s.set_write_timeout(Some(deadline)), defaults::text("msg.client_what_timeout")).and_then(|_| io(s.write_all(&tagged), "write")) {
+        return Once::Done(e);
+    }
+    let written = Instant::now();
+    let (mut buf, mut chunk) = (Vec::new(), vec![0u8; defaults::num("io.small_chunk_bytes") as usize]);
+    let mut acked: Option<Instant> = None;
+    if let Err(e) = io(s.set_read_timeout(Some(defaults::millis("wire.ack_timeout_ms").min(window))), defaults::text("msg.client_what_timeout")) {
+        return Once::Done(e);
+    }
+    // ACK(req) first (the reply may follow in the same read, or an error frame may come instead of an ack)
+    loop {
+        match (&mut s).read(&mut chunk) {
+            Ok(0) => {
+                return Once::Done(Exch::Failed(defaults::render(
+                    "msg.client_io",
+                    &[("what", &"read"), ("err", &defaults::text("msg.client_closed_before_ack"))],
+                )));
+            }
+            Ok(n) => buf.extend_from_slice(&chunk[..n]),
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => return Once::NoAck,
+            Err(e) => return Once::Done(Exch::Failed(defaults::render("msg.client_io", &[("what", &"read"), ("err", &e)]))),
+        }
+        match crate::wire::parse_ack_req(&buf) {
+            crate::wire::AckSeen::Need => continue,
+            crate::wire::AckSeen::No => break,
+            crate::wire::AckSeen::Req { len, .. } => {
+                buf.drain(..len);
+                acked = Some(Instant::now());
+                break;
+            }
+        }
+    }
+    let req_ack_us = acked.map_or(0, |a| a.duration_since(written).as_micros() as u64);
+    // acked: never resend from here; wait for the reply up to the hard window (the original read loop's rules)
+    let (start, max_reply) = (Instant::now(), defaults::num("client.max_reply") as usize);
+    let mut late = false;
+    if let Err(e) = io(s.set_read_timeout(Some(deadline)), defaults::text("msg.client_what_timeout")) {
+        return Once::Done(e);
+    }
+    let mut fo_checked = false;
+    loop {
+        if !fo_checked {
+            // the daemon reports an engine-level fail-open on its own line just before the reply frame
+            match crate::wire::parse_fail_open(&buf) {
+                crate::wire::FoSeen::Need => {}
+                crate::wire::FoSeen::No => fo_checked = true,
+                crate::wire::FoSeen::Fo { len, reason, check } => {
+                    buf.drain(..len);
+                    fo_checked = true;
+                    note_reply_fail_open(&reason, &check);
+                }
+            }
+        }
+        if let Some(total) = frame::total_len(&buf)
+            && buf.len() >= total
+        {
+            buf.truncate(total);
+            break;
+        }
+        if buf.len() > max_reply {
+            break;
+        }
+        match (&mut s).read(&mut chunk) {
+            Ok(0) => break,
+            Ok(n) => buf.extend_from_slice(&chunk[..n]),
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(e) => {
+                let why = defaults::render("msg.client_io", &[("what", &"read"), ("err", &e)]);
+                if !matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) {
+                    return Once::Done(Exch::Failed(why));
+                }
+                let left = window.saturating_sub(start.elapsed());
+                if left.is_zero() {
+                    return Once::Done(Exch::Slow(why));
+                }
+                if !late {
+                    late = true;
+                    health::log_event("client_late", "daemon", &why);
+                }
+                rearm_read_timeout(&s, left);
+            }
+        }
+    }
+    let ack_response_us = acked.unwrap_or(written).elapsed().as_micros() as u64;
+    match frame::decode(&buf) {
+        Ok((k, body)) => {
+            let launcher = std::env::var(defaults::text("launcher.stats_env")).unwrap_or_default();
+            let phases = crate::wire::ClientPhases { connect_us, req_ack_us, ack_response_us, retries, launcher };
+            *PENDING.lock().unwrap_or_else(|e| e.into_inner()) = acked.map(|_| Pending { stream: s, phases });
+            Once::Done(Exch::Reply(k, body))
+        }
+        Err(e) => Once::Done(Exch::Failed(defaults::render("msg.client_bad_frame", &[("err", &format!("{e:?}"))]))),
+    }
+}
+
+/// An exchange under the ack protocol: no ACK(req) within `wire.ack_timeout_ms` means the daemon has not started on the request, so it
+/// is resent on a fresh connection (the first is closed, and the daemon refuses to judge a request whose client is gone) while the
+/// deadline allows; an acked request is never resent.
+fn exchange_ack(sock: &Path, payload: &[u8], deadline: Duration, window: Duration) -> Exch {
+    let began = Instant::now();
+    let mut retries = 0;
+    loop {
+        let (dl, win) = (deadline.saturating_sub(began.elapsed()), window.saturating_sub(began.elapsed()));
+        if dl.is_zero() || win.is_zero() {
+            return Exch::Slow(defaults::text("msg.client_ack_timeout").into());
+        }
+        match once_ack(sock, payload, dl, win, retries) {
+            Once::Done(e) => return e,
+            Once::Legacy => return exchange_inner(sock, payload, deadline, window),
+            Once::NoAck => {
+                health::log_event("client_ack_timeout", "daemon", defaults::text("msg.client_ack_timeout"));
+                if retries >= defaults::num("wire.max_retries") || window.saturating_sub(began.elapsed()) < defaults::millis("wire.retry_min_ms") {
+                    return Exch::Slow(defaults::text("msg.client_ack_timeout").into());
+                }
+                retries += 1;
+            }
+        }
+    }
+}
+
 /// One exchange under a hard overall deadline (the work runs on a thread so even a blocking connect
 /// cannot outlive it).
 pub fn exchange(sock: &Path, payload: &[u8], deadline: Duration) -> Exch {
-    exchange_for(sock, payload, deadline, deadline)
+    exchange_for(sock, payload, deadline, deadline, false)
 }
 
 /// `exchange` that keeps waiting for the reply up to `window` (>= `deadline`) once the deadline has passed.
-fn exchange_for(sock: &Path, payload: &[u8], deadline: Duration, window: Duration) -> Exch {
+fn exchange_for(sock: &Path, payload: &[u8], deadline: Duration, window: Duration, ack: bool) -> Exch {
     let window = window.max(deadline);
     let (tx, rx) = mpsc::channel();
     let (sock, payload) = (sock.to_path_buf(), payload.to_vec());
     std::thread::spawn(move || {
-        crate::discard::harmless(tx.send(exchange_inner(&sock, &payload, deadline, window))); // keep: the receiver is gone; nobody is waiting for the result
+        crate::discard::harmless(tx.send(if ack {
+            exchange_ack(&sock, &payload, deadline, window)
+        } else {
+            exchange_inner(&sock, &payload, deadline, window)
+        })); // keep: the receiver is gone; nobody is waiting for the result
     });
     rx.recv_timeout(window + defaults::millis("client.deadline_slack_ms")).unwrap_or_else(|_| Exch::Slow(defaults::text("msg.client_timeout").into()))
 }
@@ -376,7 +554,9 @@ fn attempt_with(payload: &[u8], cfg: &ClientConfig, have_fallback: bool, hold_wa
     }
     let sock = paths::socket();
     wait_marker(true);
-    match exchange_for(&sock, payload, cfg.deadline, wait_window(cfg.deadline)) {
+    // the ack protocol only with a daemon that announced it (an older one would wait for an end-of-stream that never comes)
+    let ack = defaults::num("wire.ack") == 1 && crate::wire::caps_path().exists();
+    match exchange_for(&sock, payload, cfg.deadline, wait_window(cfg.deadline), ack) {
         Exch::Reply(Kind::Ok, body) => {
             if !hold_wait_on_ok {
                 wait_marker(false);
@@ -859,6 +1039,165 @@ mod tests {
         h.join().unwrap();
         crate::discard::harmless(std::fs::remove_dir_all(&dir)); // keep: cleanup that raced; an absent file is the goal state
         assert!(matches!(&r, Exch::Reply(Kind::Ok, b) if b == "late-ok"), "{r:?}");
+    }
+
+    /// The tests below share the process-wide pending ack.
+    static ACK_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn scratch(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("ah-ack-{tag}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// Read a tagged request off `c` the way the daemon does (head line, then the announced body length); the head line is returned.
+    fn read_tagged(c: &mut UnixStream) -> String {
+        let mut buf = Vec::new();
+        let mut one = [0u8; 1];
+        while !buf.ends_with(b"\n") {
+            c.read_exact(&mut one).unwrap();
+            buf.push(one[0]);
+        }
+        let head = String::from_utf8(buf).unwrap();
+        let mut body = vec![0u8; crate::wire::announced_len(head.trim_end()).expect("an ack-mode head announces its length")];
+        c.read_exact(&mut body).unwrap();
+        head
+    }
+
+    fn read_res(c: &mut UnixStream) -> crate::wire::ClientPhases {
+        let mut line = Vec::new();
+        let mut one = [0u8; 1];
+        while !line.ends_with(b"\n") {
+            c.read_exact(&mut one).unwrap();
+            line.push(one[0]);
+        }
+        crate::wire::parse_ack_res(&String::from_utf8(line).unwrap()).expect("ACK(res)")
+    }
+
+    #[test]
+    fn an_acked_exchange_returns_the_reply_and_confirms_it_after_the_verdict_is_handed_over() {
+        let _g = ACK_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = scratch("ok");
+        let sock = dir.join("d.sock");
+        let l = std::os::unix::net::UnixListener::bind(&sock).unwrap();
+        let h = std::thread::spawn(move || {
+            let (mut c, _) = l.accept().unwrap();
+            let head = read_tagged(&mut c);
+            std::io::Write::write_all(&mut c, &crate::wire::ack_req(7)).unwrap();
+            std::io::Write::write_all(&mut c, &frame::encode(Kind::Ok, "verdict")).unwrap();
+            (head, read_res(&mut c))
+        });
+        let r = exchange_ack(&sock, b"V 0.1.0\nE {}\n{}", Duration::from_secs(2), Duration::from_secs(2));
+        assert!(matches!(&r, Exch::Reply(Kind::Ok, b) if b == "verdict"), "{r:?}");
+        finish_ack();
+        let (head, phases) = h.join().unwrap();
+        assert!(head.starts_with("V 0.1.0-w1."), "{head}");
+        assert_eq!(phases.retries, 0);
+        crate::discard::harmless(std::fs::remove_dir_all(&dir)); // keep: cleanup that raced; an absent file is the goal state
+    }
+
+    #[test]
+    fn a_missing_ack_closes_the_connection_and_resends_on_a_fresh_one() {
+        let _g = ACK_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = scratch("retry");
+        let sock = dir.join("d.sock");
+        let l = std::os::unix::net::UnixListener::bind(&sock).unwrap();
+        let h = std::thread::spawn(move || {
+            let (mut first, _) = l.accept().unwrap();
+            read_tagged(&mut first); // read, but never ack: a daemon whose queue has not reached it yet
+            let (mut second, _) = l.accept().unwrap();
+            read_tagged(&mut second);
+            std::io::Write::write_all(&mut second, &crate::wire::ack_req(1)).unwrap();
+            std::io::Write::write_all(&mut second, &frame::encode(Kind::Ok, "second")).unwrap();
+            let res = read_res(&mut second);
+            // the first connection was closed by the client before the resend: a read sees the end of the stream
+            let mut rest = Vec::new();
+            first.read_to_end(&mut rest).unwrap();
+            (res, rest)
+        });
+        let r = exchange_ack(&sock, b"V 0.1.0\nE {}\n{}", Duration::from_secs(3), Duration::from_secs(3));
+        assert!(matches!(&r, Exch::Reply(Kind::Ok, b) if b == "second"), "{r:?}");
+        finish_ack();
+        let (res, rest) = h.join().unwrap();
+        assert_eq!(res.retries, 1, "the resend is reported");
+        assert!(rest.is_empty());
+        crate::discard::harmless(std::fs::remove_dir_all(&dir)); // keep: cleanup that raced; an absent file is the goal state
+    }
+
+    #[test]
+    fn an_acked_request_is_never_resent_however_long_the_judging_takes() {
+        let _g = ACK_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = scratch("noresend");
+        let sock = dir.join("d.sock");
+        let l = std::os::unix::net::UnixListener::bind(&sock).unwrap();
+        l.set_nonblocking(true).unwrap();
+        let ack_ms = defaults::millis("wire.ack_timeout_ms");
+        let h = std::thread::spawn(move || {
+            let c = loop {
+                match l.accept() {
+                    Ok((c, _)) => break c,
+                    Err(_) => std::thread::sleep(Duration::from_millis(2)),
+                }
+            };
+            let mut c = c;
+            c.set_nonblocking(false).unwrap();
+            read_tagged(&mut c);
+            std::io::Write::write_all(&mut c, &crate::wire::ack_req(1)).unwrap();
+            std::thread::sleep(ack_ms * 2); // judging takes longer than the ack timeout: still no resend
+            std::io::Write::write_all(&mut c, &frame::encode(Kind::Ok, "slow")).unwrap();
+            let res = read_res(&mut c);
+            std::thread::sleep(Duration::from_millis(50));
+            (res, l.accept().is_err())
+        });
+        let r = exchange_ack(&sock, b"V 0.1.0\nE {}\n{}", Duration::from_secs(5), Duration::from_secs(5));
+        assert!(matches!(&r, Exch::Reply(Kind::Ok, b) if b == "slow"), "{r:?}");
+        finish_ack();
+        let (res, no_second_connection) = h.join().unwrap();
+        assert_eq!(res.retries, 0);
+        assert!(no_second_connection, "an acked request must not be sent again");
+        crate::discard::harmless(std::fs::remove_dir_all(&dir)); // keep: cleanup that raced; an absent file is the goal state
+    }
+
+    #[test]
+    fn a_daemon_that_never_acks_ends_as_slow_after_the_bounded_resends() {
+        let _g = ACK_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = scratch("old");
+        let sock = dir.join("d.sock");
+        let l = std::os::unix::net::UnixListener::bind(&sock).unwrap();
+        let h = std::thread::spawn(move || {
+            // an original daemon: reads to end-of-stream, which an ack-mode client never sends before giving up
+            let mut seen = 0;
+            while seen < 1 + defaults::num("wire.max_retries") {
+                let (mut c, _) = l.accept().unwrap();
+                let mut req = Vec::new();
+                c.read_to_end(&mut req).unwrap();
+                seen += 1;
+            }
+            seen
+        });
+        let r = exchange_ack(&sock, b"V 0.1.0\nE {}\n{}", Duration::from_secs(3), Duration::from_secs(3));
+        assert!(matches!(r, Exch::Slow(_)), "{r:?}");
+        assert_eq!(h.join().unwrap(), 1 + defaults::num("wire.max_retries"));
+        crate::discard::harmless(std::fs::remove_dir_all(&dir)); // keep: cleanup that raced; an absent file is the goal state
+    }
+
+    #[test]
+    fn control_verbs_never_take_part_in_the_protocol() {
+        let _g = ACK_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = scratch("legacy");
+        let sock = dir.join("d.sock");
+        let l = std::os::unix::net::UnixListener::bind(&sock).unwrap();
+        let h = std::thread::spawn(move || {
+            let (mut c, _) = l.accept().unwrap();
+            let mut req = Vec::new();
+            c.read_to_end(&mut req).unwrap();
+            std::io::Write::write_all(&mut c, &frame::encode(Kind::Ok, "pong")).unwrap();
+            req
+        });
+        let r = exchange_ack(&sock, b"CTL ping\n", Duration::from_secs(2), Duration::from_secs(2));
+        assert!(matches!(&r, Exch::Reply(Kind::Ok, b) if b == "pong"), "{r:?}");
+        assert_eq!(h.join().unwrap(), b"CTL ping\n", "sent untouched, ended with end-of-stream");
+        crate::discard::harmless(std::fs::remove_dir_all(&dir)); // keep: cleanup that raced; an absent file is the goal state
     }
 
     #[test]

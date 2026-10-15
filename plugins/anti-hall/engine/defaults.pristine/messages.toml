@@ -722,3 +722,15 @@ value = "hard heap limit is below the current heap"
 [msg.launcher_st_no_wall]
 doc = "Selftest reason: the wall-clock backstop could not be armed."
 value = "cannot arm the wall-clock backstop"
+
+[msg.client_ack_timeout]
+doc = "Health-log and exchange text: the daemon did not acknowledge a request within wire.ack_timeout_ms."
+value = "no ACK(req) from the daemon"
+
+[msg.reply_busy_detail]
+doc = "Fail-open detail of a request that was shed (queue full or rate limited) and answered BUSY."
+value = "request shed under load"
+
+[msg.client_closed_before_ack]
+doc = "Exchange text: the daemon closed the connection before it acknowledged the request."
+value = "closed before ACK(req)"

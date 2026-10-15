@@ -1731,3 +1731,179 @@ fn abort_breadcrumb_is_reaped_on_next_start_and_reported_by_status() {
     assert_eq!(st["health"]["last_crash"]["breadcrumb"]["event"], "Stop", "{st}");
     assert_eq!(st["health"]["last_crash"]["breadcrumb"]["check"], "task-guard", "{st}");
 }
+
+// ---- ack protocol (GitHub #199/#201): client <-> daemon, phases, undelivered verdicts ----
+
+fn wire_ctl_status(e: &Env) -> serde_json::Value {
+    e.status()
+}
+
+/// A raw ack-mode exchange the way the client does it: tagged request, ACK(req), reply frame; the caller decides about ACK(res).
+fn raw_ack_exchange(e: &Env, send_res: Option<&str>) -> (String, ah_engine::frame::Kind) {
+    use std::os::unix::net::UnixStream;
+    let sock = ah_engine::paths::socket_in(&e.eng());
+    let body = format!("V 0.1.0\n{}\n{DENY_IN}", ah_engine::reqenv::RequestEnv::from_pairs([("HOME", e.dir.join("home").display().to_string())]).to_line());
+    let tagged = ah_engine::wire::tag_request(body.as_bytes()).unwrap();
+    let mut s = UnixStream::connect(&sock).unwrap();
+    s.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+    s.write_all(&tagged).unwrap();
+    let mut buf = Vec::new();
+    let mut chunk = [0u8; 4096];
+    let ack_len = loop {
+        let n = s.read(&mut chunk).unwrap();
+        assert!(n > 0, "closed before ACK(req)");
+        buf.extend_from_slice(&chunk[..n]);
+        match ah_engine::wire::parse_ack_req(&buf) {
+            ah_engine::wire::AckSeen::Need => continue,
+            ah_engine::wire::AckSeen::Req { len, .. } => break len,
+            ah_engine::wire::AckSeen::No => panic!("no ACK(req): {}", String::from_utf8_lossy(&buf)),
+        }
+    };
+    buf.drain(..ack_len);
+    while ah_engine::frame::total_len(&buf).is_none_or(|t| buf.len() < t) {
+        let n = s.read(&mut chunk).unwrap();
+        assert!(n > 0, "closed before the reply");
+        buf.extend_from_slice(&chunk[..n]);
+    }
+    let (kind, reply) = ah_engine::frame::decode(&buf).unwrap();
+    if let Some(stats) = send_res {
+        let p = ah_engine::wire::ClientPhases { connect_us: 11, req_ack_us: 22, ack_response_us: 33, retries: 0, launcher: stats.to_string() };
+        s.write_all(&ah_engine::wire::ack_res(&p)).unwrap();
+    }
+    (reply, kind)
+}
+
+#[test]
+fn ack_protocol_reports_phases_delivery_and_launcher_counters() {
+    let e = Env::new("ackphase", &[]);
+    e.warm();
+    let sock_caps = e.eng().join(ah_engine::defaults::text("wire.caps_file"));
+    assert!(sock_caps.exists(), "the daemon announces the ack protocol");
+    // a real client call goes through the ack protocol and is blocked as before
+    let (out, _, _, _) = e.hook(DENY_IN, false);
+    assert!(out.contains("engine-blocked"), "{out}");
+    // a raw ack-mode call with ACK(res) carrying launcher counters
+    let (reply, kind) = raw_ack_exchange(&e, Some("v=1;startup_us=321;prefix=9;host=claude;soft_wall=2"));
+    assert_eq!(kind, ah_engine::frame::Kind::Ok);
+    assert!(reply.contains("engine-blocked"), "{reply}");
+    assert!(wait_for(|| wire_ctl_status(&e)["wire"]["delivered"].as_u64().unwrap_or(0) >= 2), "{}", wire_ctl_status(&e));
+    let st = wire_ctl_status(&e);
+    let phases = &st["phases"]["PreToolUse"];
+    for ph in ["connect", "req_ack", "ack_response", "delivery", "queue_wait", "judge", "launcher_startup"] {
+        assert!(phases[ph]["count"].as_u64().unwrap_or(0) >= 1, "phase {ph} missing: {phases}");
+        for q in ["p50_us", "p95_us", "max_us"] {
+            assert!(phases[ph][q].is_u64(), "{ph}.{q}: {phases}");
+        }
+    }
+    assert_eq!(st["fail_open"]["in_window"].as_u64(), Some(0), "{}", st["fail_open"]);
+    let counters = e.ctl("metrics").unwrap();
+    assert!(counters.contains("launcher_counter") && counters.contains("soft_wall"), "the launcher counters reach telemetry: {counters}");
+}
+
+#[test]
+fn an_unconfirmed_verdict_is_an_undelivered_verdict_fail_open() {
+    let e = Env::new("ackundel", &[]);
+    e.warm();
+    let (_, kind) = raw_ack_exchange(&e, None); // the client reads the verdict and goes away without ACK(res)
+    assert_eq!(kind, ah_engine::frame::Kind::Ok);
+    assert!(
+        wait_for(|| wire_ctl_status(&e)["fail_open"]["totals"].as_array().is_some_and(|t| t.iter().any(|r| r["reason"] == "undelivered_verdict"))),
+        "{}",
+        wire_ctl_status(&e)["fail_open"]
+    );
+    assert!(e.health_log().contains("\tundelivered_verdict\t"), "one health-log line per fail-open");
+}
+
+#[test]
+fn a_client_that_is_gone_before_the_ack_is_not_judged() {
+    use std::os::unix::net::UnixStream;
+    let e = Env::new("ackgone", &[]);
+    e.warm();
+    let before = wire_ctl_status(&e)["requests"].as_u64().unwrap();
+    let sock = ah_engine::paths::socket_in(&e.eng());
+    let body = format!("V 0.1.0\n{}\n{DENY_IN}", ah_engine::reqenv::RequestEnv::from_pairs([("HOME", "/h")]).to_line());
+    let mut s = UnixStream::connect(&sock).unwrap();
+    s.write_all(&ah_engine::wire::tag_request(body.as_bytes()).unwrap()).unwrap();
+    drop(s); // closed with the request still unread
+    assert!(wait_for(|| wire_ctl_status(&e)["wire"]["abandoned"].as_u64() == Some(1)), "{}", wire_ctl_status(&e)["wire"]);
+    // the status call itself is a request; the abandoned one added none
+    assert_eq!(wire_ctl_status(&e)["requests"].as_u64().unwrap(), before + 2, "only the two status calls were counted");
+}
+
+#[test]
+fn an_original_client_still_gets_a_plain_frame_from_the_new_daemon() {
+    use std::os::unix::net::UnixStream;
+    let e = Env::new("ackold", &[]);
+    e.warm();
+    let acked_before = wire_ctl_status(&e)["wire"]["acked"].as_u64().unwrap();
+    let sock = ah_engine::paths::socket_in(&e.eng());
+    let body = format!("V 0.1.0\n{}\n{DENY_IN}", ah_engine::reqenv::RequestEnv::from_pairs([("HOME", e.dir.join("home").display().to_string())]).to_line());
+    let mut s = UnixStream::connect(&sock).unwrap();
+    s.write_all(body.as_bytes()).unwrap();
+    s.shutdown(std::net::Shutdown::Write).unwrap();
+    let mut buf = Vec::new();
+    s.read_to_end(&mut buf).unwrap();
+    let (kind, reply) = ah_engine::frame::decode(&buf).expect("a bare frame, no ack lines");
+    assert_eq!(kind, ah_engine::frame::Kind::Ok);
+    assert!(reply.contains("engine-blocked"), "{reply}");
+    assert_eq!(wire_ctl_status(&e)["wire"]["acked"].as_u64(), Some(acked_before), "an original request is never acked");
+}
+
+#[test]
+fn a_client_that_finds_no_ack_announcement_uses_the_original_exchange_with_any_daemon() {
+    // the state an older daemon leaves: it never writes the announcement, so the new client must not opt in
+    let e = Env::new("ackcaps", &[]);
+    e.warm();
+    ah_engine::discard::harmless(std::fs::remove_file(e.eng().join(ah_engine::defaults::text("wire.caps_file")))); // keep: simulating a daemon that predates the protocol
+    let before = wire_ctl_status(&e)["wire"]["acked"].as_u64().unwrap();
+    let (out, _, _, _) = e.hook(DENY_IN, false);
+    assert!(out.contains("engine-blocked"), "{out}");
+    assert_eq!(wire_ctl_status(&e)["wire"]["acked"].as_u64(), Some(before), "no opt-in without the announcement");
+}
+
+#[test]
+fn an_engine_fail_open_reaches_the_ack_client_the_counters_and_the_degraded_state() {
+    use std::os::unix::net::UnixStream;
+    let e = Env::new("ackfo", &[]);
+    e.warm();
+    let soft = ah_engine::defaults::num("fail_open.soft_per_window");
+    let sock = ah_engine::paths::socket_in(&e.eng());
+    for i in 0..soft {
+        // a request the engine cannot evaluate is answered ERR: a fail-open on the engine's side
+        let body = format!("V 0.1.0\n{}\nthis is not json", ah_engine::reqenv::RequestEnv::from_pairs([("HOME", "/h")]).to_line());
+        let mut s = UnixStream::connect(&sock).unwrap();
+        s.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+        s.write_all(&ah_engine::wire::tag_request(body.as_bytes()).unwrap()).unwrap();
+        let (mut buf, mut chunk) = (Vec::new(), [0u8; 4096]);
+        let mut seen = None;
+        loop {
+            let n = s.read(&mut chunk).unwrap();
+            assert!(n > 0, "closed early on round {i}");
+            buf.extend_from_slice(&chunk[..n]);
+            if let ah_engine::wire::AckSeen::Req { len, .. } = ah_engine::wire::parse_ack_req(&buf) {
+                buf.drain(..len);
+            }
+            if let ah_engine::wire::FoSeen::Fo { len, reason, check } = ah_engine::wire::parse_fail_open(&buf) {
+                buf.drain(..len);
+                seen = Some((reason, check));
+            }
+            if ah_engine::frame::total_len(&buf).is_some_and(|t| buf.len() >= t) {
+                break;
+            }
+        }
+        let (kind, _) = ah_engine::frame::decode(&buf).unwrap();
+        assert_eq!(kind, ah_engine::frame::Kind::Err);
+        assert_eq!(seen.map(|(r, _)| r), Some("internal_error".to_string()), "the reply carries the fail-open");
+        let p = ah_engine::wire::ClientPhases::default();
+        s.write_all(&ah_engine::wire::ack_res(&p)).unwrap();
+    }
+    assert!(
+        wait_for(|| wire_ctl_status(&e)["fail_open"]["totals"].as_array().is_some_and(|t| t.iter().any(|r| r["reason"] == "internal_error"))),
+        "{}",
+        wire_ctl_status(&e)["fail_open"]
+    );
+    let st = wire_ctl_status(&e);
+    assert_eq!(st["degraded"], true, "{}", st["fail_open"]);
+    assert_eq!(st["fail_open"]["state"], "degraded");
+    assert!(e.health_log().contains("\tfail_open\tinternal_error\t"), "one health-log line per fail-open: {}", e.health_log());
+}

@@ -111,11 +111,14 @@ pub struct Deadline {
     /// answer, so the call is cut and the check defers to its own Node hook. Never moved by blocked time (the client waits in
     /// real time); lifted with the other limits by `commit()`.
     pub req: AtomicU64,
+    /// Set by the interrupt handler when it stopped the call at its CPU or wall limit (not at the request's deadline).
+    pub timed_out: std::sync::atomic::AtomicBool,
 }
 
 impl Pool {
     /// Start the limits of a call of `limit_ms` script time; `cut` also arms the request's client deadline.
     fn arm(&self, limit_ms: u64, cut: bool) {
+        self.deadline.timed_out.store(false, Ordering::Relaxed);
         let cpu_now = crate::limits::thread_cpu_us();
         self.deadline.cpu.store(cpu_now.saturating_add(limit_ms.saturating_mul(1000)).max(1), Ordering::Relaxed);
         let now = self.epoch.elapsed();
@@ -159,7 +162,11 @@ impl Pool {
                 crate::deadline::beat(); // the interpreter is running: a slow call, not a hung worker
             }
             let now = epoch.elapsed().as_nanos() as u64;
-            (cpu != 0 && crate::limits::thread_cpu_us() > cpu) || (wall != 0 && now > wall) || (req != 0 && now > req)
+            let limit_hit = (cpu != 0 && crate::limits::thread_cpu_us() > cpu) || (wall != 0 && now > wall);
+            if limit_hit {
+                d.timed_out.store(true, Ordering::Relaxed);
+            }
+            limit_hit || (req != 0 && now > req)
         })));
         Some(Pool { ctx: None, checks: HashMap::new(), used: HashMap::new(), tick: 0, inst: budget().instance(), calls: 0, deadline, epoch, rt })
     }
@@ -604,12 +611,14 @@ pub fn cut_at_deadline(name: &str, event: &str) -> bool {
 /// A call cut at its request's client deadline: no failure of the script (nothing is counted as an error), the check defers to
 /// its own Node hook, which the client runs for this entry alone.
 pub fn cut(name: &str, event: &str) -> Verdict {
+    crate::failopen::note(defaults::text("fail_open.reason_deadline"), name, event);
     crate::discard::note("script_deadline", &defaults::render("script.msg_deadline_cut", &[("check", &name), ("event", &event)]));
     Verdict::Defer
 }
 
 fn call(name: &str, libs: &Fingerprint, own: &Fingerprint, payload: &Value, opts: &Value, event: &str, st: Settings) -> Option<Verdict> {
     let mut was_cut = false;
+    let mut timed_out = false;
     let r = POOL.with(|cell| -> Result<Option<Verdict>, String> {
         let mut slot = cell.borrow_mut();
         if slot.is_none() {
@@ -636,6 +645,7 @@ fn call(name: &str, libs: &Fingerprint, own: &Fingerprint, payload: &Value, opts
                 Ok(s.and_then(|s| s.to_string().ok()).unwrap_or_else(|| "null".into()))
             });
             was_cut = out.is_err() && pool.past_request();
+            timed_out = out.is_err() && pool.deadline.timed_out.load(Ordering::Relaxed);
             pool.disarm();
             host::set_deadline(None);
             let text = out?;
@@ -646,6 +656,10 @@ fn call(name: &str, libs: &Fingerprint, own: &Fingerprint, payload: &Value, opts
     match r {
         Ok(v) => v,
         Err(_) if was_cut => Some(cut(name, event)),
+        Err(e) if timed_out => {
+            crate::failopen::note(defaults::text("fail_open.reason_script_timeout"), name, &e);
+            Some(failed(name, event, &e))
+        }
         Err(e) => Some(failed(name, event, &e)),
     }
 }

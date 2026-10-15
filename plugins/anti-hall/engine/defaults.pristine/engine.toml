@@ -22,6 +22,10 @@ value = "AH_ENGINE_DONE_FILE"
 doc = "A file the client creates while it waits on the daemon and keeps when the daemon answered BUSY/ERR, so the call is handed to its Node hooks; it removes it when the daemon answered with nothing left for Node to decide (an OK reply whose entries defer to Node hooks keeps it until the call's final result is ready), gave no reply in the wait window, or none was there. The reliability wrapper sets it, so that its watchdog can tell a call that is still deciding (give it up to client.slow_fallback_max_ms) from a hung engine (kill at the normal budget)."
 value = "AH_ENGINE_WAIT_FILE"
 
+[env.fail_open_file]
+doc = "A file the client appends one line to (`<reason> <check>`) for every engine-level fail-open the daemon reported in a reply (GitHub #201). The launcher sets it inside its per-call run directory and counts the lines after the engine exits, so its own stats and log know the call failed open."
+value = "AH_ENGINE_FAIL_OPEN_FILE"
+
 [env.rules]
 doc = "Overrides the rules file path."
 value = "AH_ENGINE_RULES"
@@ -1181,6 +1185,10 @@ value = "done"
 [launcher.run_wait_file]
 doc = "Name, inside a per-call run directory, of the file the engine creates while it waits on a live daemon."
 value = "wait"
+
+[launcher.run_fail_open_file]
+doc = "Name, inside a per-call run directory, of the file the engine client appends the call's reported fail-opens to (see env.fail_open_file)."
+value = "fail_open"
 
 [launcher.run_spool_file]
 doc = "Name, inside a per-call run directory, of the private copy of a large payload (see launcher.spool_max_bytes)."

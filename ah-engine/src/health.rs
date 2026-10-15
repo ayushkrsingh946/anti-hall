@@ -512,6 +512,18 @@ pub fn advisory(session: &str) -> Option<String> {
     })
 }
 
+/// True the first time it is asked for this `session` and `tag`, false after (the once-per-session stamp the advisories share).
+pub fn first_in_session(session: &str, tag: &str) -> bool {
+    let dir = state_file("advised_dir");
+    crate::discard::harmless(std::fs::create_dir_all(&dir)); // keep: the write that follows reports a failure
+    let stamp = dir.join(format!("{:016x}", fnv(&format!("{session}|{tag}"))));
+    let first = std::fs::OpenOptions::new().write(true).create_new(true).open(&stamp).is_ok();
+    if first {
+        prune_advised(&dir);
+    }
+    first
+}
+
 /// A few words, once per session, when the engine is running below full strength (a self-restart in the window, a tripped
 /// breaker) and no failure advisory applies, so the owner learns of a degraded engine without digging through logs.
 fn degraded_notice(session: &str) -> Option<String> {

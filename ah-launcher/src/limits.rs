@@ -29,9 +29,10 @@ pub enum Ctr {
     ConfigFallback,
     ReaperOff,
     KickSkipped,
+    FailOpen,
 }
 
-const NCTR: usize = 13;
+const NCTR: usize = 14;
 static COUNTERS: [AtomicU64; NCTR] = [const { AtomicU64::new(0) }; NCTR];
 
 impl Ctr {
@@ -51,6 +52,7 @@ impl Ctr {
             Ctr::ConfigFallback => "config_fallback",
             Ctr::ReaperOff => "reaper_off",
             Ctr::KickSkipped => "kick_skipped",
+            Ctr::FailOpen => "fail_open",
         }
     }
     const ALL: [Ctr; NCTR] = [
@@ -67,6 +69,7 @@ impl Ctr {
         Ctr::ConfigFallback,
         Ctr::ReaperOff,
         Ctr::KickSkipped,
+        Ctr::FailOpen,
     ];
 }
 

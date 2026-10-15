@@ -285,6 +285,15 @@ pub fn daemon_section(doc: &mut Doc) {
     match (&reply, &sock_kind) {
         (Some(r), _) => {
             doc.ok(defaults::render("doctor_msg.daemon_up", &[("reply", &js_trim(r))]));
+            if let Some(fo) = crate::client::ctl_json("status").map(|st| st["fail_open"].clone()).filter(|f| f.is_object()) {
+                let (n, window, top) = (fo["in_window"].as_u64().unwrap_or(0), fo["window_s"].as_u64().unwrap_or(0), fo["top_reason"].as_str().unwrap_or(""));
+                let args: [(&str, &dyn std::fmt::Display); 3] = [("n", &n), ("window", &window), ("top", &top)];
+                match fo["state"].as_str() {
+                    Some(s) if s == defaults::text("fail_open.state_hard") => doc.bad(defaults::render("doctor_msg.fail_open_hard", &args)),
+                    Some(s) if s == defaults::text("fail_open.state_soft") => doc.warnl(defaults::render("doctor_msg.fail_open_soft", &args)),
+                    _ => {}
+                }
+            }
             let their = r.split_whitespace().nth(1).unwrap_or("");
             if !their.is_empty() && their != crate::version() {
                 doc.infol(defaults::render("doctor_msg.daemon_other_version", &[("daemon", &their), ("engine", &crate::version())]));

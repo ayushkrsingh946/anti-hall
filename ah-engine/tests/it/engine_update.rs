@@ -81,3 +81,53 @@ fn an_unknown_command_names_it_and_prints_the_usage_hint() {
     assert!(err.contains("usage: ah-engine "), "the hint: {err}");
     std::fs::remove_dir_all(&root).ok();
 }
+
+/// The updater script runs `ah-hook --selftest --engine <new>` before it swaps anything in, and a rejection aborts the update (#199).
+fn selftest_run(tag: &str, launcher_body: &str) -> (i32, String, std::path::PathBuf) {
+    let root = std::env::temp_dir().join(format!("ah-update-selftest-{}-{tag}", std::process::id()));
+    std::fs::remove_dir_all(&root).ok();
+    let plugin = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../plugins/anti-hall").canonicalize().unwrap();
+    let home = root.join("home");
+    std::fs::create_dir_all(&home).unwrap();
+    let engine = root.join("new-engine");
+    std::fs::write(&engine, "#!/bin/sh\necho 9.9.9\n").unwrap();
+    let launcher = root.join("ah-hook");
+    std::fs::write(&launcher, launcher_body).unwrap();
+    for f in [&engine, &launcher] {
+        std::fs::set_permissions(f, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    }
+    let sha = {
+        let o = Command::new("shasum").args(["-a", "256"]).arg(&engine).output().unwrap();
+        String::from_utf8_lossy(&o.stdout).split_whitespace().next().unwrap().to_string()
+    };
+    let out = Command::new("sh")
+        .arg(plugin.join("hooks/ah-update.sh"))
+        .args(["--from"])
+        .arg(&engine)
+        .args(["--sha256", &sha, "--dry-run", "--launcher"])
+        .arg(&launcher)
+        .env("HOME", &home)
+        .env("AH_ENGINE_PLUGIN_ROOT", &plugin)
+        .output()
+        .unwrap();
+    let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    (out.status.code().unwrap_or(-1), text, root)
+}
+
+#[test]
+fn the_updater_runs_the_launcher_selftest_with_the_candidate_engine_and_a_rejection_aborts() {
+    // accepted: the launcher got `--selftest --engine <candidate>`
+    let (code, text, root) = selftest_run("ok", "#!/bin/sh\necho \"$*\" > \"$HOME/launcher.args\"\nexit 0\n");
+    assert_eq!(code, 0, "{text}");
+    assert!(text.contains("launcher self-test: ok"), "{text}");
+    let args = std::fs::read_to_string(root.join("home/launcher.args")).unwrap();
+    assert!(args.starts_with("--selftest --engine "), "{args}");
+    std::fs::remove_dir_all(&root).ok();
+    // rejected: the update fails, says why, and nothing is installed
+    let (code, text, root) = selftest_run("bad", "#!/bin/sh\necho 'engine binary: not executable'\nexit 1\n");
+    assert_eq!(code, 1, "{text}");
+    assert!(text.contains("launcher self-test") && text.contains("not executable"), "{text}");
+    assert!(text.contains("state:") && text.contains("next:"), "three-part failure: {text}");
+    assert!(!root.join("home/.anti-hall/ah-engine/bin/ah-engine").exists(), "nothing was swapped in");
+    std::fs::remove_dir_all(&root).ok();
+}

@@ -658,6 +658,24 @@ fn the_failure_path_appends_a_bounded_log_line() {
     assert!(env.log().contains("engine_silent_exit"), "{}", env.log());
 }
 
+#[test]
+fn a_fail_open_the_engine_reported_in_its_reply_is_counted_and_logged() {
+    let env = Env::new("foreply");
+    // the engine client appends `reason=.. check=..` to the file the launcher named when the daemon's reply was a fail-open
+    let e = env.script(
+        "fo.sh",
+        "cat >/dev/null\nprintf 'reason=deadline_cut check=agent-scan\\n' >> \"$AH_ENGINE_FAIL_OPEN_FILE\"\n: > \"$AH_ENGINE_DONE_FILE\"\nexit 0",
+    );
+    let o = env.run("UserPromptSubmit", PAYLOAD, Some(&e), &[]);
+    assert_eq!(o.code, 0, "{}", o.err);
+    assert!(env.log().contains("engine_fail_open") && env.log().contains("reason=deadline_cut"), "{}", env.log());
+    // and nothing is left behind in the run directory
+    let quiet = env.script("quiet.sh", "cat >/dev/null\n: > \"$AH_ENGINE_DONE_FILE\"\nexit 0");
+    let before = env.log();
+    env.run("UserPromptSubmit", PAYLOAD, Some(&quiet), &[]);
+    assert_eq!(env.log(), before, "a call that did not fail open adds nothing to the log");
+}
+
 // ---------------------------------------------------------------------------------------------------------------------------
 // 7. --selftest
 // ---------------------------------------------------------------------------------------------------------------------------
