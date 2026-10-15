@@ -34,6 +34,7 @@ struct Hook {
 const INBOX: Hook = Hook { script: "inbox-read-guard.js", check: "inbox-read-guard", argv: &[] };
 const PHASE: Hook = Hook { script: "phase-tracker.js", check: "phase-tracker", argv: &[] };
 const SPAWN: Hook = Hook { script: "orch-on-spawn.js", check: "orch-on-spawn", argv: &[] };
+const PARENT_INBOX: Hook = Hook { script: "devswarm-parent-inbox.js", check: "devswarm-parent-inbox", argv: &[] };
 const ORCH: Hook = Hook { script: "verify-first-orch.js", check: "verify-first-orch", argv: &["--host=claude"] };
 /// The Codex hook entry: the same script without the `--host=claude` flag.
 const ORCH_CODEX: Hook = Hook { script: "verify-first-orch.js", check: "verify-first-orch-codex", argv: &[] };
@@ -67,15 +68,17 @@ struct Case {
     env: Vec<(String, String)>,
     seed: Vec<Seed>,
     defer: bool,
+    /// Run the Node hook once on both homes before the comparison, so the state of an earlier turn of the session is there.
+    prime: bool,
 }
 
 fn case(name: &str, input: Value) -> Case {
-    Case { name: name.into(), input: Input::Json(input), env: Vec::new(), seed: Vec::new(), defer: false }
+    Case { name: name.into(), input: Input::Json(input), env: Vec::new(), seed: Vec::new(), defer: false, prime: false }
 }
 
 impl Case {
     fn raw(name: &str, input: &str) -> Case {
-        Case { name: name.into(), input: Input::Raw(input.into()), env: Vec::new(), seed: Vec::new(), defer: false }
+        Case { name: name.into(), input: Input::Raw(input.into()), env: Vec::new(), seed: Vec::new(), defer: false, prime: false }
     }
     fn env(mut self, k: &str, v: &str) -> Case {
         self.env.push((k.into(), v.into()));
@@ -93,6 +96,10 @@ impl Case {
     }
     fn defer(mut self) -> Case {
         self.defer = true;
+        self
+    }
+    fn prime(mut self) -> Case {
+        self.prime = true;
         self
     }
 }
@@ -224,7 +231,9 @@ fn norm(s: &str, now: u128) -> String {
     }
     // tmp marker files carry a pid and a random suffix: only their existence is compared
     let re_tmp = regex::Regex::new(r"\.\d+\.[0-9a-f]{8}\.tmp\.json").unwrap();
-    re_tmp.replace_all(&out, ".<PID>.<RND>.tmp.json").to_string()
+    // the emit-dedupe store keys a record by a hash of the transcript path, which holds the (different) home of each side
+    let re_tp = regex::Regex::new(r#""tp":"[0-9a-f]{16}""#).unwrap();
+    re_tp.replace_all(&re_tmp.replace_all(&out, ".<PID>.<RND>.tmp.json"), r#""tp":"<TP>""#).to_string()
 }
 
 fn norm_path_keys(m: BTreeMap<String, String>) -> BTreeMap<String, String> {
@@ -306,13 +315,18 @@ fn drive(name: &str, h: Hook, cases: Vec<Case>) -> Tally {
         let (hn, he) = (temp_home(&format!("{name}-n")), temp_home(&format!("{name}-e")));
         seed_home(&hn, &case.seed, now);
         seed_home(&he, &case.seed, now);
-        let seeded = norm_path_keys(snapshot(&he, now));
         let render = |home: &Path| -> Vec<u8> {
             match &case.input {
                 Input::Json(v) => subst(&v.to_string(), home, now).into_bytes(),
                 Input::Raw(s) => subst(s, home, now).into_bytes(),
             }
         };
+        if case.prime {
+            for home in [&hn, &he] {
+                run_node(h, home, case, &render(home), now);
+            }
+        }
+        let seeded = norm_path_keys(snapshot(&he, now));
         let node = run_node(h, &hn, case, &render(&hn), now);
         let eng = run_engine(h, &he, case, &render(&he), now);
         let after_n = norm_path_keys(snapshot(&hn, now));
@@ -1105,6 +1119,94 @@ fn verify_first_orch_codex_matches_node() {
     assert!(t.stdout_nonempty >= 70, "the corpus must exercise the emitted texts: {}", t.stdout_nonempty);
     assert!(t.state_changed >= 5, "the corpus must exercise the marker: {}", t.state_changed);
     assert_eq!(t.deferred, always_defers.len(), "deferred {}", t.deferred);
+}
+
+// ------------------------------------------------------------------------------------------------------------------
+// devswarm-parent-inbox: an active Primary with no git checkout around its working directory
+// ------------------------------------------------------------------------------------------------------------------
+
+fn prompt(extra: Value) -> Value {
+    let mut p =
+        json!({"hook_event_name":"UserPromptSubmit","session_id":"S1","transcript_path":"$HOME/.claude/projects/-p/S1.jsonl","cwd":"$HOME/proj","prompt":"hi"});
+    for (k, v) in extra.as_object().unwrap() {
+        p[k] = v.clone();
+    }
+    p
+}
+
+fn parent_inbox_cases() -> Vec<Case> {
+    let repo_dir = repo().to_string_lossy().into_owned();
+    let primary = |c: Case| c.env("DEVSWARM_REPO_ID", "r").seed(Seed::Dir("proj".into())).seed(Seed::Dir(".claude/projects/-p".into()));
+    let dflt = || prompt(json!({}));
+    let without = |k: &str| {
+        let mut p = dflt();
+        p.as_object_mut().unwrap().remove(k);
+        p
+    };
+    let marker = |body: &str| Seed::File(".anti-hall/devswarm/primary-seat/S1.json".into(), body.as_bytes().to_vec(), 0);
+    vec![
+        primary(case("first-turn", dflt())),
+        primary(case("second-turn-same-session-suppressed", dflt())).prime(),
+        primary(case("second-turn-other-session-emits", prompt(json!({"session_id":"S2"})))).prime(),
+        primary(case("second-turn-transcript-missing", dflt())).prime().seed(Seed::Dir("x".into())),
+        primary(case("second-turn-with-transcript", dflt())).prime().file(".claude/projects/-p/S1.jsonl", "{\"type\":\"user\"}\n"),
+        primary(case("repeat-every-zero", dflt())).prime().env("ANTIHALL_INJECTION_REPEAT_EVERY", "0"),
+        primary(case("repeat-every-one", dflt())).prime().env("ANTIHALL_INJECTION_REPEAT_EVERY", "1"),
+        primary(case("repeat-every-garbage", dflt())).prime().env("ANTIHALL_INJECTION_REPEAT_EVERY", "x"),
+        primary(case("dedupe-off-settings", dflt())).prime().seed(Seed::Settings(json!({"guards":{"emitDedupe":false}}))),
+        primary(case("dedupe-window-zero", dflt())).prime().seed(Seed::Settings(json!({"context":{"dedupeWindowMin":0}}))),
+        primary(case("no-cwd", without("cwd"))),
+        primary(case("cwd-empty", prompt(json!({"cwd":""})))),
+        primary(case("cwd-numeric", prompt(json!({"cwd":5})))),
+        primary(case("cwd-nonexistent", prompt(json!({"cwd":"$HOME/gone/deeper"})))),
+        primary(case("cwd-root", prompt(json!({"cwd":"/"})))),
+        primary(case("cwd-relative-defers", prompt(json!({"cwd":"proj"})))).defer(),
+        primary(case("cwd-in-a-checkout-defers", prompt(json!({"cwd":repo_dir})))).defer(),
+        primary(case("cwd-in-a-checkout-subdir-defers", prompt(json!({"cwd":format!("{repo_dir}/ah-engine/src")})))).defer(),
+        primary(case("no-session", without("session_id"))),
+        primary(case("session-empty", prompt(json!({"session_id":""})))),
+        primary(case("session-numeric", prompt(json!({"session_id":7})))),
+        primary(case("session-odd-chars", prompt(json!({"session_id":"a/b \u{fc}!"})))),
+        primary(case("no-transcript", without("transcript_path"))),
+        primary(case("transcript-empty", prompt(json!({"transcript_path":""})))),
+        primary(case("transcript-relative-defers", prompt(json!({"transcript_path":"x/S1.jsonl"})))).defer(),
+        primary(case("transcript-numeric", prompt(json!({"transcript_path":3})))),
+        primary(case("payload-empty-object", json!({}))),
+        primary(case("payload-array", json!([1]))),
+        primary(Case::raw("payload-garbage-defers", "{nope")).defer(),
+        primary(Case::raw("payload-empty-defers", "")).defer(),
+        // the seat marker the SessionStart hook leaves
+        primary(case("seat-marker-shown-once-defers", dflt())).seed(marker("{\"shown\":1}")).defer(),
+        primary(case("seat-marker-shown-twice", dflt())).seed(marker("{\"shown\":2}")),
+        primary(case("seat-marker-shown-many", dflt())).seed(marker("{\"shown\":9}")),
+        primary(case("seat-marker-shown-string-defers", dflt())).seed(marker("{\"shown\":\"1\"}")).defer(),
+        primary(case("seat-marker-shown-null-defers", dflt())).seed(marker("{\"shown\":null}")).defer(),
+        primary(case("seat-marker-shown-absent", dflt())).seed(marker("{}")),
+        primary(case("seat-marker-null", dflt())).seed(marker("null")),
+        primary(case("seat-marker-garbage", dflt())).seed(marker("{torn")),
+        primary(case("seat-marker-array", dflt())).seed(marker("[1]")),
+        primary(case("seat-marker-other-session", dflt())).seed(Seed::File(".anti-hall/devswarm/primary-seat/S9.json".into(), b"{\"shown\":1}".to_vec(), 0)),
+        primary(case("seat-marker-no-session", without("session_id"))).seed(marker("{\"shown\":1}")),
+        // the gates in front of it
+        primary(case("switch-off", dflt())).seed(Seed::Settings(json!({"devswarm":{"parentInbox":false}}))),
+        primary(case("kill-switch", dflt())).env("DISABLE_ANTIHALL_DEVSWARM", "1"),
+        primary(case("judge-child", dflt())).env("ANTIHALL_JUDGE_CHILD", "1"),
+        primary(case("child-workspace-silent", dflt())).env("DEVSWARM_SOURCE_BRANCH", "b"),
+        primary(case("supervisor-off", dflt())).env("ANTIHALL_DEVSWARM_SUPERVISOR", "off"),
+        case("supervisor-on-without-repo-id", dflt()).env("ANTIHALL_DEVSWARM_SUPERVISOR", "on").seed(Seed::Dir("proj".into())),
+        case("not-devswarm", dflt()).seed(Seed::Dir("proj".into())),
+    ]
+}
+
+#[test]
+fn devswarm_parent_inbox_without_a_checkout_matches_node() {
+    let cases = parent_inbox_cases();
+    assert!(cases.len() >= 40, "the corpus must stay broad");
+    let t = drive("parent-inbox", PARENT_INBOX, cases);
+    assert_eq!(t.blocks, 0);
+    assert!(t.stdout_nonempty >= 18, "the corpus must exercise the emitted reminder: {}", t.stdout_nonempty);
+    assert!(t.state_changed >= 20, "the corpus must exercise the dedupe state: {}", t.state_changed);
+    assert_eq!(t.deferred, 9, "deferred {}", t.deferred);
 }
 
 // ------------------------------------------------------------------------------------------------------------------

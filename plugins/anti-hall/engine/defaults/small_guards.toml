@@ -1603,7 +1603,7 @@ value = "apply_patch"
 
 [devswarm_prompt.parent_summary]
 doc = "One-line description of the devswarm-parent-inbox check in the generated reference."
-value = "DevSwarm Primary prompt hook: answers the silent cases (not a Primary, DevSwarm inactive, switch off, judge child) in the engine; an active Primary defers to the Node hook, which owns the roster, mailbox and dedupe state (port of the gate of devswarm-parent-inbox.js)."
+value = "DevSwarm Primary prompt hook: answers the silent cases (not a Primary, DevSwarm inactive, switch off, judge child) and an active Primary with no git checkout around its working directory (its communication-override reminder through the emit-dedupe store) in the engine; a Primary in a checkout defers to the Node hook, which owns the roster, mailbox and dedupe state (port of devswarm-parent-inbox.js)."
 
 [devswarm_prompt.child_summary]
 doc = "One-line description of the devswarm-child-turn check in the generated reference."
@@ -1640,6 +1640,28 @@ value = "DEVSWARM_REPO_ID"
 [devswarm_prompt.branch_env]
 doc = "Environment variable whose non-blank value marks a child workspace (hooks/lib/devswarm-role.js)."
 value = "DEVSWARM_SOURCE_BRANCH"
+
+[devswarm_prompt.event]
+doc = "The hook event name of the prompt hooks' answer."
+value = "UserPromptSubmit"
+
+[devswarm_prompt.override_key]
+doc = "The emit-dedupe key of the Primary's communication-override reminder."
+value = "parent-inbox-comms-override"
+
+[devswarm_prompt.override_reassert]
+doc = "The Primary's per-turn communication-override reminder (hooks/devswarm-parent-inbox.js OVERRIDE_REASSERT), byte for byte."
+value = "\U0001F4A1 anti-hall \u00B7 devswarm-comms: mesh only \u2014 native hivecontrol messaging blocked. Check: `roster` / `mesh read`. Direct: `send --to <meshId>`."
+
+[devswarm_prompt.seat_dir]
+doc = "The directory, under the anti-hall directory, of the per-session seat-conflict markers the SessionStart hook writes."
+value = "devswarm/primary-seat"
+
+[devswarm_prompt.seat_shown_max]
+doc = "A seat-conflict marker is owed a repeat while the number of times it was shown is below this."
+value = 2
+min = 1
+max = 1000
 
 [devswarm_prompt.mode_setting]
 doc = "Where devswarm.supervisorMode is read from: environment variable, settings.json, then the plugin option; `values` are the accepted words and `manifest_default` is the default the plugin manifest declares for the option (a stored option equal to it counts as unset, as in hooks/lib/settings.js)."
