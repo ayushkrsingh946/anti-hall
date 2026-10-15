@@ -5,7 +5,7 @@
 //!
 //! | raw function | what it does |
 //! |---|---|
-//! | `spawnProbeCached(prog, args, cwd, timeoutMs)` | `spawnProbe` for an answer that depends only on the interpreter and the arguments (a version probe): a completed run is kept per daemon, keyed by the resolved path with its size and modification time, the arguments and the request values named by `host_spawn.cache_key_env`, for `host_spawn.cache_ttl_ms`; a hit costs no run, no budget and no `max_calls` slot; a miss runs the program in a worker bounded by the program ceiling rather than by the request, so a request cut short by its deadline fails open (`skipped`) while the answer still lands for the next one, and a probe already running under the same key is not started twice; a timed-out, killed, skipped or overflowing run is never kept |
+//! | `spawnProbeCached(prog, args, cwd, timeoutMs)` | `spawnProbe` for an answer that depends only on the interpreter and the arguments (a version probe): a completed run is kept per daemon, keyed by the resolved path with its size and modification time, the arguments and the request values named by `host_spawn.cache_key_env`, for `host_spawn.cache_ttl_ms`; a hit costs no run, no budget and no `max_calls` slot; a miss runs the program in a worker bounded by the program ceiling rather than by the request, so a request cut short by its deadline fails open (`skipped`) while the answer still lands for the next one, and a probe already running under the same key is not started twice, and at most `host_spawn.max_workers` workers live at once (a request over the cap, or with no time left, fails open without starting one); a timed-out, killed, skipped or overflowing run is never kept, nor one whose stdout matches `host_spawn.cache_skip_stdout` (an unknown-module answer, which a package install changes) |
 //! | `spawnProbe(prog, args, cwd, timeoutMs)` | run `prog` (a bare name in `host_spawn.programs`, looked up on the REQUEST's `PATH`, never the daemon's or the plugin's) with `args`, in `cwd` when it is an existing absolute directory, with the request's environment minus the names `host_spawn.scrub_env` matches, no stdin, its own process group, killed at the timeout. The timeout is clamped to `host_spawn.timeout_max_ms` and to what is left of the request minus `host_spawn.deadline_reserve_ms`; at most `host_spawn.max_calls` runs per script call. Result as JSON text: `{"found":false}` (not installed or not allowed), `{"found":true,"skipped":true}` (no time or budget left: nothing ran), else `{"found":true,"path","status":n\|null,"signal":n\|null,"timedOut":b,"overflow":b,"stdout","stderr"}` (`overflow`: a stream went past `host_spawn.output_max_bytes`; both streams are cut there) |
 // Discard triage (E3): nothing in this file is discarded silently; a spawn failure is logged by `crate::proc::run`.
 
@@ -59,6 +59,11 @@ fn cache_key(bin: &str, args: &[String], env: &std::collections::HashMap<String,
 fn remember(key: &str, out: &str) -> bool {
     let Ok(v) = serde_json::from_str::<serde_json::Value>(out) else { return false };
     if v["found"] != true || !v["signal"].is_null() || v["timedOut"] != false || v["overflow"] != false {
+        return false;
+    }
+    // an answer that says "not found / unknown" depends on what is installed, which the key cannot see: never kept
+    let unkept = defaults::text("host_spawn.cache_skip_stdout");
+    if !unkept.is_empty() && jsre::compile(unkept, false).is_match(v["stdout"].as_str().unwrap_or("")) {
         return false;
     }
     let expires = crate::health::now_ms().saturating_add(defaults::num("host_spawn.cache_ttl_ms"));
@@ -136,7 +141,15 @@ fn spawn_probe_with(prog: &str, args: &[String], cwd: Option<&str>, timeout_ms: 
     // the request waits for it only as long as its own deadline allows. A request cut short fails open as before, and the
     // finished answer serves the next one (the interpreter is not probed again for `host_spawn.cache_ttl_ms`).
     let ceiling = budget_ceiling(timeout_ms);
+    // reserve the request's wait first: with nothing left no worker is claimed or started
+    let Some(wait) = budget(timeout_ms) else {
+        return Ok(json!({"found": true, "skipped": true}).to_string());
+    };
     let (tx, rx) = std::sync::mpsc::channel();
+    if !take_slot() {
+        // the global worker cap is reached (timed-out probes still running count): fail open, nothing starts
+        return Ok(json!({"found": true, "skipped": true}).to_string());
+    }
     if claim(&k) {
         let key = k.clone();
         let spawned = std::thread::Builder::new().name("ah-spawn-probe".into()).spawn(move || {
@@ -145,20 +158,20 @@ fn spawn_probe_with(prog: &str, args: &[String], cwd: Option<&str>, timeout_ms: 
                 remember(&key, &out);
             }
             release(&key);
+            free_slot();
             crate::discard::harmless(tx.send(out));
         });
         if let Err(e) = spawned {
             release(&k);
+            free_slot();
             crate::discard::note("spawn_probe_worker_failed", &e.to_string());
             return Ok(json!({"found": true, "skipped": true}).to_string());
         }
     } else {
         // another request is already running this very probe: it warms the cache, this one fails open
+        free_slot();
         return Ok(json!({"found": true, "skipped": true}).to_string());
     }
-    let Some(wait) = budget(timeout_ms) else {
-        return Ok(json!({"found": true, "skipped": true}).to_string());
-    };
     let started = Instant::now();
     let got = rx.recv_timeout(wait);
     credit_blocking(started);
@@ -214,6 +227,20 @@ impl Run {
 fn inflight() -> std::sync::MutexGuard<'static, std::collections::HashSet<String>> {
     static SET: OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> = OnceLock::new();
     SET.get_or_init(Default::default).lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+static WORKERS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Reserve one of the `host_spawn.max_workers` probe worker slots; false when all are in use.
+fn take_slot() -> bool {
+    use std::sync::atomic::Ordering::SeqCst;
+    let max = defaults::num("host_spawn.max_workers");
+    WORKERS.try_update(SeqCst, SeqCst, |n| (n < max).then_some(n + 1)).is_ok()
+}
+
+fn free_slot() {
+    use std::sync::atomic::Ordering::SeqCst;
+    crate::discard::harmless(WORKERS.try_update(SeqCst, SeqCst, |n| Some(n.saturating_sub(1))));
 }
 
 /// Take the right to run the probe under `key`; false when a worker already has it.
@@ -293,6 +320,8 @@ mod tests {
         assert!(!remember(k, &json!({"found": true, "timedOut": false, "signal": 9, "overflow": false}).to_string()));
         assert!(!remember(k, &json!({"found": true, "timedOut": false, "signal": null, "overflow": true}).to_string()));
         assert!(!remember(k, &json!({"found": false}).to_string()));
+        assert!(!remember(k, &done("[1, 2, 0]")), "an unknown-module answer is not kept");
+        assert!(remember("sp-03-known", &done("[1, 0, 12]")), "a resolved answer is kept");
         assert!(cache().get_at(&k.to_string(), crate::health::now_ms()).is_none());
     }
 
@@ -305,5 +334,57 @@ mod tests {
         assert!(cache().len() <= cap, "{} entries over the cap {cap}", cache().len());
         assert!(cache().get_at(&"sp-04-0".to_string(), crate::health::now_ms()).is_none());
         assert!(cache().get_at(&format!("sp-04-{}", cap + 9), crate::health::now_ms()).is_some());
+    }
+
+    fn fake_python(tag: &str, body: &str) -> HashMap<String, String> {
+        use std::os::unix::fs::PermissionsExt;
+        let d = std::env::temp_dir().join(format!("ah-sp-{tag}-{}", std::process::id()));
+        crate::discard::harmless(std::fs::remove_dir_all(&d));
+        std::fs::create_dir_all(&d).unwrap();
+        let p = d.join("python3");
+        std::fs::write(&p, body).unwrap();
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        HashMap::from([("PATH".to_string(), d.to_string_lossy().to_string())])
+    }
+
+    fn request<R>(env: HashMap<String, String>, deadline_ms: u64, f: impl FnOnce() -> R) -> R {
+        crate::deadline::begin(Instant::now());
+        crate::deadline::client_deadline(deadline_ms);
+        let r = crate::script::host::with_call(crate::checks::git::util::Settings { home: String::new(), env }, || {
+            reset_call();
+            f()
+        });
+        crate::deadline::end();
+        r
+    }
+
+    #[test]
+    fn sp_05_timed_out_probes_stay_under_the_global_worker_cap() {
+        let env = fake_python("cap", "#!/bin/sh\n/bin/sleep 2\necho Python 3.12.1\n");
+        let cap = defaults::num("host_spawn.max_workers");
+        let slack = defaults::num("daemon.reply_slack_ms");
+        for req in 0..3 {
+            request(env.clone(), 500 + slack, || {
+                for g in 0..8 {
+                    let a = vec![format!("r{req}g{g}")];
+                    let out = spawn_probe_cached("python3", &a, None, 15000.0).unwrap();
+                    assert!(out.contains("skipped"), "{out}");
+                    let live = WORKERS.load(std::sync::atomic::Ordering::SeqCst);
+                    assert!(live <= cap, "{live} live probe workers over the cap {cap}");
+                }
+            });
+        }
+        assert!(WORKERS.load(std::sync::atomic::Ordering::SeqCst) <= cap);
+    }
+
+    #[test]
+    fn sp_06_no_budget_left_starts_no_worker() {
+        let env = fake_python("nobudget", "#!/bin/sh\n/bin/sleep 2\n");
+        request(env, 0, || {
+            let out = spawn_probe_cached("python3", &["nb".to_string()], None, 15000.0).unwrap();
+            assert!(out.contains("skipped"), "{out}");
+        });
+        // (the worker counter is shared with sp_05 running alongside, so the claim set is what names this probe)
+        assert!(inflight().iter().all(|k| !k.contains("nobudget")), "{:?}", *inflight());
     }
 }
