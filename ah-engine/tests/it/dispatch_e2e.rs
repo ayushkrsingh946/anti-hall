@@ -1174,6 +1174,12 @@ fn over_cap_payload_feeder_handles_slow_reader() {
 #[test]
 fn dispatcher_stdin_cap_boundaries_are_exact() {
     let e = Env::new("stdin-boundaries");
+    // This test pins the stdin cap, not the event budget. A payload at the cap costs every in-process check about 130 ms (debug
+    // build: the payload goes through the plugin scripts), 19 checks about 2.5 s, which is past SessionStart's shipped
+    // `hooks.event_budget_ms` (2400 ms). The spent budget then starts no further Node command, and the mapped `wc -c` never runs.
+    // That is the budget doing its job (the launcher cuts the call at its own limit anyway); the project config lifts it here.
+    std::fs::create_dir_all(e.dir.join(".anti-hall")).unwrap();
+    std::fs::write(e.dir.join(".anti-hall/engine.toml"), "[events.SessionStart]\nbudget_ms = 600000\n").unwrap();
     let map = session_map(&e, "wc -c", "true");
     let args = ["hook", "--event", "SessionStart", "--fallback-map", map.to_str().unwrap()];
     let max = ah_engine::defaults::num("client.max_stdin") as usize;
