@@ -49,6 +49,10 @@ value = "--days"
 doc = "Path of a DevSwarm database to read instead of the live one (`mesh`; makes the verb read-only)."
 value = "--db"
 
+[flag.debug]
+doc = "Turns debug mode (diagnostics.debug_mode) on for one `serve` or `hook` process."
+value = "--debug"
+
 [flag.dir]
 doc = "Directory to scan (`harvest`)."
 value = "--dir"

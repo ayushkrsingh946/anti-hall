@@ -84,6 +84,7 @@ Every flag in a command's arguments, with the commands that take it. A flag shar
 | `--cwd` | `coordinator-work-baseline`, `doctor`, `gh`, `migrate` | Directory to treat as the working directory instead of the current one. |
 | `--days` | `devswarm`, `jev-report`, `jev-setup` | Look-back window in days, or the snooze length for `jev-setup snooze`. |
 | `--db` | `mesh` | Path of a DevSwarm database to read instead of the live one (`mesh`; makes the verb read-only). |
+| `--debug` |  | Turns debug mode (diagnostics.debug_mode) on for one `serve` or `hook` process. |
 | `--dir` | `harvest` | Directory to scan (`harvest`). |
 | `--dry-run` | `devswarm`, `doctor`, `install-codex`, `migrate`, `mcp-reaper`, `engine-update`, `units` | Show what would change and write nothing. |
 | `--event` | `hook` | The hook event name to dispatch (`hook --event`). |
@@ -178,13 +179,14 @@ Every `AH_ENGINE_*` variable the engine or its wrappers read. A variable that ov
 | `AH_ENGINE_CRASH_N` | `client.crash_n` | Daemon deaths within the window that stop respawning. |
 | `AH_ENGINE_CRASH_WINDOW_S` | `client.crash_window_s` | Window in which daemon deaths are counted. |
 | `AH_ENGINE_DEADLINE_MS` | `client.deadline_ms` | Overall hook-client deadline for one engine exchange (connect, write, read); a hard watchdog thread enforces it so a hung daemon fails open quickly. |
+| `AH_ENGINE_DEBUG` |  | When set to anything but 0 or empty, turns debug mode (diagnostics.debug_mode) on for that process. |
 | `AH_ENGINE_DEFER_TO_NODE` | `dispatch.defer_to_node` | 1 (until the Node cutover) = a path the engine cannot decide (infrastructure fault, spent event budget, panic) hands the event to the wrapper's Node hooks with dispatch.defer_exit. 0 = no Node exists: advisory events skip their hooks (logged, counted in telemetry as dispatcher-<path>, one stderr line) and guard events follow dispatch.failure_mode; an over-cap context is delivered for the host to spill when it cannot be spilled natively. |
 | `AH_ENGINE_DIR` |  | Overrides the state directory (default: base_dir/state_dir under the home directory). |
 | `AH_ENGINE_DISPATCH_IN_PROCESS` | `dispatch.in_process` | Run the built-in checks inside the hook client (1) instead of asking the daemon (0, the default). |
 | `AH_ENGINE_DISPATCH_MAX_TIMEOUT_S` | `dispatch.max_timeout_s` | An upper bound on any Node hook's timeout, whatever its hooks.json entry says (the default is above every real timeout, so it changes nothing; tests lower it to exercise a hook that never exits). |
 | `AH_ENGINE_DONE_FILE` |  | A file the dispatcher creates once it has dispatched an event and decided its exit code (D87). The reliability wrapper sets it, so that an engine exit code of a hook's own (1, say) is told from an engine failure and is not answered by running every hook a second time. |
-| `AH_ENGINE_DOWN_MARKER_TTL_MS` | `client.down_marker_ttl_ms` | How long other clients skip connecting after one client finds the daemon absent or failed, or after client.slow_down_n consecutive slow replies; this prevents hook pile-ups while a restart is attempted. |
-| `AH_ENGINE_EVAL_BUDGET_US` | `daemon.eval_budget_us` | Per-request thread CPU budget for rule evaluation; 0 turns the budget off. |
+| `AH_ENGINE_DOWN_MARKER_TTL_MS` | `client.down_marker_ttl_ms` | How long other clients skip connecting after one client finds the daemon absent or failed, or hung (client.heartbeat_stale_ms) and not replaced, or after client.slow_down_n consecutive slow replies; this prevents hook pile-ups while a restart is attempted. |
+| `AH_ENGINE_EVAL_BUDGET_US` | `daemon.eval_budget_us` | HARD per-request thread CPU budget for rule evaluation: past it every remaining check defers to its Node hook. The SOFT budget (a warning only) is daemon.eval_soft_us. 0 turns the hard budget off. |
 | `AH_ENGINE_FALLBACK` |  | Path of the Node hook the client runs when the engine cannot answer (the `--fallback` argument wins). |
 | `AH_ENGINE_FALLBACK_MS` | `client.fallback_ms` | The Node fallback hook must finish, and its stdout and stderr must reach EOF, within this long. A hook still running at the deadline is killed (then plain allow, since it is unavailable); one that finished with output still unread is an error outcome, never an empty stdout. |
 | `AH_ENGINE_FULLFSYNC` | `storage.fullfsync` | 1 makes SQLite use F_FULLFSYNC on macOS, which also survives power loss at a large cost in commit rate (D73: 479 against 43k commits per second measured); 0 keeps the plain fsync. Off until metrics decide. |
@@ -194,6 +196,8 @@ Every `AH_ENGINE_*` variable the engine or its wrappers read. A variable that ov
 | `AH_ENGINE_HANDOVERS_MS` | `schedule.handovers_ms` | Interval of the handovers job; 0 turns it off. |
 | `AH_ENGINE_HEALTHY_AFTER_S` | `daemon.healthy_after_s` | How long the daemon must stay up before its binary is recorded as having run healthy (files.healthy_binary). A binary that dies earlier never earns the record, so a roll-back may replace it. |
 | `AH_ENGINE_HEALTH_SNAPSHOT_MS` | `telemetry.health_snapshot_ms` | How often the daemon records a `daemon` health snapshot event (resident set, its cap, restarts, degraded flag, queue and worker load, saturation). Events are kept for retention_days and capped by max_event_rows. |
+| `AH_ENGINE_HEARTBEAT_CONFIRM_MS` | `client.heartbeat_confirm_ms` | How long a stale daemon heartbeat (client.heartbeat_stale_ms) must stay unchanged, by the monotonic clock, before a client ends that daemon. The first stale sample only records a suspicion and fails open; any beat, a new daemon, or a wall-clock jump that only made a moving heartbeat read old resets it. Keep it at most client.down_marker_ttl_ms, so a stopped daemon is replaced by the first call after the down marker expires. |
+| `AH_ENGINE_HEARTBEAT_STALE_MS` | `client.heartbeat_stale_ms` | A hook call past client.deadline_ms keeps waiting for a late reply (client.slow_fallback_max_ms) only while the daemon's heartbeat (files.heartbeat) is younger than this. Older means the daemon may be stopped or wedged, not slow: the call fails open at once and marks it down (client.down_marker_ttl_ms). One stale sample only raises a suspicion (files.heartbeat_suspect); the client ends that daemon only once the same heartbeat stayed unchanged for client.heartbeat_confirm_ms, and only when it is the pid holding the singleton lock, verified as this engine's daemon, of this state dir, and still the process generation the heartbeat recorded (start time and executable from the operating system, re-read immediately before the signal); single-flight and under the crash-loop rule. Then it starts a new one. A heartbeat that names another pid or is missing counts as alive. Keep it well above daemon.watchdog_tick_ms and below client.slow_fallback_max_ms less client.slow_wait_margin_ms, so a stop is detected within the first slow call. 0 disables the check. |
 | `AH_ENGINE_IDLE_EXIT_S` | `daemon.idle_exit_s` | Seconds without any request after which the daemon exits cleanly (the next hook call starts a fresh one, and the scheduler catches up its missed jobs); 0 keeps it resident. Default is 1800 (about 30 minutes), so a daemon with no sessions does not linger forever. A daemon whose state dir, lock file or executable is gone still exits on its own (daemon.orphan_check_ms). |
 | `AH_ENGINE_INSTALL_LOCK_HOOK_WAIT_S` | `rollback.lock_hook_wait_s` | How long the integrity check started by the hook wrapper waits for the install lock before skipping (the next run checks). A held lock never holds a session. |
 | `AH_ENGINE_INSTALL_LOCK_STALE_S` | `rollback.lock_stale_s` | An install lock held longer than this is broken (one whose holder process is gone is broken at once). Longer than the slowest install: ah-update's go_live_timeout_s. |
@@ -227,9 +231,9 @@ Every `AH_ENGINE_*` variable the engine or its wrappers read. A variable that ov
 | `AH_ENGINE_RT_POLL_MS` | `realtime.poll_ms` | How often a polled directory is listed and its watched files stat'ed, in milliseconds. Only directories that cannot use OS events are polled (9p, drvfs, NFS, SMB, FUSE, a directory that does not exist yet, backend = poll), so this is the detection latency of those: at most this plus debounce_ms. Polling costs CPU in proportion to the files watched divided by this interval. |
 | `AH_ENGINE_RULES` |  | Overrides the rules file path. |
 | `AH_ENGINE_SCRIPT` | `script.enabled` | 1: a check whose script exists runs the script instead of its compiled port; 0: the compiled port always runs (the parity baseline). |
-| `AH_ENGINE_SCRIPT_CUT_AT_DEADLINE` | `script.cut_at_request_deadline` | 1 = a scripted check still running when its request's client stops waiting (client.deadline_ms minus daemon.reply_slack_ms) is interrupted there, and a check not yet started by then is not started: each such entry defers to its own Node hook while the entries answered in time keep the engine's answer, so a loaded machine costs single checks instead of the whole event (before, the reply came after the client had given up and every entry of the event ran in Node). Not counted as a script error. An engine-only check whose failure mode is closed (script.failure_mode_by_check) keeps only its own limit on a guard event. 0 = the checks run to their own limits whatever the client's deadline. |
+| `AH_ENGINE_SCRIPT_CUT_AT_DEADLINE` | `script.cut_at_request_deadline` | 1 = a scripted check still running when its request's client stops waiting (client.deadline_ms minus daemon.reply_slack_ms) is interrupted there, and a check not yet started by then is not started: each such entry defers to its own Node hook while the entries answered in time keep the engine's answer, so a loaded machine costs single checks instead of the whole event (before, the reply came after the client had given up and every entry of the event ran in Node). Not counted as a script error. An engine-only check whose failure mode is closed (script.failure_mode_by_check) keeps only its own limit on a guard event. 0 = the checks run to their own limits whatever the client's deadline (the Node parity harness sets AH_ENGINE_SCRIPT_CUT_AT_DEADLINE=0 so its daemon answers every case, however loaded the machine). |
 | `AH_ENGINE_SCRIPT_EXEC_SCALE` | `script.exec_timeout_scale` | Multiplier on the time every `ah.exec` run and every process listing a script asks for may take (the limit a script asks for, and the longest one, are both multiplied). 1 in production; a test build on a loaded machine raises it so a slow child process is not read as a failure. |
-| `AH_ENGINE_SCRIPT_TIME_MS` | `script.time_limit_ms` | CPU-time limit of one script call (the interpreter thread's own CPU time, see script.wall_limit_factor for the wall-clock backstop); past it the interpreter is interrupted and the call defers to Node (never a silent allow). |
+| `AH_ENGINE_SCRIPT_TIME_MS` | `script.time_limit_ms` | SOFT CPU-time limit of one script call (the interpreter thread's own CPU time): a call that used more is logged (script_soft) and counted, and keeps running. The HARD limit that interrupts it is this value times script.time_hard_factor (the call then defers to Node, never a silent allow); script.wall_limit_factor sets the wall-clock backstop from the hard limit. |
 | `AH_ENGINE_SESSION` |  | Session id a `proj` write is spooled under; spooled writes keep their order per session (D24). |
 | `AH_ENGINE_SESSION_BURST` | `daemon.session_burst` | Token-bucket burst per session. |
 | `AH_ENGINE_SESSION_RPS` | `daemon.session_rps` | Sustained requests per second allowed per session; 0 = unlimited. |
@@ -504,6 +508,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `env.auto_update` | `AH_ENGINE_AUTO_UPDATE` |  |  | Read by hooks/ah-update.sh in auto mode: off, stable or dev overrides the `engine.autoUpdate` setting for one run. |
 | `env.bin` | `AH_ENGINE_BIN` |  |  | Test-only: the engine binary the hook wrapper runs instead of the installed one. The wrapper unsets it unless AH_WRAPPER_TEST=1 is also set, so a stray value can never turn the safety net into a silent allow. |
 | `env.bootstrap` | `AH_ENGINE_BOOTSTRAP` |  |  | Set to 0 or 1 to turn the first-run download of the sha256-pinned engine binary off or on; overrides the `engine.bootstrap` setting. Read by hooks/ah-engine-bootstrap.sh. |
+| `env.debug` | `AH_ENGINE_DEBUG` |  |  | When set to anything but 0 or empty, turns debug mode (diagnostics.debug_mode) on for that process. |
 | `env.dir` | `AH_ENGINE_DIR` |  |  | Overrides the state directory (default: base_dir/state_dir under the home directory). |
 | `env.done_file` | `AH_ENGINE_DONE_FILE` |  |  | A file the dispatcher creates once it has dispatched an event and decided its exit code (D87). The reliability wrapper sets it, so that an engine exit code of a hook's own (1, say) is told from an engine failure and is not answered by running every hook a second time. |
 | `env.fallback` | `AH_ENGINE_FALLBACK` |  |  | Path of the Node hook the client runs when the engine cannot answer (the `--fallback` argument wins). |
@@ -5817,6 +5822,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_rt.pr_closed` | `closed` |  |  | The `pull_requests.state` value of a closed, unmerged PR (compared case-insensitively). |
 | `devswarm_rt.pr_merged` | `merged` |  |  | The `pull_requests.state` value of a merged PR (compared case-insensitively). |
 | `devswarm_rt.pr_open` | `open` |  |  | The `pull_requests.state` value of an open PR (compared case-insensitively). |
+| `devswarm_rt.probe_cache_racy_ms` | `2000` |  | ms | A heartbeat, plan or descriptor file modified more recently than this when it is read is read again by the next reconcile, even if its size and modification time look unchanged (a rewrite inside the clock's granularity could otherwise be missed). Older files are parsed once and kept until their inode, modification time or size changes. |
 | `devswarm_rt.reconcile_ms` | `60000` |  | ms | How often the whole state is re-read from its sources and diffed (the safety net under the event layer); every change it finds that events missed counts in `rt_reconcile_repairs`. |
 | `devswarm_rt.restart_grace_ms` | `120000` |  | ms | Changes found by the start-up diff (flagged while_down) are not notified before this long after start, and only if the condition still holds then. |
 | `devswarm_rt.set_line_enabled` | `6 entries` |  |  | Show the DevSwarm workspace dashboard segment in the statusline (on by default; it shows nothing when DevSwarm is absent or no workspace is active). |
@@ -6305,8 +6311,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `ops.table_headers_integrations` | `Integration, Effective, Configured, Source, Logs to` |  |  | The columns of the Jev integrations table. |
 | `ops.true_word` | `true` |  |  | The value `judge on` stores. |
 | `ops.trust_done` | `trusted {repo}/{rel} (sha256 {hash}):` |  |  | First line after a trust is recorded. Placeholders: repo, rel, hash. |
-| `ops.trust_exotic_breaks` | `
-,  ,  ` |  |  | Line-break characters that make a .git file's gitdir line ambiguous between the engine and JavaScript; a repository whose .git file holds one is refused. List of strings. |
+| `ops.trust_exotic_breaks` | `,  ,  ` |  |  | Line-break characters that make a .git file's gitdir line ambiguous between the engine and JavaScript; a repository whose .git file holds one is refused. List of strings. |
 | `ops.trust_missing` | `no {rel} in {top}` |  |  | No allowlist file. Placeholders: rel, top. |
 | `ops.trust_not_git` | `not inside a git repository: {target}` |  |  | No repository. Placeholder: target. |
 | `ops.trust_state` | `{rel} in {top} is {state}` |  |  | An unusable allowlist file. Placeholders: rel, top, state. |
@@ -7351,6 +7356,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_wire.days_flag` | `--older-than` |  |  | The flag of plan-prune that sets the minimum archive age in days. |
 | `devswarm_wire.deferred_exit` | `75` |  |  | Exit code for a verb handed to Node (nothing was done). |
 | `devswarm_wire.desc_keys` | `5 entries` |  |  | The descriptor fields the fact readers use: worktree path, session id, nudge command, escalate command, id. |
+| `devswarm_wire.events_recheck_ms` | `30000` |  | ms | How long the event-driven auto-archive waits before looking at its dirty workspaces again when it cannot act (the event trigger is off or the engine is not the executor). |
 | `devswarm_wire.executor_auto` | `auto` |  |  | The executor word that follows devswarm_sup.mode (poke and escalate only; auto-archive has no auto word). |
 | `devswarm_wire.executor_words` | `engine, node, off` |  |  | The words of the executor settings, in the order engine, node, off. Anything else reads as node (the engine stands down). |
 | `devswarm_wire.git_bin` | `git` |  |  | The git executable the fact readers run. |
@@ -7359,9 +7365,11 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_wire.id_flag` | `--id` |  |  | The flag that names the workspace. |
 | `devswarm_wire.ids_flag` | `--confirm-ids` |  |  | The flag of prune that lists the approved ids (comma separated). |
 | `devswarm_wire.jev_dirty_cap` | `256` |  |  | Most workspaces held in the Jev dirty queue; past it the oldest entries are dropped (the slow scheduled sweep still covers them). |
-| `devswarm_wire.jev_dirty_file` | `rt-jev-dirty.json` |  |  | The file (under the engine state directory) listing the workspaces whose Jev sweep is queued, so a restart does not lose the queue. |
+| `devswarm_wire.jev_dirty_file` | `rt-jev-dirty.json` |  |  | The file (under the engine state directory) the in-memory queue of workspaces whose Jev sweep is queued is saved to (every devswarm_wire.jev_dirty_flush_ms when it changed, and at shutdown), so a restart does not lose the queue. |
+| `devswarm_wire.jev_dirty_flush_ms` | `5000` |  | ms | How often the in-memory Jev dirty queue is written to its file when it changed (it is also written when the thread stops). A crash loses at most this much of queue changes; the scheduled sweep still covers every workspace. |
 | `devswarm_wire.jev_dirty_kinds` | `plan_step, activity, pr, checks` |  |  | The kinds of state change that mark a workspace's Jev data dirty and queue a sweep of just that workspace. |
 | `devswarm_wire.label_chars` | `8` |  |  | How many characters of a workspace id stand in for a missing label in an advisory. |
+| `devswarm_wire.min_sleep_ms` | `10` |  | ms | The shortest sleep of the DevSwarm thread: a deadline that is already due is handled at once, but never busy-waits. |
 | `devswarm_wire.msg_advisory` | `DevSwarm: {changes}{more} (state generation {generation})` |  |  | The advisory text. {changes} is the list of changes, {more} the note about changes left out, {generation} the state generation. |
 | `devswarm_wire.msg_deferred` | `devswarm {verb} is run by scripts/devswarm.js (the engine cannot yet reproduc...` |  |  | Printed for a verb the engine hands to Node. {verb}. |
 | `devswarm_wire.msg_edge` | `{ws} {kind} {from} -> {to}` |  |  | One change in an advisory. {ws} the workspace label or id, {kind} what changed, {from} and {to} the old and new value. |
@@ -7385,11 +7393,13 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_wire.role_words` | `main, child, subagent, codex` |  |  | The roles a caller can have, in this order: main (the interactive main session), child (a DevSwarm workspace child), subagent (a spawned agent or any automated caller), codex (a Codex session). |
 | `devswarm_wire.session_flag` | `--session` |  |  | The flag that names the session an advisory is for. |
 | `devswarm_wire.sql_last_selected` | `SELECT {col} FROM {table} WHERE {id} = ?1` |  |  | The statement that reads when a workspace was last selected in the app. {col} {table} {id} are the column, table and id column names. |
+| `devswarm_wire.store_poll_ms` | `500` |  | ms | How often the held connection of each active mesh store, and of the app database, is asked `PRAGMA data_version` (it changes when another process commits). This replaces watching the SQLite files, which a reader's own open touches. |
 | `devswarm_wire.transcript_dir` | `.claude/projects` |  |  | Where Claude Code keeps session transcripts, relative to the home directory; a worktree's directory is its path with the characters in transcript_encode replaced by '-'. |
 | `devswarm_wire.transcript_encode` | `/\:.` |  |  | The characters of a worktree path replaced by '-' to name its transcript directory. |
 | `devswarm_wire.transcript_ext` | `.jsonl` |  |  | The extension of a session transcript file. |
+| `devswarm_wire.transcript_min_interval_ms` | `5000` |  | ms | The least time between two reactions to one workspace's transcript growing (a Jev sweep mark and a stuck re-check). The gate only stats the transcript files (inode, size): growth inside the interval is acted on once, when the interval ends. |
 | `devswarm_wire.usage_exit` | `64` |  |  | Exit code for a refused or malformed owner verb. |
-| `devswarm_wire.wait_ms` | `500` |  | ms | How long the DevSwarm thread waits for a file event before it checks whether the daemon is draining and whether the periodic reconcile is due. |
+| `devswarm_wire.wait_ms` | `2000` |  | ms | The longest the DevSwarm thread sleeps. It sleeps until the next thing is due (a file event, a deferred reconcile, a store poll, a gate deadline, an action or stall deadline), and never longer than this, so the daemon's drain and a change of devswarm_rt.mode are noticed within it. |
 | `devswarm_wire.watch_git_names` | `HEAD, index, ORIG_HEAD, FETCH_HEAD` |  |  | Files of a worktree's git directory whose change means a commit or a checkout happened (a Jev hint for that workspace). |
 | `devswarm_wire.watch_state_dirs` | `mesh_write.dir_heartbeats, mesh_write.dir_plans, mesh_write.dir_workspaces, m...` |  |  | Directories under the DevSwarm state directory whose changes are hints for a reconcile (each key is a mesh_write.* setting that names the directory). |
 
@@ -8283,8 +8293,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_cli.rr_mb_grep_file_long` | `--file` |  |  | The long flag by which the pattern filter reads its patterns from a file (refused, with or without `=value`). |
 | `devswarm_cli.rr_mb_grep_file_short` | `f` |  |  | The short flag letter for the same (refused anywhere in a flag cluster). |
 | `devswarm_cli.rr_mb_inbox_word` | `inbox` |  |  | The word a mailbox cron prompt must contain (as a whole word) next to the CLI script name. |
-| `devswarm_cli.rr_mb_line_terms` | `\n
-  ` |  |  | The line terminator characters a script path may not contain (a regex dot does not cross them). |
+| `devswarm_cli.rr_mb_line_terms` | `\n  ` |  |  | The line terminator characters a script path may not contain (a regex dot does not cross them). |
 | `devswarm_cli.rr_mb_node` | `node` |  |  | The interpreter word a mailbox-class command starts with (companion/lib/devswarm-idle.js: a ping turn is made only of such calls). |
 | `devswarm_cli.rr_mb_pipe` | `\|` |  |  | The pipe character that separates a mailbox command from its read-only filters. |
 | `devswarm_cli.rr_mb_quotes` | `'"` |  |  | The two quote characters of a mailbox command, in this order: the literal quote, the string quote. |
@@ -9633,12 +9642,6 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `diagnostics.threads_proc_stat` | `stat` |  |  | Linux: the per-thread file holding the CPU ticks (fields 14 and 15) and the name. |
 | `diagnostics.threads_window_ms` | `1000` | `AH_ENGINE_THREADS_WINDOW_MS` | ms | The window of `status --threads`: per-thread CPU % and counters per second are measured over this long. |
 
-### diagnostics.toml / env
-
-| Key | Default | Env override | Unit | What it is |
-|---|---|---|---|---|
-| `env.debug` | `AH_ENGINE_DEBUG` |  |  | When set to anything but 0 or empty, turns debug mode (diagnostics.debug_mode) on for that process. |
-
 ### diagnostics.toml / files
 
 | Key | Default | Env override | Unit | What it is |
@@ -9798,13 +9801,19 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `msg.hint_socket_path` | Self-fix hint when the socket path is too long. Placeholder: {env_dir}. |
 | `msg.hint_state_dir` | Self-fix hint when the state directory is not writable or not private. Placeholders: {state_dir}, {env_dir}. |
 | `msg.impact_no_routing` | Status shown in place of a model-routing saving figure while no routing events are recorded. |
+| `msg.inv_busy_workers` | Invariant violation: more workers are marked busy than there are workers. Placeholder: {workers}. |
+| `msg.inv_queue_pop` | Invariant violation: after a worker took a connection, the queue-depth counter and the queue length differ. Placeholders: {depth}, {len}. |
+| `msg.inv_queue_push` | Invariant violation: after the accept loop queued a connection, the queue-depth counter and the queue length differ. Placeholders: {depth}, {len}. |
+| `msg.inv_violated` | Debug-log line for a violated runtime invariant (checked only in debug mode). Placeholder: {what}, the specific check that failed. |
 | `msg.jev_slow` | Log detail (code jev_slow, rate-limited) of a Jev call slower than its SOFT limit; its answer was still used. |
 | `msg.log_accept_error` | Event-log detail (rate-limited) when the daemon's accept failed for a reason other than nothing pending. Placeholders: {code} (os<n>), {err}. |
 | `msg.log_accept_recovered` | Event-log detail when the daemon accepts a connection again after accept failures (logged then, because a full descriptor table can keep the failure's own log line from being written). Placeholders: {n}, {code} (os<n> of the last failure). |
 | `msg.log_allocator_invalid` | Event-log detail (kind alloc_invalid) when diagnostics.allocator holds a value that is not an accepted allocator; the daemon starts with jemalloc. Placeholder: {value}. |
 | `msg.log_bind_fail` | Start-failure detail when binding the socket fails. Placeholders: {path}, {err}. |
 | `msg.log_budget` | Log detail when a rule evaluation exceeded its CPU budget. |
+| `msg.log_budget_cpu` | Event-log detail when the daemon CPU budget is breached or back within budget. Placeholders: {state}, {value} (percent of one core over the last window), {limit} (the budget, percent). |
 | `msg.log_budget_crossed` | Log detail when a check ran and the request's CPU budget was crossed while it did: the check's own thread CPU and wall time. |
+| `msg.log_budget_mem` | Event-log detail when the daemon memory budget is breached or back within budget. Placeholders: {state}, {value} (MB), {limit} (the budget, MB). |
 | `msg.log_budget_skipped` | Log detail when a check was not started because the request's CPU budget was already spent; `by` names the check that crossed it (empty when it was crossed before the first check). |
 | `msg.log_budget_soft` | Log detail when a request used more thread CPU than its SOFT budget (a warning; nothing was cut). |
 | `msg.log_client_panic` | Log detail when the hook client hit an internal error (a panic) and failed open. |
@@ -9815,6 +9824,8 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `msg.log_daemon_killed` | Log detail when the daemon was killed by a signal while starting. |
 | `msg.log_daemon_spawn_failed` | Event-log detail (kind spawn_fail, code os<n>) when the client could not start the daemon (fork or exec failed: EAGAIN, ENOMEM, a missing executable). Placeholder: {err}. |
 | `msg.log_deadline_soft` | Log detail when a request is still being evaluated after the client's fail-fast wait (its SOFT deadline); the checks keep running up to the hard deadline. |
+| `msg.log_debug_off` | Event-log detail when debug mode turns off (the setting was switched off and neither the environment variable nor the flag holds it on). |
+| `msg.log_debug_on` | Event-log detail when debug mode turns on (the setting, the environment variable or the flag). |
 | `msg.log_fallback_read_error` | Log detail when reading the Node fallback's stdout or stderr failed part-way. |
 | `msg.log_fallback_read_timeout` | Log detail when the Node fallback finished but its stdout or stderr was still open at the deadline. |
 | `msg.log_fallback_signal` | Log detail when the Node fallback was killed by a signal (out of memory, a crash). |
@@ -10048,6 +10059,7 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `dswire_actions` | counter | actions | kind, outcome | DevSwarm actions the engine ran or declined from a state change, by kind and outcome. |
 | `dswire_advisory` | counter | advisories |  | Advisories injected into a session. |
 | `dswire_jev_dirty` | counter | marks |  | Workspaces marked dirty for a per-child Jev sweep. |
+| `dswire_mode_change` | counter | changes | mode | Times the DevSwarm layer's mode (devswarm_rt.mode) changed while the daemon ran, by the new mode. |
 | `dswire_stall_actions` | counter | actions | kind, outcome | Pokes and escalations of silent workspaces the engine ran or refused (feature 5), by kind (poke, escalate) and outcome (ok, failed, refused); the same actions, their inputs and the mistake signals found later are in the action log (`ah-engine telemetry actions stall`). |
 | `dswire_standdown` | counter | sweeps | kind | Action sweeps the engine skipped because the action's executor is not the engine. |
 

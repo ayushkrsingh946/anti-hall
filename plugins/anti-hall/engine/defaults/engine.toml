@@ -10,6 +10,10 @@
 
 # ---- environment variable names -------------------------------------------------------------------------
 
+[env.debug]
+doc = "When set to anything but 0 or empty, turns debug mode (diagnostics.debug_mode) on for that process."
+value = "AH_ENGINE_DEBUG"
+
 [env.dir]
 doc = "Overrides the state directory (default: base_dir/state_dir under the home directory)."
 value = "AH_ENGINE_DIR"
