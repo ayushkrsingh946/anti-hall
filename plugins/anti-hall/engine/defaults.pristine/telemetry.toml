@@ -256,6 +256,26 @@ value = { kind = "counter", unit = "runs", labels = ["check", "decision"] }
 doc = "Wall time of a built-in check run, by check."
 value = { kind = "histogram", unit = "us", labels = ["check"] }
 
+[metric.check_latency_by_size_us]
+doc = "Wall time of a built-in check run, by check and by the size class of the transcript the request named (load.size_labels)."
+value = { kind = "histogram", unit = "us", labels = ["check", "size"] }
+
+[metric.check_bytes_read]
+doc = "Transcript bytes a built-in check read (tail windows and walks it opened), by check and transcript size class; divide by check_calls for the mean per run."
+value = { kind = "counter", unit = "bytes", labels = ["check", "size"] }
+
+[metric.agent_scan_kept]
+doc = "Kept-walk lookups of the agent scan (silent-agent-nudge and the agent gates): hit (the walk resumed from where the last scan stopped) or miss."
+value = { kind = "counter", unit = "lookups", labels = ["result"] }
+
+[metric.agent_scan_kept_miss]
+doc = "Why a kept-walk lookup missed and the window was walked afresh: none (nothing kept: first scan, daemon restart, eviction or idle expiry), gen (defaults changed), file (other file or shrunk), window (kept walk older than the slid window allows), rel_min or straddles (an event or call left the window), digest (head or back of the file changed), straddles_after (appended lines judged a call outside the window), error (an older line raised)."
+value = { kind = "counter", unit = "lookups", labels = ["reason"] }
+
+[metric.dispatch_overhead_us]
+doc = "Wall time of a dispatched hook request that no built-in check accounts for (request wall minus the sum of the checks), by hook event: parsing, plan, locks, waits and queueing inside the daemon."
+value = { kind = "histogram", unit = "us", labels = ["event"] }
+
 [metric.rule_hits]
 doc = "Regex rule matches, by action (deny, warn, context)."
 value = { kind = "counter", unit = "matches", labels = ["action"] }

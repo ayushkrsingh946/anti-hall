@@ -598,10 +598,14 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 |---|---|---|---|---|
 | `load.events_cap` | `32` |  |  | Most distinct hook events listed per minute bucket; past it the rest are counted together. |
 | `load.minutes_kept` | `60` |  |  | How many one-minute buckets of request load the daemon keeps (a rolling window; older buckets are dropped, so memory does not grow with traffic). |
+| `load.notes_cap` | `64` |  |  | Most counted events (a kept-walk hit or the reason it missed) one check may note before it finishes; further notes of that check are dropped. |
 | `load.proc_buckets_us` | `12 items` |  |  | Upper edges of the processing-time histogram (microseconds) the per-minute p95 is read from. |
 | `load.saturation_wait_ms` | `100` |  | ms | A call that waited longer than this between accept and the start of its processing marks that minute saturated: calls are waiting on each other. |
 | `load.saturation_window_minutes` | `10` |  | min | `status` reports the engine saturated while a saturated minute lies within this many minutes. |
 | `load.sessions_cap` | `1024` |  |  | Most distinct session ids remembered per minute bucket; past it sessions are only counted. |
+| `load.size_buckets_bytes` | `204800, 1048576, 10485760, 104857600` |  | bytes | Upper edges (bytes) of the transcript-size classes the per-check Stop latency and bytes-read metrics are split by; `load.size_labels` names the classes (one more label than edges, the last for anything larger). |
+| `load.size_label_unknown` | `none` |  |  | Size class used when a request names no readable transcript. |
+| `load.size_labels` | `lt200k, lt1m, lt10m, lt100m, ge100m` |  |  | Names of the transcript-size classes, smallest first (one more than `load.size_buckets_bytes` has edges). |
 | `load.wait_noise_us` | `1000` |  | us | A wait up to this long between accept and processing is the hand-off between two threads, not queueing; only longer waits count as `calls_that_waited`. |
 
 ### engine.toml / paths
@@ -9984,13 +9988,17 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | Name | Kind | Unit | Labels | What it counts |
 |---|---|---|---|---|
 | `accept_errors` | counter | errors | code | Accept calls that failed for a reason other than nothing pending (EMFILE, ENFILE, ENOBUFS, ENOMEM), by OS error code (os<n>); each one backs the accept loop off for daemon.accept_error_backoff_ms. |
+| `agent_scan_kept` | counter | lookups | result | Kept-walk lookups of the agent scan (silent-agent-nudge and the agent gates): hit (the walk resumed from where the last scan stopped) or miss. |
+| `agent_scan_kept_miss` | counter | lookups | reason | Why a kept-walk lookup missed and the window was walked afresh: none (nothing kept: first scan, daemon restart, eviction or idle expiry), gen (defaults changed), file (other file or shrunk), window (kept walk older than the slid window allows), rel_min or straddles (an event or call left the window), digest (head or back of the file changed), straddles_after (appended lines judged a call outside the window), error (an older line raised). |
 | `budget_soft` | counter | requests |  | Requests that used more thread CPU than the SOFT budget (daemon.eval_soft_us); only warned about, every check kept its answer. |
 | `budget_trips` | counter | evaluations |  | Evaluations cut off by the per-request CPU budget. |
 | `bus_dropped` | gauge | notifications |  | Pub/sub notifications a full subscriber queue could not take since the daemon started (the data stays in SQLite). |
 | `bus_published` | gauge | notifications |  | Pub/sub notifications delivered to subscriber queues since the daemon started. |
 | `busy_replies` | counter | requests |  | Requests answered BUSY (queue full or rate limited), which made the client fall back. |
+| `check_bytes_read` | counter | bytes | check, size | Transcript bytes a built-in check read (tail windows and walks it opened), by check and transcript size class; divide by check_calls for the mean per run. |
 | `check_calls` | counter | runs | check | Built-in check runs, by check. |
 | `check_decisions` | counter | runs | check, decision | Built-in check outcomes, by check and decision (allow, block, advisory, defer). |
+| `check_latency_by_size_us` | histogram | us | check, size | Wall time of a built-in check run, by check and by the size class of the transcript the request named (load.size_labels). |
 | `check_latency_us` | histogram | us | check | Wall time of a built-in check run, by check. |
 | `db_archive_bytes` | gauge | bytes |  | Size of archive.db (0 until it is first used). |
 | `db_archive_wal_bytes` | gauge | bytes |  | Size of archive.db's write-ahead log. |
@@ -10001,6 +10009,7 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `deadline_soft` | counter | requests |  | Requests answered after the client's fail-fast wait (client.deadline_ms) but inside the hard deadline; only warned about. |
 | `dispatch_checks` | counter | entries | event, check, answer | Built-in check entries the dispatcher sent to the daemon, by event, check and answer (decided, or defer = its Node hook ran instead) (D58). |
 | `dispatch_entries` | counter | entries | event, entry, outcome, cfg | What the dispatcher's plan did to each table entry of an event it asked the daemon about (D87): ran, skipped_predicate, skipped_max_rules, skipped_budget, shadowed or off, by event, entry, outcome and the hash of the non-default hook configuration the plan was made under (`default` when none). |
+| `dispatch_overhead_us` | histogram | us | event | Wall time of a dispatched hook request that no built-in check accounts for (request wall minus the sum of the checks), by hook event: parsing, plan, locks, waits and queueing inside the daemon. |
 | `errors` | counter | requests |  | Requests answered ERR. |
 | `hook_calls` | counter | requests | event | Hook requests served, by hook event. |
 | `hook_latency_us` | histogram | us | event | Wall time to serve a hook request inside the daemon, by hook event. |

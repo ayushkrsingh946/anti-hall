@@ -78,6 +78,7 @@ fn read_tail(path: &str, window: u64) -> Option<String> {
     use std::io::{Read, Seek, SeekFrom};
     let mut f = std::fs::File::open(path).ok()?;
     let size = f.metadata().ok()?.len();
+    crate::load::note_scan(size.min(window));
     let mut buf = Vec::new();
     if size <= window {
         f.read_to_end(&mut buf).ok()?;
