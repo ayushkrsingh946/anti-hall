@@ -274,7 +274,12 @@ pub fn pid_is_engine(pid: u32) -> bool {
     if !pid_alive(pid) {
         return false;
     }
-    let exe = std::env::current_exe().ok().and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string())).unwrap_or_default();
+    // Linux reports a replaced binary's `/proc/<pid>/exe` with a trailing " (deleted)"; a binary update must not disable this check.
+    let exe = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
+        .map(|n| n.strip_suffix(" (deleted)").map(str::to_string).unwrap_or(n))
+        .unwrap_or_default();
     let cmd = process_command(pid);
     !exe.is_empty() && cmd.contains(&exe) && cmd.contains(&format!(" {}", defaults::text("health.serve_arg")))
 }
@@ -293,7 +298,8 @@ fn instance_dir() -> PathBuf {
 
 /// Start the daemon's liveness heartbeat (`files.heartbeat`). The file names this process generation, one field per line: pid,
 /// start time and executable as the operating system reports them ([`crate::procid`]), and the instance (state dir); a field the
-/// system will not give is left empty, and a client then never signals that daemon. [`heartbeat`] touches its modification
+/// system will not give is left empty, and a client then never signals that daemon. The executable is informational only: a binary
+/// update replaces it under a surviving daemon (Linux then reports `<path> (deleted)`), so it is not part of the generation. [`heartbeat`] touches its modification
 /// time at the start of every watchdog tick; a stopped or wedged process stops touching it.
 pub fn heartbeat_init() {
     let pid = std::process::id();
@@ -324,19 +330,20 @@ pub(crate) struct Heartbeat {
 }
 
 impl Heartbeat {
-    /// The generation it names, as `(start, exe)`, when the heartbeat belongs to this instance and records both; `None` = its
+    /// The generation it names, as its OS start time, when the heartbeat belongs to this instance and records one; `None` = its
     /// generation cannot be established here (another instance's file, a heartbeat from before generation identity, a field the
-    /// system would not give), and that daemon is never signalled.
-    pub(crate) fn generation(&self) -> Option<(u64, PathBuf)> {
+    /// system would not give), and that daemon is never signalled. Identity is pid + start time + canonical state dir; the recorded
+    /// executable is skipped (a binary update changes its path under a live daemon).
+    pub(crate) fn generation(&self) -> Option<u64> {
         let mut f = self.ident.lines().skip(1);
         let start = f.next()?.parse::<u64>().ok()?;
-        let exe = PathBuf::from(f.next().filter(|e| !e.is_empty())?);
-        (std::path::Path::new(f.next()?) == instance_dir()).then_some((start, exe))
+        f.next()?; // the executable: informational only
+        (std::path::Path::new(f.next()?) == instance_dir()).then_some(start)
     }
 
-    /// True while `pid` is still the generation this heartbeat names: same start time and executable, from the operating system.
+    /// True while `pid` is still the generation this heartbeat names: the same OS start time.
     pub(crate) fn names_running(&self) -> bool {
-        self.generation().is_some_and(|(start, exe)| crate::procid::start(self.pid) == Some(start) && crate::procid::exe(self.pid) == Some(exe))
+        self.generation().is_some_and(|start| crate::procid::start(self.pid) == Some(start))
     }
 }
 
@@ -707,6 +714,22 @@ pub fn merge_advisory(event: &str, existing: &str, text: &str) -> Option<String>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_generation_does_not_depend_on_the_executable_path() {
+        // a binary update replaces the executable under a surviving daemon: same pid, start and dir must stay recoverable
+        let pid = std::process::id();
+        let start = crate::procid::start(pid).expect("own start time");
+        let beat = |start: u64, exe: &str| Heartbeat {
+            pid,
+            ident: format!("{pid}\n{start}\n{exe}\n{}\n", instance_dir().to_string_lossy()),
+            mtime_ns: 0,
+            age: Duration::ZERO,
+        };
+        assert!(beat(start, "/old/place/ah-engine (deleted)").names_running(), "another exe path, same generation");
+        assert!(beat(start, "").names_running(), "an unrecorded exe, same generation");
+        assert!(!beat(start + 1, "/old/place/ah-engine").names_running(), "another start time is another generation");
+    }
 
     #[test]
     fn the_log_trim_keeps_the_tail_atomically_and_waits_for_no_one() {

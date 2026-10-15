@@ -507,7 +507,11 @@ fn replace_hung_daemon(cfg: &ClientConfig, why: &str) -> bool {
     let killed = pid != std::process::id()
         && hb.generation().is_some()
         && health::pid_is_engine(pid)
-        && crate::procid::signal_verified(pid, libc::SIGKILL, || unchanged() && hb.names_running());
+        // The slow OS reads (`names_running`) go first and the heartbeat re-read is the LAST step before the signal. Read-then-signal
+        // cannot be made atomic (no handle ties a heartbeat read to a delivery); the residual is acceptable because a live daemon
+        // that recovers from a confirmed stall of at least `client.heartbeat_confirm_ms` must beat again within microseconds of
+        // running, and the client must be descheduled exactly across that moment.
+        && crate::procid::signal_verified(pid, libc::SIGKILL, || hb.names_running() && unchanged());
     if !killed {
         health::log_event("client_hung_spared", "daemon", &defaults::render("msg.log_hung_spared", &[("pid", &pid), ("why", &why)]));
         return false;

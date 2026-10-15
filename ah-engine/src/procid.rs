@@ -4,8 +4,9 @@
 //!
 //! Linux: `/proc/<pid>/stat` field 22 (start time in clock ticks since boot), `/proc/<pid>/exe`, and a pidfd (`pidfd_open` +
 //! `pidfd_send_signal`) so the process checked is the process signalled. macOS: `proc_pidinfo(PROC_PIDTBSDINFO)` start time in
-//! microseconds, `proc_pidpath`; there is no process handle, so the check runs immediately before `kill(2)` and the residual window
-//! is the few microseconds between the two (the pid would have to exit and be handed out again inside them).
+//! microseconds, `proc_pidpath`; there is no process handle, so the check runs immediately before `kill(2)`. The window between the
+//! two is not bounded in time (the thread can be descheduled in it), but a wrong signal also needs the verified daemon to exit AND
+//! its pid to be handed out again inside that window.
 // Discard triage (E3): a process that vanished, or whose data the system will not give, is the absent value (fail-safe: nothing is
 // done to it).
 
@@ -60,18 +61,16 @@ pub fn exe(_pid: u32) -> Option<PathBuf> {
 }
 
 /// Send `sig` to `pid` only when `verify` (run as late as possible) accepts it; true once delivered. On Linux the process is pinned
-/// by a pidfd before `verify` runs, so the signal reaches the generation `verify` saw or none (`ESRCH` once it exited); without
-/// pidfd support (kernel before 5.3) it falls back to the macOS order.
+/// by a pidfd before `verify` runs, so the signal reaches the generation `verify` saw or none (`ESRCH` once it exited); on an old
+/// kernel without pidfd (`ENOSYS`, before 5.3) it falls back to the macOS order; any other `pidfd_open` error declines.
 #[cfg(target_os = "linux")]
 pub fn signal_verified(pid: u32, sig: libc::c_int, verify: impl FnOnce() -> bool) -> bool {
     use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
     // SAFETY: `pidfd_open` takes a pid and a flags word, and returns a new descriptor or -1.
     let fd = unsafe { libc::syscall(libc::SYS_pidfd_open, pid as libc::pid_t, 0) };
     if fd < 0 {
-        if std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH) {
-            return false; // gone: nothing to signal
-        }
-        return verify_then_kill(pid, sig, verify);
+        // ENOSYS (old kernel) is the only case with no pidfd to be had; ESRCH (gone) and any other failure decline the signal
+        return std::io::Error::last_os_error().raw_os_error() == Some(libc::ENOSYS) && verify_then_kill(pid, sig, verify);
     }
     // SAFETY: `fd` was just returned by pidfd_open and is owned by nothing else.
     let fd = unsafe { OwnedFd::from_raw_fd(fd as std::os::fd::RawFd) };
