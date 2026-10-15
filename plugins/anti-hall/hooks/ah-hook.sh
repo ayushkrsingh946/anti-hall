@@ -212,11 +212,12 @@ engine_effective_num() {
   env_name=$(engine_default_env "$key" || true)
   if [ -n "$env_name" ]; then
     eval "env_value=\${$env_name:-}"
-    if [ -n "$env_value" ]; then
-      v=$env_value
-    else
-      v=$(engine_default_num "$key") || return 1
-    fi
+    # Rust (defaults::num) trims the override and takes it only when it parses as a number; anything else keeps the default
+    env_value=$(printf '%s' "$env_value" | tr -d ' \t\r\n')
+    case "$env_value" in
+      ""|*[!0-9]*) v=$(engine_default_num "$key") || return 1 ;;
+      *) v=$env_value ;;
+    esac
   else
     v=$(engine_default_num "$key") || return 1
   fi
@@ -1312,7 +1313,7 @@ run_engine() {
   eng_wait=$tmp/engine.wait
   rm -f "$eng_wait"
   wait_env=$(engine_default_text env.wait_file || true)
-  slow_max=$(engine_default_num client.slow_fallback_max_ms || true)
+  slow_max=$(engine_effective_num client.slow_fallback_max_ms || true)
   case "$slow_max" in ""|*[!0-9]*) slow_max=0 ;; esac
   hook_cap_ms=$(( $(event_timeout_secs) * 1000 ))
   [ "$slow_max" -le "$hook_cap_ms" ] || slow_max=$hook_cap_ms
