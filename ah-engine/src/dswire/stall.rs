@@ -90,7 +90,7 @@ impl Wire {
 
     /// Read the earliest follow-up time from the log (at start, and after the follow-ups have been looked at).
     pub fn refresh_followup_next(&self) {
-        let due = actlog::followups_due(&self.state_dir, word("feature"), u64::MAX).iter().filter_map(|f| f["due_ms"].as_u64()).min();
+        let due = actlog::followups_due(&self.state_dir, word("feature"), u64::MAX).iter().filter_map(|f| f.get("due_ms").and_then(Value::as_u64)).min();
         self.followup_next.store(due.map_or(i64::MAX, |d| d as i64), Ordering::SeqCst);
     }
 

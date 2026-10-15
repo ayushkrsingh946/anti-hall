@@ -162,11 +162,12 @@ impl Sampler {
             if let Some((a, t0)) = self.prev.take() {
                 let r = crate::threads::report(&a, &now, t0.elapsed().as_micros() as u64);
                 let top = defaults::num("diagnostics.debug_thread_top") as usize;
-                let by_name: Vec<Value> = r["by_name"].as_array().map(|v| v.iter().take(top).cloned().collect()).unwrap_or_default();
+                let field = |k: &str| r.get(k).cloned().unwrap_or(Value::Null);
+                let by_name: Vec<Value> = r.get("by_name").and_then(Value::as_array).map(|v| v.iter().take(top).cloned().collect()).unwrap_or_default();
                 log_data(
                     "threads",
                     "cpu",
-                    json!({"window_ms": r["window_ms"], "cpu_pct_total": r["cpu_pct_total"], "by_name": by_name, "work_per_s": r["work_per_s"]}),
+                    json!({"window_ms": field("window_ms"), "cpu_pct_total": field("cpu_pct_total"), "by_name": by_name, "work_per_s": field("work_per_s")}),
                 );
             }
             self.prev = Some((now, at));

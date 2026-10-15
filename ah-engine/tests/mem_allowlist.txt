@@ -67,3 +67,11 @@ ops/mod.rs | ERR_CAPTURE | the error output of one CLI command being captured | 
 dispatch/node.rs | Capture.buf | cut at mem.proc_output_max_bytes (mem.proc_output_marker appended) | output of the Node fallback child
 dsact/runner.rs | Drained.buf | cut at the cap passed to drain() (devswarm_act config), the rest is read and dropped | output of a DevSwarm action child
 daemon.rs | Shared.test_alloc | only reachable through the test-hook verb `alloc` (AH_ENGINE_TEST_HOOKS=1, never set in production); each call pushes one caller-sized buffer and the daemon process is short-lived in tests | test-only allocation probe for the memory watchdog tests
+
+# ---- added when the live19 train merged the dswire redesign, the Jev breaker and the request deadline work ----------------------
+deadline.rs | EVENT | one event name per thread, cleared when the request ends | the hook event of the request in progress
+devswarm_rt/sources.rs | ReadCache.json | entries the last reconcile did not use are dropped at its end (epoch), so at most the files one reconcile read | stat-keyed cache of parsed probe files
+devswarm_rt/sources.rs | ReadCache.descs | entries the last reconcile did not use are dropped at its end (epoch), so at most one per workspace descriptor | stat-keyed cache of parsed workspace descriptors
+devswarm_rt/sources.rs | FsProbe.descs | one entry per workspace descriptor; the probe lives for one reconcile | built once per probe
+dswire/consume.rs | JevQueue.ids | cut at devswarm_wire.jev_dirty_cap on every queue call | the in-memory per-child Jev dirty queue
+jev/breaker.rs | Breakers.state | one entry per vendor (two), keys are vendor names | the Jev circuit-breaker state
