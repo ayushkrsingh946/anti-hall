@@ -193,7 +193,7 @@ fn slow_streak_tripped() -> bool {
 fn wait_marker(set: bool) {
     if let Some(p) = defaults::env_var("wait_file").filter(|p| !p.is_empty()) {
         if set {
-            crate::discard::logged("wait_file_write", std::fs::write(p, b""));
+            crate::discard::logged("wait_file_write", crate::atomic::write(p, b"")); // the wrapper only tests that the file exists
         } else {
             crate::discard::harmless(std::fs::remove_file(p)); // keep: an absent marker is the desired state
         }
