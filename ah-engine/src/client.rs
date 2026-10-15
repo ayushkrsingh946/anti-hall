@@ -148,6 +148,19 @@ fn slow_streak_tripped() -> bool {
     false
 }
 
+/// Tell the wrapper (`AH_ENGINE_WAIT_FILE`) that this call is waiting on the daemon, or running the Node hooks of a late or
+/// refused reply: its watchdog then lets the call run up to `client.slow_fallback_max_ms` instead of killing it at the fail-fast
+/// budget (which would turn a delayed block into an allow). Removed once the daemon answered or none was there.
+fn wait_marker(set: bool) {
+    if let Some(p) = defaults::env_var("wait_file").filter(|p| !p.is_empty()) {
+        if set {
+            crate::discard::logged("wait_file_write", std::fs::write(p, b""));
+        } else {
+            crate::discard::harmless(std::fs::remove_file(p)); // keep: an absent marker is the desired state
+        }
+    }
+}
+
 fn clear_slow_streak() {
     crate::discard::harmless(std::fs::remove_file(state_file("slow_streak"))); // keep: absent streak is the desired state
 }
@@ -308,17 +321,22 @@ pub(crate) fn attempt(payload: &[u8], cfg: &ClientConfig, have_fallback: bool) -
         return None;
     }
     let sock = paths::socket();
+    wait_marker(true);
     match exchange(&sock, payload, cfg.deadline) {
         Exch::Reply(Kind::Ok, body) => {
+            wait_marker(false);
             clear_daemon_down_marker();
             clear_slow_streak();
             Some(body)
         }
         Exch::Reply(_, _) => {
+            // a completed valid reply (BUSY / ERR) is not a slow one: the streak counts consecutive slow replies only
+            clear_slow_streak();
             LAST_NON_OK_REPLY.set(true);
             None
         }
         Exch::Failed(why) => {
+            wait_marker(false);
             note_unavailable();
             mark_daemon_down(&why);
             if !health::crashloop_tripped(cfg)
@@ -340,6 +358,7 @@ pub(crate) fn attempt(payload: &[u8], cfg: &ClientConfig, have_fallback: bool) -
             None
         }
         Exch::Absent => {
+            wait_marker(false);
             note_unavailable();
             if health::crashloop_tripped(cfg) {
                 return None;

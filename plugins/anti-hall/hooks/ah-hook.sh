@@ -750,6 +750,15 @@ event_timeout_ms() {
   esac
 }
 
+# the hook's own timeout in seconds: the listed event timeout, capped by the wrapper's seconds budget
+event_timeout_secs() {
+  t=$(event_timeout)
+  case "$t" in
+    ""|*[!0-9]*|0) printf '%s\n' "$timeout_env" ;;
+    *) printf '%s\n' "$t" ;;
+  esac
+}
+
 matches_tool() {
   matcher=$1
   [ "$tool_match_all" -eq 1 ] && return 0
@@ -910,14 +919,25 @@ start_watchdog() {
   watch=$!
 }
 
+# Optional 5th/6th args: a wait-marker file and an absolute bound (ms from the start). When the budget runs out and the marker
+# exists (the engine client is waiting on the daemon or its Node hooks are deciding), the deadline moves once to the bound.
 start_watchdog_ms() {
-  w_pid=$1; w_timeout_ms=$2; w_group=$3; w_timed=$4
+  w_pid=$1; w_timeout_ms=$2; w_group=$3; w_timed=$4; w_slow=${5:-}; w_slow_max=${6:-0}
   (
     trap - 0 HUP INT TERM
-    deadline_ms=$(( $(now_ms) + w_timeout_ms ))
+    w_t0=$(now_ms)
+    deadline_ms=$((w_t0 + w_timeout_ms))
+    w_extended=0
     while :; do
       remaining_ms=$((deadline_ms - $(now_ms)))
-      [ "$remaining_ms" -le 0 ] && break
+      if [ "$remaining_ms" -le 0 ]; then
+        if [ "$w_extended" -eq 0 ] && [ -n "$w_slow" ] && [ "$w_slow_max" -gt "$w_timeout_ms" ] && [ -e "$w_slow" ] && kill -0 "$w_pid" 2>/dev/null; then
+          w_extended=1
+          deadline_ms=$((w_t0 + w_slow_max))
+          continue
+        fi
+        break
+      fi
       if [ "$remaining_ms" -lt "$watchdog_poll_ms" ]; then
         sleep "$(engine_default_sleep "$remaining_ms")"
       else
@@ -1286,6 +1306,21 @@ run_engine() {
   export AH_ENGINE_DONE_FILE
   timeout=$(event_timeout_ms)
   validate_positive_int "$timeout" engine_timeout_ms
+  # A call that is waiting on the daemon, or running the Node hooks of a late/refused daemon reply, gets a bounded extension: the
+  # engine client creates the wait file for exactly that time and the watchdog then waits up to client.slow_fallback_max_ms from the
+  # start, never past the hook's own timeout. Anything else (no daemon, hung engine) keeps the fail-fast budget.
+  eng_wait=$tmp/engine.wait
+  rm -f "$eng_wait"
+  wait_env=$(engine_default_text env.wait_file || true)
+  slow_max=$(engine_default_num client.slow_fallback_max_ms || true)
+  case "$slow_max" in ""|*[!0-9]*) slow_max=0 ;; esac
+  hook_cap_ms=$(( $(event_timeout_secs) * 1000 ))
+  [ "$slow_max" -le "$hook_cap_ms" ] || slow_max=$hook_cap_ms
+  if [ -n "$wait_env" ] && [ "$slow_max" -gt "$timeout" ]; then
+    export "$wait_env=$eng_wait"
+  else
+    slow_max=0
+  fi
   set -- "$engine" hook --event "$event"
   [ -n "$tool" ] && set -- "$@" --tool "$tool"
   set -- "$@" --host "$host" --fallback-map "$fallback_map"
@@ -1298,7 +1333,7 @@ run_engine() {
   pid=$(cat "$pid_file"); group_pid=$(cat "$group_file")
   children="$children $pid"
   rm -f "$pid_file" "$group_file"
-  start_watchdog_ms "$pid" "$timeout" "$group_pid" "$eng_timed"
+  start_watchdog_ms "$pid" "$timeout" "$group_pid" "$eng_timed" "$eng_wait" "$slow_max"
   wait "$pid" 2>/dev/null
   rc=$?
   settle_watchdog "$eng_timed"
@@ -1378,7 +1413,17 @@ cold_guard_wait() {
   printf '{"hook_event_name":"%s"}' "$cg_kick" >"$payload" 2>/dev/null || { payload=$real_payload; return 0; }
   # the kick is the cold client: it parses the defaults before it starts the daemon (a release build needs ~0.6 s on a fresh state
   # directory), so it gets the whole wait, not the guard engine attempt's budget, or the watchdog kills it before the daemon exists
-  cg_kick_ms=$cg_cap
+  # One absolute cold deadline: the kick, its kill grace and the socket poll all end by cg_start + cg_cap, so the whole cold path is
+  # at most the wait plus the normal engine attempt. A kick cut by its watchdog costs the kill grace on top of its budget, so the
+  # budget is the cap minus the grace; a cap that does not leave room for the grace kills the kick at once (no grace) instead.
+  cg_grace_ms=$((kill_grace * 1000))
+  cg_saved_grace=$kill_grace
+  if [ "$cg_cap" -gt "$cg_grace_ms" ]; then
+    cg_kick_ms=$((cg_cap - cg_grace_ms))
+  else
+    cg_kick_ms=$cg_cap
+    kill_grace=0
+  fi
   cg_kick_rc=1
   exec 4>&2 2>/dev/null
   if launch_argv_group "$tmp/kick.out" "$tmp/kick.err" "$tmp/kick.pid" "$tmp/kick.group" "$engine" hook --event "$cg_kick" --host "$host"; then
@@ -1395,6 +1440,7 @@ cold_guard_wait() {
     fi
   fi
   exec 2>&4 4>&-
+  kill_grace=$cg_saved_grace
   payload=$real_payload
   # the kick failed (a binary that is missing, cannot run, exits at once, or was cut by the watchdog): no daemon is coming, so the
   # wait would only cost the cap; the real attempt below fails open the usual way

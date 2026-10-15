@@ -181,7 +181,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `client.breaker_window_s` | `60` | `AH_ENGINE_BREAKER_WINDOW_S` | s | Window in which breaker failures are counted. |
 | `client.cold_guard_kick_event` | `ColdStartKick` |  |  | Event name of the empty request the wrapper sends to start a cold daemon before a guard event waits for it; it names no hook, so it decides nothing. |
 | `client.cold_guard_poll_ms` | `50` |  | ms | Poll interval of the cold-start wait for a guard event (the daemon socket appearing). |
-| `client.cold_guard_wait_ms` | `2000` |  | ms | How long a guard event (PreToolUse, PermissionRequest, Stop, SubagentStop) waits for a cold-starting daemon before it is let through with one notice per session; 0 turns the wait off. Prompts and advisories never wait. The wait never exceeds what the hook's own timeout leaves after the engine attempt. |
+| `client.cold_guard_wait_ms` | `2000` |  | ms | How long a guard event (PreToolUse, PermissionRequest, Stop, SubagentStop) waits for a cold-starting daemon before it is let through with one notice per session; 0 turns the wait off. Prompts and advisories never wait. The wait never exceeds what the hook's own timeout leaves after the engine attempt. It is one absolute deadline: the kick, its kill grace and the socket poll all end within it, so a cold guard call takes at most this plus the normal engine attempt. |
 | `client.cold_start_poll_ms` | `1` |  | ms | Poll interval while waiting for a cold-started daemon. |
 | `client.cold_start_wait_ms` | `40` |  | ms | How long a client with no fallback waits for a cold-started daemon before giving up (prints nothing). |
 | `client.crash_cooldown_s` | `1800` | `AH_ENGINE_CRASH_COOLDOWN_S` | s | How long respawning stays stopped after a crash loop. |
@@ -196,6 +196,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `client.max_reply` | `2097152` |  | bytes | Largest reply the client reads. |
 | `client.max_stdin` | `8388608` |  | bytes | Largest hook payload the client reads from stdin. |
 | `client.slow_down_n` | `5` | `AH_ENGINE_SLOW_DOWN_N` |  | Consecutive slow (late) daemon replies within client.slow_window_ms after which the daemon is treated as wedged and marked down. A single late reply never marks it down: that call runs its Node hooks and the next client asks the daemon again. |
+| `client.slow_fallback_max_ms` | `3000` |  | ms | Upper bound, measured from the engine start, on how long the wrapper lets a call run while the client is waiting on a daemon or running the Node hooks of a late or refused (BUSY/ERR) daemon reply (so a delayed block still blocks). A normal or unavailable daemon keeps the short fail-fast budget (client.deadline_ms + client.deadline_slack_ms + client.wrapper_extra_ms); never more than the hook's own timeout. 0 disables the extension. |
 | `client.slow_window_ms` | `10000` | `AH_ENGINE_SLOW_WINDOW_MS` | ms | Window in which consecutive slow daemon replies are counted toward client.slow_down_n; a streak older than this starts over. |
 | `client.spawn_lock_ttl_ms` | `3000` | `AH_ENGINE_SPAWN_LOCK_TTL_MS` | ms | How old the single-flight daemon spawn lock may get before another client treats it as stale and may try one restart. |
 | `client.spawn_n` | `6` | `AH_ENGINE_SPAWN_N` |  | Daemon starts within the spawn window that count as a crash loop even when the daemon reported no crash (a binary that exits at once reports nothing). Respawning then stops for client.crash_cooldown_s. |
@@ -289,6 +290,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `env.test_hooks` | `AH_ENGINE_TEST_HOOKS` |  |  | When set, the daemon accepts the test-only control verbs (sleep, stall, panic). Never set in production. |
 | `env.tmpdir` | `TMPDIR` |  |  | Temporary directory variable, used for the short-path socket fallback. |
 | `env.version` | `AH_ENGINE_VERSION` |  |  | Overrides the version this build reports and compares for handoff (the plugin version in production, arbitrary in tests). |
+| `env.wait_file` | `AH_ENGINE_WAIT_FILE` |  |  | A file the client creates while it waits on the daemon and keeps when the daemon was late (a slow reply) or answered BUSY/ERR, so the call is handed to its Node hooks; it removes it when the daemon answered, or none was there. The reliability wrapper sets it, so that its watchdog can tell a call that is still deciding (give it up to client.slow_fallback_max_ms) from a hung engine (kill at the normal budget). |
 
 ### engine.toml / files
 
