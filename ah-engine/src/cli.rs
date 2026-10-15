@@ -222,6 +222,8 @@ pub fn run(args: &[String]) -> i32 {
         // nothing can be answered without settings: a hook defers to Node through the wrapper, anything else is a plain failure
         return if hook { crate::bootstrap::UNAVAILABLE_EXIT } else { 70 };
     }
+    // debug mode for this process (the environment variable or the flag); the daemon also follows the config setting
+    crate::debug::init(&p.rest);
     let infos = commands();
     let Some(info) = infos.iter().find(|c| c.name == p.command) else {
         let names: Vec<String> = infos.iter().map(|c| c.name.clone()).collect();

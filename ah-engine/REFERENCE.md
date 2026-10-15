@@ -9342,6 +9342,16 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `diagnostics.allocator` | `jemalloc` |  |  | Allocator for the daemon the client spawns: jemalloc (default) or system. The client passes it on as AH_ENGINE_ALLOCATOR unless that is already set. Changing it requires a daemon restart. |
 | `diagnostics.allocator_choices` | `jemalloc, system` |  |  | Allocator names the client accepts from diagnostics.allocator; any other value is logged and the daemon starts with jemalloc. |
 | `diagnostics.allocator_env` | `AH_ENGINE_ALLOCATOR` |  |  | Environment variable the client sets on the daemon it spawns to select the allocator (the daemon reads it before its first allocation). An existing value in the client's own environment wins. |
+| `diagnostics.budget_cpu_pct` | `2` |  | % | CPU budget of the daemon, percent of one core. A breach is reported when the CPU over diagnostics.budget_cpu_windows consecutive daemon.cpu_check_ms windows stays at or above it; 0 turns the CPU budget off. |
+| `diagnostics.budget_cpu_windows` | `2` |  |  | Consecutive daemon.cpu_check_ms windows over the CPU budget that make a breach (one busy window is a burst, not a breach). |
+| `diagnostics.budget_mem_mb` | `100` |  | MB | Memory budget of the daemon in MB, measured with the figure daemon.mem_metric selects. A breach is reported while the daemon is over it; 0 turns the memory budget off. |
+| `diagnostics.debug_flag` | `--debug` |  |  | The command-line flag that turns debug mode on for one `serve` or `hook` process. |
+| `diagnostics.debug_log_max_bytes` | `8388608` |  | bytes | Size at which the debug log is rotated (the old file is kept once, as <name>.1, replacing the previous one), so it never holds more than twice this. |
+| `diagnostics.debug_mem_snapshot_ms` | `30000` |  | ms | In debug mode, how often the watchdog writes a memory line (resident set, footprint, allocator and component sizes) to the debug log; in normal mode memory is only snapshotted when the resident-set cap trips. |
+| `diagnostics.debug_mode` | `false` |  |  | Debug mode: the same binary also writes verbose per-module logs to the debug log (files.debug_log), checks runtime invariants (a violation is logged and counted, never fatal), samples per-thread CPU every diagnostics.debug_thread_sample_ms and writes a memory line every diagnostics.debug_mem_snapshot_ms. Off in normal use; the cost of the switch while off is one atomic load per call site. The environment variable env.debug or the --debug flag (diagnostics.debug_flag) of `serve` and `hook` turns it on for that process regardless of this setting; this setting is read again on every change of the config files, so a running daemon follows it without a restart. |
+| `diagnostics.debug_modules` | `` |  |  | Modules whose debug log lines are written (a module name such as `daemon/queue`, or a prefix ending in a slash such as `daemon/`). An empty list means every module. |
+| `diagnostics.debug_thread_sample_ms` | `5000` |  | ms | In debug mode, how often the watchdog samples every thread's CPU time and logs the busiest threads and the work counters per second over that interval. |
+| `diagnostics.debug_thread_top` | `8` |  |  | Threads (grouped by name) listed per per-thread CPU sample in the debug log. |
 | `diagnostics.malloc_stack_logging` | `` |  |  | Diagnostic label for an operator-run macOS `MallocStackLogging` repro (`lite` or empty). The engine only accepts and reports it; the OS facility must be enabled in the process environment before start. |
 | `diagnostics.mem_log` | `true` |  |  | Append one NDJSON line per served request to the memory log: time, request kind, event, the checks that ran, resident set and allocator figures before and after, and the size of the transcript file. Costs a few microseconds and one small append per request; turn it off once the memory question is closed. |
 | `diagnostics.mem_log_max_bytes` | `4194304` |  | bytes | Size at which the memory log is rotated (the old file is kept once, as <name>.1, replacing the previous one), so the log never holds more than twice this. |
@@ -9359,10 +9369,17 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `diagnostics.threads_proc_stat` | `stat` |  |  | Linux: the per-thread file holding the CPU ticks (fields 14 and 15) and the name. |
 | `diagnostics.threads_window_ms` | `1000` | `AH_ENGINE_THREADS_WINDOW_MS` | ms | The window of `status --threads`: per-thread CPU % and counters per second are measured over this long. |
 
+### diagnostics.toml / env
+
+| Key | Default | Env override | Unit | What it is |
+|---|---|---|---|---|
+| `env.debug` | `AH_ENGINE_DEBUG` |  |  | When set to anything but 0 or empty, turns debug mode (diagnostics.debug_mode) on for that process. |
+
 ### diagnostics.toml / files
 
 | Key | Default | Env override | Unit | What it is |
 |---|---|---|---|---|
+| `files.debug_log` | `debug.ndjson` |  |  | Debug log file name (state directory): one NDJSON line per debug event, written only in debug mode. |
 | `files.mem_log` | `mem.ndjson` |  |  | Per-request memory log file name (state directory). |
 | `files.mem_snapshot` | `mem-snapshot.json` |  |  | Cap-trip memory snapshot file name (state directory). |
 
@@ -9462,6 +9479,9 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `msg.client_what_stat` | The step named in msg.client_io when the socket path cannot be examined (a permission or path error, not a missing socket). |
 | `msg.cold_guard_notice` | Printed once per session on stderr when a guard event gave up waiting for a cold-starting daemon and was let through unchecked; {event} is the event name. |
 | `msg.daemon_already_running` | Printed on stderr when a second daemon start finds an existing daemon/lock holder for the socket. Placeholders: {path}, {pid}, {live_engine}, {answers}. |
+| `msg.dbg_cpu_window` | Debug-log line for one CPU self-check window of the daemon. Placeholders: {ms} (window length), {pct} (percent of one core). |
+| `msg.dbg_hook` | Debug-log line for one finished hook invocation of the client. Placeholders: {code} (exit code), {out} and {err} (bytes written), {us} (microseconds spent). |
+| `msg.dbg_request` | Debug-log line for a served daemon request. Placeholders: {request}, {event}, {depth} (queued connections), {busy} (busy workers). |
 | `msg.diagnostics` | Secret-scrubbed diagnostic block attached to a permanent-failure advisory. Placeholders: {version}, {os}, {arch}, {code}, {log}. |
 | `msg.dispatch_stdin_spool` | Reason (event log and stderr, with dispatch.defer_exit) when the hook's stdin payload cannot be read, or an over-cap payload cannot be spooled for the Node hooks. Placeholder: {err}. |
 | `msg.dispatch_stdin_utf8` | Reason in dispatch.msg_fail_closed when a guard event's stdin payload is not valid UTF-8. |
@@ -9510,11 +9530,17 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `msg.hint_socket_path` | Self-fix hint when the socket path is too long. Placeholder: {env_dir}. |
 | `msg.hint_state_dir` | Self-fix hint when the state directory is not writable or not private. Placeholders: {state_dir}, {env_dir}. |
 | `msg.impact_no_routing` | Status shown in place of a model-routing saving figure while no routing events are recorded. |
+| `msg.inv_busy_workers` | Invariant violation: more workers are marked busy than there are workers. Placeholder: {workers}. |
+| `msg.inv_queue_pop` | Invariant violation: after a worker took a connection, the queue-depth counter and the queue length differ. Placeholders: {depth}, {len}. |
+| `msg.inv_queue_push` | Invariant violation: after the accept loop queued a connection, the queue-depth counter and the queue length differ. Placeholders: {depth}, {len}. |
+| `msg.inv_violated` | Debug-log line for a violated runtime invariant (checked only in debug mode). Placeholder: {what}, the specific check that failed. |
 | `msg.log_accept_error` | Event-log detail (rate-limited) when the daemon's accept failed for a reason other than nothing pending. Placeholders: {code} (os<n>), {err}. |
 | `msg.log_accept_recovered` | Event-log detail when the daemon accepts a connection again after accept failures (logged then, because a full descriptor table can keep the failure's own log line from being written). Placeholders: {n}, {code} (os<n> of the last failure). |
 | `msg.log_allocator_invalid` | Event-log detail (kind alloc_invalid) when diagnostics.allocator holds a value that is not an accepted allocator; the daemon starts with jemalloc. Placeholder: {value}. |
 | `msg.log_bind_fail` | Start-failure detail when binding the socket fails. Placeholders: {path}, {err}. |
 | `msg.log_budget` | Log detail when a rule evaluation exceeded its CPU budget. |
+| `msg.log_budget_cpu` | Event-log detail when the daemon CPU budget is breached or back within budget. Placeholders: {state}, {value} (percent of one core over the last window), {limit} (the budget, percent). |
+| `msg.log_budget_mem` | Event-log detail when the daemon memory budget is breached or back within budget. Placeholders: {state}, {value} (MB), {limit} (the budget, MB). |
 | `msg.log_client_panic` | Log detail when the hook client hit an internal error (a panic) and failed open. |
 | `msg.log_cpu_sustained` | Event-log detail when the daemon CPU self-check observes sustained CPU and backs off scheduled jobs. Placeholders: {pct}, {ms}, {backoff_ms}. |
 | `msg.log_crash_context` | Log detail when a daemon is found dead without a clean exit, with the last breadcrumb. Placeholders: {pid}, {context}. |
@@ -9522,6 +9548,8 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `msg.log_crashloop_rollback` | Log detail added when a crash-loop trip also requested a roll-back. |
 | `msg.log_daemon_killed` | Log detail when the daemon was killed by a signal while starting. |
 | `msg.log_daemon_spawn_failed` | Event-log detail (kind spawn_fail, code os<n>) when the client could not start the daemon (fork or exec failed: EAGAIN, ENOMEM, a missing executable). Placeholder: {err}. |
+| `msg.log_debug_off` | Event-log detail when debug mode turns off (the setting was switched off and neither the environment variable nor the flag holds it on). |
+| `msg.log_debug_on` | Event-log detail when debug mode turns on (the setting, the environment variable or the flag). |
 | `msg.log_fallback_read_error` | Log detail when reading the Node fallback's stdout or stderr failed part-way. |
 | `msg.log_fallback_read_timeout` | Log detail when the Node fallback finished but its stdout or stderr was still open at the deadline. |
 | `msg.log_fallback_signal` | Log detail when the Node fallback was killed by a signal (out of memory, a crash). |
@@ -9576,6 +9604,8 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `msg.spool_io` | Printed by `proj` when the spool could not be written. Placeholder: {err}. |
 | `msg.spool_rewrite_failed` | Log detail when the spool could not be replaced after a drain. The old spool stays whole (the records already applied are applied again, harmlessly, by their write ids). Placeholders: {err} the OS error, {n} unapplied records still in it. |
 | `msg.spool_spooled` | Printed by `proj` when the engine could not take a write and it was spooled. Placeholder: {id}. |
+| `msg.state_budget_over` | The word for a resource budget that has just been breached. |
+| `msg.state_budget_within` | The word for a resource budget that is back within its limit. |
 | `msg.state_open` | Status text for a breaker that is open. Placeholder: {secs}. |
 | `msg.state_stopped` | Status text for a crash-loop stop that is active. Placeholder: {secs}. |
 | `msg.storage_off` | Status value when the daemon runs without storage (unit tests, or before it opened). |

@@ -1664,6 +1664,25 @@ same build (check with `dwarfdump --uuid`). On macOS: `sample <pid> 3 -file s.tx
 printed on each `???` line of the sample). On Linux: `perf record -g -p <pid>` and `perf report` with the `.dwp` next to the
 binary, or `eu-stack -p <pid>`.
 
+### Debug mode and resource budgets
+
+**One build, two runtime modes.** The shipped binary is the debug build too; debug mode only switches on extra work. Turn it on
+with the setting `diagnostics.debug_mode` (the running daemon follows a change of the config files without a restart), with
+`AH_ENGINE_DEBUG=1` in the environment, or with `--debug` on `serve` / `hook` (the last two are per process and hold it on
+whatever the setting says). While on it writes `debug.ndjson` in the state directory (rotated at
+`diagnostics.debug_log_max_bytes`): verbose lines per module (`daemon/request`, `daemon/cpu`, `client/hook`, ...; narrow them with
+`diagnostics.debug_modules`, a name or a `daemon/` prefix), runtime invariant checks (`daemon/queue`: the depth counter against
+the queue length; `daemon/watchdog`: busy workers against workers; a violation is logged and counted, never fatal), a per-thread
+CPU sample every `diagnostics.debug_thread_sample_ms` and a memory line every `diagnostics.debug_mem_snapshot_ms`. `ah-engine
+status --json` shows `debug` (enabled, forced, lines written, invariant violations). While off, each call site costs one relaxed
+atomic load and its arguments are not evaluated.
+
+**Budgets.** `diagnostics.budget_cpu_pct` (2 % of one core, over `diagnostics.budget_cpu_windows` consecutive
+`daemon.cpu_check_ms` windows) and `diagnostics.budget_mem_mb` (100 MB, the figure `daemon.mem_metric` selects) are the daemon's
+resource budgets; 0 turns one off. The daemon reports a breach when it begins and when it ends in the health log (kind
+`budget`, code `cpu` or `mem`), in `status --json` (`budget`: the readings, the budgets, `breached`, `breaches`), and in every
+`daemon` health event (`cpu_permille`, `budget_breach`: bit 0 CPU, bit 1 memory). Reporting only: a breach changes nothing else.
+
 **Memory.** `ah-engine status --memory` gives the heap against RSS, the allocator's own figures, the memory budgets of every
 long-lived cache, and `components`: the sizes of the in-memory structures per subsystem (guard state, session counters, rate
 buckets, Jev lanes, the DevSwarm state's workspaces and edge log, the thread count). For allocation sites see
