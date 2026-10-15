@@ -148,6 +148,7 @@ const ALLOW: &[(&str, &str, &str)] = &[
     ("src/watch/kq.rs", "const FFLAGS", "the kqueue vnode event flags the backend subscribes to: a kernel protocol constant, not a tunable"),
     ("src/watch/kq.rs", "const GONE", "the kqueue vnode event flags that mean the file went away: a kernel protocol constant, not a tunable"),
     ("src/deadline.rs", "static REQ", "a thread-local slot initialised empty (the request being served): state, not a tunable"),
+    ("src/deadline.rs", "static EVENT", "a thread-local slot initialised empty (the hook event of the request being served): state, not a tunable"),
     ("src/deadline.rs", "static STAGED", "a thread-local list initialised empty (the state writes a request staged): state, not a tunable"),
     ("src/telemetry/mod.rs", "static STAGE", "a thread-local slot initialised empty (what a request staged): state, not a tunable"),
     ("src/checks/mod.rs", "static ALL", "the check registry: the list of compiled-in checks is code, not configuration"),
