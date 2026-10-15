@@ -12,11 +12,8 @@ path = "src/main.rs"
 [dependencies]
 # kill(2)/killpg for the process-group watchdog; std has no signal API
 libc = "0.2.190"
-# A/B only: the established TOML parser in place of the line reader (`--features toml-crate`)
-toml = { version = "1.1.6", default-features = false, features = ["parse"], optional = true }
-
-[features]
-toml-crate = ["dep:toml"]
+# the plugin's defaults (the engine's own parser; A/B against a hand-written reader in THIN-LAUNCHER.md)
+toml = { version = "1.1.6", default-features = false, features = ["parse", "serde"] }
 
 [profile.release]
 opt-level = 3
@@ -24,3 +21,4 @@ lto = true
 codegen-units = 1
 panic = "unwind"
 strip = true
+

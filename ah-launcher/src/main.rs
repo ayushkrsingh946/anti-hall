@@ -15,7 +15,6 @@
 //! The launcher itself never blocks a session: a panic exits 0, and the host treats a missing binary or a crash as a
 //! non-blocking hook error.
 
-use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::os::unix::fs::{DirBuilderExt, FileTypeExt, MetadataExt};
 use std::os::unix::process::{CommandExt, ExitStatusExt};
@@ -25,145 +24,78 @@ use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Mutex, mpsc};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-const TEST_KNOBS: [&str; 7] =
-    ["AH_ENGINE_BIN", "AH_FALLBACK_LIST", "AH_FALLBACK_MAP", "AH_HOOK_TIMEOUT_S", "AH_HOOK_TIMEOUT_MS", "AH_KILL_GRACE_S", "AH_HOOK_SWEEP_AGE_S"];
+const TEST_KNOBS: [&str; 7] = [
+    "AH_ENGINE_BIN",
+    "AH_FALLBACK_LIST",
+    "AH_FALLBACK_MAP",
+    "AH_HOOK_TIMEOUT_S",
+    "AH_HOOK_TIMEOUT_MS",
+    "AH_KILL_GRACE_S",
+    "AH_HOOK_SWEEP_AGE_S",
+];
 
 // ---------------------------------------------------------------------------------------------------------------------------
-// Config: the plugin's TOML defaults. Default build: a line reader for the subset the defaults use ([table] headers,
-// `field = value` with one-line strings, integers and string arrays). `--features toml-crate`: the `toml` crate (A/B).
+// Config: the plugin's TOML defaults, parsed by the `toml` crate. A/B (owner rule: an established crate when it is at least as
+// good): the crate parsed engine.toml + dispatch.toml in 0.55-0.69 ms against 1.27-1.54 ms for a hand-written line reader
+// that covered the same TOML subset, and end to end the two launchers were within noise (THIN-LAUNCHER.md).
 // ---------------------------------------------------------------------------------------------------------------------------
 
 #[derive(Default)]
 struct Cfg {
-    tables: HashMap<String, HashMap<String, String>>,
+    doc: toml::Table,
 }
 
-#[cfg(not(feature = "toml-crate"))]
 impl Cfg {
     fn parse(text: &str) -> Cfg {
-        let mut tables: HashMap<String, HashMap<String, String>> = HashMap::new();
-        let mut cur: Option<String> = None;
-        for line in text.lines() {
-            let t = line.trim();
-            if t.is_empty() || t.starts_with('#') {
-                continue;
-            }
-            if t.starts_with('[') && !t.starts_with("[[") {
-                cur = t.strip_prefix('[').and_then(|r| r.split(']').next()).map(|s| s.trim().to_string());
-                continue;
-            }
-            if let (Some(tb), Some((k, v))) = (&cur, t.split_once('=')) {
-                let fields = tables.entry(tb.clone()).or_default();
-                fields.entry(k.trim().to_string()).or_insert_with(|| v.trim().to_string());
-            }
+        Cfg {
+            doc: text.parse().unwrap_or_default(),
         }
-        Cfg { tables }
     }
 
-    fn raw(&self, key: &str, field: &str) -> Option<&str> {
-        self.tables.get(key)?.get(field).map(String::as_str)
+    /// `[a.b]` field `f`: walks the dotted key (the launcher reads no quoted, dotted segment).
+    fn raw(&self, key: &str, field: &str) -> Option<&toml::Value> {
+        let mut t = &self.doc;
+        for seg in key.split('.') {
+            t = t.get(seg)?.as_table()?;
+        }
+        t.get(field)
     }
 
     fn num_field(&self, key: &str, field: &str) -> Option<u64> {
-        let v = self.raw(key, field)?;
-        let digits: String = v.chars().take_while(char::is_ascii_digit).collect();
-        digits.parse().ok()
+        self.raw(key, field)?
+            .as_integer()
+            .and_then(|i| u64::try_from(i).ok())
     }
 
     fn text(&self, key: &str) -> Option<String> {
-        unquote(self.raw(key, "value")?).filter(|s| !s.is_empty())
+        self.raw(key, "value")?
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
     }
 
     fn env_name(&self, key: &str) -> Option<String> {
-        unquote(self.raw(key, "env")?).filter(|s| !s.is_empty())
+        self.raw(key, "env")?
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
     }
 
     fn list(&self, key: &str) -> Vec<String> {
-        let Some(v) = self.raw(key, "value") else { return Vec::new() };
-        let inner = v.trim().trim_start_matches('[').trim_end_matches(']');
-        inner.split(',').filter_map(|s| unquote(s.trim())).filter(|s| !s.is_empty()).collect()
-    }
-}
-
-#[cfg(not(feature = "toml-crate"))]
-fn unquote(v: &str) -> Option<String> {
-    let rest = v.trim().strip_prefix('"')?;
-    let mut out = String::new();
-    let mut chars = rest.chars();
-    while let Some(c) = chars.next() {
-        match c {
-            '"' => return Some(out),
-            '\\' => match chars.next()? {
-                'n' => out.push('\n'),
-                't' => out.push('\t'),
-                'r' => out.push('\r'),
-                o => out.push(o),
-            },
-            c => out.push(c),
-        }
-    }
-    None
-}
-
-#[cfg(feature = "toml-crate")]
-impl Cfg {
-    fn parse(text: &str) -> Cfg {
-        let mut tables = HashMap::new();
-        if let Ok(doc) = text.parse::<toml::Table>() {
-            flatten(&doc, String::new(), &mut tables);
-        }
-        Cfg { tables }
-    }
-
-    fn raw(&self, key: &str, field: &str) -> Option<&str> {
-        self.tables.get(key)?.get(field).map(String::as_str)
-    }
-
-    fn num_field(&self, key: &str, field: &str) -> Option<u64> {
-        self.raw(key, field)?.parse().ok()
-    }
-
-    fn text(&self, key: &str) -> Option<String> {
-        self.raw(key, "value").map(str::to_string).filter(|s| !s.is_empty())
-    }
-
-    fn env_name(&self, key: &str) -> Option<String> {
-        self.raw(key, "env").map(str::to_string).filter(|s| !s.is_empty())
-    }
-
-    fn list(&self, key: &str) -> Vec<String> {
-        self.raw(key, "value").map(|v| v.split('\u{1f}').filter(|s| !s.is_empty()).map(str::to_string).collect()).unwrap_or_default()
-    }
-}
-
-/// `[a.b]` tables become key "a.b"; scalar fields keep their text, string arrays are joined with U+001F.
-#[cfg(feature = "toml-crate")]
-fn flatten(t: &toml::Table, prefix: String, out: &mut HashMap<String, HashMap<String, String>>) {
-    let mut fields = HashMap::new();
-    for (k, v) in t {
-        match v {
-            toml::Value::Table(sub) => flatten(sub, if prefix.is_empty() { k.clone() } else { format!("{prefix}.{k}") }, out),
-            toml::Value::String(s) => {
-                fields.insert(k.clone(), s.clone());
-            }
-            toml::Value::Integer(i) => {
-                fields.insert(k.clone(), i.to_string());
-            }
-            toml::Value::Array(a) => {
-                let joined: Vec<String> = a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect();
-                fields.insert(k.clone(), joined.join("\u{1f}"));
-            }
-            _ => {}
-        }
-    }
-    if !fields.is_empty() {
-        out.insert(prefix, fields);
+        let Some(a) = self.raw(key, "value").and_then(toml::Value::as_array) else {
+            return Vec::new();
+        };
+        a.iter()
+            .filter_map(|v| v.as_str().map(str::to_string))
+            .collect()
     }
 }
 
 impl Cfg {
     fn load(path: &Path) -> Cfg {
-        std::fs::read_to_string(path).map(|t| Cfg::parse(&t)).unwrap_or_default()
+        std::fs::read_to_string(path)
+            .map(|t| Cfg::parse(&t))
+            .unwrap_or_default()
     }
 
     fn num(&self, key: &str) -> Option<u64> {
@@ -172,10 +104,15 @@ impl Cfg {
 
     /// The value with its env override (taken only when it is all digits, as the engine's `defaults::num`), clamped to min/max.
     fn effective_num(&self, key: &str) -> Option<u64> {
-        let from_env = self.env_name(key).and_then(|n| std::env::var(n).ok()).and_then(|v| {
-            let v: String = v.chars().filter(|c| !c.is_whitespace()).collect();
-            (!v.is_empty() && v.chars().all(|c| c.is_ascii_digit())).then(|| v.parse().ok()).flatten()
-        });
+        let from_env = self
+            .env_name(key)
+            .and_then(|n| std::env::var(n).ok())
+            .and_then(|v| {
+                let v: String = v.chars().filter(|c| !c.is_whitespace()).collect();
+                (!v.is_empty() && v.chars().all(|c| c.is_ascii_digit()))
+                    .then(|| v.parse().ok())
+                    .flatten()
+            });
         let mut v = from_env.or_else(|| self.num(key))?;
         if let Some(min) = self.num_field(key, "min") {
             v = v.max(min);
@@ -192,7 +129,10 @@ impl Cfg {
 // ---------------------------------------------------------------------------------------------------------------------------
 
 fn now_ms() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 fn env_nonempty(name: &str) -> Option<String> {
@@ -209,7 +149,10 @@ fn uid() -> u32 {
 }
 
 fn positive(v: &str) -> Option<u64> {
-    (!v.is_empty() && v.chars().all(|c| c.is_ascii_digit())).then(|| v.parse().ok()).flatten().filter(|n| *n > 0)
+    (!v.is_empty() && v.chars().all(|c| c.is_ascii_digit()))
+        .then(|| v.parse().ok())
+        .flatten()
+        .filter(|n| *n > 0)
 }
 
 /// A top-level string field of a JSON object, found by a cheap scan (session_id for the once-per-session notice).
@@ -217,7 +160,11 @@ fn json_str_field(payload: &[u8], field: &str) -> Option<String> {
     let text = std::str::from_utf8(payload).ok()?;
     let pat = format!("\"{field}\"");
     let at = text.find(&pat)? + pat.len();
-    let rest = text[at..].trim_start().strip_prefix(':')?.trim_start().strip_prefix('"')?;
+    let rest = text[at..]
+        .trim_start()
+        .strip_prefix(':')?
+        .trim_start()
+        .strip_prefix('"')?;
     Some(rest.split('"').next()?.to_string())
 }
 
@@ -225,9 +172,14 @@ fn stop_hook_active(event: &str, payload: &[u8]) -> bool {
     if event != "Stop" && event != "SubagentStop" {
         return false;
     }
-    let Ok(text) = std::str::from_utf8(payload) else { return false };
+    let Ok(text) = std::str::from_utf8(payload) else {
+        return false;
+    };
     text.find("\"stop_hook_active\"").is_some_and(|i| {
-        text[i + "\"stop_hook_active\"".len()..].trim_start().strip_prefix(':').is_some_and(|r| r.trim_start().starts_with("true"))
+        text[i + "\"stop_hook_active\"".len()..]
+            .trim_start()
+            .strip_prefix(':')
+            .is_some_and(|r| r.trim_start().starts_with("true"))
     })
 }
 
@@ -274,7 +226,11 @@ fn install_signal_thread() {
 }
 
 enum Run {
-    Exited { code: i32, out: Vec<u8>, err: Vec<u8> },
+    Exited {
+        code: i32,
+        out: Vec<u8>,
+        err: Vec<u8>,
+    },
     TimedOut,
     GroupAlive,
     SpawnFailed,
@@ -295,17 +251,33 @@ fn group_alive(pgid: i32) -> bool {
 /// Run `argv` in its own process group with `input` on stdin. Killed (TERM, grace, KILL to the whole group) when it is still
 /// running at `budget`; once, when `wait_file` exists at that point (the client is waiting on a live daemon), the deadline moves
 /// to `slow_max` from the start instead.
-fn run_child(argv: &[String], envs: &[(String, String)], input: &[u8], budget: Duration, wait_file: Option<&Path>, slow_max: Duration, grace: Duration) -> Run {
+fn run_child(
+    argv: &[String],
+    envs: &[(String, String)],
+    input: &[u8],
+    budget: Duration,
+    wait_file: Option<&Path>,
+    slow_max: Duration,
+    grace: Duration,
+) -> Run {
     let mut cmd = Command::new(&argv[0]);
-    cmd.args(&argv[1..]).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).process_group(0);
+    cmd.args(&argv[1..])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .process_group(0);
     for (k, v) in envs {
         cmd.env(k, v);
     }
     let start = Instant::now();
-    let Ok(mut child) = cmd.spawn() else { return Run::SpawnFailed };
+    let Ok(mut child) = cmd.spawn() else {
+        return Run::SpawnFailed;
+    };
     let pgid = child.id() as i32;
     CHILD_PGID.store(pgid, Ordering::SeqCst);
-    let (Some(mut stdin), Some(mut so), Some(mut se)) = (child.stdin.take(), child.stdout.take(), child.stderr.take()) else {
+    let (Some(mut stdin), Some(mut so), Some(mut se)) =
+        (child.stdin.take(), child.stdout.take(), child.stderr.take())
+    else {
         kill_group(pgid, libc::SIGKILL);
         let _ = child.wait();
         return Run::SpawnFailed;
@@ -332,7 +304,9 @@ fn run_child(argv: &[String], envs: &[(String, String)], input: &[u8], budget: D
     });
     let mut status = wrx.recv_timeout(budget).ok();
     if status.is_none() && slow_max > budget && wait_file.is_some_and(Path::exists) {
-        status = wrx.recv_timeout(slow_max.saturating_sub(start.elapsed())).ok();
+        status = wrx
+            .recv_timeout(slow_max.saturating_sub(start.elapsed()))
+            .ok();
     }
     let Some(status) = status else {
         kill_group(pgid, libc::SIGTERM);
@@ -352,7 +326,10 @@ fn run_child(argv: &[String], envs: &[(String, String)], input: &[u8], budget: D
         Ok(st) => st.code().unwrap_or_else(|| 128 + st.signal().unwrap_or(0)),
         Err(_) => return Run::SpawnFailed,
     };
-    let (Ok(out), Ok(err)) = (orx.recv_timeout(grace.max(Duration::from_millis(1))), erx.recv_timeout(grace.max(Duration::from_millis(1)))) else {
+    let (Ok(out), Ok(err)) = (
+        orx.recv_timeout(grace.max(Duration::from_millis(1))),
+        erx.recv_timeout(grace.max(Duration::from_millis(1))),
+    ) else {
         return Run::GroupAlive;
     };
     Run::Exited { code, out, err }
@@ -389,7 +366,10 @@ fn write_out(out: &[u8], err: &[u8]) {
 impl L {
     fn fail_closed(&self, why: &str) -> i32 {
         if stop_hook_active(&self.event, &self.payload) {
-            eprintln!("anti-hall: fail open for {} because stop_hook_active is true: {why}", self.event);
+            eprintln!(
+                "anti-hall: fail open for {} because stop_hook_active is true: {why}",
+                self.event
+            );
             return 0;
         }
         eprintln!("anti-hall: fail closed for {}: {why}", self.event);
@@ -414,7 +394,14 @@ impl L {
 
     fn detached(&self, script: &Path, args: &[&str]) {
         if script.is_file() {
-            let _ = Command::new("sh").arg(script).args(args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).process_group(0).spawn();
+            let _ = Command::new("sh")
+                .arg(script)
+                .args(args)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .process_group(0)
+                .spawn();
         }
     }
 
@@ -423,21 +410,30 @@ impl L {
             return;
         }
         if let Some(p) = env_nonempty("AH_ENGINE_WRAPPER_DIAG").filter(|p| p.starts_with('/'))
-            && let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(p)
+            && let Ok(mut f) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(p)
         {
             let _ = writeln!(f, "{line}");
         }
     }
 
     fn fresh_marker(&self, files_key: &str) -> bool {
-        let Some(name) = self.cfg.text(&format!("files.{files_key}")) else { return false };
-        let Ok(t) = std::fs::read_to_string(self.state_dir.join(name)) else { return false };
+        let Some(name) = self.cfg.text(&format!("files.{files_key}")) else {
+            return false;
+        };
+        let Ok(t) = std::fs::read_to_string(self.state_dir.join(name)) else {
+            return false;
+        };
         let digits: String = t.chars().take_while(char::is_ascii_digit).collect();
         digits.parse::<u64>().is_ok_and(|until| until > now_ms())
     }
 
     fn halted(&self) -> bool {
-        self.fresh_marker("daemon_down_marker") || self.fresh_marker("breaker_until") || self.fresh_marker("crashloop_until")
+        self.fresh_marker("daemon_down_marker")
+            || self.fresh_marker("breaker_until")
+            || self.fresh_marker("crashloop_until")
     }
 
     /// A private run directory for the done and wait markers: `$HOME/.anti-hall/tmp` (ours, mode 700), else TMPDIR.
@@ -450,8 +446,13 @@ impl L {
             bases.push(PathBuf::from(t).join(format!("ah-hook-{}", uid())));
         }
         for b in bases {
-            let _ = std::fs::DirBuilder::new().recursive(true).mode(0o700).create(&b);
-            let Ok(m) = std::fs::symlink_metadata(&b) else { continue };
+            let _ = std::fs::DirBuilder::new()
+                .recursive(true)
+                .mode(0o700)
+                .create(&b);
+            let Ok(m) = std::fs::symlink_metadata(&b) else {
+                continue;
+            };
             if !m.is_dir() || m.uid() != uid() || m.mode() & 0o777 != 0o700 {
                 continue;
             }
@@ -466,7 +467,9 @@ impl L {
 
     fn cold_notice(&self) {
         let msgs = Cfg::load(&self.cfg_dir.join("messages.toml"));
-        let Some(text) = msgs.text("msg.cold_guard_notice") else { return };
+        let Some(text) = msgs.text("msg.cold_guard_notice") else {
+            return;
+        };
         let sid = json_str_field(&self.payload, "session_id").unwrap_or_else(|| "none".into());
         if let Some(name) = self.cfg.text("files.cold_guard_notice") {
             let p = self.state_dir.join(name);
@@ -488,7 +491,9 @@ impl L {
         let margin = c.num("client.wrapper_extra_ms").filter(|v| *v > 0)?;
         let kick = c.text("client.cold_guard_kick_event")?;
         let sock_name = c.text("paths.socket_file")?;
-        if c.text("env.nospawn").is_some_and(|n| std::env::var_os(n).is_some()) {
+        if c.text("env.nospawn")
+            .is_some_and(|n| std::env::var_os(n).is_some())
+        {
             return None;
         }
         let sock = self.state_dir.join(sock_name);
@@ -506,12 +511,34 @@ impl L {
             return None;
         }
         let grace_ms = self.grace.as_millis() as u64;
-        let (kick_ms, grace) = if cap > grace_ms { (cap - grace_ms, self.grace) } else { (cap, Duration::ZERO) };
-        let argv = [engine.to_string(), "hook".into(), "--event".into(), kick.clone(), "--host".into(), self.host.clone()];
+        let (kick_ms, grace) = if cap > grace_ms {
+            (cap - grace_ms, self.grace)
+        } else {
+            (cap, Duration::ZERO)
+        };
+        let argv = [
+            engine.to_string(),
+            "hook".into(),
+            "--event".into(),
+            kick.clone(),
+            "--host".into(),
+            self.host.clone(),
+        ];
         let body = format!("{{\"hook_event_name\":\"{kick}\"}}");
-        match run_child(&argv, &[], body.as_bytes(), Duration::from_millis(kick_ms), None, Duration::ZERO, grace) {
+        match run_child(
+            &argv,
+            &[],
+            body.as_bytes(),
+            Duration::from_millis(kick_ms),
+            None,
+            Duration::ZERO,
+            grace,
+        ) {
             Run::TimedOut => {
-                self.diag(&format!("cold_guard_gave_up event={} cap_ms={cap} kick_cut=1", self.event));
+                self.diag(&format!(
+                    "cold_guard_gave_up event={} cap_ms={cap} kick_cut=1",
+                    self.event
+                ));
                 self.cold_notice();
                 return Some(0);
             }
@@ -519,7 +546,9 @@ impl L {
             _ => return None, // the kick failed: no daemon is coming, the real attempt fails open the usual way
         }
         loop {
-            if std::fs::symlink_metadata(&sock).is_ok_and(|m| m.file_type().is_socket()) || self.halted() {
+            if std::fs::symlink_metadata(&sock).is_ok_and(|m| m.file_type().is_socket())
+                || self.halted()
+            {
                 return None;
             }
             if start.elapsed() >= Duration::from_millis(cap) {
@@ -527,7 +556,10 @@ impl L {
             }
             std::thread::sleep(Duration::from_millis(poll));
         }
-        self.diag(&format!("cold_guard_gave_up event={} cap_ms={cap}", self.event));
+        self.diag(&format!(
+            "cold_guard_gave_up event={} cap_ms={cap}",
+            self.event
+        ));
         self.cold_notice();
         Some(0)
     }
@@ -542,13 +574,23 @@ impl L {
             .stdin(Stdio::piped())
             .spawn();
         let Ok(mut child) = child else {
-            return if self.guard { self.fail_closed("fallback runner unavailable") } else { 0 };
+            return if self.guard {
+                self.fail_closed("fallback runner unavailable")
+            } else {
+                0
+            };
         };
         if let Some(mut si) = child.stdin.take() {
             let _ = si.write_all(&self.payload);
         }
         match child.wait() {
-            Ok(st) => st.code().unwrap_or_else(|| if self.guard { self.fail_closed("fallback runner died") } else { 0 }),
+            Ok(st) => st.code().unwrap_or_else(|| {
+                if self.guard {
+                    self.fail_closed("fallback runner died")
+                } else {
+                    0
+                }
+            }),
             Err(_) => 0,
         }
     }
@@ -560,7 +602,10 @@ impl L {
         if let (Some(name), Some(p)) = (self.cfg.text("env.done_file"), &done) {
             envs.push((name, p.display().to_string()));
         }
-        let mut slow_max = self.cfg.effective_num("client.slow_fallback_max_ms").unwrap_or(0);
+        let mut slow_max = self
+            .cfg
+            .effective_num("client.slow_fallback_max_ms")
+            .unwrap_or(0);
         slow_max = slow_max.min(self.event_timeout_s().unwrap_or(self.timeout_s) * 1000);
         let mut wait_file = None;
         match (self.cfg.text("env.wait_file"), &wait) {
@@ -580,11 +625,23 @@ impl L {
             "--fallback-map".into(),
             self.map.display().to_string(),
         ];
-        let r = run_child(&argv, &envs, &self.payload, Duration::from_millis(eng_ms), wait_file, Duration::from_millis(slow_max), self.grace);
+        let r = run_child(
+            &argv,
+            &envs,
+            &self.payload,
+            Duration::from_millis(eng_ms),
+            wait_file,
+            Duration::from_millis(slow_max),
+            self.grace,
+        );
         let done_marked = done.as_deref().is_some_and(Path::exists);
         let defer = self.dcfg.num("dispatch.defer_exit").map(|v| v as i32);
         match r {
-            Run::Exited { code: c @ (0 | 2), out, err } => {
+            Run::Exited {
+                code: c @ (0 | 2),
+                out,
+                err,
+            } => {
                 write_out(&out, &err);
                 c
             }
@@ -594,17 +651,27 @@ impl L {
                 code
             }
             Run::Exited { code, .. } => {
-                self.diag(&format!("engine_silent_exit event={} timeout_ms={eng_ms} rc={code} done=0", self.event));
+                self.diag(&format!(
+                    "engine_silent_exit event={} timeout_ms={eng_ms} rc={code} done=0",
+                    self.event
+                ));
                 self.integrity("fail");
                 0
             }
             Run::TimedOut => {
-                self.diag(&format!("engine_timed event={} timeout_ms={eng_ms} done={}", self.event, u8::from(done_marked)));
+                self.diag(&format!(
+                    "engine_timed event={} timeout_ms={eng_ms} done={}",
+                    self.event,
+                    u8::from(done_marked)
+                ));
                 self.integrity("fail");
                 0
             }
             Run::GroupAlive => {
-                self.diag(&format!("engine_group_alive event={} timeout_ms={eng_ms}", self.event));
+                self.diag(&format!(
+                    "engine_group_alive event={} timeout_ms={eng_ms}",
+                    self.event
+                ));
                 self.integrity("fail");
                 0
             }
@@ -617,26 +684,40 @@ fn find_engine() -> Option<String> {
     if let Some(b) = env_nonempty("AH_ENGINE_BIN") {
         return is_exec(Path::new(&b)).then_some(b);
     }
-    let home = env_nonempty("HOME").map(|h| PathBuf::from(h).join(".anti-hall/ah-engine/bin/ah-engine"));
+    let home =
+        env_nonempty("HOME").map(|h| PathBuf::from(h).join(".anti-hall/ah-engine/bin/ah-engine"));
     if let Some(h) = home.filter(|p| is_exec(p)) {
         return Some(h.display().to_string());
     }
     std::env::var_os("PATH")
-        .and_then(|p| std::env::split_paths(&p).map(|d| d.join("ah-engine")).find(|p| is_exec(p)))
+        .and_then(|p| {
+            std::env::split_paths(&p)
+                .map(|d| d.join("ah-engine"))
+                .find(|p| is_exec(p))
+        })
         .map(|p| p.display().to_string())
 }
 
 /// The plugin this launcher serves (its hooks/ dir: lists, fallback runner, integrity script): `--plugin-root`, else the host's
 /// plugin-root variable, else the directory above the binary.
 fn plugin_root(args: &[String]) -> Option<PathBuf> {
-    let flag = args.iter().position(|a| a == "--plugin-root").and_then(|i| args.get(i + 1)).map(PathBuf::from);
+    let flag = args
+        .iter()
+        .position(|a| a == "--plugin-root")
+        .and_then(|i| args.get(i + 1))
+        .map(PathBuf::from);
     let candidates = [
         flag,
         env_nonempty("CLAUDE_PLUGIN_ROOT").map(PathBuf::from),
         env_nonempty("PLUGIN_ROOT").map(PathBuf::from),
-        std::env::current_exe().ok().and_then(|e| e.parent()?.parent().map(Path::to_path_buf)),
+        std::env::current_exe()
+            .ok()
+            .and_then(|e| e.parent()?.parent().map(Path::to_path_buf)),
     ];
-    candidates.into_iter().flatten().find(|r| r.join("hooks").is_dir())
+    candidates
+        .into_iter()
+        .flatten()
+        .find(|r| r.join("hooks").is_dir())
 }
 
 fn run() -> i32 {
@@ -649,20 +730,29 @@ fn run() -> i32 {
             let err = Command::new("sh").arg(doctor).args(&args[1..]).exec();
             eprintln!("anti-hall: cannot run ah-doctor.sh: {err}");
         } else {
-            eprintln!("anti-hall: ah-doctor.sh is missing next to ah-hook.sh; reinstall the plugin");
+            eprintln!(
+                "anti-hall: ah-doctor.sh is missing next to ah-hook.sh; reinstall the plugin"
+            );
         }
         return 1;
     }
     let event = args.first().cloned().unwrap_or_default();
     let test = std::env::var("AH_WRAPPER_TEST").is_ok_and(|v| v == "1");
     if !test {
-        let ignored: Vec<&str> = TEST_KNOBS.iter().copied().filter(|k| env_nonempty(k).is_some()).collect();
+        let ignored: Vec<&str> = TEST_KNOBS
+            .iter()
+            .copied()
+            .filter(|k| env_nonempty(k).is_some())
+            .collect();
         for k in TEST_KNOBS {
             // SAFETY: single-threaded here; no other thread reads the environment yet.
             unsafe { std::env::remove_var(k) };
         }
         if !ignored.is_empty() {
-            eprintln!("anti-hall: ignoring test-only variables (need AH_WRAPPER_TEST=1): {}", ignored.join(" "));
+            eprintln!(
+                "anti-hall: ignoring test-only variables (need AH_WRAPPER_TEST=1): {}",
+                ignored.join(" ")
+            );
         }
     }
     let mut host = "claude".to_string();
@@ -685,7 +775,9 @@ fn run() -> i32 {
     let cfg_root = match env_nonempty("AH_ENGINE_PLUGIN_ROOT") {
         Some(r) => Some(PathBuf::from(r)),
         None => {
-            let r = root.clone().filter(|r| r.join("engine/defaults/index.toml").is_file());
+            let r = root
+                .clone()
+                .filter(|r| r.join("engine/defaults/index.toml").is_file());
             if let Some(r) = &r {
                 // SAFETY: single-threaded here.
                 unsafe { std::env::set_var("AH_ENGINE_PLUGIN_ROOT", r) };
@@ -693,13 +785,19 @@ fn run() -> i32 {
             r
         }
     };
-    let cfg_dir = cfg_root.map(|r| r.join("engine/defaults")).unwrap_or_default();
+    let cfg_dir = cfg_root
+        .map(|r| r.join("engine/defaults"))
+        .unwrap_or_default();
     let cfg = Cfg::load(&cfg_dir.join("engine.toml"));
     let dcfg = Cfg::load(&cfg_dir.join("dispatch.toml"));
     let guard = dcfg.list("dispatch.guard_events").contains(&event);
     let mut payload = Vec::new();
     let _ = std::io::stdin().read_to_end(&mut payload);
-    let (list_default, map_default) = if host == "codex" { ("ah-fallback.codex.list", "ah-fallback.codex.map.json") } else { ("ah-fallback.list", "ah-fallback.map.json") };
+    let (list_default, map_default) = if host == "codex" {
+        ("ah-fallback.codex.list", "ah-fallback.codex.map.json")
+    } else {
+        ("ah-fallback.list", "ah-fallback.map.json")
+    };
     let state_dir = cfg
         .text("env.dir")
         .and_then(|n| env_nonempty(&n))
@@ -713,8 +811,12 @@ fn run() -> i32 {
         event,
         cfg_dir: cfg_dir.clone(),
         host,
-        list: env_nonempty("AH_FALLBACK_LIST").map(PathBuf::from).unwrap_or_else(|| hooks_dir.join(list_default)),
-        map: env_nonempty("AH_FALLBACK_MAP").map(PathBuf::from).unwrap_or_else(|| hooks_dir.join(map_default)),
+        list: env_nonempty("AH_FALLBACK_LIST")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| hooks_dir.join(list_default)),
+        map: env_nonempty("AH_FALLBACK_MAP")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| hooks_dir.join(map_default)),
         hooks_dir,
         cfg,
         dcfg,
@@ -731,7 +833,13 @@ fn run() -> i32 {
     l.timeout_s = match env_nonempty("AH_HOOK_TIMEOUT_S") {
         Some(v) => match positive(&v) {
             Some(n) => n,
-            None => return if l.guard { l.fail_closed("AH_HOOK_TIMEOUT_S must be a positive integer") } else { 0 },
+            None => {
+                return if l.guard {
+                    l.fail_closed("AH_HOOK_TIMEOUT_S must be a positive integer")
+                } else {
+                    0
+                };
+            }
         },
         None => match default_s {
             Some(n) => n,
@@ -741,29 +849,52 @@ fn run() -> i32 {
     l.timeout_ms = match env_nonempty("AH_HOOK_TIMEOUT_MS") {
         Some(v) => match positive(&v) {
             Some(n) => n,
-            None => return if l.guard { l.fail_closed("AH_HOOK_TIMEOUT_MS must be a positive integer") } else { 0 },
+            None => {
+                return if l.guard {
+                    l.fail_closed("AH_HOOK_TIMEOUT_MS must be a positive integer")
+                } else {
+                    0
+                };
+            }
         },
         None if env_nonempty("AH_HOOK_TIMEOUT_S").is_some() => l.timeout_s * 1000,
         None => {
-            let parts = (l.cfg.effective_num("client.deadline_ms"), l.cfg.num("client.deadline_slack_ms"), l.cfg.num("client.wrapper_extra_ms"));
+            let parts = (
+                l.cfg.effective_num("client.deadline_ms"),
+                l.cfg.num("client.deadline_slack_ms"),
+                l.cfg.num("client.wrapper_extra_ms"),
+            );
             match parts {
                 (Some(a), Some(b), Some(c)) => a + b + c,
                 _ => l.timeout_s * 1000,
             }
         }
     };
-    l.grace = match env_nonempty("AH_KILL_GRACE_S").and_then(|v| v.parse::<u64>().ok()).filter(|v| *v <= 5) {
+    l.grace = match env_nonempty("AH_KILL_GRACE_S")
+        .and_then(|v| v.parse::<u64>().ok())
+        .filter(|v| *v <= 5)
+    {
         Some(s) => Duration::from_secs(s),
-        None => Duration::from_millis(l.cfg.effective_num("client.wrapper_kill_grace_ms").unwrap_or(0)),
+        None => Duration::from_millis(
+            l.cfg
+                .effective_num("client.wrapper_kill_grace_ms")
+                .unwrap_or(0),
+        ),
     };
     if l.event == "SessionStart" {
         l.integrity("check");
-        if env_nonempty("AH_ENGINE_BIN").is_none() && l.hooks_dir.join("../ah-engine.lock").is_file() {
+        if env_nonempty("AH_ENGINE_BIN").is_none()
+            && l.hooks_dir.join("../ah-engine.lock").is_file()
+        {
             l.detached(&l.hooks_dir.join("ah-engine-bootstrap.sh"), &[]);
         }
     }
-    let Some(engine) = find_engine() else { return 0 };
-    if std::env::var("AH_ENGINE_DISPATCH_IN_PROCESS").map_or(true, |v| v != "1") && l.fresh_marker("daemon_down_marker") {
+    let Some(engine) = find_engine() else {
+        return 0;
+    };
+    if std::env::var("AH_ENGINE_DISPATCH_IN_PROCESS").map_or(true, |v| v != "1")
+        && l.fresh_marker("daemon_down_marker")
+    {
         return 0;
     }
     let eng_ms = match l.event_timeout_s() {
@@ -796,4 +927,3 @@ fn main() {
     let _ = std::io::stdout().flush();
     std::process::exit(code);
 }
-
