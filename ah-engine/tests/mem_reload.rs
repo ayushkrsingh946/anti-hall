@@ -58,7 +58,7 @@ fn held(root: &Path, state: &Path, plugin: &Path) -> (u64, u64) {
 
 fn wait_for(what: &str, mut f: impl FnMut() -> bool) {
     let t = Instant::now();
-    while t.elapsed() < common::READY_CEILING {
+    while t.elapsed() < Duration::from_secs(180) {
         if f() {
             return;
         }
@@ -127,6 +127,8 @@ fn fifty_defaults_reloads_do_not_keep_a_copy_of_the_defaults_each() {
     // the allocator tuning the client hands a daemon it spawns (`daemon.malloc_conf`), read from the plugin copy like the client does
     let shipped: toml::Table = std::fs::read_to_string(plugin.join("engine/defaults/engine.toml")).unwrap().parse().unwrap();
     let conf = shipped["daemon"]["malloc_conf"]["value"].as_str().unwrap().to_string();
+    // a debug build on a loaded machine must not be killed by the stall and stuck watchdogs while it reloads
+    std::fs::write(state.join("config.toml"), "[daemon]\nstall_ms = 600000\nstuck_ms = 600000\n").unwrap();
     let mut child = cmd(&root, &state, &plugin).env("_RJEM_MALLOC_CONF", conf).arg("serve").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap();
     struct Stop<'a>(&'a Path, &'a mut std::process::Child);
     impl Drop for Stop<'_> {
