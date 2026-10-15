@@ -1354,9 +1354,18 @@ A change is parsed and validated first and swapped in only if valid; a request t
 that version throughout. An invalid or unreadable file keeps the last good config and logs `config_invalid`; a deleted
 file falls back to the next layer. A corrupt `settings.json` counts as invalid here (Node reads it as empty), so a
 half-written edit cannot swap the daemon to defaults. Settings in `config.restart_only` keep their running value until
-the next start and are listed as `pending_restart`; an automatic handoff for them is planned (D18). Today the swap
-reaches every daemon limit (`daemon.*`: request and reply deadlines, size and CPU budgets, queue, rate limits, watchdog
-and idle timing); moving the remaining readers of shipped defaults onto the snapshot is incremental work (D17).
+the next start and are listed as `pending_restart` (the settings a daemon thread reads once when it starts belong there:
+`realtime.*`, `devswarm_wire.wait_ms`, `devswarm_wire.reconcile_min_gap_ms`); an automatic handoff for them is planned (D18).
+
+Every read of a setting answers the effective value (#195): `defaults::num`, `text`, `list`, `raw` and the helpers built on
+them read the owner's file layers first. The daemon installs each config snapshot it swaps in as that overlay; any other
+process (a command, the hook client, the status line) reads both files once at start and resolves only the keys they name.
+The environment layer is read by `defaults::num` itself, as before. `defaults::shipped` and `defaults::get`/`all` are the
+schema (the shipped value), which is what the layers resolve over. Settings in `config.locked` cannot be changed by the files:
+the names of the environment variables (the contract between the wrapper, the client and the daemon), the settings that say
+where the config files are, the two lists themselves, the dispatch table `dispatch.hooks_*` (hooks are configured through
+`[events.*]`/`[entries.*]`, whose guard rules stay in force) and the command registry `cmd.*`; `config.toml` naming one is
+invalid (`locked`), `settings.json` naming one is ignored. A value derived from settings (`defaults::Cache`, a compiled pattern) is rebuilt after an overlay change.
 
 State lives in `~/.anti-hall/ah-engine/` (override with `AH_ENGINE_DIR`): `hot.db` and `archive.db`, the write spool
 `spool.log` and its `spool.quarantine`, the `backups/` directory, the optional `schedules.json`, the event log,

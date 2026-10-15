@@ -517,7 +517,12 @@ fn finish(root: &Path, picks: Vec<Pick>, prev: Option<&Data>) -> Result<Data, De
     }
     crate::hookcfg::check_shipped(&entries).map_err(|e| DefaultsError::new("hooks", "", "", e))?;
     check_rows(root, &entries).map_err(|e| DefaultsError::new("dispatch", "", "", e))?;
-    Ok(Data { root: root.to_path_buf(), entries: leak_slice(entries), index, canon, report: Report::default(), print: String::new() })
+    // an unchanged load reuses the previous snapshot's entry list instead of leaking another one per reload (~48 KB at 6,000 settings)
+    let entries: &'static [&'static Entry] = match prev {
+        Some(p) if p.entries.len() == entries.len() && p.entries.iter().zip(&entries).all(|(a, b)| std::ptr::eq(*a, *b)) => p.entries,
+        _ => leak_slice(entries),
+    };
+    Ok(Data { root: root.to_path_buf(), entries, index, canon, report: Report::default(), print: String::new() })
 }
 
 /// Read and validate the defaults of the plugin at `root`, falling back per file and per setting to the last-known-good

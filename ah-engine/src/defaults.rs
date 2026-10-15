@@ -30,10 +30,11 @@ pub use load::{DefaultsError, Fingerprint, Healed, Layer, Note, Report, fingerpr
 // - an unset or non-UTF-8 variable is an unset one
 // A failure that must be seen goes through `crate::discard` instead.
 
+use arc_swap::ArcSwapOption;
 use serde_json::{Value as Json, json};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, RwLock};
 
 fn fatal_defaults(msg: String) -> ! {
     eprintln!("{msg}");
@@ -173,7 +174,11 @@ enum Backend {
     Lazy(load::Lazy),
 }
 
-static CUR: RwLock<Option<Arc<Backend>>> = RwLock::new(None);
+/// The active snapshot. An `ArcSwapOption`, not a `RwLock`: every settings read loads it, from every daemon thread at once, and a
+/// read lock's shared counter made those reads queue on one cache line (#195 A/B, 8 reader threads: 733 ns a read under
+/// `RwLock`, 84 ns under arc-swap; equal when uncontended). Writers (init, reload) are serialized by [`CUR_W`].
+static CUR: ArcSwapOption<Backend> = ArcSwapOption::const_empty();
+static CUR_W: Mutex<()> = Mutex::new(());
 static CLIENT: AtomicBool = AtomicBool::new(false);
 static GENERATION: AtomicU64 = AtomicU64::new(0);
 static CACHE_WRITES: AtomicBool = AtomicBool::new(false);
@@ -192,7 +197,15 @@ pub fn write_cache_on_load() {
 }
 
 fn current() -> Option<Arc<Backend>> {
-    CUR.read().unwrap_or_else(|e| e.into_inner()).clone()
+    CUR.load_full()
+}
+
+/// Install `b` unless a snapshot is already active (a concurrent `init` won).
+fn install_first(b: Backend) {
+    let _w = CUR_W.lock().unwrap_or_else(|e| e.into_inner());
+    if CUR.load().is_none() {
+        CUR.store(Some(Arc::new(b)));
+    }
 }
 
 fn cache_best_effort(d: &load::Data) {
@@ -229,8 +242,7 @@ pub fn init() -> Result<(), DefaultsError> {
     if CLIENT.load(Ordering::SeqCst) {
         let want = crate::bootstrap::env_root();
         if let Some(lazy) = cache.as_deref().and_then(|c| load::Lazy::open(c, want.as_deref())) {
-            let mut w = CUR.write().unwrap_or_else(|e| e.into_inner());
-            w.get_or_insert_with(|| Arc::new(Backend::Lazy(lazy)));
+            install_first(Backend::Lazy(lazy));
             return Ok(());
         }
     }
@@ -244,10 +256,7 @@ pub fn init() -> Result<(), DefaultsError> {
     let data = load::load(&root, None)?;
     cache_best_effort(&data);
     let (report, root) = (data.report.clone(), data.root().to_path_buf());
-    {
-        let mut w = CUR.write().unwrap_or_else(|e| e.into_inner());
-        w.get_or_insert_with(|| Arc::new(Backend::Full(data)));
-    }
+    install_first(Backend::Full(data));
     GENERATION.fetch_add(1, Ordering::SeqCst);
     after_load(&report, &root);
     Ok(())
@@ -328,7 +337,10 @@ pub fn reload(root: Option<&Path>) -> Result<Reloaded, DefaultsError> {
     }
     cache_best_effort(&data);
     let (report, root) = (data.report.clone(), data.root().to_path_buf());
-    *CUR.write().unwrap_or_else(|e| e.into_inner()) = Some(Arc::new(Backend::Full(data)));
+    {
+        let _w = CUR_W.lock().unwrap_or_else(|e| e.into_inner());
+        CUR.store(Some(Arc::new(Backend::Full(data))));
+    }
     GENERATION.fetch_add(1, Ordering::SeqCst);
     after_load(&report, &root);
     Ok(Reloaded::Applied)
@@ -378,11 +390,130 @@ fn backend() -> Arc<Backend> {
     current().unwrap_or_else(|| fatal_defaults("init() installed a snapshot".to_string()))
 }
 
-/// The entry for `key`, if shipped.
+/// The owner's layered values over the shipped ones (#195): the settings `settings.json` and the engine's `config.toml` set, as
+/// resolved by `cfgstore` (its precedence, its locked keys, its restart-only hold), sorted by key. The accessors below read
+/// through it, so every `defaults::*` read answers the EFFECTIVE value; the environment layer stays where it was (`num` reads
+/// the setting's own variable first). Only keys whose value comes from a file are here; a key the files do not set reads the
+/// shipped value. Null while the files set nothing (the usual case, and every in-process test).
+///
+/// Each installed table is leaked, like the values in it, so a read is ONE atomic load and a binary search: no guard, no reference
+/// count, no lock (an arc-swap guard here cost about 30 ns a read, measured, on top of the snapshot load every read already does).
+/// The leak is one table per applied config change (a few hundred bytes for a large file), recorded with `mem::note_leak`.
+/// Writers are serialized by [`OVERLAY_W`].
+static OVERLAY: AtomicPtr<Table> = AtomicPtr::new(std::ptr::null_mut());
+/// Every value and table ever installed, so a config that goes back to an earlier content (a reload loop, an editor's undo) reuses
+/// what it leaked then: the leak is bounded by the number of DISTINCT contents, not by the number of reloads.
+type Table = Vec<(&'static str, &'static V)>;
+struct Pool {
+    values: Vec<(&'static str, &'static V)>,
+    tables: Vec<&'static Table>,
+}
+static OVERLAY_W: Mutex<Pool> = Mutex::new(Pool { values: Vec::new(), tables: Vec::new() });
+
+fn overlay_table() -> Option<&'static [(&'static str, &'static V)]> {
+    let p = OVERLAY.load(Ordering::Acquire);
+    // SAFETY: a non-null pointer was made by `Box::leak` in `set_overlay` and is never freed, so it is valid for 'static; the
+    // table is never written after it is published (the Release store pairs with this Acquire load).
+    (!p.is_null()).then(|| unsafe { &*p }.as_slice())
+}
+
+fn overlaid(key: &str) -> Option<&'static V> {
+    let o = overlay_table()?;
+    o.binary_search_by(|(k, _)| (*k).cmp(key)).ok().map(|i| o[i].1)
+}
+
+/// A JSON value as static data in the shape of the shipped default `d` (the layers have already checked the shape). `None` for a
+/// value no setting can hold (a float, a null), which then reads as the shipped value.
+fn leak_value(j: &Json) -> Option<V> {
+    let leak_str = |s: &str| -> &'static str {
+        crate::mem::note_leak(s.len());
+        Box::leak(s.to_string().into_boxed_str())
+    };
+    Some(match j {
+        Json::Bool(b) => V::Bool(*b),
+        Json::Number(n) => V::Int(n.as_i64()?),
+        Json::String(s) => V::Str(leak_str(s)),
+        Json::Array(a) => {
+            let items: Vec<V> = a.iter().map(leak_value).collect::<Option<_>>()?;
+            crate::mem::note_leak(items.len() * std::mem::size_of::<V>());
+            V::List(Box::leak(items.into_boxed_slice()))
+        }
+        Json::Object(o) => {
+            let mut pairs: Vec<(&'static str, V)> = o.iter().map(|(k, v)| Some((leak_str(k), leak_value(v)?))).collect::<Option<_>>()?;
+            pairs.sort_by(|a, b| a.0.cmp(b.0));
+            crate::mem::note_leak(pairs.len() * std::mem::size_of::<(&str, V)>());
+            V::Table(Box::leak(pairs.into_boxed_slice()))
+        }
+        Json::Null => return None,
+    })
+}
+
+/// Install the owner's layered values (`cfgstore` calls this with every setting a file supplies; see [`OVERLAY`]). A value equal to
+/// the one already installed for its key is reused, so the leak is bounded by the number of distinct edits. A change bumps
+/// [`generation`], so values derived from settings ([`Cache`]) are rebuilt. Keys that are not shipped are ignored.
+pub fn set_overlay(values: &[(&str, Json)]) {
+    let mut pool = OVERLAY_W.lock().unwrap_or_else(|e| e.into_inner());
+    let mut next: Table = Vec::with_capacity(values.len());
+    for (key, j) in values {
+        let Some(e) = find(key) else { continue };
+        let reuse = pool.values.iter().find(|(k, v)| *k == e.key && v.to_json() == *j).map(|(_, v)| *v);
+        let v = match reuse {
+            Some(v) => v,
+            None => match leak_value(j) {
+                Some(v) => {
+                    crate::mem::note_leak(std::mem::size_of::<V>());
+                    let v: &'static V = Box::leak(Box::new(v));
+                    pool.values.push((e.key, v));
+                    v
+                }
+                None => continue,
+            },
+        };
+        next.push((e.key, v));
+    }
+    next.sort_by(|a, b| a.0.cmp(b.0));
+    next.dedup_by(|a, b| a.0 == b.0);
+    let same = |t: &Table| t.len() == next.len() && t.iter().zip(&next).all(|(a, b)| a.0 == b.0 && std::ptr::eq(a.1, b.1));
+    let cur = OVERLAY.load(Ordering::Acquire);
+    // SAFETY: as in `overlay_table`: a non-null pointer is a leaked, never-written table
+    let unchanged = if cur.is_null() { next.is_empty() } else { same(unsafe { &*cur }) };
+    if unchanged {
+        return;
+    }
+    let table: *mut Table = if next.is_empty() {
+        std::ptr::null_mut()
+    } else if let Some(t) = pool.tables.iter().find(|t| same(t)) {
+        std::ptr::from_ref::<Table>(t).cast_mut()
+    } else {
+        crate::mem::note_leak(next.len() * std::mem::size_of::<(&str, &V)>());
+        let t: &'static mut Table = Box::leak(Box::new(next));
+        let p = std::ptr::from_mut(t);
+        // SAFETY: `p` is the just-leaked table, valid for 'static and never written again
+        pool.tables.push(unsafe { &*p });
+        p
+    };
+    OVERLAY.store(table, Ordering::Release);
+    GENERATION.fetch_add(1, Ordering::SeqCst);
+}
+
+/// The keys the overlay sets now, with their values (`config --json` tooling and tests).
+pub fn overlay() -> Vec<(&'static str, &'static V)> {
+    overlay_table().map(<[_]>::to_vec).unwrap_or_default()
+}
+
+/// The entry for `key`, if shipped. The hot path of every settings read: a guard load of the snapshot, no reference count.
 fn find(key: &str) -> Option<&'static Entry> {
-    match backend().as_ref() {
-        Backend::Full(d) => d.find(key),
-        Backend::Lazy(l) => l.find(key),
+    let g = CUR.load();
+    match g.as_deref() {
+        Some(Backend::Full(d)) => d.find(key),
+        Some(Backend::Lazy(l)) => l.find(key),
+        None => {
+            drop(g);
+            match backend().as_ref() {
+                Backend::Full(d) => d.find(key),
+                Backend::Lazy(l) => l.find(key),
+            }
+        }
     }
 }
 
@@ -400,16 +531,23 @@ pub fn has(key: &str) -> bool {
     find(key).is_some()
 }
 
-/// The raw default value of `key`.
+/// The effective value of `key`: the owner's file layers ([`set_overlay`]) over the shipped default. The environment layer
+/// applies to numeric settings only and is read by [`num`].
 pub fn raw(key: &str) -> &'static V {
+    overlaid(key).unwrap_or_else(|| &entry(key).value)
+}
+
+/// The value of `key` as shipped, ignoring the owner's files (the schema: what the layers resolve over).
+pub fn shipped(key: &str) -> &'static V {
     &entry(key).value
 }
 
-/// A numeric setting: the default, overridden by its `env` variable when that holds a number, then clamped to
-/// its `min`/`max`.
+/// A numeric setting, resolved in the documented order (`cfgstore`, D18): its `env` variable when that holds a number, else the
+/// owner's files ([`set_overlay`]), else the shipped default; then clamped to its `min`/`max`.
 pub fn num(key: &str) -> u64 {
     let e = entry(key);
-    let default = e.value.as_integer().unwrap_or_else(|| fatal_defaults(format!("defaults key {key:?} is not an integer"))).max(0) as u64;
+    let value = overlaid(key).unwrap_or(&e.value);
+    let default = value.as_integer().unwrap_or_else(|| fatal_defaults(format!("defaults key {key:?} is not an integer"))).max(0) as u64;
     let mut v = e.env.and_then(|n| std::env::var(n).ok()).and_then(|s| s.trim().parse::<u64>().ok()).unwrap_or(default);
     if let Some(min) = e.min {
         v = v.max(min.max(0) as u64);
