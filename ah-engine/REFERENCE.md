@@ -319,8 +319,8 @@ Rule fields (JSON): `id`, `events`, `tools`, `field`, `pattern` (regex), `check`
 | `inbox-read-guard` | Blocks a Read of the raw DevSwarm inbox; a Read of the raw store defers to Node, which probes the wrapper; dormant unless DevSwarm is active (port of inbox-read-guard.js). |
 | `phase-tracker` | Records each Agent or Task spawn in ~/.anti-hall (the statusline's live swarm bar and the running-agents heartbeat); never blocks (port of phase-tracker.js). |
 | `orch-on-spawn` | Silent unless a spawn-time delivery is pending: answers every case where Node would print nothing; a pending marker takes the claim (a file created only when absent) and sends the full rules; only the retry slot after the claim lease, which needs the transcript scan, defers to Node (port of orch-on-spawn.js). |
-| `verify-first-orch` | SessionStart orchestration text for the Claude entry: composes the full or compact text and keeps the delivery marker; a DevSwarm session defers to Node (port of verify-first-orch.js --host=claude). |
-| `verify-first-orch-codex` | SessionStart orchestration text for the Codex entry (the same hook without --host=claude, so never Claude-confident): composes the full or compact text and keeps the delivery marker; a DevSwarm session defers to Node. |
+| `verify-first-orch` | SessionStart orchestration text for the Claude entry: composes the full or compact text (with the workspace-tier rule for a DevSwarm Primary) and keeps the delivery marker (port of verify-first-orch.js --host=claude). |
+| `verify-first-orch-codex` | SessionStart orchestration text for the Codex entry (the same hook without --host=claude, so never Claude-confident): composes the full or compact text (with the workspace-tier rule for a DevSwarm Primary) and keeps the delivery marker. |
 | `verify-first` | UserPromptSubmit: the short rotating verify-first reminder, deduplicated per session; DevSwarm Primary sessions stay on Node (port of verify-first.js). |
 | `idle-agent-sweep` | UserPromptSubmit: lists agents that finished but were never stopped or closed, and the call that ends each (port of idle-agent-sweep.js). |
 | `emit-dedupe-reset` | SessionStart: marks a context loss in the session's emit-dedupe state so the next UserPromptSubmit blocks are re-emitted (port of emit-dedupe-reset.js). |
@@ -351,7 +351,7 @@ Rule fields (JSON): `id`, `events`, `tools`, `field`, `pattern` (regex), `check`
 | `devswarm-comms-guard` | Blocks SendMessage to a peer session whose cwd is a DevSwarm workspace while DevSwarm is active, and labels other known targets (port of devswarm-comms-guard.js). |
 | `swarm-guard` | Blocks an agent spawn past the spawn-rate cap or under critical memory pressure, and adds the shared-tree advisory to an allowed write-capable spawn that shares a working tree with a running write-capable agent (port of swarm-guard.js and lib/shared-tree-note.js). |
 | `jev-weekly-scorecard` | Stays silent when the weekly Jev scorecard notice cannot be due (Jev off, notice off, child workspace, checked within a week); when the check is due and the Jev decision log holds no rows it stamps the weekly latch itself; otherwise defers to the Node hook, which builds the report (port of jev-weekly-scorecard.js). |
-| `jev-review-reminder` | Stays silent when no session-start Jev notice can be due (Jev and the semantic judge off, the recommend notice off or shown within 30 days, a subagent turn, a non-interactive run); shows the recommend-Jev notice and stamps its latch itself when that is the only notice due; otherwise defers to the Node hook (port of jev-review-reminder.js). |
+| `jev-review-reminder` | SessionStart notices of Jev: the one-time legacy-key notice, the recommend-Jev notice (Jev off) and the review-due line (Jev on), with their state files kept by the engine; answers every case itself (port of hooks/jev-review-reminder.js). |
 | `repair-on-reload` | Stays silent when no repair can start (switch off, subagent turn, skipped, nothing pending at the running version, cooldown); otherwise defers to the Node hook, which takes the lock and starts the detached repair (port of the gates of repair-on-reload.js). |
 | `codex-availability` | SessionStart: probes PATH for a real codex executable, records it, folds a Codex job-log usage-limit error into the quota record and tells the session (port of codex-availability.js). |
 | `codex-quota-detect` | Advisory: records a Codex quota or rate-limit exhaustion reported by a codex:codex-rescue Agent result, once, in the shared availability file (port of codex-quota-detect.js). |
@@ -362,9 +362,9 @@ Rule fields (JSON): `id`, `events`, `tools`, `field`, `pattern` (regex), `check`
 | `dispatch-tier` | Asks Jev (dispatchTier, detached) how a new or changed task should be dispatched, once per task text, and keeps the request marker in dispatch-tier-state.json; does nothing while the integration is off (port of dispatch-tier.js). |
 | `task-guard` | Stop gate: blocks a Stop while tasks are open (the idle-neglect block when dispatchable work has no running agent, else the generic block), with the loop state, the per-prompt budget and the OMC and live-agent steps aside of the Node hook; hands a Stop whose answer needs the DevSwarm app database to Node (port of task-guard.js). |
 | `tasklist-guard` | Stop gate: blocks a Stop after untracked work, tasks stalled in progress or a missing or stale progress file, with the Node hook's loop state, dedupe, cap, handover advisories, stop-policy budget and acknowledgement; answers the quiet Stops, plan mode and the resume-verification nudge with the same file effects (port of tasklist-guard.js). |
-| `devswarm-parent-inbox` | DevSwarm Primary prompt hook: answers the silent cases (not a Primary, DevSwarm inactive, switch off, judge child) in the engine; an active Primary defers to the Node hook, which owns the roster, mailbox and dedupe state (port of the gate of devswarm-parent-inbox.js). |
+| `devswarm-parent-inbox` | DevSwarm Primary prompt hook: answers the silent cases (not a Primary, DevSwarm inactive, switch off, judge child) and an active Primary with no git checkout around its working directory (its communication-override reminder through the emit-dedupe store) in the engine; a Primary in a checkout defers to the Node hook, which owns the roster, mailbox and dedupe state (port of devswarm-parent-inbox.js). |
 | `devswarm-child-turn` | DevSwarm child prompt hook: answers the silent cases (not a child workspace, DevSwarm inactive, switch off, judge child) in the engine; an active child defers to the Node hook, which writes the heartbeat and descriptor and renders the mailbox (port of the gate of devswarm-child-turn.js). |
-| `devswarm-child-role` | SessionStart: injects the DevSwarm mesh-only messaging directive for a child workspace (port of devswarm-child-role.js); a Primary session, a stale stable launcher or anything else it cannot prove byte-identical defers to Node. |
+| `devswarm-child-role` | SessionStart: injects the DevSwarm mesh-only messaging directive for a child workspace or a Primary with no seat to settle (port of devswarm-child-role.js); a Primary in a git checkout (seat adoption writes the mesh store), a stale stable launcher or anything else it cannot prove byte-identical defers to Node. |
 | `devswarm-parent-gate` | Stop: the DevSwarm Primary gate (port of devswarm-parent-gate.js, decided in engine/logic/devswarm-parent-gate.js): the early exits, the inert and clean passes (loop state removed), the busy and grace advisories, and the neglect block with its loop state, cap, escalation, waiting-on-human lines and wake line; own unread, pending questions, stale verdicts, a parked escalation and every case it cannot reproduce byte for byte defer to the Node gate before anything is written. |
 | `devswarm-child-gate` | DevSwarm child Stop gate: allows the stop when the hook cannot act (switch off, skip recorded, not a DevSwarm child); a child workspace defers to the Node gate, which owns the heartbeat state, the stop budgets, the mailbox store and the hivecontrol probe (port of devswarm-child-gate.js). |
 | `devswarm-parent-reply-tracker` | DevSwarm Primary reply tracker: allows every Bash call that is not a devswarm send (switch off, child workspace, other tool, command without the devswarm and send words); a plausible send defers to the Node hook, which records the reply state (port of devswarm-parent-reply-tracker.js). |
@@ -707,10 +707,12 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 
 | Key | Default | Env override | Unit | What it is |
 |---|---|---|---|---|
-| `request_env.allow` | `42 items` |  |  | The environment variables the client forwards with every request, and the only ones the daemon evaluates a check with (never its own environment). A trailing `*` matches a prefix. PATH is read by scan-throttle. DISABLE_ANTIHALL_DEVSWARM and DEVSWARM_REPO_ID decide whether DevSwarm is active, CLAUDE_CONFIG_DIR locates the host's transcripts and NODE_TEST_CONTEXT marks a test run (inbox-read-guard, orch-on-spawn, verify-first-orch). DEVSWARM_SOURCE_BRANCH (non-empty in a DevSwarm child workspace) is read by verify-first-subagent. verify-first also reads DEVSWARM_REPO_ID, DEVSWARM_SOURCE_BRANCH and DISABLE_ANTIHALL_DEVSWARM to see whether the session could be a DevSwarm Primary. DEVSWARM_SOURCE_BRANCH also marks a DevSwarm child workspace for ask-guard. DEVSWARM_REPO_ID, DEVSWARM_SOURCE_BRANCH and DISABLE_ANTIHALL_DEVSWARM are also read by the DevSwarm prompt gates (devswarm-parent-inbox, devswarm-child-turn). DEVSWARM_BUILDER_ID and DEVSWARM_AI_AGENT (with the repo id, the source branch and the DISABLE_ANTIHALL_DEVSWARM kill switch) are read by the devswarm-child-role and devswarm-parent-gate checks. CLAUDE_PLUGIN_OPTION_* carry the plugin options the guards' switch chain reads. The rest are what the git check needs to see the client's git, never the daemon's: the `gitcache.bypass_env` names, XDG_CONFIG_HOME (locates git's config), the GIT_CONFIG_* variables (GIT_CONFIG_COUNT with its KEY_n/VALUE_n pairs travel together, since git exits 128 on a COUNT without its KEY_0; PARAMETERS and NOSYSTEM likewise), GIT_EXEC_PATH (locates git's helpers) and the object-store variables GIT_OBJECT_DIRECTORY, GIT_ALTERNATE_OBJECT_DIRECTORIES and GIT_NO_REPLACE_OBJECTS. LANG and LC_* are not forwarded: the git calls discard stderr and read only config data from stdout. TZ decides the local calendar date and local-time date strings of the handover and Codex checks, and TMPDIR, TMP and TEMP locate the session scratchpad the Codex nudge exempts, and decide where `os.tmpdir()` points in the task checks (scratch paths do not count as work). DISABLE_OMC and OMC_SKIP_HOOKS are the oh-my-claudecode kill switches task-guard reads before it steps aside for an OMC loop. |
+| `request_env.allow` | `43 items` |  |  | The environment variables the client forwards with every request, and the only ones the daemon evaluates a check with (never its own environment). A trailing `*` matches a prefix. PATH is read by scan-throttle. DISABLE_ANTIHALL_DEVSWARM and DEVSWARM_REPO_ID decide whether DevSwarm is active, CLAUDE_CONFIG_DIR locates the host's transcripts and NODE_TEST_CONTEXT marks a test run (inbox-read-guard, orch-on-spawn, verify-first-orch). DEVSWARM_SOURCE_BRANCH (non-empty in a DevSwarm child workspace) is read by verify-first-subagent. verify-first also reads DEVSWARM_REPO_ID, DEVSWARM_SOURCE_BRANCH and DISABLE_ANTIHALL_DEVSWARM to see whether the session could be a DevSwarm Primary. DEVSWARM_SOURCE_BRANCH also marks a DevSwarm child workspace for ask-guard. DEVSWARM_REPO_ID, DEVSWARM_SOURCE_BRANCH and DISABLE_ANTIHALL_DEVSWARM are also read by the DevSwarm prompt gates (devswarm-parent-inbox, devswarm-child-turn). DEVSWARM_BUILDER_ID and DEVSWARM_AI_AGENT (with the repo id, the source branch and the DISABLE_ANTIHALL_DEVSWARM kill switch) are read by the devswarm-child-role and devswarm-parent-gate checks. DEVSWARM_BUILDER_NAME is written into the heartbeat of devswarm-child-turn. CLAUDE_PLUGIN_OPTION_* carry the plugin options the guards' switch chain reads. The rest are what the git check needs to see the client's git, never the daemon's: the `gitcache.bypass_env` names, XDG_CONFIG_HOME (locates git's config), the GIT_CONFIG_* variables (GIT_CONFIG_COUNT with its KEY_n/VALUE_n pairs travel together, since git exits 128 on a COUNT without its KEY_0; PARAMETERS and NOSYSTEM likewise), GIT_EXEC_PATH (locates git's helpers) and the object-store variables GIT_OBJECT_DIRECTORY, GIT_ALTERNATE_OBJECT_DIRECTORIES and GIT_NO_REPLACE_OBJECTS. LANG and LC_* are not forwarded: the git calls discard stderr and read only config data from stdout. TZ decides the local calendar date and local-time date strings of the handover and Codex checks, and TMPDIR, TMP and TEMP locate the session scratchpad the Codex nudge exempts, and decide where `os.tmpdir()` points in the task checks (scratch paths do not count as work). DISABLE_OMC and OMC_SKIP_HOOKS are the oh-my-claudecode kill switches task-guard reads before it steps aside for an OMC loop. |
 | `request_env.incomplete_key` | `ah_env_incomplete` |  |  | Reserved name, never a forwardable variable, that carries the request's incomplete flag inside the forwarded environment object (the client's variables were dropped or it had no HOME), so the daemon's checks defer to the Node guards. |
 | `request_env.line_prefix` | `E ` |  |  | Prefix of the request line that carries the forwarded environment as one JSON object. |
 | `request_env.max_bytes` | `65536` |  | bytes | Largest forwarded environment (sum of names and values); a client whose allowed variables exceed it forwards none of them and the request is marked incomplete, so every check defers to the Node guard (a missing or empty HOME marks it incomplete too). |
+| `request_env.presence_only` | `AI_GATEWAY_API_KEY, TYPESAFE_API_KEY, ANTHROPIC_API_KEY` |  |  | Environment variables whose PRESENCE the checks need but whose value they must never see (a secret): the client forwards the presence text when one is set and non-empty, nothing otherwise, and the value never leaves the client. These are the legacy API-key variables the session-start key notice looks for (credentials.js legacyKeyPresent). |
+| `request_env.presence_text` | `1` |  |  | The value a presence-only variable carries on the wire. |
 
 ### engine.toml / rollback
 
@@ -1480,16 +1482,49 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | Key | Default | Env override | Unit | What it is |
 |---|---|---|---|---|
 | `devswarm_prompt.branch_env` | `DEVSWARM_SOURCE_BRANCH` |  |  | Environment variable whose non-blank value marks a child workspace (hooks/lib/devswarm-role.js). |
+| `devswarm_prompt.builder_env` | `DEVSWARM_BUILDER_ID` |  |  | Environment variable that holds a child workspace's builder id. |
+| `devswarm_prompt.builder_name_env` | `DEVSWARM_BUILDER_NAME` |  |  | Environment variable that holds a child workspace's builder name. |
+| `devswarm_prompt.child_autonomy` | `💡 anti-hall · devswarm-autonomy: if you are running a multi-round autonomous ...` |  |  | The child's self-continue reminder (hooks/devswarm-child-turn.js SELF_CONTINUE), byte for byte. |
+| `devswarm_prompt.child_block_joiner` | `\n\n` |  |  | Between the segments of the child's answer. |
+| `devswarm_prompt.child_override` | `💡 anti-hall · devswarm-comms: mesh only — native hivecontrol messaging blocke...` |  |  | The child workspace's communication-override reminder of every turn (hooks/devswarm-child-turn.js OVERRIDE_REASSERT), byte for byte. |
+| `devswarm_prompt.child_plan_keepalive` | `10` |  |  | Delivered turns after which an unchanged plan segment is sent again. |
+| `devswarm_prompt.child_plan_key` | `child-turn-plan` |  |  | The emit-dedupe key of the child's plan segment. |
+| `devswarm_prompt.child_receive` | `💡 anti-hall · devswarm-child-reception: to RECEIVE parent messages, run `node...` |  |  | The child's reception reminder (hooks/devswarm-child-turn.js RECEIVE_NUDGE); {cli} is the DevSwarm CLI path and the id token is replaced by the builder id when that is a safe id. |
+| `devswarm_prompt.child_reminder` | `💡 anti-hall · devswarm-child-workspace: (per turn) keep the parent orchestrat...` |  |  | The child's per-turn report reminder (hooks/devswarm-child-turn.js REMINDER); {cli} is the DevSwarm CLI path and the id token is replaced by the builder id when that is a safe id. |
 | `devswarm_prompt.child_setting` | `6 entries` |  |  | Where the devswarm.childTurn switch (default on) is read from: no environment variable, then settings.json, then the plugin option. |
+| `devswarm_prompt.child_static_key` | `child-turn-static` |  |  | The emit-dedupe key of the child's fixed per-turn block. |
 | `devswarm_prompt.child_summary` | `DevSwarm child prompt hook: answers the silent cases (not a child workspace, ...` |  |  | One-line description of the devswarm-child-turn check in the generated reference. |
+| `devswarm_prompt.descriptor_dir` | `devswarm/workspaces` |  |  | The directory, under the anti-hall directory, of the workspace descriptors. |
+| `devswarm_prompt.event` | `UserPromptSubmit` |  |  | The hook event name of the prompt hooks' answer. |
+| `devswarm_prompt.heartbeat_branch_unsafe` | `[^A-Za-z0-9._-]` |  |  | The characters of a branch name that become a dash in a heartbeat file name when the branch is not a safe id. |
+| `devswarm_prompt.heartbeat_dir` | `devswarm/heartbeats` |  |  | The directory, under the anti-hall directory, of the per-builder heartbeat files. |
+| `devswarm_prompt.heartbeat_hash_len` | `8` |  |  | Characters of the branch's SHA-1 appended to a sanitized heartbeat file name. |
+| `devswarm_prompt.heartbeat_name_fallback` | `branch` |  |  | The heartbeat file name for a branch that sanitizes to nothing. |
+| `devswarm_prompt.heartbeat_name_max` | `80` |  |  | The longest sanitized branch name of a heartbeat file name. |
+| `devswarm_prompt.heartbeat_source` | `child-turn` |  |  | The `source` of a heartbeat the child's prompt hook writes. |
+| `devswarm_prompt.id_token` | `<DEVSWARM_BUILDER_ID>` |  |  | The placeholder of the builder id in the child's reminders. |
 | `devswarm_prompt.judge_env` | `ANTIHALL_JUDGE_CHILD` |  |  | Environment variable that marks a Jev judge child process; its hooks do nothing (hooks/lib/judge-child-exit.js). Only the exact value in judge_value counts. |
 | `devswarm_prompt.judge_value` | `1` |  |  | The value of judge_env that silences the hook. |
 | `devswarm_prompt.kill_env` | `DISABLE_ANTIHALL_DEVSWARM` |  |  | Hard kill switch of the DevSwarm integration (hooks/lib/devswarm-detect.js): the exact value in kill_value makes the integration inactive. |
 | `devswarm_prompt.kill_value` | `1` |  |  | The value of kill_env that deactivates the DevSwarm integration. |
 | `devswarm_prompt.mode_setting` | `7 entries` |  |  | Where devswarm.supervisorMode is read from: environment variable, settings.json, then the plugin option; `values` are the accepted words and `manifest_default` is the default the plugin manifest declares for the option (a stored option equal to it counts as unset, as in hooks/lib/settings.js). |
+| `devswarm_prompt.override_key` | `parent-inbox-comms-override` |  |  | The emit-dedupe key of the Primary's communication-override reminder. |
+| `devswarm_prompt.override_reassert` | `💡 anti-hall · devswarm-comms: mesh only — native hivecontrol messaging blocke...` |  |  | The Primary's per-turn communication-override reminder (hooks/devswarm-parent-inbox.js OVERRIDE_REASSERT), byte for byte. |
 | `devswarm_prompt.parent_setting` | `6 entries` |  |  | Where the devswarm.parentInbox switch (default on) is read from: no environment variable, then settings.json, then the plugin option. |
 | `devswarm_prompt.parent_summary` | `DevSwarm Primary prompt hook: answers the silent cases (not a Primary, DevSwa...` |  |  | One-line description of the devswarm-parent-inbox check in the generated reference. |
+| `devswarm_prompt.plan_all_done` | `💡 anti-hall · devswarm-plan: all {total} steps are done — report it with `nod...` |  |  | The first sentence of the plan segment when every step is done. Placeholders: {total}, {cli}. |
+| `devswarm_prompt.plan_blocked` | ` (blocked)` |  |  | Added to the plan head when the latest touched step is blocked. |
+| `devswarm_prompt.plan_dir` | `devswarm/plans` |  |  | The directory, under the anti-hall directory, of the step-plan files of the workspaces. |
+| `devswarm_prompt.plan_head` | `💡 anti-hall · devswarm-plan: {done}/{total} steps done; latest touched step {...` |  |  | The first sentence of the plan segment. Placeholders: {done}, {total}, {n}, {blocked}, {text}. |
+| `devswarm_prompt.plan_none` | `💡 anti-hall · devswarm-plan: you have no step plan yet. Write your brief as n...` |  |  | The plan segment of a child with no step plan when one is required (hooks/devswarm-child-turn.js buildPlanSegment). Placeholders: {cli}, {id}. |
+| `devswarm_prompt.plan_required_setting` | `6 entries` |  |  | The setting devswarm.planRequired (off by default): a child without a step plan is asked to write one every turn. |
+| `devswarm_prompt.plan_tail` | ` Report step progress as it happens: `node {cli} heartbeat {id} --step N --st...` |  |  | The rest of the plan segment. Placeholders: {cli}, {id}. |
+| `devswarm_prompt.plan_tracking_setting` | `6 entries` |  |  | The setting devswarm.planTracking (on by default): the child is shown its step plan each turn. |
 | `devswarm_prompt.repo_env` | `DEVSWARM_REPO_ID` |  |  | Environment variable whose non-blank value makes the DevSwarm integration active in auto mode. |
+| `devswarm_prompt.seat_dir` | `devswarm/primary-seat` |  |  | The directory, under the anti-hall directory, of the per-session seat-conflict markers the SessionStart hook writes. |
+| `devswarm_prompt.seat_shown_max` | `2` |  |  | A seat-conflict marker is owed a repeat while the number of times it was shown is below this. |
+| `devswarm_prompt.uuid_full_re` | `^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$` |  |  | A full UUID (a builder id of this shape is a real id). |
+| `devswarm_prompt.uuid_truncated_re` | `^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{1,11}$` |  |  | A UUID cut short in its last group (a builder id of this shape was truncated; Node recovers or skips it and says so on stderr). |
 
 ### small_guards.toml / edit_guard
 
@@ -1907,6 +1942,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `verify_first_orch.full_lines` | `15 items` |  |  | Lines of the full orchestration text for a Claude session, joined with a newline. |
 | `verify_first_orch.full_lines_codex` | `15 items` |  |  | Lines of the full orchestration text for a Codex session, joined with a newline. |
 | `verify_first_orch.mn_prefix` | `M/N.` |  |  | How the compact body's model-routing line starts (that line is swapped for the Codex one). |
+| `verify_first_orch.primary_rule` | `  W. DEVSWARM PRIMARY — WORKSPACE IS THE TOP FAN-OUT TIER: a feature/fix/depl...` |  |  | The DevSwarm Primary workspace-tier rule (W), inserted after the header line of the full orchestration text when the session is a Primary. |
 | `verify_first_orch.projects_dir` | `projects` |  |  | Directory of the host's transcripts, relative to the host's config directory. |
 | `verify_first_orch.root_placeholder` | `<abs>` |  |  | Placeholder in the compact text that is replaced by the plugin root. |
 | `verify_first_orch.summary` | `SessionStart orchestration text for the Claude entry: composes the full or co...` |  |  | One-line description of the verify-first-orch check in the generated reference. |
@@ -3285,15 +3321,28 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 
 | Key | Default | Env override | Unit | What it is |
 |---|---|---|---|---|
+| `jev_review.after_days_fallback` | `7` |  |  | The days used when the resolved jev.reviewAfterDays is zero or not a number (Node: `Number(x) \|\| 7`). |
+| `jev_review.after_days_setting` | `8 entries` |  |  | The setting jev.reviewAfterDays: days an integration must have been in shadow (and since its last review) before a review is due. |
 | `jev_review.headless_setting` | `6 entries` |  |  | The setting jev.recommendNoticeHeadless (off by default): show the recommend notice in a non-interactive run too. |
 | `jev_review.latch_key` | `lastShownTs` |  |  | The key of the recommend notice latch that holds the time it was last shown. |
+| `jev_review.line_ellipsis` | `…` |  |  | Ends a review line that is still over the limit after naming one integration. |
+| `jev_review.line_item` | `{id} ({days}d, {decisions} decisions)` |  |  | How one due integration is named in the review line. Placeholders: {id}, {days}, {decisions}. |
+| `jev_review.line_joiner` | `\n` |  |  | Between the notices of the session start (the legacy-key notice, the recommend notice and the review line). |
+| `jev_review.line_list_joiner` | `, ` |  |  | Between the named integrations of the review line. |
+| `jev_review.line_more` | `, +{n} more` |  |  | Appended to the list of the review line when more integrations are due than are named. Placeholder: {n}. |
+| `jev_review.line_text` | `💡 anti-hall · jev-review: review due for {list}.\nDo instead: tell the owner ...` |  |  | The review line (hooks/jev-review-reminder.js buildLine), byte for byte. Placeholder: {list}. |
+| `jev_review.max_line_chars` | `320` |  |  | The longest the review line may be (UTF-16 units); it names fewer integrations before it is cut. |
+| `jev_review.max_named` | `3` |  |  | How many due integrations the review line names before it says how many more there are. |
+| `jev_review.min_decisions_fallback` | `30` |  |  | The decisions used when the resolved jev.reviewMinDecisions is not a finite number (Node: `Number.isFinite(x) ? x : 30`). |
+| `jev_review.min_decisions_setting` | `8 entries` |  |  | The setting jev.reviewMinDecisions: decisions an integration must have logged before a review is due. |
 | `jev_review.protocol_full` | `full` |  |  | The protocol level that turns the headless recommend notice on by default. |
 | `jev_review.protocol_level_setting` | `7 entries` |  |  | The setting context.protocolLevel; while jev.recommendNoticeHeadless is not set anywhere, the full level turns the headless notice on. |
 | `jev_review.recommend_latch_file` | `state/jev-recommend-notice.json` |  |  | The recommend notice latch, relative to the anti-hall directory: the time it was last shown. |
 | `jev_review.recommend_notice` | `Tell the user now, verbatim, bold kept:\n**Recommended: enable Jev, the optio...` |  |  | The recommend-Jev notice the session receives (hooks/lib/jev-recommend.js: the directive line, then shortNotice()), byte for byte. |
 | `jev_review.recommend_setting` | `6 entries` |  |  | The setting jev.recommendNotice (on by default): the one-in-30-days notice recommending Jev while it is off. |
 | `jev_review.remind_every_ms` | `2592000000` |  | ms | How long after it was shown the recommend notice stays quiet. |
-| `jev_review.summary` | `Stays silent when no session-start Jev notice can be due (Jev and the semanti...` |  |  | One-line description of the jev-review-reminder check in the generated reference. |
+| `jev_review.reminder_setting` | `6 entries` |  |  | The setting jev.reviewReminder (on by default): the session-start line that says a Jev shadow review is due. |
+| `jev_review.summary` | `SessionStart notices of Jev: the one-time legacy-key notice, the recommend-Je...` |  |  | One-line description of the jev-review-reminder check in the generated reference. |
 
 ### session_gates.toml / jev_weekly
 
@@ -3323,6 +3372,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | Key | Default | Env override | Unit | What it is |
 |---|---|---|---|---|
 | `session_gates.agent_key_markers` | `agent_id, agent_type` |  |  | Payload keys whose presence (with a value other than null) marks a subagent turn. |
+| `session_gates.allow_anthropic_setting` | `7 entries` |  |  | The home-only setting guards.allowAnthropicEnvKey: whether ANTHROPIC_API_KEY may count as a key (off by default; no env name, no plugin option). |
 | `session_gates.allow_real_home_env` | `ANTIHALL_ALLOW_REAL_HOME_TEST` |  |  | Environment variable that lets a test run use the real home directory anyway. |
 | `session_gates.anti_hall_dir` | `.anti-hall` |  |  | The anti-hall directory under the home directory. |
 | `session_gates.child_branch_env` | `DEVSWARM_SOURCE_BRANCH` |  |  | Environment variable DevSwarm sets in a child workspace (a non-blank value marks the session as a child). |
@@ -3330,12 +3380,30 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `session_gates.codex_tool` | `apply_patch` |  |  | The tool name only Codex has; its presence marks a Codex payload. |
 | `session_gates.default_event` | `SessionStart` |  |  | The hook event name an advisory carries when the payload names none (a non-empty string hook_event_name wins). |
 | `session_gates.entrypoint_env` | `CLAUDE_CODE_ENTRYPOINT` |  |  | Environment variable that names how the host was started. |
+| `session_gates.generic_vendor_member` | `genericKeyVendor` |  |  | The member of the Jev settings that records which vendor the generic key is bound to (jev.genericKeyVendor). |
 | `session_gates.headless_prefix` | `sdk-` |  |  | Entry point names starting with this are non-interactive (SDK) runs. |
 | `session_gates.jev_config_file` | `jev.json` |  |  | The legacy Jev configuration file, relative to the anti-hall directory. |
 | `session_gates.jev_enabled_setting` | `8 entries` |  |  | The setting jev.enabled (off by default; a legacy jev.json value is honoured). |
 | `session_gates.jev_semantic_judge_setting` | `6 entries` |  |  | The setting jev.semanticJudge (off by default). |
 | `session_gates.judge_child_env` | `ANTIHALL_JUDGE_CHILD` |  |  | Environment variable the judge child process runs with; every one of these hooks does nothing in it. |
 | `session_gates.judge_child_value` | `1` |  |  | The value of that variable that marks the judge child. |
+| `session_gates.key_binding_member` | `jevBinding` |  |  | The member of `shown` that records the generic-key binding note. |
+| `session_gates.key_binding_note` | `your generic Jev key (jev_api_key / jev.keyFile) is bound to {vendor} and is ...` |  |  | The note that a generic Jev key is bound to the default vendor while the transport is typesafe. Placeholder: {vendor}. |
+| `session_gates.key_default_vendor` | `vercel` |  |  | The vendor a generic Jev key stays bound to until it is bound explicitly (the schema default of jev.transport). |
+| `session_gates.key_kind_anthropic` | `anthropic` |  |  | The name of the Anthropic kind in the legacy-key notice state. |
+| `session_gates.key_kind_jev` | `jev` |  |  | The name of the Jev kind in the legacy-key notice state. |
+| `session_gates.key_migration_note` | `a legacy {what} exists but anti-hall no longer reads credentials from this ma...` |  |  | The legacy-key notice for one kind (hooks/lib/credentials.js migrationNotice). Placeholders: {what}, {option}, {setting}. |
+| `session_gates.key_notice_joiner` | ` ` |  |  | Between the parts of the one-time legacy-key notice. |
+| `session_gates.key_notice_prefix` | `anti-hall (shown once): ` |  |  | Starts the one-time legacy-key notice. |
+| `session_gates.key_option_anthropic` | `anthropic_api_key` |  |  | The plugin option that holds the Anthropic key. |
+| `session_gates.key_option_jev` | `jev_api_key` |  |  | The plugin option that holds the Jev key. |
+| `session_gates.key_setting_anthropic` | `guards.allowAnthropicEnvKey` |  |  | The opt-in setting that keeps a legacy Anthropic key in use. |
+| `session_gates.key_setting_jev` | `jev.allowLegacyKeyRead` |  |  | The opt-in setting that keeps a legacy Jev key in use. |
+| `session_gates.key_shown_member` | `shown` |  |  | The member of the legacy-key notice state that holds the time each kind was named. |
+| `session_gates.key_state_file` | `legacy-key-notice-state.json` |  |  | The legacy-key notice state, relative to the anti-hall directory: which kinds were already named. |
+| `session_gates.key_what_anthropic` | `ANTHROPIC_API_KEY env var` |  |  | How the legacy-key notice calls a legacy Anthropic key. |
+| `session_gates.key_what_jev` | `Jev key file/env var` |  |  | How the legacy-key notice calls a legacy Jev key. |
+| `session_gates.settings_jev_member` | `jev` |  |  | The member of the home settings file that holds the Jev settings. |
 | `session_gates.sidechain_flags` | `isSidechain, is_sidechain` |  |  | Payload keys that mark a sidechain (subagent) turn when exactly true. |
 | `session_gates.test_markers` | `NODE_TEST_CONTEXT, ANTIHALL_TEST, ANTIHALL_TEST_ISOLATION` |  |  | Environment variables that mark a test run; with one set, the Node hook refuses to use the real (password database) home directory (companion/lib/test-home-guard.js). |
 
@@ -3886,10 +3954,13 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_role.launcher_src` | `#!/usr/bin/env node\n'use strict';\n// AUTO-GENERATED by anti-hall (hooks/lib...` |  |  | The source of a generated stable launcher (placeholders {segments}: the JSON array of the target's path parts, {fallback}: the JSON string of the target's absolute path at generation time). Compared byte for byte with the file on disk, never executed or written by the engine. |
 | `devswarm_role.launcher_watcher` | `2 entries` |  |  | The stable launcher of the mailbox watcher: its file name under the bin directory and the script it resolves, relative to the plugin root. |
 | `devswarm_role.msg_base` | `💡 anti-hall · devswarm-comms: anti-hall's shared mesh store is this workspace...` |  |  | The mesh-only messaging directive of a child workspace (placeholder {cli}: the DevSwarm CLI path). |
+| `devswarm_role.msg_base_parent` | `💡 anti-hall · devswarm-comms: anti-hall's shared mesh store is this workspace...` |  |  | The mesh-only messaging directive of a Primary (placeholder {cli}: the DevSwarm CLI path). |
 | `devswarm_role.msg_expiry_inline` | ` + re-arm on its final/expired event` |  |  | The monitor-expiry clause when the monitor is also re-armed inline on its own expiry. |
 | `devswarm_role.msg_expiry_tick` | `. Do NOT re-arm inline when it emits its final/expired event — reply in one l...` |  |  | The monitor-expiry clause when re-arming happens only from the cron tick. |
 | `devswarm_role.msg_wake_claude` | ` MAILBOX WAKE (do this NOW, on your FIRST turn): call `CronList`. If ANY exis...` |  |  | The mailbox-wake text of a claude workspace (placeholders {cli}, {watcher}, {id}, {cron}, {expiry}). |
+| `devswarm_role.msg_wake_claude_parent` | ` MAILBOX WAKE (do this NOW, on your FIRST turn): call `CronList`. If ANY exis...` |  |  | The mailbox-wake text of a claude Primary (placeholders {cli}, {watcher}, {id}, {cron}, {expiry}). |
 | `devswarm_role.msg_wake_other` | ` MAILBOX WAKE: this workspace runs `{agent}`, which has NO idle-wake primitiv...` |  |  | The mailbox-wake text of a workspace whose agent is not claude (placeholders {cli}, {id}, {agent}). |
+| `devswarm_role.msg_wake_other_parent` | ` MAILBOX WAKE: this workspace runs `{agent}`, which has NO idle-wake primitiv...` |  |  | The mailbox-wake text of a Primary whose agent is not claude (placeholders {cli}, {id}, {agent}). |
 | `devswarm_role.out_prefix` | `{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":` |  |  | The SessionStart hook output up to the directive text (host protocol; the text follows as a JSON string). |
 | `devswarm_role.out_suffix` | `}}` |  |  | The SessionStart hook output after the directive text. |
 | `devswarm_role.pg_and_more` | ` (and {n} more)` |  |  | More rows than shown: {n}. |
@@ -5756,7 +5827,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `script.heap_budget_base_bytes` | `524288` |  | bytes | Memory budget the interpreter test holds one worker thread to (DECISIONS.md 1.111): this much for the runtime, the shared context, the host bindings and the lib files, plus script.heap_budget_per_check_bytes for every check script it has run. Measured 2026-10-09: 224 KB base, 1.04 MB with all 16 shipped scripts (git.js 365 KB, the others 1-195 KB); a context per check held 3.3 MB. |
 | `script.heap_budget_per_check_bytes` | `98304` |  | bytes | Per check script share of the interpreter budget above (DECISIONS.md 1.111). |
 | `script.idle_free_ms` | `60000` |  | ms | A worker whose script interpreter has not been called for this long, and that has nothing queued, frees the interpreter (its heap goes back to the allocator; the next scripted call rebuilds it from the plugin's files, a cold call). Bounds the memory the script pool holds when the load is bursty. 0 = never free. |
-| `script.includes` | `13 entries` |  |  | Scripts a check script builds on: check name to the names of other scripts in the logic directory, loaded as libraries (after the shared helpers, before the check's own script, which then defines the entry). A listed script that does not exist makes the check's script unavailable. |
+| `script.includes` | `14 entries` |  |  | Scripts a check script builds on: check name to the names of other scripts in the logic directory, loaded as libraries (after the shared helpers, before the check's own script, which then defines the entry). A listed script that does not exist makes the check's script unavailable. |
 | `script.lib_dir` | `lib` |  |  | Sub-directory (of both the shipped and the override directory) whose `*.js` files are evaluated, in file-name order, before a check script. |
 | `script.lock_max_held` | `2` |  |  | Most cross-process locks (`ah.state.lock`) a script may hold at once in one call. A script that nests two takes them in one fixed order and releases the inner one first. |
 | `script.lock_wait_max_ms` | `5000` |  | ms | Longest wait a script may ask `ah.state.lock` for in place of its group's wait. |
@@ -9280,7 +9351,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `opcli.review_head` | `jev review-due:` |  |  | `review-due` heading above the due integrations. |
 | `opcli.review_hour_ms` | `3600000` |  |  | Milliseconds in an hour (the due-to-reviewed latency is said in hours). |
 | `opcli.review_json_flag` | `--json` |  |  | The argument that makes `review-due` print JSON. |
-| `opcli.review_keys` | `15 entries` |  |  | Names of the JSON members of the review state, a decision row and a rollup. |
+| `opcli.review_keys` | `16 entries` |  |  | Names of the JSON members of the review state, a decision row and a rollup. |
 | `opcli.review_max_time_ms` | `8640000000000000` |  |  | The largest instant a date can hold, in milliseconds (a snooze past it has no date). |
 | `opcli.review_metrics_file` | `logs/jev-review.ndjson` |  |  | The shadow-review metrics log (one JSON row per event), relative to the anti-hall home directory. |
 | `opcli.review_min_decisions_default` | `30` |  |  | jev.reviewMinDecisions when the setting is not a finite number. |
@@ -9288,6 +9359,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `opcli.review_none` | `jev review-due: nothing due (reviewAfterDays={after}, reviewMinDecisions={min})` |  |  | `review-due` when nothing is due. Placeholders: {after}, {min}. |
 | `opcli.review_rollup_midnight` | `T00:00:00Z` |  |  | The suffix that turns a rollup's day into its UTC midnight. |
 | `opcli.review_row` | `  {id} ({days}d, {decisions} decisions)` |  |  | `review-due` line of one due integration. Placeholders: {id}, {days}, {decisions}. |
+| `opcli.review_shown_type` | `reminder-shown` |  |  | The `type` of the review metrics row that records a SessionStart reminder. |
 | `opcli.review_state_bad` | `review state: the entry of {id} is not an object; fix or remove ~/.anti-hall/...` |  |  | The review state holds an entry that is not an object, which the verb cannot update (nothing is written). Placeholder: {id}. |
 | `opcli.review_state_file` | `jev-review-state.json` |  |  | The durable shadow-review state, relative to the anti-hall home directory. |
 | `opcli.review_write_failed` | `⚠️ anti-hall · jev-setup: could not save the review state: {error}` |  |  | A review-state write that failed after the verb was answered (best effort, as in Node: said, not fatal). Placeholder: {error}. |

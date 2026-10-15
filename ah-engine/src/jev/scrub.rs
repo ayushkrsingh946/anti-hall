@@ -27,20 +27,19 @@ struct Rule {
 /// malformed or does not compile: the scrubber then redacts the whole text.
 fn rules() -> std::sync::Arc<Option<Vec<Rule>>> {
     static RULES: defaults::Cache<Option<Vec<Rule>>> = defaults::Cache::new();
-    RULES
-        .get_or_init(|| {
-            defaults::raw("jev.scrub_rules")
-                .as_array()?
-                .iter()
-                .map(|r| {
-                    Some(Rule {
-                        re: Regex::new(r.get("pattern").and_then(V::as_str)?).ok()?,
-                        to: r.get("to").and_then(V::as_str)?.to_string(),
-                        no_alnum_before: r.get("no_alnum_before").and_then(V::as_bool).unwrap_or(false),
-                    })
+    RULES.get_or_init(|| {
+        defaults::raw("jev.scrub_rules")
+            .as_array()?
+            .iter()
+            .map(|r| {
+                Some(Rule {
+                    re: Regex::new(r.get("pattern").and_then(V::as_str)?).ok()?,
+                    to: r.get("to").and_then(V::as_str)?.to_string(),
+                    no_alnum_before: r.get("no_alnum_before").and_then(V::as_bool).unwrap_or(false),
                 })
-                .collect()
-        })
+            })
+            .collect()
+    })
 }
 
 /// True when `c` is an ASCII letter or digit.

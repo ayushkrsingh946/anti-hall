@@ -2,7 +2,8 @@
 // DevSwarm mesh-only messaging directive for a child workspace. The Node hook installs the stable launchers when it is loaded, before it
 // looks at its switch, the supervisor or the role, so this script may answer (silent or not) only when that install would change nothing:
 // the switch is off, or both launchers already hold exactly what Node would write. Otherwise Node runs, installs them, and the next
-// session is answered here. A Primary (it adopts or registers its seat through the DevSwarm CLI) defers. Mirrors `main` of
+// session is answered here. A Primary is answered here too when it has no seat to settle (no session id, or a working directory that is no
+// git checkout, so the seat verdict is `n/a`); a Primary in a checkout (it adopts or registers its seat in the mesh store) defers. Mirrors `main` of
 // hooks/devswarm-child-role.js and the module-level launcher install above it. Keys and texts: devswarm_role.toml (devswarm_role.*).
 'use strict';
 
@@ -87,13 +88,30 @@ function dwWakeCron() {
 }
 
 function dwChildContext(cli, watcher, agent, id, cron, tickOnly) {
-  var out = text.render(ah.cfg('devswarm_role.msg_base'), { cli: cli });
+  return dwContext(true, cli, watcher, agent, id, cron, tickOnly);
+}
+
+// The directive of a child workspace (`child`) or of a Primary: the same wake text but for the drain command it names.
+function dwContext(child, cli, watcher, agent, id, cron, tickOnly) {
+  var out = text.render(ah.cfg(child ? 'devswarm_role.msg_base' : 'devswarm_role.msg_base_parent'), { cli: cli });
   if (agent === '') return out;
   if (agent === ah.cfg('devswarm_role.claude_agent')) {
     var expiry = ah.cfg(tickOnly ? 'devswarm_role.msg_expiry_tick' : 'devswarm_role.msg_expiry_inline');
-    return out + text.render(ah.cfg('devswarm_role.msg_wake_claude'), { cli: cli, watcher: watcher, id: id, cron: cron, expiry: expiry });
+    return out + text.render(ah.cfg(child ? 'devswarm_role.msg_wake_claude' : 'devswarm_role.msg_wake_claude_parent'), { cli: cli, watcher: watcher, id: id, cron: cron, expiry: expiry });
   }
-  return out + text.render(ah.cfg('devswarm_role.msg_wake_other'), { cli: cli, id: id, agent: agent });
+  return out + text.render(ah.cfg(child ? 'devswarm_role.msg_wake_other' : 'devswarm_role.msg_wake_other_parent'), { cli: cli, id: id, agent: agent });
+}
+
+// `primarySeatResult(payload)` of hooks/devswarm-child-role.js for the Primaries that have no seat to settle: true (no notices, no seat id),
+// or false when the seat needs the mesh store, the app database or a session liveness check (a Primary in a git checkout), which Node
+// answers. Without a session id the hook looks at nothing; with one, a working directory that is no checkout has the verdict `n/a`.
+function dwNoSeat(p) {
+  var sid = jx.isObj(p) && typeof p.session_id === 'string' ? p.session_id : '';
+  if (sid === '') return true;
+  var cwd = p.cwd;
+  if (typeof cwd !== 'string' || cwd === '' || cwd.charAt(0) !== '/') return false; // Node uses its own working directory
+  var c = ah.repo.context(cwd);
+  return !c.unsure && c.root === null;
 }
 
 function decide(p, opts, event) {
@@ -103,12 +121,13 @@ function decide(p, opts, event) {
   var l = dwLaunchers(root, true);
   if (l === null) return 'defer';
   if (!ah.settings.bool('devswarm_role.sw_child_role') || !dwActive()) return 'allow';
-  if (!dwNonBlank(ah.cfg('devswarm_role.branch_env'))) return 'defer'; // a Primary adopts or registers its seat through the DevSwarm CLI
+  var child = dwNonBlank(ah.cfg('devswarm_role.branch_env'));
+  if (!child && !dwNoSeat(p)) return 'defer'; // a Primary in a checkout adopts or registers its seat through the DevSwarm CLI
   var agentRaw = ah.env.get(ah.cfg('devswarm_role.agent_env')) || '';
   if (/[^\x00-\x7f]/.test(agentRaw)) return 'defer'; // JavaScript and Rust lower-case some non-ASCII letters differently
   var agent = agentRaw.trim().replace(/[A-Z]/g, function (c) { return c.toLowerCase(); });
   var rawId = ah.env.get(ah.cfg('devswarm_role.builder_env')), extra = ah.cfg('devswarm_role.id_extra_chars');
   var id = rawId !== null && rawId !== '' && rawId.split('').every(function (c) { return /[A-Za-z0-9]/.test(c) || extra.indexOf(c) >= 0; }) ? rawId : ah.cfg('devswarm_role.id_placeholder');
-  var ctx = dwChildContext(l.cli, l.watcher, agent, id, dwWakeCron(), ah.settings.bool('devswarm_role.sw_rearm'));
+  var ctx = dwContext(child, l.cli, l.watcher, agent, id, dwWakeCron(), ah.settings.bool('devswarm_role.sw_rearm'));
   return { exact: { code: 0, out: ah.cfg('devswarm_role.out_prefix') + JSON.stringify(ctx) + ah.cfg('devswarm_role.out_suffix') + '\n', err: '' } };
 }

@@ -134,10 +134,14 @@ fn a_line_only_javascript_can_parse_is_unsure_not_skipped() {
 #[test]
 fn the_scan_counts_a_renamed_task_as_it_counts_an_unrenamed_one() {
     use super::scanview::scan_tasks;
-    let call = |id: &str, name: &str, input: Value| json!({"type": "assistant", "message": {"id": "m", "role": "assistant",
-        "content": [{"type": "tool_use", "id": id, "name": name, "input": input}]}});
-    let result = |id: &str, text: &str| json!({"type": "user", "message": {"role": "user",
-        "content": [{"type": "tool_result", "tool_use_id": id, "content": text}]}});
+    let call = |id: &str, name: &str, input: Value| {
+        json!({"type": "assistant", "message": {"id": "m", "role": "assistant",
+        "content": [{"type": "tool_use", "id": id, "name": name, "input": input}]}})
+    };
+    let result = |id: &str, text: &str| {
+        json!({"type": "user", "message": {"role": "user",
+        "content": [{"type": "tool_result", "tool_use_id": id, "content": text}]}})
+    };
     for rename in [false, true] {
         let mut update = json!({"taskId": "1", "status": "in_progress"});
         if rename {

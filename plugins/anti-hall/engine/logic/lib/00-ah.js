@@ -144,7 +144,15 @@ var ah = {
   scrub: function (t) { return ahHost.scrubSecrets(t); },
   log: function (kind, t) { ahHost.log(kind, t); },
   // Milliseconds left of the request being answered (null outside a daemon). The Jev ask itself is in lib/60-b3.js.
-  jev: { deadlineLeftMs: function () { return ahNull(ahHost.deadlineLeftMs()); } },
+  jev: {
+    deadlineLeftMs: function () { return ahNull(ahHost.deadlineLeftMs()); },
+    // The shadow reviews due: [[id, wholeDays, decisions]] (the review state is updated as Node updates it), or null when the state cannot be worked on.
+    reviewDue: function (afterDays, minDecisions) { var r = ahHost.jevReviewDue(afterDays, minDecisions); return r === null || r === undefined ? null : JSON.parse(r); },
+    // Record that the review reminder named these integration ids.
+    reviewShown: function (ids) { ahHost.jevReviewShown(JSON.stringify(ids)); },
+    // The one-time legacy-key notice: {notice: string|null}, or {unsure: true} when only Node can say.
+    keyNotice: function (jevOn, judgeOn, allowAnthropic) { return JSON.parse(ahHost.jevKeyNotice(!!jevOn, !!judgeOn, !!allowAnthropic)); },
+  },
   sys: {
     // {available: bytes|null, total: bytes} of this machine; available counts reclaimable cache.
     memory: function () { return JSON.parse(ahHost.memory()); },

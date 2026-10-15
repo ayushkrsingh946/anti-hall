@@ -1203,9 +1203,11 @@ fn jev_weekly_scorecard_script_matches_the_compiled_port() {
 #[test]
 fn jev_review_reminder_script_matches_the_compiled_port() {
     let kinds = golden::assert_script_matches("jev-review-reminder");
-    for k in ["advisory", "allow", "defer"] {
+    // the Jev-on path is answered here now: only a payload no script can read still defers
+    for k in ["advisory", "allow"] {
         assert!(kinds.get(k).copied().unwrap_or(0) >= 10, "a corpus that exercises {k}: {kinds:?}");
     }
+    assert!(kinds.get("defer").copied().unwrap_or(0) >= 1, "a corpus that exercises defer: {kinds:?}");
 }
 
 #[test]
@@ -1331,7 +1333,12 @@ mod speculation_stop_gate {
     /// A hedge the reply itself acknowledges (a command it ran): flagged by the hit scan, yet the rule layer alone would not block.
     const FLAGGED: &str = "This probably fixes it, verified in main.js:42.";
 
-    fn run(tag: &str, text: &str, extra: &[(&str, &str)], script: Vec<Result<crate::jev::transport::RawResponse, NetError>>) -> (Option<Option<Verdict>>, std::sync::Arc<crate::jev::Jev>, std::sync::Arc<crate::jev::testkit::Fake>, String) {
+    fn run(
+        tag: &str,
+        text: &str,
+        extra: &[(&str, &str)],
+        script: Vec<Result<crate::jev::transport::RawResponse, NetError>>,
+    ) -> (Option<Option<Verdict>>, std::sync::Arc<crate::jev::Jev>, std::sync::Arc<crate::jev::testkit::Fake>, String) {
         let h = home(tag);
         let t = format!("{h}/t.jsonl");
         std::fs::write(&t, "").unwrap();

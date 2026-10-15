@@ -9,6 +9,7 @@ use crate::checks::jsport::date::{self, Parsed};
 use crate::checks::jsport::json::{J, stringify};
 use crate::checks::jsport::num::to_js_string;
 use crate::defaults;
+use crate::jev::settings::{JevSettings, Sources};
 use crate::setup::jsfmt::keys;
 use crate::setup::{out, read_capped, text_of, warn};
 use std::io::Write;
@@ -68,6 +69,9 @@ struct State {
     path: PathBuf,
     /// The whole state object (members this tool does not know are kept, in order).
     top: Obj,
+    /// An `integrations` member that is an array: JavaScript keeps it as it is (named properties set on an array are not
+    /// serialized), so the work goes on in an object and the array is written back unchanged.
+    array_integrations: Option<J>,
 }
 
 impl State {
@@ -81,10 +85,16 @@ impl State {
             Some(J::Obj(o)) => o,
             _ => Vec::new(),
         };
-        if !matches!(top.iter().find(|(n, _)| n == k("integrations")), Some((_, J::Obj(_)))) {
-            set(&mut top, k("integrations"), J::Obj(Vec::new()));
+        let mut array_integrations = None;
+        match top.iter().find(|(n, _)| n == k("integrations")) {
+            Some((_, J::Obj(_))) => {}
+            Some((_, a @ J::Arr(_))) => {
+                array_integrations = Some(a.clone());
+                set(&mut top, k("integrations"), J::Obj(Vec::new()));
+            }
+            _ => set(&mut top, k("integrations"), J::Obj(Vec::new())),
         }
-        State { path, top }
+        State { path, top, array_integrations }
     }
 
     fn integrations(&mut self) -> Result<&mut Obj, String> {
@@ -110,8 +120,11 @@ impl State {
     /// The entry of `id`, created empty when absent; an entry that is not an object cannot be updated.
     fn entry(&mut self, id: &str) -> Result<&mut Obj, String> {
         let ints = self.integrations()?;
-        if !ints.iter().any(|(n, _)| n == id) {
-            ints.push((id.to_string(), J::Obj(Vec::new())));
+        // `state.integrations[id] || (state.integrations[id] = {})`: an absent or falsy entry is replaced by an empty one
+        match ints.iter().position(|(n, _)| n == id) {
+            None => ints.push((id.to_string(), J::Obj(Vec::new()))),
+            Some(i) if !truthy(Some(&ints[i].1)) => ints[i].1 = J::Obj(Vec::new()),
+            Some(_) => {}
         }
         match ints.iter_mut().find(|(n, _)| n == id) {
             Some((_, J::Obj(o))) => Ok(o),
@@ -125,7 +138,11 @@ impl State {
             if let Some(dir) = self.path.parent() {
                 std::fs::create_dir_all(dir).map_err(crate::setup::io_err(defaults::text("setup.what_create_dir").to_string()))?;
             }
-            write_json_atomic(&self.path, J::Obj(self.top.clone()))
+            let mut top = self.top.clone();
+            if let Some(a) = &self.array_integrations {
+                set(&mut top, k("integrations"), a.clone());
+            }
+            write_json_atomic(&self.path, J::Obj(top))
         })();
         if let Err(e) = result {
             warn(&defaults::render("opcli.review_write_failed", &[("error", &e)]));
@@ -249,7 +266,6 @@ struct Computed {
 }
 
 fn compute_review_due(cx: &Ctx) -> Result<Computed, String> {
-    let now = date::now_ms();
     let after = match setting_number("reviewAfterDays", &to_js_string(num_of("opcli.review_after_days_default"))) {
         n if n == 0.0 || n.is_nan() => num_of("opcli.review_after_days_default"),
         n => n,
@@ -258,10 +274,16 @@ fn compute_review_due(cx: &Ctx) -> Result<Computed, String> {
         n if n.is_finite() => n,
         _ => num_of("opcli.review_min_decisions_default"),
     };
+    compute_due(&cx.home, &resolve_settings(cx), after, min)
+}
+
+/// The integrations whose review is due, for the numbers `after` (days) and `min` (decisions) and the settings `s`; persists the
+/// derived `shadowSince` / `dueSince` as Node does. The state-file write is best effort.
+fn compute_due(home: &Path, s: &JevSettings, after: f64, min: f64) -> Result<Computed, String> {
+    let now = date::now_ms();
     let window = after * num_of("opcli.review_day_ms");
 
-    let s = resolve_settings(cx);
-    let legacy = read_object(&jev_json_path(&cx.home));
+    let legacy = read_object(&jev_json_path(home));
     // the settings registry lists the integrations in the order the Node schema does
     let mut ids: Vec<String> =
         crate::migrate::settings::entries().iter().filter(|e| e.section == key("integrations_section")).map(|e| e.key.to_string()).collect();
@@ -272,8 +294,8 @@ fn compute_review_due(cx: &Ctx) -> Result<Computed, String> {
     }
     ids.retain(|id| s.mode(id, false).as_str() == defaults::text("opcli.review_mode_shadow"));
 
-    let ev = Evidence { rows: decision_rows(&cx.home), rollups: rollups(&cx.home) };
-    let mut state = State::read(&cx.home);
+    let ev = Evidence { rows: decision_rows(home), rollups: rollups(home) };
+    let mut state = State::read(home);
     let mut due = Vec::new();
     for id in &ids {
         let entry = state.entry(id)?;
@@ -303,6 +325,27 @@ fn compute_review_due(cx: &Ctx) -> Result<Computed, String> {
         state.write();
     }
     Ok(Computed { due, after, min })
+}
+
+/// The reviews due for the SessionStart hook (`computeReviewDue` of `hooks/lib/jev-review.js`): `(id, whole days in shadow, decisions)`
+/// per due integration, in schema order. `after` and `min` are the already-resolved `jev.reviewAfterDays` / `jev.reviewMinDecisions`.
+pub(crate) fn hook_review_due(home: &Path, env: &crate::jev::settings::Env, after: f64, min: f64) -> Result<Vec<(String, f64, f64)>, String> {
+    let s = JevSettings::resolve(home, Sources::load(home, env.clone()));
+    compute_due(home, &s, after, min).map(|c| c.due.into_iter().map(|d| (d.id, d.days, d.decisions)).collect())
+}
+
+/// `recordReminderShown(home, ids)`: one `reminder-shown` row in the review metrics log (best effort).
+pub(crate) fn hook_reminder_shown(home: &Path, ids: &[String]) {
+    if ids.is_empty() {
+        return;
+    }
+    append_metric(
+        home,
+        vec![
+            (k("type").to_string(), J::Str(defaults::text("opcli.review_shown_type").to_string())),
+            (k("ids").to_string(), J::Arr(ids.iter().map(|i| J::Str(i.clone())).collect())),
+        ],
+    );
 }
 
 pub(super) fn cmd_review_due(cx: &mut Ctx, positional: &[String]) -> Result<(), SetupError> {

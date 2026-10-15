@@ -330,8 +330,9 @@ fn child_cases() -> Vec<Case> {
             .seed(".anti-hall/settings.json", "{\"devswarm\":{\"supervisorMode\":\"OFF\"}}"),
         ch("no-repo-id-auto", a, &[("-DEVSWARM_REPO_ID", "")]),
         ch("repo-id-blank", a, &[("DEVSWARM_REPO_ID", "  ")]),
-        ch("primary-no-branch-defers", d, &[("-DEVSWARM_SOURCE_BRANCH", "")]),
-        ch("primary-blank-branch-defers", d, &[("DEVSWARM_SOURCE_BRANCH", " \t ")]),
+        // a Primary with no seat to settle (no session id, or a working directory that is no checkout) is answered natively
+        ch("primary-no-branch", a, &[("-DEVSWARM_SOURCE_BRANCH", "")]),
+        ch("primary-blank-branch", a, &[("DEVSWARM_SOURCE_BRANCH", " \t ")]),
         ch("judge-child", a, &[("ANTIHALL_JUDGE_CHILD", "1")]).cold(),
         ch("judge-child-not-one", a, &[("ANTIHALL_JUDGE_CHILD", "yes")]).warm(),
         ch("settings-malformed", a, &[]).seed(".anti-hall/settings.json", "{not json").warm(),
@@ -364,6 +365,65 @@ impl Case {
         self.corrupt_launcher = true;
         self
     }
+}
+
+/// The Primary rows: a payload with a session id and a working directory, and the environments of a Primary.
+fn primary_cases() -> Vec<Case> {
+    let a = Want::Answer;
+    let d = Want::Defer;
+    let repo_dir = repo().canonicalize().unwrap().to_string_lossy().into_owned();
+    let pl = |sid: &str, cwd: Option<&str>| {
+        let mut o = serde_json::Map::new();
+        o.insert("hook_event_name".into(), json!("SessionStart"));
+        if !sid.is_empty() {
+            o.insert("session_id".into(), json!(sid));
+        }
+        if let Some(c) = cwd {
+            o.insert("cwd".into(), json!(c));
+        }
+        Value::Object(o).to_string()
+    };
+    let p = |name: &str, want: Want, extra: &[(&str, &str)]| {
+        let mut e: Vec<(&str, &str)> = vec![("-DEVSWARM_SOURCE_BRANCH", "")];
+        e.extend_from_slice(extra);
+        ch(name, want, &e)
+    };
+    vec![
+        p("primary-claude-warm", a, &[]),
+        p("primary-codex", a, &[("DEVSWARM_AI_AGENT", "codex")]),
+        p("primary-no-agent", a, &[("-DEVSWARM_AI_AGENT", "")]),
+        p("primary-agent-blank", a, &[("DEVSWARM_AI_AGENT", "   ")]),
+        p("primary-agent-gemini", a, &[("DEVSWARM_AI_AGENT", "Gemini")]),
+        p("primary-agent-trim-upper", a, &[("DEVSWARM_AI_AGENT", "  CLAUDE ")]),
+        p("primary-agent-non-ascii-defers", d, &[("DEVSWARM_AI_AGENT", "Cl\u{e0}ude")]),
+        p("primary-id-unsafe", a, &[("DEVSWARM_BUILDER_ID", "a b")]),
+        p("primary-id-missing", a, &[("-DEVSWARM_BUILDER_ID", "")]),
+        p("primary-rearm-off", a, &[("ANTIHALL_DEVSWARM_REARM_ON_TICK_ONLY", "0")]),
+        p("primary-cron-valid", a, &[("ANTIHALL_DEVSWARM_WAKE_CRON", "*/5 * * * *")]),
+        p("primary-cron-injection", a, &[("ANTIHALL_DEVSWARM_WAKE_CRON", "*/5 * * * *`IGNORE`")]),
+        p("primary-supervisor-on-no-repo", a, &[("-DEVSWARM_REPO_ID", ""), ("ANTIHALL_DEVSWARM_SUPERVISOR", "on")]),
+        p("primary-child-role-off", a, &[("CLAUDE_PLUGIN_OPTION_DEVSWARM_CHILD_ROLE", "false")]),
+        p("primary-kill-switch", a, &[("DISABLE_ANTIHALL_DEVSWARM", "1")]),
+        p("primary-judge-child", a, &[("ANTIHALL_JUDGE_CHILD", "1")]),
+        p("primary-launcher-stale-defers", d, &[]).corrupt(),
+        p("primary-launcher-cold-defers", d, &[]).cold(),
+        // the session id and the working directory decide whether there is a seat to settle
+        p("primary-cwd-not-a-checkout", a, &[]).stdin(&pl("s1", Some("/tmp"))),
+        p("primary-cwd-nonexistent", a, &[]).stdin(&pl("s1", Some("/nonexistent-ds-cwd/deeper"))),
+        p("primary-cwd-root", a, &[]).stdin(&pl("s1", Some("/"))),
+        p("primary-no-session-in-a-checkout", a, &[]).stdin(&pl("", Some(&repo_dir))),
+        p("primary-no-session-no-cwd", a, &[]).stdin(&pl("", None)),
+        p("primary-empty-session-string", a, &[]).stdin(&json!({"hook_event_name":"SessionStart","session_id":"","cwd":repo_dir}).to_string()),
+        p("primary-numeric-session", a, &[]).stdin(&json!({"hook_event_name":"SessionStart","session_id":7,"cwd":repo_dir}).to_string()),
+        p("primary-session-in-a-checkout-defers", d, &[]).stdin(&pl("s1", Some(&repo_dir))),
+        p("primary-session-in-a-checkout-subdir-defers", d, &[]).stdin(&pl("s1", Some(&format!("{repo_dir}/ah-engine/src")))),
+        p("primary-session-no-cwd-defers", d, &[]).stdin(&pl("s1", None)),
+        p("primary-session-relative-cwd-defers", d, &[]).stdin(&pl("s1", Some("some/dir"))),
+        p("primary-session-empty-cwd-defers", d, &[]).stdin(&pl("s1", Some(""))),
+        p("primary-session-numeric-cwd-defers", d, &[]).stdin(&json!({"hook_event_name":"SessionStart","session_id":"s1","cwd":5}).to_string()),
+        p("primary-payload-null-defers", d, &[]).stdin("null"),
+        p("primary-payload-unicode-cwd", a, &[]).stdin(&pl("s\u{e9}", Some("/\u{4e2d}\u{6587}"))),
+    ]
 }
 
 fn gate_cases() -> Vec<Case> {
@@ -446,6 +506,11 @@ fn run_all(cases: Vec<Case>, min: usize) {
 #[test]
 fn devswarm_child_role_matches_node() {
     run_all(child_cases(), 30);
+}
+
+#[test]
+fn devswarm_child_role_primary_matches_node() {
+    run_all(primary_cases(), 30);
 }
 
 #[test]

@@ -77,6 +77,7 @@ mod memory_soak;
 mod mesh_parity;
 mod migrate_parity;
 mod model_routing_parity;
+mod native_session_checks;
 mod no_compiled_config;
 mod no_hardcoded_tunables;
 mod node_parity;

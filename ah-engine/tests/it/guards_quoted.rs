@@ -280,8 +280,10 @@ fn the_shared_tree_note_is_silent_for_a_spawn_that_only_calls_the_github_api() {
 fn model_routing_does_not_read_a_git_mv_commit_and_pr_brief_as_read_only() {
     let dir = scratch("mr-write");
     let readonly = "research/read-only-shaped spawn";
-    let write = |prompt: &str| json!({"hook_event_name": "PreToolUse", "tool_name": "Agent", "session_id": "s1", "cwd": "/tmp",
-        "tool_input": {"subagent_type": "general-purpose", "model": "sonnet", "description": "tidy the docs", "prompt": prompt}});
+    let write = |prompt: &str| {
+        json!({"hook_event_name": "PreToolUse", "tool_name": "Agent", "session_id": "s1", "cwd": "/tmp",
+        "tool_input": {"subagent_type": "general-purpose", "model": "sonnet", "description": "tidy the docs", "prompt": prompt}})
+    };
     for prompt in [
         "Find the stale docs, git mv the kept ones into docs/, git rm the rest, commit and open a PR.",
         "Locate the duplicate scripts, git rm them and open a pull request with the result.",
@@ -299,8 +301,10 @@ fn model_routing_does_not_read_a_git_mv_commit_and_pr_brief_as_read_only() {
 #[test]
 fn merge_side_pick_reads_multi_line_quoted_and_heredoc_text_as_text() {
     let dir = scratch("msp");
-    let push = |cmd: &str| json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "session_id": "s1", "cwd": "/tmp",
-        "tool_input": {"command": cmd}});
+    let push = |cmd: &str| {
+        json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "session_id": "s1", "cwd": "/tmp",
+        "tool_input": {"command": cmd}})
+    };
     let advised = |o: &(i32, String)| o.1.contains("one side wholesale");
     for cmd in [
         "git commit -m \"fix\n\nResolved with git checkout --theirs x.js\" && git push",
@@ -326,7 +330,11 @@ fn super_with_submodule(dir: &std::path::Path) -> (PathBuf, PathBuf) {
     let git = |args: &[&str], cwd: &std::path::Path| {
         let o = Command::new("git")
             .args(["-c", "user.email=a@b.c", "-c", "user.name=a", "-c", "protocol.file.allow=always", "-c", "init.defaultBranch=main"])
-            .args(args).current_dir(cwd).env("GIT_CONFIG_GLOBAL", "/dev/null").output().unwrap();
+            .args(args)
+            .current_dir(cwd)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .output()
+            .unwrap();
         assert!(o.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&o.stderr));
     };
     let (sub, sup) = (dir.join("sub-origin"), dir.join("super"));
@@ -367,7 +375,11 @@ fn the_history_ledger_and_progress_prune_key_on_the_superproject_for_a_submodule
             "cwd": sub.to_string_lossy()});
         let run = |check: &str, hook: &str, p: &Value| {
             let mut c = if is_engine { Command::new(env!("CARGO_BIN_EXE_ah-engine")) } else { Command::new("node") };
-            if is_engine { c.args(["check", check]); } else { c.arg(plugin().join("hooks").join(hook)); }
+            if is_engine {
+                c.args(["check", check]);
+            } else {
+                c.arg(plugin().join("hooks").join(hook));
+            }
             c.env_clear();
             std::fs::create_dir_all(dir.join("home")).unwrap();
             feed(c, &dir, &p.to_string())

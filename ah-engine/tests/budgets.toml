@@ -22,3 +22,15 @@ warmup = 5
 leak_bytes_per_reload = 4096
 # Kilobytes the counted heap (`status --memory` heap_live_kb) may grow by, per reload.
 heap_kb_per_reload = 8
+
+[native_session_checks]
+# The session-start and prompt checks that used to hand almost every call to Node (tests/it/native_session_checks.rs). Each value is the
+# largest p50, in milliseconds, of the check's own time inside the daemon (the `check_latency_us` histogram) over a run of calls with
+# a DevSwarm Primary, Jev on and a review due. Node needed about 280 ms for the same work. The gate builds without optimisations,
+# so the test multiplies by `debug_factor`.
+verify_first_orch_p50_ms = 5
+jev_review_reminder_p50_ms = 10
+devswarm_child_role_p50_ms = 5
+devswarm_parent_inbox_p50_ms = 10
+devswarm_child_turn_p50_ms = 10
+debug_factor = 10

@@ -1659,7 +1659,7 @@ value = "apply_patch"
 
 [devswarm_prompt.parent_summary]
 doc = "One-line description of the devswarm-parent-inbox check in the generated reference."
-value = "DevSwarm Primary prompt hook: answers the silent cases (not a Primary, DevSwarm inactive, switch off, judge child) in the engine; an active Primary defers to the Node hook, which owns the roster, mailbox and dedupe state (port of the gate of devswarm-parent-inbox.js)."
+value = "DevSwarm Primary prompt hook: answers the silent cases (not a Primary, DevSwarm inactive, switch off, judge child) and an active Primary with no git checkout around its working directory (its communication-override reminder through the emit-dedupe store) in the engine; a Primary in a checkout defers to the Node hook, which owns the roster, mailbox and dedupe state (port of devswarm-parent-inbox.js)."
 
 [devswarm_prompt.child_summary]
 doc = "One-line description of the devswarm-child-turn check in the generated reference."
@@ -1696,6 +1696,154 @@ value = "DEVSWARM_REPO_ID"
 [devswarm_prompt.branch_env]
 doc = "Environment variable whose non-blank value marks a child workspace (hooks/lib/devswarm-role.js)."
 value = "DEVSWARM_SOURCE_BRANCH"
+
+[devswarm_prompt.event]
+doc = "The hook event name of the prompt hooks' answer."
+value = "UserPromptSubmit"
+
+[devswarm_prompt.override_key]
+doc = "The emit-dedupe key of the Primary's communication-override reminder."
+value = "parent-inbox-comms-override"
+
+[devswarm_prompt.override_reassert]
+doc = "The Primary's per-turn communication-override reminder (hooks/devswarm-parent-inbox.js OVERRIDE_REASSERT), byte for byte."
+value = "\U0001F4A1 anti-hall \u00B7 devswarm-comms: mesh only \u2014 native hivecontrol messaging blocked. Check: `roster` / `mesh read`. Direct: `send --to <meshId>`."
+
+[devswarm_prompt.seat_dir]
+doc = "The directory, under the anti-hall directory, of the per-session seat-conflict markers the SessionStart hook writes."
+value = "devswarm/primary-seat"
+
+[devswarm_prompt.seat_shown_max]
+doc = "A seat-conflict marker is owed a repeat while the number of times it was shown is below this."
+value = 2
+min = 1
+max = 1000
+
+[devswarm_prompt.child_override]
+doc = "The child workspace's communication-override reminder of every turn (hooks/devswarm-child-turn.js OVERRIDE_REASSERT), byte for byte."
+value = '''
+💡 anti-hall · devswarm-comms: mesh only — native hivecontrol messaging blocked. Report: `heartbeat <id> --summary`. Direct: `send --to-primary`.'''
+
+[devswarm_prompt.child_autonomy]
+doc = "The child's self-continue reminder (hooks/devswarm-child-turn.js SELF_CONTINUE), byte for byte."
+value = '''
+💡 anti-hall · devswarm-autonomy: if you are running a multi-round autonomous task (deadly-loop, iterative fix waves, a long staged build), do NOT end your turn to wait between rounds — keep issuing tool calls and proceed to the next round within the SAME turn. End your turn (Stop) ONLY at: (a) a genuine BLOCK needing a parent decision, (b) your final completion / merge-gate report, or (c) an unrecoverable error. Ending your turn just to 'check in' between rounds costs a full wake-cycle of latency and is the main cause of slow workspace work.'''
+
+[devswarm_prompt.child_reminder]
+doc = "The child's per-turn report reminder (hooks/devswarm-child-turn.js REMINDER); {cli} is the DevSwarm CLI path and the id token is replaced by the builder id when that is a safe id."
+value = '''
+💡 anti-hall · devswarm-child-workspace: (per turn) keep the parent orchestrator updated — run `node {cli} heartbeat <DEVSWARM_BUILDER_ID> --summary "<status>"` to report progress/blockers as you make them — this is what satisfies your Stop-gate report (`send --to-primary --message-file <path>` is a SEPARATE direct message, not a substitute) — and check for + act on any parent messages before continuing, so you stay visible on the parent's task list instead of drifting off it.'''
+
+[devswarm_prompt.child_receive]
+doc = "The child's reception reminder (hooks/devswarm-child-turn.js RECEIVE_NUDGE); {cli} is the DevSwarm CLI path and the id token is replaced by the builder id when that is a safe id."
+value = '''
+💡 anti-hall · devswarm-child-reception: to RECEIVE parent messages, run `node {cli} inbox pull <DEVSWARM_BUILDER_ID>` (anti-hall devswarm CLI) — a SAFE, bounded drain that folds the native parent->child queue into your durable inbox (non-destructive count gate, one bounded read, never `monitor`). Then read them via `node {cli} inbox read-primary <DEVSWARM_BUILDER_ID>` (read-only; after handling, run the `ackCommand` it returns). Substitute your own DEVSWARM_BUILDER_ID for <...>.'''
+
+[devswarm_prompt.id_token]
+doc = "The placeholder of the builder id in the child's reminders."
+value = "<DEVSWARM_BUILDER_ID>"
+
+[devswarm_prompt.child_block_joiner]
+doc = "Between the segments of the child's answer."
+value = "\n\n"
+
+[devswarm_prompt.child_static_key]
+doc = "The emit-dedupe key of the child's fixed per-turn block."
+value = "child-turn-static"
+
+[devswarm_prompt.child_plan_key]
+doc = "The emit-dedupe key of the child's plan segment."
+value = "child-turn-plan"
+
+[devswarm_prompt.child_plan_keepalive]
+doc = "Delivered turns after which an unchanged plan segment is sent again."
+value = 10
+min = 0
+max = 100000
+
+[devswarm_prompt.heartbeat_dir]
+doc = "The directory, under the anti-hall directory, of the per-builder heartbeat files."
+value = "devswarm/heartbeats"
+
+[devswarm_prompt.heartbeat_source]
+doc = "The `source` of a heartbeat the child's prompt hook writes."
+value = "child-turn"
+
+[devswarm_prompt.heartbeat_branch_unsafe]
+doc = "The characters of a branch name that become a dash in a heartbeat file name when the branch is not a safe id."
+value = "[^A-Za-z0-9._-]"
+
+[devswarm_prompt.heartbeat_name_max]
+doc = "The longest sanitized branch name of a heartbeat file name."
+value = 80
+min = 1
+max = 255
+
+[devswarm_prompt.heartbeat_name_fallback]
+doc = "The heartbeat file name for a branch that sanitizes to nothing."
+value = "branch"
+
+[devswarm_prompt.heartbeat_hash_len]
+doc = "Characters of the branch's SHA-1 appended to a sanitized heartbeat file name."
+value = 8
+min = 1
+max = 40
+
+[devswarm_prompt.descriptor_dir]
+doc = "The directory, under the anti-hall directory, of the workspace descriptors."
+value = "devswarm/workspaces"
+
+[devswarm_prompt.plan_dir]
+doc = "The directory, under the anti-hall directory, of the step-plan files of the workspaces."
+value = "devswarm/plans"
+
+[devswarm_prompt.uuid_full_re]
+doc = "A full UUID (a builder id of this shape is a real id)."
+value = "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+
+[devswarm_prompt.uuid_truncated_re]
+doc = "A UUID cut short in its last group (a builder id of this shape was truncated; Node recovers or skips it and says so on stderr)."
+value = "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{1,11}$"
+
+[devswarm_prompt.plan_tracking_setting]
+doc = "The setting devswarm.planTracking (on by default): the child is shown its step plan each turn."
+value = { section = "devswarm", key = "planTracking", type = "boolean", env = "ANTIHALL_DEVSWARM_PLAN_TRACKING", option = "devswarm_plan_tracking", default = true }
+
+[devswarm_prompt.plan_required_setting]
+doc = "The setting devswarm.planRequired (off by default): a child without a step plan is asked to write one every turn."
+value = { section = "devswarm", key = "planRequired", type = "boolean", env = "ANTIHALL_DEVSWARM_PLAN_REQUIRED", option = "devswarm_plan_required", default = false }
+
+[devswarm_prompt.plan_none]
+doc = "The plan segment of a child with no step plan when one is required (hooks/devswarm-child-turn.js buildPlanSegment). Placeholders: {cli}, {id}."
+value = '''
+💡 anti-hall · devswarm-plan: you have no step plan yet. Write your brief as numbered steps once: `node {cli} plan set {id} --steps "1. …\n2. …"` — then report each step with `heartbeat {id} --step N --status doing|done|blocked`.'''
+
+[devswarm_prompt.plan_head]
+doc = "The first sentence of the plan segment. Placeholders: {done}, {total}, {n}, {blocked}, {text}."
+value = '''
+💡 anti-hall · devswarm-plan: {done}/{total} steps done; latest touched step {n}{blocked} — "{text}".'''
+
+[devswarm_prompt.plan_blocked]
+doc = "Added to the plan head when the latest touched step is blocked."
+value = " (blocked)"
+
+[devswarm_prompt.plan_all_done]
+doc = "The first sentence of the plan segment when every step is done. Placeholders: {total}, {cli}."
+value = '''
+💡 anti-hall · devswarm-plan: all {total} steps are done — report it with `node {cli} done`.'''
+
+[devswarm_prompt.plan_tail]
+doc = "The rest of the plan segment. Placeholders: {cli}, {id}."
+value = '''
+ Report step progress as it happens: `node {cli} heartbeat {id} --step N --status doing|done|blocked` (it is what the Primary's roster shows). If a user prompt asks you for work outside this plan, record it first: `node {cli} scope add {id} --glob '<paths>' --note '<what the user asked>'` — the Primary sees the note and may challenge it.'''
+
+[devswarm_prompt.builder_env]
+doc = "Environment variable that holds a child workspace's builder id."
+value = "DEVSWARM_BUILDER_ID"
+
+[devswarm_prompt.builder_name_env]
+doc = "Environment variable that holds a child workspace's builder name."
+value = "DEVSWARM_BUILDER_NAME"
 
 [devswarm_prompt.mode_setting]
 doc = "Where devswarm.supervisorMode is read from: environment variable, settings.json, then the plugin option; `values` are the accepted words and `manifest_default` is the default the plugin manifest declares for the option (a stored option equal to it counts as unset, as in hooks/lib/settings.js)."

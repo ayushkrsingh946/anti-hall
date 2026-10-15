@@ -1017,6 +1017,7 @@ pub fn install(c: &Ctx<'_>) -> rquickjs::Result<()> {
     super::host_b3::install(c, &h)?;
     super::host_d::install(c, &h)?;
     super::host_mesh::install(c, &h)?;
+    super::host_port::install(c, &h)?;
     super::host_proc::install(c, &h)?;
     super::host_spawn::install(c, &h)?;
     super::host_ts::install(c, &h)?;

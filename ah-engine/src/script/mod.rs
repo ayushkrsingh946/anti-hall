@@ -46,6 +46,7 @@ pub mod host_b3;
 pub mod host_d;
 mod host_io;
 pub mod host_mesh;
+pub mod host_port;
 pub mod host_proc;
 pub mod host_spawn;
 pub mod host_transcript;
@@ -261,7 +262,18 @@ impl Pool {
                 None => false,
             }
         })));
-        Some(Pool { ctx: None, checks: HashMap::new(), used: HashMap::new(), tick: 0, inst: budget().instance(), calls: 0, deadline, epoch, last_call: Instant::now(), rt })
+        Some(Pool {
+            ctx: None,
+            checks: HashMap::new(),
+            used: HashMap::new(),
+            tick: 0,
+            inst: budget().instance(),
+            calls: 0,
+            deadline,
+            epoch,
+            last_call: Instant::now(),
+            rt,
+        })
     }
 }
 
