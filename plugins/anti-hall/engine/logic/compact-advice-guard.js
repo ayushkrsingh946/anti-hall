@@ -25,20 +25,25 @@ function decide(p) {
   var tp = typeof p.transcript_path === 'string' ? p.transcript_path : null;
   if (!tp) return 'allow';
   if (!ah.path.isAbsolute(tp)) return 'defer';
-  var tail = ah.fs.readTail(tp, cb.n('ctxbudget.tail_bytes'));
-  if (tail === null) return 'allow';
+  var tailBytes = cb.n('ctxbudget.tail_bytes');
+  // an unreadable transcript allows. A zero-byte window opens and measures the file exactly as the full read does, without
+  // pulling it in: most Stops end at `mayAdvise` below and never need the text.
+  if (ah.fs.tailLines(tp, 0, false, ['\u0000']) === null) return 'allow';
   var lam = typeof p.last_assistant_message === 'string' ? p.last_assistant_message : '';
   if (lam.trim()) {
     if (!cadv.mayAdvise(lam)) return 'allow';
   } else {
     // the final text is the turn's last part: a cheap exact test on the host first, then the whole turn's text (a superset of it)
     var hint = ah.cfg('ctxbudget.advice_prefilter');
+    var tail = ah.fs.readTail(tp, tailBytes);
+    if (tail === null) return 'allow';
     var lower = tail.toLowerCase();
     if (tail.indexOf('\\u') === -1 && !hint.some(function (w) { return lower.indexOf(w.toLowerCase()) !== -1; })) return 'allow';
     var tt = ah.transcript.turnText(tp, cb.n('ctxbudget.tail_bytes'), '');
     if (tt !== null && !tt.unsure && tt.parts && !cadv.mayAdvise(tt.parts.join('\n'))) return 'allow';
   }
-  var lines = tail.split('\n'); // a trailing \r stays: JSON.parse reads past it
+  var lines = ah.fs.tailLines(tp, tailBytes, false); // a trailing \r stays: JSON.parse reads past it
+  if (lines === null) return 'allow';
   var turn = cadv.readTurn(lines);
   if (turn === null) return 'defer';
   var finalText = lam.trim() ? lam : turn.finalText;

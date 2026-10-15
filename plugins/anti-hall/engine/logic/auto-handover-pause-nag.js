@@ -22,12 +22,14 @@ function decide(p) {
   var tag = cb.sessionTag(p);
   if (!tag) return 'allow';
   var latch = cb.readLatch(tag);
-  var tp = typeof p.transcript_path === 'string' ? p.transcript_path : null, lines = null;
-  if (tp) {
-    if (!ah.path.isAbsolute(tp)) return 'defer';
-    var tail = ah.fs.readTail(tp, cb.n('ctxbudget.tail_bytes'));
-    if (tail !== null) lines = tail.split('\n');
-  }
+  var tp = typeof p.transcript_path === 'string' ? p.transcript_path : null;
+  if (tp && !ah.path.isAbsolute(tp)) return 'defer';
+  // the tail's lines are read only by the fire and nag branches below (most Stops take neither), so they are fetched on first use
+  var linesLoaded = false, linesMemo = null;
+  var linesOf = function () {
+    if (!linesLoaded) { linesLoaded = true; if (tp) linesMemo = ah.fs.tailLines(tp, cb.n('ctxbudget.tail_bytes'), false); }
+    return linesMemo;
+  };
   var w = { latch: null, inferred: null }, reason = null, now = ah.clock.now(), result;
   if (latch.fired !== true) {
     // the Stop-side fire, once per arm; never for a crossing against a guessed window
@@ -37,7 +39,7 @@ function decide(p) {
     if (over === cb.c('ctxbudget.ah_via_pct') || over === cb.c('ctxbudget.ah_via_tokens')) {
       var hp = cb.expectedHandoverPath(p);
       if (hp === false) return 'defer';
-      var suffix = cb.decisiveSuffixFor(p, cfg, lines);
+      var suffix = cb.decisiveSuffixFor(p, cfg, linesOf());
       if (suffix === 'defer') return 'defer';
       w.latch = { fired: true, firedAt: now, firedPct: result.pct, firedVia: cb.c('ctxbudget.ah_via_stop_prefix') + over, lastNagPct: result.pct, lastNagAt: now, softFired: latch.softFired === true };
       reason = cb.fire(result, over, p, cfg.maxTokens, hp) + suffix;
@@ -54,12 +56,12 @@ function decide(p) {
         var lastNagPct = fin(latch.lastNagPct) ? latch.lastNagPct : (fin(latch.firedPct) ? latch.firedPct : cfg.pct);
         var shown = Math.round(result.pct), risen = result.pct >= lastNagPct + cfg.nagStepPct, quietElapsed = now - lastNagAt >= cfg.nagQuietMin * 60 * 1000;
         if ((risen || quietElapsed) && !(!risen && latch.lastPauseNagPct === shown)) {
-          var open = cb.hasOpenTasks(lines);
+          var open = cb.hasOpenTasks(linesOf());
           if (open === 'defer') return 'defer';
           var spawned = open === true ? false : cb.recentSpawn(tag, now);
           if (spawned === 'defer') return 'defer';
           if (open !== true && !spawned) {
-            var sfx = cb.decisiveSuffixFor(p, cfg, lines);
+            var sfx = cb.decisiveSuffixFor(p, cfg, linesOf());
             if (sfx === 'defer') return 'defer';
             w.latch = Object.assign({}, latch, { lastNagAt: now, lastPauseNagPct: shown });
             if (risen) w.latch.lastNagPct = result.pct;
