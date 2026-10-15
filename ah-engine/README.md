@@ -220,9 +220,18 @@ Deliberate differences from the Node guard:
   `classifyBashWork` from command-guard and the hook's `CLAUDE_CODE_ENTRYPOINT`, neither of which the engine has yet, so
   every main-thread call defers to the Node guard, which keeps all of the window's state; the engine keeps none, so the
   two cannot disagree. The window moves in with the command-guard port (planned, D75).
-- `devswarm-parent-inbox`, `devswarm-child-turn`: the gate of the two DevSwarm prompt hooks. Silent cases (not a Primary or not
-  a child, DevSwarm inactive, the hook's switch off, a Jev judge child) are answered; an active Primary or child defers to the
-  Node hook, which owns the roster, the mailbox and the dedupe state until the engine owns the mesh and mailbox (D45).
+- `devswarm-parent-inbox`: the gate of the DevSwarm Primary prompt hook. Silent cases (not a Primary, DevSwarm inactive, the
+  hook's switch off, a Jev judge child) and a Primary with no git checkout are answered; a Primary in a checkout defers to the
+  Node hook, which owns the roster, the mailbox and the dedupe state.
+- `devswarm-child-turn`: the DevSwarm child prompt hook, in a checkout or not. The silent cases, the heartbeat (with the git
+  push state), the registration of the child (descriptor, registry row and summary under the workspace lock, the project's store
+  created on the first turn), the ingest-daemon banners, the fixed reminder block, the step plan, unread parent mail, mesh-direct
+  mail and the archive request are answered. Handed to Node, each before the first write: an archived workspace, a truncated
+  builder id, a second registry row of the worktree, a phantom descriptor, a row at another worktree, a journal-backend store, a
+  workspace lock that stays busy, and (after the idempotent registration) mesh-direct mail while some reader of the partition holds
+  a cursor of its own, since the hook's reader identity comes from its process ancestry, which the daemon does not share. Every
+  deferral writes its cause to the event log (`child-turn-defer`). Parity: `tests/it/devswarm_child_turn_parity.rs` (42 scenes on
+  real git repositories against the Node hook).
 - `compact-declaration-guard`: decides whether the call is new work (Node's patterns, quotes blanked, handover edits
   exempt), reads the last 1.5 MB of `transcript_path` itself (the shared transcript index is another lane), rebuilds the
   current turn's assistant text with Node's turn rules and allows unless that text contains "safe", which both

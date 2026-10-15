@@ -282,6 +282,9 @@ function ctDecide(p, opts) {
     var planOpts = plan === null ? null : { sessionId: sid, key: ah.cfg('devswarm_prompt.child_plan_key'), content: plan, transcriptPath: tp, keepaliveTurns: ah.cfgNum('devswarm_prompt.child_plan_keepalive') };
     var dedupeOn = sid !== null && !dedupe.disabled();
     if (dedupeOn && ((banner !== null && banner.opts !== null && banner.content !== null && !dedupe.canDecide(banner.opts)) || !dedupe.canDecide(staticOpts) || (planOpts !== null && !dedupe.canDecide(planOpts)))) return ctDefer('dedupe-undecidable');
+    // the durable inbox as it is now: a path or a file the engine cannot read as Node does hands the turn over before anything is written
+    var preInfo;
+    try { preInfo = ctUnread(builder, home); } catch (e) { if (e === gates.UNDECIDABLE) return ctDefer('inbox'); throw e; }
     // the push state of the checkout (a read), then the writes: the heartbeat first (its failure never stops the turn), the registration, the dedupe records
     var push = inCheckout ? ctPushState(top) : null;
     ah.commit();
@@ -322,7 +325,7 @@ function ctDecide(p, opts) {
         }
       }
     }
-    var info = ctUnread(builder, home);
+    var info = reg ? ctUnread(builder, home) : preInfo; // a registration may have created the cursor and the inbox
     var segments = [];
     if (bannerText !== null) segments.push(bannerText);
     if (!dedupeOn || dedupe.shouldEmit(staticOpts)) segments = segments.concat(block);

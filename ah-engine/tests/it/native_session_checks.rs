@@ -26,10 +26,12 @@ struct Scene {
     dir: PathBuf,
     /// A child workspace (a non-blank DEVSWARM_SOURCE_BRANCH) instead of a Primary.
     child: bool,
+    /// The working directory is a real git checkout (`home/proj`) instead of a directory with none.
+    checkout: bool,
 }
 
 impl Scene {
-    fn new(tag: &str, child: bool) -> Scene {
+    fn new(tag: &str, child: bool, checkout: bool) -> Scene {
         let root = std::env::var_os("AH_ENGINE_IT_ROOT").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/tmp"));
         let dir = root.join(format!("ah-nsc-{tag}-{}", std::process::id()));
         ah_engine::discard::harmless(std::fs::remove_dir_all(&dir));
@@ -42,7 +44,18 @@ impl Scene {
         let rows: String =
             (0..31).map(|i| format!("{{\"ts\":\"2026-01-0{}T00:00:00.000Z\",\"id\":\"newRequest\",\"mode\":\"shadow\"}}\n", 1 + i % 9)).collect();
         std::fs::write(home.join(".anti-hall/logs/jev-assist.ndjson"), rows).unwrap();
-        Scene { dir, child }
+        if checkout {
+            let repo = home.join("proj");
+            assert!(Command::new("git").args(["init", "-q"]).arg(&repo).status().unwrap().success());
+            assert!(Command::new("git")
+                .arg("-C")
+                .arg(&repo)
+                .args(["-c", "user.email=a@b", "-c", "user.name=n", "commit", "-q", "--allow-empty", "-m", "x"])
+                .status()
+                .unwrap()
+                .success());
+        }
+        Scene { dir, child, checkout }
     }
 
     fn home(&self) -> PathBuf {
@@ -106,7 +119,7 @@ impl Scene {
 
     /// The payload of call `n` (each call is a session of its own, so the emit-dedupe store never mutes the answer).
     fn payload(&self, host: &str, event: &str, n: usize) -> String {
-        let cwd = self.dir.join("nogit");
+        let cwd = if self.checkout { self.home().join("proj").canonicalize().unwrap() } else { self.dir.join("nogit") };
         let mut p = serde_json::json!({"hook_event_name": event, "source": "startup", "session_id": format!("S{n}"), "cwd": cwd,
             "transcript_path": self.home().join(format!(".claude/projects/-p/S{n}.jsonl")), "model": "m", "prompt": "hi"});
         if host == "codex" {
@@ -220,8 +233,8 @@ fn warm_launchers(s: &Scene) {
 
 /// One run of `CALLS` calls of `event` on `host`: the answer carries `says`, Node starts for none of `ports`, and the p50 of each of
 /// `latency` (check name, budget key) stays inside its budget.
-fn run_event(host: &str, event: &str, child: bool, says: &[&str], ports: &[&str], latency: &[(&str, &str)]) {
-    let s = Scene::new(&format!("{host}-{}", event.to_lowercase()), child);
+fn run_event(host: &str, event: &str, child: bool, checkout: bool, says: &[&str], ports: &[&str], latency: &[(&str, &str)]) {
+    let s = Scene::new(&format!("{host}-{}{}", event.to_lowercase(), if checkout { "-checkout" } else { "" }), child, checkout);
     warm_launchers(&s);
     let ran = s.dir.join("ran.txt");
     warm_daemon(&s, host, event, &ran);
@@ -254,6 +267,7 @@ fn session_start(host: &str, orch_check: &str) {
         host,
         "SessionStart",
         false,
+        false,
         &["ORCHESTRATION DISCIPLINE", "W. DEVSWARM PRIMARY", "devswarm-comms", "jev-review: review due for newRequest"],
         &["verify-first-orch", "jev-review-reminder", "devswarm-child-role"],
         &[
@@ -270,6 +284,7 @@ fn prompt(host: &str, child: bool) {
             host,
             "UserPromptSubmit",
             true,
+            false,
             &["devswarm-child-workspace", "devswarm-autonomy", "devswarm-child-reception"],
             &["devswarm-child-turn"],
             &[("devswarm-child-turn", "devswarm_child_turn_p50_ms")],
@@ -278,6 +293,7 @@ fn prompt(host: &str, child: bool) {
         run_event(
             host,
             "UserPromptSubmit",
+            false,
             false,
             &["devswarm-comms: mesh only"],
             &["devswarm-parent-inbox"],
@@ -314,4 +330,27 @@ fn the_codex_primary_prompt_port_starts_no_node_and_stays_inside_its_budget() {
 #[test]
 fn the_codex_child_prompt_port_starts_no_node_and_stays_inside_its_budget() {
     prompt("codex", true);
+}
+
+/// A child inside a git checkout: the turn registers it (descriptor, registry row, summary), and with no ingest daemon running says so.
+fn child_in_checkout(host: &str) {
+    run_event(
+        host,
+        "UserPromptSubmit",
+        true,
+        true,
+        &["devswarm-child-workspace", "devswarm-autonomy", "devswarm-child-reception", "devswarm-stale-data"],
+        &["devswarm-child-turn"],
+        &[("devswarm-child-turn", "devswarm_child_turn_checkout_p50_ms")],
+    );
+}
+
+#[test]
+fn the_claude_child_prompt_port_in_a_checkout_starts_no_node_and_stays_inside_its_budget() {
+    child_in_checkout("claude");
+}
+
+#[test]
+fn the_codex_child_prompt_port_in_a_checkout_starts_no_node_and_stays_inside_its_budget() {
+    child_in_checkout("codex");
 }

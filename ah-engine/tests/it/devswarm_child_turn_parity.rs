@@ -428,6 +428,8 @@ fn scenes() -> Vec<Scene> {
         // the cases that stay with Node, each decided before anything is written
         scene("archived-marker", Defer).seed(archived("s1")),
         scene("descriptor-array", Defer).seed(descriptor("[1,2]")),
+        scene("inbox-relative-path", Defer).seed(descriptor(r#"{"id":"child-1","inboxPath":"in.ndjson","cursorPath":"in.cursor"}"#)),
+        scene("inbox-path-not-a-string", Defer).seed(descriptor(r#"{"id":"child-1","inboxPath":5}"#)),
         scene("duplicate-row", Defer).seed(|h| {
             sql(
                 h,

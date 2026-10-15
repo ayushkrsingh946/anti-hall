@@ -1298,20 +1298,18 @@ fn child_turn_cases() -> Vec<Case> {
             .seed(desc(r#"{"inboxPath":"$HOME/in.ndjson","cursorPath":"$HOME/in.cursor"}"#))
             .file("in.ndjson", "{\"a\":1}\n{\"a\":2}\n")
             .file("in.cursor", "2"),
-        child(case("mail-unread-defers", dflt()))
+        child(case("mail-unread", dflt()))
             .seed(desc(r#"{"inboxPath":"$HOME/in.ndjson","cursorPath":"$HOME/in.cursor"}"#))
             .file("in.ndjson", "{\"a\":1}\n{\"a\":2}\n")
-            .file("in.cursor", "1")
-            .defer(),
+            .file("in.cursor", "1"),
         child(case("mail-cursor-json-line", dflt()))
             .seed(desc(r#"{"inboxPath":"$HOME/in.ndjson","cursorPath":"$HOME/in.cursor"}"#))
             .file("in.ndjson", "{\"a\":1}\n")
             .file("in.cursor", "{\"line\":1}"),
-        child(case("mail-cursor-json-unread-defers", dflt()))
+        child(case("mail-cursor-json-unread", dflt()))
             .seed(desc(r#"{"inboxPath":"$HOME/in.ndjson","cursorPath":"$HOME/in.cursor"}"#))
             .file("in.ndjson", "{\"a\":1}\n")
-            .file("in.cursor", "{\"line\":0}")
-            .defer(),
+            .file("in.cursor", "{\"line\":0}"),
         child(case("mail-cursor-garbage", dflt()))
             .seed(desc(r#"{"inboxPath":"$HOME/in.ndjson","cursorPath":"$HOME/in.cursor"}"#))
             .file("in.ndjson", "{\"a\":1}\n")
@@ -1342,7 +1340,8 @@ fn child_turn_cases() -> Vec<Case> {
         child(case("no-cwd-defers", without("cwd"))).defer(),
         child(case("cwd-relative-defers", prompt(json!({"cwd":"proj"})))).defer(),
         child(case("cwd-numeric-defers", prompt(json!({"cwd":5})))).defer(),
-        child(case("cwd-in-a-checkout-defers", prompt(json!({"cwd":repo_dir})))).defer(),
+        // a working directory inside a checkout registers the child and writes the project's SQLite store, which this suite compares byte for
+        // byte (clock readings and page layout differ between two writers): `devswarm_child_turn_parity.rs` covers it table by table
         child(case("cwd-nonexistent", prompt(json!({"cwd":"$HOME/gone/deeper"})))),
         child(case("no-session", without("session_id"))),
         child(case("session-empty", prompt(json!({"session_id":""})))),
