@@ -275,7 +275,7 @@ pub fn install<'a>(c: &Ctx<'a>, h: &Object<'a>) -> rquickjs::Result<()> {
 }
 
 #[cfg(test)]
-mod tail_lines_tests {
+mod tests {
     use super::*;
 
     fn file(tag: &str, bytes: &[u8]) -> String {

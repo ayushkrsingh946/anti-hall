@@ -1184,8 +1184,13 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `transcript.ev_type_text` | `text` |  |  | The content block type of a text block. |
 | `transcript.ev_type_tool_result` | `tool_result` |  |  | The content block type of a tool result. |
 | `transcript.ev_type_tool_use` | `tool_use` |  |  | The content block type of a tool call. |
+| `transcript.evidence_cache_entry_max_bytes` | `6291456` |  | bytes | Largest estimated size of one kept transcript evidence; a larger one is not kept (the next call reads its window afresh). |
+| `transcript.evidence_cache_idle_ms` | `600000` |  | ms | How long a kept transcript evidence may sit unused before it is dropped. |
+| `transcript.evidence_cache_max_paths` | `8` |  | count | How many transcripts' evidence `ah.transcript.evidence` keeps between calls, so a Stop reads only the bytes appended since the last one (0 turns the cache off and every call reads its whole window). The least recently used is dropped first, so more concurrently stopping sessions than this each read their whole window every time. |
+| `transcript.evidence_fingerprint_bytes` | `4096` |  | bytes | Bytes hashed at each end of the kept lines to notice that a transcript was rewritten in place. |
 | `transcript.evidence_max_bytes` | `8388608` |  | bytes | Largest window `ah.transcript.evidence` reads from the end of a transcript, whatever the script asks for. |
 | `transcript.evidence_max_chars` | `16777216` |  |  | Most characters of text `ah.transcript.evidence` returns in all; a transcript whose evidence is larger is reported as unsure. |
+| `transcript.evidence_read_chunk_bytes` | `65536` |  | bytes | Bytes read at a time while looking for the newline that ends the cut first line of a window. |
 | `transcript.final_statuses` | `completed failed stopped` |  |  | Task-notification statuses the DevSwarm idle gate treats as final (companion/lib/devswarm-idle.js FINAL_STATUS), case-insensitive. |
 | `transcript.fingerprint_bytes` | `256` |  | bytes | Leading bytes of the file hashed to notice a rewritten or rotated transcript. |
 | `transcript.idle_ttl_ms` | `21600000` |  | ms | How long the registry keeps an index nobody asked for; a dropped index is rebuilt from the file on the next request. |
@@ -9679,6 +9684,9 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `mem.devswarm_rt_low_water_pct` | `80` |  |  | Percent of mem.devswarm_rt_soft_bytes the DevSwarm realtime edge buffer is evicted down to when the soft limit is reached. |
 | `mem.devswarm_rt_max_edges` | `2048` |  |  | DevSwarm realtime edges retained at most; past it the oldest edge is dropped first. |
 | `mem.devswarm_rt_soft_bytes` | `4194304` |  | bytes | Estimated bytes of DevSwarm realtime snapshots and retained edges held before old edges are evicted down to the low-water mark. |
+| `mem.evidence_cache_hard_bytes` | `20971520` |  | bytes | Bytes of kept transcript evidence at which an insert is refused (the answer is returned, not kept) and the cache is recycled. |
+| `mem.evidence_cache_low_water_pct` | `80` |  |  | Percent of mem.evidence_cache_soft_bytes the kept transcript evidence is evicted down to when the soft limit is reached. |
+| `mem.evidence_cache_soft_bytes` | `10485760` |  | bytes | Bytes of kept transcript evidence held before the least recently used are dropped down to the low-water mark. |
 | `mem.global_hard_bytes` | `125829120` |  | bytes | Process memory above which every holder is recycled and every cache insert is refused. If it is still above this `mem.global_restart_after_s` later, the daemon is asked to restart cleanly and the reason is recorded in the event log. |
 | `mem.global_log_min_interval_ms` | `60000` |  | ms | At most one soft or hard log line per holder per interval (the counters in `status --memory` still count every excursion), so a cache that cycles between its low-water mark and its soft limit cannot flood the event log. |
 | `mem.global_low_water_pct` | `90` |  |  | Percent of the global soft and hard limits that process memory must fall to before the global triggers re-arm (hysteresis, so a total hovering at a limit is one excursion, not many). |
@@ -10011,6 +10019,8 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `dispatch_entries` | counter | entries | event, entry, outcome, cfg | What the dispatcher's plan did to each table entry of an event it asked the daemon about (D87): ran, skipped_predicate, skipped_max_rules, skipped_budget, shadowed or off, by event, entry, outcome and the hash of the non-default hook configuration the plan was made under (`default` when none). |
 | `dispatch_overhead_us` | histogram | us | event | Wall time of a dispatched hook request that no built-in check accounts for (request wall minus the sum of the checks), by hook event: parsing, plan, locks, waits and queueing inside the daemon. |
 | `errors` | counter | requests |  | Requests answered ERR. |
+| `evidence_cache` | counter | lookups | result | Transcript evidence lookups (claim-ledger and other `ah.transcript.evidence` callers): hit (nothing appended), extend (only the appended bytes were read) or rebuild (the window was read afresh). |
+| `evidence_cache_rebuild` | counter | lookups | reason | Why a transcript evidence lookup read its window afresh: none (nothing kept: first call, daemon restart, eviction or idle expiry), file (another file or a shorter one), window (the window moved past the kept lines) or digest (the file was rewritten in place). |
 | `hook_calls` | counter | requests | event | Hook requests served, by hook event. |
 | `hook_latency_us` | histogram | us | event | Wall time to serve a hook request inside the daemon, by hook event. |
 | `inject_emitted` | counter | blocks | cut | Gated hook blocks passed on whole, by cut (injection gate). |

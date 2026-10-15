@@ -276,6 +276,14 @@ value = { kind = "counter", unit = "lookups", labels = ["reason"] }
 doc = "Wall time of a dispatched hook request that no built-in check accounts for (request wall minus the sum of the checks), by hook event: parsing, plan, locks, waits and queueing inside the daemon."
 value = { kind = "histogram", unit = "us", labels = ["event"] }
 
+[metric.evidence_cache]
+doc = "Transcript evidence lookups (claim-ledger and other `ah.transcript.evidence` callers): hit (nothing appended), extend (only the appended bytes were read) or rebuild (the window was read afresh)."
+value = { kind = "counter", unit = "lookups", labels = ["result"] }
+
+[metric.evidence_cache_rebuild]
+doc = "Why a transcript evidence lookup read its window afresh: none (nothing kept: first call, daemon restart, eviction or idle expiry), file (another file or a shorter one), window (the window moved past the kept lines) or digest (the file was rewritten in place)."
+value = { kind = "counter", unit = "lookups", labels = ["reason"] }
+
 [metric.rule_hits]
 doc = "Regex rule matches, by action (deny, warn, context)."
 value = { kind = "counter", unit = "matches", labels = ["action"] }

@@ -50,6 +50,7 @@ pub mod host_proc;
 pub mod host_spawn;
 pub mod host_transcript;
 pub mod host_ts;
+pub mod evidence_cache;
 pub mod recache;
 pub mod sysmem;
 
