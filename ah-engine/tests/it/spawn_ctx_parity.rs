@@ -1020,9 +1020,42 @@ fn orch_cases() -> Vec<Case> {
         "{}",
         old,
     ));
-    // DevSwarm sessions defer to Node
-    v.push(ok(case("devswarm-repo-id-defers", dflt())).env("DEVSWARM_REPO_ID", "r").defer());
-    v.push(ok(case("devswarm-supervisor-on-defers", dflt())).env("ANTIHALL_DEVSWARM_SUPERVISOR", "on").defer());
+    // DevSwarm: a Primary gets the workspace-tier rule W natively; the kill switch, the off mode, a child workspace, the dispatch-tier
+    // switch and a repository that forbids workspaces get the baseline text. Only a layout the engine cannot classify defers.
+    let proj = || Seed::Dir("proj".into());
+    let ds = |c: Case| ok(c).seed(proj()).env("DEVSWARM_REPO_ID", "r");
+    v.push(ds(case("devswarm-primary", dflt())));
+    v.push(ok(case("devswarm-supervisor-on-primary", dflt())).seed(proj()).env("ANTIHALL_DEVSWARM_SUPERVISOR", "on"));
+    v.push(ok(case("devswarm-supervisor-on-file", dflt())).seed(proj()).seed(Seed::Settings(json!({"devswarm":{"supervisorMode":"on"}}))));
+    v.push(ds(case("devswarm-primary-codex", start(json!({"turn_id":"t"})))));
+    v.push(ds(case("devswarm-primary-level-full", dflt())).env("ANTIHALL_PROTOCOL_LEVEL", "full"));
+    v.push(ds(case("devswarm-primary-level-full-codex", start(json!({"turn_id":"t"})))).env("ANTIHALL_PROTOCOL_LEVEL", "full"));
+    v.push(ds(case("devswarm-primary-mode-off", dflt())).env("ANTIHALL_ORCH_FULL_ON", "off"));
+    v.push(ds(case("devswarm-primary-mode-spawn", dflt())).env("ANTIHALL_ORCH_FULL_ON", "spawn"));
+    v.push(ds(case("devswarm-primary-clears-pending", dflt())).file(".anti-hall/orch-full/orch-full-S1.json", "{\"epochId\":\"1\",\"decision\":\"pending\",\"sentAt\":1}"));
+    v.push(ds(case("devswarm-child-baseline", dflt())).env("DEVSWARM_SOURCE_BRANCH", "feat/x"));
+    v.push(ds(case("devswarm-child-blank-branch-is-primary", dflt())).env("DEVSWARM_SOURCE_BRANCH", "  "));
+    v.push(ds(case("devswarm-tier-text-off", dflt())).seed(Seed::Settings(json!({"devswarm":{"dispatchTierText":false}}))));
+    v.push(ds(case("devswarm-no-ws-repos-name", dflt())).seed(Seed::Settings(json!({"jev":{"dispatchTierNoWorkspaceRepos":"proj"}}))));
+    v.push(ds(case("devswarm-no-ws-repos-star", dflt())).seed(Seed::Settings(json!({"jev":{"dispatchTierNoWorkspaceRepos":"*"}}))));
+    v.push(ds(case("devswarm-no-ws-repos-path", dflt())).env("ANTIHALL_JEV_DISPATCH_TIER_NO_WORKSPACE_REPOS", "$HOME/proj"));
+    v.push(ds(case("devswarm-no-ws-claude-md", dflt())).file("proj/CLAUDE.md", "# notes\nNO WORKSPACES FOR REAL WORK in this repo.\n"));
+    v.push(ds(case("devswarm-no-ws-agents-md", dflt())).file("proj/AGENTS.md", "Never spin workspaces for real work.\n"));
+    v.push(ds(case("devswarm-docs-without-rule", dflt())).file("proj/CLAUDE.md", "# notes\nuse workspaces freely\n"));
+    v.push(
+        ds(case("devswarm-no-ws-detect-off", dflt()))
+            .file("proj/CLAUDE.md", "NO WORKSPACES FOR REAL WORK\n")
+            .seed(Seed::Settings(json!({"jev":{"dispatchTierDetectNoWorkspaces":false}}))),
+    );
+    v.push(ds(case("devswarm-cwd-missing-dir", start(json!({"cwd":"$HOME/gone"})))));
+    v.push(ds(case("devswarm-cwd-not-string", start(json!({"cwd":5})))));
+    v.push(ds(case("devswarm-no-cwd-defers", {
+        let mut p = dflt();
+        p.as_object_mut().unwrap().remove("cwd");
+        p
+    }))
+    .defer());
+    v.push(ds(case("devswarm-relative-cwd-defers", start(json!({"cwd":"proj"})))).defer());
     v.push(ok(case("devswarm-kill-switch-proceeds", dflt())).env("DEVSWARM_REPO_ID", "r").env("DISABLE_ANTIHALL_DEVSWARM", "1"));
     v.push(ok(case("devswarm-supervisor-off-proceeds", dflt())).env("DEVSWARM_REPO_ID", "r").env("ANTIHALL_DEVSWARM_SUPERVISOR", "off"));
     v.push(ok(case("devswarm-blank-repo-proceeds", dflt())).env("DEVSWARM_REPO_ID", " "));
@@ -1031,7 +1064,6 @@ fn orch_cases() -> Vec<Case> {
             .env("DEVSWARM_REPO_ID", "r")
             .seed(Seed::Settings(json!({"context":{"verifyFirstOrchestration":false}}))),
     );
-    v.push(ok(case("devswarm-codex-defers", start(json!({"turn_id":"t"})))).env("DEVSWARM_REPO_ID", "r").defer());
     // the judge child
     v.push(ok(case("judge-child-silent", dflt())).env("ANTIHALL_JUDGE_CHILD", "1"));
     v.push(ok(case("judge-child-other-value", dflt())).env("ANTIHALL_JUDGE_CHILD", "yes"));
@@ -1046,14 +1078,15 @@ fn verify_first_orch_matches_node() {
     assert_eq!(t.blocks, 0);
     assert!(t.stdout_nonempty >= 70, "the corpus must exercise the emitted texts: {}", t.stdout_nonempty);
     assert!(t.state_changed >= 30, "the corpus must exercise the marker: {}", t.state_changed);
-    assert!(t.deferred >= 6, "deferred {}", t.deferred);
+    assert!(t.deferred >= 5, "deferred {}", t.deferred);
+    assert!(t.stdout_nonempty >= 90, "the DevSwarm cases must answer natively: {}", t.stdout_nonempty);
 }
 
 /// The Codex entry runs the same corpus. Without the flag no session is Claude-confident, so the cases that defer on the
-/// host's config directory now answer; a DevSwarm session and an unreadable payload still defer.
+/// host's config directory now answer; a DevSwarm session with no usable working directory and an unreadable payload still defer.
 #[test]
 fn verify_first_orch_codex_matches_node() {
-    let always_defers = ["devswarm-repo-id-defers", "devswarm-supervisor-on-defers", "devswarm-codex-defers", "raw-garbage-defers", "raw-empty-defers"];
+    let always_defers = ["devswarm-no-cwd-defers", "devswarm-relative-cwd-defers", "raw-garbage-defers", "raw-empty-defers"];
     let cases: Vec<Case> = orch_cases()
         .into_iter()
         .map(|mut c| {

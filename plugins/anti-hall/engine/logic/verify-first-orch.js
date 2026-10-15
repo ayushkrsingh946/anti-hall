@@ -1,8 +1,8 @@
 // check = "verify-first-orch" (SessionStart, the Claude hook entry; verify-first-orch-codex.js is the Codex entry). Emits the
 // orchestration discipline text: the full text, or the compact text plus a marker that makes the first spawn deliver the rest (an
-// opt-in mode), and keeps that marker in step with what it sent. Everything is decided here except a DevSwarm session (whether it is a
-// Primary, with a different text, depends on the role of the workspace and on CLAUDE.md doctrine), which defers to Node before any
-// file is touched. Mirrors hooks/verify-first-orch.js `main` and hooks/lib/auto-handover-text.js `isClaudeConfident`.
+// opt-in mode), and keeps that marker in step with what it sent. Everything is decided here, a DevSwarm Primary included (the gate is
+// `vf.tierTextOn`: DevSwarm active, not a child workspace, the dispatch-tier switch on, the repository not forbidding workspaces); only
+// a repository layout or working directory the engine cannot classify defers to Node, before any file is touched. Mirrors hooks/verify-first-orch.js `main` and hooks/lib/auto-handover-text.js `isClaudeConfident`.
 // Keys, texts and switches: spawn_context.toml (verify_first_orch.*, orch_state.*).
 'use strict';
 
@@ -52,7 +52,12 @@ function vfoCompact(spawnDelivery, root, codex) {
   return lines.join('\n').split(ah.cfg('verify_first_orch.root_placeholder')).join(root);
 }
 
-function vfoFull(codex) { return ah.cfg(codex ? 'verify_first_orch.full_lines_codex' : 'verify_first_orch.full_lines').join('\n'); }
+// ORCH_FULL, or ORCH_FULL_PRIMARY (rule W after the header line) for a DevSwarm Primary.
+function vfoFull(codex, primary) {
+  var lines = ah.cfg(codex ? 'verify_first_orch.full_lines_codex' : 'verify_first_orch.full_lines').slice();
+  if (primary) lines.splice(1, 0, ah.cfg('verify_first_orch.primary_rule'));
+  return lines.join('\n');
+}
 
 // The orchestration marker file of a session (hooks/lib/orch-full-state.js `writeMarker`): written atomically, then stale state swept.
 function vfoWriteMarker(sid, decision) {
@@ -89,9 +94,11 @@ function vfoDecide(p, opts, claudeHost) {
   }
   if (!ah.settings.bool('orch_state.setting')) { writeNone(); return null; }
   var codex = vf.codexPayload(p);
-  if (spawn.devswarmActive()) return 'defer';
+  // `primaryTierTextOn(env, cwd)`: null = the answer needs what the engine does not reproduce, so Node decides (nothing written yet).
+  var primary = vf.tierTextOn(p);
+  if (primary === null) return 'defer';
   function emit(t) { return { advisory: text.advisoryJson(ah.cfg('verify_first_orch.event'), t) }; }
-  if (ah.settings.enum('orch_state.protocol_setting') === ah.cfg('orch_state.full_level')) { writeNone(); return emit(vfoFull(codex)); }
+  if (ah.settings.enum('orch_state.protocol_setting') === ah.cfg('orch_state.full_level') || primary) { writeNone(); return emit(vfoFull(codex, primary)); }
   var mode = ah.settings.enum('orch_state.orch_full_on_setting');
   if (mode === 'auto') mode = 'session';
   if (mode === 'spawn' && !confident) mode = 'session';
