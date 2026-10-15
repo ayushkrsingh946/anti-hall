@@ -1394,7 +1394,7 @@ fn the_prompt_checks_answer_a_raw_slash_command_prompt_like_a_plain_one() {
             let v = super::run_forced(check, &p, &opts, "UserPromptSubmit", &env(&h))
                 .unwrap_or_else(|| panic!("{check}: a shipped script"))
                 .unwrap_or_else(|| panic!("{check}: a verdict"));
-            let _ = std::fs::remove_dir_all(&h);
+            crate::discard::harmless(std::fs::remove_dir_all(&h)); // keep: a test scratch directory
             v
         };
         let raw = answer("/anti-hall:ship-it build x", "raw");

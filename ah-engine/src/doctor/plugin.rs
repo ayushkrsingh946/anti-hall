@@ -289,7 +289,7 @@ mod tests {
     fn fixture(tag: &str, reg: &str, settings: &str, manifests: &[(&str, &str)]) -> (Doc, std::path::PathBuf) {
         crate::defaults::init().unwrap();
         let home = std::env::temp_dir().join(format!("ah-plugin-clash-{tag}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&home);
+        crate::discard::harmless(std::fs::remove_dir_all(&home)); // keep: a test scratch directory
         std::fs::create_dir_all(home.join(".claude/plugins")).unwrap();
         for (dir, name) in manifests {
             std::fs::create_dir_all(home.join(dir).join(".claude-plugin")).unwrap();
@@ -312,7 +312,7 @@ mod tests {
         let (doc, home) = fixture("on", REG, on, &[("a", "anti-hall"), ("o", "anti-hall")]);
         let body = doc.body();
         assert!(body.contains("other@mkt") && body.contains("shares the plugin name"), "{body}");
-        let _ = std::fs::remove_dir_all(home);
+        crate::discard::harmless(std::fs::remove_dir_all(home)); // keep: a test scratch directory
     }
 
     #[test]
@@ -320,11 +320,11 @@ mod tests {
         let off = r#"{"enabledPlugins":{"anti-hall@anti-hall":true,"other@mkt":false}}"#;
         let (doc, home) = fixture("off", REG, off, &[("a", "anti-hall"), ("o", "anti-hall")]);
         assert!(!doc.body().contains("shares the plugin name"), "{}", doc.body());
-        let _ = std::fs::remove_dir_all(home);
+        crate::discard::harmless(std::fs::remove_dir_all(home)); // keep: a test scratch directory
         let on = r#"{"enabledPlugins":{"anti-hall@anti-hall":true,"other@mkt":true}}"#;
         let (doc, home) = fixture("diff", REG, on, &[("a", "anti-hall"), ("o", "other")]);
         assert!(!doc.body().contains("shares the plugin name"), "{}", doc.body());
-        let _ = std::fs::remove_dir_all(home);
+        crate::discard::harmless(std::fs::remove_dir_all(home)); // keep: a test scratch directory
     }
 
     #[test]
