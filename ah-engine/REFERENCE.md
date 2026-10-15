@@ -1639,6 +1639,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `model_routing.negated_write_re` | `\b(?:do\s+not\|don'?t\|never\|without\|no\|not)\s+(?:\w+\s+){0,3}?(?:git\s+\|gh\s+)...` |  |  | Regex (case-insensitive, global) of a negated write instruction ('never commit', 'do not push', 'don't create files', 'no edits or commits'); removed from the brief before strong_write_re is tested. |
 | `model_routing.off_mode` | `off` |  |  | Routing-mode value that disables model-routing. |
 | `model_routing.planning_intent_re` | `\b(architect(?:ure)?\|brainstorm\|design\s+(?:a\|the\|an)\b\|plan\s+(?:a\|the\|an\|ou...` |  |  | Strict planning-intent regex for the row-4 haiku advisory. |
+| `model_routing.quoted_text_re` | `(^\|[^\w'])'[^']{1,1000}'\|"[^"]{1,1000}"` |  |  | Regex (global) of quoted text in a brief: a single-quoted span that opens after a non-word character (so an apostrophe in a contraction never opens one) or a double-quoted span, at most 1000 characters (a quoted issue comment or log excerpt can span lines). The deploy floor reads the brief with these spans blanked (group 1 is kept): a word that is only quoted ('deploy' in a question about the word) is not a deploy task. |
 | `model_routing.readonly_override_re` | `\b(?:report\s+only\|read[- ]?only\|(?:do\s+not\|don'?t\|never)\s+(?:edit\|modify\|w...` |  |  | Explicit read-only statement regex that overrides ambiguous write words for row 6. |
 | `model_routing.readonly_re` | `\b(verbatim\|read[- ]?only\|mechanical\|append\s*only\|run\s+exactly\|do\s+nothing...` |  |  | Read-only/mechanical marker regex used to suppress row-4 false positives. |
 | `model_routing.reasoning_re` | `\b(analy[sz]\w*\|synthesi[sz]\w*\|summari[sz]\w*\|reconcil\w*\|evaluat\w*\|interpr...` |  |  | Heavy reading and synthesis regex that vetoes rows steering to haiku. |
@@ -3280,6 +3281,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `codex_handover.detail_state` | `state.md` |  |  | The detail file that holds the task list snapshot. |
 | `codex_handover.detail_trials` | `trials.md` |  |  | The detail file that holds the do-not-repeat list. |
 | `codex_handover.details_sep` | ` / ` |  |  | Separator of the detail file names in the resume steps. |
+| `codex_handover.detect_echo_min_chars` | `8` |  |  | A line of the agent's own prompt at least this long (trimmed, in UTF-16 units) is removed from its result before the quota search, as is its JSON-escaped form: a result that quotes the brief back (a brief that mentions a quota limit) is not a quota message. |
 | `codex_handover.detect_scan_cap` | `20000` |  |  | How much of a Codex result is searched for a quota message, in UTF-16 units. |
 | `codex_handover.detect_summary` | `Advisory: records a Codex quota or rate-limit exhaustion reported by a codex:...` |  |  | One-line description of the codex-quota-detect check in the generated reference. |
 | `codex_handover.git_binary` | `git` |  |  | The git executable the hooks run. |

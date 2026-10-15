@@ -579,6 +579,10 @@ value = '\bsave\s+(?:[\w-]+\s+){0,4}?(?:to|into)\s+\S|\bclone\s+(?:\S+\s+){0,3}?
 doc = "Regex (case-insensitive) of a brief that tells the agent to commit or open a git worktree: a writing brief however many read-only words it quotes, so it suppresses the row-6 Explore advisory and cannot be overridden by an explicit read-only statement. A negated commit is removed first (negated_commit_re)."
 value = '\bgit\s+(?:commit|push|worktree\s+add|checkout\s+-b)\b|\bcommit(?:s|ting)?\s+(?:per|each|every|it\b|them\b|your\b|after|before|the\s+(?:fix|fixes|change|changes|work)|with\s+a)\b|\bcommit\s+(?:and|&)\s+push\b'
 
+[model_routing.quoted_text_re]
+doc = "Regex (global) of quoted text in a brief: a single-quoted span that opens after a non-word character (so an apostrophe in a contraction never opens one) or a double-quoted span, at most 1000 characters (a quoted issue comment or log excerpt can span lines). The deploy floor reads the brief with these spans blanked (group 1 is kept): a word that is only quoted ('deploy' in a question about the word) is not a deploy task."
+value = '''(^|[^\w'])'[^']{1,1000}'|"[^"]{1,1000}"'''
+
 [model_routing.negated_commit_re]
 doc = "Regex (case-insensitive, global) of a negated commit, push or worktree instruction ('never commit', 'do not push'); removed from the brief before commit_phrase_re is tested."
 value = '''\b(?:do\s+not|don'?t|never|without|no)\s+(?:\w+\s+){0,3}?(?:git\s+)?(?:commit|push|worktree)\w*(?:\s*(?:,|or|and|nor)\s+(?:git\s+)?(?:commit|push|worktree)\w*)*'''

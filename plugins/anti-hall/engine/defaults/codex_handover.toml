@@ -115,6 +115,10 @@ value = "trials.md"
 doc = "Separator of the detail file names in the resume steps."
 value = " / "
 
+[codex_handover.detect_echo_min_chars]
+doc = "A line of the agent's own prompt at least this long (trimmed, in UTF-16 units) is removed from its result before the quota search, as is its JSON-escaped form: a result that quotes the brief back (a brief that mentions a quota limit) is not a quota message."
+value = 8
+
 [codex_handover.detect_scan_cap]
 doc = "How much of a Codex result is searched for a quota message, in UTF-16 units."
 value = 20000

@@ -176,7 +176,10 @@ const DEPLOY_STRONG_RE = new RegExp(
   'i',
 );
 const DEPLOY_WEAK_RE = /\b(prod|production|secrets?|credentials?)\b/gi;
+// Quoted text is not an action: a word that is only quoted ('deploy' in a question about the word) is not a deploy task.
+const QUOTED_TEXT_RE = /(^|[^\w'])'[^']{1,1000}'|"[^"]{1,1000}"/g;
 function isDeployShaped(corpus) {
+  corpus = corpus.replace(QUOTED_TEXT_RE, '$1 ');
   if (DEPLOY_STRONG_RE.test(corpus)) return true;
   const kinds = new Set();
   for (const m of corpus.matchAll(DEPLOY_WEAK_RE)) {
