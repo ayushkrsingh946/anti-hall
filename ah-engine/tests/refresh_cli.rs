@@ -48,7 +48,13 @@ impl Scratch {
     }
     fn run(&self, extra: &[&str]) -> Value {
         let out = self.raw(extra);
-        assert!(out.status.success(), "refresh failed: {}", String::from_utf8_lossy(&out.stderr));
+        assert!(out.status.success(), "refresh failed ({:?}): stderr {} stdout {}", out.status, String::from_utf8_lossy(&out.stderr), String::from_utf8_lossy(&out.stdout));
+        serde_json::from_slice(&out.stdout).unwrap_or_else(|e| panic!("{e}: {}", String::from_utf8_lossy(&out.stdout)))
+    }
+    /// A run whose pending probe fails: the exit status is non-zero (so the scheduler retries it) and the report is still printed.
+    fn run_failing(&self, extra: &[&str]) -> Value {
+        let out = self.raw(extra);
+        assert!(!out.status.success(), "a failed probe must exit non-zero");
         serde_json::from_slice(&out.stdout).unwrap_or_else(|e| panic!("{e}: {}", String::from_utf8_lossy(&out.stdout)))
     }
     fn raw(&self, extra: &[&str]) -> std::process::Output {
@@ -142,7 +148,7 @@ fn refresh_follows_the_node_fallbacks() {
     s.prog("git", "exit 1");
     std::fs::remove_file(s.home().join(".anti-hall/version-check.json")).unwrap();
     s.request("version", "{\"requestedAt\":6}");
-    let v = s.run(&[]);
+    let v = s.run_failing(&[]);
     assert_eq!(outcome(&v, "version"), "failed", "{v}");
     assert!(s.read(".anti-hall/version-check.json").is_none());
     assert_eq!(outcome(&s.run(&[]), "version"), "skipped");
@@ -180,7 +186,7 @@ fn refresh_repair_honours_its_cooldown_and_lock() {
     );
     std::fs::write(s.home().join(".anti-hall/repair-on-reload.lock"), lock).unwrap();
     s.request("repair", "{\"requestedAt\":2,\"version\":\"9.9.8\"}");
-    let v = s.run(&[]);
+    let v = s.run_failing(&[]);
     assert_eq!(outcome(&v, "repair"), "failed", "{v}");
     let handled: Value = serde_json::from_slice(&std::fs::read(s.home().join(".anti-hall/refresh/handled.json")).unwrap()).unwrap();
     assert_eq!(handled["repair"].as_f64(), Some(1.0), "a locked repair is retried at the next tick: {handled}");
