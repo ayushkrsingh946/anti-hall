@@ -41,6 +41,7 @@
 // - an unreadable optional file or directory is the same as an absent one
 // A failure that must be seen goes through `crate::discard` instead.
 
+pub mod evidence_cache;
 pub mod host;
 pub mod host_b3;
 pub mod host_d;

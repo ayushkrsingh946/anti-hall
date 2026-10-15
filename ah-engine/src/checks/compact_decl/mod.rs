@@ -43,6 +43,7 @@ pub(crate) fn read_tail(path: &str, max: u64) -> Option<Vec<String>> {
     }
     let n = size.min(max);
     f.seek(SeekFrom::Start(size - n)).ok()?;
+    crate::load::note_scan(n);
     let mut buf = vec![0u8; n as usize];
     let mut got = 0usize;
     while got < buf.len() {

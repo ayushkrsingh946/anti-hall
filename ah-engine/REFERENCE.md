@@ -673,10 +673,14 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 |---|---|---|---|---|
 | `load.events_cap` | `32` |  |  | Most distinct hook events listed per minute bucket; past it the rest are counted together. |
 | `load.minutes_kept` | `60` |  |  | How many one-minute buckets of request load the daemon keeps (a rolling window; older buckets are dropped, so memory does not grow with traffic). |
+| `load.notes_cap` | `64` |  |  | Most counted events (a kept-walk hit or the reason it missed) one check may note before it finishes; further notes of that check are dropped. |
 | `load.proc_buckets_us` | `12 items` |  |  | Upper edges of the processing-time histogram (microseconds) the per-minute p95 is read from. |
 | `load.saturation_wait_ms` | `100` |  | ms | A call that waited longer than this between accept and the start of its processing marks that minute saturated: calls are waiting on each other. |
 | `load.saturation_window_minutes` | `10` |  | min | `status` reports the engine saturated while a saturated minute lies within this many minutes. |
 | `load.sessions_cap` | `1024` |  |  | Most distinct session ids remembered per minute bucket; past it sessions are only counted. |
+| `load.size_buckets_bytes` | `204800, 1048576, 10485760, 104857600` |  | bytes | Upper edges (bytes) of the transcript-size classes the per-check Stop latency and bytes-read metrics are split by; `load.size_labels` names the classes (one more label than edges, the last for anything larger). |
+| `load.size_label_unknown` | `none` |  |  | Size class used when a request names no readable transcript. |
+| `load.size_labels` | `lt200k, lt1m, lt10m, lt100m, ge100m` |  |  | Names of the transcript-size classes, smallest first (one more than `load.size_buckets_bytes` has edges). |
 | `load.wait_noise_us` | `1000` |  | us | A wait up to this long between accept and processing is the hand-off between two threads, not queueing; only longer waits count as `calls_that_waited`. |
 
 ### engine.toml / paths
@@ -1258,8 +1262,13 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `transcript.ev_type_text` | `text` |  |  | The content block type of a text block. |
 | `transcript.ev_type_tool_result` | `tool_result` |  |  | The content block type of a tool result. |
 | `transcript.ev_type_tool_use` | `tool_use` |  |  | The content block type of a tool call. |
+| `transcript.evidence_cache_entry_max_bytes` | `6291456` |  | bytes | Largest estimated size of one kept transcript evidence; a larger one is not kept (the next call reads its window afresh). |
+| `transcript.evidence_cache_idle_ms` | `600000` |  | ms | How long a kept transcript evidence may sit unused before it is dropped. |
+| `transcript.evidence_cache_max_paths` | `8` |  | count | How many transcripts' evidence `ah.transcript.evidence` keeps between calls, so a Stop reads only the bytes appended since the last one (0 turns the cache off and every call reads its whole window). The least recently used is dropped first, so more concurrently stopping sessions than this each read their whole window every time. |
+| `transcript.evidence_fingerprint_bytes` | `4096` |  | bytes | Bytes hashed at each end of the kept lines to notice that a transcript was rewritten in place. |
 | `transcript.evidence_max_bytes` | `8388608` |  | bytes | Largest window `ah.transcript.evidence` reads from the end of a transcript, whatever the script asks for. |
 | `transcript.evidence_max_chars` | `16777216` |  |  | Most characters of text `ah.transcript.evidence` returns in all; a transcript whose evidence is larger is reported as unsure. |
+| `transcript.evidence_read_chunk_bytes` | `65536` |  | bytes | Bytes read at a time while looking for the newline that ends the cut first line of a window. |
 | `transcript.final_statuses` | `completed failed stopped` |  |  | Task-notification statuses the DevSwarm idle gate treats as final (companion/lib/devswarm-idle.js FINAL_STATUS), case-insensitive. |
 | `transcript.fingerprint_bytes` | `256` |  | bytes | Leading bytes of the file hashed to notice a rewritten or rotated transcript. |
 | `transcript.idle_ttl_ms` | `21600000` |  | ms | How long the registry keeps an index nobody asked for; a dropped index is rebuilt from the file on the next request. |
@@ -3051,9 +3060,9 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `agent_scan.agent_tool` | `Agent` |  |  | Name of the tool whose input carries the description of a launched agent. |
 | `agent_scan.cache_entry_bytes` | `256` |  | bytes | Estimated bytes one entry of a kept walk (a tool use, an answered or errored call, a launch, a stop, a retained answer) holds, for the size cap above. |
 | `agent_scan.cache_fingerprint_bytes` | `4096` |  | bytes | Bytes at the start of a transcript, and bytes just before the kept offset, hashed to notice a rewritten or rotated file; a kept walk whose file no longer matches is rebuilt from the start. |
-| `agent_scan.cache_idle_ms` | `900000` |  | ms | How long a kept walk may sit unused before it is dropped. |
+| `agent_scan.cache_idle_ms` | `21600000` |  | ms | How long a kept walk may sit unused before it is dropped. A walk holds a few tens of kilobytes (the memory registry's agent_scan_walk limits bound all of them); a session that stops once an hour finds its walk and reads only what was appended, instead of walking the last 64 MiB again. |
 | `agent_scan.cache_max_bytes` | `16777216` |  | bytes | Largest estimated size of one kept walk; a walk that grows past it is not kept (the next scan reads the file afresh, as it did before the cache). |
-| `agent_scan.cache_max_paths` | `12` |  | count | How many walks the scan keeps between calls (one per transcript and window size), so a Stop reads only the bytes appended since the last scan (0 turns the cache off). The least recently used one is dropped first. |
+| `agent_scan.cache_max_paths` | `24` |  | count | How many walks the scan keeps between calls (one per transcript and window size), so a Stop reads only the bytes appended since the last scan (0 turns the cache off). The least recently used one is dropped first, so more transcripts in use at once than this are each walked afresh (the walk of a long session is its cold cost: 64 MiB read and filtered). |
 | `agent_scan.delivery_tools` | `TaskOutput, SendMessage` |  |  | Tools whose tool_result can deliver an agent's result. |
 | `agent_scan.empty_object` | `{}` |  |  | What JSON.stringify gives for a missing tool input. |
 | `agent_scan.inbox_phrase` | `'s inbox` |  |  | Phrase of the result of a message sent to a teammate's inbox. |
@@ -9849,6 +9858,9 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `mem.devswarm_rt_low_water_pct` | `80` |  |  | Percent of mem.devswarm_rt_soft_bytes the DevSwarm realtime edge buffer is evicted down to when the soft limit is reached. |
 | `mem.devswarm_rt_max_edges` | `2048` |  |  | DevSwarm realtime edges retained at most; past it the oldest edge is dropped first. |
 | `mem.devswarm_rt_soft_bytes` | `4194304` |  | bytes | Estimated bytes of DevSwarm realtime snapshots and retained edges held before old edges are evicted down to the low-water mark. |
+| `mem.evidence_cache_hard_bytes` | `20971520` |  | bytes | Bytes of kept transcript evidence at which an insert is refused (the answer is returned, not kept) and the cache is recycled. |
+| `mem.evidence_cache_low_water_pct` | `80` |  |  | Percent of mem.evidence_cache_soft_bytes the kept transcript evidence is evicted down to when the soft limit is reached. |
+| `mem.evidence_cache_soft_bytes` | `10485760` |  | bytes | Bytes of kept transcript evidence held before the least recently used are dropped down to the low-water mark. |
 | `mem.global_hard_bytes` | `125829120` |  | bytes | Process memory above which every holder is recycled and every cache insert is refused. If it is still above this `mem.global_restart_after_s` later, the daemon is asked to restart cleanly and the reason is recorded in the event log. |
 | `mem.global_log_min_interval_ms` | `60000` |  | ms | At most one soft or hard log line per holder per interval (the counters in `status --memory` still count every excursion), so a cache that cycles between its low-water mark and its soft limit cannot flood the event log. |
 | `mem.global_low_water_pct` | `90` |  |  | Percent of the global soft and hard limits that process memory must fall to before the global triggers re-arm (hysteresis, so a total hovering at a limit is one excursion, not many). |
@@ -10253,13 +10265,17 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | Name | Kind | Unit | Labels | What it counts |
 |---|---|---|---|---|
 | `accept_errors` | counter | errors | code | Accept calls that failed for a reason other than nothing pending (EMFILE, ENFILE, ENOBUFS, ENOMEM), by OS error code (os<n>); each one backs the accept loop off for daemon.accept_error_backoff_ms. |
+| `agent_scan_kept` | counter | lookups | result | Kept-walk lookups of the agent scan (silent-agent-nudge and the agent gates): hit (the walk resumed from where the last scan stopped) or miss. |
+| `agent_scan_kept_miss` | counter | lookups | reason | Why a kept-walk lookup missed and the window was walked afresh: none (nothing kept: first scan, daemon restart, eviction or idle expiry), gen (defaults changed), file (other file or shrunk), window (kept walk older than the slid window allows), rel_min or straddles (an event or call left the window), digest (head or back of the file changed), straddles_after (appended lines judged a call outside the window), error (an older line raised). |
 | `budget_soft` | counter | requests |  | Requests that used more thread CPU than the SOFT budget (daemon.eval_soft_us); only warned about, every check kept its answer. |
 | `budget_trips` | counter | evaluations |  | Evaluations cut off by the per-request CPU budget. |
 | `bus_dropped` | gauge | notifications |  | Pub/sub notifications a full subscriber queue could not take since the daemon started (the data stays in SQLite). |
 | `bus_published` | gauge | notifications |  | Pub/sub notifications delivered to subscriber queues since the daemon started. |
 | `busy_replies` | counter | requests |  | Requests answered BUSY (queue full or rate limited), which made the client fall back. |
+| `check_bytes_read` | counter | bytes | check, size | Transcript bytes a built-in check read (tail windows and walks it opened), by check and transcript size class; divide by check_calls for the mean per run. |
 | `check_calls` | counter | runs | check | Built-in check runs, by check. |
 | `check_decisions` | counter | runs | check, decision | Built-in check outcomes, by check and decision (allow, block, advisory, defer). |
+| `check_latency_by_size_us` | histogram | us | check, size | Wall time of a built-in check run, by check and by the size class of the transcript the request named (load.size_labels). |
 | `check_latency_us` | histogram | us | check | Wall time of a built-in check run, by check. |
 | `db_archive_bytes` | gauge | bytes |  | Size of archive.db (0 until it is first used). |
 | `db_archive_wal_bytes` | gauge | bytes |  | Size of archive.db's write-ahead log. |
@@ -10270,7 +10286,10 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `deadline_soft` | counter | requests |  | Requests answered after the client's fail-fast wait (client.deadline_ms) but inside the hard deadline; only warned about. |
 | `dispatch_checks` | counter | entries | event, check, answer | Built-in check entries the dispatcher sent to the daemon, by event, check and answer (decided, or defer = its Node hook ran instead) (D58). |
 | `dispatch_entries` | counter | entries | event, entry, outcome, cfg | What the dispatcher's plan did to each table entry of an event it asked the daemon about (D87): ran, skipped_predicate, skipped_max_rules, skipped_budget, shadowed or off, by event, entry, outcome and the hash of the non-default hook configuration the plan was made under (`default` when none). |
+| `dispatch_overhead_us` | histogram | us | event | Wall time of a dispatched hook request that no built-in check accounts for (request wall minus the sum of the checks), by hook event: parsing, plan, locks, waits and queueing inside the daemon. |
 | `errors` | counter | requests |  | Requests answered ERR. |
+| `evidence_cache` | counter | lookups | result | Transcript evidence lookups (claim-ledger and other `ah.transcript.evidence` callers): hit (nothing appended), extend (only the appended bytes were read) or rebuild (the window was read afresh). |
+| `evidence_cache_rebuild` | counter | lookups | reason | Why a transcript evidence lookup read its window afresh: none (nothing kept: first call, daemon restart, eviction or idle expiry), file (another file or a shorter one), window (the window moved past the kept lines) or digest (the file was rewritten in place). |
 | `fail_open` | counter | events | reason, check | Engine-level fail-opens by reason and check: the request was answered without the check's verdict (missing_key, deadline_cut, script_timeout, jev_breaker_open, busy, internal_error, undelivered_verdict). |
 | `hook_calls` | counter | requests | event | Hook requests served, by hook event. |
 | `hook_latency_us` | histogram | us | event | Wall time to serve a hook request inside the daemon, by hook event. |

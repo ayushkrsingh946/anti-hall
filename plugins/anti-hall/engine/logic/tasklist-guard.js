@@ -73,11 +73,14 @@ function tlToolUses(node, out) {
 // throw, so it decides nothing) or 'defer'.
 function tlScanWork(path, progressAbs, cx) {
   var out = { work: 0, lastWork: 0, lastProgressWrite: 0 };
-  var lines = rp.lines(path, tlN('window_bytes'));
-  if (lines === null) return out;
-  // a session with ONE user request: a write under a path that request names is the requested output (workdetect.request_path_re)
+  // a session with ONE user request: a write under a path that request names is the requested output (workdetect.request_path_re);
+  // that needs every user entry, and only a window that holds the whole transcript counts, so only then are all lines read. Any
+  // other window needs the entries the loop below parses: those that hold a tool use (or an escape that could spell one) or a null.
   var size = ah.fs.size(path);
-  cx.requested = wd.requestedPaths(lines, cx, size !== null && size <= tlN('window_bytes'));
+  var complete = size !== null && size <= tlN('window_bytes');
+  var lines = complete ? rp.lines(path, tlN('window_bytes')) : rp.lines(path, tlN('window_bytes'), ['tool_use', '\\u', 'null']);
+  if (lines === null) return out;
+  cx.requested = wd.requestedPaths(lines, cx, complete);
   for (var i = 0; i < lines.length; i++) {
     // only an entry that holds a tool use (or an escape that could spell one), and a bare `null`, can matter to the work count
     var raw = lines[i];
@@ -334,9 +337,9 @@ function tlHandover(f, state, safe, reason) {
 function tlPromptKey(f) {
   var pid = f.p.prompt_id;
   if (typeof pid === 'string' && pid) return pid;
-  var tail = ah.fs.readTail(f.transcript, tlN('policy_tail_bytes'));
-  if (tail === null || tail === '') return '';
-  var lines = tail.split('\n');
+  // only the lines that hold the user marker are read below, so only those are fetched
+  var lines = ah.fs.tailLines(f.transcript, tlN('policy_tail_bytes'), false, [tlT('policy_user_marker')]);
+  if (lines === null) return '';
   for (var i = lines.length - 1; i >= 0; i--) {
     var t = lines[i].trim();
     if (!t || t.indexOf(tlT('policy_user_marker')) < 0) continue;

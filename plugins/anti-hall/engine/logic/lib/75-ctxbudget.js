@@ -93,9 +93,9 @@ var cb = {
     if (!ah.path.isAbsolute(tp)) return 'defer';
     var size = ah.fs.size(tp);
     if (size === null || size <= 0) return null;
-    var tail = ah.fs.readTail(tp, cb.n('ctxbudget.tail_bytes'));
-    if (tail === null) return null;
-    var lines = tail.split('\n');
+    // both readers below look at the newest line holding their marker and skip every other, so only those lines are fetched
+    var lines = ah.fs.tailLines(tp, cb.n('ctxbudget.tail_bytes'), false, [cb.c('ctxbudget.token_count_marker'), cb.c('ctxbudget.usage_marker')]);
+    if (lines === null) return null;
     var codex = cb.lastCodex(lines);
     if (codex) return { pct: Math.max(0, Math.min(100, (codex.used / codex.max) * 100)), used: codex.used, max: codex.max, source: 'codex-transcript', estimated: false, windowKnown: true, windowLabel: null };
     var usage = cb.lastUsage(lines);

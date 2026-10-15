@@ -1286,22 +1286,19 @@ fn scan_kept(path: &str, tail: u64, f: std::fs::File, m: &std::fs::Metadata, opt
     let key = (path.to_string(), tail);
     let taken = walk_cache().remove(&key);
     let mut k = match taken {
-        Some(k)
-            if k.gen_ == gen_
-                && k.dev == m.dev()
-                && k.ino == m.ino()
-                && k.off <= size
-                && k.built_s <= s
-                && k.base <= start
-                && start - k.base <= slack
-                && k.walk.rel_min >= start
-                && !k.walk.straddles(start)
-                && digest_at(&f, k.base, fp.min(k.off - k.base)) == Some(k.head)
-                && digest_at(&f, k.off - fp.min(k.off - k.base), fp.min(k.off - k.base)) == Some(k.back) =>
-        {
+        Some(k) if kept_miss_reason(&k, gen_, m, size, s, start, slack, &f, fp).is_none() => {
+            crate::load::note_count("agent_scan_kept", "result", "hit");
             k
         }
-        _ => Kept { gen_, dev: m.dev(), ino: m.ino(), base: start, built_s: s, off: start, seq: 0, head: 0, back: 0, walk: Walk::new() },
+        other => {
+            crate::load::note_count("agent_scan_kept", "result", "miss");
+            crate::load::note_count(
+                "agent_scan_kept_miss",
+                "reason",
+                other.as_ref().and_then(|k| kept_miss_reason(k, gen_, m, size, s, start, slack, &f, fp)).unwrap_or("none"),
+            );
+            Kept { gen_, dev: m.dev(), ino: m.ino(), base: start, built_s: s, off: start, seq: 0, head: 0, back: 0, walk: Walk::new() }
+        }
     };
     let banded = k.base < start;
     let want = size - k.off;
@@ -1328,6 +1325,7 @@ fn scan_kept(path: &str, tail: u64, f: std::fs::File, m: &std::fs::Metadata, opt
             buf.pop();
             if let Err(e) = feed(&mut k.walk, &mut k.seq, &buf) {
                 // what an older line raises is not an error of this window
+                crate::load::note_count("agent_scan_kept_miss", "reason", "error");
                 return if banded { scan_window(path, tail, opts) } else { Err(e) };
             }
             k.off += n as u64;
@@ -1348,6 +1346,7 @@ fn scan_kept(path: &str, tail: u64, f: std::fs::File, m: &std::fs::Metadata, opt
     // the appended lines (the unfinished one included) may judge, by an answer, a call that already left the exact window: such a
     // walk no longer holds what a fresh scan of the window holds, so the window is read afresh
     if w.straddles(start) {
+        crate::load::note_count("agent_scan_kept_miss", "reason", "straddles_after");
         return scan_window(path, tail, opts);
     }
     if k.base < start {
@@ -1368,6 +1367,31 @@ fn scan_kept(path: &str, tail: u64, f: std::fs::File, m: &std::fs::Metadata, opt
         }
     }
     scan
+}
+
+/// Why a kept walk cannot serve the window starting at `start` (`None` when it can): the first condition that fails, in the order
+/// [`scan_kept`] has always checked them.
+#[allow(clippy::too_many_arguments)]
+fn kept_miss_reason(k: &Kept, gen_: u64, m: &std::fs::Metadata, size: u64, s: u64, start: u64, slack: u64, f: &std::fs::File, fp: u64) -> Option<&'static str> {
+    if k.gen_ != gen_ {
+        return Some("gen");
+    }
+    if k.dev != m.dev() || k.ino != m.ino() || k.off > size {
+        return Some("file");
+    }
+    if k.built_s > s || k.base > start || start - k.base > slack {
+        return Some("window");
+    }
+    if k.walk.rel_min < start {
+        return Some("rel_min");
+    }
+    if k.walk.straddles(start) {
+        return Some("straddles");
+    }
+    if digest_at(f, k.base, fp.min(k.off - k.base)) != Some(k.head) || digest_at(f, k.off - fp.min(k.off - k.base), fp.min(k.off - k.base)) != Some(k.back) {
+        return Some("digest");
+    }
+    None
 }
 
 fn finish(mut w: Walk, path: &str, opts: &Opts) -> Res<Scan> {

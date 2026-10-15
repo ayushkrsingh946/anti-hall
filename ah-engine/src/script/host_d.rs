@@ -291,6 +291,7 @@ fn read_end(path: &str, bytes: f64) -> Option<String> {
     let size = f.metadata().ok()?.len();
     let len = size.min(want);
     f.seek(SeekFrom::Start(size - len)).ok()?;
+    crate::load::note_scan(len);
     let mut buf = vec![0u8; len as usize];
     f.read_exact(&mut buf).ok()?;
     Some(crate::checks::guardkit::text::lossy_owned(buf))

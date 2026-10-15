@@ -428,6 +428,7 @@ pub fn backfill(facts: &mut Facts, path: &str, window: u64) -> R<()> {
         let n = (chunk as u64).min(pos) as usize;
         pos -= n as u64;
         scanned += n as u64;
+        crate::load::note_scan(n as u64);
         let Some(buf) = read_at(&mut f, pos, n) else { return Err(Unsure) };
         let mut comb = buf;
         comb.extend_from_slice(&carry);

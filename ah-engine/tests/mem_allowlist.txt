@@ -51,6 +51,7 @@ jev/testkit.rs | Fake.timeouts | test double | not used by the daemon
 # ---- scoped to one request or one call on a worker thread ------------------------------------------------------------------
 deadline.rs | STAGED | staged writes of the request in progress, taken and flushed or dropped when it ends | per-request
 load.rs | REQUEST | one (event, session) pair, replaced per request | per-request
+load.rs | NOTES | at most load.notes_cap counted events per check, handed to the metrics and cleared when the check finishes and at the start of the next request | per-check counted events (a kept-walk hit or the reason it missed)
 memdiag.rs | REPORTS | one report per worker, cleared at each snapshot | per-snapshot
 script/host.rs | CACHE | one cfgLive cache entry for the current defaults generation and one or two config file stamps | replaced when generation or config metadata changes
 script/host.rs | HELD | held handles of the script call in progress, capped by the host's script.lock_max_held, taken at the end of the call | per-call

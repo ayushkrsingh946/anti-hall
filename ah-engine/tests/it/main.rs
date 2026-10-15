@@ -97,6 +97,7 @@ mod setup_parity;
 mod sibling_sweep_reload;
 mod spawn_ctx_parity;
 mod spool;
+mod stop_scripts_guardrail;
 mod task_checks_e2e;
 mod task_tracker_parity;
 mod telemetry;

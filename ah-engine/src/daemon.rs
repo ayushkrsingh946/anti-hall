@@ -587,9 +587,26 @@ struct DaemonObserver<'a> {
     event: &'a str,
 }
 
+/// What a check that just finished read and noted (task #66 step 0): its transcript bytes and latency by transcript size class,
+/// and the counted events it noted (a kept-walk hit or the reason it missed).
+fn observe_check_cost(t: &Telemetry, check: &str, micros: u64) {
+    let bytes = crate::load::take_check_scan();
+    let notes = crate::load::take_counts();
+    let size = crate::load::size_bucket(crate::load::transcript_size());
+    t.with_metrics(|m| {
+        let l = [("check", check), ("size", size.as_str())];
+        m.add("check_bytes_read", &l, bytes);
+        m.observe("check_latency_by_size_us", &l, micros);
+        for (metric, label, value) in notes {
+            m.inc(metric, &[(label, value)]);
+        }
+    });
+}
+
 impl crate::hookio::Observer for DaemonObserver<'_> {
     fn check(&self, check: &str, rule_id: &str, verdict: &crate::checks::Verdict, micros: u64) {
         crate::memdiag::note_check(check);
+        observe_check_cost(self.t, check, micros);
         self.t.observe_check_in(self.event, check, rule_id, verdict, micros, self.project);
     }
 
@@ -774,6 +791,10 @@ fn dispatch(body: &str, sh: &Shared, cfg: &Config) -> Reply {
             m.inc("dispatch_entries", &[("event", meta.event.as_str()), ("entry", id.as_str()), ("outcome", outcome.as_str()), ("cfg", cfg)]);
         }
     });
+    let checks_us = std::cell::Cell::new(0u64);
+    crate::load::set_transcript_size(
+        p.get("transcript_path").and_then(|v| v.as_str()).filter(|t| !t.is_empty()).and_then(|t| std::fs::metadata(t).ok()).map(|m| m.len()),
+    );
     let observe = |e: &crate::dispatch::table::Entry, a: &crate::dispatch::native::Answer, micros: u64| {
         use crate::checks::Verdict;
         use crate::dispatch::native::Answer;
@@ -796,6 +817,8 @@ fn dispatch(body: &str, sh: &Shared, cfg: &Config) -> Reply {
         let answer = if v == Verdict::Defer { "defer" } else { "decided" };
         sh.telemetry.with_metrics(|m| m.inc("dispatch_checks", &[("event", meta.event.as_str()), ("check", check), ("answer", answer)]));
         crate::memdiag::note_check(check);
+        observe_check_cost(&sh.telemetry, check, micros);
+        checks_us.set(checks_us.get().saturating_add(micros));
         sh.telemetry.observe_check(check, &e.id, &v, micros, &phash);
     };
     let (start_cpu, budget) = cpu_budget(cfg);
@@ -805,7 +828,9 @@ fn dispatch(body: &str, sh: &Shared, cfg: &Config) -> Reply {
         record_budget_trip(sh, &phash, defaults::text("msg.log_budget"));
     }
     note_cpu_soft(sh, start_cpu, cfg);
-    sh.telemetry.observe_hook(&meta.event, started.elapsed().as_micros() as u64);
+    let wall = started.elapsed().as_micros() as u64;
+    sh.telemetry.with_metrics(|m| m.observe("dispatch_overhead_us", &[("event", meta.event.as_str())], wall.saturating_sub(checks_us.get())));
+    sh.telemetry.observe_hook(&meta.event, wall);
     Reply::Ok(crate::dispatch::native::encode(&answers))
 }
 

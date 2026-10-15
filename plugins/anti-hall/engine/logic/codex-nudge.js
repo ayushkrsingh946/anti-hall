@@ -82,9 +82,10 @@ function cxFirstStr(inp, keys) { for (var i = 0; i < keys.length; i++) { var v =
 
 // The scan of the transcript tail: {files, edits, review}; null when there is nothing to read, 'defer'.
 function cxScanTranscript(path, p) {
-  var tail = ah.fs.readTail(path, cxN('nudge_tail_bytes'));
-  if (tail === null) return null;
-  var lines = tail.split('\n'), scan = { files: [], edits: 0, review: false }, ex = null, seen = {};
+  // an entry can name a tool use only by holding "tool_use" or an escape that could spell it: the host hands over only those lines
+  var lines = ah.fs.tailLines(path, cxN('nudge_tail_bytes'), false, ['tool_use', '\\u']);
+  if (lines === null) return null;
+  var scan = { files: [], edits: 0, review: false }, ex = null, seen = {};
   var codeExt = new RegExp(cxT('nudge_code_ext_re'), 'i'), agentRe = new RegExp(cxT('nudge_agent_re'), 'i');
   for (var li = 0; li < lines.length; li++) {
     var t = lines[li].trim();

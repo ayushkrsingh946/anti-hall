@@ -21,7 +21,7 @@ use crate::defaults;
 use rquickjs::{Ctx, Function, Object};
 use serde_json::{Value, json};
 
-fn unsure() -> String {
+pub(super) fn unsure() -> String {
     r#"{"unsure":true}"#.into()
 }
 
@@ -65,66 +65,119 @@ pub fn evidence(path: &str, window: f64) -> String {
     }
     let cap = defaults::num("transcript.evidence_max_bytes");
     let w = if window.is_finite() && window > 0.0 { (window as u64).min(cap) } else { cap };
-    let Some(tail) = read_window(path, w) else { return "null".into() };
+    // a transcript followed by earlier calls answers by reading only what was appended since (and the same bytes as below)
+    if let Some(answer) = super::evidence_cache::cached(path, w) {
+        return answer;
+    }
+    evidence_uncached(path, w)
+}
+
+/// What one transcript line adds to the evidence: its items as compact JSON (comma separated, no brackets) and the characters of
+/// text they hold.
+pub(super) struct LineEv {
+    /// The items of the line, `["p","text"]` and the like, joined with commas.
+    pub json: String,
+    /// The bytes of text the items hold (the sum the `transcript.evidence_max_chars` cap is read against).
+    pub chars: usize,
+}
+
+/// The evidence of one line (no trailing `\r`): `Ok(None)` when it adds nothing, `Err(())` when only JavaScript can read it
+/// exactly (the whole call is then unsure).
+pub(super) fn line_items(line: &str) -> Result<Option<LineEv>, ()> {
+    let e = match parse_line(line) {
+        Err(_) => return Err(()),
+        Ok(None) => return Ok(None),
+        Ok(Some(e)) => e,
+    };
+    if !e.is_object() && !e.is_array() {
+        return Ok(None);
+    }
     let mut items: Vec<Value> = Vec::new();
-    let chars = std::cell::Cell::new(0usize);
-    let push = |items: &mut Vec<Value>, v: Value, text: &str| {
-        chars.set(chars.get() + text.len());
+    let mut chars = 0usize;
+    let mut push = |v: Value, text: &str| {
+        chars += text.len();
         items.push(v);
     };
+    let message = prop(&e, "message").filter(|m| truthy(m));
+    let role_v = prop(&e, "type").filter(|t| truthy(t)).or_else(|| message.and_then(|m| prop(m, "role")));
+    let role = role_v.and_then(Value::as_str).unwrap_or("");
+    let content = if message.is_some() { message.and_then(|m| prop(m, "content")) } else { prop(&e, "content") };
+    let blocks: &[Value] = content.and_then(Value::as_array).map_or(&[], Vec::as_slice);
+    if role == defaults::text("transcript.ev_role_user") {
+        let results: Vec<&Value> =
+            blocks.iter().filter(|b| truthy(b) && prop(b, "type").and_then(Value::as_str) == Some(defaults::text("transcript.ev_type_tool_result"))).collect();
+        if results.is_empty() {
+            let t = as_text(content);
+            push(json!(["p", t]), &t);
+        } else {
+            for r in &results {
+                let t = as_text(prop(r, "content"));
+                push(json!(["r", t]), &t);
+            }
+            if let Some(u) = prop(&e, "toolUseResult") {
+                let t = as_text(Some(u));
+                push(json!(["r", t]), &t);
+            }
+        }
+    } else if role == defaults::text("transcript.ev_role_attachment") {
+        let t = as_text(prop(&e, "attachment"));
+        push(json!(["a", t]), &t);
+    } else if role == defaults::text("transcript.ev_role_assistant") {
+        for b in blocks {
+            if truthy(b) && prop(b, "type").and_then(Value::as_str) == Some(defaults::text("transcript.ev_type_tool_use")) {
+                let t = as_text(prop(b, "input"));
+                push(json!(["i", t]), &t);
+            }
+        }
+        let text = text_blocks(content);
+        if !js_trim(&text).is_empty() {
+            let id = message.and_then(|m| prop(m, "id")).and_then(Value::as_str).map(str::to_string);
+            push(json!(["t", text, id]), &text);
+        }
+    }
+    if items.is_empty() {
+        return Ok(Some(LineEv { json: String::new(), chars }));
+    }
+    Ok(Some(LineEv { json: items.iter().map(Value::to_string).collect::<Vec<_>>().join(","), chars }))
+}
+
+/// `evidence` read straight from the file: the last `w` bytes, every line, no memory of earlier calls.
+pub(super) fn evidence_uncached(path: &str, w: u64) -> String {
+    let Some(tail) = read_window(path, w) else { return "null".into() };
+    let mut items: Vec<String> = Vec::new();
+    let mut chars = 0usize;
     for line in tail_lines(&tail) {
-        let e = match parse_line(line) {
-            Err(_) => return unsure(),
+        match line_items(line) {
+            Err(()) => return unsure(),
             Ok(None) => continue,
-            Ok(Some(e)) => e,
-        };
-        if !e.is_object() && !e.is_array() {
-            continue;
-        }
-        let message = prop(&e, "message").filter(|m| truthy(m));
-        let role_v = prop(&e, "type").filter(|t| truthy(t)).or_else(|| message.and_then(|m| prop(m, "role")));
-        let role = role_v.and_then(Value::as_str).unwrap_or("");
-        let content = if message.is_some() { message.and_then(|m| prop(m, "content")) } else { prop(&e, "content") };
-        let blocks: &[Value] = content.and_then(Value::as_array).map_or(&[], Vec::as_slice);
-        if role == defaults::text("transcript.ev_role_user") {
-            let results: Vec<&Value> = blocks
-                .iter()
-                .filter(|b| truthy(b) && prop(b, "type").and_then(Value::as_str) == Some(defaults::text("transcript.ev_type_tool_result")))
-                .collect();
-            if results.is_empty() {
-                let t = as_text(content);
-                push(&mut items, json!(["p", t]), &t);
-            } else {
-                for r in &results {
-                    let t = as_text(prop(r, "content"));
-                    push(&mut items, json!(["r", t]), &t);
+            Ok(Some(l)) => {
+                chars += l.chars;
+                if !l.json.is_empty() {
+                    items.push(l.json);
                 }
-                if let Some(u) = prop(&e, "toolUseResult") {
-                    let t = as_text(Some(u));
-                    push(&mut items, json!(["r", t]), &t);
-                }
-            }
-        } else if role == defaults::text("transcript.ev_role_attachment") {
-            let t = as_text(prop(&e, "attachment"));
-            push(&mut items, json!(["a", t]), &t);
-        } else if role == defaults::text("transcript.ev_role_assistant") {
-            for b in blocks {
-                if truthy(b) && prop(b, "type").and_then(Value::as_str) == Some(defaults::text("transcript.ev_type_tool_use")) {
-                    let t = as_text(prop(b, "input"));
-                    push(&mut items, json!(["i", t]), &t);
-                }
-            }
-            let text = text_blocks(content);
-            if !js_trim(&text).is_empty() {
-                let id = message.and_then(|m| prop(m, "id")).and_then(Value::as_str).map(str::to_string);
-                push(&mut items, json!(["t", text, id]), &text);
             }
         }
-        if chars.get() as f64 > defaults::num("transcript.evidence_max_chars") as f64 {
+        if chars as f64 > defaults::num("transcript.evidence_max_chars") as f64 {
             return unsure();
         }
     }
-    json!({"truncated": tail.truncated, "items": items}).to_string()
+    answer(&items, tail.truncated)
+}
+
+/// The answer text: `{"items":[...],"truncated":bool}` (the keys in the order a JSON object map prints them).
+pub(super) fn answer<S: AsRef<str>>(items: &[S], truncated: bool) -> String {
+    let mut out = String::with_capacity(items.iter().map(|i| i.as_ref().len() + 1).sum::<usize>());
+    out.push_str("{\"items\":[");
+    for (i, it) in items.iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        out.push_str(it.as_ref());
+    }
+    out.push_str("],\"truncated\":");
+    out.push_str(if truncated { "true" } else { "false" });
+    out.push('}');
+    out
 }
 
 /// `teammates(path, tail)`: JSON text. The named in-process teammates the last `tail` bytes of a Claude transcript show finished
@@ -185,4 +238,79 @@ pub fn install<'a>(c: &Ctx<'a>, h: &Object<'a>) -> rquickjs::Result<()> {
     h.set("transcriptTeammates", Function::new(c.clone(), |p: String, t: f64| teammates(&p, t))?)?;
     h.set("transcriptCodexAgents", Function::new(c.clone(), |p: String, t: f64| codex_agents(&p, t))?)?;
     Ok(())
+}
+
+/// The reader as it was before the per-line split and the kept lines, verbatim, so the tests can show that today's answer is
+/// byte-for-byte the one it gave.
+#[cfg(test)]
+pub(in crate::script) mod reference {
+    use super::*;
+
+    pub(in crate::script) fn evidence_v0(path: &str, window: f64) -> String {
+        if !path.starts_with('/') {
+            return unsure();
+        }
+        let cap = defaults::num("transcript.evidence_max_bytes");
+        let w = if window.is_finite() && window > 0.0 { (window as u64).min(cap) } else { cap };
+        let Some(tail) = read_window(path, w) else { return "null".into() };
+        let mut items: Vec<Value> = Vec::new();
+        let chars = std::cell::Cell::new(0usize);
+        let push = |items: &mut Vec<Value>, v: Value, text: &str| {
+            chars.set(chars.get() + text.len());
+            items.push(v);
+        };
+        for line in tail_lines(&tail) {
+            let e = match parse_line(line) {
+                Err(_) => return unsure(),
+                Ok(None) => continue,
+                Ok(Some(e)) => e,
+            };
+            if !e.is_object() && !e.is_array() {
+                continue;
+            }
+            let message = prop(&e, "message").filter(|m| truthy(m));
+            let role_v = prop(&e, "type").filter(|t| truthy(t)).or_else(|| message.and_then(|m| prop(m, "role")));
+            let role = role_v.and_then(Value::as_str).unwrap_or("");
+            let content = if message.is_some() { message.and_then(|m| prop(m, "content")) } else { prop(&e, "content") };
+            let blocks: &[Value] = content.and_then(Value::as_array).map_or(&[], Vec::as_slice);
+            if role == defaults::text("transcript.ev_role_user") {
+                let results: Vec<&Value> = blocks
+                    .iter()
+                    .filter(|b| truthy(b) && prop(b, "type").and_then(Value::as_str) == Some(defaults::text("transcript.ev_type_tool_result")))
+                    .collect();
+                if results.is_empty() {
+                    let t = as_text(content);
+                    push(&mut items, json!(["p", t]), &t);
+                } else {
+                    for r in &results {
+                        let t = as_text(prop(r, "content"));
+                        push(&mut items, json!(["r", t]), &t);
+                    }
+                    if let Some(u) = prop(&e, "toolUseResult") {
+                        let t = as_text(Some(u));
+                        push(&mut items, json!(["r", t]), &t);
+                    }
+                }
+            } else if role == defaults::text("transcript.ev_role_attachment") {
+                let t = as_text(prop(&e, "attachment"));
+                push(&mut items, json!(["a", t]), &t);
+            } else if role == defaults::text("transcript.ev_role_assistant") {
+                for b in blocks {
+                    if truthy(b) && prop(b, "type").and_then(Value::as_str) == Some(defaults::text("transcript.ev_type_tool_use")) {
+                        let t = as_text(prop(b, "input"));
+                        push(&mut items, json!(["i", t]), &t);
+                    }
+                }
+                let text = text_blocks(content);
+                if !js_trim(&text).is_empty() {
+                    let id = message.and_then(|m| prop(m, "id")).and_then(Value::as_str).map(str::to_string);
+                    push(&mut items, json!(["t", text, id]), &text);
+                }
+            }
+            if chars.get() as f64 > defaults::num("transcript.evidence_max_chars") as f64 {
+                return unsure();
+            }
+        }
+        json!({"truncated": tail.truncated, "items": items}).to_string()
+    }
 }

@@ -709,6 +709,7 @@ fn tail_scan(path: &str, window: f64, line_max: f64, mut each: impl FnMut(u64, O
     let size = f.metadata().ok()?.len();
     let start = size.saturating_sub(window);
     f.seek(SeekFrom::Start(start)).ok()?;
+    crate::load::note_scan(size - start);
     let mut r = std::io::BufReader::with_capacity(defaults::num("script.tail_buf_bytes") as usize, f.take(size - start));
     let mut offset = start;
     let mut buf: Vec<u8> = Vec::new();

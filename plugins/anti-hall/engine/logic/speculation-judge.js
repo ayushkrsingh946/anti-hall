@@ -84,7 +84,8 @@ function decide(p) {
   if (typeof p.last_assistant_message === 'string' && p.last_assistant_message.trim()) {
     last = p.last_assistant_message;
   } else {
-    var lines = rp.lines(transcript, ah.cfgNum('speculation_judge.reply_window'));
+    // lastAssistant reads only entries that name `assistant` (or spell it with an escape): the host hands over just those lines
+    var lines = rp.lines(transcript, ah.cfgNum('speculation_judge.reply_window'), ['assistant', '\\u']);
     last = '';
     if (lines !== null) {
       var r = rp.lastAssistant(lines);
