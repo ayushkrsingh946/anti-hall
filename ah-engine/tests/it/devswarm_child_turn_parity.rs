@@ -44,6 +44,8 @@ struct Scene {
     sub: Option<&'static str>,
     healthy: bool,
     warm: bool,
+    /// The Codex host's payload: a turn id and a model beside the common fields.
+    codex: bool,
 }
 
 fn scene(name: &'static str, want: Want) -> Scene {
@@ -59,6 +61,7 @@ fn scene(name: &'static str, want: Want) -> Scene {
         sub: None,
         healthy: true,
         warm: true,
+        codex: false,
     }
 }
 
@@ -258,8 +261,12 @@ fn without_write_seq(tree: &BTreeMap<String, String>) -> BTreeMap<String, String
         .collect()
 }
 
-fn payload(cwd: &Path, session: &str, transcript: Option<&Path>) -> String {
+fn payload(cwd: &Path, session: &str, transcript: Option<&Path>, codex: bool) -> String {
     let mut p = json!({"hook_event_name": "UserPromptSubmit", "session_id": session, "prompt": "hi", "cwd": cwd});
+    if codex {
+        p["turn_id"] = json!("t1");
+        p["model"] = json!("gpt-5");
+    }
     if let Some(t) = transcript {
         p["transcript_path"] = json!(t);
     }
@@ -394,6 +401,16 @@ fn scenes() -> Vec<Scene> {
             s.warm_env = Some(vec![]);
             s
         },
+        {
+            let mut s = scene("codex-host-payload", Same);
+            s.codex = true;
+            s
+        },
+        {
+            let mut s = scene("codex-host-unread-and-plan", Same).seed(both(inbox(&["a", "b"], "0"), plan(json!([{"n": 1, "text": "one", "status": "blocked", "ts": 5}]))));
+            s.codex = true;
+            s
+        },
         scene("builder-name", Same).env(vec![("DEVSWARM_BUILDER_NAME", "Fix the thing")]),
         {
             let mut s = scene("repeat-same-session", Same);
@@ -506,7 +523,7 @@ fn run_scene(s: &Scene) -> Result<bool, String> {
     let cwd = cwd.canonicalize().unwrap();
     if s.warm {
         let warm_env = s.warm_env.clone().unwrap_or_else(|| s.env.clone());
-        node(&home, &payload(&cwd, "warm", None), &warm_env);
+        node(&home, &payload(&cwd, "warm", None, s.codex), &warm_env);
     }
     if s.healthy && s.warm {
         let key = std::fs::read_dir(ds(&home).join("store")).unwrap().next().unwrap().unwrap().file_name().to_string_lossy().into_owned();
@@ -519,7 +536,7 @@ fn run_scene(s: &Scene) -> Result<bool, String> {
         write(&t, "");
         t
     });
-    let pl = payload(&cwd, s.session, transcript.as_deref());
+    let pl = payload(&cwd, s.session, transcript.as_deref(), s.codex);
     let saved = base.join("saved");
     copy_dir(&home, &saved);
     let mut n = (0, String::new(), String::new());
