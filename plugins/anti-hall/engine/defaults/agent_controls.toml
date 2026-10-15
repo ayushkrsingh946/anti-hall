@@ -622,8 +622,8 @@ value = "Override (only if the user explicitly confirmed this exact condition is
 # ---- the kept walk of a transcript that fits the scan window (checks::agent_scan::scan_kept, #22) ------------------
 
 [agent_scan.cache_max_paths]
-doc = "How many walks the scan keeps between calls (one per transcript and window size), so a Stop reads only the bytes appended since the last scan (0 turns the cache off). The least recently used one is dropped first."
-value = 12
+doc = "How many walks the scan keeps between calls (one per transcript and window size), so a Stop reads only the bytes appended since the last scan (0 turns the cache off). The least recently used one is dropped first, so more transcripts in use at once than this are each walked afresh (the walk of a long session is its cold cost: 64 MiB read and filtered)."
+value = 24
 unit = "count"
 
 [agent_scan.window_slack_pct]
@@ -634,8 +634,8 @@ max = 100
 unit = "percent"
 
 [agent_scan.cache_idle_ms]
-doc = "How long a kept walk may sit unused before it is dropped."
-value = 900000
+doc = "How long a kept walk may sit unused before it is dropped. A walk holds a few tens of kilobytes (the memory registry's agent_scan_walk limits bound all of them); a session that stops once an hour finds its walk and reads only what was appended, instead of walking the last 64 MiB again."
+value = 21600000
 unit = "ms"
 
 [agent_scan.cache_max_bytes]

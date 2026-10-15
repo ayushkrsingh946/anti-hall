@@ -2930,9 +2930,9 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `agent_scan.agent_tool` | `Agent` |  |  | Name of the tool whose input carries the description of a launched agent. |
 | `agent_scan.cache_entry_bytes` | `256` |  | bytes | Estimated bytes one entry of a kept walk (a tool use, an answered or errored call, a launch, a stop, a retained answer) holds, for the size cap above. |
 | `agent_scan.cache_fingerprint_bytes` | `4096` |  | bytes | Bytes at the start of a transcript, and bytes just before the kept offset, hashed to notice a rewritten or rotated file; a kept walk whose file no longer matches is rebuilt from the start. |
-| `agent_scan.cache_idle_ms` | `900000` |  | ms | How long a kept walk may sit unused before it is dropped. |
+| `agent_scan.cache_idle_ms` | `21600000` |  | ms | How long a kept walk may sit unused before it is dropped. A walk holds a few tens of kilobytes (the memory registry's agent_scan_walk limits bound all of them); a session that stops once an hour finds its walk and reads only what was appended, instead of walking the last 64 MiB again. |
 | `agent_scan.cache_max_bytes` | `16777216` |  | bytes | Largest estimated size of one kept walk; a walk that grows past it is not kept (the next scan reads the file afresh, as it did before the cache). |
-| `agent_scan.cache_max_paths` | `12` |  | count | How many walks the scan keeps between calls (one per transcript and window size), so a Stop reads only the bytes appended since the last scan (0 turns the cache off). The least recently used one is dropped first. |
+| `agent_scan.cache_max_paths` | `24` |  | count | How many walks the scan keeps between calls (one per transcript and window size), so a Stop reads only the bytes appended since the last scan (0 turns the cache off). The least recently used one is dropped first, so more transcripts in use at once than this are each walked afresh (the walk of a long session is its cold cost: 64 MiB read and filtered). |
 | `agent_scan.delivery_tools` | `TaskOutput, SendMessage` |  |  | Tools whose tool_result can deliver an agent's result. |
 | `agent_scan.empty_object` | `{}` |  |  | What JSON.stringify gives for a missing tool input. |
 | `agent_scan.inbox_phrase` | `'s inbox` |  |  | Phrase of the result of a message sent to a teammate's inbox. |
