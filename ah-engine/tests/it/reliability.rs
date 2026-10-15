@@ -1078,6 +1078,31 @@ fn wrapper_returns_the_guards_block_when_the_daemon_is_slow() {
 }
 
 #[test]
+fn an_ok_reply_that_defers_to_node_keeps_the_wait_until_the_node_deny_is_ready() {
+    // Codex final Prior-1B: the daemon answers OK at once but leaves the entries to their Node hooks; one denies after the fail-fast
+    // budget. The wait marker must stay while that Node work is unresolved, or the wrapper's watchdog kills the call and allows.
+    let _timing = wrapper_timing_lock();
+    let tag = "okdefer";
+    let map = format!("/tmp/ah-r-{tag}-{}/map.json", std::process::id());
+    let e = Env::new(tag, &[("AH_ENGINE_NOSPAWN", "1"), ("AH_ENGINE_SLOW_DOWN_N", "9"), ("AH_FALLBACK_MAP", map.as_str())]);
+    let entries = ah_engine::dispatch::table::entries("claude", "PreToolUse");
+    let first_node = entries.iter().position(|x| x.check.is_none()).unwrap_or(0);
+    let late_deny = "sleep 1.2; echo NODE-LATE-DENY >&2; exit 2";
+    let m: serde_json::Map<String, serde_json::Value> =
+        entries.iter().enumerate().map(|(i, x)| (x.id.clone(), if i == first_node { late_deny } else { "true" }.into())).collect();
+    std::fs::write(&map, serde_json::json!({ "PreToolUse": m }).to_string()).unwrap();
+    // an OK frame with no decided answer: every entry is deferred to its Node hook
+    fake_server(&e, || Some(ah_engine::frame::encode(ah_engine::frame::Kind::Ok, "[]")));
+    let fail_fast_ms = clamped_num("client.deadline_ms", 300) + clamped_num("client.deadline_slack_ms", 0) + clamped_num("client.wrapper_extra_ms", 0);
+    let max_ms = clamped_num("client.slow_fallback_max_ms", 3000);
+    let (_, code, dt) = e.wrapper_hook(DENY_IN);
+    println!("TIMING wrapper ok-defer-late-node-deny wall_ms={:.1} fail_fast_ms={fail_fast_ms}", dt.as_secs_f64() * 1000.0);
+    assert!(dt > Duration::from_millis(fail_fast_ms), "the Node deny must land after the fail-fast budget to prove the wait: {dt:?} <= {fail_fast_ms} ms");
+    assert_eq!(code, 2, "a Node deny after the fail-fast budget must still block: {dt:?}{}", e.diag());
+    assert!(dt < Duration::from_millis(max_ms), "bounded by client.slow_fallback_max_ms = {max_ms} ms: {dt:?}");
+}
+
+#[test]
 fn a_late_reply_is_the_daemons_decision_and_no_node_hook_runs() {
     // R0 P0: the daemon may have committed state for a request by the time its reply is late, so a Node hook on top would count
     // the call twice. The client keeps waiting (client.slow_fallback_max_ms) and uses the daemon's own answer.
