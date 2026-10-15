@@ -584,6 +584,18 @@ fn watched_directories_cover_every_source_and_batches_are_classified() {
     assert_eq!(watching::plan(&have, false, &[PathBuf::from("/elsewhere/x")]), watching::Plan::default());
 }
 
+#[test]
+fn an_ingest_daemon_heartbeat_is_not_a_reconcile_hint() {
+    let w = world("ingest-beat");
+    let wire = wire(&w, &Arc::new(Stub::default()), Executor::Engine);
+    wire.reconcile(Cause::Startup);
+    let want = watching::wanted(&wire, &ah_engine::watch::Config::load());
+    let beats = w.home.join(".anti-hall/devswarm/heartbeats");
+    let (_, filter, _) = want.iter().find(|(d, _, _)| *d == beats).expect("the heartbeats directory is watched");
+    assert!(filter.matches(std::ffi::OsStr::new("ws-1.json")), "a workspace heartbeat is a hint");
+    assert!(!filter.matches(std::ffi::OsStr::new("ingest-some-project-123.json")), "an ingest daemon heartbeat is not");
+}
+
 // ---- roles -----------------------------------------------------------------------------------------------------------------
 
 fn env_of(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {

@@ -110,6 +110,10 @@ value = "git"
 doc = "Directories under the DevSwarm state directory whose changes are hints for a reconcile (each key is a mesh_write.* setting that names the directory)."
 value = ["mesh_write.dir_heartbeats", "mesh_write.dir_plans", "mesh_write.dir_workspaces", "mesh_write.dir_summaries", "mesh_write.dir_archived"]
 
+[devswarm_wire.state_ignore_prefixes]
+doc = "File-name prefixes in the watched state directories that are not hints for a reconcile (each key is a setting that names the prefix). The ingest daemons' heartbeats (ingest-*.json, written every ~2 s) are never a reconcile input; without this they drove most reconciles."
+value = ["mesh_write.ingest_beat_prefix"]
+
 [devswarm_wire.watch_git_names]
 doc = "Files of a worktree's git directory whose change means a commit or a checkout happened (a Jev hint for that workspace)."
 value = ["HEAD", "index", "ORIG_HEAD", "FETCH_HEAD"]

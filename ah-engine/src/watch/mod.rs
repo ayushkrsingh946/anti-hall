@@ -101,6 +101,15 @@ impl Config {
         Filter::Except(except)
     }
 
+    /// A [`Filter`] for every entry of a directory except the ignored names (`realtime.ignore_suffixes`) and those that start
+    /// with one of `prefixes`.
+    pub fn all_but_prefixed(&self, prefixes: Vec<String>) -> Filter {
+        if prefixes.is_empty() {
+            return self.all_filter();
+        }
+        Filter::Ignoring { prefixes, suffixes: self.ignore_suffixes.clone() }
+    }
+
     /// A [`Filter`] for every entry of a directory except the ignored names (`realtime.ignore_suffixes`).
     pub fn all_filter(&self) -> Filter {
         Filter::Except(self.ignore_suffixes.clone())
