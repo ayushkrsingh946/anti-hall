@@ -252,6 +252,8 @@ pub struct JevStats {
     changed: AtomicU64,
     cost_micro_usd: AtomicU64,
     verdicts: Mutex<Vec<((String, &'static str), u64)>>,
+    /// The Stop gate's decisions per integration: (id, kind) where kind is `asked_sync`, `skipped_unflagged` or `timeout`.
+    gate: Mutex<Vec<((String, &'static str), u64)>>,
     latencies_us: Mutex<Vec<u64>>,
 }
 
@@ -273,6 +275,14 @@ impl JevStats {
         }
     }
 
+    fn gate(&self, id: &str, kind: &'static str) {
+        let mut g = self.gate.lock().unwrap_or_else(|e| e.into_inner());
+        match g.iter_mut().find(|((i, k), _)| i == id && *k == kind) {
+            Some(slot) => slot.1 += 1,
+            None => g.push(((id.to_string(), kind), 1)),
+        }
+    }
+
     /// Move the counts gathered since the last call into `m` and reset them.
     pub fn drain_into(&self, m: &mut crate::metrics::Metrics) {
         for ((backend, mode), n) in std::mem::take(&mut *self.calls.lock().unwrap_or_else(|e| e.into_inner())) {
@@ -285,6 +295,14 @@ impl JevStats {
         m.add("jev_cost_micro_usd", &[], self.cost_micro_usd.swap(0, Ordering::Relaxed));
         for ((id, verdict), n) in std::mem::take(&mut *self.verdicts.lock().unwrap_or_else(|e| e.into_inner())) {
             m.add("jev_verdicts", &[("id", &id), ("verdict", verdict)], n);
+        }
+        for ((id, kind), n) in std::mem::take(&mut *self.gate.lock().unwrap_or_else(|e| e.into_inner())) {
+            let name = match kind {
+                "asked_sync" => "jev_asked_sync",
+                "skipped_unflagged" => "jev_skipped_unflagged",
+                _ => "jev_gate_timeouts",
+            };
+            m.add(name, &[("id", &id)], n);
         }
         for us in std::mem::take(&mut *self.latencies_us.lock().unwrap_or_else(|e| e.into_inner())) {
             m.observe("jev_latency_us", &[], us);
@@ -609,6 +627,11 @@ impl Jev {
     #[cfg(test)]
     fn worker_starts(&self) -> usize {
         self.worker_starts.load(Ordering::SeqCst)
+    }
+
+    /// Count one Stop-gate decision of integration `id`: `asked_sync`, `skipped_unflagged` or `timeout`.
+    pub fn note_gate(&self, id: &str, kind: &'static str) {
+        self.stats.gate(id, kind);
     }
 
     /// The current settings snapshot.

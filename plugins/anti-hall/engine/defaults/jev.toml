@@ -97,6 +97,22 @@ value = 1000
 min = 1
 unit = "ms"
 
+[jev.gate_enabled]
+doc = "1 (default) gates the Stop/SubagentStop Jev wait: a check that passes `flagged` (its cheap rule layer found a likely unverified claim, with the evidence in hand) waits for Jev within jev.stop_soft_ms / jev.stop_hard_ms; an unflagged one keeps its baseline without asking synchronously. 0 asks on every Stop, as before the gate."
+value = 1
+min = 0
+max = 1
+
+[jev.gate_background_ask]
+doc = "1 also sends the question of an unflagged Stop out in the background (its answer lands in the cache and the log for a later turn, adding no Stop latency); 0 (default) does not ask at all."
+value = 0
+min = 0
+max = 1
+
+[jev.reason_fail_open]
+doc = "The reason a flagged Stop reports when its wait for Jev ran out and the check kept its baseline (fail-open)."
+value = "fail_open"
+
 [jev.max_timeout_ms]
 doc = "Hard ceiling on any configured or per-call timeout, so a Jev call can never outlast the hook that asked (Node: MAX_TIMEOUT_MS)."
 value = 3000
@@ -379,6 +395,18 @@ value = { kind = "counter", unit = "calls", labels = [] }
 [metric.jev_timeouts]
 doc = "Jev calls that ran out of their time budget."
 value = { kind = "counter", unit = "calls", labels = [] }
+
+[metric.jev_asked_sync]
+doc = "Stop/SubagentStop asks the gate let wait for Jev (the rule layer had flagged a likely unverified claim), by integration."
+value = { kind = "counter", unit = "calls", labels = ["id"] }
+
+[metric.jev_skipped_unflagged]
+doc = "Stop/SubagentStop asks the gate skipped because the rule layer flagged nothing: no synchronous Jev call, the check kept its baseline. By integration."
+value = { kind = "counter", unit = "calls", labels = ["id"] }
+
+[metric.jev_gate_timeouts]
+doc = "Flagged Stop/SubagentStop asks whose wait for Jev ran out (the check failed open on its baseline), by integration."
+value = { kind = "counter", unit = "calls", labels = ["id"] }
 
 [metric.jev_cooldowns]
 doc = "Jev calls skipped because a vendor's circuit breaker was open."
