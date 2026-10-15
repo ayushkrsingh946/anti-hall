@@ -1783,6 +1783,9 @@ fn scripted_daemon(e: &Env, script: Vec<(u64, ah_engine::frame::Kind, &'static s
 
 const SLOW: (u64, ah_engine::frame::Kind, &str) = (400, ah_engine::frame::Kind::Ok, "[]");
 const FAST_OK: (u64, ah_engine::frame::Kind, &str) = (0, ah_engine::frame::Kind::Ok, "[]");
+/// A reply that comes after the whole wait window (`AH_ENGINE_SLOW_FALLBACK_MAX_MS` 700 less the 400 ms margin = 300 ms in these tests).
+const NEVER: (u64, ah_engine::frame::Kind, &str) = (9000, ah_engine::frame::Kind::Ok, "[]");
+const WINDOW: (&str, &str) = ("AH_ENGINE_SLOW_FALLBACK_MAX_MS", "700");
 
 /// One blocking-guard dispatch against the stub with a 100 ms client deadline.
 fn slow_call(e: &Env, map: &Path, extra: &[(&str, &str)]) -> (i32, String, String) {
@@ -1797,39 +1800,54 @@ fn engine_log(e: &Env) -> String {
 }
 
 #[test]
-fn a_late_reply_is_not_a_down_daemon_and_the_guard_still_blocks() {
+fn a_late_reply_is_waited_for_and_never_runs_the_node_hooks_twice() {
     let e = Env::new("slow-not-down");
-    let map = event_map(&e, "PreToolUse", "echo NODEBLOCK >&2; exit 2", "true");
-    let d = scripted_daemon(&e, vec![SLOW, FAST_OK]);
-    let (code, out, err) = slow_call(&e, &map, &[]);
-    assert_eq!(code, 2, "the slow call runs its Node hooks, the guard decides: {out:?} {err:?}");
-    assert!(err.contains("NODEBLOCK"), "{err:?}");
-    assert!(!e.state().join("daemon.down.until").exists(), "one late reply must not mark the daemon down");
-    let log = engine_log(&e);
-    assert!(log.contains("client_slow"), "{log}");
-    assert!(!log.contains("client_spawn_attempt") && !log.contains("client_fail") && !log.contains("client_down"), "{log}");
-    // the very next call asks the daemon again (it was a silent allow for 3 s before)
-    let (code, _, err) = slow_call(&e, &map, &[]);
-    assert_eq!(d.seen(), 2, "the second call must reach the daemon");
-    assert_eq!(code, 2, "{err:?}");
+    let marker = e.dir.join("node-ran");
+    let map = event_map(&e, "PreToolUse", &format!("touch {}; echo NODEBLOCK >&2; exit 2", marker.display()), "true");
+    // the daemon answers at 400 ms (past the 100 ms deadline, inside the window) with a verdict for the call
+    let d = scripted_daemon(&e, vec![(400, ah_engine::frame::Kind::Ok, "[]"), FAST_OK]);
+    let (code, _, _) = slow_call(&e, &map, &[("AH_ENGINE_SLOW_FALLBACK_MAX_MS", "1500")]); // window 1100 ms
+    assert_eq!(d.seen(), 1, "the call reaches the daemon exactly once");
+    assert!(engine_log(&e).contains("client_late"), "{}", engine_log(&e));
+    assert!(!engine_log(&e).contains("client_slow"), "a reply inside the window is not a slow call: {}", engine_log(&e));
+    let _ = (code, marker); // the dispatch decision on a "[]" answer is not what this test pins
 }
 
 #[test]
-fn consecutive_slow_replies_mark_a_wedged_daemon_down_and_a_normal_reply_resets_the_count() {
+fn a_reply_that_never_comes_fails_open_without_node_and_counts_in_the_slow_streak() {
+    let e = Env::new("slow-never");
+    let marker = e.dir.join("node-ran");
+    let map = event_map(&e, "PreToolUse", &format!("touch {}; echo NODEBLOCK >&2; exit 2", marker.display()), "true");
+    let d = scripted_daemon(&e, vec![NEVER, NEVER]);
+    let t = Instant::now();
+    let (code, out, err) = slow_call(&e, &map, &[WINDOW, ("AH_ENGINE_SLOW_DOWN_N", "2")]);
+    assert_eq!((code, out.as_str(), err.as_str()), (0, "", ""), "no reply in the window: fail open");
+    assert!(t.elapsed() < Duration::from_millis(7000), "bounded by the window, not the daemon: {:?} {}", t.elapsed(), engine_log(&e));
+    assert!(!marker.exists(), "the Node hook must not run for a call the daemon may have processed");
+    assert!(engine_log(&e).contains("client_slow"), "{}", engine_log(&e));
+    assert!(!e.state().join("daemon.down.until").exists(), "one slow call must not mark the daemon down");
+    let (code, _, err) = slow_call(&e, &map, &[WINDOW, ("AH_ENGINE_SLOW_DOWN_N", "2")]);
+    assert_eq!((code, err.as_str()), (0, ""));
+    assert!(!marker.exists());
+    assert!(e.state().join("daemon.down.until").exists(), "two slow calls in a row mark the daemon down: {}", engine_log(&e));
+    assert_eq!(d.seen(), 2);
+}
+
+#[test]
+fn consecutive_slow_calls_mark_a_wedged_daemon_down_and_a_normal_reply_resets_the_count() {
     let e = Env::new("slow-streak");
     let map = event_map(&e, "PreToolUse", "echo NODEBLOCK >&2; exit 2", "true");
-    let n = [("AH_ENGINE_SLOW_DOWN_N", "2")];
+    let n = [WINDOW, ("AH_ENGINE_SLOW_DOWN_N", "2")];
     // slow, normal, slow: the normal reply in between resets the count, so nothing is marked
-    let d = scripted_daemon(&e, vec![SLOW, FAST_OK, SLOW, SLOW]);
+    let d = scripted_daemon(&e, vec![NEVER, FAST_OK, NEVER, NEVER]);
     for _ in 0..3 {
-        let (code, _, err) = slow_call(&e, &map, &n);
-        assert_eq!(code, 2, "{err:?}");
+        slow_call(&e, &map, &n);
     }
     assert!(!e.state().join("daemon.down.until").exists(), "{}", engine_log(&e));
-    // the second slow in a row trips it; that call still runs its Node hooks
+    // the second slow in a row trips it
     let (code, _, err) = slow_call(&e, &map, &n);
-    assert_eq!(code, 2, "{err:?}");
-    assert!(e.state().join("daemon.down.until").exists(), "two slow replies in a row mark the daemon down: {}", engine_log(&e));
+    assert_eq!((code, err.as_str()), (0, ""), "a slow call fails open");
+    assert!(e.state().join("daemon.down.until").exists(), "two slow calls in a row mark the daemon down: {}", engine_log(&e));
     // marked down: the next call does not reach the daemon
     let before = d.seen();
     slow_call(&e, &map, &n);

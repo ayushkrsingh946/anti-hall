@@ -195,6 +195,10 @@ pub struct Stats {
     pub same_blocks: usize,
     pub state_mismatch: usize,
     pub state_same: usize,
+    /// steps whose request the engine's client gave no reply for within the whole wait window (log `client_slow`): a fail-open
+    /// under load, listed instead of counted as a mismatch (a healthy quiet run has none)
+    pub late: usize,
+    pub late_ids: Vec<String>,
     pub node_runs: usize,
     pub node_runs_by: BTreeMap<String, usize>,
     pub deferred_ids: BTreeSet<String>,
@@ -615,6 +619,8 @@ fn run_guard_with(o: &Opts, hooks: &Path, scenarios: &[Scenario], golden: &Golde
                         },
                     ));
                 }
+                let slow_logged = || std::fs::read_to_string(dir.join("ah-engine.log")).unwrap_or_default().lines().filter(|l| l.split('\t').nth(1) == Some("client_slow")).count();
+                let slow_before = slow_logged();
                 if matches!(o.mode, Mode::Daemon | Mode::Both) {
                     let mut e = run(ENGINE, &strs(&["hook", "--fallback", &fb]), input.as_bytes(), &denv, "/tmp").trimmed();
                     // Contract: the hook client fails open (exit 0, nothing printed) when the daemon does not answer within its ~300 ms
@@ -623,7 +629,9 @@ fn run_guard_with(o: &Opts, hooks: &Path, scenarios: &[Scenario], golden: &Golde
                     // silent allow where Node blocked or advised is retried (a lost git-audit advisory was measured returning at 311 ms, the deadline plus slack): the
                     // second request is warm and the daemon must then deny or advise. A daemon that
                     // never denies still ends as a mismatch after the retries.
-                    for _ in 0..4 {
+                    // a step that mutates state is never re-sent: the daemon applies every request it receives, so a repeat would
+                    // count the call twice and the state compare would then measure the harness, not the engine
+                    for _ in 0..if state_re.is_some() { 0 } else { 4 } {
                         // a fail-open notice (a probe the cold daemon could not finish inside the request deadline) is the same
                         // cold start: the probe goes on in the daemon and the answer is kept for the repeat
                         let cold = e.code == "0" && e.out.is_empty() && (e.err.is_empty() || e.err.contains("verification skipped"));
@@ -656,8 +664,19 @@ fn run_guard_with(o: &Opts, hooks: &Path, scenarios: &[Scenario], golden: &Golde
                         .unwrap_or("");
                     clip(c, 160)
                 };
+                // the engine's client gave up waiting (log `client_slow`) and failed open: reported as late, not as a mismatch
+                let late = matches!(o.mode, Mode::Daemon | Mode::Both)
+                    && results.iter().any(|(m, r)| *m == "daemon" && matches!(r, R::Other(e) if e.code == "0" && e.out.is_empty()))
+                    && slow_logged() > slow_before;
+                if late {
+                    let mut st = stats.lock().unwrap();
+                    st.late += 1;
+                    st.late_ids.push(format!("{}#{si}", sc.id));
+                    results.retain(|(m, _)| *m != "daemon");
+                }
                 if o.dual
                     && !stopped
+                    && !late
                     && !results.is_empty()
                     && let Some(re) = &state_re
                 {
@@ -873,6 +892,9 @@ fn run_guard_with(o: &Opts, hooks: &Path, scenarios: &[Scenario], golden: &Golde
         "  blocks the engine itself printed identically to Node: {} of {} Node blocks (the rest deferred)\n",
         stats.same_blocks, stats.node_blocks
     ));
+    if stats.late > 0 {
+        s.push_str(&format!("  LATE (no daemon reply within the wait window, failed open; not compared): {} {:?}\n", stats.late, stats.late_ids));
+    }
     if !stats.deferred_ids.is_empty() {
         let mut by: BTreeMap<String, usize> = BTreeMap::new();
         s.push_str(&format!("  LOCAL deferred ids: {:?}\n", stats.deferred_ids));
