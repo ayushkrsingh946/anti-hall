@@ -41,7 +41,7 @@ Same as on Claude Code: `codex/hooks/hooks.json` (and what `install-codex.js` wr
 `sh ".../hooks/ah-hook.sh" <Event> --host codex`, for all ten events. The core is the `ah-engine` binary
 (`~/.anti-hall/ah-engine/bin/ah-engine`, downloaded once by the shared bootstrap and checked against the sha256 pinned in
 `ah-engine.lock`), the trigger asks it: the engine answers natively what it can prove identical to the Node hook and hands
-every other case, during the migration, to that temporary Node compatibility hook (removed in v1.0, when the engine is the only runtime). With no binary, or when the engine cannot answer, those Node
+every other case, during the migration, to that temporary Node compatibility hook (removed in v0.301, when the engine is the only runtime). With no binary, or when the engine cannot answer, those Node
 hooks run. The Codex hook table, its rules, settings and texts are the plugin's `engine/` files (shared with
 Claude, hot-reloaded, with last-known-good and pristine copies). `PermissionRequest`, `PostCompact` and `SubagentStart` have a
 thin trigger but no hook entries yet, so they answer with the neutral no-op. Opt out of the download with
@@ -153,7 +153,9 @@ On Codex, shell writes (`cat >`, `tee`, `sed -i` and similar) reach `edit-guard`
 
 ## Roadmap
 
-**Later: native Windows support** — anti-hall currently supports macOS and Linux (including WSL). Native Windows support is planned for a future release, once the Rust engine has a Windows process-control layer and a non-shell hook wrapper.
+The ordered plan is in [`docs/ROADMAP.md`](https://github.com/talas9/anti-hall/blob/main/docs/ROADMAP.md).
+
+**Later (parked): native Windows support** — anti-hall currently supports macOS and Linux (including WSL). Native Windows support is parked, not promised: it would need a Windows process-control layer and a non-shell hook wrapper in the Rust engine.
 
 ## Documentation
 
