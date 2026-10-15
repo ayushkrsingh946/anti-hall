@@ -154,6 +154,9 @@ fn verify_first_through_the_dispatcher_picks_the_line_the_digest_of_the_raw_byte
 #[test]
 fn verify_first_answers_a_devswarm_primary_itself_and_defers_only_without_a_working_directory() {
     let e = Env::new("vf-primary");
+    // the Primary's own prompt hook (it says its override reminder once per session) is switched off: this test is about the other line
+    std::fs::create_dir_all(e.home().join(".anti-hall")).unwrap();
+    std::fs::write(e.home().join(".anti-hall/settings.json"), r#"{"devswarm":{"parentInbox":false}}"#).unwrap();
     let map = e.map("UserPromptSubmit", "verify-first");
     let args = ["hook", "--event", "UserPromptSubmit", "--fallback-map", map.to_str().unwrap()];
     let p = ups("sp", "x", None);
