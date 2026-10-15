@@ -674,9 +674,10 @@ impl Jev {
         if mode == Mode::Off || (req.trust == Trust::RelaxBlock && req.baseline != Value::Bool(true)) {
             return self.ask(req); // needs no network: nothing to defer
         }
-        let cached = self.cache_key_of(&s, req).filter(|_| resolve_key(&s, s.transport).key.is_some()).is_some_and(|(ck, chain)| {
-            self.cache.get(&ck).is_some_and(|c| c.chain.as_ref().is_none_or(|x| *x == chain))
-        });
+        let cached = self
+            .cache_key_of(&s, req)
+            .filter(|_| resolve_key(&s, s.transport).key.is_some())
+            .is_some_and(|(ck, chain)| self.cache.get(&ck).is_some_and(|c| c.chain.as_ref().is_none_or(|x| *x == chain)));
         if cached {
             return self.ask(req); // a cached answer costs no wait
         }

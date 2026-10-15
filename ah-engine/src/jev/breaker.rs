@@ -19,8 +19,8 @@
 
 use super::settings::Vendor;
 use crate::defaults;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
