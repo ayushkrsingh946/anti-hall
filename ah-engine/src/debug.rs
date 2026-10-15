@@ -70,6 +70,9 @@ fn listed(list: &[&str], module: &str) -> bool {
 
 fn write(module: &str, msg: &str, data: Value) {
     let path = crate::paths::dir().join(defaults::text("files.debug_log"));
+    if let Some(dir) = path.parent() {
+        crate::discard::harmless(std::fs::create_dir_all(dir)); // keep: a state dir that is not there yet must not swallow the first debug lines
+    }
     if std::fs::metadata(&path).map(|m| m.len() > defaults::num("diagnostics.debug_log_max_bytes")).unwrap_or(false) {
         // keep: rotation that raced another writer leaves the log growing one more line, nothing is lost
         crate::discard::harmless(std::fs::rename(&path, path.with_extension("ndjson.1")));
@@ -191,10 +194,15 @@ mod tests {
         crate::paths::dir().join(defaults::text("files.debug_log"))
     }
 
-    /// The lines this process wrote (other test processes append to the same file).
+    /// The lines this test wrote: this process (other test processes append to the same file) and this test's own thread (the
+    /// tests of this process share one log file, so another test's lines would otherwise be counted, by test order).
     fn own_lines(path: &std::path::Path) -> Vec<Value> {
         let text = std::fs::read_to_string(path).unwrap_or_default();
-        text.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).filter(|v| v["pid"] == json!(std::process::id())).collect()
+        let me = std::thread::current().name().unwrap_or_default().to_string();
+        text.lines()
+            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+            .filter(|v| v["pid"] == json!(std::process::id()) && v["thread"] == json!(me))
+            .collect()
     }
 
     #[test]

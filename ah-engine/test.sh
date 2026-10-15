@@ -39,6 +39,17 @@ else
   cargo test --release "$@"
   rc=$?
 fi
+# The reload-memory guard (tests/mem_reload.rs) has a release-build heap cap and is ignored in debug builds: run it here, in
+# release, with --include-ignored, print its figure, and fail the gate when it did not run, so it cannot drop out silently.
+if [ "$rc" -eq 0 ]; then
+  mem_out="$(cargo test --release --test mem_reload -- --include-ignored --nocapture 2>&1)"
+  mem_rc=$?
+  printf '%s\n' "$mem_out" | grep -E 'RELOAD x|test result' >&2
+  if [ "$mem_rc" -ne 0 ] || ! printf '%s\n' "$mem_out" | grep -q '1 passed'; then
+    echo "FAIL: tests/mem_reload.rs did not pass in release" >&2
+    rc=1
+  fi
+fi
 if [ "$rc" -eq 0 ]; then
   sh tests/wrapper.sh && sh tests/bootstrap.sh
   rc=$?
