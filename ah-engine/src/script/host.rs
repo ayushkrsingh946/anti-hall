@@ -116,6 +116,7 @@ pub fn with_call<R>(st: Settings, f: impl FnOnce() -> R) -> R {
     super::host_proc::reset_call();
     super::host_mesh::reset_call();
     super::host_childturn::reset_call();
+    super::host_parentinbox::reset_call();
     super::host_spawn::reset_call();
     let r = f();
     // a lock a script still holds when its call ends (an exception, an interrupt) is released here, never left to go stale
