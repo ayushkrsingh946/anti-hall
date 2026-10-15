@@ -306,7 +306,19 @@ fn exchange_ack(sock: &Path, payload: &[u8], deadline: Duration, window: Duratio
             Once::Legacy => return exchange_inner(sock, payload, deadline, window),
             Once::NoAck => {
                 health::log_event("client_ack_timeout", "daemon", defaults::text("msg.client_ack_timeout"));
+                // a daemon that never acknowledges and has stopped beating is hung, not slow: the replacement path, as in the original exchange
+                if let Some((hung, confirmed)) = stale_heartbeat() {
+                    return Exch::Hung(hung, confirmed);
+                }
                 if retries >= defaults::num("wire.max_retries") || window.saturating_sub(began.elapsed()) < defaults::millis("wire.retry_min_ms") {
+                    // no more resends: like the original exchange, keep watching the daemon's heartbeat for the rest of the window, so a
+                    // daemon that went silent and stopped beating is reported hung (and replaced) instead of merely slow
+                    while window.saturating_sub(began.elapsed()) > Duration::ZERO {
+                        if let Some((hung, confirmed)) = stale_heartbeat() {
+                            return Exch::Hung(hung, confirmed);
+                        }
+                        std::thread::sleep(defaults::millis("client.heartbeat_poll_ms").min(window.saturating_sub(began.elapsed())));
+                    }
                     return Exch::Slow(defaults::text("msg.client_ack_timeout").into());
                 }
                 retries += 1;
