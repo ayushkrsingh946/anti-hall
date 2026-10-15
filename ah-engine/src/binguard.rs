@@ -31,7 +31,7 @@ pub fn sha256_file(p: &Path) -> Option<String> {
         if n == 0 {
             break;
         }
-        ctx.update(&buf[..n]);
+        ctx.update(buf.get(..n)?);
     }
     Some(ctx.finish().as_ref().iter().map(|b| format!("{b:02x}")).collect())
 }
