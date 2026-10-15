@@ -35,7 +35,7 @@ pub fn wanted(w: &Wire, cfg: &Config) -> Vec<(PathBuf, Filter, Role)> {
         out.push((root.join(defaults::text(k)), cfg.all_filter(), Role::State));
     }
     let snap = w.rt.current();
-    let descs = facts::descriptors(&w.home); // read once for every workspace
+    let descs = facts::descriptors_with(&w.home, Some(w.rt.read_cache())); // read once for every workspace
     for ws in snap.workspaces.values().filter(|x| x.lifecycle.value == Lifecycle::Active) {
         let Some(wt) = ws.worktree.as_deref() else { continue };
         if let Some(key) = facts::repo_key(wt) {

@@ -1096,3 +1096,170 @@ fn the_transcript_gate_acts_on_growth_once_per_interval_and_never_loses_held_bac
     assert!(g.observe("ws-1", std::slice::from_ref(&f), t0 + Duration::from_secs(10)));
     assert!(g.observe("ws-2", std::slice::from_ref(&f), t0 + Duration::from_secs(10)));
 }
+
+// ---- the scale test: the budget -------------------------------------------------------------------------------------------
+
+/// A mesh store for the worktree `wt` (see [`mesh_store`]): SQLite-backed with its WAL and index on disk and no process holding it.
+fn mesh_store_of(w: &World, wt: &Path, tag: &str) -> PathBuf {
+    let key = facts::repo_key(wt.to_str().unwrap()).unwrap();
+    let dir = w.home.join(".anti-hall/devswarm/store").join(key);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("BACKEND"), "sqlite\n").unwrap();
+    let src = w.dir.join(format!("store-src-{tag}.db"));
+    let c = Connection::open(&src).unwrap();
+    c.pragma_update(None, "journal_mode", "wal").unwrap();
+    c.execute_batch("CREATE TABLE t (x INTEGER); INSERT INTO t VALUES (1);").unwrap();
+    for sfx in ["", "-wal", "-shm"] {
+        std::fs::copy(format!("{}{sfx}", src.display()), dir.join(format!("devswarm.db{sfx}"))).unwrap();
+    }
+    drop(c);
+    dir
+}
+
+/// CPU seconds used so far by the threads `own` names (by thread id).
+fn cpu_of(own: &std::collections::HashSet<u64>) -> f64 {
+    ah_engine::threads::snapshot().iter().filter(|t| own.contains(&t.tid)).map(|t| t.cpu_us as f64 / 1e6).sum()
+}
+
+/// A realistic DevSwarm machine, driven for a while; returns (average CPU % of one core of the engine's threads, resident MB at
+/// the end, reconciles per second, thread wakes per second). `n` active workspaces each have their own repository, mesh store,
+/// transcript and descriptor; on top of them is the weight of a long-lived machine (300 archived builders, 100 descriptors, 300
+/// heartbeats). Every session appends to its transcript once a second, every workspace rewrites its heartbeat every 5 s, and
+/// every mesh store receives a commit every 10 s.
+fn drive(tag: &str, n: usize, warm: Duration, window: Duration) -> (f64, f64, f64, f64, f64) {
+    let w = world(tag);
+    // SAFETY: nothing else in this test reads the environment while it runs alone (nextest: one process per test); the engine state
+    // dir (the statusline line file, one write per reconcile) goes to the scratch state dir, never the real home
+    unsafe { std::env::set_var("AH_ENGINE_DIR", &w.state) };
+    let root = w.home.join(".anti-hall/devswarm");
+    let c = Connection::open(&w.db).unwrap();
+    let mut stores = Vec::new();
+    let mut wts = vec![(1usize, w.wt.clone())];
+    for i in 2..=n {
+        let wt = w.dir.join(format!("wt-{i}"));
+        std::fs::create_dir_all(&wt).unwrap();
+        sh(&wt, &["init", "-q"]);
+        sh(&wt, &["commit", "-q", "--allow-empty", "-m", "x"]);
+        c.execute(&format!("INSERT INTO builders VALUES ('ws-{i}','r1','b{i}',?1,'Child {i}',0,NULL,'standard',1,NULL)"), params![wt.to_str().unwrap()])
+            .unwrap();
+        write(&root.join(format!("workspaces/ws-{i}.json")), &json!({"id": format!("ws-{i}"), "worktreePath": wt, "sessionId": format!("s{i}")}));
+        wts.push((i, wt));
+    }
+    for (i, wt) in &wts {
+        write(&root.join(format!("heartbeats/ws-{i}.json")), &json!({"ts": now()}));
+        stores.push(mesh_store_of(&w, wt, &format!("{i}")).join("devswarm.db"));
+        let p = facts::transcript_path(&w.home, wt.to_str().unwrap(), &format!("s{i}"));
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(&p, "{}\n").unwrap();
+    }
+    for i in 0..300 {
+        c.execute(&format!("INSERT INTO builders VALUES ('old-{i}','r1','o{i}','/gone/{i}','Old {i}',1,NULL,'standard',0,NULL)"), []).unwrap();
+        if i < 100 {
+            write(
+                &root.join(format!("workspaces/old-{i}.json")),
+                &json!({"id": format!("old-{i}"), "worktreePath": format!("/gone/{i}"), "sessionId": format!("o{i}")}),
+            );
+        }
+        write(&root.join(format!("heartbeats/old-{i}.json")), &json!({"ts": now() - 86_400_000}));
+    }
+    drop(c);
+    let rss_before = ah_engine::limits::rss_kb() as f64 / 1024.0;
+    let before: std::collections::HashSet<u64> = ah_engine::threads::snapshot().iter().map(|t| t.tid).collect();
+    let (sweeper, _) = recording_sweeper();
+    let wire = Arc::new(wire(&w, &Arc::new(Stub::default()), Executor::Off).with_jev_sweeper(sweeper));
+    let stop = Arc::new(AtomicBool::new(false));
+    let (wr, st) = (wire.clone(), stop.clone());
+    let h = std::thread::Builder::new().name("ah-dswire".into()).spawn(move || watching::run(&wr, &|| st.load(Ordering::SeqCst))).unwrap();
+    let load_stop = Arc::new(AtomicBool::new(false));
+    let (ls, home, wts2) = (load_stop.clone(), w.home.clone(), wts.clone());
+    let load = std::thread::spawn(move || {
+        let mut tick = 0u64;
+        while !ls.load(Ordering::SeqCst) {
+            for (i, wt) in &wts2 {
+                if tick % 10 == (*i as u64) % 10 {
+                    let p = facts::transcript_path(&home, wt.to_str().unwrap(), &format!("s{i}"));
+                    std::fs::OpenOptions::new().append(true).open(&p).unwrap().write_all(format!("{{\"n\":{tick}}}\n").as_bytes()).unwrap();
+                }
+                if tick % 50 == (*i as u64) % 50 {
+                    write(&home.join(format!(".anti-hall/devswarm/heartbeats/ws-{i}.json")), &json!({"ts": now()}));
+                }
+                if tick % 100 == (*i as u64) % 100 {
+                    let key = facts::repo_key(wt.to_str().unwrap()).unwrap();
+                    let db = home.join(".anti-hall/devswarm/store").join(key).join("devswarm.db");
+                    Connection::open(db).unwrap().execute("INSERT INTO t VALUES (7)", []).unwrap();
+                }
+            }
+            tick += 1;
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    });
+    std::thread::sleep(warm);
+    let own: std::collections::HashSet<u64> =
+        ah_engine::threads::snapshot().iter().filter(|t| !before.contains(&t.tid) && t.name.starts_with("ah-")).map(|t| t.tid).collect();
+    assert!(!own.is_empty(), "the engine's threads were found");
+    let (c0, r0, k0, t0) = (cpu_of(&own), wire.reconciles(), watching::work::snapshot(), Instant::now());
+    std::thread::sleep(window);
+    let (cpu, wall, rec) = (cpu_of(&own) - c0, t0.elapsed().as_secs_f64(), wire.reconciles() - r0);
+    let wakes = watching::work::snapshot().iter().find(|(k, _)| *k == "wakes").map_or(0, |x| x.1) - k0.iter().find(|(k, _)| *k == "wakes").map_or(0, |x| x.1);
+    let rss_mb = ah_engine::limits::rss_kb() as f64 / 1024.0;
+    load_stop.store(true, Ordering::SeqCst);
+    load.join().unwrap();
+    stop.store(true, Ordering::SeqCst);
+    h.join().unwrap();
+    (100.0 * cpu / wall, rss_mb, rss_mb - rss_before, rec as f64 / wall, wakes as f64 / wall)
+}
+
+#[test]
+fn the_thread_stays_inside_its_budget_at_scale() {
+    let b: toml::Table = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/budgets.toml")).unwrap().parse().unwrap();
+    let b = &b["devswarm_scale"];
+    let f = |k: &str| b[k].as_float().unwrap_or_else(|| b[k].as_integer().unwrap() as f64);
+    let (cpu_budget, rss_budget) = (f("cpu_pct"), f("rss_mb"));
+    let factor = if cfg!(debug_assertions) { f("debug_factor") } else { 1.0 };
+    let (window, warm) = (Duration::from_secs(f("window_s") as u64), Duration::from_secs(f("warmup_s") as u64));
+    let (cpu, rss, grown, rec, wakes) = drive("scale", 10, warm, window);
+    eprintln!(
+        "SCALE 1 primary + 10 workspaces + 10 sessions: cpu={cpu:.2}% (budget {cpu_budget}% x{factor}) rss={rss:.1} MB (+{grown:.1} since the start; budget {rss_budget}) reconciles={rec:.2}/s wakes={wakes:.2}/s"
+    );
+    assert!(cpu < cpu_budget * factor, "the DevSwarm threads used {cpu:.2}% of one core, over the {cpu_budget}% budget (x{factor})");
+    assert!(grown < rss_budget, "the DevSwarm machinery grew the process by {grown:.1} MB, over the {rss_budget} MB budget");
+    // the whole process counts when it is alone (nextest runs each test in its own process; `cargo test` shares one with every other test)
+    if std::env::var_os("NEXTEST").is_some() {
+        assert!(rss < rss_budget, "the process holds {rss:.1} MB, over the {rss_budget} MB budget");
+    }
+}
+
+#[test]
+fn the_read_cache_parses_a_settled_file_once_and_never_trusts_a_fresh_or_changed_one() {
+    use ah_engine::devswarm_rt::sources::ReadCache;
+    ah_engine::defaults::init().unwrap();
+    let t = TempDir::new("rcache");
+    std::fs::create_dir_all(&t.0).unwrap();
+    let f = t.0.join("hb.json");
+    std::fs::write(&f, r#"{"ts": 111}"#).unwrap();
+    age(&f, 60_000); // settled: well past devswarm_rt.probe_cache_racy_ms
+    let c = ReadCache::new();
+    c.begin();
+    let (a, b) = (c.json(&f).unwrap(), c.json(&f).unwrap());
+    assert!(Arc::ptr_eq(&a, &b), "an unchanged settled file is parsed once");
+    // changed in place with the same size: only its modification time differs
+    std::fs::write(&f, r#"{"ts": 222}"#).unwrap();
+    age(&f, 30_000);
+    let d = c.json(&f).unwrap();
+    assert!(!Arc::ptr_eq(&a, &d), "a changed file is read again");
+    assert_eq!(format!("{:?}", d.get("ts")), format!("{:?}", ah_engine::checks::guardkit::ojson::OVal::parse(r#"{"ts": 222}"#).unwrap().get("ts")));
+    // a file modified just now could be rewritten within the clock's granularity: never kept
+    let g = t.0.join("fresh.json");
+    std::fs::write(&g, r#"{"ts": 1}"#).unwrap();
+    let (x, y) = (c.json(&g).unwrap(), c.json(&g).unwrap());
+    assert!(!Arc::ptr_eq(&x, &y), "a fresh file is read every time");
+    // what a reconcile did not use is dropped at its end
+    c.end();
+    c.begin();
+    c.end();
+    let e = c.json(&f).unwrap();
+    assert!(!Arc::ptr_eq(&d, &e), "an entry unused by a whole reconcile is gone");
+    // an unreadable file is nothing, not a stale answer
+    std::fs::remove_file(&f).unwrap();
+    assert!(c.json(&f).is_none());
+}

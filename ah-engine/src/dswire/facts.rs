@@ -43,8 +43,27 @@ fn argv_of(v: Option<&Value>) -> Option<Vec<String>> {
     (out.len() == a.len() && !out.is_empty()).then_some(out)
 }
 
+/// The descriptor in the file at `path`: `None` when it cannot be read or lacks an id, a worktree or a session.
+pub fn descriptor_at(path: &Path) -> Option<Desc> {
+    let v = std::fs::read_to_string(path)
+        .ok()
+        .inspect(|t| crate::devswarm_rt::sources::count_read(t.len()))
+        .and_then(|t| serde_json::from_str::<Value>(&t).ok())?;
+    let s = |k: &str| v.get(key(k)).and_then(Value::as_str).unwrap_or_default().to_string();
+    let (id, worktree, session) = (s("id"), s("worktree"), s("session"));
+    if worktree.is_empty() || session.is_empty() || !is_safe_id(&id) {
+        return None;
+    }
+    Some(Desc { id, worktree, session, nudge: argv_of(v.get(key("nudge"))), escalate: argv_of(v.get(key("escalate"))) })
+}
+
 /// Every readable descriptor that has an id, a worktree and a session.
 pub fn descriptors(home: &Path) -> Vec<Desc> {
+    descriptors_with(home, None)
+}
+
+/// [`descriptors`], answering from `cache` the files whose stat data is unchanged (the reconcile's read; an action's re-check passes none).
+pub fn descriptors_with(home: &Path, cache: Option<&crate::devswarm_rt::sources::ReadCache>) -> Vec<Desc> {
     let dir = devswarm_root(home).join(defaults::text("mesh_write.dir_workspaces"));
     let suffix = defaults::text("mesh_write.json_suffix");
     let mut out = Vec::new();
@@ -53,19 +72,11 @@ pub fn descriptors(home: &Path) -> Vec<Desc> {
         if !e.file_name().to_string_lossy().ends_with(suffix) {
             continue;
         }
-        let Some(v) = std::fs::read_to_string(e.path())
-            .ok()
-            .inspect(|t| crate::devswarm_rt::sources::count_read(t.len()))
-            .and_then(|t| serde_json::from_str::<Value>(&t).ok())
-        else {
-            continue;
+        let d = match cache {
+            Some(c) => c.descriptor(&e.path()),
+            None => descriptor_at(&e.path()),
         };
-        let s = |k: &str| v.get(key(k)).and_then(Value::as_str).unwrap_or_default().to_string();
-        let (id, worktree, session) = (s("id"), s("worktree"), s("session"));
-        if worktree.is_empty() || session.is_empty() || !is_safe_id(&id) {
-            continue;
-        }
-        out.push(Desc { id, worktree, session, nudge: argv_of(v.get(key("nudge"))), escalate: argv_of(v.get(key("escalate"))) });
+        out.extend(d);
     }
     out.sort_by(|a, b| a.id.cmp(&b.id));
     out

@@ -1652,6 +1652,7 @@ takes snapshots; the client waits out the window, so no worker is held.
 | `dswire_batches`, `dswire_paths` | change batches the watcher delivered to the DevSwarm thread, and the paths in them |
 | `dswire_reconciles` | full re-reads of the DevSwarm state (at most one per `devswarm_wire.reconcile_min_gap_ms`) |
 | `dswire_reconciles_deferred` | reconcile requests folded into one already waiting for the gap |
+| `probe_cache_hits` | file reads a reconcile answered from the read cache (an unchanged heartbeat, plan or descriptor costs one `stat`; files modified within `devswarm_rt.probe_cache_racy_ms` are always read) |
 | `probe_files_read`, `probe_bytes_read` | files (and bytes) the DevSwarm probes read: heartbeats, descriptors, plans |
 
 Healthy idle: a reconcile every few seconds at most, `ah-dswire` well under 1%. A reconcile rate stuck at one per gap with no

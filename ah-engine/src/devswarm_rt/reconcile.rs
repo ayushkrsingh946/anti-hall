@@ -130,6 +130,8 @@ pub struct Rt {
     emitted: AtomicU64,
     mismatches: AtomicU64,
     published: Mutex<(u64, u64, u64)>,
+    /// What the reconciles read from the files, kept while the files are unchanged.
+    cache: Arc<sources::ReadCache>,
     /// Serialises runs: two overlapping reconciles would diff against the same base and double-emit.
     run: Mutex<()>,
 }
@@ -154,6 +156,7 @@ impl Rt {
             emitted: AtomicU64::new(0),
             mismatches: AtomicU64::new(0),
             published: Mutex::new((0, 0, 0)),
+            cache: Arc::new(sources::ReadCache::new()),
             run: Mutex::new(()),
         }
     }
@@ -254,9 +257,17 @@ impl Rt {
     /// Read the sources from the real home and reconcile (the production path).
     pub fn run_live(&self, cause: Cause, gh: Option<&dyn GithubState>, db: Option<&Db>) -> Report {
         let now = crate::health::now_ms() as i64;
-        let probe = FsProbe::new(&self.det.home, now);
+        self.cache.begin();
+        let probe = FsProbe::new(&self.det.home, now).with_cache(self.cache.clone());
         let app = self.det.app_db.as_deref().and_then(sources::read_app);
-        self.run(cause, &Inputs { app: app.as_ref(), probe: &probe as &dyn Probe, gh, now }, db)
+        let report = self.run(cause, &Inputs { app: app.as_ref(), probe: &probe as &dyn Probe, gh, now }, db);
+        self.cache.end();
+        report
+    }
+
+    /// The file read cache (the watch sync reads the descriptors through it too).
+    pub fn read_cache(&self) -> &Arc<sources::ReadCache> {
+        &self.cache
     }
 
     /// Reconcile against the given sources: derive, diff, swap, remember the edges, persist.

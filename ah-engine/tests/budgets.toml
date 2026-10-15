@@ -1,0 +1,14 @@
+# Resource budgets that tests enforce (a test that exceeds one FAILS the gate). Local tooling thresholds live here, not in the
+# engine: they are not settings of the shipped plugin.
+
+[devswarm_scale]
+# The scale test (tests/it/devswarm_wire.rs, `the_thread_stays_inside_its_budget_at_scale`): 1 primary + 10 workspaces + 10
+# sessions appending, on top of the weight of a long-lived machine (300 archived builders, 100 descriptors, 300 heartbeats).
+# Owner budget 2026-10-15: under 2% of one core and under 100 MB with a realistic DevSwarm and session load.
+cpu_pct = 2.0
+rss_mb = 100.0
+# A build without optimisations runs the same work slower; the CPU budget is set for the release binary the gate builds.
+debug_factor = 10.0
+# Seconds measured after the warm-up.
+window_s = 30
+warmup_s = 5

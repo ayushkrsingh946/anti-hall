@@ -128,6 +128,7 @@ pub fn work() -> Value {
     }
     m.insert("dswire_reconciles".into(), json!(crate::dswire::global().map_or(0, |w| w.reconciles())));
     m.insert("probe_files_read".into(), json!(crate::devswarm_rt::sources::PROBE_FILES_READ.load(Relaxed)));
+    m.insert("probe_cache_hits".into(), json!(crate::devswarm_rt::sources::PROBE_CACHE_HITS.load(Relaxed)));
     m.insert("probe_bytes_read".into(), json!(crate::devswarm_rt::sources::PROBE_BYTES_READ.load(Relaxed)));
     Value::Object(m)
 }
