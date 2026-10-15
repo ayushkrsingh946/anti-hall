@@ -767,7 +767,10 @@ fn the_probe_warm_up_never_slows_the_first_reply_and_fills_the_cache() {
         wait_for(|| {
             fn kept(v: &serde_json::Value) -> bool {
                 match v {
-                    serde_json::Value::Object(m) => (m.get("name").and_then(|n| n.as_str()) == Some("spawn_probe") && m.get("bytes").and_then(|b| b.as_u64()).unwrap_or(0) > 0) || m.values().any(kept),
+                    serde_json::Value::Object(m) => {
+                        (m.get("name").and_then(|n| n.as_str()) == Some("spawn_probe") && m.get("bytes").and_then(|b| b.as_u64()).unwrap_or(0) > 0)
+                            || m.values().any(kept)
+                    }
                     serde_json::Value::Array(a) => a.iter().any(kept),
                     _ => false,
                 }
@@ -993,7 +996,10 @@ fn a_full_descriptor_table_backs_the_accept_loop_off_instead_of_spinning() {
 fn a_wedged_daemon_is_marked_down_only_after_a_streak_of_slow_replies() {
     // one slow call is not a down daemon (R0 P0); client.slow_down_n (5) in a row are: those calls fail open (no Node hook), then
     // later clients skip the daemon and nothing is respawned.
-    let e = Env::new("slowok", &[("AH_ENGINE_NOSPAWN", "1"), ("AH_ENGINE_DEADLINE_MS", "150"), ("AH_ENGINE_SLOW_FALLBACK_MAX_MS", "700"), ("AH_ENGINE_BREAKER_N", "3")]);
+    let e = Env::new(
+        "slowok",
+        &[("AH_ENGINE_NOSPAWN", "1"), ("AH_ENGINE_DEADLINE_MS", "150"), ("AH_ENGINE_SLOW_FALLBACK_MAX_MS", "700"), ("AH_ENGINE_BREAKER_N", "3")],
+    );
     std::fs::create_dir_all(e.eng()).unwrap();
     let l = UnixListener::bind(e.eng().join("e.sock")).unwrap();
     std::thread::spawn(move || {
@@ -1023,7 +1029,16 @@ fn a_wedged_daemon_is_marked_down_only_after_a_streak_of_slow_replies() {
 #[test]
 fn a_non_slow_reply_between_slow_ones_breaks_the_slow_streak() {
     // Codex delta F5: slow, BUSY, slow with slow_down_n = 2 is not two slow replies in a row; the completed BUSY reply clears the streak
-    let e = Env::new("slowbusy", &[("AH_ENGINE_NOSPAWN", "1"), ("AH_ENGINE_DEADLINE_MS", "150"), ("AH_ENGINE_SLOW_FALLBACK_MAX_MS", "700"), ("AH_ENGINE_SLOW_DOWN_N", "2"), ("AH_ENGINE_BREAKER_N", "9")]);
+    let e = Env::new(
+        "slowbusy",
+        &[
+            ("AH_ENGINE_NOSPAWN", "1"),
+            ("AH_ENGINE_DEADLINE_MS", "150"),
+            ("AH_ENGINE_SLOW_FALLBACK_MAX_MS", "700"),
+            ("AH_ENGINE_SLOW_DOWN_N", "2"),
+            ("AH_ENGINE_BREAKER_N", "9"),
+        ],
+    );
     std::fs::create_dir_all(e.eng()).unwrap();
     let l = UnixListener::bind(e.eng().join("e.sock")).unwrap();
     let seen = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -1068,7 +1083,13 @@ fn wrapper_returns_the_guards_block_when_the_daemon_is_slow() {
     let max_ms = clamped_num("client.slow_fallback_max_ms", 3000);
     let (out, code, dt) = e.wrapper_hook(DENY_IN);
     println!("TIMING wrapper slow-daemon-delayed-deny wall_ms={:.1}", dt.as_secs_f64() * 1000.0);
-    assert_eq!(code, 2, "a delayed deny through the wrapper must block, not allow: out={out:?} diag={:?} log={}", std::fs::read_to_string(&diag), e.health_log());
+    assert_eq!(
+        code,
+        2,
+        "a delayed deny through the wrapper must block, not allow: out={out:?} diag={:?} log={}",
+        std::fs::read_to_string(&diag),
+        e.health_log()
+    );
     assert!(dt < Duration::from_millis(max_ms), "slow-daemon call took {dt:?}, bound is client.slow_fallback_max_ms = {max_ms} ms");
     // a daemon that is merely absent keeps the fail-fast budget
     let down = Env::new("slowblock-down", &[("AH_ENGINE_NOSPAWN", "1")]);
@@ -1133,7 +1154,15 @@ fn dying_server(e: &Env, reset: bool) {
             if reset {
                 let lin = libc::linger { l_onoff: 1, l_linger: 0 };
                 // SAFETY: `s` is a live socket fd and `lin` is a valid `linger` of the size passed.
-                unsafe { libc::setsockopt(std::os::fd::AsRawFd::as_raw_fd(&s), libc::SOL_SOCKET, libc::SO_LINGER, (&raw const lin).cast(), std::mem::size_of::<libc::linger>() as libc::socklen_t) };
+                unsafe {
+                    libc::setsockopt(
+                        std::os::fd::AsRawFd::as_raw_fd(&s),
+                        libc::SOL_SOCKET,
+                        libc::SO_LINGER,
+                        (&raw const lin).cast(),
+                        std::mem::size_of::<libc::linger>() as libc::socklen_t,
+                    )
+                };
             }
             drop(s);
         }

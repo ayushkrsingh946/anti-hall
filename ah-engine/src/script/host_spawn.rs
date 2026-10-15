@@ -420,10 +420,13 @@ mod tests {
     fn sp_06_no_budget_left_starts_one_warm_worker_and_the_next_request_hits_the_cache() {
         let _g = worker_lock();
         // workers left by the cap test (sleeping probes) finish first, so a slot is free
-        assert!((0..300).any(|_| {
-            std::thread::sleep(Duration::from_millis(50));
-            WORKERS.load(std::sync::atomic::Ordering::SeqCst) == 0
-        }), "earlier workers drain");
+        assert!(
+            (0..300).any(|_| {
+                std::thread::sleep(Duration::from_millis(50));
+                WORKERS.load(std::sync::atomic::Ordering::SeqCst) == 0
+            }),
+            "earlier workers drain"
+        );
         let count = std::env::temp_dir().join(format!("ah-sp-warm-count-{}", std::process::id()));
         crate::discard::harmless(std::fs::remove_file(&count));
         let env = fake_python("warm", &format!("#!/bin/sh\necho x >>{}\necho Python 3.12.1\n", count.display()));

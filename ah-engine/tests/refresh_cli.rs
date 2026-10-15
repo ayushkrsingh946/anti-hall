@@ -48,7 +48,13 @@ impl Scratch {
     }
     fn run(&self, extra: &[&str]) -> Value {
         let out = self.raw(extra);
-        assert!(out.status.success(), "refresh failed ({:?}): stderr {} stdout {}", out.status, String::from_utf8_lossy(&out.stderr), String::from_utf8_lossy(&out.stdout));
+        assert!(
+            out.status.success(),
+            "refresh failed ({:?}): stderr {} stdout {}",
+            out.status,
+            String::from_utf8_lossy(&out.stderr),
+            String::from_utf8_lossy(&out.stdout)
+        );
         serde_json::from_slice(&out.stdout).unwrap_or_else(|e| panic!("{e}: {}", String::from_utf8_lossy(&out.stdout)))
     }
     /// A run whose pending probe fails: the exit status is non-zero (so the scheduler retries it) and the report is still printed.

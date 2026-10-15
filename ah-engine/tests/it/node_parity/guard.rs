@@ -619,7 +619,13 @@ fn run_guard_with(o: &Opts, hooks: &Path, scenarios: &[Scenario], golden: &Golde
                         },
                     ));
                 }
-                let slow_logged = || std::fs::read_to_string(dir.join("ah-engine.log")).unwrap_or_default().lines().filter(|l| l.split('\t').nth(1) == Some("client_slow")).count();
+                let slow_logged = || {
+                    std::fs::read_to_string(dir.join("ah-engine.log"))
+                        .unwrap_or_default()
+                        .lines()
+                        .filter(|l| l.split('\t').nth(1) == Some("client_slow"))
+                        .count()
+                };
                 let slow_before = slow_logged();
                 if matches!(o.mode, Mode::Daemon | Mode::Both) {
                     let mut e = run(ENGINE, &strs(&["hook", "--fallback", &fb]), input.as_bytes(), &denv, "/tmp").trimmed();
