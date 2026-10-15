@@ -1600,8 +1600,14 @@ test_cold_guard_wait_respects_the_hook_budget_and_a_warm_daemon() {
   # a warm daemon (socket already bound): straight to the engine, no kick
   : >"$cg_log"
   printf '@PreToolUse\t10\n*\t10\ttrue\n' >"$cg_dir/list"
-  perl -MIO::Socket::UNIX -e '$s = IO::Socket::UNIX->new(Local => $ARGV[0], Listen => 1) or exit 1' "$cg_state/e.sock" || ok=0
+  # a daemon that LISTENS (the launcher tells a live socket from a stale socket file by connecting to it)
+  perl -MIO::Socket::UNIX -e '$s = IO::Socket::UNIX->new(Local => $ARGV[0], Listen => 5) or exit 1; sleep 60' "$cg_state/e.sock" &
+  cg_listener=$!
+  n=0
+  while [ ! -S "$cg_state/e.sock" ] && [ "$n" -lt 100 ]; do sleep 0.05; n=$((n + 1)); done
   cg_run PreToolUse sess-a
+  kill "$cg_listener" 2>/dev/null || true
+  wait "$cg_listener" 2>/dev/null || true
   [ "$cg_rc" -eq 2 ] && ! grep -q ColdStartKick "$cg_log" || ok=0
   # the wait is off at 0
   rm -f "$cg_state/e.sock"

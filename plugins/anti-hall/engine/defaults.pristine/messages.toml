@@ -598,3 +598,75 @@ value = "usage: ah-engine mesh <roster|unread|read|dump> --db <devswarm.db> [--i
 [msg.err_mesh_range]
 doc = "A store value is an integer JavaScript cannot represent exactly, which Node's reader rejects too. Placeholder: {value}."
 value = "integer {value} is out of range for a JavaScript number"
+
+[msg.launcher_ignored_knobs]
+doc = "Printed when test-only variables are set without the test flag; {vars} lists them."
+value = "anti-hall: ignoring test-only variables (need AH_WRAPPER_TEST=1): {vars}"
+
+[msg.launcher_bad_host]
+doc = "Printed when --host names a host the launcher does not serve; the default host is used."
+value = "anti-hall: ignoring unknown --host value"
+
+[msg.launcher_no_doctor]
+doc = "Printed by --doctor when the doctor script is missing."
+value = "anti-hall: ah-doctor.sh is missing next to ah-hook.sh; reinstall the plugin"
+
+[msg.launcher_doctor_failed]
+doc = "Printed by --doctor when the doctor script cannot be started; {err} is the reason."
+value = "anti-hall: cannot run ah-doctor.sh: {err}"
+
+[msg.launcher_fail_closed]
+doc = "Printed when a guard event is blocked because the launcher cannot run it safely; {event} is the event, {why} the reason."
+value = "anti-hall: fail closed for {event}: {why}"
+
+[msg.launcher_fail_open_stop]
+doc = "Printed instead of blocking when the event is a stop hook that is already active; {event} and {why} as above."
+value = "anti-hall: fail open for {event} because stop_hook_active is true: {why}"
+
+[msg.launcher_why_timeout_s]
+doc = "Reason: the seconds budget knob is not a positive integer."
+value = "AH_HOOK_TIMEOUT_S must be a positive integer"
+
+[msg.launcher_why_timeout_ms]
+doc = "Reason: the milliseconds budget knob is not a positive integer."
+value = "AH_HOOK_TIMEOUT_MS must be a positive integer"
+
+[msg.launcher_why_fallback_unavailable]
+doc = "Reason: the fallback runner could not be started."
+value = "fallback runner unavailable"
+
+[msg.launcher_why_fallback_died]
+doc = "Reason: the fallback runner died without an exit code."
+value = "fallback runner died"
+
+[msg.launcher_why_fallback_payload]
+doc = "Reason: the payload was larger than the launcher keeps, so the fallback runner cannot be given it."
+value = "payload too large to replay to the fallback runner"
+
+[msg.launcher_internal]
+doc = "Printed (once) when the launcher itself failed and let the hook through; {what} is the failure."
+value = "anti-hall: launcher internal failure, hook let through: {what}"
+
+[msg.launcher_mem_hard]
+doc = "Printed when the launcher passed its hard heap limit and let the hook through."
+value = "anti-hall: launcher memory limit reached, hook let through"
+
+[msg.launcher_cpu_hard]
+doc = "Printed when the launcher passed its hard CPU limit and let the hook through."
+value = "anti-hall: launcher CPU limit reached, hook let through"
+
+[msg.launcher_wall_hard]
+doc = "Printed when the launcher passed its wall-clock backstop and let the hook through."
+value = "anti-hall: launcher time limit reached, hook let through"
+
+[msg.launcher_config_invalid]
+doc = "Log line when a defaults file is missing or invalid and the built-in copy is used; {file} names it."
+value = "defaults file unusable, built-in values used: {file}"
+
+[msg.launcher_selftest_ok]
+doc = "Selftest line for a passing check; {check} names it."
+value = "ok {check}"
+
+[msg.launcher_selftest_fail]
+doc = "Selftest line for a failing check; {check} names it, {why} the reason."
+value = "FAIL {check}: {why}"
