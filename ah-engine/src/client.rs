@@ -62,6 +62,15 @@ fn wait_window(deadline: Duration) -> Duration {
     deadline.max(ends)
 }
 
+/// Re-arm the read timeout for the rest of the wait window. macOS refuses SO_RCVTIMEO (EINVAL) once the daemon has replied and
+/// closed, while its reply is still buffered: that is no failure, so the refusal is logged and the previous timeout stays; the
+/// next read returns the buffered reply (or EOF), and the window check in the caller bounds the wait.
+fn rearm_read_timeout(s: &UnixStream, left: Duration) {
+    if let Err(e) = s.set_read_timeout(Some(left)) {
+        health::log_event("client_rearm", "daemon", &defaults::render("msg.client_io", &[("what", &defaults::text("msg.client_what_timeout")), ("err", &e)]));
+    }
+}
+
 fn exchange_inner(sock: &Path, payload: &[u8], deadline: Duration, window: Duration) -> Exch {
     match std::fs::symlink_metadata(sock) {
         // only a missing socket means "no daemon"; any other error (EACCES, ENOTDIR, ELOOP, EIO) is a failed exchange the
@@ -102,9 +111,7 @@ fn exchange_inner(sock: &Path, payload: &[u8], deadline: Duration, window: Durat
             late = true;
             health::log_event("client_late", "daemon", &why); // past the deadline but still waiting for the daemon's own reply
         }
-        if let Err(e) = io(s.set_read_timeout(Some(left)), defaults::text("msg.client_what_timeout")) {
-            return e;
-        }
+        rearm_read_timeout(&s, left);
     }
     match frame::decode(&buf) {
         Ok((k, body)) => Exch::Reply(k, body),
@@ -815,6 +822,39 @@ mod tests {
         let r = exchange_inner(&file.join("e.sock"), b"CTL ping\n", Duration::from_millis(200), Duration::from_millis(200));
         assert!(matches!(r, Exch::Failed(_)), "{r:?}");
         crate::discard::harmless(std::fs::remove_dir_all(&dir)); // keep: cleanup that raced; an absent file is the goal state
+    }
+
+    #[test]
+    fn a_reply_written_and_closed_after_the_first_read_timeout_is_still_delivered() {
+        // macOS: re-arming SO_RCVTIMEO on a socket the daemon already closed is EINVAL; that must not drop the readable reply
+        let dir = std::env::temp_dir().join(format!("ah-client-late-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let sock = dir.join("d.sock");
+        let l = std::os::unix::net::UnixListener::bind(&sock).unwrap();
+        let h = std::thread::spawn(move || {
+            let (mut c, _) = l.accept().unwrap();
+            let mut req = Vec::new();
+            c.read_to_end(&mut req).unwrap();
+            std::thread::sleep(Duration::from_millis(400));
+            std::io::Write::write_all(&mut c, &frame::encode(Kind::Ok, "late-ok")).unwrap();
+        }); // dropping `c` closes the socket right after the write
+        let r = exchange_inner(&sock, b"CTL ping\n", Duration::from_millis(150), Duration::from_secs(5));
+        h.join().unwrap();
+        crate::discard::harmless(std::fs::remove_dir_all(&dir)); // keep: cleanup that raced; an absent file is the goal state
+        assert!(matches!(&r, Exch::Reply(Kind::Ok, b) if b == "late-ok"), "{r:?}");
+    }
+
+    #[test]
+    fn a_refused_rearm_on_a_closed_socket_leaves_the_buffered_reply_readable() {
+        let (mut a, mut b) = UnixStream::pair().unwrap();
+        a.shutdown(std::net::Shutdown::Write).unwrap();
+        std::io::Write::write_all(&mut b, b"reply").unwrap();
+        drop(b);
+        std::thread::sleep(Duration::from_millis(50));
+        rearm_read_timeout(&a, Duration::from_millis(100)); // EINVAL on macOS here; must neither panic nor fail the exchange
+        let mut got = Vec::new();
+        a.read_to_end(&mut got).unwrap();
+        assert_eq!(got, b"reply");
     }
 
     #[test]
