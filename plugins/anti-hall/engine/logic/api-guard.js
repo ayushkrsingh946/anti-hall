@@ -271,7 +271,8 @@ function agMain(p) {
     var pb = agPyBin(st);
     if (pb) { bins.push(pb); fakes = fakes.concat(agVerifyPython(st, py, pb)); }
   }
-  if (js.length) { bins.push(agCfg('node_bin')); fakes = fakes.concat(agVerifyJs(st, js, hookProc.cwd(p))); }
+  // the version probe goes first (a throwaway notice state): a cold daemon keeps its answer for the block message even when the verify probe then runs out of time
+  if (js.length) { bins.push(agCfg('node_bin')); agVersion({ notice: null }, agCfg('node_bin')); fakes = fakes.concat(agVerifyJs(st, js, hookProc.cwd(p))); }
   if (!fakes.length) { var nt = agNotice(st); return nt ? { exact: { code: 0, out: '', err: nt } } : 'allow'; }
   var seen = new Set(), uniq = fakes.filter(function (f) { return seen.has(f.label) ? false : (seen.add(f.label), true); });
   var vers = bins.map(function (b) { return agVersion(st, b); }).join(agCfg('version_joiner'));

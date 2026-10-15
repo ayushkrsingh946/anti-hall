@@ -354,6 +354,24 @@ fn the_policy_applies_to_every_kind_of_script_failure() {
     assert_eq!(crate::script::missing("sibling-sweep", "SessionStart"), Some(Verdict::Allow));
 }
 
+#[test]
+fn api_guard_rechecks_a_module_after_a_package_is_installed() {
+    use std::os::unix::fs::PermissionsExt;
+    let h = home("agpkg");
+    let bin = format!("{h}/bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let marker = format!("{h}/installed");
+    let body = format!("#!/bin/sh\ncase \"$1\" in --version|-V) echo 'Python 3.12.1';; *) if [ -e {marker} ]; then echo '[0]'; else echo '[2]'; fi;; esac\n");
+    std::fs::write(format!("{bin}/python3"), body).unwrap();
+    std::fs::set_permissions(format!("{bin}/python3"), std::fs::Permissions::from_mode(0o755)).unwrap();
+    let e = RequestEnv::from_pairs([("HOME", h.as_str()), ("PATH", bin.as_str()), ("ANTIHALL_API_GUARD_THIRDPARTY", "1")]);
+    let p = json!({"tool_name": "Write", "tool_input": {"file_path": "x.py", "content": "import fakepkg\nfakepkg.no_such_fn()\n"}});
+    let go = || run_forced("api-guard", &p, &e).expect("a script").expect("an answer");
+    assert_eq!(go(), Verdict::Allow, "an absent package is not a fake attribute");
+    std::fs::write(&marker, "").unwrap();
+    assert_ne!(go(), Verdict::Allow, "the same call after the package is installed is checked again, not served from a kept allow");
+}
+
 // ---- golden parity of the migrated checks ----
 
 #[test]

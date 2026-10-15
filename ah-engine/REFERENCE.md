@@ -9138,10 +9138,12 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 |---|---|---|---|---|
 | `host_spawn.cache_enabled` | `true` |  |  | Whether `ahHost.spawnProbeCached` keeps completed probe answers (an interpreter's version line) per daemon. Off: every call runs the program. |
 | `host_spawn.cache_key_env` | `PATH, PYENV_VERSION, ASDF_PYTHON_VERSION, VIRTUAL_ENV, CONDA_PREFIX, CONDA_DE...` |  |  | Request environment variables whose values are part of a kept probe answer's key, because they pick the interpreter version behind a shim (pyenv, asdf, virtualenv, conda); a different value probes again. |
+| `host_spawn.cache_skip_stdout` | `^\s*\[[^\]]*\b2\b` |  |  | A regular expression: a probe run whose stdout matches is not kept, because its answer depends on what is installed and the key cannot see that (the Python probe's `[..., 2, ...]` means a module or attribute could not be resolved; installing the package changes it). Empty keeps every finished run. |
 | `host_spawn.cache_ttl_ms` | `600000` |  | ms | How long a kept probe answer is served before the program is run again (a changed interpreter file re-probes at once, whatever this says). |
 | `host_spawn.deadline_reserve_ms` | `60` |  | ms | Time kept back from the request's deadline when a spawned program's timeout is cut to it: the other checks of the event and the reply still need it. |
 | `host_spawn.default_path` | `/usr/bin:/bin` |  |  | The search path used when the request carries no PATH: the default of the C library's execvp, which is what Node's spawn falls back to. |
 | `host_spawn.max_calls` | `16` |  |  | Most programs one script call may start (api-guard: two version probes, one per module group up to api_guard_v1.max_modules, one Node probe, the version lines of the message). |
+| `host_spawn.max_workers` | `4` |  |  | The most probe workers (kept-answer runs that outlive their request) alive at once, across all requests; a request that would exceed it fails open without starting one, so timed-out probes cannot pile up. |
 | `host_spawn.min_run_ms` | `1` |  | ms | A spawn whose cut timeout is below this does not run at all (reported as skipped). |
 | `host_spawn.output_max_bytes` | `262144` |  | bytes | Largest stdout or stderr a spawned program may write; more marks the run `overflow` (the Node probe's maxBuffer) and both streams are cut here. |
 | `host_spawn.path_env` | `PATH` |  |  | The request environment variable that holds the search path for a spawned program. |
