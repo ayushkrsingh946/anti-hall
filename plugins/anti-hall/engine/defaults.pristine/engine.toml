@@ -18,6 +18,10 @@ value = "AH_ENGINE_DIR"
 doc = "A file the dispatcher creates once it has dispatched an event and decided its exit code (D87). The reliability wrapper sets it, so that an engine exit code of a hook's own (1, say) is told from an engine failure and is not answered by running every hook a second time."
 value = "AH_ENGINE_DONE_FILE"
 
+[env.wait_file]
+doc = "A file the client creates while it waits on the daemon and keeps when the daemon was late (a slow reply) or answered BUSY/ERR, so the call is handed to its Node hooks; it removes it when the daemon answered, or none was there. The reliability wrapper sets it, so that its watchdog can tell a call that is still deciding (give it up to client.slow_fallback_max_ms) from a hung engine (kill at the normal budget)."
+value = "AH_ENGINE_WAIT_FILE"
+
 [env.rules]
 doc = "Overrides the rules file path."
 value = "AH_ENGINE_RULES"
@@ -460,6 +464,12 @@ doc = "Extra wait for the exchange thread to report after the deadline before th
 value = 10
 unit = "ms"
 
+[client.slow_fallback_max_ms]
+doc = "Upper bound, measured from the engine start, on how long the wrapper lets a call run while the client is waiting on a daemon or running the Node hooks of a late or refused (BUSY/ERR) daemon reply (so a delayed block still blocks). A normal or unavailable daemon keeps the short fail-fast budget (client.deadline_ms + client.deadline_slack_ms + client.wrapper_extra_ms); never more than the hook's own timeout. 0 disables the extension."
+value = 3000
+min = 0
+unit = "ms"
+
 [client.down_marker_ttl_ms]
 doc = "How long other clients skip connecting after one client finds the daemon absent or failed, or after client.slow_down_n consecutive slow replies; this prevents hook pile-ups while a restart is attempted."
 value = 3000
@@ -540,7 +550,7 @@ env = "AH_ENGINE_FALLBACK_MS"
 unit = "ms"
 
 [client.cold_guard_wait_ms]
-doc = "How long a guard event (PreToolUse, PermissionRequest, Stop, SubagentStop) waits for a cold-starting daemon before it is let through with one notice per session; 0 turns the wait off. Prompts and advisories never wait. The wait never exceeds what the hook's own timeout leaves after the engine attempt."
+doc = "How long a guard event (PreToolUse, PermissionRequest, Stop, SubagentStop) waits for a cold-starting daemon before it is let through with one notice per session; 0 turns the wait off. Prompts and advisories never wait. The wait never exceeds what the hook's own timeout leaves after the engine attempt. It is one absolute deadline: the kick, its kill grace and the socket poll all end within it, so a cold guard call takes at most this plus the normal engine attempt."
 value = 2000
 unit = "ms"
 

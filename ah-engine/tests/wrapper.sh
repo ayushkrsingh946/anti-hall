@@ -1486,11 +1486,13 @@ printf '%s | %s\n' "$*" "$payload" >>"$AH_COLD_LOG"
 sock=$AH_ENGINE_DIR/e.sock
 case "$payload" in
   *ColdStartKick*)
+    [ -z "${AH_COLD_HANG_KICK:-}" ] || sleep 30
     if [ -n "${AH_COLD_READY_S:-}" ] && [ ! -S "$sock" ]; then
       perl -MPOSIX -MIO::Socket::UNIX -e 'exit 0 if fork; POSIX::setsid(); select(undef, undef, undef, $ARGV[1]); unlink $ARGV[0]; $s = IO::Socket::UNIX->new(Local => $ARGV[0], Listen => 1); sleep 4' "$sock" "$AH_COLD_READY_S" </dev/null >/dev/null 2>&1
     fi
     exit 0 ;;
 esac
+[ -z "${AH_COLD_HANG_ALL:-}" ] || sleep 30
 if [ -S "$sock" ]; then
   case "$payload" in
     *PreToolUse*) printf 'denied-by-daemon\n' >&2; exit 2 ;;
@@ -1550,6 +1552,26 @@ test_cold_guard_gives_up_at_the_cap_with_one_notice_per_session() {
   cg_run PreToolUse sess-b
   [ "$cg_rc" -eq 0 ] && grep -q 'was not checked' "$cg_dir/err" || ok=0
   [ "$ok" -eq 1 ] || printf 'cold guard cap: first_ms=%s rc=%s err=%s\n' "$first_ms" "$cg_rc" "$(cat "$cg_dir/err")" >&2
+  cg_cleanup
+  [ "$ok" -eq 1 ]
+}
+
+# One absolute cold deadline (Codex delta F2): a kick that hangs, and a kick plus engine that both hang, end within
+# client.cold_guard_wait_ms plus the normal engine attempt (its budget and kill grace), never the sum of every stage.
+test_cold_guard_hang_ends_within_the_cold_deadline_plus_engine_budget() {
+  cg_setup 2000
+  ok=1
+  eng_ms=560
+  grace_ms=1000
+  slack_ms=800
+  bound=$((2000 + eng_ms + grace_ms + slack_ms))
+  cg_run PreToolUse sess-a AH_HOOK_TIMEOUT_MS=$eng_ms AH_COLD_HANG_KICK=1
+  [ "$cg_rc" -eq 0 ] && [ "$cg_ms" -lt "$bound" ] || { ok=0; printf 'kick hang: rc=%s ms=%s bound=%s\n' "$cg_rc" "$cg_ms" "$bound" >&2; }
+  printf 'TIMING cold kick-only hang wall_ms=%s bound=%s\n' "$cg_ms" "$bound" >&2
+  rm -f "$cg_state"/*.until
+  cg_run PreToolUse sess-b AH_HOOK_TIMEOUT_MS=$eng_ms AH_COLD_HANG_KICK=1 AH_COLD_HANG_ALL=1
+  [ "$cg_rc" -eq 0 ] && [ "$cg_ms" -lt "$bound" ] || { ok=0; printf 'both hang: rc=%s ms=%s bound=%s\n' "$cg_rc" "$cg_ms" "$bound" >&2; }
+  printf 'TIMING cold both-hang wall_ms=%s bound=%s\n' "$cg_ms" "$bound" >&2
   cg_cleanup
   [ "$ok" -eq 1 ]
 }
@@ -1621,6 +1643,7 @@ test_cold_guard_does_not_wait_when_no_daemon_can_start() {
 check cold_guard_waits_for_a_daemon_that_comes_up test_cold_guard_waits_for_a_daemon_that_comes_up
 check cold_guard_does_not_wait_when_no_daemon_can_start test_cold_guard_does_not_wait_when_no_daemon_can_start
 check cold_guard_gives_up_at_the_cap_with_one_notice_per_session test_cold_guard_gives_up_at_the_cap_with_one_notice_per_session
+check cold_guard_hang_ends_within_the_cold_deadline_plus_engine_budget test_cold_guard_hang_ends_within_the_cold_deadline_plus_engine_budget
 check cold_non_guard_event_never_waits test_cold_non_guard_event_never_waits
 check cold_guard_wait_respects_the_hook_budget_and_a_warm_daemon test_cold_guard_wait_respects_the_hook_budget_and_a_warm_daemon
 
