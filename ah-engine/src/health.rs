@@ -284,10 +284,23 @@ pub fn write_marker() {
     crate::discard::logged("run_marker_write", crate::atomic::write(state_file("run_marker"), std::process::id().to_string()));
 }
 
-/// Start the daemon's liveness heartbeat (`files.heartbeat`): the file names this daemon, and [`heartbeat`] touches its
-/// modification time from the watchdog thread, apart from request handling. A stopped or wedged process stops touching it.
+/// The canonical state directory: the instance identity a heartbeat records and a client compares (two spellings of one
+/// directory, a symlinked temp dir for one, must not read as two instances).
+fn instance_dir() -> PathBuf {
+    let d = paths::dir();
+    std::fs::canonicalize(&d).unwrap_or(d)
+}
+
+/// Start the daemon's liveness heartbeat (`files.heartbeat`). The file names this process generation, one field per line: pid,
+/// start time and executable as the operating system reports them ([`crate::procid`]), and the instance (state dir); a field the
+/// system will not give is left empty, and a client then never signals that daemon. [`heartbeat`] touches its modification
+/// time at the start of every watchdog tick; a stopped or wedged process stops touching it.
 pub fn heartbeat_init() {
-    crate::discard::logged("heartbeat_write", crate::atomic::write(state_file("heartbeat"), std::process::id().to_string()));
+    let pid = std::process::id();
+    let start = crate::procid::start(pid).map(|s| s.to_string()).unwrap_or_default();
+    let exe = crate::procid::exe(pid).map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
+    let ident = format!("{pid}\n{start}\n{exe}\n{}\n", instance_dir().to_string_lossy());
+    crate::discard::logged("heartbeat_write", crate::atomic::write(state_file("heartbeat"), ident));
 }
 
 /// One heartbeat: touch the file's modification time (no data written).
@@ -297,15 +310,108 @@ pub fn heartbeat() {
     }
 }
 
-/// The daemon's heartbeat as `(pid, age)`, counted only when it names the pid that holds the singleton lock (the daemon now
-/// serving the socket). `None` = unknown (no heartbeat yet, a daemon still starting whose watchdog has not begun, a build from
-/// before the heartbeat, an unreadable file), which counts as alive.
-pub(crate) fn heartbeat_of_lock_holder() -> Option<(u32, Duration)> {
+/// One reading of the daemon's heartbeat.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Heartbeat {
+    /// The pid the heartbeat names.
+    pub pid: u32,
+    /// The whole file: the generation identity (pid, start time, executable, state dir).
+    pub ident: String,
+    /// Its modification time, nanoseconds since the epoch: changes on every beat.
+    pub mtime_ns: u128,
+    /// How old that modification time is by the wall clock (0 when it is in the future).
+    pub age: Duration,
+}
+
+impl Heartbeat {
+    /// The generation it names, as `(start, exe)`, when the heartbeat belongs to this instance and records both; `None` = its
+    /// generation cannot be established here (another instance's file, a heartbeat from before generation identity, a field the
+    /// system would not give), and that daemon is never signalled.
+    pub(crate) fn generation(&self) -> Option<(u64, PathBuf)> {
+        let mut f = self.ident.lines().skip(1);
+        let start = f.next()?.parse::<u64>().ok()?;
+        let exe = PathBuf::from(f.next().filter(|e| !e.is_empty())?);
+        (std::path::Path::new(f.next()?) == instance_dir()).then_some((start, exe))
+    }
+
+    /// True while `pid` is still the generation this heartbeat names: same start time and executable, from the operating system.
+    pub(crate) fn names_running(&self) -> bool {
+        self.generation().is_some_and(|(start, exe)| crate::procid::start(self.pid) == Some(start) && crate::procid::exe(self.pid) == Some(exe))
+    }
+}
+
+/// The daemon's heartbeat, counted only when it names the pid that holds the singleton lock (the daemon now serving the socket).
+/// `None` = unknown (no heartbeat yet, a daemon still starting whose watchdog has not begun, a build from before the heartbeat,
+/// an unreadable file), which counts as alive.
+pub(crate) fn heartbeat_of_lock_holder() -> Option<Heartbeat> {
     let p = state_file("heartbeat");
-    let pid: u32 = std::fs::read_to_string(&p).ok()?.trim().parse().ok()?;
+    let ident = std::fs::read_to_string(&p).ok()?;
+    let pid: u32 = ident.lines().next()?.trim().parse().ok()?;
     let holder: u32 = std::fs::read_to_string(paths::lock_for(&paths::socket())).ok()?.trim().parse().ok()?;
-    let age = std::fs::metadata(&p).and_then(|m| m.modified()).ok()?.elapsed().unwrap_or_default();
-    (pid != 0 && pid == holder).then_some((pid, age))
+    let mtime = std::fs::metadata(&p).and_then(|m| m.modified()).ok()?;
+    let mtime_ns = mtime.duration_since(std::time::UNIX_EPOCH).ok()?.as_nanos();
+    (pid != 0 && pid == holder).then(|| Heartbeat { pid, ident, mtime_ns, age: mtime.elapsed().unwrap_or_default() })
+}
+
+/// The system-wide monotonic clock in milliseconds: comparable across the short-lived client processes (std's `Instant` is not
+/// serialisable) and never stepped by a wall-clock change.
+pub(crate) fn mono_ms() -> u64 {
+    // SAFETY: a zeroed timespec is a valid value of the plain C struct.
+    let mut ts: libc::timespec = unsafe { std::mem::zeroed() };
+    // SAFETY: `ts` is a live, writable timespec; CLOCK_MONOTONIC is always available on the supported systems.
+    unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut ts) };
+    (ts.tv_sec.max(0) as u64).saturating_mul(1000).saturating_add(ts.tv_nsec.max(0) as u64 / 1_000_000)
+}
+
+/// What one stale heartbeat sample means.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Hang {
+    /// First seen stale, or seen stale again within `client.heartbeat_confirm_ms`: the call fails open, nothing is signalled.
+    Suspected,
+    /// The same generation's heartbeat stayed unchanged for at least `client.heartbeat_confirm_ms` of monotonic time.
+    Confirmed(u64),
+}
+
+/// The suspicion file (`files.heartbeat_suspect`): `<mono ms first seen stale>\n<mtime ns>\n<identity>`.
+fn read_suspicion() -> Option<(u64, u128, String)> {
+    let t = std::fs::read_to_string(state_file("heartbeat_suspect")).ok()?;
+    let mut it = t.splitn(3, '\n');
+    Some((it.next()?.parse().ok()?, it.next()?.parse().ok()?, it.next()?.to_string()))
+}
+
+/// How long (monotonic ms) the suspicion has held this exact heartbeat (same generation, same modification time); `None` when
+/// the recorded suspicion is about another heartbeat, or there is none.
+fn suspicion_held(hb: &Heartbeat) -> Option<u64> {
+    let (first, mtime, ident) = read_suspicion()?;
+    (mtime == hb.mtime_ns && ident == hb.ident).then(|| mono_ms().checked_sub(first)).flatten()
+}
+
+/// Weigh one stale sample of `hb`. A hang is confirmed only when a suspicion raised earlier saw this same heartbeat (same
+/// generation, same modification time) at least `client.heartbeat_confirm_ms` ago by the monotonic clock: any beat in between,
+/// a new generation, or a wall-clock jump that only made a moving heartbeat read old, resets it. Otherwise the suspicion is
+/// (re)recorded for the next call.
+pub(crate) fn weigh_stale(hb: &Heartbeat) -> Hang {
+    match suspicion_held(hb) {
+        Some(held) if held >= defaults::num("client.heartbeat_confirm_ms") => Hang::Confirmed(held),
+        Some(_) => Hang::Suspected,
+        None => {
+            crate::discard::harmless(crate::limits::ensure_private_dir(&paths::dir())); // keep: the write below reports failure by absence
+            let line = format!("{}\n{}\n{}", mono_ms(), hb.mtime_ns, hb.ident);
+            crate::discard::logged("heartbeat_suspect_write", crate::atomic::write(state_file("heartbeat_suspect"), line));
+            Hang::Suspected
+        }
+    }
+}
+
+/// True while the recorded suspicion still holds `hb` unchanged for at least `client.heartbeat_confirm_ms` (re-checked under the
+/// spawn lock and again immediately before a signal).
+pub(crate) fn hang_confirmed(hb: &Heartbeat) -> bool {
+    suspicion_held(hb).is_some_and(|held| held >= defaults::num("client.heartbeat_confirm_ms"))
+}
+
+/// Drop the suspicion (the daemon it named was ended).
+pub(crate) fn clear_hang_suspicion() {
+    crate::discard::harmless(std::fs::remove_file(state_file("heartbeat_suspect"))); // keep: an absent suspicion is the goal state
 }
 
 /// Remove the run marker on a clean exit.

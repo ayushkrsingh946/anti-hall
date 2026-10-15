@@ -60,6 +60,7 @@ pub mod operator;
 pub mod ops;
 pub mod paths;
 pub mod proc;
+pub mod procid;
 /// Process watch: orphan sweep, resource and disk warnings.
 pub mod procwatch;
 pub mod refresh;

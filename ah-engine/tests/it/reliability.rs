@@ -1786,11 +1786,14 @@ fn a_permanently_wedged_daemon_is_replaced_by_a_new_one() {
 }
 
 /// The heartbeat a fake daemon keeps (the file the real daemon's watchdog touches): `fresh` touches it every 100 ms, else it is
-/// written once and aged past the stale threshold. `pid` is what the file names (never this test process).
+/// written once and aged past the stale threshold. `pid` is what the file names (never this test process), with its real start
+/// time and executable and this instance's state dir, so only "is it this engine's daemon" can stop a signal.
 fn fake_heartbeat(e: &Env, pid: u32, fresh: bool) {
     let p = e.eng().join("daemon.heartbeat");
     std::fs::create_dir_all(e.eng()).unwrap();
-    std::fs::write(&p, pid.to_string()).unwrap();
+    let (start, exe) = (ah_engine::procid::start(pid).unwrap(), ah_engine::procid::exe(pid).unwrap());
+    let dir = std::fs::canonicalize(e.eng()).unwrap();
+    std::fs::write(&p, format!("{pid}\n{start}\n{}\n{}\n", exe.display(), dir.display())).unwrap();
     std::fs::write(e.eng().join("e.sock.lock"), pid.to_string()).unwrap(); // the singleton lock holder the heartbeat must name
     let old = std::time::SystemTime::now() - Duration::from_secs(60);
     std::fs::File::options().write(true).open(&p).unwrap().set_modified(old).unwrap();
@@ -1837,11 +1840,143 @@ fn a_stale_heartbeat_fails_fast_and_never_kills_a_process_that_is_not_the_daemon
     });
     let (_, code, dt) = e.wrapper_hook(DENY_IN);
     println!("TIMING stale-heartbeat wall_ms={:.1} rc={code}", dt.as_secs_f64() * 1000.0);
+    let marked = e.fresh_down_marker();
+    // past the down marker, the same unchanged heartbeat confirms the hang: the replacement path runs and must spare it
+    std::thread::sleep(Duration::from_millis(clamped_num("client.down_marker_ttl_ms", 3000) + 200));
+    let (_, code2, dt2) = e.wrapper_hook(DENY_IN);
+    println!("TIMING stale-heartbeat confirming call wall_ms={:.1} rc={code2}", dt2.as_secs_f64() * 1000.0);
     let survived = stand_in.try_wait().unwrap().is_none();
     ah_engine::discard::harmless(stand_in.kill());
     ah_engine::discard::harmless(stand_in.wait());
-    assert_eq!(code, 0, "a hung daemon fails open: {}", e.health_log());
-    assert!(dt < Duration::from_secs(1), "a stale heartbeat must fail fast: {dt:?}");
+    let log = e.health_log();
+    assert_eq!((code, code2), (0, 0), "a hung daemon fails open: {log}");
+    assert!(dt < Duration::from_secs(1) && dt2 < Duration::from_secs(1), "a stale heartbeat must fail fast: {dt:?} {dt2:?}");
+    assert!(marked, "a hung daemon is marked down at once: {log}");
+    assert!(log.contains("\tclient_hung_spared\t"), "the confirming call reached the replacement path: {log}");
     assert!(survived, "a pid that is not the engine's daemon must never be signalled");
-    assert!(e.fresh_down_marker(), "a hung daemon that could not be recovered is marked down at once: {}", e.health_log());
+}
+
+/// A stale heartbeat seen once only raises suspicion: the call fails open at once, and nothing is signalled until a later call finds
+/// the same heartbeat still unchanged (`client.heartbeat_confirm_ms`). A daemon stopped for a while and resumed inside that window
+/// beats again, which clears the suspicion: it is never killed and answers the next call itself.
+#[test]
+fn a_stopped_daemon_that_resumes_before_confirmation_is_not_killed() {
+    let _timing = wrapper_timing_lock();
+    let e = Env::new("hbresume", &[]);
+    e.warm();
+    let old = e.pid().unwrap();
+    signal(old, libc::SIGSTOP);
+    let (_, code, dt) = e.wrapper_hook(DENY_IN);
+    println!("TIMING resumed-daemon suspect call wall_ms={:.1} rc={code}", dt.as_secs_f64() * 1000.0);
+    signal(old, libc::SIGCONT);
+    std::thread::sleep(Duration::from_millis(clamped_num("client.down_marker_ttl_ms", 3000) + 200));
+    let (_, after, _) = e.wrapper_hook(DENY_IN);
+    let (survived, same) = (alive(old), e.pid() == Some(old));
+    let log = e.health_log();
+    assert!(code == 0 || code == 2, "the suspect call exited {code}");
+    assert!(log.contains("\tclient_hung\t"), "the stale heartbeat must have been seen: {log}");
+    assert!(!log.contains("\tclient_hung_kill\t"), "a daemon that resumed must not be killed: {log}");
+    assert!(survived && same, "the resumed daemon must still be the one serving{}", e.diag());
+    assert_eq!(after, 2, "the resumed daemon answers the next call itself{}", e.diag());
+}
+
+/// A heartbeat that reads old on every sample but keeps moving (the wall clock jumped forward past it, or the beat lands late) is
+/// progress, not a hang: the suspicion resets on every change, so the daemon is never signalled however many calls see it stale.
+#[test]
+fn a_heartbeat_that_reads_old_but_keeps_moving_is_never_killed() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let _timing = wrapper_timing_lock();
+    let e = Env::new("hbjump", &[]);
+    e.warm();
+    let old = e.pid().unwrap();
+    signal(old, libc::SIGSTOP); // late replies; the heartbeat below stands in for its beat
+    let (p, stop) = (e.eng().join("daemon.heartbeat"), Arc::new(AtomicBool::new(false)));
+    let toucher = {
+        let stop = stop.clone();
+        std::thread::spawn(move || {
+            while !stop.load(Ordering::SeqCst) {
+                if let Ok(f) = std::fs::File::options().write(true).open(&p) {
+                    ah_engine::discard::harmless(f.set_modified(std::time::SystemTime::now() - Duration::from_secs(60)));
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+        })
+    };
+    for i in 0..3 {
+        let (_, code, dt) = e.wrapper_hook(DENY_IN);
+        println!("TIMING moving-old-heartbeat call {i} wall_ms={:.1} rc={code}", dt.as_secs_f64() * 1000.0);
+        std::thread::sleep(Duration::from_millis(clamped_num("client.down_marker_ttl_ms", 3000) + 200));
+    }
+    stop.store(true, Ordering::SeqCst);
+    ah_engine::discard::harmless(toucher.join());
+    let survived = alive(old);
+    signal(old, libc::SIGCONT);
+    let log = e.health_log();
+    assert!(log.contains("\tclient_hung\t"), "every sample read stale: {log}");
+    assert!(!log.contains("\tclient_hung_kill\t"), "a moving heartbeat must never be killed: {log}");
+    assert!(survived, "the daemon must still be alive");
+}
+
+/// The heartbeat a real daemon of another instance (`other`) wrote, as `(pid, lines)`.
+fn heartbeat_lines(other: &Env) -> (u32, Vec<String>) {
+    let text = std::fs::read_to_string(other.eng().join("daemon.heartbeat")).unwrap();
+    let lines: Vec<String> = text.lines().map(str::to_string).collect();
+    (lines[0].parse().unwrap(), lines)
+}
+
+/// Plant `content` as a long-stale heartbeat in `e`, naming `pid` as the singleton lock holder, behind a slow fake daemon; run a
+/// suspect call and, past the down marker, the confirming one.
+fn stale_planted_heartbeat_two_calls(e: &Env, pid: u32, content: &str) {
+    std::fs::create_dir_all(e.eng()).unwrap();
+    let p = e.eng().join("daemon.heartbeat");
+    std::fs::write(&p, content).unwrap();
+    std::fs::write(e.eng().join("e.sock.lock"), pid.to_string()).unwrap();
+    std::fs::File::options().write(true).open(&p).unwrap().set_modified(std::time::SystemTime::now() - Duration::from_secs(60)).unwrap();
+    fake_server(e, || {
+        std::thread::sleep(Duration::from_millis(1500));
+        Some(ah_engine::frame::encode(ah_engine::frame::Kind::Ok, "{}"))
+    });
+    for i in 0..2 {
+        if i == 1 {
+            std::thread::sleep(Duration::from_millis(clamped_num("client.down_marker_ttl_ms", 3000) + 200));
+        }
+        let (_, code, dt) = e.wrapper_hook(DENY_IN);
+        println!("TIMING planted-heartbeat call {i} wall_ms={:.1} rc={code}", dt.as_secs_f64() * 1000.0);
+    }
+}
+
+/// P1-2: a heartbeat whose pid now belongs to another process generation (a reused pid: same number, another start time) is
+/// never signalled, even when that process is a live engine daemon.
+#[test]
+fn a_heartbeat_naming_a_reused_pid_is_never_signalled() {
+    let _timing = wrapper_timing_lock();
+    let other = Env::new("hbreuse-b", &[]);
+    other.warm();
+    let (pid, mut lines) = heartbeat_lines(&other);
+    let e = Env::new("hbreuse-a", &[("AH_ENGINE_NOSPAWN", "1"), ("AH_ENGINE_SLOW_DOWN_N", "9")]);
+    lines[1] = (lines[1].parse::<u64>().unwrap() + 1).to_string(); // an earlier process that had this pid
+    std::fs::create_dir_all(e.eng()).unwrap();
+    lines[3] = std::fs::canonicalize(e.eng()).unwrap().to_string_lossy().into_owned(); // this instance
+    stale_planted_heartbeat_two_calls(&e, pid, &(lines.join("\n") + "\n"));
+    let (survived, log) = (alive(pid) && other.pid() == Some(pid), e.health_log());
+    assert!(log.contains("\tclient_hung_spared\t"), "the confirmed hang must reach the identity check and decline: {log}");
+    assert!(!log.contains("\tclient_hung_kill\t"), "{log}");
+    assert!(survived, "a reused pid must never be signalled");
+}
+
+/// P1-2: a heartbeat a daemon of another instance (another state dir) wrote is never acted on here, even with its pid, start time
+/// and executable all matching that live daemon.
+#[test]
+fn a_heartbeat_from_another_instance_is_never_signalled() {
+    let _timing = wrapper_timing_lock();
+    let other = Env::new("hbinst-b", &[]);
+    other.warm();
+    let (pid, lines) = heartbeat_lines(&other);
+    let e = Env::new("hbinst-a", &[("AH_ENGINE_NOSPAWN", "1"), ("AH_ENGINE_SLOW_DOWN_N", "9")]);
+    stale_planted_heartbeat_two_calls(&e, pid, &(lines.join("\n") + "\n"));
+    let (survived, log) = (alive(pid) && other.pid() == Some(pid), e.health_log());
+    assert!(log.contains("\tclient_hung_spared\t"), "the confirmed hang must reach the identity check and decline: {log}");
+    assert!(!log.contains("\tclient_hung_kill\t"), "{log}");
+    assert!(survived, "another instance's daemon must never be signalled");
 }
