@@ -170,6 +170,10 @@ value = "daemon.down.until"
 doc = "Client marker holding the count of consecutive slow (late) daemon replies and when the streak began; a normal reply removes it."
 value = "daemon.slow.streak"
 
+[files.heartbeat]
+doc = "The daemon's liveness heartbeat: names the daemon's pid; the watchdog thread touches its modification time every daemon.watchdog_tick_ms, apart from request handling. A client past its deadline reads it to tell a slow daemon (heartbeat fresh) from a stopped or wedged one (stale, see client.heartbeat_stale_ms)."
+value = "daemon.heartbeat"
+
 [files.spawn_lock]
 doc = "Short-lived client single-flight lock: only the client that creates it attempts to restart a missing daemon."
 value = "daemon.spawn.lock"
@@ -477,7 +481,7 @@ value = 400
 unit = "ms"
 
 [client.down_marker_ttl_ms]
-doc = "How long other clients skip connecting after one client finds the daemon absent or failed, or after client.slow_down_n consecutive slow replies; this prevents hook pile-ups while a restart is attempted."
+doc = "How long other clients skip connecting after one client finds the daemon absent or failed, or hung (client.heartbeat_stale_ms) and not replaced, or after client.slow_down_n consecutive slow replies; this prevents hook pile-ups while a restart is attempted."
 value = 3000
 env = "AH_ENGINE_DOWN_MARKER_TTL_MS"
 unit = "ms"
@@ -492,6 +496,19 @@ min = 1
 doc = "Window in which consecutive slow daemon replies are counted toward client.slow_down_n; a streak older than this starts over."
 value = 10000
 env = "AH_ENGINE_SLOW_WINDOW_MS"
+unit = "ms"
+
+[client.heartbeat_stale_ms]
+doc = "A hook call past client.deadline_ms keeps waiting for a late reply (client.slow_fallback_max_ms) only while the daemon's heartbeat (files.heartbeat) is younger than this. Older means the daemon is stopped or wedged, not slow: the call fails open at once, and the client ends that daemon (only the pid the heartbeat names, holding the singleton lock, verified as this engine's daemon; single-flight and under the crash-loop rule) and starts a new one, or marks it down (client.down_marker_ttl_ms) when it cannot. A heartbeat that names another pid or is missing counts as alive. Keep it well above daemon.watchdog_tick_ms and below client.slow_fallback_max_ms less client.slow_wait_margin_ms, so a stop is detected within the first slow call. 0 disables the check."
+value = 1500
+env = "AH_ENGINE_HEARTBEAT_STALE_MS"
+min = 0
+unit = "ms"
+
+[client.heartbeat_poll_ms]
+doc = "While a hook call waits past its deadline for a late reply, how often it re-reads the daemon's heartbeat (client.heartbeat_stale_ms)."
+value = 100
+min = 1
 unit = "ms"
 
 [client.spawn_lock_ttl_ms]

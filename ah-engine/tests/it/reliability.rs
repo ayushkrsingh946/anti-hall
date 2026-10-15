@@ -1719,3 +1719,129 @@ fn abort_breadcrumb_is_reaped_on_next_start_and_reported_by_status() {
     assert_eq!(st["health"]["last_crash"]["breadcrumb"]["event"], "Stop", "{st}");
     assert_eq!(st["health"]["last_crash"]["breadcrumb"]["check"], "task-guard", "{st}");
 }
+
+// ---- R0 P0: a hung (SIGSTOPped / wedged) daemon -------------------------------------------------------------------------
+
+fn signal(pid: u32, sig: libc::c_int) {
+    // SAFETY: `kill` takes plain integers and has no memory-safety preconditions; the pid is this test's own daemon or child.
+    unsafe { libc::kill(pid as i32, sig) };
+}
+
+/// A daemon frozen by SIGSTOP (alive, holding its socket and singleton lock, making no progress) costs at most one slow call:
+/// every later hook call is under a second and fails open, also after the down marker's TTL has run out.
+#[test]
+fn a_stopped_daemon_costs_at_most_one_slow_call() {
+    let _timing = wrapper_timing_lock();
+    let e = Env::new("hbstop", &[]);
+    e.warm();
+    let old = e.pid().unwrap();
+    signal(old, libc::SIGSTOP);
+    let max_ms = clamped_num("client.slow_fallback_max_ms", 3000);
+    let ttl_ms = clamped_num("client.down_marker_ttl_ms", 3000);
+    let (_, code, dt) = e.wrapper_hook(DENY_IN);
+    println!("TIMING hung-daemon call 0 wall_ms={:.1} rc={code}", dt.as_secs_f64() * 1000.0);
+    assert!(code == 0 || code == 2, "call 0 exited {code}");
+    assert!(dt <= Duration::from_millis(max_ms), "the one slow call is bounded by client.slow_fallback_max_ms = {max_ms} ms: {dt:?}");
+    let mut times = Vec::new();
+    for phase in 0..2 {
+        if phase == 1 {
+            std::thread::sleep(Duration::from_millis(ttl_ms + 200)); // past the down marker: the hang must not cost again
+        }
+        for i in 0..5 {
+            let (_, code, dt) = e.wrapper_hook(DENY_IN);
+            println!("TIMING hung-daemon phase {phase} call {} wall_ms={:.1} rc={code}", i + 1, dt.as_secs_f64() * 1000.0);
+            assert!(code == 0 || code == 2, "phase {phase} call {} exited {code}", i + 1);
+            times.push(dt);
+        }
+    }
+    signal(old, libc::SIGKILL);
+    assert!(times.iter().all(|t| *t < Duration::from_secs(1)), "every call after the first must be under 1 s: {times:?}{}", e.diag());
+}
+
+/// A permanently wedged daemon is recovered: the client that finds it hung ends it (by the pid it verified as this daemon) and
+/// a new daemon answers within a few calls.
+#[test]
+fn a_permanently_wedged_daemon_is_replaced_by_a_new_one() {
+    let _timing = wrapper_timing_lock();
+    let e = Env::new("hbwedge", &[]);
+    e.warm();
+    let old = e.pid().unwrap();
+    signal(old, libc::SIGSTOP);
+    let mut fresh = None;
+    for i in 0..10 {
+        let (_, code, dt) = e.wrapper_hook(DENY_IN);
+        println!("TIMING wedged-daemon call {i} wall_ms={:.1} rc={code}", dt.as_secs_f64() * 1000.0);
+        fresh = e.pid().filter(|p| *p != old);
+        if fresh.is_some() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(500));
+    }
+    let old_alive = alive(old);
+    signal(old, libc::SIGKILL);
+    assert!(fresh.is_some(), "no new daemon answered within 10 calls after the old one wedged{}", e.diag());
+    assert!(!old_alive, "the wedged daemon must have been ended");
+    e.warm();
+    assert!(e.health_log().contains("\tclient_hung_kill\t"), "the recovery is logged: {}", e.health_log());
+}
+
+/// The heartbeat a fake daemon keeps (the file the real daemon's watchdog touches): `fresh` touches it every 100 ms, else it is
+/// written once and aged past the stale threshold. `pid` is what the file names (never this test process).
+fn fake_heartbeat(e: &Env, pid: u32, fresh: bool) {
+    let p = e.eng().join("daemon.heartbeat");
+    std::fs::create_dir_all(e.eng()).unwrap();
+    std::fs::write(&p, pid.to_string()).unwrap();
+    std::fs::write(e.eng().join("e.sock.lock"), pid.to_string()).unwrap(); // the singleton lock holder the heartbeat must name
+    let old = std::time::SystemTime::now() - Duration::from_secs(60);
+    std::fs::File::options().write(true).open(&p).unwrap().set_modified(old).unwrap();
+    if fresh {
+        std::thread::spawn(move || {
+            while let Ok(f) = std::fs::File::options().write(true).open(&p) {
+                ah_engine::discard::harmless(f.set_modified(std::time::SystemTime::now()));
+                std::thread::sleep(Duration::from_millis(100));
+            }
+        });
+    }
+}
+
+/// A slow-but-ALIVE daemon (its heartbeat fresh) still gets the slow window: a deny 1.5 s late blocks (rc 2).
+#[test]
+fn a_late_deny_from_a_daemon_with_a_fresh_heartbeat_still_blocks() {
+    let _timing = wrapper_timing_lock();
+    let e = Env::new("hbfresh", &[("AH_ENGINE_NOSPAWN", "1"), ("AH_ENGINE_SLOW_DOWN_N", "9")]);
+    let mut stand_in = Command::new("sleep").arg("60").spawn().unwrap();
+    fake_heartbeat(&e, stand_in.id(), true);
+    fake_server(&e, || {
+        std::thread::sleep(Duration::from_millis(1500));
+        Some(ah_engine::frame::encode(ah_engine::frame::Kind::Ok, &format!("{}late deny", ah_engine::hookio::EXIT2)))
+    });
+    let (out, code, dt) = e.wrapper_hook(DENY_IN);
+    println!("TIMING fresh-heartbeat late deny wall_ms={:.1} rc={code}", dt.as_secs_f64() * 1000.0);
+    ah_engine::discard::harmless(stand_in.kill());
+    ah_engine::discard::harmless(stand_in.wait());
+    assert_eq!(code, 2, "a delayed deny from a live daemon must block: out={out:?} {}", e.health_log());
+    assert!(dt >= Duration::from_millis(1500) && dt < Duration::from_millis(clamped_num("client.slow_fallback_max_ms", 3000)), "{dt:?}");
+}
+
+/// A daemon whose heartbeat is stale fails the call fast (no slow window), and a pid the heartbeat names that is not this
+/// engine's daemon is never signalled.
+#[test]
+fn a_stale_heartbeat_fails_fast_and_never_kills_a_process_that_is_not_the_daemon() {
+    let _timing = wrapper_timing_lock();
+    let e = Env::new("hbstale", &[("AH_ENGINE_NOSPAWN", "1"), ("AH_ENGINE_SLOW_DOWN_N", "9")]);
+    let mut stand_in = Command::new("sleep").arg("60").spawn().unwrap();
+    fake_heartbeat(&e, stand_in.id(), false);
+    fake_server(&e, || {
+        std::thread::sleep(Duration::from_millis(1500));
+        Some(ah_engine::frame::encode(ah_engine::frame::Kind::Ok, &format!("{}late deny", ah_engine::hookio::EXIT2)))
+    });
+    let (_, code, dt) = e.wrapper_hook(DENY_IN);
+    println!("TIMING stale-heartbeat wall_ms={:.1} rc={code}", dt.as_secs_f64() * 1000.0);
+    let survived = stand_in.try_wait().unwrap().is_none();
+    ah_engine::discard::harmless(stand_in.kill());
+    ah_engine::discard::harmless(stand_in.wait());
+    assert_eq!(code, 0, "a hung daemon fails open: {}", e.health_log());
+    assert!(dt < Duration::from_secs(1), "a stale heartbeat must fail fast: {dt:?}");
+    assert!(survived, "a pid that is not the engine's daemon must never be signalled");
+    assert!(e.fresh_down_marker(), "a hung daemon that could not be recovered is marked down at once: {}", e.health_log());
+}

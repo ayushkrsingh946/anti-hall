@@ -284,6 +284,30 @@ pub fn write_marker() {
     crate::discard::logged("run_marker_write", crate::atomic::write(state_file("run_marker"), std::process::id().to_string()));
 }
 
+/// Start the daemon's liveness heartbeat (`files.heartbeat`): the file names this daemon, and [`heartbeat`] touches its
+/// modification time from the watchdog thread, apart from request handling. A stopped or wedged process stops touching it.
+pub fn heartbeat_init() {
+    crate::discard::logged("heartbeat_write", crate::atomic::write(state_file("heartbeat"), std::process::id().to_string()));
+}
+
+/// One heartbeat: touch the file's modification time (no data written).
+pub fn heartbeat() {
+    if let Ok(f) = std::fs::File::options().write(true).open(state_file("heartbeat")) {
+        crate::discard::harmless(f.set_modified(std::time::SystemTime::now())); // keep: a missed beat only makes a slow reply fail open sooner
+    }
+}
+
+/// The daemon's heartbeat as `(pid, age)`, counted only when it names the pid that holds the singleton lock (the daemon now
+/// serving the socket). `None` = unknown (no heartbeat yet, a daemon still starting whose watchdog has not begun, a build from
+/// before the heartbeat, an unreadable file), which counts as alive.
+pub(crate) fn heartbeat_of_lock_holder() -> Option<(u32, Duration)> {
+    let p = state_file("heartbeat");
+    let pid: u32 = std::fs::read_to_string(&p).ok()?.trim().parse().ok()?;
+    let holder: u32 = std::fs::read_to_string(paths::lock_for(&paths::socket())).ok()?.trim().parse().ok()?;
+    let age = std::fs::metadata(&p).and_then(|m| m.modified()).ok()?.elapsed().unwrap_or_default();
+    (pid != 0 && pid == holder).then_some((pid, age))
+}
+
 /// Remove the run marker on a clean exit.
 pub fn clear_marker() {
     crate::discard::harmless(std::fs::remove_file(state_file("run_marker"))); // keep: cleanup that raced; an absent file is the goal state

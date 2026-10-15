@@ -190,9 +190,11 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `client.ctl_timeout_ms` | `1500` |  | ms | Deadline for a control exchange (ping, status, reload, stop, project ops). |
 | `client.deadline_ms` | `300` | `AH_ENGINE_DEADLINE_MS` | ms | Overall hook-client deadline for one engine exchange (connect, write, read); a hard watchdog thread enforces it so a hung daemon fails open quickly. |
 | `client.deadline_slack_ms` | `10` |  | ms | Extra wait for the exchange thread to report after the deadline before the client declares a timeout. |
-| `client.down_marker_ttl_ms` | `3000` | `AH_ENGINE_DOWN_MARKER_TTL_MS` | ms | How long other clients skip connecting after one client finds the daemon absent or failed, or after client.slow_down_n consecutive slow replies; this prevents hook pile-ups while a restart is attempted. |
+| `client.down_marker_ttl_ms` | `3000` | `AH_ENGINE_DOWN_MARKER_TTL_MS` | ms | How long other clients skip connecting after one client finds the daemon absent or failed, or hung (client.heartbeat_stale_ms) and not replaced, or after client.slow_down_n consecutive slow replies; this prevents hook pile-ups while a restart is attempted. |
 | `client.fallback_ms` | `8000` | `AH_ENGINE_FALLBACK_MS` | ms | The Node fallback hook must finish, and its stdout and stderr must reach EOF, within this long. A hook still running at the deadline is killed (then plain allow, since it is unavailable); one that finished with output still unread is an error outcome, never an empty stdout. |
 | `client.fallback_poll_ms` | `2` |  | ms | Poll interval while the Node fallback runs. |
+| `client.heartbeat_poll_ms` | `100` |  | ms | While a hook call waits past its deadline for a late reply, how often it re-reads the daemon's heartbeat (client.heartbeat_stale_ms). |
+| `client.heartbeat_stale_ms` | `1500` | `AH_ENGINE_HEARTBEAT_STALE_MS` | ms | A hook call past client.deadline_ms keeps waiting for a late reply (client.slow_fallback_max_ms) only while the daemon's heartbeat (files.heartbeat) is younger than this. Older means the daemon is stopped or wedged, not slow: the call fails open at once, and the client ends that daemon (only the pid the heartbeat names, holding the singleton lock, verified as this engine's daemon; single-flight and under the crash-loop rule) and starts a new one, or marks it down (client.down_marker_ttl_ms) when it cannot. A heartbeat that names another pid or is missing counts as alive. Keep it well above daemon.watchdog_tick_ms and below client.slow_fallback_max_ms less client.slow_wait_margin_ms, so a stop is detected within the first slow call. 0 disables the check. |
 | `client.max_reply` | `2097152` |  | bytes | Largest reply the client reads. |
 | `client.max_stdin` | `8388608` |  | bytes | Largest hook payload the client reads from stdin. |
 | `client.slow_down_n` | `5` | `AH_ENGINE_SLOW_DOWN_N` |  | Consecutive slow (late) daemon replies within client.slow_window_ms after which the daemon is treated as wedged and marked down. A single call that gets no reply in the window never marks it down: it fails open and the next client asks the daemon again. |
@@ -307,6 +309,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `files.daemon_down_marker` | `daemon.down.until` |  |  | Short-lived client marker: when a hook client finds the daemon absent or hung, other clients skip connecting until this expires. |
 | `files.failure` | `failure.json` |  |  | Last recorded failure, for the once-per-session advisory. |
 | `files.healthy_binary` | `healthy.binary` |  |  | Holds the sha256 of the engine binary that last stayed up for daemon.healthy_after_s. The integrity script promotes that binary to the known-good copy; a binary with no entry here has never proven itself. |
+| `files.heartbeat` | `daemon.heartbeat` |  |  | The daemon's liveness heartbeat: names the daemon's pid; the watchdog thread touches its modification time every daemon.watchdog_tick_ms, apart from request handling. A client past its deadline reads it to tell a slow daemon (heartbeat fresh) from a stopped or wedged one (stale, see client.heartbeat_stale_ms). |
 | `files.integrity_log` | `integrity.log` |  |  | Log of the integrity script (checks, promotions, roll-backs), inside the state directory. |
 | `files.last_crash` | `last-crash.json` |  |  | Last panic or stale-run-marker crash report, shown by status and doctor. |
 | `files.log` | `ah-engine.log` |  |  | Event log file name (state directory). |
@@ -9447,6 +9450,7 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `msg.client_bad_socket` | Exchange failure when the socket path is not a socket owned by this user. |
 | `msg.client_connect` | Exchange failure when connecting failed. Placeholder: {err}. |
 | `msg.client_fallback_unavailable` | Printed on stderr when stdin cannot safely be sent to the engine and the Node fallback cannot answer. Guard events exit 2; non-guard events exit 0 with this note. |
+| `msg.client_hung` | Log detail for a hook call that stopped waiting because the daemon's heartbeat is stale (stopped or wedged). {pid} = the daemon, {age} = the heartbeat's age in ms. |
 | `msg.client_io` | Exchange failure for another I/O step. Placeholders: {what}, {err}. |
 | `msg.client_no_fallback_guard` | Printed on stderr (exit dispatch.defer_exit) when the legacy `hook` command gets a guard event, the engine cannot answer and no Node fallback was given: the caller must run the Node hook, never take silence as an allow. |
 | `msg.client_skip` | Log detail for a hook call that skipped the daemon because a down marker, the breaker or the crash-loop cooldown was active. |
@@ -9518,6 +9522,7 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `msg.log_fallback_read_timeout` | Log detail when the Node fallback finished but its stdout or stderr was still open at the deadline. |
 | `msg.log_fallback_signal` | Log detail when the Node fallback was killed by a signal (out of memory, a crash). |
 | `msg.log_fallback_timeout` | Log detail when the Node fallback did not finish in time. |
+| `msg.log_hung_kill` | Log detail when a client ends a hung daemon (verified pid) so a new one can start. {pid} = the ended daemon, {why} = the stale-heartbeat detail. |
 | `msg.log_lock_fail` | Start-failure detail when the lock file cannot be opened. Placeholders: {path}, {err}. |
 | `msg.log_lock_no_daemon` | Log detail when a starting daemon gives up on the singleton lock while no daemon answers on the socket. Placeholders: {path}, {pid} (the pid the lock file names, may be empty), {live_engine}. |
 | `msg.log_not_socket` | Start-failure detail when something other than a socket sits at the socket path. Placeholder: {path}. |

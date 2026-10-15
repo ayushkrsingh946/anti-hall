@@ -52,6 +52,9 @@ pub enum Exch {
     /// request, so this call runs no Node hook (it would count twice): it fails open, and no down marker, spawn or breaker
     /// failure follows unless `client.slow_down_n` such calls come in a row (a wedged daemon).
     Slow(String),
+    /// Past the deadline, and the daemon's heartbeat (`files.heartbeat`) is older than `client.heartbeat_stale_ms`: the process is
+    /// stopped or wedged, not slow, so the call stops waiting at once (no slow window) and the daemon is recovered.
+    Hung(String),
 }
 
 /// The longest one exchange waits for its reply: the deadline, extended to `client.slow_fallback_max_ms` less `client.slow_wait_margin_ms` (a daemon
@@ -69,6 +72,13 @@ fn rearm_read_timeout(s: &UnixStream, left: Duration) {
     if let Err(e) = s.set_read_timeout(Some(left)) {
         health::log_event("client_rearm", "daemon", &defaults::render("msg.client_io", &[("what", &defaults::text("msg.client_what_timeout")), ("err", &e)]));
     }
+}
+
+/// Why the daemon counts as hung: its heartbeat is older than `client.heartbeat_stale_ms` (0 = never; unknown = alive).
+fn stale_heartbeat() -> Option<String> {
+    let stale = defaults::millis("client.heartbeat_stale_ms");
+    let (pid, age) = health::heartbeat_of_lock_holder()?;
+    (!stale.is_zero() && age > stale).then(|| defaults::render("msg.client_hung", &[("pid", &pid), ("age", &age.as_millis())]))
 }
 
 fn exchange_inner(sock: &Path, payload: &[u8], deadline: Duration, window: Duration) -> Exch {
@@ -110,7 +120,10 @@ fn exchange_inner(sock: &Path, payload: &[u8], deadline: Duration, window: Durat
             late = true;
             health::log_event("client_late", "daemon", &why); // past the deadline but still waiting for the daemon's own reply
         }
-        rearm_read_timeout(&s, left);
+        if let Some(hung) = stale_heartbeat() {
+            return Exch::Hung(hung);
+        }
+        rearm_read_timeout(&s, left.min(defaults::millis("client.heartbeat_poll_ms")));
     }
     match frame::decode(&buf) {
         Ok((k, body)) => Exch::Reply(k, body),
@@ -415,6 +428,21 @@ fn attempt_with(payload: &[u8], cfg: &ClientConfig, have_fallback: bool, hold_wa
             }
             None
         }
+        Exch::Hung(why) => {
+            // stopped or wedged, not slow: this call fails open, and the daemon is replaced (the new one clears the down
+            // marker), or skipped until the marker expires when it cannot be. The marker comes first, so a client cut off
+            // mid-way still leaves it; the wait marker stays until the replacement is done, so the wrapper's watchdog does
+            // not cut it off (single-flight: one call pays it).
+            note_unavailable();
+            clear_slow_streak();
+            health::log_event("client_hung", "daemon", &why);
+            mark_daemon_down(&why);
+            if replace_hung_daemon(cfg, &why) {
+                clear_daemon_down_marker();
+            }
+            wait_marker(false);
+            None
+        }
         Exch::Absent => {
             wait_marker(false);
             note_unavailable();
@@ -450,6 +478,28 @@ fn attempt_with(payload: &[u8], cfg: &ClientConfig, have_fallback: bool, hold_wa
             None
         }
     }
+}
+
+/// End a hung daemon and start a new one; true once the new one is started. Single-flight (the spawn lock) and gated by the
+/// crash-loop rule. The pid is the one the daemon's own heartbeat names, still stale, holding the singleton lock, and verified
+/// as this engine's daemon process: anything else is never signalled. SIGKILL, because a stopped process acts on nothing else.
+fn replace_hung_daemon(cfg: &ClientConfig, why: &str) -> bool {
+    if health::crashloop_tripped(cfg) {
+        return false;
+    }
+    let Some(_spawn_lock) = spawn_lock() else { return false };
+    let stale = defaults::millis("client.heartbeat_stale_ms");
+    let Some((pid, _)) = health::heartbeat_of_lock_holder().filter(|(pid, age)| *age > stale && *pid != std::process::id() && health::pid_is_engine(*pid))
+    else {
+        return false;
+    };
+    // SAFETY: `kill` takes plain integers and has no memory-safety preconditions; the pid was verified as this engine's daemon just above.
+    if unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) } != 0 {
+        return false;
+    }
+    health::log_event("client_hung_kill", "daemon", &defaults::render("msg.log_hung_kill", &[("pid", &pid), ("why", &why)]));
+    health::log_event("client_spawn_attempt", "singleflight", why);
+    spawn_daemon().is_some()
 }
 
 /// Log a fallback failure; the state dir may not exist yet (no daemon ever ran here), and the event must still be on record.
