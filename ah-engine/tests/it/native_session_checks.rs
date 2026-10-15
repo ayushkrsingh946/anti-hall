@@ -1,5 +1,6 @@
-//! The session-start checks that used to hand almost every call to Node (verify-first-orch, jev-review-reminder and devswarm-child-role),
-//! through the real dispatcher and a real daemon, on both hosts (Claude and Codex).
+//! The checks that used to hand almost every call to Node, through the real dispatcher and a real daemon, on both hosts (Claude and Codex):
+//! verify-first-orch, jev-review-reminder and devswarm-child-role at SessionStart, and devswarm-parent-inbox and devswarm-child-turn at
+//! UserPromptSubmit (a DevSwarm Primary or child with no git checkout around its working directory).
 //!
 //! * no Node on the normal path: every entry of the event is mapped (`--fallback-map`) to a command that records its id, and none of
 //!   the three ports may appear in that record, while the joined output carries what each of them says;
@@ -23,10 +24,12 @@ const CALLS: usize = 25;
 
 struct Scene {
     dir: PathBuf,
+    /// A child workspace (a non-blank DEVSWARM_SOURCE_BRANCH) instead of a Primary.
+    child: bool,
 }
 
 impl Scene {
-    fn new(tag: &str) -> Scene {
+    fn new(tag: &str, child: bool) -> Scene {
         let root = std::env::var_os("AH_ENGINE_IT_ROOT").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/tmp"));
         let dir = root.join(format!("ah-nsc-{tag}-{}", std::process::id()));
         ah_engine::discard::harmless(std::fs::remove_dir_all(&dir));
@@ -39,7 +42,7 @@ impl Scene {
         let rows: String =
             (0..31).map(|i| format!("{{\"ts\":\"2026-01-0{}T00:00:00.000Z\",\"id\":\"newRequest\",\"mode\":\"shadow\"}}\n", 1 + i % 9)).collect();
         std::fs::write(home.join(".anti-hall/logs/jev-assist.ndjson"), rows).unwrap();
-        Scene { dir }
+        Scene { dir, child }
     }
 
     fn home(&self) -> PathBuf {
@@ -71,6 +74,19 @@ impl Scene {
             .env("DEVSWARM_BUILDER_ID", "abc-123")
             .env("DEVSWARM_AI_AGENT", "claude")
             .current_dir(&self.dir);
+        if self.child {
+            c.env("DEVSWARM_SOURCE_BRANCH", "feat/x");
+        }
+        c
+    }
+
+    /// The command for the engine's own verbs (ping, metrics, stop): run as the owner's main session, with none of the DevSwarm variables,
+    /// because the engine's role matrix keeps those verbs from a child workspace.
+    fn admin(&self) -> Command {
+        let mut c = self.cmd();
+        for v in ["DEVSWARM_REPO_ID", "DEVSWARM_SOURCE_BRANCH", "DEVSWARM_BUILDER_ID", "DEVSWARM_AI_AGENT"] {
+            c.env_remove(v);
+        }
         c
     }
 
@@ -88,10 +104,11 @@ impl Scene {
         p
     }
 
-    fn payload(&self, host: &str) -> String {
+    /// The payload of call `n` (each call is a session of its own, so the emit-dedupe store never mutes the answer).
+    fn payload(&self, host: &str, event: &str, n: usize) -> String {
         let cwd = self.dir.join("nogit");
-        let mut p = serde_json::json!({"hook_event_name": "SessionStart", "source": "startup", "session_id": "S1", "cwd": cwd,
-            "transcript_path": self.home().join(".claude/projects/-p/S1.jsonl"), "model": "m"});
+        let mut p = serde_json::json!({"hook_event_name": event, "source": "startup", "session_id": format!("S{n}"), "cwd": cwd,
+            "transcript_path": self.home().join(format!(".claude/projects/-p/S{n}.jsonl")), "model": "m", "prompt": "hi"});
         if host == "codex" {
             p["turn_id"] = serde_json::json!("t1");
         }
@@ -99,26 +116,26 @@ impl Scene {
     }
 
     /// One dispatcher call; returns (exit code, stdout, stderr).
-    fn hook(&self, host: &str, ran: &Path) -> (i32, String, String) {
-        let map = self.map(host, "SessionStart");
+    fn hook(&self, host: &str, event: &str, n: usize, ran: &Path) -> (i32, String, String) {
+        let map = self.map(host, event);
         let mut ch = self
             .cmd()
             .env("AH_TEST_RAN", ran)
             .env("CLAUDE_PLUGIN_ROOT", Scene::plugin())
-            .args(["hook", "--event", "SessionStart", "--host", host, "--fallback-map"])
+            .args(["hook", "--event", event, "--host", host, "--fallback-map"])
             .arg(map)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
             .unwrap();
-        ch.stdin.take().unwrap().write_all(self.payload(host).as_bytes()).unwrap();
+        ch.stdin.take().unwrap().write_all(self.payload(host, event, n).as_bytes()).unwrap();
         let o = ch.wait_with_output().unwrap();
         (o.status.code().unwrap_or(-1), String::from_utf8_lossy(&o.stdout).to_string(), String::from_utf8_lossy(&o.stderr).to_string())
     }
 
     fn json(&self, args: &[&str]) -> serde_json::Value {
-        let o = self.cmd().args(args).output().unwrap();
+        let o = self.admin().args(args).output().unwrap();
         serde_json::from_slice(&o.stdout).unwrap_or_else(|e| panic!("{args:?} did not print JSON ({e}): {}", String::from_utf8_lossy(&o.stdout)))
     }
 
@@ -143,7 +160,7 @@ impl Scene {
 impl Drop for Scene {
     fn drop(&mut self) {
         common::reap(&self.dir.join("eng"), || {
-            ah_engine::discard::harmless(self.cmd().arg("stop").output());
+            ah_engine::discard::harmless(self.admin().arg("stop").output());
         });
         ah_engine::discard::harmless(std::fs::remove_dir_all(&self.dir));
     }
@@ -173,11 +190,11 @@ fn with_spill(out: &str) -> String {
 }
 
 /// Start the daemon with dispatcher calls and wait until it answers (a client that finds no daemon starts one and lets that call pass).
-fn warm_daemon(s: &Scene, host: &str, ran: &Path) {
+fn warm_daemon(s: &Scene, host: &str, event: &str, ran: &Path) {
     let t = std::time::Instant::now();
     while t.elapsed() < std::time::Duration::from_secs(90) {
-        s.hook(host, ran);
-        if s.cmd().args(["ctl", "ping"]).output().is_ok_and(|o| o.status.success()) {
+        s.hook(host, event, 0, ran);
+        if s.admin().args(["ctl", "ping"]).output().is_ok_and(|o| o.status.success()) {
             return;
         }
         std::thread::sleep(std::time::Duration::from_millis(100));
@@ -201,46 +218,82 @@ fn warm_launchers(s: &Scene) {
     assert!(s.home().join(".anti-hall/bin/devswarm.js").exists(), "the launchers exist");
 }
 
-fn run_host(host: &str, orch_check: &str) {
-    let s = Scene::new(host);
+/// One run of `CALLS` calls of `event` on `host`: the answer carries `says`, Node starts for none of `ports`, and the p50 of each of
+/// `latency` (check name, budget key) stays inside its budget.
+fn run_event(host: &str, event: &str, child: bool, says: &[&str], ports: &[&str], latency: &[(&str, &str)]) {
+    let s = Scene::new(&format!("{host}-{}", event.to_lowercase()), child);
     warm_launchers(&s);
     let ran = s.dir.join("ran.txt");
-    warm_daemon(&s, host, &ran);
+    warm_daemon(&s, host, event, &ran);
     std::fs::write(&ran, "").unwrap();
     let mut last = String::new();
-    for i in 0..CALLS {
-        let (code, out, err) = s.hook(host, &ran);
+    for i in 1..=CALLS {
+        let (code, out, err) = s.hook(host, event, i, &ran);
         assert_eq!(code, 0, "call {i}: {out} {err}");
         last = format!("{}\nSTDERR: {err}\nRAN: {}", with_spill(&out), std::fs::read_to_string(&ran).unwrap_or_default());
     }
-    // what the three ports say, in one joined answer
-    assert!(last.contains("ORCHESTRATION DISCIPLINE"), "verify-first-orch spoke: {last}");
-    assert!(last.contains("W. DEVSWARM PRIMARY"), "the Primary rule is part of it: {last}");
-    assert!(last.contains("devswarm-comms"), "devswarm-child-role spoke: {last}");
-    assert!(last.contains("jev-review: review due for newRequest"), "jev-review-reminder spoke: {last}");
-    // and Node ran for none of them
+    for needle in says {
+        assert!(last.contains(needle), "{host}/{event}: the answer lacks {needle:?}: {last}");
+    }
+    // and Node ran for none of the ports
     let ran_ids = std::fs::read_to_string(&ran).unwrap();
-    for id in ["verify-first-orch", "jev-review-reminder", "devswarm-child-role"] {
-        assert!(!ran_ids.lines().any(|l| l.starts_with(id)), "{host}: Node was started for {id}; it ran: {ran_ids}");
+    for id in ports {
+        assert!(!ran_ids.lines().any(|l| l.starts_with(id)), "{host}/{event}: Node was started for {id}; it ran: {ran_ids}");
     }
     // latency, from the daemon's own histogram
-    for (check, key) in
-        [(orch_check, "verify_first_orch_p50_ms"), ("jev-review-reminder", "jev_review_reminder_p50_ms"), ("devswarm-child-role", "devswarm_child_role_p50_ms")]
-    {
+    for (check, key) in latency {
         let (p50, calls) = s.p50_us(check);
         let budget = budget_ms(key);
         eprintln!("{host}/{check}: p50 {:.2} ms over {calls} calls (budget {budget:.0} ms)", p50 as f64 / 1000.0);
-        assert!(calls >= (CALLS - 1) as u64, "{check}: the daemon answered the calls ({calls})");
         assert!(p50 as f64 / 1000.0 <= budget, "{host}/{check}: p50 {:.2} ms is over the budget of {budget} ms", p50 as f64 / 1000.0);
+    }
+}
+
+fn session_start(host: &str, orch_check: &str) {
+    run_event(
+        host,
+        "SessionStart",
+        false,
+        &["ORCHESTRATION DISCIPLINE", "W. DEVSWARM PRIMARY", "devswarm-comms", "jev-review: review due for newRequest"],
+        &["verify-first-orch", "jev-review-reminder", "devswarm-child-role"],
+        &[(orch_check, "verify_first_orch_p50_ms"), ("jev-review-reminder", "jev_review_reminder_p50_ms"), ("devswarm-child-role", "devswarm_child_role_p50_ms")],
+    );
+}
+
+fn prompt(host: &str, child: bool) {
+    if child {
+        run_event(host, "UserPromptSubmit", true, &["devswarm-child-workspace", "devswarm-autonomy", "devswarm-child-reception"], &["devswarm-child-turn"], &[("devswarm-child-turn", "devswarm_child_turn_p50_ms")]);
+    } else {
+        run_event(host, "UserPromptSubmit", false, &["devswarm-comms: mesh only"], &["devswarm-parent-inbox"], &[("devswarm-parent-inbox", "devswarm_parent_inbox_p50_ms")]);
     }
 }
 
 #[test]
 fn the_claude_session_start_ports_start_no_node_and_stay_inside_their_budget() {
-    run_host("claude", "verify-first-orch");
+    session_start("claude", "verify-first-orch");
 }
 
 #[test]
 fn the_codex_session_start_ports_start_no_node_and_stay_inside_their_budget() {
-    run_host("codex", "verify-first-orch-codex");
+    session_start("codex", "verify-first-orch-codex");
+}
+
+#[test]
+fn the_claude_primary_prompt_port_starts_no_node_and_stays_inside_its_budget() {
+    prompt("claude", false);
+}
+
+#[test]
+fn the_claude_child_prompt_port_starts_no_node_and_stays_inside_its_budget() {
+    prompt("claude", true);
+}
+
+#[test]
+fn the_codex_primary_prompt_port_starts_no_node_and_stays_inside_its_budget() {
+    prompt("codex", false);
+}
+
+#[test]
+fn the_codex_child_prompt_port_starts_no_node_and_stays_inside_its_budget() {
+    prompt("codex", true);
 }
