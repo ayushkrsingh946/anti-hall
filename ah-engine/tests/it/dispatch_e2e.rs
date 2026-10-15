@@ -99,8 +99,10 @@ impl Env {
             .env("ANTIHALL_JEV_RECOMMEND_NOTICE", "false") // the session gate answers the notice itself; these tests probe the Node fallback
             .env("ANTIHALL_ROLE_NOTE", "0") // the role note is injected at every SessionStart; these tests probe the Node fallback and the exact bytes
             .env("AH_ENGINE_DISPATCH_IN_PROCESS", if in_process { "1" } else { "0" })
-            // DevSwarm active makes the native verify-first-orch check defer to its mapped Node command, so the
-            // SessionStart tests below keep driving Node hooks only (the check itself is covered by spawn_ctx_parity.rs)
+            // DevSwarm active, together with a SessionStart payload that names no working directory, makes the native
+            // verify-first-orch check defer to its mapped Node command (whether a Primary may be told the workspace tier depends on
+            // the repository's own documents), so the SessionStart tests below keep driving Node hooks only (the check itself is
+            // covered by spawn_ctx_parity.rs)
             .env("DEVSWARM_REPO_ID", "e2e")
             .current_dir(&self.dir)
             .stdin(Stdio::piped())
@@ -141,8 +143,10 @@ impl Env {
             .env("AH_ENGINE_DIR", self.state())
             .env("AH_ENGINE_VERSION", "dispatch-e2e")
             .env("AH_ENGINE_DISPATCH_IN_PROCESS", if in_process { "1" } else { "0" })
-            // DevSwarm active makes the native verify-first-orch check defer to its mapped Node command, so the
-            // SessionStart tests below keep driving Node hooks only (the check itself is covered by spawn_ctx_parity.rs)
+            // DevSwarm active, together with a SessionStart payload that names no working directory, makes the native
+            // verify-first-orch check defer to its mapped Node command (whether a Primary may be told the workspace tier depends on
+            // the repository's own documents), so the SessionStart tests below keep driving Node hooks only (the check itself is
+            // covered by spawn_ctx_parity.rs)
             .env("DEVSWARM_REPO_ID", "e2e")
             .current_dir(&self.dir)
             .stdin(Stdio::piped())
@@ -739,7 +743,7 @@ fn overcap_session(name: &str) -> (Env, String, PathBuf) {
         ids.iter().enumerate().map(|(i, id)| (id.clone(), if i < 3 { big(["a", "b", "c"][i]) } else { "true".to_string() }.into())).collect();
     let map = e.dir.join("map.json");
     std::fs::write(&map, serde_json::json!({ "SessionStart": m }).to_string()).unwrap();
-    let p = serde_json::json!({"session_id": "e2e", "cwd": e.dir, "hook_event_name": "SessionStart", "source": "startup"}).to_string();
+    let p = serde_json::json!({"session_id": "e2e", "hook_event_name": "SessionStart", "source": "startup"}).to_string();
     (e, p, map)
 }
 
@@ -970,7 +974,7 @@ fn small_payloads_do_not_need_a_usable_spool_dir() {
     let mark = e.dir.join("session-ran");
     let map = session_map(&e, r#"wc -c > "$AH_TEST_MARK""#, "true");
     let args = ["hook", "--event", "SessionStart", "--fallback-map", map.to_str().unwrap()];
-    let payload = serde_json::json!({"session_id": "e2e", "cwd": e.dir, "hook_event_name": "SessionStart", "source": "startup"}).to_string();
+    let payload = serde_json::json!({"session_id": "e2e", "hook_event_name": "SessionStart", "source": "startup"}).to_string();
     let (code, out, err) =
         e.run_with(&args, true, &payload, true, &[("AH_ENGINE_DIR", state_file.to_str().unwrap()), ("AH_TEST_MARK", mark.to_str().unwrap())]);
     assert_eq!((code, out.as_str()), (0, ""));
