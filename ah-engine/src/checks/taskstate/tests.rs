@@ -127,3 +127,32 @@ fn a_line_only_javascript_can_parse_is_unsure_not_skipped() {
     assert!(!super::parse::maybe_valid_for_js("{\"x\": 1,"));
     assert!(reconstruct(&["{\"x\": 1,"], Variant::Guard).is_ok());
 }
+
+/// The tasklist-guard pass (`scanview`) applies a rename the way the reconstruction does (#177 follow-up): a subject an update set
+/// is kept when the create's result is folded in, and the status and priority the pass counts are unchanged by it. The pass reports
+/// ids and counts only, so the rename itself is not visible in its answer; this holds the counts.
+#[test]
+fn the_scan_counts_a_renamed_task_as_it_counts_an_unrenamed_one() {
+    use super::scanview::scan_tasks;
+    let call = |id: &str, name: &str, input: Value| json!({"type": "assistant", "message": {"id": "m", "role": "assistant",
+        "content": [{"type": "tool_use", "id": id, "name": name, "input": input}]}});
+    let result = |id: &str, text: &str| json!({"type": "user", "message": {"role": "user",
+        "content": [{"type": "tool_result", "tool_use_id": id, "content": text}]}});
+    for rename in [false, true] {
+        let mut update = json!({"taskId": "1", "status": "in_progress"});
+        if rename {
+            update["subject"] = json!("renamed after creation");
+        }
+        let lines = [
+            call("t1", "TaskCreate", json!({"subject": "created as", "priority": "P0"})),
+            result("t1", "Task #1 created successfully: created as"),
+            call("t2", "TaskUpdate", update),
+            result("t2", "Updated task #1"),
+        ];
+        let path = std::env::temp_dir().join(format!("ah-scanview-{}-{rename}.jsonl", std::process::id()));
+        std::fs::write(&path, lines.iter().map(|l| format!("{l}\n")).collect::<String>()).unwrap();
+        let scan = scan_tasks(&path.to_string_lossy(), 1 << 20, 1 << 20).unwrap().unwrap();
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!((scan.open_task_ids.clone(), scan.in_progress_count, scan.saw_task_activity), (vec!["1".to_string()], 1, true), "rename={rename}");
+    }
+}

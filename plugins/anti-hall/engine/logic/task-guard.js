@@ -57,15 +57,16 @@ function tgChildAttended(owner) {
   return tk.appDbPresent(ah.home()) ? null : false;
 }
 
-// A task whose owner names an agent this session has running (its id, its name or description) is attended: the agent is working
+// A task whose owner names an agent this session has running (its id, the name it was launched with, or its description) is attended: the agent is working
 // it. `rows` is the running-agent list of the transcript scan (null when unreadable: nothing is attended through it).
 function tgLiveAgentOwner(owner, rows) {
   var o = (owner || '').trim().toLowerCase();
   if (!o || rows === null || tgCoordinator(o)) return false;
-  var min = ah.cfgNum('task_guard.owner_match_min');
+  var min = ah.cfgNum('task_guard.owner_match_min'), nameKey = ah.cfg('task_guard.owner_name_key');
   return rows.some(function (r) {
     var id = String(r.id || '').toLowerCase(), d = String(r.description || '').toLowerCase();
-    return o === id || (d !== '' && o === d) || (o.length >= min && d.indexOf(o) >= 0);
+    var nm = jx.isObj(r.spawnInput) && typeof r.spawnInput[nameKey] === 'string' ? r.spawnInput[nameKey].trim().toLowerCase() : '';
+    return o === id || (d !== '' && o === d) || (nm !== '' && o === nm) || (o.length >= min && d.indexOf(o) >= 0);
   });
 }
 

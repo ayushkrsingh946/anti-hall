@@ -91,7 +91,7 @@ const WRITE_IMPERATIVE_RE =
 // clone <repo> into/to <path>, git clone / git format-patch, or run the generator/
 // tests/build as an instruction (sentence start, "then", "and").
 const WRITE_PHRASE_RE =
-  /\bsave\s+(?:[\w-]+\s+){0,4}?(?:to|into)\s+\S|\bclone\s+(?:\S+\s+){0,3}?(?:into|to)\s+\S|\bgit\s+(?:clone|format-patch)\b|(?:^|[.;:]\s+|\b(?:then|and)\s+)run\s+(?:the\s+)?(?:generators?|tests?|test\s+suite|build)\b/im;
+  /\bsave\s+(?:[\w-]+\s+){0,4}?(?:to|into)\s+\S|\bclone\s+(?:\S+\s+){0,3}?(?:into|to)\s+\S|\bgit\s+(?:clone|format-patch|mv|rm)\b|\bopen(?:s|ing)?\s+(?:an?\s+|the\s+)?(?:pr|pull\s+request)\b|(?:^|[.;:]\s+|\b(?:then|and)\s+)run\s+(?:the\s+)?(?:generators?|tests?|test\s+suite|build)\b/im;
 
 // A brief that tells the agent to commit (or to open a git worktree) is a writing brief however many read-only words it quotes
 // (dogfood 2026-10-09: a fix brief naming the check "read-only-shaped" was judged read-only). A negated commit ("never commit",
@@ -176,7 +176,10 @@ const DEPLOY_STRONG_RE = new RegExp(
   'i',
 );
 const DEPLOY_WEAK_RE = /\b(prod|production|secrets?|credentials?)\b/gi;
+// Quoted text is not an action: a word that is only quoted ('deploy' in a question about the word) is not a deploy task.
+const QUOTED_TEXT_RE = /(^|[^\w'])'[^']{1,1000}'|"[^"]{1,1000}"/g;
 function isDeployShaped(corpus) {
+  corpus = corpus.replace(QUOTED_TEXT_RE, '$1 ');
   if (DEPLOY_STRONG_RE.test(corpus)) return true;
   const kinds = new Set();
   for (const m of corpus.matchAll(DEPLOY_WEAK_RE)) {

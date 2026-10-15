@@ -42,6 +42,23 @@ function buildBlob(payload) {
   }
   let blob = parts.join('\n');
   if (blob.length > SCAN_CAP) blob = blob.slice(0, SCAN_CAP);
+  return stripEcho(blob, payload);
+}
+
+// The result without the lines of the agent's own prompt (and their JSON-escaped forms): a result that echoes the brief back is not
+// a quota message.
+const ECHO_MIN_CHARS = 8;
+function stripEcho(blob, payload) {
+  const input = payload && payload.tool_input;
+  const prompt = input && typeof input === 'object' ? input.prompt : undefined;
+  if (typeof prompt !== 'string' || prompt === '') return blob;
+  for (const line of prompt.split(/\r?\n/)) {
+    const l = line.trim();
+    if (l.length < ECHO_MIN_CHARS) continue;
+    blob = blob.split(l).join('');
+    const esc = JSON.stringify(l).slice(1, -1);
+    if (esc !== l) blob = blob.split(esc).join('');
+  }
   return blob;
 }
 

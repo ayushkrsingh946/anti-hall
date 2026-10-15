@@ -86,7 +86,7 @@ function decide(p) {
   if (ctx.unsure) return 'defer';
   var now = ah.clock.now(), stateRel = ah.cfg('session.state_dir') + '/' + ah.cfg('session.progress_state_file');
   var state = ppState(stateRel);
-  var progressDir = (function () { var top = ctx.toplevel, rh = ah.fs.realpath(home) || home; return top && top !== rh ? top : cwd; })();
+  var progressDir = (function () { var top = ctx.root || ctx.toplevel, rh = ah.fs.realpath(home) || home; return top && top !== rh ? top : cwd; })(); // the session's project: a submodule cwd keys on its superproject
   var listing = ah.fs.readdir(progressDir + '/' + ah.cfg('session.anti_hall_dir') + '/' + ah.cfg('session.progress_dir'));
   if (listing === null && ah.fs.isDir(progressDir + '/' + ah.cfg('session.anti_hall_dir') + '/' + ah.cfg('session.progress_dir'))) return 'defer'; // too many entries to list exactly
   var hint = ppGitignoreHint(ctx, home, now);

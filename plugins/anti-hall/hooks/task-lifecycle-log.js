@@ -20,10 +20,12 @@
 const fs = require('fs');
 const path = require('path');
 const { appendIndexLineIfAbsent } = require('./session-history-index.js');
-// repoRoot(cwd) -- the canonical resolver, so a cwd already inside
+// sessionProjectRoot(cwd) -- the canonical resolver, so a cwd already inside
 // .anti-hall/**/... does not double onto itself (2026-09-25 fix; see
-// hooks/lib/handover-find.js for the full rationale).
-const { repoRoot } = require('./lib/handover-find.js');
+// hooks/lib/handover-find.js for the full rationale) and a cwd inside a submodule
+// keys the ledger on the SUPERPROJECT, not the submodule's own checkout (the
+// ledger is a property of the session's project, as tasklist-guard already has it).
+const { sessionProjectRoot } = require('./lib/handover-find.js');
 
 const UNKNOWN_SESSION = 'unknown-session';
 
@@ -75,7 +77,7 @@ function main() {
   if (subject) line += ' · ' + subject;
 
   try {
-    const root = repoRoot(cwd);
+    const root = sessionProjectRoot(cwd);
     const historyDir = path.join(root, '.anti-hall', 'history', date);
     fs.mkdirSync(historyDir, { recursive: true });
     const ledgerPath = path.join(historyDir, sessionIdForPath + '.md');

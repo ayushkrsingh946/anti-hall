@@ -333,7 +333,8 @@ pub fn reconstruct(lines: &[&str], variant: Variant) -> R<Facts> {
                     let subject = get(inp, "subject").and_then(Value::as_str).filter(|s| !s.is_empty());
                     let upd = Task {
                         id: ex.id.clone(),
-                        content: if variant == Variant::State { subject.map_or_else(|| ex.content.clone(), str::to_string) } else { ex.content.clone() },
+                        // a rename counts in both variants: a task is listed by its current subject, not the one it was created with
+                        content: subject.map_or_else(|| ex.content.clone(), str::to_string),
                         description: if variant == Variant::State {
                             match get(inp, "description") {
                                 Some(Value::String(s)) => s.clone(),
@@ -351,7 +352,7 @@ pub fn reconstruct(lines: &[&str], variant: Variant) -> R<Facts> {
                             true => ex.priority.clone(),
                             false => None,
                         },
-                        subject_updated: if variant == Variant::State && subject.is_some() { true } else { variant == Variant::State && ex.subject_updated },
+                        subject_updated: subject.is_some() || ex.subject_updated,
                         unknown: gaps_after_update(ex.unknown, inp),
                         block_unknown: false,
                         // `String(inp.status || '')` against the pending / in-progress pattern; a truthy non-string status was refused above
@@ -416,12 +417,13 @@ fn resolve_provisional(tasks: &mut TaskMap, prov: &[(String, Prov)], result_ids:
                 },
             ),
             (Variant::Guard, Some(e)) => {
-                if e.content.is_empty() || e.content == key {
+                if e.content.is_empty() || e.content == key || e.subject_updated {
                     tasks.set(
                         &key,
                         Task {
                             id: key.clone(),
-                            content: rec.content.clone(),
+                            // a subject an update set is newer than the create's
+                            content: if e.subject_updated { e.content.clone() } else { rec.content.clone() },
                             description: String::new(),
                             status: e.status.clone(),
                             owner: if e.owner.is_empty() { rec.owner.clone() } else { e.owner.clone() },

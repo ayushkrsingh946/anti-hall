@@ -58,6 +58,10 @@ function snCandidates(p, home, now, threshold, session) {
         if (resumed > reference) reference = resumed;
         if (resumed !== 0) snapshot = snapshot + ah.cfg('silent_nudge.resume_mark') + String(resumed);
         if (now - reference < threshold) continue;
+        var staleMax = ah.cfgNum('silent_nudge.stale_max_ms');
+        if (staleMax > 0 && now - reference >= staleMax) continue; // a record this old outlived its agent
+        var isShell = rec.taskType === ah.cfg('silent_nudge.shell_task_type');
+        if (isShell && jx.re('silent_nudge.daemon_re', 'i').test(rec.description || '')) continue; // a daemon is quiet by design
         out.push({ key: ah.cfg('silent_nudge.key_transcript') + id, id: id, resumedAt: resumed, snapshot: snapshot, label: rec.description ? rec.description : id, age: now - reference, shell: rec.taskType === ah.cfg('silent_nudge.shell_task_type') });
       }
     }
@@ -84,6 +88,7 @@ function snCandidates(p, home, now, threshold, session) {
     if (finished.some(function (w) { return w.toLowerCase() === status; })) continue;
     if (now - ts < threshold) continue;
     if (ts !== Math.trunc(ts) || Math.abs(ts) >= ah.cfgNum('agent_scan.safe_int')) return null;
+    if (ah.cfgNum('silent_nudge.stale_max_ms') > 0 && now - ts >= ah.cfgNum('silent_nudge.stale_max_ms')) continue; // a heartbeat this old outlived its agent
     out.push({ key: ah.cfg('silent_nudge.key_heartbeat') + d.id, id: d.id, resumedAt: 0, snapshot: String(ts), label: typeof d.step === 'string' && d.step ? d.step : d.id, age: now - ts, shell: false });
   }
   return out;

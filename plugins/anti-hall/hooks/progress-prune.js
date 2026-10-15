@@ -11,11 +11,12 @@ require('./lib/judge-child-exit');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-// repoRoot(cwd) -- the canonical resolver (companion/lib/identity.js via
+// sessionProjectRoot(cwd) -- the canonical resolver (companion/lib/identity.js via
 // hooks/lib/handover-find.js): a cwd already under .anti-hall/progress/...
 // (or any subdir) must not double onto itself when joined below (same root
-// cause as the 2026-09-25 PreCompact doubled-path bug).
-const { repoRoot } = require('./lib/handover-find.js');
+// cause as the 2026-09-25 PreCompact doubled-path bug), and a cwd inside a
+// submodule prunes the SUPERPROJECT's progress/history, where the session keeps them.
+const { sessionProjectRoot } = require('./lib/handover-find.js');
 
 const STATE_FILE = path.join(os.homedir(), '.anti-hall', 'progress-prune-state.json');
 const THROTTLE_MS = 24 * 60 * 60 * 1000;
@@ -80,7 +81,7 @@ function archiveAndDelete(progressFile, historyFile, prunedAt) {
 }
 
 function pruneProject(cwd, now) {
-  const root = repoRoot(cwd);
+  const root = sessionProjectRoot(cwd);
   const progressRoot = path.join(root, '.anti-hall', 'progress');
   const todayUtc = new Date(now).toISOString().slice(0, 10);
   const entries = fs.readdirSync(progressRoot, { withFileTypes: true });

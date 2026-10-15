@@ -1616,14 +1616,26 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `merge_side_pick.cmd_keep` | `120` |  |  | How many UTF-16 units of the side-pick command are kept for the advisory. |
 | `merge_side_pick.dry_run` | `\s(?:--dry-run\|-n)\b` |  |  | Regex that marks a push segment as a dry run, which is not a push. |
 | `merge_side_pick.fallback_cmd` | `a side-pick` |  |  | Text used for the side-pick command when none was recorded. |
+| `merge_side_pick.git_dir_levels` | `64` |  |  | How many directory levels up from the working directory the search for the checkout's .git climbs at most. |
+| `merge_side_pick.git_file_max` | `4096` |  |  | Most bytes read from a .git file or a HEAD file. |
 | `merge_side_pick.git_prefix` | `(?:^\|\s)git(?:\s+-C\s+\S+\|\s+-c\s+\S+\|\s+--no-pager)*\s+` |  |  | Regex source that every git pattern starts with: the git word with optional -C, -c and --no-pager options. |
+| `merge_side_pick.gitdir_line_re` | `^gitdir:[^\n]+` |  |  | Regex source (multi-line): the gitdir line of a .git file (a linked worktree). |
+| `merge_side_pick.gitdir_prefix` | `^gitdir:\s*` |  |  | Regex source: the prefix cut from the gitdir line to leave the path. |
 | `merge_side_pick.guard_name` | `merge-side-pick` |  |  | The guard id this check answers to in skip.json and in messages. |
+| `merge_side_pick.head_ref_prefix` | `^ref:\s*refs/heads/` |  |  | Regex source: the prefix cut from the HEAD ref line to leave the branch name. |
+| `merge_side_pick.head_ref_re` | `^ref:\s*refs/heads/[^\s]+` |  |  | Regex source: the ref line of a HEAD file (a detached HEAD has none, and the branch is then unknown). |
+| `merge_side_pick.head_word` | `HEAD` |  |  | The refspec word that means the current branch. |
+| `merge_side_pick.heads_prefix` | `refs/heads/` |  |  | The prefix of a full local branch ref in a refspec. |
+| `merge_side_pick.heredoc_open` | `<<-?[ \t]*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\1` |  |  | JavaScript regex source for the opener of a heredoc (<<TAG, <<-TAG, <<'TAG'; capture 1 = the optional quote, capture 2 = the tag). The lines up to the tag line are text, blanked before a command is split into segments. |
 | `merge_side_pick.msg_instead` | `run the tests first, review the discarded side in `git diff`, then push.` |  |  | Advisory advice. |
 | `merge_side_pick.msg_what` | `pushing after a conflict was resolved by taking one side wholesale ({pick}) w...` |  |  | Advisory headline; {pick} is the recorded side-pick command. |
 | `merge_side_pick.msg_why` | `taking --ours/--theirs (or -X ours/theirs) silently drops the other side's ch...` |  |  | Advisory reason. |
 | `merge_side_pick.pick_tails` | `(?:checkout\\|restore)\b[^\n]*?\s--(?:ours\\|theirs)\b, (?:merge\\|pull\\|rebase\...` |  |  | Regex sources, each appended to git_prefix, that recognise taking one side of a conflict wholesale (checkout or restore --ours, -X ours, -s ours). |
+| `merge_side_pick.plain_branch_re` | `^[A-Za-z0-9][A-Za-z0-9._/@-]*$` |  |  | Regex source: a plain local branch name in a refspec (anything else, such as a tag, a sha or a revision, keeps the advisory). |
 | `merge_side_pick.push_tail` | `push\b` |  |  | Regex source appended to git_prefix that recognises a push. |
-| `merge_side_pick.quote_masks` | `\x27[^\x27\n]*\x27, "(?:[^"\\\n]\\|\\.)*"` |  |  | Regexes whose matches (quoted spans) are blanked before a command is split into segments, so quoted text is never mistaken for a command (maskShellQuotes). |
+| `merge_side_pick.push_unscoped_opts_re` | `^(?:--(?:all\|mirror\|tags\|follow-tags\|prune\|branches\|push-option\|repo\|receive-...` |  |  | Regex source: a push argument that pushes more than the named refs or takes its value as the next word (--all, --mirror, --tags, --follow-tags, --prune, --branches, -o, --push-option, --repo, --receive-pack, --exec). The advisory stays for such a push. |
+| `merge_side_pick.quote_masks` | `\x27[^\x27]*\x27\\|"(?:[^"\\]\\|\\.)*"` |  |  | Regexes whose matches (quoted spans, which may span lines such as a multi-line commit message) are blanked before a command is split into segments, so quoted text is never mistaken for a command (maskShellQuotes). One alternation, so the quote that opens first wins. |
+| `merge_side_pick.scope_unknown_re` | `(?:^\|\s)(?:cd\|pushd\|GIT_DIR=\|GIT_WORK_TREE=\|--git-dir\|--work-tree)(?:\s\|=\|$)` |  |  | Regex source: a segment after which the checkout a git command runs in cannot be told (cd, pushd, GIT_DIR, GIT_WORK_TREE, --git-dir, --work-tree). A push then keeps the advisory. |
 | `merge_side_pick.segment_split` | `[;&\|\n]+` |  |  | Regex that splits a masked command into segments (semicolon, ampersand, pipe, newline). |
 | `merge_side_pick.setting` | `6 entries` |  |  | Where the on/off switch is read from (guards.mergeSidePickAdvisory, default on). |
 | `merge_side_pick.state_ns` | `merge-side-pick` |  |  | Namespace of this check's per-session state in the guard state store. |
@@ -1715,6 +1727,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `model_routing.negated_write_re` | `\b(?:do\s+not\|don'?t\|never\|without\|no\|not)\s+(?:\w+\s+){0,3}?(?:git\s+\|gh\s+)...` |  |  | Regex (case-insensitive, global) of a negated write instruction ('never commit', 'do not push', 'don't create files', 'no edits or commits'); removed from the brief before strong_write_re is tested. |
 | `model_routing.off_mode` | `off` |  |  | Routing-mode value that disables model-routing. |
 | `model_routing.planning_intent_re` | `\b(architect(?:ure)?\|brainstorm\|design\s+(?:a\|the\|an)\b\|plan\s+(?:a\|the\|an\|ou...` |  |  | Strict planning-intent regex for the row-4 haiku advisory. |
+| `model_routing.quoted_text_re` | `(^\|[^\w'])'[^']{1,1000}'\|"[^"]{1,1000}"` |  |  | Regex (global) of quoted text in a brief: a single-quoted span that opens after a non-word character (so an apostrophe in a contraction never opens one) or a double-quoted span, at most 1000 characters (a quoted issue comment or log excerpt can span lines). The deploy floor reads the brief with these spans blanked (group 1 is kept): a word that is only quoted ('deploy' in a question about the word) is not a deploy task. |
 | `model_routing.readonly_override_re` | `\b(?:report\s+only\|read[- ]?only\|(?:do\s+not\|don'?t\|never)\s+(?:edit\|modify\|w...` |  |  | Explicit read-only statement regex that overrides ambiguous write words for row 6. |
 | `model_routing.readonly_re` | `\b(verbatim\|read[- ]?only\|mechanical\|append\s*only\|run\s+exactly\|do\s+nothing...` |  |  | Read-only/mechanical marker regex used to suppress row-4 false positives. |
 | `model_routing.reasoning_re` | `\b(analy[sz]\w*\|synthesi[sz]\w*\|summari[sz]\w*\|reconcil\w*\|evaluat\w*\|interpr...` |  |  | Heavy reading and synthesis regex that vetoes rows steering to haiku. |
@@ -1741,7 +1754,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `model_routing.update_skill_path_re` | `\bnode\s+["']?\S*skills[\\/]update[\\/]scripts[\\/]update\.js\b` |  |  | Regex for node commands that run anti-hall's update skill script. |
 | `model_routing.update_slash_re` | `\b(?:run\|invoke\|execute)\s+`?/anti-hall:update\b` |  |  | Regex for explicit requests to invoke the anti-hall update skill. |
 | `model_routing.write_imperative_re` | `(?:^\|[\n\r\u2028\u2029]\|[.;:!?]\s+\|\b(?:then\|and\|also\|please\|to)\s+)(?:tag\|re...` |  |  | Instruction-position ambiguous write/execute regex that suppresses the row-6 Explore advisory. |
-| `model_routing.write_phrase_re` | `\bsave\s+(?:[\w-]+\s+){0,4}?(?:to\|into)\s+\S\|\bclone\s+(?:\S+\s+){0,3}?(?:int...` |  |  | Explicit write phrase regex that suppresses the row-6 Explore advisory even when read-only override words are present. |
+| `model_routing.write_phrase_re` | `\bsave\s+(?:[\w-]+\s+){0,4}?(?:to\|into)\s+\S\|\bclone\s+(?:\S+\s+){0,3}?(?:int...` |  |  | Explicit write phrase regex (a save-to, clone, git clone/format-patch/mv/rm, opening a PR, running the generators or tests) that suppresses the row-6 Explore advisory even when read-only override words are present. |
 | `model_routing.write_re` | `\b(write\|edit\|modif\|commit\|push\|changelog\|create\s+(?:an?\s+\|the\s+\|new\s+)?f...` |  |  | Write/execute regex that suppresses the row-6 Explore advisory. |
 
 ### small_guards.toml / scan_throttle
@@ -3106,6 +3119,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `silent_nudge.ack_subject_sep` | `,` |  |  | Separator between the sorted agent ids the stop-ack signature is computed over. |
 | `silent_nudge.agents_dir` | `.anti-hall/agents` |  |  | Directory of subagent heartbeat files, relative to the home directory. |
 | `silent_nudge.control_re` | `[\x00-\x1f\x7f-\u{9f}]` |  |  | Rust regex source of the control characters turned into spaces in a name the nudge shows. |
+| `silent_nudge.daemon_re` | `\b(daemon\|throttle\|watchdog\|watcher\|keep-?alive\|heartbeat\|server\|listener\|pol...` |  |  | JavaScript regex source (case-insensitive) of the description of a background SHELL that is a long-running daemon: quiet by design, so it is never nudged as silent (an agent is judged by silence alone). |
 | `silent_nudge.ellipsis` | `…` |  |  | Text appended to a name that was cut. |
 | `silent_nudge.ever_key` | `everNudged` |  |  | Field of the state file that holds the once-per-agent records. |
 | `silent_nudge.ever_nudged_ttl_ms` | `2592000000` |  | ms | How long a once-per-agent nudge record is kept (30 days). |
@@ -3145,6 +3159,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `silent_nudge.shell_task_type` | `local_bash` |  |  | The task_status taskType of a background shell (anything else adopted is an agent). |
 | `silent_nudge.sidechain_file_prefix` | `agent-` |  |  | Prefix of an agent's own sidechain transcript file name. |
 | `silent_nudge.signature_len` | `16` |  |  | Hex characters of the SHA-1 a stop-ack signature keeps. |
+| `silent_nudge.stale_max_ms` | `86400000` |  | ms | A background task or heartbeat quiet for at least this long (24 hours) is a record that outlived its agent (carried over a restart or a compaction), not a silent agent: it is expired and never nudged. 0 turns the expiry off. |
 | `silent_nudge.state_file` | `.anti-hall/silent-agent-nudge-state.json` |  |  | Nudge state file, relative to the home directory. |
 | `silent_nudge.summary` | `Stop: nudges once per silent background agent (the block text, the nudge stat...` |  |  | One-line description of the silent-agent-nudge check in the generated reference. |
 | `silent_nudge.tasks_dir` | `tasks` |  |  | The directory name that holds a session's task output files (<session id>/tasks/<id>.output). |
@@ -3232,6 +3247,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `swarm_guard.msg_shared_why` | `Two such agents can stage and commit each other's uncommitted changes.` |  |  | Why the shared-tree advisory applies. |
 | `swarm_guard.proc_pidns` | `/proc/self/ns/pid` |  |  | The Linux link that names this process's pid namespace. |
 | `swarm_guard.proc_uptime` | `/proc/uptime` |  |  | The Linux file that holds the uptime in seconds. |
+| `swarm_guard.re_api_only` | `\b(?:gh\|github)[- ](?:api\|cli)[- ]only\b\|\bonly\s+(?:calls?\|uses?\|runs?\|via)\...` |  |  | JavaScript regex source (case-insensitive): a statement that the spawn only calls the GitHub API or gh CLI and edits no checkout (gh-API-only, only calls the GitHub API, no checkout, do not touch the working tree). Such a spawn shares no working tree, so the shared-tree advisory does not apply; an in-place statement still cancels it. |
 | `swarm_guard.re_in_place` | `\bin\s+place\b\|\bin\s+(?:the\s+)?(?:session\s+)?repo\b\|\brepo\s+files\b\|\b(?:...` |  |  | JavaScript regex source (case-insensitive): a statement that the spawn works in place in the session repo, which cancels the scratch reading. |
 | `swarm_guard.re_named_tree` | `\b(?:(?:a\|an\|the\|your\|its\|their\|own\|scratch\|separate\|fresh\|lane)\s+(?:clone\|w...` |  |  | JavaScript regex source (case-insensitive): a statement that names the spawn's own working tree ("a\|your\|its\|scratch… clone", worktree, checkout, cd, cwd or work-in target; a bare "git clone <src>" names a source, not a tree) followed by an absolute, ~ or $HOME path. When that path lies outside the session's git tree (and outside its cwd), the spawn works in another checkout and shares no tree; the scratch negation and in-place statements still cancel it. |
 | `swarm_guard.re_named_tree_home` | `^(?:~\|\$HOME)` |  |  | JavaScript regex source: the home prefix of a named-tree path (~ or $HOME), replaced by the user's home directory. |
@@ -3361,6 +3377,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `codex_handover.detail_state` | `state.md` |  |  | The detail file that holds the task list snapshot. |
 | `codex_handover.detail_trials` | `trials.md` |  |  | The detail file that holds the do-not-repeat list. |
 | `codex_handover.details_sep` | ` / ` |  |  | Separator of the detail file names in the resume steps. |
+| `codex_handover.detect_echo_min_chars` | `8` |  |  | A line of the agent's own prompt at least this long (trimmed, in UTF-16 units) is removed from its result before the quota search, as is its JSON-escaped form: a result that quotes the brief back (a brief that mentions a quota limit) is not a quota message. |
 | `codex_handover.detect_scan_cap` | `20000` |  |  | How much of a Codex result is searched for a quota message, in UTF-16 units. |
 | `codex_handover.detect_summary` | `Advisory: records a Codex quota or rate-limit exhaustion reported by a codex:...` |  |  | One-line description of the codex-quota-detect check in the generated reference. |
 | `codex_handover.git_binary` | `git` |  |  | The git executable the hooks run. |
@@ -3635,6 +3652,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `task_guard.omc_state_max_bytes` | `65536` |  |  | Largest OMC state file read; a larger one counts as malformed. |
 | `task_guard.omc_ts_keys` | `last_checked_at, updated_at, started_at` |  |  | The state fields that may carry a fresh time, in the order tried. |
 | `task_guard.owner_match_min` | `4` |  | chars | The shortest task owner text that counts as naming a running agent by a part of its description (an owner of fewer characters matches only the agent's id or its whole description). A task owned by a running agent is attended and is not listed by the generic block. |
+| `task_guard.owner_name_key` | `name` |  |  | The field of the Agent call that launched a running agent which names it (its `name`). A task whose owner is that name is attended, like one owned by the agent's id or description. |
 | `task_guard.pending_status` | `pending` |  |  | The status (lowercase) of a task that can be dispatched now. |
 | `task_guard.priority_default_rank` | `1` |  |  | The rank of a task with no priority or an unrecognised one (fail-open: it counts as P1). |
 | `task_guard.priority_low` | `low, deferred` |  |  | Priority words (lowercase) that rank below the default. |

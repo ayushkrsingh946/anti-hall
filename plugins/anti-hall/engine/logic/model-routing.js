@@ -253,7 +253,7 @@ function decide(p) {
 
   var suppressHaiku = false;
   var floorName = ah.settings.enum('model_routing.deploy_floor_setting');
-  if (floorName !== ah.cfg('model_routing.deploy_floor_off') && mrDeployShaped(corpus)) {
+  if (floorName !== ah.cfg('model_routing.deploy_floor_off') && mrDeployShaped(corpus.replace(jx.re('model_routing.quoted_text_re', 'g'), '$1 '))) {
     var floor = mrRank(floorName) !== null ? floorName : ah.cfg('model_routing.deploy_floor_default');
     // an omitted model inherits the session's: at or above the floor it is no cheap model (only an unknown or lower tier is advised)
     var inherited = omitted ? mrInheritedTier(p) : null;

@@ -51,6 +51,8 @@ const SCRATCH_RE = new RegExp([
   String.raw`\b(?:its|your|their)\s+own\s+(?:git\s+)?worktrees?\b`,
 ].join('|'), 'i');
 const SCRATCH_NEGATED_RE = /\b(?:not|no|without|instead\s+of)\s+(?:in\s+|a\s+|the\s+|any\s+)?scratch\b/i;
+// A spawn that only calls the GitHub API / gh CLI edits no checkout and shares no tree. Mirrors engine swarm_guard.re_api_only.
+const API_ONLY_RE = /\b(?:gh|github)[- ](?:api|cli)[- ]only\b|\bonly\s+(?:calls?|uses?|runs?|via)\s+(?:the\s+)?(?:github\s+api|gh\s+(?:api|cli|commands?))\b|\b(?:via|through|using)\s+the\s+github\s+api\s+only\b|\bno\s+(?:local\s+)?(?:checkout|file\s+(?:edits|writes|changes)|working[- ]tree)\b|\b(?:does\s+not|doesn'?t|do\s+not|don'?t|never)\s+(?:touch|write\s+to|edit|modify)\s+(?:the\s+|any\s+|a\s+)?(?:local\s+)?(?:checkout|working\s+tree|repo\s+files?)\b/i;
 const IN_PLACE_RE = /\bin\s+place\b|\bin\s+(?:the\s+)?(?:session\s+)?repo\b|\brepo\s+files\b|\b(?:session|main)\s+(?:checkout|working\s+tree)\b|\bin\s+the\s+(?:working\s+tree|checkout)\b|\bworking\s+copy\b|\bchecked[- ]out\s+(?:files?|tree|copy|branch)\b|\bon\s+main\b|\bmain\s+branch\b/i;
 // A brief that names its own working tree (a clone, worktree, checkout, cd, cwd or work-in target) at an absolute, ~ or $HOME
 // path outside the session's git tree and cwd works in another checkout: it shares no tree. Mirrors engine swarm_guard.re_named_tree*.
@@ -104,7 +106,7 @@ function namesOtherTree(t, tree, home) {
 function inScratch(inp, tree, home) {
   const i = inp && typeof inp === 'object' ? inp : {};
   const t = String(i.prompt || '') + '\n' + String(i.description || '');
-  return (SCRATCH_RE.test(t) || namesOtherTree(t, tree, home)) && !SCRATCH_NEGATED_RE.test(t) && !IN_PLACE_RE.test(t);
+  return (SCRATCH_RE.test(t) || API_ONLY_RE.test(t) || namesOtherTree(t, tree, home)) && !SCRATCH_NEGATED_RE.test(t) && !IN_PLACE_RE.test(t);
 }
 
 function isolated(inp) {

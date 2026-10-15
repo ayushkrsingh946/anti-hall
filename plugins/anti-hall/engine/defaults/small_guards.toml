@@ -111,9 +111,13 @@ value = { section = "guards", key = "mergeSidePickAdvisory", env = "ANTIHALL_MER
 doc = "Namespace of this check's per-session state in the guard state store."
 value = "merge-side-pick"
 
+[merge_side_pick.heredoc_open]
+doc = "JavaScript regex source for the opener of a heredoc (<<TAG, <<-TAG, <<'TAG'; capture 1 = the optional quote, capture 2 = the tag). The lines up to the tag line are text, blanked before a command is split into segments."
+value = '''<<-?[ \t]*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\1'''
+
 [merge_side_pick.quote_masks]
-doc = "Regexes whose matches (quoted spans) are blanked before a command is split into segments, so quoted text is never mistaken for a command (maskShellQuotes)."
-value = ['\x27[^\x27\n]*\x27', '"(?:[^"\\\n]|\\.)*"']
+doc = "Regexes whose matches (quoted spans, which may span lines such as a multi-line commit message) are blanked before a command is split into segments, so quoted text is never mistaken for a command (maskShellQuotes). One alternation, so the quote that opens first wins."
+value = ['\x27[^\x27]*\x27|"(?:[^"\\]|\\.)*"']
 
 [merge_side_pick.segment_split]
 doc = "Regex that splits a masked command into segments (semicolon, ampersand, pipe, newline)."
@@ -170,6 +174,54 @@ value = "taking --ours/--theirs (or -X ours/theirs) silently drops the other sid
 [merge_side_pick.msg_instead]
 doc = "Advisory advice."
 value = "run the tests first, review the discarded side in `git diff`, then push."
+
+[merge_side_pick.scope_unknown_re]
+doc = "Regex source: a segment after which the checkout a git command runs in cannot be told (cd, pushd, GIT_DIR, GIT_WORK_TREE, --git-dir, --work-tree). A push then keeps the advisory."
+value = '(?:^|\s)(?:cd|pushd|GIT_DIR=|GIT_WORK_TREE=|--git-dir|--work-tree)(?:\s|=|$)'
+
+[merge_side_pick.git_dir_levels]
+doc = "How many directory levels up from the working directory the search for the checkout's .git climbs at most."
+value = 64
+min = 1
+max = 256
+
+[merge_side_pick.git_file_max]
+doc = "Most bytes read from a .git file or a HEAD file."
+value = 4096
+min = 64
+max = 65536
+
+[merge_side_pick.gitdir_line_re]
+doc = "Regex source (multi-line): the gitdir line of a .git file (a linked worktree)."
+value = '^gitdir:[^\n]+'
+
+[merge_side_pick.gitdir_prefix]
+doc = "Regex source: the prefix cut from the gitdir line to leave the path."
+value = '^gitdir:\s*'
+
+[merge_side_pick.head_ref_re]
+doc = "Regex source: the ref line of a HEAD file (a detached HEAD has none, and the branch is then unknown)."
+value = '^ref:\s*refs/heads/[^\s]+'
+
+[merge_side_pick.head_ref_prefix]
+doc = "Regex source: the prefix cut from the HEAD ref line to leave the branch name."
+value = '^ref:\s*refs/heads/'
+
+[merge_side_pick.push_unscoped_opts_re]
+doc = "Regex source: a push argument that pushes more than the named refs or takes its value as the next word (--all, --mirror, --tags, --follow-tags, --prune, --branches, -o, --push-option, --repo, --receive-pack, --exec). The advisory stays for such a push."
+value = '^(?:--(?:all|mirror|tags|follow-tags|prune|branches|push-option|repo|receive-pack|exec)|-o)$'
+
+[merge_side_pick.head_word]
+doc = "The refspec word that means the current branch."
+value = "HEAD"
+
+[merge_side_pick.heads_prefix]
+doc = "The prefix of a full local branch ref in a refspec."
+value = "refs/heads/"
+
+[merge_side_pick.plain_branch_re]
+doc = "Regex source: a plain local branch name in a refspec (anything else, such as a tag, a sha or a revision, keeps the advisory)."
+value = '^[A-Za-z0-9][A-Za-z0-9._/@-]*$'
 
 [merge_side_pick.fallback_cmd]
 doc = "Text used for the side-pick command when none was recorded."
@@ -572,12 +624,16 @@ doc = "Instruction-position ambiguous write/execute regex that suppresses the ro
 value = '(?:^|[\n\r\u2028\u2029]|[.;:!?]\s+|\b(?:then|and|also|please|to)\s+)(?:tag|release|bump|apply|patch|build|deploy|install|fix)\b'
 
 [model_routing.write_phrase_re]
-doc = "Explicit write phrase regex that suppresses the row-6 Explore advisory even when read-only override words are present."
-value = '\bsave\s+(?:[\w-]+\s+){0,4}?(?:to|into)\s+\S|\bclone\s+(?:\S+\s+){0,3}?(?:into|to)\s+\S|\bgit\s+(?:clone|format-patch)\b|(?:^|[\n\r\u2028\u2029]|[.;:]\s+|\b(?:then|and)\s+)run\s+(?:the\s+)?(?:generators?|tests?|test\s+suite|build)\b'
+doc = "Explicit write phrase regex (a save-to, clone, git clone/format-patch/mv/rm, opening a PR, running the generators or tests) that suppresses the row-6 Explore advisory even when read-only override words are present."
+value = '\bsave\s+(?:[\w-]+\s+){0,4}?(?:to|into)\s+\S|\bclone\s+(?:\S+\s+){0,3}?(?:into|to)\s+\S|\bgit\s+(?:clone|format-patch|mv|rm)\b|\bopen(?:s|ing)?\s+(?:an?\s+|the\s+)?(?:pr|pull\s+request)\b|(?:^|[\n\r\u2028\u2029]|[.;:]\s+|\b(?:then|and)\s+)run\s+(?:the\s+)?(?:generators?|tests?|test\s+suite|build)\b'
 
 [model_routing.commit_phrase_re]
 doc = "Regex (case-insensitive) of a brief that tells the agent to commit or open a git worktree: a writing brief however many read-only words it quotes, so it suppresses the row-6 Explore advisory and cannot be overridden by an explicit read-only statement. A negated commit is removed first (negated_commit_re)."
 value = '\bgit\s+(?:commit|push|worktree\s+add|checkout\s+-b)\b|\bcommit(?:s|ting)?\s+(?:per|each|every|it\b|them\b|your\b|after|before|the\s+(?:fix|fixes|change|changes|work)|with\s+a)\b|\bcommit\s+(?:and|&)\s+push\b'
+
+[model_routing.quoted_text_re]
+doc = "Regex (global) of quoted text in a brief: a single-quoted span that opens after a non-word character (so an apostrophe in a contraction never opens one) or a double-quoted span, at most 1000 characters (a quoted issue comment or log excerpt can span lines). The deploy floor reads the brief with these spans blanked (group 1 is kept): a word that is only quoted ('deploy' in a question about the word) is not a deploy task."
+value = '''(^|[^\w'])'[^']{1,1000}'|"[^"]{1,1000}"'''
 
 [model_routing.negated_commit_re]
 doc = "Regex (case-insensitive, global) of a negated commit, push or worktree instruction ('never commit', 'do not push'); removed from the brief before commit_phrase_re is tested."

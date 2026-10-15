@@ -146,6 +146,30 @@ const legacyLineHash = require('./lib/devswarm-unread.js').legacyLineHash;
 // same functions. They live there (the leaf module) and are imported here.
 const { bodyMultisetOfRows, consumeBody } = require('./lib/devswarm-unread.js');
 
+// senderOfLegacyLine(line, registry) -> id | null. A legacy durable-inbox line is the NDJSON row `inbox pull` mirrored
+// ({_h, fromBranch, message, createdAt, status, sender}); the import used to keep only the raw line, so the sender it carried
+// (or the branch that names it) was dropped and `read-primary` printed `from: null`. The line's own sender wins; else the one
+// registered workspace checked out under its fromBranch (or the branch of a "DONE: <branch>" body); else null, never a guess.
+// Pure; never throws.
+function senderOfLegacyLine(line, registry) {
+  try {
+    const row = JSON.parse(line);
+    if (!row || typeof row !== 'object') return null;
+    if (typeof row.sender === 'string' && row.sender.trim() !== '') return row.sender.trim();
+    const bs = require('./lib/devswarm-branch-sender.js');
+    return bs.resolveBranchSender(registry, row.fromBranch) || bs.resolveBranchSender(registry, bs.branchOfDoneBody(row.message)) || null;
+  } catch (_) { return null; }
+}
+
+// registryOf(s, extra) -> the workspaces a branch can be resolved against: the legacy descriptors (`extra`, every workspace the
+// run knows, since each one's store holds only its own row) plus the store's own registry rows. [] when unreadable (a sender is
+// then simply not attributed).
+function registryOf(s, extra) {
+  let rows = [];
+  try { rows = (typeof s.listRegistry === 'function' ? s.listRegistry() : []) || []; } catch (_) { rows = []; }
+  return (Array.isArray(extra) ? extra : []).concat(rows);
+}
+
 // readInbox(inboxPath, F) -> { readable, lines }. Distinguishes a genuinely
 // READABLE inbox (possibly empty) from a MISSING path or a read ERROR — a
 // distinction migrateOne needs to avoid falsely reporting `verified:true` for a
@@ -285,6 +309,7 @@ function migrateOne(s, descriptor, F, opts) {
   // still imports.
   const pendingIdx = new Set(pendingLegacyLines(s, id, lines));
   let imported = 0;
+  const registry = registryOf(s, opts && opts.registry);
   for (let i = 0; i < lines.length; i++) {
     if (!pendingIdx.has(i)) continue; // already covered by another path
     const r = s.appendMessage({
@@ -292,6 +317,7 @@ function migrateOne(s, descriptor, F, opts) {
       body: lines[i],
       hash: legacyLineHash(id, i, lines[i]),
       ts: Date.now(),
+      sender: senderOfLegacyLine(lines[i], registry),
     });
     if (r && r.inserted) imported++;
   }
@@ -403,7 +429,7 @@ function migrateToStore(opts) {
         // migrateOne itself cannot see `home`, so the gate is resolved here
         // and threaded through opts.archiveGate.
         const archiveGate = migrationArchiveGate(home, d.id, d, F, { now: o.now, worktreeIndex: archivedWorktreeIndex });
-        const report = migrateOne(s, d, F, { markRead, archiveGate });
+        const report = migrateOne(s, d, F, { markRead, archiveGate, registry: descriptors });
         // Human-friendly label for reporting only (never used for identity/dedupe):
         // the worktree's own basename, falling back to the raw id when there is no
         // worktreePath to derive one from.
@@ -558,7 +584,7 @@ function migrateGlobalStoreToPerProject(opts) {
             // may have no physical seq at all). Use `index` — the ordinal is stable
             // because the source is append-only, so existing indices never shift.
             const h = (m.hash != null) ? String(m.hash) : synthGlobalHash(id, m.index, m.body);
-            const r = dst.appendMessage({ workspaceId: id, body: m.body, hash: h, ts: Number.isFinite(m.ts) ? m.ts : o.now });
+            const r = dst.appendMessage({ workspaceId: id, body: m.body, hash: h, ts: Number.isFinite(m.ts) ? m.ts : o.now, sender: m.sender, recipient: m.recipient, mtype: m.mtype });
             if (r && r.inserted) { wsCopied++; copied++; }
           }
           const regEntry = reg.find((d) => d && String(d.id) === String(id));
@@ -639,10 +665,11 @@ function migrateLegacyInbox(opts) {
     let verified = false;
     try {
       const wantHashes = [];
+      const registry = registryOf(s, (() => { try { return readDescriptors(home, F); } catch (_) { return []; } })());
       for (let i = 0; i < lines.length; i++) {
         const h = legacyLineHash(workspaceId, i, lines[i]);
         wantHashes.push(h);
-        const r = s.appendMessage({ workspaceId, body: lines[i], hash: h, ts: Date.now() });
+        const r = s.appendMessage({ workspaceId, body: lines[i], hash: h, ts: Date.now(), sender: senderOfLegacyLine(lines[i], registry) });
         if (r && r.inserted) imported++;
       }
       // OPT-IN markRead: this direct-import path never set a cursor before

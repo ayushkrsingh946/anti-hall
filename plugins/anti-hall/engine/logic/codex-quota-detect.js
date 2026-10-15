@@ -40,9 +40,24 @@ function cxBlob(p) {
   if (joined.length > cap) {
     var last = joined.charCodeAt(cap - 1);
     if (last >= 0xd800 && last <= 0xdbff) return null;
-    return joined.slice(0, cap);
+    return cxStripEcho(joined.slice(0, cap), p);
   }
-  return joined;
+  return cxStripEcho(joined, p);
+}
+
+// The result without the lines of the agent's own prompt (and their JSON-escaped forms): a result that echoes the brief back is not a quota message.
+function cxStripEcho(blob, p) {
+  var input = p.tool_input, prompt = jx.isObj(input) ? input.prompt : undefined;
+  if (typeof prompt !== 'string' || prompt === '') return blob;
+  var min = cxN('detect_echo_min_chars'), lines = prompt.split(/\r?\n/);
+  for (var i = 0; i < lines.length; i++) {
+    var l = lines[i].trim();
+    if (l.length < min) continue;
+    blob = blob.split(l).join('');
+    var esc = JSON.stringify(l).slice(1, -1);
+    if (esc !== l) blob = blob.split(esc).join('');
+  }
+  return blob;
 }
 
 function decide(p) {

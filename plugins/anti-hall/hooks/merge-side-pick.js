@@ -21,10 +21,10 @@ function main(payload, env, argv, out) {
   const lib = require('./lib/merge-side-pick.js');
   const home = io.homeOf(env);
   if (payload.hook_event_name === 'PostToolUse' || argv.includes('--post')) {
-    lib.record(home, sid, cmd);
+    lib.record(home, sid, cmd, typeof payload.cwd === 'string' ? payload.cwd : '');
     return;
   }
-  const pick = lib.pushCheck(home, sid, cmd);
+  const pick = lib.pushCheck(home, sid, cmd, typeof payload.cwd === 'string' ? payload.cwd : '');
   if (!pick) return;
   out.json({ hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: lib.advisory(pick) } });
 }

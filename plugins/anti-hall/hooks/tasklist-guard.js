@@ -1039,9 +1039,12 @@ function scanTranscript(filePath, opts) {
                   ? inp.metadata.priority : inp.priority
               )
             : (existing.priority || null);
+          const renamed = typeof inp.subject === 'string' && inp.subject !== '';
           taskMap.set(id, {
             id: existing.id,
-            content: existing.content,
+            // a rename counts: a task is listed by its current subject, not the one it was created with
+            content: renamed ? inp.subject : existing.content,
+            subjectUpdated: renamed ? true : existing.subjectUpdated,
             // NEVER guess: an id first seen in a TaskUpdate keeps an UNKNOWN
             // (undefined) status unless the update carries one, so a task whose
             // create/status lie before the window is not counted as pending.
@@ -1070,8 +1073,9 @@ function scanTranscript(filePath, opts) {
     if (existing && existing.unknown) { existing = Object.assign({}, existing, TS.fillFromCreate(existing, rec)); taskMap.set(key, existing); }
     if (!existing) {
       taskMap.set(key, { id: key, content: rec.content, status: rec.status, priority: rec.priority || null });
-    } else if (!existing.content || existing.content === key) {
-      taskMap.set(key, { id: key, content: rec.content, status: existing.status || rec.status, priority: existing.priority || rec.priority || null });
+    } else if (!existing.content || existing.content === key || existing.subjectUpdated) {
+      // a subject an update set is newer than the create's
+      taskMap.set(key, { id: key, content: existing.subjectUpdated ? existing.content : rec.content, status: existing.status || rec.status, priority: existing.priority || rec.priority || null });
     }
   }
 
