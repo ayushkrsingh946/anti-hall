@@ -182,7 +182,7 @@ fn once_ack(sock: &Path, payload: &[u8], deadline: Duration, window: Duration, r
     }
     // ACK(req) first (the reply may follow in the same read, or an error frame may come instead of an ack)
     loop {
-        match (&mut s).read(&mut chunk) {
+        match s.read(&mut chunk) {
             Ok(0) => {
                 return Once::Done(Exch::Failed(defaults::render(
                     "msg.client_io",
@@ -234,7 +234,7 @@ fn once_ack(sock: &Path, payload: &[u8], deadline: Duration, window: Duration, r
         if buf.len() > max_reply {
             break;
         }
-        match (&mut s).read(&mut chunk) {
+        match s.read(&mut chunk) {
             Ok(0) => break,
             Ok(n) => buf.extend_from_slice(&chunk[..n]),
             Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
