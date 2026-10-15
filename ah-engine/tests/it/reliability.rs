@@ -1868,6 +1868,36 @@ fn a_stale_heartbeat_fails_fast_and_never_kills_a_process_that_is_not_the_daemon
     assert!(survived, "a pid that is not the engine's daemon must never be signalled");
 }
 
+/// Codex P1 on the merge: in ack mode a daemon that acknowledged the request and then stopped beating must reach the hung path
+/// (fail fast, replacement), not wait out the slow window.
+#[test]
+fn an_acked_request_whose_daemon_stops_beating_is_hung_not_slow() {
+    let _timing = wrapper_timing_lock();
+    let e = Env::new("hback", &[("AH_ENGINE_NOSPAWN", "1"), ("AH_ENGINE_SLOW_DOWN_N", "9")]);
+    let mut stand_in = Command::new("sleep").arg("60").spawn().unwrap();
+    fake_heartbeat(&e, stand_in.id(), false);
+    std::fs::write(e.eng().join(ah_engine::defaults::text("wire.caps_file")), "1").unwrap(); // the daemon announces the ack protocol
+    std::fs::create_dir_all(e.eng()).unwrap();
+    let l = UnixListener::bind(e.eng().join("e.sock")).unwrap();
+    std::thread::spawn(move || {
+        for s in l.incoming().flatten() {
+            let mut s = s;
+            let mut chunk = [0u8; 4096];
+            ah_engine::discard::harmless(s.read(&mut chunk)); // the tagged request
+            ah_engine::discard::harmless(s.write_all(&ah_engine::wire::ack_req(0))); // acknowledged ...
+            std::thread::sleep(Duration::from_millis(2500)); // ... and then nothing, and no heartbeat
+        }
+    });
+    let (_, code, dt) = e.wrapper_hook(DENY_IN);
+    println!("TIMING acked-then-silent wall_ms={:.1} rc={code}", dt.as_secs_f64() * 1000.0);
+    ah_engine::discard::harmless(stand_in.kill());
+    ah_engine::discard::harmless(stand_in.wait());
+    let log = e.health_log();
+    assert_eq!(code, 0, "a hung daemon fails open: {log}");
+    assert!(log.contains("\tclient_hung\t"), "the stale heartbeat must be seen in ack mode: {log}");
+    assert!(dt < Duration::from_secs(2), "an acked-then-silent daemon must fail fast, not wait the slow window: {dt:?} {log}");
+}
+
 /// A stale heartbeat seen once only raises suspicion: the call fails open at once, and nothing is signalled until a later call finds
 /// the same heartbeat still unchanged (`client.heartbeat_confirm_ms`). A daemon stopped for a while and resumed inside that window
 /// beats again, which clears the suspicion: it is never killed and answers the next call itself.

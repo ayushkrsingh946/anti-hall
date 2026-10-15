@@ -270,7 +270,11 @@ fn once_ack(sock: &Path, payload: &[u8], deadline: Duration, window: Duration, r
                     late = true;
                     health::log_event("client_late", "daemon", &why);
                 }
-                rearm_read_timeout(&s, left);
+                // as in the original exchange: a daemon that acked and then stopped beating is hung, not slow
+                if let Some((hung, confirmed)) = stale_heartbeat() {
+                    return Once::Done(Exch::Hung(hung, confirmed));
+                }
+                rearm_read_timeout(&s, left.min(defaults::millis("client.heartbeat_poll_ms")));
             }
         }
     }

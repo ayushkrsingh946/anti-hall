@@ -1117,6 +1117,11 @@ impl Jev {
         cost_usd: Option<f64>,
         changed: bool,
     ) {
+        // only when the call ended on the open breaker: a fallback that returned an applied verdict is not a fail-open (counted
+        // whether or not telemetry events are on)
+        if reason == Some(&Reason::CircuitOpen) {
+            crate::failopen::note(defaults::text("fail_open.reason_jev_breaker"), &req.id, mode.as_str());
+        }
         if self.telemetry.load(Ordering::Relaxed) {
             crate::telemetry::emit::event(self.call_event(s, req, mode, r, backend, verdict, reason, cost_usd, changed));
         }
@@ -1146,9 +1151,6 @@ impl Jev {
         };
         let asked = r.is_some() && backend != Backend::Cache;
         let breaker = if asked && self.client.breaker_open_for(s.transport, Some(&req.id)) { "open" } else { "closed" };
-        if breaker == "open" {
-            crate::failopen::note(defaults::text("fail_open.reason_jev_breaker"), &req.id, mode.as_str());
-        }
         let error = reason.map(ToString::to_string);
         emit::jev_call(&emit::JevCall {
             integration: &req.id,
@@ -1637,6 +1639,46 @@ mod tests {
         let seen = f.seen.lock().unwrap();
         assert_eq!((seen.len(), seen[0].0.as_str(), seen[1].0.as_str()), (2, "http://127.0.0.1:9/x", "https://api.typesafe.ai/v1/systemone"));
         assert_eq!((seen[0].1.as_str(), seen[1].1.as_str()), ("vk", "tk"), "each key went only to its own session's endpoint");
+    }
+
+    /// A request with its own text, so no ask is served from the cache.
+    fn req_n(n: usize) -> AskRequest {
+        let mut r = req("speculation", Trust::AddBlock, json!(false));
+        r.state = format!("text {n}");
+        r
+    }
+
+    #[test]
+    fn an_open_primary_breaker_is_a_fail_open_only_when_no_fallback_answered() {
+        let fb = [
+            ("ANTIHALL_JEV", "1"),
+            ("CLAUDE_PLUGIN_OPTION_JEV_VERCEL_API_KEY", "vk"),
+            ("CLAUDE_PLUGIN_OPTION_JEV_FALLBACK_TRANSPORT", "typesafe"),
+            ("CLAUDE_PLUGIN_OPTION_JEV_TYPESAFE_API_KEY", "tk"),
+        ];
+        let n = defaults::num("jev.breaker_threshold") as usize;
+        // the primary fails every time and the fallback answers: after n asks the primary's breaker is open
+        let mut script: Vec<_> = (0..n).flat_map(|_| [ok(500, ""), ok(200, &answer(0.99))]).collect();
+        script.push(ok(200, &answer(0.99))); // the last ask skips the open primary: the fallback alone is called
+        let (jev, _, _) = lane(&fb, script);
+        jev.telemetry.store(true, Ordering::Relaxed); // the event path runs too
+        for i in 0..n {
+            jev.ask(&req_n(i));
+        }
+        crate::failopen::begin_request();
+        let d = jev.ask(&req_n(n));
+        assert_eq!(d.backend, Backend::Jev, "the fallback answered: {d:?}");
+        assert_eq!(d.reason, None, "{d:?}");
+        assert_eq!(crate::failopen::take_request(), None, "an applied verdict from the fallback is not a fail-open");
+        // both vendors out: the call ends on the open breaker, which IS a fail-open
+        let (jev, _, _) = lane(&fb, (0..2 * n).map(|_| ok(500, "")).collect());
+        for i in 0..n {
+            jev.ask(&req_n(i));
+        }
+        crate::failopen::begin_request();
+        let d = jev.ask(&req_n(n));
+        assert_eq!(d.reason, Some(Reason::CircuitOpen), "{d:?}");
+        assert!(crate::failopen::take_request().is_some(), "an ask that ended on the open breaker is recorded");
     }
 
     #[test]
