@@ -20,5 +20,8 @@ fn main() {
     if args.first().map(String::as_str) == Some("diag") {
         std::process::exit(ah_engine::diag::run(&args[1..]));
     }
-    std::process::exit(cli::run(&args));
+    // a panic is recorded by the hook; a write to a closed pipe (`ah-engine docs | head`) is the reader leaving, so exit
+    // quietly with the SIGPIPE convention (128 + 13) instead of the panic exit code
+    let code = std::panic::catch_unwind(|| cli::run(&args)).unwrap_or_else(|_| if ah_engine::crash::broken_pipe_seen() { 141 } else { 101 });
+    std::process::exit(code);
 }

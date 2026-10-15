@@ -151,6 +151,9 @@ fn every_key_the_source_reads_is_shipped_and_every_shipped_key_is_read() {
             || k.starts_with("opcli.dr_")
             || k.starts_with("opcli.fd_")
             || k.starts_with("opcli.cwb_")
+            || k.starts_with("flag.") // the documented flags, read whole by the reference generator (`docs::documented_flags`)
+            || k == "docs.external_flags" // read by the flag drift test (tests/it/reference.rs)
+            || ["env.auto_update", "env.install_lock_token", "env.release_base", "env.wrapper_diag"].contains(&k) // read by the shell wrappers, named here so the reference lists them
             || k.starts_with("cmd.") // handlers are checked against the registry by cli::tests; planned commands have no handler
             || k.starts_with("protocol.") // documents the wire format; the request words are parsed in daemon.rs
             || k.starts_with("job.") // scheduled jobs are read by prefix in schedule.rs

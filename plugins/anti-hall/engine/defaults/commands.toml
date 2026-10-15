@@ -17,7 +17,7 @@ value = { args = "[--fallback <hook.js>] | --event <Event> [--tool <Tool>] [--ho
 
 [cmd.status]
 doc = "Show the daemon's state: version, uptime, memory, counters, breaker and crash-loop state, rules, and a headline summary of what it did."
-value = { args = "[--memory]", read_only = true, status = "implemented" }
+value = { args = "[--memory] [--threads]", read_only = true, status = "implemented" }
 
 [cmd.metrics]
 doc = "Show the engine's metrics: counters, gauges and latency percentiles, optionally for one check; with --rollup, the stored rollups of one resolution (minute, hour), optionally for the last --since seconds."
@@ -29,7 +29,7 @@ value = { args = "[--kind <kind>] [--project <hash>] [--window <7d>]", read_only
 
 [cmd.telemetry]
 doc = "Telemetry (D78): `summary` (invocations, outcomes, latency and injected bytes per hook and check), `events` (routing, spawn, Jev and spill events), `rollup` (move complete days into archive.db and apply the retention), `actions [feature]` (what the acting features did and got wrong: action counts, success rate, mistake signals and mistake rate; `--mistake <feature> <action> <target> <kind>` records one the engine cannot see, such as a dismissed escalation). Local only."
-value = { args = "[summary|events|rollup|actions [feature]] [--window <7d>] [--kind <k>] [--limit <n>]", read_only = false, read_only_args = ["", "summary", "events", "rollup", "actions"], status = "implemented" }
+value = { args = "[summary|events|rollup|actions [feature]] [--window <7d>] [--kind <k>] [--limit <n>] [--mistake <feature> <action> <target> <kind>]", read_only = false, read_only_args = ["", "summary", "events", "rollup", "actions"], status = "implemented" }
 
 [cmd.docs]
 doc = "Print the generated reference: every command, setting, metric, impact kind, check and error code."
@@ -95,7 +95,7 @@ value = { args = "[--dry-run] [--home <dir>] [--cwd <dir>] [--plugin-root <dir>]
 
 [cmd.doctor]
 doc = "The health check and repair of anti-hall (D81), with the Node doctor's report layout and finding texts: the platform and versions, the hook scripts the registry names, the live behaviour of the guards (each built-in check run in-process on a crafted payload; a payload the engine defers to its Node hook is reported as a deferral, never a pass), the statusline configuration and the saved Workflow templates. Read-only by default; `--repair` (or `--fix`) runs the repair pass of `migrate` after the diagnostics, `--dry-run` previews it, and `--migrations-only` with either prints only the migration report as JSON."
-value = { args = "[--check] [--repair|--fix] [--dry-run] [--migrations-only] [--quiet] [--home <dir>] [--cwd <dir>] [--plugin-root <dir>]", read_only = false, status = "implemented" }
+value = { args = "[--check] [--repair|--fix] [--dry-run] [--migrations-only] [--quiet] [--home <dir>] [--cwd <dir>] [--plugin-root <dir>] [--repair-ingest-orphans] [--repair-test-stores] [--repair-resurrected] [--apply]", read_only = false, status = "implemented" }
 
 [cmd.jev-setup]
 doc = "Activate, configure and inspect the opt-in Jev classifier (D81, the port of scripts/jev-setup.js): `status` (resolved settings, key presence yes or no, every integration's mode, calls in the last 24 hours, the Vercel credit balance), `enable` and `disable`, `set-key` (the key is read from stdin only and written 0600), `bind-generic-key`, `mode <integration> on|shadow|off`, `test` (one real gateway call per configured transport, each on its own) and the shadow-review verbs `review-due [--json]`, `reviewed <integration>` and `snooze <integration> --days N`."
@@ -131,7 +131,7 @@ value = { args = "[--root <plugin dir>]", read_only = true, status = "implemente
 
 [cmd.settings]
 doc = "Show or change any anti-hall setting (L9a, the port of scripts/settings.js): `show [--section <key>] [--all]`, `get <section.key>`, `set <section.key> <value> [--confirmed]`, `reset <section.key> [--confirmed]`, `judge on|off|status`, `tunables [<category|key prefix>] [--all]` (every key of the plugin's engine/defaults/*.toml with its default, env variable and description, grouped by file; read-only, edit the file to change one), and `trust-command-allow` / `trust-edit-allow [<repo>] [--confirmed]`; the settings.json file and the registry are the plugin's own."
-value = { args = "<show|get|set|reset|judge|tunables|trust-command-allow|trust-edit-allow> [args] [--json]", read_only = false, status = "implemented" }
+value = { args = "<show|get|set|reset|judge|tunables|trust-command-allow|trust-edit-allow> [args] [--section <key>] [--all] [--confirmed] [--json]", read_only = false, status = "implemented" }
 
 [cmd.jev-report]
 doc = "The Jev report of the /anti-hall:jev skill (the port of scripts/jev-report.js): per-integration calls, agreement, changed decisions, precision, cost and the KEEP / REVIEW / REMOVE verdict from the decision log, with `--json`, `--days`, `--window 24h|7d`, `--by project|session`, `--project`, `--weekly`, `--since`, `--until`, `--exclude-window`, `--exclude-project`; `label <hash> [tp|fp]` reads or records a human precision label and `prune-audit --days N` trims the audit snippets (the only two forms that write)."

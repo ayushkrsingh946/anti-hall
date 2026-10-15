@@ -638,3 +638,11 @@ value = "usage: ah-engine mesh <roster|unread|read|dump> --db <devswarm.db> [--i
 [msg.err_mesh_range]
 doc = "A store value is an integer JavaScript cannot represent exactly, which Node's reader rejects too. Placeholder: {value}."
 value = "integer {value} is out of range for a JavaScript number"
+
+[msg.docs_flags_intro]
+doc = "Introduction of the Flags section of the generated reference."
+value = "Every flag in a command's arguments, with the commands that take it. A flag shared by several commands is described once; the command's own entry says how it uses it."
+
+[msg.docs_env_intro]
+doc = "Introduction of the Environment variables section of the generated reference."
+value = "Every `AH_ENGINE_*` variable the engine or its wrappers read. A variable that overrides a setting names that setting."

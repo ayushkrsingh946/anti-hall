@@ -5,7 +5,32 @@ use serde_json::{Value, json};
 use std::cell::RefCell;
 use std::panic::PanicHookInfo;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
+
+/// True only in the daemon process: it alone owns the crash record and the restart tally (`health.summary`).
+static DAEMON: AtomicBool = AtomicBool::new(false);
+/// Set when a panic was a write to a closed stdout/stderr pipe (`ah-engine docs | head`): the process then leaves quietly.
+static BROKEN_PIPE: AtomicBool = AtomicBool::new(false);
+
+/// Mark this process as the daemon, so its panics are recorded as daemon crashes.
+pub fn mark_daemon(on: bool) {
+    DAEMON.store(on, Ordering::SeqCst);
+}
+
+/// Whether a panic hit a closed output pipe since start.
+pub fn broken_pipe_seen() -> bool {
+    BROKEN_PIPE.load(Ordering::SeqCst)
+}
+
+/// A `print!`/`println!` on a closed pipe panics with this message; it is the reader leaving, not an engine bug.
+fn is_broken_pipe(message: &str) -> bool {
+    let text = |key: &str| defaults::get(key).and_then(|e| e.value.as_str()).filter(|t| !t.is_empty());
+    match (text("crash.closed_pipe_prefix"), text("crash.closed_pipe_marker")) {
+        (Some(prefix), Some(marker)) => message.starts_with(prefix) && message.contains(marker),
+        _ => false,
+    }
+}
 
 thread_local! {
     static BREADCRUMB: RefCell<Context> = RefCell::new(Context::default());
@@ -54,7 +79,8 @@ pub fn current() -> Context {
     BREADCRUMB.with(|c| c.borrow().clone())
 }
 
-/// Install the process-wide panic hook. The hook never writes to host stderr; it writes only the engine log and crash file.
+/// Install the process-wide panic hook. The hook never writes to host stderr; it writes only the engine log and a crash file
+/// (the daemon's `last_crash`, or `cli_crash` for any other process).
 pub fn install_panic_hook() {
     std::panic::set_hook(Box::new(record_panic));
 }
@@ -70,6 +96,11 @@ fn payload(info: &PanicHookInfo<'_>) -> String {
 }
 
 fn record_panic(info: &PanicHookInfo<'_>) {
+    let message = payload(info);
+    if is_broken_pipe(&message) {
+        BROKEN_PIPE.store(true, Ordering::SeqCst);
+        return;
+    }
     let ctx = current();
     let thread = std::thread::current().name().unwrap_or(defaults::text("msg.thread_unknown")).to_string();
     let loc = info.location().map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column())).unwrap_or_default();
@@ -77,14 +108,20 @@ fn record_panic(info: &PanicHookInfo<'_>) {
     let v = json!({
         "ts": health::now_ms(),
         "kind": "panic",
-        "message": payload(info),
+        "message": message,
         "location": loc,
         "thread": thread,
         "context": ctx.json(),
         "backtrace": backtrace,
     });
-    health::write_crash_report(&v);
-    health::log_event("panic", "panic", &v.to_string());
+    if DAEMON.load(Ordering::SeqCst) {
+        health::write_crash_report(&v);
+        health::log_event("panic", "panic", &v.to_string());
+    } else {
+        // a CLI or hook-client panic is not a daemon crash: it must not set last_crash or count as a restart
+        health::write_cli_crash_report(&v);
+        health::log_event("cli_panic", "panic", &v.to_string());
+    }
 }
 
 /// Run one long-lived service loop behind a panic boundary. A panic restarts the loop until the configured cap is exceeded.
@@ -177,6 +214,7 @@ mod tests {
         // SAFETY: this test sets the engine state dir before spawning any helper thread that reads it.
         unsafe { std::env::set_var(crate::defaults::env_name("dir"), &d.0) };
         install_panic_hook();
+        mark_daemon(true);
         let _guard = enter("request", "V", "PreToolUse", "git-guard", "");
         assert!(std::panic::catch_unwind(|| panic!("hook panic")).is_err());
         let crash = crate::health::last_crash().expect("panic hook wrote crash report");
@@ -185,6 +223,29 @@ mod tests {
         assert_eq!(crash["context"]["check"], "git-guard");
         assert!(!crash["thread"].as_str().unwrap_or("").is_empty());
         assert!(!crash["backtrace"].as_str().unwrap_or("").is_empty());
+        mark_daemon(false);
+    }
+
+    #[test]
+    fn cli_panic_is_not_a_daemon_crash_or_restart() {
+        let _lock = env_lock();
+        let d = crate::db::TempDir::new("cli-panic");
+        // SAFETY: this test sets the engine state dir before spawning any helper thread that reads it.
+        unsafe { std::env::set_var(crate::defaults::env_name("dir"), &d.0) };
+        install_panic_hook();
+        mark_daemon(false);
+        assert!(std::panic::catch_unwind(|| panic!("cli bug")).is_err());
+        assert!(crate::health::last_crash().is_none(), "a CLI panic must not write the daemon's last_crash");
+        assert!(crate::health::cli_crash().is_some(), "a CLI panic goes to the separate cli crash record");
+        let s = crate::health::summary();
+        assert_eq!(s["restarts"]["total"], 0, "{s}");
+        assert_eq!(s["degraded"], false, "{s}");
+    }
+
+    #[test]
+    fn closed_pipe_message_is_recognised() {
+        assert!(is_broken_pipe("failed printing to stdout: Broken pipe (os error 32)"));
+        assert!(!is_broken_pipe("index out of bounds"));
     }
 
     #[test]

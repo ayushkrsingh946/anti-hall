@@ -11,6 +11,7 @@ files = [
     "git.toml",
     "command.toml",
     "commands.toml",
+    "flags.toml",
     "telemetry.toml",
     "storage.toml",
     "config.toml",

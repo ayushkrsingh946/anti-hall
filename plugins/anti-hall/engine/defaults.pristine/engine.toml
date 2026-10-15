@@ -38,6 +38,36 @@ value = "AH_ENGINE_FALLBACK"
 doc = "The Node binary used to run the fallback hook."
 value = "AH_ENGINE_NODE"
 
+# ---- environment variables read only by the POSIX shell wrappers (documented here so the generated reference lists them) ----
+
+[env.allocator]
+doc = "Selects the daemon's allocator: jemalloc (default) or system. The client sets it from `diagnostics.allocator` on the daemon it spawns, unless it is already set; the daemon reads it before its first allocation."
+value = "AH_ENGINE_ALLOCATOR"
+
+[env.auto_update]
+doc = "Read by hooks/ah-update.sh in auto mode: off, stable or dev overrides the `engine.autoUpdate` setting for one run."
+value = "AH_ENGINE_AUTO_UPDATE"
+
+[env.bin]
+doc = "Test-only: the engine binary the hook wrapper runs instead of the installed one. The wrapper unsets it unless AH_WRAPPER_TEST=1 is also set, so a stray value can never turn the safety net into a silent allow."
+value = "AH_ENGINE_BIN"
+
+[env.bootstrap]
+doc = "Set to 0 or 1 to turn the first-run download of the sha256-pinned engine binary off or on; overrides the `engine.bootstrap` setting. Read by hooks/ah-engine-bootstrap.sh."
+value = "AH_ENGINE_BOOTSTRAP"
+
+[env.install_lock_token]
+doc = "Set by an installer (ah-update.sh) for the integrity script: the token of the install lock it already holds, so recording the expected sha256 runs under the caller's hold instead of waiting on it."
+value = "AH_ENGINE_INSTALL_LOCK_TOKEN"
+
+[env.release_base]
+doc = "Test-only: download base URL for the engine binary (http allowed). Honored by hooks/ah-engine-bootstrap.sh only with AH_WRAPPER_TEST=1."
+value = "AH_ENGINE_RELEASE_BASE"
+
+[env.wrapper_diag]
+doc = "Test-only: absolute path of a file the hook wrapper appends its diagnostic lines to. Honored only with AH_WRAPPER_TEST=1."
+value = "AH_ENGINE_WRAPPER_DIAG"
+
 [env.nospawn]
 doc = "When set, the client never starts a daemon (tests, and hosts that manage the daemon themselves)."
 value = "AH_ENGINE_NOSPAWN"
@@ -181,6 +211,10 @@ value = "crash-breadcrumb.json"
 [files.last_crash]
 doc = "Last panic or stale-run-marker crash report, shown by status and doctor."
 value = "last-crash.json"
+
+[files.cli_crash]
+doc = "Last panic of a non-daemon process (a CLI verb or the hook client). Kept apart from last-crash.json so it never counts as a daemon crash or restart."
+value = "cli-crash.json"
 
 [files.reaped_prefix]
 doc = "Prefix of the temporary name a stale run marker is renamed to when it is claimed (the pid is appended)."
@@ -1018,3 +1052,11 @@ doc = "An install lock held longer than this is broken (one whose holder process
 value = 900
 env = "AH_ENGINE_INSTALL_LOCK_STALE_S"
 unit = "s"
+
+[crash.closed_pipe_prefix]
+doc = "Start of the panic message Rust prints when a write to stdout or stderr fails; with `crash.closed_pipe_marker` it recognises a closed pipe (`ah-engine docs | head`), which is the reader leaving and not an engine crash."
+value = "failed printing to std"
+
+[crash.closed_pipe_marker]
+doc = "Text of the I/O error that marks the closed-pipe panic (see `crash.closed_pipe_prefix`)."
+value = "Broken pipe"
