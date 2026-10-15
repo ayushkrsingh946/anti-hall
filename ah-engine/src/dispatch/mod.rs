@@ -75,15 +75,28 @@ pub fn parse_args(args: &[String]) -> Result<Args, DispatchError> {
     Ok(Args { host, event: flag(args, "--event").unwrap_or_default(), tool: flag(args, "--tool"), map: flag(args, "--fallback-map").map(PathBuf::from) })
 }
 
-/// Ask the daemon for the built-in checks; `None` when it cannot answer (the checks then run as Node hooks).
-fn ask_daemon(meta: &Meta, raw: &str) -> Option<Vec<(String, Answer)>> {
+/// Ends the wrapper-visible wait (the client's wait marker) when the call's final result is ready, on every return path: an OK
+/// reply whose answers defer to Node leaves the marker in place while those hooks run, so a Node deny that lands after the fail-fast
+/// budget is still waited for.
+struct WaitRelease;
+
+impl Drop for WaitRelease {
+    fn drop(&mut self) {
+        crate::client::release_wait_marker();
+    }
+}
+
+/// Ask the daemon for the built-in checks; `None` when it cannot answer (the checks then run as Node hooks). `hold_wait` leaves the
+/// client's wait marker in place after an OK reply (the caller releases it, see [`WaitRelease`]).
+fn ask_daemon(meta: &Meta, raw: &str, hold_wait: bool) -> Option<Vec<(String, Answer)>> {
     let cfg = crate::config::ClientConfig::from_env();
     let meta = serde_json::to_string(meta).ok()?;
     let req = format!("D {}\n{meta}\n{raw}", crate::version());
     if req.len() as u64 > defaults::num("daemon.max_request") {
         return None; // the daemon would refuse it; Node answers instead
     }
-    native::decode(&crate::client::attempt(req.as_bytes(), &cfg, true)?)
+    let reply = if hold_wait { crate::client::attempt_holding_wait(req.as_bytes(), &cfg, true) } else { crate::client::attempt(req.as_bytes(), &cfg, true) };
+    native::decode(&reply?)
 }
 
 /// True for an event whose hooks can block: a deferral there fails closed.
@@ -563,7 +576,7 @@ fn cold_start_kick(args: &Args) -> Option<Outcome> {
         payload_sha1: None,
         deadline_ms: Some(crate::config::ClientConfig::from_env().deadline.as_millis() as u64),
     };
-    ask_daemon(&meta, "{}"); // keep: the answer is empty by construction; the call is for the daemon start
+    ask_daemon(&meta, "{}", false); // keep: the answer is empty by construction; the call is for the daemon start
     Some(Outcome { out: String::new(), code: 0, err: String::new() })
 }
 
@@ -680,13 +693,14 @@ fn run_core(raw: &str, args: &Args, payload: Option<&File>, complete: bool, tele
         // the daemon clamps its inner budgets (git, Jev) to what this client still waits (review finding 4)
         deadline_ms: Some(crate::config::ClientConfig::from_env().deadline.as_millis() as u64),
     };
+    let _wait = WaitRelease;
     let answers = match (&parsed, complete) {
         // A payload serde_json cannot read falls back to Node (JS may still parse it, e.g. a lone surrogate escape): the
         // engine must not be a worse guard than Node (D74). Only a guard entry with no runnable Node command blocks.
         (_, false) | (None, _) => Vec::new(),
         (Some(_), _) if entries.iter().all(|e| e.check.is_none()) => Vec::new(),
         (Some(p), _) if defaults::num("dispatch.in_process") == 1 => native::evaluate(&meta, p, &|| false, &|_, _, _| {}),
-        (Some(_), _) => match ask_daemon(&meta, raw) {
+        (Some(_), _) => match ask_daemon(&meta, raw, true) {
             Some(a) => a,
             None if crate::client::take_non_ok_reply() => Vec::new(),
             None if crate::client::take_unavailable() || crate::client::fail_open_unavailable() => {

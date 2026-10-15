@@ -212,11 +212,12 @@ engine_effective_num() {
   env_name=$(engine_default_env "$key" || true)
   if [ -n "$env_name" ]; then
     eval "env_value=\${$env_name:-}"
-    if [ -n "$env_value" ]; then
-      v=$env_value
-    else
-      v=$(engine_default_num "$key") || return 1
-    fi
+    # Rust (defaults::num) trims the override and takes it only when it parses as a number; anything else keeps the default
+    env_value=$(printf '%s' "$env_value" | tr -d ' \t\r\n')
+    case "$env_value" in
+      ""|*[!0-9]*) v=$(engine_default_num "$key") || return 1 ;;
+      *) v=$env_value ;;
+    esac
   else
     v=$(engine_default_num "$key") || return 1
   fi
@@ -1312,7 +1313,7 @@ run_engine() {
   eng_wait=$tmp/engine.wait
   rm -f "$eng_wait"
   wait_env=$(engine_default_text env.wait_file || true)
-  slow_max=$(engine_default_num client.slow_fallback_max_ms || true)
+  slow_max=$(engine_effective_num client.slow_fallback_max_ms || true)
   case "$slow_max" in ""|*[!0-9]*) slow_max=0 ;; esac
   hook_cap_ms=$(( $(event_timeout_secs) * 1000 ))
   [ "$slow_max" -le "$hook_cap_ms" ] || slow_max=$hook_cap_ms
@@ -1425,6 +1426,7 @@ cold_guard_wait() {
     kill_grace=0
   fi
   cg_kick_rc=1
+  cg_kick_cut=0
   exec 4>&2 2>/dev/null
   if launch_argv_group "$tmp/kick.out" "$tmp/kick.err" "$tmp/kick.pid" "$tmp/kick.group" "$engine" hook --event "$cg_kick" --host "$host"; then
     cg_pid=$(cat "$tmp/kick.pid"); cg_group=$(cat "$tmp/kick.group")
@@ -1434,6 +1436,7 @@ cold_guard_wait() {
     wait "$cg_pid" 2>/dev/null
     cg_kick_rc=$?
     settle_watchdog "$tmp/kick.timed"
+    [ -f "$tmp/kick.timed" ] && cg_kick_cut=1
     remove_child "$cg_pid"
     if [ "$cg_group" -eq 1 ] && kill -0 "-$cg_pid" 2>/dev/null; then
       terminate_process_group "$cg_pid" "$cg_group"
@@ -1442,8 +1445,15 @@ cold_guard_wait() {
   exec 2>&4 4>&-
   kill_grace=$cg_saved_grace
   payload=$real_payload
-  # the kick failed (a binary that is missing, cannot run, exits at once, or was cut by the watchdog): no daemon is coming, so the
-  # wait would only cost the cap; the real attempt below fails open the usual way
+  # the kick was cut by the watchdog: the single cold deadline (the kick budget plus its kill grace) has expired, so the call ends
+  # here with the cold-start notice; a second, real engine attempt would run past the deadline
+  if [ "$cg_kick_cut" -eq 1 ]; then
+    wrapper_diag "cold_guard_gave_up event=$event cap_ms=$cg_cap kick_cut=1"
+    cold_guard_notice
+    exit 0
+  fi
+  # the kick failed (a binary that is missing, cannot run or exits at once): no daemon is coming, so the wait would only cost the
+  # cap; the real attempt below fails open the usual way
   [ "$cg_kick_rc" -eq 0 ] || return 0
   while :; do
     [ -S "$cg_sock" ] && return 0

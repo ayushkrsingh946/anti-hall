@@ -19,7 +19,7 @@ doc = "A file the dispatcher creates once it has dispatched an event and decided
 value = "AH_ENGINE_DONE_FILE"
 
 [env.wait_file]
-doc = "A file the client creates while it waits on the daemon and keeps when the daemon answered BUSY/ERR, so the call is handed to its Node hooks; it removes it when the daemon answered, gave no reply in the wait window, or none was there. The reliability wrapper sets it, so that its watchdog can tell a call that is still deciding (give it up to client.slow_fallback_max_ms) from a hung engine (kill at the normal budget)."
+doc = "A file the client creates while it waits on the daemon and keeps when the daemon answered BUSY/ERR, so the call is handed to its Node hooks; it removes it when the daemon answered with nothing left for Node to decide (an OK reply whose entries defer to Node hooks keeps it until the call's final result is ready), gave no reply in the wait window, or none was there. The reliability wrapper sets it, so that its watchdog can tell a call that is still deciding (give it up to client.slow_fallback_max_ms) from a hung engine (kill at the normal budget)."
 value = "AH_ENGINE_WAIT_FILE"
 
 [env.rules]

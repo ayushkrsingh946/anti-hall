@@ -189,7 +189,7 @@ fn slow_streak_tripped() -> bool {
 
 /// Tell the wrapper (`AH_ENGINE_WAIT_FILE`) that this call is waiting on the daemon, or running the Node hooks of a late or
 /// refused reply: its watchdog then lets the call run up to `client.slow_fallback_max_ms` instead of killing it at the fail-fast
-/// budget (which would turn a delayed block into an allow). Removed once the daemon answered or none was there.
+/// budget (which would turn a delayed block into an allow). Removed once the daemon answered with nothing left to run (a dispatch caller keeps it until its final result is ready, see `attempt_holding_wait`) or none was there.
 fn wait_marker(set: bool) {
     if let Some(p) = defaults::env_var("wait_file").filter(|p| !p.is_empty()) {
         if set {
@@ -352,6 +352,22 @@ fn engine_attempt(raw: &str, cfg: &ClientConfig, have_fallback: bool) -> Option<
 /// Send one request (a hook `V` or a dispatch `D` request) to the daemon, starting it when none answers. `None` =
 /// fail open for hook callers; with `have_fallback` a cold start does not wait.
 pub(crate) fn attempt(payload: &[u8], cfg: &ClientConfig, have_fallback: bool) -> Option<String> {
+    attempt_with(payload, cfg, have_fallback, false)
+}
+
+/// [`attempt`] for a caller that may still run Node hooks after an OK reply (its answers can contain a deferral): the wait marker
+/// stays in place after the reply, so the wrapper's watchdog keeps its extended window while that work is unresolved. The caller
+/// ends it with [`release_wait_marker`] once its final result is ready.
+pub(crate) fn attempt_holding_wait(payload: &[u8], cfg: &ClientConfig, have_fallback: bool) -> Option<String> {
+    attempt_with(payload, cfg, have_fallback, true)
+}
+
+/// Remove the wait marker: the call's final result is ready.
+pub(crate) fn release_wait_marker() {
+    wait_marker(false);
+}
+
+fn attempt_with(payload: &[u8], cfg: &ClientConfig, have_fallback: bool, hold_wait_on_ok: bool) -> Option<String> {
     LAST_NON_OK_REPLY.set(false);
     LAST_UNAVAILABLE.set(false);
     if health::breaker_remaining().is_some() || health::crashloop_remaining().is_some() || daemon_down_marked() {
@@ -363,7 +379,9 @@ pub(crate) fn attempt(payload: &[u8], cfg: &ClientConfig, have_fallback: bool) -
     wait_marker(true);
     match exchange_for(&sock, payload, cfg.deadline, wait_window(cfg.deadline)) {
         Exch::Reply(Kind::Ok, body) => {
-            wait_marker(false);
+            if !hold_wait_on_ok {
+                wait_marker(false);
+            }
             clear_daemon_down_marker();
             clear_slow_streak();
             Some(body)

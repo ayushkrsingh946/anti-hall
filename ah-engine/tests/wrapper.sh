@@ -1557,21 +1557,20 @@ test_cold_guard_gives_up_at_the_cap_with_one_notice_per_session() {
 }
 
 # One absolute cold deadline (Codex delta F2): a kick that hangs, and a kick plus engine that both hang, end within
-# client.cold_guard_wait_ms plus the normal engine attempt (its budget and kill grace), never the sum of every stage.
+# client.cold_guard_wait_ms (kick budget plus its kill grace) with the cold-start notice, and run no second engine attempt (Codex
+# final Prior-2: the cap plus a real attempt was not the single deadline).
 test_cold_guard_hang_ends_within_the_cold_deadline_plus_engine_budget() {
   cg_setup 2000
   ok=1
   eng_ms=560
-  grace_ms=1000
   slack_ms=800
-  bound=$((2000 + eng_ms + grace_ms + slack_ms))
-  cg_run PreToolUse sess-a AH_HOOK_TIMEOUT_MS=$eng_ms AH_COLD_HANG_KICK=1
+  bound=$((2000 + slack_ms))
+  cg_run PreToolUse sess-a AH_HOOK_TIMEOUT_MS=$eng_ms AH_COLD_HANG_KICK=1 AH_COLD_HANG_ALL=1
   [ "$cg_rc" -eq 0 ] && [ "$cg_ms" -lt "$bound" ] || { ok=0; printf 'kick hang: rc=%s ms=%s bound=%s\n' "$cg_rc" "$cg_ms" "$bound" >&2; }
-  printf 'TIMING cold kick-only hang wall_ms=%s bound=%s\n' "$cg_ms" "$bound" >&2
-  rm -f "$cg_state"/*.until
-  cg_run PreToolUse sess-b AH_HOOK_TIMEOUT_MS=$eng_ms AH_COLD_HANG_KICK=1 AH_COLD_HANG_ALL=1
-  [ "$cg_rc" -eq 0 ] && [ "$cg_ms" -lt "$bound" ] || { ok=0; printf 'both hang: rc=%s ms=%s bound=%s\n' "$cg_rc" "$cg_ms" "$bound" >&2; }
-  printf 'TIMING cold both-hang wall_ms=%s bound=%s\n' "$cg_ms" "$bound" >&2
+  grep -q 'was not checked' "$cg_dir/err" || { ok=0; printf 'kick hang: no cold-start notice: %s\n' "$(cat "$cg_dir/err")" >&2; }
+  # the hung kick is the only engine call: no real attempt follows it
+  [ "$(wc -l <"$cg_log" | tr -d ' ')" -eq 1 ] || { ok=0; printf 'kick hang: engine calls: %s\n' "$(cat "$cg_log")" >&2; }
+  printf 'TIMING cold kick hang wall_ms=%s bound=%s\n' "$cg_ms" "$bound" >&2
   cg_cleanup
   [ "$ok" -eq 1 ]
 }
@@ -1639,6 +1638,39 @@ test_cold_guard_does_not_wait_when_no_daemon_can_start() {
   cg_cleanup
   [ "$ok" -eq 1 ]
 }
+
+# Codex final N1: the watchdog's slow-window bound is the EFFECTIVE client.slow_fallback_max_ms (env override included), as the
+# engine client computes it. A stand-in that marks itself as waiting on the daemon (the wait file) and denies after 3500 ms is
+# killed at the shipped 3000 ms bound (fail open, rc 0) but must block once the override raises the bound past the deny.
+sw_setup() {
+  cg_setup 0
+  cat >"$cg_dir/slowdeny.sh" <<'ENG'
+#!/bin/sh
+cat >/dev/null
+[ -z "${AH_ENGINE_WAIT_FILE:-}" ] || : >"$AH_ENGINE_WAIT_FILE"
+sleep 3.5
+printf 'denied-after-wait\n' >&2
+exit 2
+ENG
+  chmod +x "$cg_dir/slowdeny.sh"
+}
+
+test_slow_window_bound_honours_the_env_override() {
+  sw_setup
+  ok=1
+  # shipped bound (3000 ms): the late deny is outside the window, the call fails open
+  cg_run PreToolUse sess-a AH_ENGINE_BIN="$cg_dir/slowdeny.sh" AH_HOOK_TIMEOUT_MS=500
+  [ "$cg_rc" -eq 0 ] || { ok=0; printf 'slow control: rc=%s ms=%s\n' "$cg_rc" "$cg_ms" >&2; }
+  # raised bound: the deny at 3500 ms is inside the effective window and must block
+  cg_run PreToolUse sess-a AH_ENGINE_BIN="$cg_dir/slowdeny.sh" AH_HOOK_TIMEOUT_MS=500 AH_ENGINE_SLOW_FALLBACK_MAX_MS=6000
+  [ "$cg_rc" -eq 2 ] && grep -q denied-after-wait "$cg_dir/err" || { ok=0; printf 'slow raised: rc=%s ms=%s err=%s\n' "$cg_rc" "$cg_ms" "$(cat "$cg_dir/err")" >&2; }
+  # an unusable override keeps the shipped bound, as the engine does (defaults::num falls back to the default)
+  cg_run PreToolUse sess-a AH_ENGINE_BIN="$cg_dir/slowdeny.sh" AH_HOOK_TIMEOUT_MS=500 AH_ENGINE_SLOW_FALLBACK_MAX_MS=junk
+  [ "$cg_rc" -eq 0 ] || { ok=0; printf 'slow junk: rc=%s ms=%s\n' "$cg_rc" "$cg_ms" >&2; }
+  cg_cleanup
+  [ "$ok" -eq 1 ]
+}
+check slow_window_bound_honours_the_env_override test_slow_window_bound_honours_the_env_override
 
 check cold_guard_waits_for_a_daemon_that_comes_up test_cold_guard_waits_for_a_daemon_that_comes_up
 check cold_guard_does_not_wait_when_no_daemon_can_start test_cold_guard_does_not_wait_when_no_daemon_can_start

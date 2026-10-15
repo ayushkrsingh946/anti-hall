@@ -372,6 +372,36 @@ fn api_guard_rechecks_a_module_after_a_package_is_installed() {
     assert_ne!(go(), Verdict::Allow, "the same call after the package is installed is checked again, not served from a kept allow");
 }
 
+/// Codex final N2: the verdict is verified before the optional version text is fetched, so a slow cold version probe can never
+/// starve the verification (it used to run first, eat the request's remaining time, and turn a deny into an unchecked allow).
+#[test]
+fn api_guard_verifies_before_the_version_probe_and_the_deny_survives_a_tight_budget() {
+    use std::os::unix::fs::PermissionsExt;
+    let h = home("agorder");
+    let bin = format!("{h}/bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let log = format!("{h}/calls");
+    // verification answers at once; the (cold) version probe takes far longer than the whole request window
+    let body = format!(
+        "#!/bin/sh\ncase \"$1\" in --version|-V) echo version >>{log}; sleep 3; echo v22.0.0;; *) echo verify >>{log}; echo '{{\"req\":{{\"fs\":[0]}},\"glob\":[]}}';; esac\n"
+    );
+    std::fs::write(format!("{bin}/node"), body).unwrap();
+    std::fs::set_permissions(format!("{bin}/node"), std::fs::Permissions::from_mode(0o755)).unwrap();
+    let e = RequestEnv::from_pairs([("HOME", h.as_str()), ("PATH", bin.as_str())]);
+    let p = json!({"tool_name": "Write", "tool_input": {"file_path": "x.js", "content": "require('fs').definitelyFake();\n"}});
+    // the defaults and the script are loaded before the window opens, so the window is spent on the probes alone
+    assert_eq!(run_forced("api-guard", &json!({"tool_name": "Bash"}), &e), Some(Some(Verdict::Allow)));
+    crate::deadline::begin(Instant::now());
+    crate::deadline::client_deadline(defaults::num("daemon.reply_slack_ms") + 1200);
+    let v = run_forced("api-guard", &p, &e);
+    crate::deadline::end();
+    let calls = std::fs::read_to_string(&log).unwrap_or_default();
+    assert_eq!(calls.lines().next(), Some("verify"), "verification runs first: {calls:?}");
+    let Some(Some(Verdict::Exact(x))) = v else { panic!("a verdict: {v:?}") };
+    assert_eq!(x.code, 2, "the deny survives a version probe that cannot finish in budget: {x:?}");
+    crate::discard::harmless(std::fs::remove_dir_all(&h)); // keep: cleanup
+}
+
 // ---- golden parity of the migrated checks ----
 
 #[test]

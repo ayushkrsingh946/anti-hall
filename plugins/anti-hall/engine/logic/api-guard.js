@@ -271,10 +271,11 @@ function agMain(p) {
     var pb = agPyBin(st);
     if (pb) { bins.push(pb); fakes = fakes.concat(agVerifyPython(st, py, pb)); }
   }
-  // the version probe goes first (a throwaway notice state): a cold daemon keeps its answer for the block message even when the verify probe then runs out of time
-  if (js.length) { bins.push(agCfg('node_bin')); agVersion({ notice: null }, agCfg('node_bin')); fakes = fakes.concat(agVerifyJs(st, js, hookProc.cwd(p))); }
+  // verification comes first: the optional version text (fetched below, only for a block) never takes the time the verdict needs
+  if (js.length) { bins.push(agCfg('node_bin')); fakes = fakes.concat(agVerifyJs(st, js, hookProc.cwd(p))); }
   if (!fakes.length) { var nt = agNotice(st); return nt ? { exact: { code: 0, out: '', err: nt } } : 'allow'; }
   var seen = new Set(), uniq = fakes.filter(function (f) { return seen.has(f.label) ? false : (seen.add(f.label), true); });
+  // the version line: a kept (cached) version, or when the remaining time cannot fetch one, the plain runtime name
   var vers = bins.map(function (b) { return agVersion(st, b); }).join(agCfg('version_joiner'));
   var reason = text.message('block', ah.cfg('api_guard.guard_name'), {
     what: text.render(agCfg('msg_what'), { versions: vers }), why: agCfg('msg_why'), instead: agCfg('msg_instead'),
