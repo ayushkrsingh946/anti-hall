@@ -35,6 +35,9 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: ah-engine/fuzz
+          shared-key: fuzz
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/engine-proto' || github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/fix/163-fuzz-nightly' }}
+          cache-on-failure: true
       - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
           tool: cargo-fuzz
