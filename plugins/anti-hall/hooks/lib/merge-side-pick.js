@@ -80,6 +80,100 @@ function isPush(cmd) {
   return segments(cmd).some((s) => PUSH_RE.test(s) && !/\s(?:--dry-run|-n)\b/.test(s));
 }
 
+
+// ---- which branch a side-pick belongs to (mirrors engine merge_side_pick.*) ------------------------------------------------------
+// A pick is recorded with the git directory and branch it happened on; a push draws the advisory only when it may push that branch.
+// Anything this cannot tell (a quoted push, a cd, GIT_DIR, a detached HEAD, --all) keeps the advisory, as before.
+const SCOPE_UNKNOWN_RE = /(?:^|\s)(?:cd|pushd|GIT_DIR=|GIT_WORK_TREE=|--git-dir|--work-tree)(?:\s|=|$)/;
+const PUSH_UNSCOPED_OPTS_RE = /^(?:--(?:all|mirror|tags|follow-tags|prune|branches|push-option|repo|receive-pack|exec)|-o)$/;
+const PLAIN_BRANCH_RE = /^[A-Za-z0-9][A-Za-z0-9._/@-]*$/;
+const GIT_FILE_MAX = 4096;
+const GIT_DIR_LEVELS = 64;
+
+const quoted = (cmd) => maskShellQuotes(cmd) !== String(cmd || '');
+const words = (s) => s.split(/\s+/).filter(Boolean);
+const cdLike = (s) => SCOPE_UNKNOWN_RE.test(s);
+
+function readHead(file) {
+  try {
+    const fd = fs.openSync(file, 'r');
+    try { const b = Buffer.alloc(GIT_FILE_MAX); const n = fs.readSync(fd, b, 0, GIT_FILE_MAX, 0); return b.slice(0, n).toString('utf8'); } finally { fs.closeSync(fd); }
+  } catch (_) { return null; }
+}
+
+// The directory a git segment runs in: the payload cwd, moved by one plain `-C <dir>`; '' when that cannot be told.
+function segDir(s, cwd, cmdQuoted) {
+  const w = words(s);
+  const at = w.indexOf('-C');
+  if (at < 0) return cwd;
+  if (w.indexOf('-C', at + 1) >= 0 || cmdQuoted || at + 1 >= w.length) return '';
+  const d = w[at + 1];
+  return path.isAbsolute(d) ? d : (cwd === '' ? '' : path.join(cwd, d));
+}
+
+// { gitdir, branch } of the checkout around `dir` ('' for each when unknown).
+function scopeOf(dir) {
+  const none = { gitdir: '', branch: '' };
+  if (typeof dir !== 'string' || dir === '' || !path.isAbsolute(dir)) return none;
+  let d = path.resolve(dir), gitdir = '';
+  for (let i = 0; i < GIT_DIR_LEVELS && d !== ''; i++) {
+    let st = null;
+    try { st = fs.lstatSync(path.join(d, '.git')); } catch (_) { st = null; }
+    if (st && st.isDirectory()) { gitdir = path.join(d, '.git'); break; }
+    if (st && st.isFile()) {
+      const t = readHead(path.join(d, '.git'));
+      const m = t === null ? null : /^gitdir:[^\n]+/m.exec(t);
+      if (!m) return none;
+      const g = m[0].replace(/^gitdir:\s*/, '').trim();
+      gitdir = path.isAbsolute(g) ? g : path.join(d, g);
+      break;
+    }
+    if (st) return none;
+    const up = d.lastIndexOf('/');
+    d = up <= 0 ? (d === '/' ? '' : '/') : d.slice(0, up);
+  }
+  if (gitdir === '') return none;
+  const head = readHead(path.join(gitdir, 'HEAD'));
+  const r = head === null ? null : /^ref:\s*refs\/heads\/[^\s]+/.exec(head);
+  return { gitdir, branch: r ? r[0].replace(/^ref:\s*refs\/heads\//, '') : '' };
+}
+
+// The local branches a push segment may push, or null when that cannot be told (the advisory then stays).
+function pushedBranches(s, current) {
+  const w = words(s);
+  const rest = w.slice(w.indexOf('push') + 1), args = [];
+  for (const a of rest) {
+    if (PUSH_UNSCOPED_OPTS_RE.test(a)) return null;
+    if (a.charAt(0) === '-') continue;
+    args.push(a);
+  }
+  if (args.length <= 1) return [current];
+  const out = [];
+  for (const a of args.slice(1)) {
+    let src = a.replace(/^\+/, '').split(':')[0];
+    if (src === 'HEAD') src = current;
+    else if (src.indexOf('refs/heads/') === 0) src = src.slice('refs/heads/'.length);
+    if (src === '') continue;
+    if (!PLAIN_BRANCH_RE.test(src)) return null;
+    out.push(src);
+  }
+  return out.length === 0 ? [current] : out;
+}
+
+// True when a push segment is, for sure, not a push of `pick`'s branch: another checkout, or other branches than the picked one.
+function pushLeavesPick(pick, segsBefore, s, cwd, cmdQuoted) {
+  if (pick.gitdir === '' || pick.branch === '' || cwd === '' || cmdQuoted) return false;
+  if (segsBefore.some(cdLike) || cdLike(s)) return false;
+  const dir = segDir(s, cwd, cmdQuoted);
+  if (dir === '') return false;
+  const here = scopeOf(dir);
+  if (here.gitdir === '') return false;
+  if (here.gitdir !== pick.gitdir) return true;
+  if (here.branch === '') return false;
+  const pushed = pushedBranches(s, here.branch);
+  return pushed !== null && !pushed.includes(pick.branch);
+}
+
 function stateDir(home) { return path.join(home, '.anti-hall'); }
 function stateFile(home, sid) {
   const safe = String(sid || '').replace(/[^A-Za-z0-9_.-]/g, '_').slice(0, 120);
@@ -89,29 +183,35 @@ function stateFile(home, sid) {
 function load(file) {
   try {
     const s = JSON.parse(fs.readFileSync(file, 'utf8'));
-    if (s && typeof s === 'object') return { seq: s.seq | 0, pickSeq: s.pickSeq | 0, testSeq: s.testSeq | 0, cmd: String(s.cmd || '') };
+    if (s && typeof s === 'object') return { seq: s.seq | 0, pickSeq: s.pickSeq | 0, testSeq: s.testSeq | 0, cmd: String(s.cmd || ''), gitdir: String(s.gitdir || ''), branch: String(s.branch || '') };
   } catch (_) { /* absent or corrupt -> fresh */ }
-  return { seq: 0, pickSeq: 0, testSeq: 0, cmd: '' };
+  return { seq: 0, pickSeq: 0, testSeq: 0, cmd: '', gitdir: '', branch: '' };
 }
 
 // record(home, sid, cmd) -> true when state changed. Writes only when something matched.
-function record(home, sid, cmd) {
+function record(home, sid, cmd, cwd) {
   try {
     const file = stateFile(home, sid);
     if (!file) return false;
     const segs = segments(cmd);
     if (!segs.some((s) => segPick(s) || segTest(s))) return false;
-    const st = load(file);
+    const st = load(file), cq = quoted(cmd), dir0 = typeof cwd === 'string' ? cwd : '';
+    let moved = false;
     for (const s of segs) {
       if (segPick(s)) {
         st.seq += 1; st.pickSeq = st.seq;
         st.cmd = s.replace(/\s+/g, ' ').slice(0, 120);
+        const at = moved || cdLike(s) ? { gitdir: '', branch: '' } : scopeOf(segDir(s, dir0, cq));
+        st.gitdir = at.gitdir; st.branch = at.branch;
       } else if (segTest(s)) {
         st.seq += 1; st.testSeq = st.seq;
       }
+      if (cdLike(s)) moved = true;
     }
+    const o = { seq: st.seq, pickSeq: st.pickSeq, testSeq: st.testSeq, cmd: st.cmd };
+    if (st.gitdir !== '' && st.branch !== '') { o.gitdir = st.gitdir; o.branch = st.branch; }
     fs.mkdirSync(stateDir(home), { recursive: true });
-    fs.writeFileSync(file, JSON.stringify(st), 'utf8');
+    fs.writeFileSync(file, JSON.stringify(o), 'utf8');
     try {
       require('./state-prune.js').pruneStale({ stateDir: stateDir(home), prefix: PREFIX, keepFile: file });
     } catch (_) { /* prune is best-effort */ }
@@ -119,25 +219,32 @@ function record(home, sid, cmd) {
   } catch (_) { return false; }
 }
 
-// pending(home, sid) -> the recorded side-pick command when no test run followed it, else ''.
-function pending(home, sid) {
+// pending(home, sid) -> { cmd, gitdir, branch } of the recorded side-pick when no test run followed it, else null.
+function pendingPick(home, sid) {
   try {
     const file = stateFile(home, sid);
-    if (!file) return '';
+    if (!file) return null;
     const st = load(file);
-    return st.pickSeq > 0 && st.pickSeq > st.testSeq ? (st.cmd || 'a side-pick') : '';
-  } catch (_) { return ''; }
+    return st.pickSeq > 0 && st.pickSeq > st.testSeq ? { cmd: st.cmd || 'a side-pick', gitdir: st.gitdir, branch: st.branch } : null;
+  } catch (_) { return null; }
 }
+function pending(home, sid) { const p = pendingPick(home, sid); return p ? p.cmd : ''; }
 
-// pushCheck(home, sid, cmd) -> the side-pick command to warn about when `cmd` pushes
-// with an untested side-pick (recorded earlier OR earlier in this same command), else ''.
-function pushCheck(home, sid, cmd) {
+// pushCheck(home, sid, cmd, cwd) -> the side-pick command to warn about when `cmd` pushes with an untested side-pick
+// (recorded earlier OR earlier in this same command) that the push may carry, else ''.
+function pushCheck(home, sid, cmd, cwd) {
   try {
-    let pend = pending(home, sid);
-    for (const s of segments(cmd)) {
-      if (segPick(s)) pend = s.replace(/\s+/g, ' ').slice(0, 120);
-      else if (segTest(s)) pend = '';
-      else if (PUSH_RE.test(s) && !/\s(?:--dry-run|-n)\b/.test(s) && pend) return pend;
+    let pend = pendingPick(home, sid);
+    const segs = segments(cmd), cq = quoted(cmd), dir0 = typeof cwd === 'string' ? cwd : '';
+    let moved = false;
+    for (let i = 0; i < segs.length; i++) {
+      const s = segs[i];
+      if (segPick(s)) {
+        const at = moved || cdLike(s) ? { gitdir: '', branch: '' } : scopeOf(segDir(s, dir0, cq));
+        pend = { cmd: s.replace(/\s+/g, ' ').slice(0, 120), gitdir: at.gitdir, branch: at.branch };
+      } else if (segTest(s)) pend = null;
+      else if (PUSH_RE.test(s) && !/\s(?:--dry-run|-n)\b/.test(s) && pend && !pushLeavesPick(pend, segs.slice(0, i), s, dir0, cq)) return pend.cmd;
+      if (cdLike(s)) moved = true;
     }
   } catch (_) { /* fail open */ }
   return '';

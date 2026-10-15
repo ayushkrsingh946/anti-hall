@@ -389,3 +389,91 @@ fn the_history_ledger_and_progress_prune_key_on_the_superproject_for_a_submodule
         assert!(!sub.join(".anti-hall").exists(), "{runner}: still nothing inside the submodule");
     }
 }
+
+/// R1 GUARDS (#180). merge-side-pick records a side-pick with the checkout and branch it happened on and warns only for a push of
+/// that branch. A fixture repository per case; each case's engine and Node runs keep their own session state between steps.
+fn side_pick_repo(dir: &std::path::Path, name: &str, branch: &str) -> PathBuf {
+    let repo = dir.join(name);
+    std::fs::create_dir_all(&repo).unwrap();
+    let ok = Command::new("git").args(["init", "-q", "-b", branch]).arg(&repo).status().unwrap().success();
+    assert!(ok, "git init");
+    repo
+}
+
+fn bash_step(event: &str, cwd: &std::path::Path, cmd: &str) -> Value {
+    json!({"hook_event_name": event, "tool_name": "Bash", "session_id": "sp1", "cwd": cwd.to_string_lossy(), "tool_input": {"command": cmd}})
+}
+
+/// After a `git checkout --theirs` recorded on `engine-proto`, does `push` (run in the repo, or in `other`) draw the advisory? (engine, node)
+fn pick_then_push(tag: &str, pushed_from: &str, switch_to: Option<&str>, push: &str) -> (bool, bool) {
+    let dir = scratch(tag);
+    let repo = side_pick_repo(&dir, "repo", "engine-proto");
+    let other = side_pick_repo(&dir, "other", "main");
+    let (_, _) = both("merge-side-pick", "merge-side-pick.js", &dir, &bash_step("PostToolUse", &repo, "git checkout --theirs .claude/skills/x.md"));
+    if let Some(b) = switch_to {
+        let ok = Command::new("git").arg("-C").arg(&repo).args(["symbolic-ref", "HEAD", &format!("refs/heads/{b}")]).status().unwrap().success();
+        assert!(ok, "switch branch");
+    }
+    let at = if pushed_from == "other" { &other } else { &repo };
+    let (e, n) = both("merge-side-pick", "merge-side-pick.js", &dir, &bash_step("PreToolUse", at, push));
+    (e.1.contains("merge-side-pick"), n.1.contains("merge-side-pick"))
+}
+
+#[test]
+fn merge_side_pick_stays_silent_for_a_push_that_has_no_side_pick_in_it() {
+    for (tag, from, switch, push) in [
+        ("sp-other-branch", "repo", None, "git push origin fix/21-bounded-caches"),
+        ("sp-switched", "repo", Some("fix/21"), "git push"),
+        ("sp-other-repo", "other", None, "git push origin main"),
+        ("sp-other-head", "repo", None, "git push -u origin fix/21 fix/22"),
+        ("sp-dash-c-other", "other", None, "git -C ../repo push origin other"),
+    ] {
+        let (e, n) = pick_then_push(tag, from, switch, push);
+        assert!(!e && !n, "{tag}: no advisory expected (engine {e}, node {n}) for {push}");
+    }
+}
+
+#[test]
+fn merge_side_pick_still_warns_for_every_push_that_may_carry_the_side_pick() {
+    for (tag, from, switch, push) in [
+        ("sp-bare", "repo", None, "git push"),
+        ("sp-remote-only", "repo", None, "git push origin"),
+        ("sp-named", "repo", None, "git push origin engine-proto"),
+        ("sp-forced-named", "repo", None, "git push origin +engine-proto:engine-proto"),
+        ("sp-head", "repo", None, "git push origin HEAD"),
+        ("sp-all", "repo", None, "git push --all origin"),
+        ("sp-mirror", "repo", None, "git push --mirror"),
+        ("sp-quoted", "repo", None, "git push origin \"fix/21\""),
+        ("sp-cd", "other", None, "cd ../repo && git push origin other"),
+        ("sp-list", "repo", None, "git push origin fix/21 engine-proto"),
+        ("sp-dash-c", "other", None, "git -C ../repo push origin engine-proto"),
+        ("sp-head-other", "repo", Some("main"), "git push origin engine-proto"),
+    ] {
+        let (e, n) = pick_then_push(tag, from, switch, push);
+        assert!(e && n, "{tag}: advisory expected (engine {e}, node {n}) for {push}");
+    }
+}
+
+/// A linked worktree has its own HEAD: a push from it is not a push of the branch the pick was recorded on, a push from the picked
+/// worktree itself still is.
+#[test]
+fn merge_side_pick_tells_a_linked_worktree_from_the_picked_checkout() {
+    let dir = scratch("sp-worktree");
+    let repo = side_pick_repo(&dir, "repo", "engine-proto");
+    let git = |args: &[&str]| {
+        let ok = Command::new("git").arg("-C").arg(&repo).args(["-c", "user.name=t", "-c", "user.email=t@t"]).args(args).status().unwrap().success();
+        assert!(ok, "git {args:?}");
+    };
+    git(&["commit", "-q", "--allow-empty", "-m", "x"]);
+    let wt = dir.join("wt");
+    git(&["worktree", "add", "-q", "-b", "wtb", &wt.to_string_lossy()]);
+    both("merge-side-pick", "merge-side-pick.js", &dir, &bash_step("PostToolUse", &repo, "git checkout --theirs f"));
+    let (e, n) = both("merge-side-pick", "merge-side-pick.js", &dir, &bash_step("PreToolUse", &wt, "git push"));
+    assert!(!e.1.contains("merge-side-pick") && !n.1.contains("merge-side-pick"), "a push from another worktree: {} / {}", e.1, n.1);
+    let (e, n) = both("merge-side-pick", "merge-side-pick.js", &dir, &bash_step("PreToolUse", &repo, "git push"));
+    assert!(e.1.contains("merge-side-pick") && n.1.contains("merge-side-pick"), "a push from the picked worktree: {} / {}", e.1, n.1);
+    // the pick made in the linked worktree is recorded there
+    both("merge-side-pick", "merge-side-pick.js", &dir, &bash_step("PostToolUse", &wt, "git checkout --ours g"));
+    let (e, n) = both("merge-side-pick", "merge-side-pick.js", &dir, &bash_step("PreToolUse", &wt, "git push origin wtb"));
+    assert!(e.1.contains("merge-side-pick") && n.1.contains("merge-side-pick"), "a push of the worktree's branch: {} / {}", e.1, n.1);
+}
