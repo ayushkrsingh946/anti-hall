@@ -107,6 +107,13 @@ pub struct Wire {
     tele: crate::dsact::tele::Tele,
     last_stall: AtomicI64,
     reconciles: AtomicU64,
+    /// Full (forced) action sweeps run so far.
+    full_sweeps: AtomicU64,
+    /// When the last full sweep ran (epoch ms) and the state generation it saw.
+    last_full: AtomicI64,
+    full_gen: AtomicU64,
+    /// The longest a periodic reconcile goes without a full sweep when nothing changed (`devswarm_wire.periodic_full_sweep_ms`).
+    full_every_ms: i64,
     /// Where the mode in force comes from (the daemon's live configuration); `None` keeps the mode the `Rt` was built with.
     mode_src: Option<ModeSource>,
     /// The per-child Jev dirty queue, in memory (saved on a timer and at shutdown).
@@ -162,6 +169,10 @@ impl Wire {
             tele: crate::dsact::tele::Tele::new(state_dir),
             last_stall: AtomicI64::new(0),
             reconciles: AtomicU64::new(0),
+            full_sweeps: AtomicU64::new(0),
+            last_full: AtomicI64::new(0),
+            full_gen: AtomicU64::new(0),
+            full_every_ms: crate::defaults::num("devswarm_wire.periodic_full_sweep_ms") as i64,
             mode_src: None,
             jev: consume::JevQueue::load(state_dir),
             jev_sweeper: Arc::new(sweep_jev),
@@ -196,6 +207,17 @@ impl Wire {
     /// How many reconciles this layer has run (every cause).
     pub fn reconciles(&self) -> u64 {
         self.reconciles.load(Ordering::Relaxed)
+    }
+
+    /// How many full (forced) action sweeps this layer has run.
+    pub fn full_sweeps(&self) -> u64 {
+        self.full_sweeps.load(Ordering::Relaxed)
+    }
+
+    /// The longest a periodic reconcile goes without a full sweep when nothing changed (tests shorten it).
+    pub fn with_full_sweep_every(mut self, ms: i64) -> Wire {
+        self.full_every_ms = ms;
+        self
     }
 
     /// The least time between two unforced action sweeps (tests shorten it).
@@ -268,9 +290,22 @@ impl Wire {
         let kinds: Vec<&str> = crate::defaults::list("devswarm_wire.act_edge_kinds");
         let trigger = !matches!(cause, Cause::Event) || rep.edges.iter().any(|e| kinds.contains(&e.kind.as_str()));
         if trigger {
-            self.act_sweeps(!matches!(cause, Cause::Event));
+            // the periodic run is the safety net, not a full sweep every time: it reads every workspace's git facts (live19:
+            // 710 ms CPU per minute), so it sweeps in full only when the state moved since the last full sweep or the interval
+            // has passed; otherwise it takes the cheap gap-limited path (the event path acts on edges either way)
+            let full = match cause {
+                Cause::Event => false,
+                Cause::Periodic => self.full_sweep_due(now_ms()),
+                _ => true,
+            };
+            self.act_sweeps(full);
         }
         rep
+    }
+
+    /// Whether a periodic run owes a full sweep: the state generation moved since the last one, or `periodic_full_sweep_ms` passed.
+    fn full_sweep_due(&self, now: i64) -> bool {
+        self.rt.current().generation != self.full_gen.load(Ordering::SeqCst) || now - self.last_full.load(Ordering::SeqCst) >= self.full_every_ms
     }
 
     /// The Jev sweep of the queued workspaces, on its own short-lived thread (a Jev call may wait on a model).
@@ -308,6 +343,12 @@ impl Wire {
         }
         self.act_pending.store(false, Ordering::SeqCst);
         self.last_act.store(now, Ordering::SeqCst);
+        if force {
+            self.full_sweeps.fetch_add(1, Ordering::Relaxed);
+            self.last_full.store(now, Ordering::SeqCst);
+            self.full_gen.store(self.rt.current().generation, Ordering::SeqCst);
+            self.count(&mut |m| m.inc("dswire_full_sweeps", &[]));
+        }
         let live = RtLive { rt: &self.rt, home: self.home.clone(), runner: &*self.runner, state_dir: self.state_dir.clone(), env: self.env.clone(), now };
         let act = Act::new(&self.home, &self.state_dir, self.env.clone(), &live, &*self.runner).with_tele(self.tele.clone());
         let kinds = crate::defaults::list("devswarm_wire.act_kinds");
