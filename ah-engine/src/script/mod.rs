@@ -45,6 +45,7 @@ pub mod host;
 pub mod host_b3;
 pub mod host_d;
 mod host_io;
+pub mod host_childturn;
 pub mod host_mesh;
 pub mod host_port;
 pub mod host_proc;

@@ -349,7 +349,7 @@ fn build_descriptor(inv: &Inv, id: &str, f: &RegFlags, existing: Option<&OVal>) 
 
 /// Whether Node's `retireWorktreeDuplicates` would find another registry row of the same physical worktree (it would fold it
 /// into this id: the engine leaves that to Node).
-fn has_duplicate_rows(inv: &Inv, current: &str, id: &str, worktree: Option<&str>) -> R<bool> {
+pub(crate) fn has_duplicate_rows(inv: &Inv, current: &str, id: &str, worktree: Option<&str>) -> R<bool> {
     let Some(w) = worktree else { return Ok(false) };
     let keep_mesh = ident::primary_workspace_id(w)?;
     if keep_mesh == id {

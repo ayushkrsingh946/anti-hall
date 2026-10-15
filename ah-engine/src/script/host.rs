@@ -115,6 +115,7 @@ pub fn with_call<R>(st: Settings, f: impl FnOnce() -> R) -> R {
     EXECS.with(|c| *c.borrow_mut() = 0);
     super::host_proc::reset_call();
     super::host_mesh::reset_call();
+    super::host_childturn::reset_call();
     super::host_spawn::reset_call();
     let r = f();
     // a lock a script still holds when its call ends (an exception, an interrupt) is released here, never left to go stale
@@ -1017,6 +1018,7 @@ pub fn install(c: &Ctx<'_>) -> rquickjs::Result<()> {
     super::host_b3::install(c, &h)?;
     super::host_d::install(c, &h)?;
     super::host_mesh::install(c, &h)?;
+    super::host_childturn::install(c, &h)?;
     super::host_port::install(c, &h)?;
     super::host_proc::install(c, &h)?;
     super::host_spawn::install(c, &h)?;
