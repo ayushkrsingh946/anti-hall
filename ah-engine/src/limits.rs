@@ -419,10 +419,18 @@ mod tests {
     #[test]
     fn a_memory_refusal_serves_the_request_untracked_instead_of_busy() {
         use std::collections::HashMap;
-        let cfg: HashMap<String, u64> = [("b.soft", 1 << 20), ("b.hard", 1 << 21), ("b.low", 80), ("mem.global_soft_bytes", 1000), ("mem.global_hard_bytes", 2000), ("mem.global_low_water_pct", 90), ("mem.global_restart_after_s", 60)]
-            .into_iter()
-            .map(|(k, v)| (k.to_string(), v))
-            .collect();
+        let cfg: HashMap<String, u64> = [
+            ("b.soft", 1 << 20),
+            ("b.hard", 1 << 21),
+            ("b.low", 80),
+            ("mem.global_soft_bytes", 1000),
+            ("mem.global_hard_bytes", 2000),
+            ("mem.global_low_water_pct", 90),
+            ("mem.global_restart_after_s", 60),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v))
+        .collect();
         let reg = crate::mem::Registry::new(Box::new(move |k| cfg.get(k).copied().unwrap_or(0)), Box::new(|_| {}));
         let (mut b, _owners) = buckets_in(&reg);
         let t0 = Instant::now();
