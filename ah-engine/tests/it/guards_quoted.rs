@@ -293,3 +293,99 @@ fn model_routing_does_not_read_a_git_mv_commit_and_pr_brief_as_read_only() {
     let (eng, node) = both("model-routing", "model-routing-guard.js", &dir, &write("Research how the guards are wired and report what you find."));
     assert!(eng.1.contains(readonly) && node.1.contains(readonly), "a read-only brief is still nudged: {} / {}", eng.1, node.1);
 }
+
+/// R1 GUARDS (#180). A push whose command only carries side-pick words as text (a multi-line commit message, a heredoc note) has no
+/// merge side to pick; the same words as a command still advise.
+#[test]
+fn merge_side_pick_reads_multi_line_quoted_and_heredoc_text_as_text() {
+    let dir = scratch("msp");
+    let push = |cmd: &str| json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "session_id": "s1", "cwd": "/tmp",
+        "tool_input": {"command": cmd}});
+    let advised = |o: &(i32, String)| o.1.contains("one side wholesale");
+    for cmd in [
+        "git commit -m \"fix\n\nResolved with git checkout --theirs x.js\" && git push",
+        "git commit -m \"$(cat <<'EOF'\nnote: git merge -X ours main\nEOF\n)\" && git push",
+        "cat <<EOF > notes.md\ngit checkout --ours a.js\nEOF\ngit push",
+        "git commit -m 'it is\ngit checkout --theirs a' && git push",
+    ] {
+        let (eng, node) = both("merge-side-pick", "merge-side-pick.js", &dir, &push(cmd));
+        assert!(!advised(&eng) && !advised(&node), "text is not a side-pick: {cmd:?}: {} / {}", eng.1, node.1);
+    }
+    for cmd in [
+        "git checkout --theirs a.js && git push",
+        "git commit -m \"merge\" && git checkout --ours b.js\ngit push",
+        "cat <<EOF > n.md\nnote\nEOF\ngit merge -X theirs main && git push",
+    ] {
+        let (eng, node) = both("merge-side-pick", "merge-side-pick.js", &dir, &push(cmd));
+        assert!(advised(&eng) && advised(&node), "a real side-pick still advises: {cmd:?}: {} / {}", eng.1, node.1);
+    }
+}
+
+/// A real `git submodule add` fixture (the submodule's `.git` is a file): returns (superproject, submodule checkout).
+fn super_with_submodule(dir: &std::path::Path) -> (PathBuf, PathBuf) {
+    let git = |args: &[&str], cwd: &std::path::Path| {
+        let o = Command::new("git")
+            .args(["-c", "user.email=a@b.c", "-c", "user.name=a", "-c", "protocol.file.allow=always", "-c", "init.defaultBranch=main"])
+            .args(args).current_dir(cwd).env("GIT_CONFIG_GLOBAL", "/dev/null").output().unwrap();
+        assert!(o.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&o.stderr));
+    };
+    let (sub, sup) = (dir.join("sub-origin"), dir.join("super"));
+    for r in [&sub, &sup] {
+        std::fs::create_dir_all(r).unwrap();
+        git(&["init", "-q"], r);
+        std::fs::write(r.join("f.txt"), "x").unwrap();
+        git(&["add", "."], r);
+        git(&["commit", "-q", "-m", "init"], r);
+    }
+    git(&["submodule", "add", "-q", sub.to_str().unwrap(), "appfb"], &sup);
+    git(&["commit", "-q", "-m", "add submodule"], &sup);
+    (sup.clone(), sup.join("appfb"))
+}
+
+/// R1 GUARDS (#B9). A task event or a session start with its cwd inside a submodule keys the history ledger and the progress prune
+/// on the superproject, never on the submodule's own checkout; the engine and the Node twin agree.
+#[test]
+fn the_history_ledger_and_progress_prune_key_on_the_superproject_for_a_submodule_cwd() {
+    let date = {
+        let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+        // UTC date from the epoch day, as the guards stamp it
+        let z = (secs / 86400) as i64 + 719468;
+        let era = z.div_euclid(146097);
+        let doe = z.rem_euclid(146097);
+        let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+        let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+        let mp = (5 * doy + 2) / 153;
+        let d = doy - (153 * mp + 2) / 5 + 1;
+        let m = if mp < 10 { mp + 3 } else { mp - 9 };
+        let y = yoe + era * 400 + i64::from(m <= 2);
+        format!("{y:04}-{m:02}-{d:02}")
+    };
+    for (runner, is_engine) in [("n", false), ("e", true)] {
+        let dir = scratch(&format!("sm-{runner}"));
+        let (sup, sub) = super_with_submodule(&dir);
+        let payload = json!({"hook_event_name": "TaskCreated", "session_id": "s1", "task_id": "t1", "task_subject": "do it",
+            "cwd": sub.to_string_lossy()});
+        let run = |check: &str, hook: &str, p: &Value| {
+            let mut c = if is_engine { Command::new(env!("CARGO_BIN_EXE_ah-engine")) } else { Command::new("node") };
+            if is_engine { c.args(["check", check]); } else { c.arg(plugin().join("hooks").join(hook)); }
+            c.env_clear();
+            std::fs::create_dir_all(dir.join("home")).unwrap();
+            feed(c, &dir, &p.to_string())
+        };
+        run("task-lifecycle-log", "task-lifecycle-log.js", &payload);
+        let ledger = sup.join(".anti-hall/history").join(&date).join("s1.md");
+        assert!(ledger.is_file(), "{runner}: the ledger lands in the superproject: {}", ledger.display());
+        assert!(!sub.join(".anti-hall").exists(), "{runner}: nothing is written inside the submodule");
+
+        // an old progress file in the superproject is archived to the superproject's history, not looked for in the submodule
+        let old = sup.join(".anti-hall/progress/2020-01-01");
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::write(old.join("s0.md"), "old work").unwrap();
+        let aged = std::time::SystemTime::now() - std::time::Duration::from_secs(30 * 86400);
+        std::fs::File::options().write(true).open(old.join("s0.md")).unwrap().set_modified(aged).unwrap();
+        run("progress-prune", "progress-prune.js", &json!({"hook_event_name": "SessionStart", "session_id": "s1", "cwd": sub.to_string_lossy()}));
+        assert!(!old.join("s0.md").exists(), "{runner}: the superproject's stale progress is pruned");
+        assert!(sup.join(".anti-hall/history/2020-01-01/s0.md").is_file(), "{runner}: and archived to the superproject's history");
+        assert!(!sub.join(".anti-hall").exists(), "{runner}: still nothing inside the submodule");
+    }
+}

@@ -26,7 +26,11 @@ function decide(p) {
   var line = '- ' + iso + sep + event + sep + 'task_id=' + taskId;
   if (teammate !== '') line += sep + 'teammate=' + teammate;
   if (subject !== '') line += sep + subject;
-  var root = task.repoRoot(p.cwd, ah.home());
+  if (!ah.path.isAbsolute(p.cwd) || ah.home() === '') return 'defer';
+  // The session's project: the outermost superproject's work tree. Where the cheap file-level answer cannot classify the checkout (a
+  // submodule or nested repository), ask the host's git-aware resolver; a cwd inside a submodule keys on its superproject.
+  var root = task.sessionProjectRoot(p.cwd, ah.home());
+  if (root === null) root = ho.sessionProjectRoot(p.cwd);
   if (root === null) return 'defer';
   var dir = ah.cfg('task_lifecycle_log.history_dir').join('/'), ext = ah.cfg('task_lifecycle_log.ledger_ext');
   var index = dir + '/' + ah.cfg('task_lifecycle_log.index_name');

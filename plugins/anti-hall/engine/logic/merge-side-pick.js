@@ -7,12 +7,31 @@
 
 function isObj(v) { return v !== null && typeof v === 'object' && !Array.isArray(v); }
 
-// Blank quoted spans (same length) so a quoted message or echo argument cannot be mistaken for a command.
+// Blank heredoc bodies and quoted spans (same length) so text a command only carries (a commit message, a heredoc note, an echo
+// argument) cannot be mistaken for a command. A body is text however many lines it spans, so its newlines stay and its characters
+// go; an unterminated heredoc runs to the end, as the shell reads it. The opener pattern is merge_side_pick.heredoc_open
+// (capture 1 = optional quote, 2 = the tag); a `<<<` here-string is not a heredoc.
+function blank(t) { return t.replace(/[^\n]/g, ' '); }
+function maskHeredocs(cmd) {
+  var s = cmd, from = 0, open = new RegExp(ah.cfg('merge_side_pick.heredoc_open'), 'g');
+  for (;;) {
+    open.lastIndex = from;
+    var m = open.exec(s);
+    if (!m) return s;
+    if (m.index > 0 && s.charAt(m.index - 1) === '<') { from = open.lastIndex; continue; }
+    var nl = s.indexOf('\n', open.lastIndex);
+    if (nl < 0) return s;
+    var end = new RegExp('\\n[ \\t]*' + m[2] + '[ \\t]*(?=\\n|$)').exec(s.slice(nl));
+    var stop = end ? nl + end.index : s.length;
+    s = s.slice(0, nl + 1) + blank(s.slice(nl + 1, stop)) + s.slice(stop);
+    from = stop;
+  }
+}
 function maskQuotes(cmd) {
-  var s = cmd;
+  var s = maskHeredocs(cmd);
   ah.cfg('merge_side_pick.quote_masks').forEach(function (src) {
     var hits = ah.re.findAll(src, '', s), out = '', at = 0;
-    hits.forEach(function (h) { out += s.slice(at, h[0]) + ' '.repeat(h[1] - h[0]); at = h[1]; });
+    hits.forEach(function (h) { out += s.slice(at, h[0]) + blank(s.slice(h[0], h[1])); at = h[1]; });
     s = out + s.slice(at);
   });
   return s;

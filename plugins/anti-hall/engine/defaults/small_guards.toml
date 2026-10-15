@@ -111,9 +111,13 @@ value = { section = "guards", key = "mergeSidePickAdvisory", env = "ANTIHALL_MER
 doc = "Namespace of this check's per-session state in the guard state store."
 value = "merge-side-pick"
 
+[merge_side_pick.heredoc_open]
+doc = "JavaScript regex source for the opener of a heredoc (<<TAG, <<-TAG, <<'TAG'; capture 1 = the optional quote, capture 2 = the tag). The lines up to the tag line are text, blanked before a command is split into segments."
+value = '''<<-?[ \t]*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\1'''
+
 [merge_side_pick.quote_masks]
-doc = "Regexes whose matches (quoted spans) are blanked before a command is split into segments, so quoted text is never mistaken for a command (maskShellQuotes)."
-value = ['\x27[^\x27\n]*\x27', '"(?:[^"\\\n]|\\.)*"']
+doc = "Regexes whose matches (quoted spans, which may span lines such as a multi-line commit message) are blanked before a command is split into segments, so quoted text is never mistaken for a command (maskShellQuotes). One alternation, so the quote that opens first wins."
+value = ['\x27[^\x27]*\x27|"(?:[^"\\]|\\.)*"']
 
 [merge_side_pick.segment_split]
 doc = "Regex that splits a masked command into segments (semicolon, ampersand, pipe, newline)."
