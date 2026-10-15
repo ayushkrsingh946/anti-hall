@@ -70,3 +70,9 @@ slow-timeout = { period = "300s", terminate-after = 6 }
 [[profile.default.overrides]]
 filter = 'binary(it) & test(/^(reliability|crashloop_drill|fail_closed_matrix)::/)'
 test-group = 'wrapper-timing'
+
+# script_latency replays every golden case many times (about 275 s alone on a dev Mac, longer under load): its own slow-timeout, so the
+# default 180 s cut cannot TIMEOUT a gate. Its budget assertions are unchanged (their failures are tracked in R1).
+[[profile.default.overrides]]
+filter = 'binary(script_latency)'
+slow-timeout = { period = "300s", terminate-after = 6 }

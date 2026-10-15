@@ -106,10 +106,25 @@ pub fn spawn_probe_cached(prog: &str, args: &[String], cwd: Option<&str>, timeou
 }
 
 fn spawn_probe_with(prog: &str, args: &[String], cwd: Option<&str>, timeout_ms: f64, cacheable: bool) -> rquickjs::Result<String> {
+    spawn_probe_in(prog, args, cwd, timeout_ms, cacheable, None)
+}
+
+/// `spawn_probe_with` against an explicit environment (the daemon's own, for the start-up warm-up) instead of the request's.
+fn spawn_probe_in(
+    prog: &str,
+    args: &[String],
+    cwd: Option<&str>,
+    timeout_ms: f64,
+    cacheable: bool,
+    env: Option<std::collections::HashMap<String, String>>,
+) -> rquickjs::Result<String> {
     if !defaults::list("host_spawn.programs").contains(&prog) {
         return Ok(json!({"found": false}).to_string());
     }
-    let env = with_settings(|st| st.env.clone())?;
+    let env = match env {
+        Some(e) => e,
+        None => with_settings(|st| st.env.clone())?,
+    };
     // no PATH in the request: the default search path a C library's execvp uses (as Node's spawn does)
     let Some(bin) = which(prog, env.get(defaults::text("host_spawn.path_env")).map_or(defaults::text("host_spawn.default_path"), String::as_str)) else {
         return Ok(json!({"found": false}).to_string());
@@ -179,6 +194,21 @@ fn spawn_probe_with(prog: &str, args: &[String], cwd: Option<&str>, timeout_ms: 
         Ok(out) => out,
         Err(_) => json!({"found": true, "skipped": true}).to_string(),
     })
+}
+
+/// Warm the probe cache with the version probes the guards ask for first (`host_spawn.prewarm_programs` with the version arguments
+/// of `api_guard_v1.version_args`), in the daemon's own environment, which is the environment of the client that started it. Run
+/// on a worker thread after the socket is listening, so it never delays a reply; a probe that cannot finish is simply not kept.
+pub fn prewarm() {
+    if !defaults::raw("host_spawn.prewarm").as_bool().unwrap_or(false) {
+        return;
+    }
+    let args: Vec<String> = defaults::list("api_guard_v1.version_args").iter().map(|a| (*a).to_string()).collect();
+    let timeout = defaults::num("host_spawn.prewarm_timeout_ms") as f64;
+    for prog in defaults::list("host_spawn.prewarm_programs") {
+        let env: std::collections::HashMap<String, String> = std::env::vars().collect();
+        crate::discard::logged("probe_prewarm", spawn_probe_in(prog, &args, None, timeout, true, Some(env)).map_err(|e| e.to_string()));
+    }
 }
 
 /// A probe to run: everything copied off the request thread, so a worker can finish after the request has been answered.

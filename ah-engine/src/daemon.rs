@@ -1473,6 +1473,8 @@ pub fn serve() {
     }
     start_scheduler(&sh);
     start_devswarm(&sh);
+    // the guards' first interpreter probes, warmed in the background: the first guard call after the start finds them kept
+    crate::discard::logged("probe_prewarm_thread", std::thread::Builder::new().name("ah-probe-prewarm".into()).spawn(crate::script::host_spawn::prewarm));
     {
         let s = sh.clone();
         spawn_service(&sh, "telemetry_flusher", Arc::new(move || telemetry_flusher(s.clone())));

@@ -722,6 +722,49 @@ fn twenty_concurrent_wrapper_calls_after_a_kill_leave_exactly_one_daemon() {
     assert_eq!(daemons.len(), 1, "exactly one daemon must be running, found {daemons:?}{}", e.diag());
 }
 
+/// The start-up probe warm-up runs on its own thread after the socket is listening: a slow interpreter probe (a fake `python3` that
+/// takes 3 s) must not delay the daemon's first reply, and once it finishes the answer is kept for the guards.
+#[test]
+fn the_probe_warm_up_never_slows_the_first_reply_and_fills_the_cache() {
+    let e0 = Env::new("prewarm-dir", &[]);
+    let bindir = e0.dir.join("fakebin");
+    std::fs::create_dir_all(&bindir).unwrap();
+    std::fs::write(bindir.join("python3"), "#!/bin/sh\nsleep 3\necho 'Python 3.13.0'\n").unwrap();
+    std::fs::set_permissions(bindir.join("python3"), std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    drop(e0);
+    let path = format!("{}:/usr/bin:/bin", std::env::temp_dir().join(format!("ah-r-prewarm-dir-{}", std::process::id())).join("fakebin").display());
+    let e = Env::new("prewarm", &[("PATH", path.as_str()), ("AH_HOOK_TIMEOUT_MS", "5000")]);
+    let fake = PathBuf::from(&path.split(':').next().unwrap());
+    std::fs::create_dir_all(&fake).unwrap();
+    std::fs::write(fake.join("python3"), "#!/bin/sh\nsleep 3\necho 'Python 3.13.0'\n").unwrap();
+    std::fs::set_permissions(fake.join("python3"), std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    let _ = e.hook(DENY_IN, true);
+    assert!(wait_for(|| e.pid().is_some()), "no daemon{}", e.diag());
+    // the fake interpreter is still running its 3 s: the daemon answers at once
+    let t = Instant::now();
+    assert!(e.ctl("ping").is_some());
+    assert!(t.elapsed() < Duration::from_millis(1500), "ping took {:?} while the warm-up probe runs", t.elapsed());
+    let (_, _, code, dt) = e.hook(DENY_IN, true);
+    assert!(code == 0 || code == 2, "{code}");
+    assert!(dt < Duration::from_secs(2), "a guard call took {dt:?} while the warm-up probe runs");
+    // after the probe finished, the kept answer shows in the memory registry
+    assert!(
+        wait_for(|| {
+            fn kept(v: &serde_json::Value) -> bool {
+                match v {
+                    serde_json::Value::Object(m) => (m.get("name").and_then(|n| n.as_str()) == Some("spawn_probe") && m.get("bytes").and_then(|b| b.as_u64()).unwrap_or(0) > 0) || m.values().any(kept),
+                    serde_json::Value::Array(a) => a.iter().any(kept),
+                    _ => false,
+                }
+            }
+            e.ctl("status").and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok()).is_some_and(|v| kept(&v))
+        }),
+        "the warm-up kept no probe answer{}",
+        e.diag()
+    );
+    ah_engine::discard::harmless(std::fs::remove_dir_all(fake.parent().unwrap().join("fakebin")));
+}
+
 /// The wrapper's cold-start kick (`client.cold_guard_kick_event`) names no hook: the engine answers it with nothing (exit 0, no
 /// output, no deferral to Node) and the call starts the daemon.
 #[test]
