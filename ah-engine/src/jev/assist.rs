@@ -72,6 +72,11 @@ pub enum Trust {
 /// Normalises a Jev answer into the true/false space the trust rules work in (for a Choice question).
 pub type Judge = Arc<dyn Fn(&Answer) -> bool + Send + Sync>;
 
+/// Whether the request being served is a Stop or SubagentStop (`dispatch.stop_events`): the events that may wait for Jev.
+fn in_stop_event() -> bool {
+    crate::deadline::event().is_some_and(|e| defaults::list("dispatch.stop_events").iter().any(|s| *s == e))
+}
+
 /// One decision to ask Jev about.
 #[derive(Clone)]
 pub struct AskRequest {
@@ -654,17 +659,32 @@ impl Jev {
             let r = self.cascade(&s, req, CallResult::answered(c.answer, c.confidence, 0), cache_key.as_ref());
             return self.finish(&s, req, mode, Some(r), true, true);
         }
-        let r = self.client.decide_for(&s, Some(&req.id), &req.question, &req.state, req.budget_ms);
-        if r.ms > defaults::num("jev.soft_ms") {
-            // past the SOFT limit: only noted (the hard limit is the call's budget, which already cut it if it was reached)
-            self.stats.slow.fetch_add(1, Ordering::Relaxed);
-            crate::discard::note("jev_slow", &defaults::render("msg.jev_slow", &[("id", &req.id), ("ms", &r.ms), ("soft_ms", &defaults::num("jev.soft_ms"))]));
-        }
+        // a Stop/SubagentStop may wait for Jev, inside the tighter stop limits; every other call keeps jev.timeout_ms / jev.soft_ms
+        let stopping = in_stop_event();
+        let budget = if stopping {
+            Some(req.budget_ms.filter(|b| *b > 0).map_or(defaults::num("jev.stop_hard_ms"), |b| b.min(defaults::num("jev.stop_hard_ms"))))
+        } else {
+            req.budget_ms
+        };
+        let r = self.client.decide_for(&s, Some(&req.id), &req.question, &req.state, budget);
+        self.note_if_slow(&req.id, r.ms, stopping);
         if let (Some(a), Some((ck, chain))) = (&r.answer, &cache_key) {
             self.cache.put(ck, Cached { answer: a.clone(), confidence: r.confidence, chain: Some(chain.clone()) });
         }
         let r = self.cascade(&s, req, r, cache_key.as_ref());
         self.finish(&s, req, mode, Some(r), false, true)
+    }
+
+    /// Past the SOFT limit a call is only counted and logged (`jev_slow`); the hard limit is the call's budget, which already
+    /// cut it if it was reached. True when the call was over.
+    fn note_if_slow(&self, id: &str, ms: u64, stopping: bool) -> bool {
+        let soft = defaults::num(if stopping { "jev.stop_soft_ms" } else { "jev.soft_ms" });
+        if ms <= soft {
+            return false;
+        }
+        self.stats.slow.fetch_add(1, Ordering::Relaxed);
+        crate::discard::note("jev_slow", &defaults::render("msg.jev_slow", &[("id", &id), ("ms", &ms), ("soft_ms", &soft)]));
+        true
     }
 
     /// [`Jev::ask`] for a caller inside a daemon request, which must answer inside the time its client still waits. When that
@@ -673,7 +693,13 @@ impl Jev {
     /// the answer lands in the cache and the log, and the next ask of the same text is answered from the cache. With enough
     /// time left, or outside a request, it is [`Jev::ask`].
     pub fn ask_in_time(&self, req: &AskRequest) -> Decision {
-        let affordable = crate::deadline::remaining().is_none_or(|left| left >= defaults::millis("jev.sync_min_ms"));
+        // a Stop/SubagentStop waits for Jev (within jev.stop_soft_ms / jev.stop_hard_ms); any other event of a request is answered
+        // from its baseline and the cache while the question goes out asynchronously
+        let affordable = match crate::deadline::event() {
+            Some(_) if in_stop_event() => true,
+            Some(_) => false,
+            None => crate::deadline::remaining().is_none_or(|left| left >= defaults::millis("jev.sync_min_ms")),
+        };
         if affordable {
             return self.ask(req);
         }
@@ -1430,6 +1456,39 @@ mod tests {
         crate::deadline::end();
         assert_eq!(again.backend, Backend::Cache);
         assert_eq!(again.outcome, json!(true));
+    }
+
+    #[test]
+    fn a_stop_event_waits_for_jev_inside_the_hard_stop_limit() {
+        let _ = defaults::num("client.deadline_ms");
+        let _ = defaults::list("dispatch.stop_events");
+        let (jev, f, _) = lane(&ON, vec![ok(200, &answer(0.99)), ok(200, &answer(0.99))]);
+        crate::deadline::begin(std::time::Instant::now());
+        crate::deadline::client_window(300); // the fail-fast wait is 300 ms, the request hard window is longer
+        crate::deadline::set_event("Stop");
+        let d = jev.ask_in_time(&req("speculation", Trust::AddBlock, json!(false)));
+        assert_eq!(d.backend, Backend::Jev, "a Stop waits for the answer");
+        crate::deadline::set_event("PreToolUse");
+        let mut other = req("speculation", Trust::AddBlock, json!(false));
+        other.state = "other text".into();
+        let late = jev.ask_in_time(&other);
+        crate::deadline::end();
+        assert_eq!(late.backend, Backend::BaselineOnly, "any other event is answered from its baseline, never waited for");
+        assert!(jev.drain(Duration::from_secs(5)));
+        let t = f.timeouts.lock().unwrap().clone();
+        assert!(t[0] <= Duration::from_millis(defaults::num("jev.stop_hard_ms")), "the wait is cut at the HARD stop limit: {t:?}");
+        assert!(t[1] > Duration::from_millis(defaults::num("jev.stop_hard_ms")), "a non-stop call keeps jev.timeout_ms: {t:?}");
+    }
+
+    #[test]
+    fn a_stop_call_over_the_soft_stop_limit_is_counted_and_not_cut() {
+        let (jev, _, _) = lane(&ON, vec![]);
+        let soft = defaults::num("jev.stop_soft_ms");
+        assert!(!jev.note_if_slow("speculation", soft, true), "at the limit is not over it");
+        assert!(jev.note_if_slow("speculation", soft + 1, true));
+        assert!(!jev.note_if_slow("speculation", soft + 1, false), "the same time is inside the ordinary soft limit");
+        assert_eq!(jev.stats.slow.load(Ordering::Relaxed), 1);
+        assert!(soft < defaults::num("jev.stop_hard_ms"));
     }
 
     #[test]

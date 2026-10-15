@@ -40,6 +40,8 @@ struct Req {
 thread_local! {
     /// When the current request arrived (accepted), and when its client stops waiting (after the slack).
     static REQ: Cell<Option<Req>> = const { Cell::new(None) };
+    /// The hook event of the request being served (set by the dispatch, empty outside one).
+    static EVENT: RefCell<Option<String>> = const { RefCell::new(None) };
     /// The state writes the current request staged, in order.
     static STAGED: RefCell<Vec<Staged>> = const { RefCell::new(Vec::new()) };
     /// Whether the script call in progress on this thread may be cut at the request's deadline (armed, not lifted by `commit()`).
@@ -121,6 +123,7 @@ pub fn discard_staged_since(mark: usize) {
 /// request names its own ([`client_deadline`]).
 pub fn begin(arrived: Instant) {
     discard_staged(); // nothing a previous request left can belong to this one
+    EVENT.with(|e| *e.borrow_mut() = None);
     REQ.with(|r| r.set(Some(Req { arrived, soft: None, hard: None, noted: false })));
     client_window(crate::defaults::num("client.deadline_ms"));
 }
@@ -149,7 +152,18 @@ fn set_window(soft_ms: u64, hard_ms: u64) {
 /// The request is answered: no deadline on this thread any more. A staged write not committed by now is dropped.
 pub fn end() {
     discard_staged();
+    EVENT.with(|e| *e.borrow_mut() = None);
     REQ.with(|r| r.set(None));
+}
+
+/// The request being served on this thread is a dispatch of hook event `event`.
+pub fn set_event(event: &str) {
+    EVENT.with(|e| *e.borrow_mut() = Some(event.to_string()));
+}
+
+/// The hook event of the request being served, when the dispatch named it.
+pub fn event() -> Option<String> {
+    EVENT.with(|e| e.borrow().clone().filter(|s| !s.is_empty()))
 }
 
 /// Whether a request is being served on this thread (state writes are then staged until its reply is delivered).

@@ -1666,6 +1666,8 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `jev.settings_recheck_ms` | `2000` |  | ms | How often the settings files are re-checked for changes: at most one stat of each of the two files per window, taken by the first call after it elapses; between checks a call costs one clock read, so an off Jev stays off the hot path. |
 | `jev.soft_ms` | `800` |  | ms | SOFT limit of one Jev call: a call slower than this is logged (jev_slow) and counted, and its answer is still used. The HARD limit that cuts the call (and falls back to the baseline) is jev.timeout_ms, capped by jev.max_timeout_ms. |
 | `jev.state_dir` | `state` |  |  | Directory of the Jev budget-watch state, relative to the anti-hall home directory (Node: state/). |
+| `jev.stop_hard_ms` | `1000` |  | ms | HARD limit of a Jev call made by a Stop or SubagentStop: the wait is cut there and the check keeps its baseline (fail-open). PreToolUse and UserPromptSubmit never wait: they answer from the baseline and the cache while the question goes out asynchronously. |
+| `jev.stop_soft_ms` | `500` |  | ms | SOFT limit of a Jev call made by a Stop or SubagentStop (dispatch.stop_events), the only events that wait for Jev: slower is logged (jev_slow) and counted, the answer is still used. |
 | `jev.sync_min_ms` | `700` |  | ms | Least time a request must still have for a check inside it to wait on Jev; with less, the check keeps its baseline, the question goes out asynchronously and its answer is cached for the next ask of the same text. Jev answered in 300-680 ms in live use while a hook client waits about 250 ms, so a shorter wait could only time out and open the breaker. |
 | `jev.timeout_ms` | `1500` |  | ms | HARD limit (the per-call time budget) for one Jev call, request, headers and body together; the SOFT limit is jev.soft_ms (Node: DEFAULT_TIMEOUT_MS). |
 | `jev.turn_ref_window_bytes` | `65536` |  | bytes | How much of the end of a transcript is scanned for the turn pointer on a decision row (Node: the 64 KiB window of turnRefFromTranscript). |
@@ -9683,6 +9685,7 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | Name | Kind | Unit | Labels | What it counts |
 |---|---|---|---|---|
 | `accept_errors` | counter | errors | code | Accept calls that failed for a reason other than nothing pending (EMFILE, ENFILE, ENOBUFS, ENOMEM), by OS error code (os<n>); each one backs the accept loop off for daemon.accept_error_backoff_ms. |
+| `budget_soft` | counter | requests |  | Requests that used more thread CPU than the SOFT budget (daemon.eval_soft_us); only warned about, every check kept its answer. |
 | `budget_trips` | counter | evaluations |  | Evaluations cut off by the per-request CPU budget. |
 | `bus_dropped` | gauge | notifications |  | Pub/sub notifications a full subscriber queue could not take since the daemon started (the data stays in SQLite). |
 | `bus_published` | gauge | notifications |  | Pub/sub notifications delivered to subscriber queues since the daemon started. |
@@ -9696,6 +9699,7 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `db_hot_bytes` | gauge | bytes |  | Size of hot.db. |
 | `db_hot_wal_bytes` | gauge | bytes |  | Size of hot.db's write-ahead log. |
 | `db_writes` | gauge | writes |  | Writes carried by those transactions since the daemon started. |
+| `deadline_soft` | counter | requests |  | Requests answered after the client's fail-fast wait (client.deadline_ms) but inside the hard deadline; only warned about. |
 | `dispatch_checks` | counter | entries | event, check, answer | Built-in check entries the dispatcher sent to the daemon, by event, check and answer (decided, or defer = its Node hook ran instead) (D58). |
 | `dispatch_entries` | counter | entries | event, entry, outcome, cfg | What the dispatcher's plan did to each table entry of an event it asked the daemon about (D87): ran, skipped_predicate, skipped_max_rules, skipped_budget, shadowed or off, by event, entry, outcome and the hash of the non-default hook configuration the plan was made under (`default` when none). |
 | `errors` | counter | requests |  | Requests answered ERR. |
@@ -9721,6 +9725,7 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `rule_hits` | counter | matches | action | Regex rule matches, by action (deny, warn, context). |
 | `schedule_missed` | counter | runs | job | Runs that caught up a missed window or skipped it, by job (D33). |
 | `schedule_runs` | counter | runs | job, status | Scheduled runs that finished, by job and status (ok, failed, timeout, planned, skipped) (D33). |
+| `script_soft` | counter | calls |  | Script calls that used more thread CPU than their SOFT limit (script.time_limit_ms); only warned about, the call was not cut. |
 | `slow_replies` | counter | replies |  | Replies finished after their client's deadline had passed: slow but healthy (the client fell back to Node), counted apart from errors. |
 | `spool_applied` | counter | writes |  | Spooled writes the daemon applied (D24). |
 | `spool_quarantined` | counter | records |  | Spool records moved to quarantine: damaged, or refused for good by the store (D24). |
@@ -9739,6 +9744,7 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `jev_cooldowns` | counter | calls |  | Jev calls skipped because a vendor's circuit breaker was open. |
 | `jev_cost_micro_usd` | counter | micro-usd |  | Cost of fresh Jev calls in millionths of a US dollar, as reported by the vendor or priced from the reported tokens; a cache hit adds nothing. Never an estimate of what a judge call would have cost. |
 | `jev_latency_us` | histogram | us |  | Latency of fresh Jev network calls. |
+| `jev_slow` | counter | calls |  | Jev calls slower than the SOFT limit (jev.soft_ms); their answers were still used. |
 | `jev_timeouts` | counter | calls |  | Jev calls that ran out of their time budget. |
 | `jev_verdicts` | counter | decisions | id, verdict | What each Jev decision did, by integration and verdict: added or changed (an on-mode outcome moved), would-change (a shadow call that would have moved it), none (Jev agreed with the baseline) or no-answer (it failed or was skipped). |
 | `rt_edges` | counter | edges |  | Workspace state changes emitted. |

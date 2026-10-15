@@ -695,6 +695,7 @@ fn dispatch(body: &str, sh: &Shared, cfg: &Config) -> Reply {
     if let Some(ms) = meta.deadline_ms {
         crate::deadline::client_window(ms);
     }
+    crate::deadline::set_event(&meta.event);
     let session = p.get("session_id").and_then(|v| v.as_str()).unwrap_or("-");
     crate::load::note_request(&meta.event, p.get("session_id").and_then(|v| v.as_str()));
     crate::memdiag::note_payload(&p);

@@ -85,6 +85,18 @@ value = 800
 min = 1
 unit = "ms"
 
+[jev.stop_soft_ms]
+doc = "SOFT limit of a Jev call made by a Stop or SubagentStop (dispatch.stop_events), the only events that wait for Jev: slower is logged (jev_slow) and counted, the answer is still used."
+value = 500
+min = 1
+unit = "ms"
+
+[jev.stop_hard_ms]
+doc = "HARD limit of a Jev call made by a Stop or SubagentStop: the wait is cut there and the check keeps its baseline (fail-open). PreToolUse and UserPromptSubmit never wait: they answer from the baseline and the cache while the question goes out asynchronously."
+value = 1000
+min = 1
+unit = "ms"
+
 [jev.max_timeout_ms]
 doc = "Hard ceiling on any configured or per-call timeout, so a Jev call can never outlast the hook that asked (Node: MAX_TIMEOUT_MS)."
 value = 3000
