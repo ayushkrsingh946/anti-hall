@@ -224,7 +224,10 @@ pub fn scan_tasks(path: &str, window: u64, wide: u64) -> R<Option<ScanTasks>> {
                             None => existing.status.clone(),
                         };
                         let unknown = gaps(existing.unknown, inp);
-                        let mut t = task(&existing.id, existing.content.clone(), status, priority, unknown);
+                        // a rename counts: a task is listed by its current subject, not the one it was created with
+                        let subject = get(inp, "subject").and_then(Value::as_str).filter(|s| !s.is_empty());
+                        let mut t = task(&existing.id, subject.map_or_else(|| existing.content.clone(), str::to_string), status, priority, unknown);
+                        t.subject_updated = subject.is_some() || existing.subject_updated;
                         t.unknown = unknown;
                         tasks.set(&id, t);
                     }
@@ -267,12 +270,14 @@ pub fn scan_tasks(path: &str, window: u64, wide: u64) -> R<Option<ScanTasks>> {
         match ex {
             None => tasks.set(&key, task(&key, content.clone(), Some(status.clone()), priority.clone(), None)),
             Some(e) => {
-                if e.content.is_empty() || e.content == key {
+                if e.content.is_empty() || e.content == key || e.subject_updated {
                     let st = match &e.status {
                         Some(s) if !s.is_empty() => Some(s.clone()),
                         _ => Some(status.clone()),
                     };
-                    tasks.set(&key, task(&key, content.clone(), st, e.priority.clone().or_else(|| priority.clone()), None));
+                    // a subject an update set is newer than the create's
+                    let shown = if e.subject_updated { e.content.clone() } else { content.clone() };
+                    tasks.set(&key, task(&key, shown, st, e.priority.clone().or_else(|| priority.clone()), None));
                 }
             }
         }
