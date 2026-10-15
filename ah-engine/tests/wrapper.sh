@@ -1557,21 +1557,20 @@ test_cold_guard_gives_up_at_the_cap_with_one_notice_per_session() {
 }
 
 # One absolute cold deadline (Codex delta F2): a kick that hangs, and a kick plus engine that both hang, end within
-# client.cold_guard_wait_ms plus the normal engine attempt (its budget and kill grace), never the sum of every stage.
+# client.cold_guard_wait_ms (kick budget plus its kill grace) with the cold-start notice, and run no second engine attempt (Codex
+# final Prior-2: the cap plus a real attempt was not the single deadline).
 test_cold_guard_hang_ends_within_the_cold_deadline_plus_engine_budget() {
   cg_setup 2000
   ok=1
   eng_ms=560
-  grace_ms=1000
   slack_ms=800
-  bound=$((2000 + eng_ms + grace_ms + slack_ms))
-  cg_run PreToolUse sess-a AH_HOOK_TIMEOUT_MS=$eng_ms AH_COLD_HANG_KICK=1
+  bound=$((2000 + slack_ms))
+  cg_run PreToolUse sess-a AH_HOOK_TIMEOUT_MS=$eng_ms AH_COLD_HANG_KICK=1 AH_COLD_HANG_ALL=1
   [ "$cg_rc" -eq 0 ] && [ "$cg_ms" -lt "$bound" ] || { ok=0; printf 'kick hang: rc=%s ms=%s bound=%s\n' "$cg_rc" "$cg_ms" "$bound" >&2; }
-  printf 'TIMING cold kick-only hang wall_ms=%s bound=%s\n' "$cg_ms" "$bound" >&2
-  rm -f "$cg_state"/*.until
-  cg_run PreToolUse sess-b AH_HOOK_TIMEOUT_MS=$eng_ms AH_COLD_HANG_KICK=1 AH_COLD_HANG_ALL=1
-  [ "$cg_rc" -eq 0 ] && [ "$cg_ms" -lt "$bound" ] || { ok=0; printf 'both hang: rc=%s ms=%s bound=%s\n' "$cg_rc" "$cg_ms" "$bound" >&2; }
-  printf 'TIMING cold both-hang wall_ms=%s bound=%s\n' "$cg_ms" "$bound" >&2
+  grep -q 'was not checked' "$cg_dir/err" || { ok=0; printf 'kick hang: no cold-start notice: %s\n' "$(cat "$cg_dir/err")" >&2; }
+  # the hung kick is the only engine call: no real attempt follows it
+  [ "$(wc -l <"$cg_log" | tr -d ' ')" -eq 1 ] || { ok=0; printf 'kick hang: engine calls: %s\n' "$(cat "$cg_log")" >&2; }
+  printf 'TIMING cold kick hang wall_ms=%s bound=%s\n' "$cg_ms" "$bound" >&2
   cg_cleanup
   [ "$ok" -eq 1 ]
 }
