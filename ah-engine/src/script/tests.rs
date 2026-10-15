@@ -115,12 +115,20 @@ fn a_runaway_script_is_interrupted_and_defers() {
     put_override(&h, "zz-loop", "function decide() { for (;;) {} }");
     let t = Instant::now();
     assert_eq!(run_forced("zz-loop", &json!({}), &e), Some(Some(Verdict::Defer)));
-    assert!(t.elapsed() < std::time::Duration::from_millis(defaults::num("script.time_limit_ms") * 10), "{:?}", t.elapsed());
+    assert!(
+        t.elapsed() < std::time::Duration::from_millis(defaults::num("script.time_limit_ms") * defaults::num("script.time_hard_factor") * 3),
+        "{:?}",
+        t.elapsed()
+    );
     // a catastrophic native regex is interrupted too
     put_override(&h, "zz-redos", "function decide() { return /^(a+)+$/.test('a'.repeat(40) + 'b') ? 'allow' : 'defer'; }");
     let t = Instant::now();
     assert_eq!(run_forced("zz-redos", &json!({}), &e), Some(Some(Verdict::Defer)));
-    assert!(t.elapsed() < std::time::Duration::from_millis(defaults::num("script.time_limit_ms") * 10), "{:?}", t.elapsed());
+    assert!(
+        t.elapsed() < std::time::Duration::from_millis(defaults::num("script.time_limit_ms") * defaults::num("script.time_hard_factor") * 3),
+        "{:?}",
+        t.elapsed()
+    );
     // the same thread's runtime still works afterwards
     put_override(&h, "zz-ok", "function decide() { return 'allow'; }");
     assert_eq!(run_forced("zz-ok", &json!({}), &e), Some(Some(Verdict::Allow)));
@@ -1502,6 +1510,7 @@ fn the_limit_that_interrupted_a_call_is_named_in_its_failure() {
     assert_eq!(d.exceeded(0, 9_001), Some(Trip::Request));
     assert_eq!(d.explain("interrupted", 50), "interrupted", "no trip recorded: the error is left as it was");
     d.trip.store(Trip::Cpu as u64, Relaxed);
-    let wall_ms = 50 * defaults::num("script.wall_limit_factor");
-    assert_eq!(d.explain("interrupted", 50), format!("interrupted (interrupted by the cpu limit; cpu limit 50 ms, wall backstop {wall_ms} ms)"));
+    let cpu_ms = (50 * defaults::num("script.time_hard_factor")).min(defaults::num("script.time_hard_cap_ms"));
+    let wall_ms = cpu_ms * defaults::num("script.wall_limit_factor");
+    assert_eq!(d.explain("interrupted", 50), format!("interrupted (interrupted by the cpu limit; cpu limit {cpu_ms} ms, wall backstop {wall_ms} ms)"));
 }

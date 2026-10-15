@@ -241,6 +241,8 @@ pub struct Decision {
 pub struct JevStats {
     calls: Mutex<Vec<((&'static str, &'static str), u64)>>,
     timeouts: AtomicU64,
+    /// Calls that took longer than the SOFT limit `jev.soft_ms`.
+    slow: AtomicU64,
     cooldowns: AtomicU64,
     changed: AtomicU64,
     cost_micro_usd: AtomicU64,
@@ -272,6 +274,7 @@ impl JevStats {
             m.add("jev_calls", &[("backend", backend), ("mode", mode)], n);
         }
         m.add("jev_timeouts", &[], self.timeouts.swap(0, Ordering::Relaxed));
+        m.add("jev_slow", &[], self.slow.swap(0, Ordering::Relaxed));
         m.add("jev_cooldowns", &[], self.cooldowns.swap(0, Ordering::Relaxed));
         m.add("jev_changed", &[], self.changed.swap(0, Ordering::Relaxed));
         m.add("jev_cost_micro_usd", &[], self.cost_micro_usd.swap(0, Ordering::Relaxed));
@@ -652,6 +655,11 @@ impl Jev {
             return self.finish(&s, req, mode, Some(r), true, true);
         }
         let r = self.client.decide_for(&s, Some(&req.id), &req.question, &req.state, req.budget_ms);
+        if r.ms > defaults::num("jev.soft_ms") {
+            // past the SOFT limit: only noted (the hard limit is the call's budget, which already cut it if it was reached)
+            self.stats.slow.fetch_add(1, Ordering::Relaxed);
+            crate::discard::note("jev_slow", &defaults::render("msg.jev_slow", &[("id", &req.id), ("ms", &r.ms), ("soft_ms", &defaults::num("jev.soft_ms"))]));
+        }
         if let (Some(a), Some((ck, chain))) = (&r.answer, &cache_key) {
             self.cache.put(ck, Cached { answer: a.clone(), confidence: r.confidence, chain: Some(chain.clone()) });
         }
@@ -1406,6 +1414,7 @@ mod tests {
         let _ = defaults::num("client.deadline_ms"); // load the defaults outside the request window
         let (jev, f, log) = lane(&ON, vec![ok(200, &answer(0.99))]);
         crate::deadline::begin(std::time::Instant::now());
+        crate::deadline::client_deadline(250); // a request whose hard window is the old 250 ms: less than jev.sync_min_ms is left
         let d = jev.ask_in_time(&req("speculation", Trust::AddBlock, json!(false)));
         crate::deadline::end();
         assert_eq!(d.outcome, json!(false), "the baseline decides now");
@@ -1416,6 +1425,7 @@ mod tests {
         assert_eq!(jev.cache.len(), 1, "the answer is kept for the next ask of the same text");
         // the next ask of the same text is answered from the cache inside the same tight window
         crate::deadline::begin(std::time::Instant::now());
+        crate::deadline::client_deadline(250);
         let again = jev.ask_in_time(&req("speculation", Trust::AddBlock, json!(false)));
         crate::deadline::end();
         assert_eq!(again.backend, Backend::Cache);

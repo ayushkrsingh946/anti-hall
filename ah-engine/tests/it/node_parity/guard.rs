@@ -548,6 +548,7 @@ fn run_guard_with(o: &Opts, hooks: &Path, scenarios: &[Scenario], golden: &Golde
                 ("AH_ENGINE_PROJECT_RPS", "0"),
                 ("AH_ENGINE_VERSION", "parity"),
                 ("AH_ENGINE_EVAL_BUDGET_US", "0"),
+                ("AH_ENGINE_SCRIPT_CUT_AT_DEADLINE", "0"),
                 ("AH_ENGINE_DEADLINE_MS", "30000"), // clamped to the 300 ms cap (client.deadline_ms max); kept for older engines
                 ("AH_ENGINE_DOWN_MARKER_TTL_MS", "1"), // one slow answer must not make the next requests skip the daemon
                 ("AH_ENGINE_NODE", &node_bin),

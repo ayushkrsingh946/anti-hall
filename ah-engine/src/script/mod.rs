@@ -113,6 +113,22 @@ pub struct Deadline {
     pub req: AtomicU64,
     /// Which limit interrupted the call in progress ([`Trip`] as a number; 0 = none yet). The first limit to fire stays.
     pub trip: AtomicU64,
+    /// The thread CPU time (us) at which the call in progress was armed, for the soft-limit check after it.
+    pub start_cpu: AtomicU64,
+}
+
+/// Calls that ran past their SOFT limit (and were not cut), since the last [`take_soft_overruns`].
+static SOFT_OVERRUNS: AtomicU64 = AtomicU64::new(0);
+
+/// The soft-limit overruns counted since the last call; the daemon adds them to its metrics.
+pub fn take_soft_overruns() -> u64 {
+    SOFT_OVERRUNS.swap(0, Ordering::Relaxed)
+}
+
+/// The HARD CPU limit (ms) of a call whose SOFT limit is `soft_ms`.
+fn hard_ms_of(soft_ms: u64) -> u64 {
+    // never past `script.time_hard_cap_ms`, except that a soft limit already above the cap (a batch job's) is its own hard limit
+    soft_ms.saturating_mul(defaults::num("script.time_hard_factor").max(1)).min(defaults::num("script.time_hard_cap_ms").max(soft_ms))
 }
 
 /// The limit that interrupted a script call.
@@ -165,8 +181,9 @@ impl Deadline {
     fn explain(&self, error: &str, limit_ms: u64) -> String {
         let Some(trip) = Trip::of(self.trip.load(Ordering::Relaxed)) else { return error.to_string() };
         let limit = defaults::text(trip.message_key());
-        let wall_ms = limit_ms.saturating_mul(defaults::num("script.wall_limit_factor").max(1));
-        defaults::render("msg.script_interrupted", &[("error", &error), ("limit", &limit), ("cpu_ms", &limit_ms), ("wall_ms", &wall_ms)])
+        let hard_ms = hard_ms_of(limit_ms);
+        let wall_ms = hard_ms.saturating_mul(defaults::num("script.wall_limit_factor").max(1));
+        defaults::render("msg.script_interrupted", &[("error", &error), ("limit", &limit), ("cpu_ms", &hard_ms), ("wall_ms", &wall_ms)])
     }
 }
 
@@ -174,9 +191,11 @@ impl Pool {
     /// Start the limits of a call of `limit_ms` script time; `cut` also arms the request's client deadline.
     fn arm(&self, limit_ms: u64, cut: bool) {
         let cpu_now = crate::limits::thread_cpu_us();
-        self.deadline.cpu.store(cpu_now.saturating_add(limit_ms.saturating_mul(1000)).max(1), Ordering::Relaxed);
+        let hard_ms = hard_ms_of(limit_ms);
+        self.deadline.start_cpu.store(cpu_now, Ordering::Relaxed);
+        self.deadline.cpu.store(cpu_now.saturating_add(hard_ms.saturating_mul(1000)).max(1), Ordering::Relaxed);
         let now = self.epoch.elapsed();
-        let wall = limit_ms.saturating_mul(defaults::num("script.wall_limit_factor").max(1)).saturating_mul(1_000_000);
+        let wall = hard_ms.saturating_mul(defaults::num("script.wall_limit_factor").max(1)).saturating_mul(1_000_000);
         self.deadline.wall.store((now.as_nanos() as u64).saturating_add(wall).max(1), Ordering::Relaxed);
         let req = crate::deadline::at().filter(|_| cut).map_or(0, |at| {
             let left = at.saturating_duration_since(Instant::now());
@@ -191,6 +210,22 @@ impl Pool {
     fn past_request(&self) -> bool {
         let req = self.deadline.req.load(Ordering::Relaxed);
         req != 0 && self.epoch.elapsed().as_nanos() as u64 > req
+    }
+
+    /// A call that finished (or was interrupted) having used more thread CPU than its SOFT limit: logged and counted.
+    fn note_soft(&self, name: &str, event: &str, soft_ms: u64) {
+        let used = crate::limits::thread_cpu_us().saturating_sub(self.deadline.start_cpu.load(Ordering::Relaxed));
+        if self.deadline.start_cpu.load(Ordering::Relaxed) != 0 && used > soft_ms.saturating_mul(1000) {
+            SOFT_OVERRUNS.fetch_add(1, Ordering::Relaxed);
+            let hard = hard_ms_of(soft_ms);
+            crate::discard::note(
+                "script_soft",
+                &defaults::render(
+                    "msg.script_soft_overrun",
+                    &[("check", &name), ("event", &event), ("used_us", &used), ("soft_ms", &soft_ms), ("hard_ms", &hard)],
+                ),
+            );
+        }
     }
 
     fn disarm(&self) {
@@ -638,6 +673,7 @@ pub fn call_fn(name: &str, func: &str, args: &Value) -> Option<Value> {
                 let s = c.json_stringify(v).catch(&c).map_err(|e| e.to_string())?;
                 Ok(s.and_then(|s| s.to_string().ok()).unwrap_or_else(|| "null".into()))
             });
+            pool.note_soft(name, func, limit);
             pool.disarm();
             host::set_deadline(None);
             reset_heap(pool);
@@ -699,6 +735,7 @@ fn call(name: &str, libs: &Fingerprint, own: &Fingerprint, payload: &Value, opts
                 Ok(s.and_then(|s| s.to_string().ok()).unwrap_or_else(|| "null".into()))
             });
             was_cut = out.is_err() && pool.past_request();
+            pool.note_soft(name, event, limit);
             let out = out.map_err(|e| pool.deadline.explain(&e, limit));
             pool.disarm();
             host::set_deadline(None);

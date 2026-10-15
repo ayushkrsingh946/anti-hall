@@ -248,9 +248,21 @@ value = 1000
 env = "AH_ENGINE_WRITE_MS"
 unit = "ms"
 
-[daemon.eval_budget_us]
-doc = "Per-request thread CPU budget for rule evaluation; 0 turns the budget off."
+[daemon.eval_soft_us]
+doc = "SOFT per-request thread CPU budget for rule evaluation: a request that used more is logged (budget_soft) and counted, and every check keeps its answer. The HARD budget is daemon.eval_budget_us. 0 turns the warning off."
 value = 200000
+min = 0
+unit = "us"
+
+[daemon.request_hard_ms]
+doc = "HARD deadline of a request, measured from its arrival (less daemon.reply_slack_ms): the point where a scripted check still running is cut and a check not yet started is deferred to its Node hook. The SOFT deadline is client.deadline_ms (past it the request is logged as deadline_soft and counted, nothing is cut). A client whose daemon is alive waits for a late reply up to client.slow_fallback_max_ms less client.slow_wait_margin_ms and uses it, so this must stay below that window."
+value = 2000
+min = 1
+unit = "ms"
+
+[daemon.eval_budget_us]
+doc = "HARD per-request thread CPU budget for rule evaluation: past it every remaining check defers to its Node hook. The SOFT budget (a warning only) is daemon.eval_soft_us. 0 turns the hard budget off."
+value = 1000000
 env = "AH_ENGINE_EVAL_BUDGET_US"
 unit = "us"
 

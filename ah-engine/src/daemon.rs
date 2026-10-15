@@ -612,6 +612,17 @@ fn over_cpu_budget(start: u64, budget: u64) -> bool {
     budget > 0 && limits::thread_cpu_us().saturating_sub(start) > budget
 }
 
+/// The SOFT cpu budget: the request used more thread CPU than `daemon.eval_soft_us`. Only logged and counted; the checks that ran
+/// keep their answers.
+fn note_cpu_soft(sh: &Shared, start: u64, cfg: &Config) {
+    let used = limits::thread_cpu_us().saturating_sub(start);
+    if cfg.eval_soft_us > 0 && used > cfg.eval_soft_us {
+        sh.telemetry.with_metrics(|m| m.inc("budget_soft", &[]));
+        let detail = defaults::render("msg.log_budget_soft", &[("used_us", &used), ("soft_us", &cfg.eval_soft_us), ("hard_us", &cfg.eval_budget_us)]);
+        health::log_event("budget_soft", "-", &detail);
+    }
+}
+
 fn record_budget_trip(sh: &Shared, project: &str, detail: &str) {
     sh.stats.budget_trips.fetch_add(1, SeqCst);
     sh.telemetry.with_metrics(|m| m.inc("budget_trips", &[]));
@@ -659,6 +670,7 @@ fn hook(body: &str, env: &crate::reqenv::RequestEnv, sh: &Shared, cfg: &Config) 
             Reply::Err(defaults::text("msg.reply_budget").into())
         }
     };
+    note_cpu_soft(sh, start, cfg);
     let micros = started.elapsed().as_micros() as u64;
     sh.telemetry.observe_hook(crate::hookio::event_of(&p).unwrap_or(""), micros);
     let (outcome, injected) = reply_outcome(&reply);
@@ -681,7 +693,7 @@ fn dispatch(body: &str, sh: &Shared, cfg: &Config) -> Reply {
         sh.config.offer_root(root);
     }
     if let Some(ms) = meta.deadline_ms {
-        crate::deadline::client_deadline(ms);
+        crate::deadline::client_window(ms);
     }
     let session = p.get("session_id").and_then(|v| v.as_str()).unwrap_or("-");
     crate::load::note_request(&meta.event, p.get("session_id").and_then(|v| v.as_str()));
@@ -732,6 +744,7 @@ fn dispatch(body: &str, sh: &Shared, cfg: &Config) -> Reply {
     if over() {
         record_budget_trip(sh, &phash, defaults::text("msg.log_budget"));
     }
+    note_cpu_soft(sh, start_cpu, cfg);
     sh.telemetry.observe_hook(&meta.event, started.elapsed().as_micros() as u64);
     Reply::Ok(crate::dispatch::native::encode(&answers))
 }
@@ -964,8 +977,12 @@ fn serve_conn(mut s: UnixStream, sh: &Shared, wait: Duration, in_flight: u64) ->
             (Reply::Err(defaults::text("msg.reply_internal").into()), After::Continue)
         }
     };
+    let soft_scripts = crate::script::take_soft_overruns();
+    if soft_scripts > 0 {
+        sh.telemetry.with_metrics(|m| m.add("script_soft", &[], soft_scripts));
+    }
     let mem_after = mem_before.is_some().then(crate::memdiag::measure_after);
-    let late = crate::deadline::remaining() == Some(Duration::ZERO);
+    let late = crate::deadline::soft_remaining() == Some(Duration::ZERO);
     let delivered = write_reply(&mut s, &reply, &cfg);
     if delivered {
         sh.telemetry.stage_commit();
@@ -978,6 +995,7 @@ fn serve_conn(mut s: UnixStream, sh: &Shared, wait: Duration, in_flight: u64) ->
         // answered after the client's deadline: slow but healthy, which is not a failure of the engine
         SLOW_REPLIES.fetch_add(1, SeqCst);
         sh.telemetry.with_metrics(|m| m.inc("slow_replies", &[]));
+        sh.telemetry.with_metrics(|m| m.inc("deadline_soft", &[]));
     }
     crate::deadline::end();
     let (event, session) = crate::load::take_request();

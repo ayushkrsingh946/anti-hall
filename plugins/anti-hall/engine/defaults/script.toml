@@ -56,9 +56,21 @@ doc = "Reason logged when a loaded script call fails. Placeholders: {name}, {fun
 value = "{name}.{func} check={check} event={event}: {error}"
 
 [script.time_limit_ms]
-doc = "CPU-time limit of one script call (the interpreter thread's own CPU time, see script.wall_limit_factor for the wall-clock backstop); past it the interpreter is interrupted and the call defers to Node (never a silent allow)."
+doc = "SOFT CPU-time limit of one script call (the interpreter thread's own CPU time): a call that used more is logged (script_soft) and counted, and keeps running. The HARD limit that interrupts it is this value times script.time_hard_factor (the call then defers to Node, never a silent allow); script.wall_limit_factor sets the wall-clock backstop from the hard limit."
 value = 50
 env = "AH_ENGINE_SCRIPT_TIME_MS"
+min = 1
+unit = "ms"
+
+[script.time_hard_factor]
+doc = "The HARD CPU limit of a script call as a multiple of its SOFT limit (script.time_limit_ms, or the per-check entry of script.time_limit_by_check). Past the soft limit a call is only logged and counted; the interpreter is interrupted at the hard one."
+value = 10
+min = 1
+max = 1000
+
+[script.time_hard_cap_ms]
+doc = "Ceiling of the HARD CPU limit of a script call that has a normal soft limit; a soft limit already above it (a batch job's, in script.time_limit_by_check) is its own hard limit."
+value = 5000
 min = 1
 unit = "ms"
 
@@ -78,8 +90,8 @@ doc = "Exception a native transcript scan raises in a script call cut at its req
 value = "the request's client stopped waiting during the scan"
 
 [script.wall_limit_factor]
-doc = "The wall-clock backstop of a script call, as a multiple of its time limit. The limit itself counts the interpreter thread's CPU time, so a thread kept waiting for a core by a loaded machine is not interrupted; the backstop ends a script that waits without using CPU. Time a host function spends blocked (a child process, a lock) is credited back to the backstop."
-value = 10
+doc = "The wall-clock backstop of a script call, as a multiple of its HARD CPU limit (script.time_limit_ms times script.time_hard_factor). The limit itself counts the interpreter thread's CPU time, so a thread kept waiting for a core by a loaded machine is not interrupted; the backstop ends a script that waits without using CPU. Time a host function spends blocked (a child process, a lock) is credited back to the backstop."
+value = 4
 min = 1
 max = 1000
 
