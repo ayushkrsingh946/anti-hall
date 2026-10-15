@@ -241,3 +241,55 @@ fn the_silent_agent_nudge_exempts_a_quiet_daemon_by_the_configured_rule() {
     let (eng, node) = silent_stop("sn-shell", "local_bash", "Run the full test suite", 29);
     assert!(nudged(&eng.1) && nudged(&node.1), "an ordinary silent shell is still nudged: {} / {}", eng.1, node.1);
 }
+
+/// R1 GUARDS (#179). A spawn payload with a running writer in the transcript, so the shared-tree note has something to compare.
+fn shared_tree_pair(tag: &str, prompt: &str) -> ((i32, String), (i32, String)) {
+    let dir = scratch(tag);
+    let t = dir.join("t.jsonl");
+    let launch = json!({"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "toolu_1", "name": "Agent",
+        "input": {"subagent_type": "general-purpose", "prompt": "fix it"}}]}});
+    let result = json!({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "toolu_1",
+        "content": "Async agent launched successfully.\nagentId: a1b2c3d4e5f60718 (internal ID - do not mention to user)\noutput_file: /tmp/x/a1b2c3d4e5f60718.output"}]}});
+    std::fs::write(&t, format!("{launch}\n{result}\n")).unwrap();
+    let p = json!({"hook_event_name": "PreToolUse", "tool_name": "Agent", "session_id": "s1", "cwd": dir.to_string_lossy(),
+        "transcript_path": t.to_string_lossy(),
+        "tool_input": {"subagent_type": "general-purpose", "model": "sonnet", "description": "sync labels", "prompt": prompt}});
+    both("swarm-guard", "swarm-guard.js", &dir, &p)
+}
+
+/// A spawn that only calls the GitHub API shares no checkout, so the shared-tree note stays silent; the same spawn without that
+/// statement is still a write-capable agent beside a running one.
+#[test]
+fn the_shared_tree_note_is_silent_for_a_spawn_that_only_calls_the_github_api() {
+    for prompt in [
+        "Sync the status labels on issues 12 and 13. gh-API-only: no checkout, no file edits.",
+        "Set the board status via the GitHub API only. Do not touch the working tree.",
+    ] {
+        let (eng, node) = shared_tree_pair("st-api", prompt);
+        assert!(!eng.1.contains("shared-tree"), "engine: {prompt}: {}", eng.1);
+        assert!(!node.1.contains("shared-tree"), "node: {prompt}: {}", node.1);
+    }
+    let (eng, node) = shared_tree_pair("st-write", "Fix the cache bug and update the tests.");
+    assert!(eng.1.contains("shared-tree") && node.1.contains("shared-tree"), "a writer still gets the note: {} / {}", eng.1, node.1);
+    let (eng, node) = shared_tree_pair("st-inplace", "Use the GitHub API only for labels, then edit the repo files in place.");
+    assert!(eng.1.contains("shared-tree") && node.1.contains("shared-tree"), "an in-place statement still cancels: {} / {}", eng.1, node.1);
+}
+
+/// A brief that moves and removes files, commits and opens a PR is a write task, however many research words it carries.
+#[test]
+fn model_routing_does_not_read_a_git_mv_commit_and_pr_brief_as_read_only() {
+    let dir = scratch("mr-write");
+    let readonly = "research/read-only-shaped spawn";
+    let write = |prompt: &str| json!({"hook_event_name": "PreToolUse", "tool_name": "Agent", "session_id": "s1", "cwd": "/tmp",
+        "tool_input": {"subagent_type": "general-purpose", "model": "sonnet", "description": "tidy the docs", "prompt": prompt}});
+    for prompt in [
+        "Find the stale docs, git mv the kept ones into docs/, git rm the rest, commit and open a PR.",
+        "Locate the duplicate scripts, git rm them and open a pull request with the result.",
+    ] {
+        let (eng, node) = both("model-routing", "model-routing-guard.js", &dir, &write(prompt));
+        assert!(!eng.1.contains(readonly), "engine: {prompt}: {}", eng.1);
+        assert!(!node.1.contains(readonly), "node: {prompt}: {}", node.1);
+    }
+    let (eng, node) = both("model-routing", "model-routing-guard.js", &dir, &write("Research how the guards are wired and report what you find."));
+    assert!(eng.1.contains(readonly) && node.1.contains(readonly), "a read-only brief is still nudged: {} / {}", eng.1, node.1);
+}

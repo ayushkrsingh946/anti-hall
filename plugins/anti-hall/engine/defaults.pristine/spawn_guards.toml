@@ -349,6 +349,10 @@ value = '''^(?:~|\$HOME)'''
 doc = "JavaScript regex source (case-insensitive): a negated scratch statement, which cancels the scratch reading."
 value = '''\b(?:not|no|without|instead\s+of)\s+(?:in\s+|a\s+|the\s+|any\s+)?scratch\b'''
 
+[swarm_guard.re_api_only]
+doc = "JavaScript regex source (case-insensitive): a statement that the spawn only calls the GitHub API or gh CLI and edits no checkout (gh-API-only, only calls the GitHub API, no checkout, do not touch the working tree). Such a spawn shares no working tree, so the shared-tree advisory does not apply; an in-place statement still cancels it."
+value = '''\b(?:gh|github)[- ](?:api|cli)[- ]only\b|\bonly\s+(?:calls?|uses?|runs?|via)\s+(?:the\s+)?(?:github\s+api|gh\s+(?:api|cli|commands?))\b|\b(?:via|through|using)\s+the\s+github\s+api\s+only\b|\bno\s+(?:local\s+)?(?:checkout|file\s+(?:edits|writes|changes)|working[- ]tree)\b|\b(?:does\s+not|doesn'?t|do\s+not|don'?t|never)\s+(?:touch|write\s+to|edit|modify)\s+(?:the\s+|any\s+|a\s+)?(?:local\s+)?(?:checkout|working\s+tree|repo\s+files?)\b'''
+
 [swarm_guard.re_in_place]
 doc = "JavaScript regex source (case-insensitive): a statement that the spawn works in place in the session repo, which cancels the scratch reading."
 value = '''\bin\s+place\b|\bin\s+(?:the\s+)?(?:session\s+)?repo\b|\brepo\s+files\b|\b(?:session|main)\s+(?:checkout|working\s+tree)\b|\bin\s+the\s+(?:working\s+tree|checkout)\b|\bworking\s+copy\b|\bchecked[- ]out\s+(?:files?|tree|copy|branch)\b|\bon\s+main\b|\bmain\s+branch\b'''

@@ -91,7 +91,7 @@ const WRITE_IMPERATIVE_RE =
 // clone <repo> into/to <path>, git clone / git format-patch, or run the generator/
 // tests/build as an instruction (sentence start, "then", "and").
 const WRITE_PHRASE_RE =
-  /\bsave\s+(?:[\w-]+\s+){0,4}?(?:to|into)\s+\S|\bclone\s+(?:\S+\s+){0,3}?(?:into|to)\s+\S|\bgit\s+(?:clone|format-patch)\b|(?:^|[.;:]\s+|\b(?:then|and)\s+)run\s+(?:the\s+)?(?:generators?|tests?|test\s+suite|build)\b/im;
+  /\bsave\s+(?:[\w-]+\s+){0,4}?(?:to|into)\s+\S|\bclone\s+(?:\S+\s+){0,3}?(?:into|to)\s+\S|\bgit\s+(?:clone|format-patch|mv|rm)\b|\bopen(?:s|ing)?\s+(?:an?\s+|the\s+)?(?:pr|pull\s+request)\b|(?:^|[.;:]\s+|\b(?:then|and)\s+)run\s+(?:the\s+)?(?:generators?|tests?|test\s+suite|build)\b/im;
 
 // A brief that tells the agent to commit (or to open a git worktree) is a writing brief however many read-only words it quotes
 // (dogfood 2026-10-09: a fix brief naming the check "read-only-shaped" was judged read-only). A negated commit ("never commit",

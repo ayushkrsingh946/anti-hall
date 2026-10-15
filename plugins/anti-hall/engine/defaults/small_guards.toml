@@ -572,8 +572,8 @@ doc = "Instruction-position ambiguous write/execute regex that suppresses the ro
 value = '(?:^|[\n\r\u2028\u2029]|[.;:!?]\s+|\b(?:then|and|also|please|to)\s+)(?:tag|release|bump|apply|patch|build|deploy|install|fix)\b'
 
 [model_routing.write_phrase_re]
-doc = "Explicit write phrase regex that suppresses the row-6 Explore advisory even when read-only override words are present."
-value = '\bsave\s+(?:[\w-]+\s+){0,4}?(?:to|into)\s+\S|\bclone\s+(?:\S+\s+){0,3}?(?:into|to)\s+\S|\bgit\s+(?:clone|format-patch)\b|(?:^|[\n\r\u2028\u2029]|[.;:]\s+|\b(?:then|and)\s+)run\s+(?:the\s+)?(?:generators?|tests?|test\s+suite|build)\b'
+doc = "Explicit write phrase regex (a save-to, clone, git clone/format-patch/mv/rm, opening a PR, running the generators or tests) that suppresses the row-6 Explore advisory even when read-only override words are present."
+value = '\bsave\s+(?:[\w-]+\s+){0,4}?(?:to|into)\s+\S|\bclone\s+(?:\S+\s+){0,3}?(?:into|to)\s+\S|\bgit\s+(?:clone|format-patch|mv|rm)\b|\bopen(?:s|ing)?\s+(?:an?\s+|the\s+)?(?:pr|pull\s+request)\b|(?:^|[\n\r\u2028\u2029]|[.;:]\s+|\b(?:then|and)\s+)run\s+(?:the\s+)?(?:generators?|tests?|test\s+suite|build)\b'
 
 [model_routing.commit_phrase_re]
 doc = "Regex (case-insensitive) of a brief that tells the agent to commit or open a git worktree: a writing brief however many read-only words it quotes, so it suppresses the row-6 Explore advisory and cannot be overridden by an explicit read-only statement. A negated commit is removed first (negated_commit_re)."
