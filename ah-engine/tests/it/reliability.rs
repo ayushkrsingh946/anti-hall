@@ -724,13 +724,17 @@ fn twenty_concurrent_wrapper_calls_after_a_kill_leave_exactly_one_daemon() {
     }
     assert!(wait_for(|| e.pid().is_some_and(|p| p != old)), "no new daemon after 20 wrapper calls following kill -9{}", e.diag());
     std::thread::sleep(Duration::from_secs(3)); // a spawn storm shows up as late extra daemons
-    // every `serve` process of THIS state directory (the daemon may fork away from the logged pid, so ask the process table)
-    let ps = Command::new("ps").args(["-axww", "-E", "-o", "pid=,command="]).output().unwrap();
-    let mine = format!("AH_ENGINE_DIR={}", e.eng().display());
-    let mut daemons: Vec<u32> = String::from_utf8_lossy(&ps.stdout)
-        .lines()
-        .filter(|l| l.contains(" serve") && l.contains(&mine))
-        .filter_map(|l| l.split_whitespace().next()?.parse().ok())
+    // every `serve` process of THIS state directory (the daemon may fork away from the logged pid, so ask the process table). The
+    // engine's own process table reads command lines and environments on both platforms (`ps -E` is BSD-only: procps on Linux
+    // rejects it, which left this list empty there).
+    let mine = e.eng().display().to_string();
+    let mut table = ah_engine::procwatch::table::Table::new();
+    let rows = table.list();
+    let mut daemons: Vec<u32> = rows
+        .into_iter()
+        .filter(|r| r.cmd.split_whitespace().any(|a| a == "serve"))
+        .filter(|r| table.environ(r.pid).iter().any(|(k, v)| k == "AH_ENGINE_DIR" && *v == mine))
+        .map(|r| r.pid)
         .collect();
     daemons.sort_unstable();
     daemons.dedup();
@@ -865,11 +869,19 @@ fn a_cold_first_wrapper_call_starts_the_daemon() {
     for k in ["AH_ENGINE_PLUGIN_ROOT", "CLAUDE_PLUGIN_ROOT"] {
         e.extra.push((k.to_string(), root.display().to_string()));
     }
-    let (code, out, _) = wrapper_once(&e);
+    let o = wrapper_child(&e).wait_with_output().unwrap();
+    let (code, out, err) = (o.status.code().unwrap_or(-1), String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
     // a guard event no longer runs against a daemon that is still starting: the wrapper kicks it, waits for the socket
-    // (client.cold_guard_wait_ms) and returns the engine's real decision (DENY_IN is a block)
-    assert_eq!(code, 2, "a cold first guard call waits for the daemon and gets its decision: {out}");
-    assert!(out.contains("\"decision\":\"block\""), "a cold first guard call gets the engine's block: {out}");
+    // (client.cold_guard_wait_ms) and returns the engine's real decision (DENY_IN is a block). The engine answers a Claude
+    // PreToolUse block in either host form: a JSON `decision: block` on stdout, or exit 2 with the reason on stderr (the shipped
+    // git check, which answers this force push before the test rule, uses the second). The wrapper's own fail-closed exit 2
+    // (no engine answer) is not the engine's decision, and neither is a Node fallback answer.
+    assert_eq!(code, 2, "a cold first guard call waits for the daemon and gets its decision: stdout={out} stderr={err}");
+    let engine_block = out.contains("\"decision\":\"block\"") || (!err.trim().is_empty() && !err.contains("fail closed"));
+    assert!(engine_block, "a cold first guard call gets the engine's block: stdout={out} stderr={err}");
+    let invocations = std::fs::read_to_string(e.invocation_log()).unwrap_or_default();
+    assert!(invocations.lines().any(|l| l.contains("--event PreToolUse")), "the engine answered the guard call itself: {invocations}");
+    assert_eq!(e.status()["health"]["fallbacks"]["total"], 0, "no Node fallback answered the cold guard call{}", e.diag());
     assert!(wait_for(|| e.pid().is_some()), "no daemon after the first cold wrapper call{}", e.diag());
 }
 
