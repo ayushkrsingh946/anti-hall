@@ -40,7 +40,12 @@ fn both(check: &str, hook: &str, dir: &std::path::Path, payload: &Value) -> ((i3
     e.args(["check", check]).env_clear();
     let mut n = Command::new("node");
     n.arg(plugin().join("hooks").join(hook)).env_clear();
-    (feed(e, dir, &payload.to_string()), feed(n, dir, &payload.to_string()))
+    // each runner has its own home and state: the first one's loop-state and records must not decide the second's answer
+    let (eh, nh) = (dir.join("e"), dir.join("n"));
+    for h in [&eh, &nh] {
+        std::fs::create_dir_all(h.join("home")).unwrap();
+    }
+    (feed(e, &eh, &payload.to_string()), feed(n, &nh, &payload.to_string()))
 }
 
 fn spawn(prompt: &str) -> Value {
@@ -86,7 +91,9 @@ fn codex_quota_detect_ignores_the_agents_own_prompt_text() {
     let (eng, node) = both("codex-quota-detect", "codex-quota-detect.js", &dir, &rescue(prompt, &echo));
     assert!(eng.1.trim().is_empty(), "engine marked Codex unavailable on its own prompt: {}", eng.1);
     assert!(node.1.trim().is_empty(), "node marked Codex unavailable on its own prompt: {}", node.1);
-    assert!(!dir.join("home/.anti-hall/codex-availability.json").exists(), "nothing recorded");
+    for h in ["e", "n"] {
+        assert!(!dir.join(h).join("home/.anti-hall/codex-availability.json").exists(), "nothing recorded by {h}");
+    }
     // a JSON-shaped result escapes the newlines and quotes of the echoed brief
     let obj = json!({"result": echo});
     let (eng, node) = both("codex-quota-detect", "codex-quota-detect.js", &dir, &rescue(prompt, "x").tap_resp(obj));
@@ -96,7 +103,9 @@ fn codex_quota_detect_ignores_the_agents_own_prompt_text() {
     let (eng, node) = both("codex-quota-detect", "codex-quota-detect.js", &dir, &rescue(prompt, "x").tap_resp(wrapped));
     // a result with several keys that mention a quota is the Node hook's to read: the engine defers to it
     assert!(matches!(eng.1.trim(), "" | "AHFALLBACK") && node.1.trim().is_empty(), "{} / {}", eng.1, node.1);
-    assert!(!dir.join("home/.anti-hall/codex-availability.json").exists(), "nothing recorded");
+    for h in ["e", "n"] {
+        assert!(!dir.join(h).join("home/.anti-hall/codex-availability.json").exists(), "nothing recorded by {h}");
+    }
     // the real message still counts
     let real = format!("{echo}\nError: you have hit your usage limit, try again at 2026-10-30T12:00:00Z.");
     let (eng, node) = both("codex-quota-detect", "codex-quota-detect.js", &dir, &rescue(prompt, &real));
@@ -112,4 +121,81 @@ impl TapResp for Value {
         self["tool_response"] = v;
         self
     }
+}
+
+// ---- #177: the task guard reads a task's current subject and honours an owner that is a running agent ----
+
+fn stamp(minutes_ago: i64) -> String {
+    let ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as i64 - minutes_ago * 60_000;
+    let secs = ms.div_euclid(1000);
+    let (days, rem) = (secs.div_euclid(86400), secs.rem_euclid(86400));
+    // civil-from-days (Howard Hinnant): the UTC date of a day count since 1970-01-01
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    format!("{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}.000Z", rem / 3600, rem % 3600 / 60, rem % 60)
+}
+
+fn asst_tool(ago: i64, id: &str, name: &str, input: Value) -> Value {
+    json!({"type": "assistant", "timestamp": stamp(ago), "message": {"role": "assistant", "content": [{"type": "tool_use", "id": id, "name": name, "input": input}]}})
+}
+
+fn tool_res(ago: i64, id: &str, text: &str) -> Value {
+    json!({"type": "user", "timestamp": stamp(ago), "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": id, "content": [{"type": "text", "text": text}]}]}})
+}
+
+/// A Stop whose transcript holds the given lines; returns (engine, node) answers.
+fn stop(tag: &str, lines: &[Value]) -> ((i32, String), (i32, String)) {
+    let dir = scratch(tag);
+    let tp = dir.join("t.jsonl");
+    std::fs::write(&tp, lines.iter().map(|l| l.to_string() + "\n").collect::<String>()).unwrap();
+    let p = json!({"hook_event_name": "Stop", "session_id": "s1", "cwd": dir.to_string_lossy(), "transcript_path": tp.to_string_lossy(), "stop_hook_active": false});
+    both("task-guard", "task-guard.js", &dir, &p)
+}
+
+fn create(ago: i64, tu: &str, n: u32, subject: &str) -> [Value; 2] {
+    [
+        asst_tool(ago, tu, "TaskCreate", json!({"subject": subject, "description": subject})),
+        json!({"type": "user", "timestamp": stamp(ago), "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": tu, "content": format!("Task #{n} created successfully: {subject}")}]}}),
+    ]
+}
+
+/// A task renamed after it was created is listed under its CURRENT subject, not the one it was created with.
+#[test]
+fn the_task_guard_lists_a_renamed_task_by_its_current_subject() {
+    let mut l: Vec<Value> = create(90, "toolu_c1", 1, "R0 old working title").into();
+    l.push(asst_tool(60, "toolu_u1", "TaskUpdate", json!({"taskId": "1", "subject": "#12 renamed board subject"})));
+    let (eng, node) = stop("tg-rename", &l);
+    for (who, out) in [("engine", &eng.1), ("node", &node.1)] {
+        assert_ne!(out.trim(), "AHFALLBACK", "{who} answers this Stop itself");
+        assert!(out.contains("#12 renamed board subject"), "{who} must list the current subject: {out}");
+        assert!(!out.contains("R0 old working title"), "{who} listed the old subject: {out}");
+    }
+    assert!(node.1.contains("#12 renamed board subject"), "node: {}", node.1);
+}
+
+/// A task owned by a running agent named by the `name` it was launched with (not its id or description) is attended.
+#[test]
+fn the_task_guard_treats_an_owner_that_is_a_running_named_agent_as_attended() {
+    let launch_text = "Async agent launched successfully.\nagentId: abc123def456 (internal ID - do not mention to user. Use SendMessage with to: 'abc123def456')\nThe agent is working in the background.\noutput_file: /tmp/none/abc123def456.output\n";
+    let mut l: Vec<Value> = create(90, "toolu_c1", 1, "Lane 9 hardening").into();
+    l.push(asst_tool(80, "toolu_u1", "TaskUpdate", json!({"taskId": "1", "status": "in_progress", "owner": "live9"})));
+    l.push(asst_tool(70, "toolu_a1", "Agent", json!({"description": "train lane", "name": "live9", "prompt": "go", "run_in_background": true})));
+    l.push(tool_res(70, "toolu_a1", launch_text));
+    let (eng, node) = stop("tg-owner-name", &l);
+    for (who, out) in [("engine", &eng.1), ("node", &node.1)] {
+        assert!(!out.contains("\"decision\":\"block\""), "{who} blocked on a task its running agent owns: {out}");
+    }
+    // the same task with an owner that is no running agent still blocks
+    let mut l2: Vec<Value> = create(90, "toolu_c1", 1, "Lane 9 hardening").into();
+    l2.push(asst_tool(80, "toolu_u1", "TaskUpdate", json!({"taskId": "1", "status": "in_progress", "owner": "ghost"})));
+    let (eng, node) = stop("tg-owner-ghost", &l2);
+    assert!(node.1.contains("\"decision\":\"block\""), "node: {}", node.1);
+    assert!(eng.1.contains("\"decision\":\"block\"") || eng.1.trim() == "AHFALLBACK", "engine: {}", eng.1);
 }

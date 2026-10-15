@@ -694,7 +694,9 @@ function liveAgentOwner(owner, rows) {
   if (!o || !Array.isArray(rows) || /^(main|orchestrator|coordinator)$/.test(o)) return false;
   return rows.some((r) => {
     const id = String(r.id || '').toLowerCase(), d = String(r.description || '').toLowerCase();
-    return o === id || (d !== '' && o === d) || (o.length >= 4 && d.includes(o));
+    // the `name` the agent was launched with (an owner that names a teammate or a lane)
+    const nm = r.spawnInput && typeof r.spawnInput.name === 'string' ? r.spawnInput.name.trim().toLowerCase() : '';
+    return o === id || (d !== '' && o === d) || (nm !== '' && o === nm) || (o.length >= 4 && d.includes(o));
   });
 }
 
@@ -973,9 +975,12 @@ function parseTasksFromFile(filePath) {
           const updatedBlockedOn = hasBlockedOnUpdate
             ? ((inp.metadata != null && inp.metadata.blockedOn != null) ? inp.metadata.blockedOn : inp.blockedOn)
             : existing.blockedOn;
+          const renamed = typeof inp.subject === 'string' && inp.subject !== '';
           taskMap.set(id, {
             id: existing.id,
-            content: existing.content,
+            // a rename counts: a task is listed by its current subject, not the one it was created with
+            content: renamed ? inp.subject : existing.content,
+            subjectUpdated: renamed ? true : existing.subjectUpdated,
             unknown: TS.gapsAfterUpdate(existing.unknown, inp),
             // NEVER guess: an id first seen here stays status-unknown (undefined)
             // unless the update carries one; lib/task-subject-backfill.js recovers
@@ -1018,10 +1023,10 @@ function parseTasksFromFile(filePath) {
         owner: rec.owner || '', blockedBy: rec.blockedBy || [],
         priority: rec.priority || null, blockedOn: rec.blockedOn,
       });
-    } else if (!existing.content || existing.content === key) {
-      // Backfill subject from provisional record (update may have arrived first).
+    } else if (!existing.content || existing.content === key || existing.subjectUpdated) {
+      // Backfill subject from provisional record (update may have arrived first); a subject an update set is newer than the create's.
       taskMap.set(key, {
-        id: key, content: rec.content, status: existing.status, sinceMs: existing.sinceMs,
+        id: key, content: existing.subjectUpdated ? existing.content : rec.content, status: existing.status, sinceMs: existing.sinceMs,
         owner: existing.owner || rec.owner || '',
         blockedBy: (existing.blockedBy && existing.blockedBy.length) ? existing.blockedBy : (rec.blockedBy || []),
         priority: existing.priority || rec.priority || null,

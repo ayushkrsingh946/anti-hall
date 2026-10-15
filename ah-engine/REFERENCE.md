@@ -3556,6 +3556,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `task_guard.omc_state_max_bytes` | `65536` |  |  | Largest OMC state file read; a larger one counts as malformed. |
 | `task_guard.omc_ts_keys` | `last_checked_at, updated_at, started_at` |  |  | The state fields that may carry a fresh time, in the order tried. |
 | `task_guard.owner_match_min` | `4` |  | chars | The shortest task owner text that counts as naming a running agent by a part of its description (an owner of fewer characters matches only the agent's id or its whole description). A task owned by a running agent is attended and is not listed by the generic block. |
+| `task_guard.owner_name_key` | `name` |  |  | The field of the Agent call that launched a running agent which names it (its `name`). A task whose owner is that name is attended, like one owned by the agent's id or description. |
 | `task_guard.pending_status` | `pending` |  |  | The status (lowercase) of a task that can be dispatched now. |
 | `task_guard.priority_default_rank` | `1` |  |  | The rank of a task with no priority or an unrecognised one (fail-open: it counts as P1). |
 | `task_guard.priority_low` | `low, deferred` |  |  | Priority words (lowercase) that rank below the default. |

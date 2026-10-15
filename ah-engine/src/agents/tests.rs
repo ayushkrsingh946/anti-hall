@@ -311,6 +311,37 @@ fn a_stopped_subagent_is_done_not_hung_and_a_live_one_still_is() {
     assert!(hung.iter().any(|r| r["text"].as_str().unwrap().contains("def")), "the true positive still fires: {hung:?}");
 }
 
+/// #177: a subagent the coordinator stopped with `TaskStop` (a tool call answered by its result, no completion notice) is done,
+/// not hung; an unanswered stop does not end it, and a stop naming another task leaves it running.
+#[test]
+fn a_subagent_stopped_with_task_stop_is_done_not_hung() {
+    let h = home("taskstop");
+    let n = now0();
+    write(
+        &sess(&h, "parent"),
+        &[
+            prompt(n - 60 * MIN, "/w"),
+            tool(n - 30 * MIN, "p1", 5, "toolu_stop1", "TaskStop", json!({"task_id": "abc"})),
+            result(n - 30 * MIN + 1000, "toolu_stop1", "Successfully stopped task: abc (Docs-drift review)", false),
+            tool(n - 29 * MIN, "p2", 5, "toolu_stop2", "TaskStop", json!({"task_id": "ghi"})),
+        ],
+    );
+    let dir = h.join(".claude/projects/p/parent/subagents");
+    for id in ["abc", "def", "ghi"] {
+        write(
+            &dir.join(format!("agent-{id}.jsonl")),
+            &[prompt(n - 70 * MIN, "/w"), asst(n - 65 * MIN, "s1", 5, 5, json!([{"type": "text", "text": "x"}]), None)],
+        );
+    }
+    let mut st = State::default();
+    ticks(&h, &mut st, &[n, n + MIN, n + 2 * MIN]);
+    assert_eq!(signals::state_of(agent(&st, "abc")), "done", "an answered TaskStop ends the agent");
+    assert_eq!(signals::state_of(agent(&st, "def")), "running", "nothing ended it");
+    assert_eq!(signals::state_of(agent(&st, "ghi")), "running", "a stop with no result yet is not a kill");
+    let hung: Vec<Value> = queue(&h, "parent").into_iter().filter(|r| r["signal"] == "hung").collect();
+    assert!(hung.iter().all(|r| !r["text"].as_str().unwrap().contains("abc")), "no hung reminder about the stopped agent: {hung:?}");
+}
+
 // ---- wake paths ---------------------------------------------------------------------------------------------
 
 fn parent_with_bg(h: &Path, n: u64, arm: Option<Value>) {
