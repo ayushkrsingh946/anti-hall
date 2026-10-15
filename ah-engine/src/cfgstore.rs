@@ -1167,6 +1167,27 @@ mod tests {
         assert_eq!(o, vec![("daemon.queue", json!(11)), ("daemon.worker_wait_ms", json!(99))], "env-sourced and default keys stay out");
     }
 
+    /// settings.json is shared with the Node settings store, which owns every `section.key` of its schema and the pre-0.108.4
+    /// `jev.integrations.<id>` form (#195 made every shipped key readable from settings.json, so a shipped key named like one of
+    /// these paths would read the user's Node value as an engine tunable: `jev.integrations.newRequest = "on"` turned a shadow
+    /// integration on in the engine while Node ignored it).
+    #[test]
+    fn no_shipped_key_is_a_path_the_node_settings_store_owns() {
+        let mut paths = std::collections::BTreeSet::new();
+        for e in crate::migrate::settings::entries() {
+            paths_of(&e.section, &json!({ e.key.as_str(): {} }), &mut paths);
+        }
+        let old = format!("{}.{}", defaults::text("migrate.settings_section_jev"), defaults::text("migrate.integrations_key_prefix").trim_end_matches('.'));
+        paths.insert(old);
+        let hit: Vec<&String> = paths.iter().filter(|p| defaults::get(p).is_some()).collect();
+        assert!(hit.is_empty(), "shipped keys named like Node settings.json paths: {hit:?}");
+        // the behaviour behind it: the old per-integration form changes nothing the engine resolves
+        let l = layers(json!({"jev": {"integrations": {"newRequest": "on"}}}), "");
+        let r = Effective::resolve(&l, &no_env);
+        let from_settings: Vec<&str> = r.iter().filter(|(_, x)| x.source == Source::Settings).map(|(k, _)| k).collect();
+        assert!(from_settings.is_empty(), "read from settings.json: {from_settings:?}");
+    }
+
     #[test]
     fn every_dotted_path_of_settings_json_is_a_candidate_key() {
         let mut out = std::collections::BTreeSet::new();

@@ -80,7 +80,7 @@ fn in_stop_event() -> bool {
 /// One decision to ask Jev about.
 #[derive(Clone)]
 pub struct AskRequest {
-    /// The integration id (a key of the `jev.integrations` table).
+    /// The integration id (a key of the `jev.default_modes` table).
     pub id: String,
     /// The question.
     pub question: Question,
