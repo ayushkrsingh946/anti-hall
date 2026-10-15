@@ -42,6 +42,13 @@ min = 10
 max = 60000
 unit = "ms"
 
+[devswarm_wire.reconcile_min_gap_ms]
+doc = "The least time between two reconciles the file events ask for. Changes inside the gap are folded into one reconcile at its end (none is lost), so a burst of changes, or a source that changes all the time, costs at most one reconcile per gap. 0 reconciles on every batch."
+value = 1000
+min = 0
+max = 600000
+unit = "ms"
+
 [devswarm_wire.act_min_gap_ms]
 doc = "The least time between two action sweeps (auto-archive, poke/escalate). An event burst triggers at most one sweep per gap; the periodic reconcile always triggers one."
 value = 5000

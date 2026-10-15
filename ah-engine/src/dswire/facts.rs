@@ -53,7 +53,13 @@ pub fn descriptors(home: &Path) -> Vec<Desc> {
         if !e.file_name().to_string_lossy().ends_with(suffix) {
             continue;
         }
-        let Some(v) = std::fs::read_to_string(e.path()).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()) else { continue };
+        let Some(v) = std::fs::read_to_string(e.path())
+            .ok()
+            .inspect(|t| crate::devswarm_rt::sources::count_read(t.len()))
+            .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+        else {
+            continue;
+        };
         let s = |k: &str| v.get(key(k)).and_then(Value::as_str).unwrap_or_default().to_string();
         let (id, worktree, session) = (s("id"), s("worktree"), s("session"));
         if worktree.is_empty() || session.is_empty() || !is_safe_id(&id) {

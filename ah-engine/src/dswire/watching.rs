@@ -10,7 +10,7 @@ use crate::meshw::union;
 use crate::watch::{Config, Watcher, poll::Filter};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// What a watched directory is.
 #[derive(Debug, Clone, PartialEq)]
@@ -33,18 +33,20 @@ pub fn wanted(w: &Wire, cfg: &Config) -> Vec<(PathBuf, Filter, Role)> {
     }
     let root = devswarm_root(&w.home);
     for k in defaults::list("devswarm_wire.watch_state_dirs") {
-        out.push((root.join(defaults::text(k)), Filter::All, Role::State));
+        out.push((root.join(defaults::text(k)), cfg.all_filter(), Role::State));
     }
     let snap = w.rt.current();
     for ws in snap.workspaces.values().filter(|x| x.lifecycle.value == Lifecycle::Active) {
         let Some(wt) = ws.worktree.as_deref() else { continue };
         if let Some(key) = facts::repo_key(wt) {
-            out.push((union::store_dir(&w.home, &key), Filter::All, Role::State));
+            // the store's SQLite shared-memory index is ignored (all_filter): the reconcile itself opens the store, and the open
+            // touches that file, so watching it made every reconcile trigger the next one (live P0, 2026-10-15)
+            out.push((union::store_dir(&w.home, &key), cfg.all_filter(), Role::State));
         }
         let descs = facts::descriptors(&w.home);
         for d in descs.iter().filter(|d| d.worktree == wt || d.id == ws.id) {
             if let Some(dir) = facts::transcript_path(&w.home, &d.worktree, &d.session).parent() {
-                out.push((dir.to_path_buf(), Filter::All, Role::Transcript(ws.id.clone())));
+                out.push((dir.to_path_buf(), cfg.all_filter(), Role::Transcript(ws.id.clone())));
             }
         }
         if let Some(g) = facts::git_dir(wt) {
@@ -98,30 +100,71 @@ pub fn plan(have: &HashMap<PathBuf, Role>, rescan: bool, paths: &[PathBuf]) -> P
     p
 }
 
-/// The thread body: reconcile at start, then one reconcile per batch, until `stop` says the daemon is draining.
+/// The work the thread has done since the process started: batches received, paths in them, and reconciles run per cause (the
+/// `status --threads` work counters; reading them costs nothing).
+pub mod work {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    /// Batches the watcher handed the thread.
+    pub static BATCHES: AtomicU64 = AtomicU64::new(0);
+    /// Changed paths in those batches.
+    pub static PATHS: AtomicU64 = AtomicU64::new(0);
+    /// Reconcile requests folded into one already waiting for `devswarm_wire.reconcile_min_gap_ms` to pass.
+    pub static DEFERRED: AtomicU64 = AtomicU64::new(0);
+    pub(crate) fn add(c: &AtomicU64, n: u64) {
+        c.fetch_add(n, Ordering::Relaxed);
+    }
+    /// `(name, value)` of every counter.
+    pub fn snapshot() -> Vec<(&'static str, u64)> {
+        vec![("batches", BATCHES.load(Ordering::Relaxed)), ("paths", PATHS.load(Ordering::Relaxed)), ("reconciles_deferred", DEFERRED.load(Ordering::Relaxed))]
+    }
+}
+
+/// The cause that covers both: an overflow (a full reconcile that counts repairs) wins over a plain event.
+fn merge(a: Option<Cause>, b: Cause) -> Cause {
+    if a == Some(Cause::Overflow) { Cause::Overflow } else { b }
+}
+
+/// The thread body: reconcile at start, then one reconcile per batch (at most one per `devswarm_wire.reconcile_min_gap_ms`; a
+/// batch inside the gap is folded into the reconcile at its end, never dropped), until `stop` says the daemon is draining.
 pub fn run(w: &Wire, stop: &dyn Fn() -> bool) {
     w.reconcile(Cause::Startup);
     let watcher = Watcher::start(Config::load());
     let mut have: HashMap<PathBuf, Role> = HashMap::new();
     sync(w, &watcher, &mut have);
     let wait = Duration::from_millis(defaults::num("devswarm_wire.wait_ms"));
+    let gap = Duration::from_millis(defaults::num("devswarm_wire.reconcile_min_gap_ms"));
+    let mut last = Instant::now();
+    let mut pending: Option<Cause> = None;
     while !stop() {
         w.act_if_pending();
         w.events_if_due();
         w.stall_tick();
-        let Some(batch) = watcher.next(wait) else { continue };
-        let p = plan(&have, batch.rescan, &batch.paths);
-        if !p.dirty.is_empty() {
-            let n = consume::queue_ids(&w.state_dir, &p.dirty);
-            if n > 0 {
-                w.count_dirty(n);
+        let left = gap.saturating_sub(last.elapsed());
+        if let Some(batch) = watcher.next(if pending.is_some() { wait.min(left) } else { wait }) {
+            work::add(&work::BATCHES, 1);
+            work::add(&work::PATHS, batch.paths.len() as u64);
+            let p = plan(&have, batch.rescan, &batch.paths);
+            if !p.dirty.is_empty() {
+                let n = consume::queue_ids(&w.state_dir, &p.dirty);
+                if n > 0 {
+                    w.count_dirty(n);
+                }
+                w.run_jev();
             }
-            w.run_jev();
+            // a transcript or git event on a workspace the state calls stuck: the silence clock reset, so read the state again now
+            if let Some(cause) = p.reconcile.or_else(|| w.stuck_among(&p.dirty).then_some(Cause::Event)) {
+                if pending.is_some() {
+                    work::add(&work::DEFERRED, 1);
+                }
+                pending = Some(merge(pending, cause));
+            }
         }
-        // a transcript or git event on a workspace the state calls stuck: the silence clock reset, so read the state again now
-        let cause = p.reconcile.or_else(|| w.stuck_among(&p.dirty).then_some(Cause::Event));
-        if let Some(cause) = cause {
+        if let Some(cause) = pending
+            && last.elapsed() >= gap
+        {
+            pending = None;
             w.reconcile(cause);
+            last = Instant::now();
             sync(w, &watcher, &mut have);
         }
     }

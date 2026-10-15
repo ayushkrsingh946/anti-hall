@@ -352,6 +352,9 @@ impl Shared {
                 "jev_lanes": crate::jev::shared::lane_count(),
                 "queued_connections": self.depth.load(SeqCst),
                 "workers": self.busy_since.len(),
+                "dswire_workspaces": crate::dswire::global().map_or(0, |w| w.rt.current().workspaces.len()),
+                "dswire_edge_log": crate::dswire::global().map_or(0, |w| w.rt.edge_log_len()),
+                "threads": crate::threads::snapshot().len(),
             },
         })
     }
@@ -496,6 +499,7 @@ pub fn handle_request_with(req: &[u8], sh: &Shared, cfg: &crate::cfgstore::Snaps
         Some("config") => (Reply::Ok(sh.config.report().to_string()), After::Continue),
         Some("stop") => (Reply::Ok("ok".into()), After::Exit),
         Some("status") => (Reply::Ok(sh.status()), After::Continue),
+        Some(v) if v == defaults::text("diagnostics.threads_ctl") => (Reply::Ok(crate::threads::snapshot_json().to_string()), After::Continue),
         Some(_) if cfg.test_hooks => test_verb(ctl.unwrap_or(""), sh),
         _ => (Reply::Err(defaults::text("msg.reply_unknown_request").into()), After::Continue),
     }

@@ -270,12 +270,24 @@ pub struct FsProbe {
     home: PathBuf,
     now: i64,
     plans: OnceLock<HashMap<String, PathBuf>>,
+    descs: OnceLock<Vec<crate::dswire::facts::Desc>>,
+}
+
+/// Files the probes read and their bytes, since the process started (the `status --threads` work counters).
+pub static PROBE_FILES_READ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// See [`PROBE_FILES_READ`].
+pub static PROBE_BYTES_READ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Count one file read of `n` bytes by a probe.
+pub fn count_read(n: usize) {
+    PROBE_FILES_READ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    PROBE_BYTES_READ.fetch_add(n as u64, std::sync::atomic::Ordering::Relaxed);
 }
 
 impl FsProbe {
     /// A probe over `home`'s DevSwarm directory; `now` is the clock the unread union uses.
     pub fn new(home: &Path, now: i64) -> FsProbe {
-        FsProbe { home: home.to_path_buf(), now, plans: OnceLock::new() }
+        FsProbe { home: home.to_path_buf(), now, plans: OnceLock::new(), descs: OnceLock::new() }
     }
     fn dir(&self, key: &str) -> PathBuf {
         devswarm_root(&self.home).join(defaults::text(key))
@@ -284,7 +296,13 @@ impl FsProbe {
         self.dir(dir).join(format!("{id}{}", defaults::text("mesh_write.json_suffix")))
     }
     fn read_json(p: &Path) -> Option<OVal> {
-        OVal::parse(&String::from_utf8_lossy(&std::fs::read(p).ok()?))
+        let b = std::fs::read(p).ok()?;
+        count_read(b.len());
+        OVal::parse(&String::from_utf8_lossy(&b))
+    }
+    /// The workspace descriptors, read once per probe (a reconcile asks for them once per open workspace).
+    pub fn descriptors(&self) -> &[crate::dswire::facts::Desc] {
+        self.descs.get_or_init(|| crate::dswire::facts::descriptors(&self.home))
     }
     /// worktree -> plan file, scanned once per probe.
     fn plan_files(&self) -> &HashMap<String, PathBuf> {
@@ -327,9 +345,8 @@ impl Probe for FsProbe {
         };
         let mut out = Vec::new();
         if wanted.contains(&"transcript") {
-            let descs = facts::descriptors(&self.home);
             out.extend(
-                descs
+                self.descriptors()
                     .iter()
                     .filter(|d| d.id == id || worktree == Some(d.worktree.as_str()))
                     .filter_map(|d| mtime(&facts::transcript_path(&self.home, &d.worktree, &d.session))),

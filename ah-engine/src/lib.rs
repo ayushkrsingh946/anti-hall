@@ -75,6 +75,7 @@ pub mod sql;
 pub mod storage;
 pub mod store;
 pub mod telemetry;
+pub mod threads;
 pub mod tier;
 pub mod transcript;
 pub mod wakew;

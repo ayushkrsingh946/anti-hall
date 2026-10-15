@@ -67,6 +67,36 @@ unit = "bytes"
 doc = "Diagnostic label for an operator-run macOS `MallocStackLogging` repro (`lite` or empty). The engine only accepts and reports it; the OS facility must be enabled in the process environment before start."
 value = ""
 
+[diagnostics.threads_flag]
+doc = "The `ah-engine status` flag that reports the live daemon's per-thread CPU and work counters over a short window (`status --threads [--json]`)."
+value = "--threads"
+
+[diagnostics.threads_ctl]
+doc = "The control request that asks the daemon for one snapshot of every thread's CPU time and the work counters (the client asks twice, the window apart, and reports the difference)."
+value = "threads"
+
+[diagnostics.threads_window_ms]
+doc = "The window of `status --threads`: per-thread CPU % and counters per second are measured over this long."
+value = 1000
+min = 100
+max = 60000
+unit = "ms"
+env = "AH_ENGINE_THREADS_WINDOW_MS"
+
+[diagnostics.threads_proc_dir]
+doc = "Linux: the directory listing this process's threads (each has a `stat` file with its CPU ticks and name)."
+value = "/proc/self/task"
+
+[diagnostics.threads_proc_stat]
+doc = "Linux: the per-thread file holding the CPU ticks (fields 14 and 15) and the name."
+value = "stat"
+
+[diagnostics.threads_name_max]
+doc = "macOS: the size of the buffer a thread name is read into (the OS limit, MAXTHREADNAMESIZE)."
+value = 64
+min = 16
+max = 1024
+
 [files.mem_log]
 doc = "Per-request memory log file name (state directory)."
 value = "mem.ndjson"

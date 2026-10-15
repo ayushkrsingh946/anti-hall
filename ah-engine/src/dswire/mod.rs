@@ -33,7 +33,7 @@ use crate::reqenv::RequestEnv;
 use live::RtLive;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 /// Who runs an action.
@@ -104,6 +104,7 @@ pub struct Wire {
     dirty: crate::dsact::events::Dirty,
     tele: crate::dsact::tele::Tele,
     last_stall: AtomicI64,
+    reconciles: AtomicU64,
 }
 
 static GLOBAL: OnceLock<Arc<Wire>> = OnceLock::new();
@@ -137,7 +138,13 @@ impl Wire {
             dirty: crate::dsact::events::Dirty::new(),
             tele: crate::dsact::tele::Tele::new(state_dir),
             last_stall: AtomicI64::new(0),
+            reconciles: AtomicU64::new(0),
         }
+    }
+
+    /// How many reconciles this layer has run (every cause).
+    pub fn reconciles(&self) -> u64 {
+        self.reconciles.load(Ordering::Relaxed)
     }
 
     /// The least time between two unforced action sweeps (tests shorten it).
@@ -178,6 +185,7 @@ impl Wire {
 
     /// One reconcile for `cause`, then what follows from it: counters, Jev dirty marks, the action sweeps.
     pub fn reconcile(&self, cause: Cause) -> Report {
+        self.reconciles.fetch_add(1, Ordering::Relaxed);
         let rep = self.rt.run_live(cause, None, self.db.as_deref());
         self.count(&mut |m| self.rt.publish(m));
         if self.rt.mode() != Mode::On {

@@ -289,6 +289,77 @@ fn a_real_file_event_drives_the_archive() {
     assert_eq!(archives(&stub).len(), 1, "one archive, driven by the file event (no periodic tick ran)");
 }
 
+/// ws-1's per-repo mesh store, SQLite-backed, with its write-ahead log and shared-memory index on disk and no process holding it
+/// (what a Node writer leaves behind): the next reader to open it rebuilds the index, so opening it changes a file in the store.
+fn mesh_store(w: &World) -> PathBuf {
+    let key = facts::repo_key(w.wt.to_str().unwrap()).unwrap();
+    let dir = w.home.join(".anti-hall/devswarm/store").join(key);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("BACKEND"), "sqlite\n").unwrap();
+    let src = w.dir.join("store-src.db");
+    let c = Connection::open(&src).unwrap();
+    c.pragma_update(None, "journal_mode", "wal").unwrap();
+    c.execute_batch("CREATE TABLE t (x INTEGER); INSERT INTO t VALUES (1);").unwrap();
+    for sfx in ["", "-wal", "-shm"] {
+        std::fs::copy(format!("{}{sfx}", src.display()), dir.join(format!("devswarm.db{sfx}"))).unwrap();
+    }
+    drop(c);
+    dir
+}
+
+#[test]
+fn a_reconcile_does_not_wake_itself_through_the_files_it_reads() {
+    // the live P0 (2026-10-15): every reconcile opened the mesh store, the open touched the store's -shm, the watcher reported
+    // that as a change of a state source, and the next reconcile followed 100 ms later, forever (55-60% CPU on one core)
+    let w = world("selfwake");
+    let store = mesh_store(&w);
+    let wire = Arc::new(wire(&w, &Arc::new(Stub::default()), Executor::Off));
+    let stop = Arc::new(AtomicBool::new(false));
+    let (wr, st) = (wire.clone(), stop.clone());
+    let h = std::thread::spawn(move || watching::run(&wr, &|| st.load(Ordering::SeqCst)));
+    std::thread::sleep(Duration::from_millis(1500)); // the watcher is up
+    write(&w.home.join(".anti-hall/devswarm/heartbeats/ws-1.json"), &json!({"ts": now() - 7_100_000})); // one real change
+    std::thread::sleep(Duration::from_millis(1500)); // its reconcile, and that reconcile's own echo if any, are behind us
+    let before = wire.reconciles();
+    std::thread::sleep(Duration::from_millis(3000)); // nothing changes on disk in this window
+    let idle = wire.reconciles() - before;
+    std::fs::write(store.join("devswarm.db-wal"), b"x").unwrap(); // a real write to the store still counts
+    let t0 = Instant::now();
+    while wire.reconciles() - before == idle && t0.elapsed() < Duration::from_secs(10) {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let woke = wire.reconciles() - before > idle;
+    stop.store(true, Ordering::SeqCst);
+    h.join().unwrap();
+    assert!(idle <= 1, "{idle} reconciles in 3 s with nothing changing: a reconcile wakes itself");
+    assert!(woke, "a real write to the mesh store must still reconcile");
+}
+
+#[test]
+fn a_storm_of_real_changes_costs_at_most_one_reconcile_per_gap() {
+    let w = world("storm");
+    let wire = Arc::new(wire(&w, &Arc::new(Stub::default()), Executor::Off));
+    let stop = Arc::new(AtomicBool::new(false));
+    let (wr, st) = (wire.clone(), stop.clone());
+    let h = std::thread::spawn(move || watching::run(&wr, &|| st.load(Ordering::SeqCst)));
+    std::thread::sleep(Duration::from_millis(1500));
+    let gap = ah_engine::defaults::num("devswarm_wire.reconcile_min_gap_ms");
+    let before = wire.reconciles();
+    let t0 = Instant::now();
+    for i in 0..60 {
+        // sixty different heartbeat files, one every 25 ms: each is its own batch once the debounce passes
+        write(&w.home.join(format!(".anti-hall/devswarm/heartbeats/storm-{i}.json")), &json!({"ts": now()}));
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    std::thread::sleep(Duration::from_millis(gap + 1000)); // the last change's reconcile has run
+    let ran = wire.reconciles() - before;
+    let window = t0.elapsed().as_millis() as u64;
+    stop.store(true, Ordering::SeqCst);
+    h.join().unwrap();
+    assert!(ran >= 1, "the changes were reconciled");
+    assert!(ran <= window / gap + 1, "{ran} reconciles in {window} ms with a {gap} ms gap");
+}
+
 #[test]
 fn an_edge_inside_the_sweep_gap_is_not_lost() {
     let w = world("gap");
@@ -785,4 +856,91 @@ fn a_nudge_that_changed_nothing_and_an_escalation_followed_by_activity_are_logge
     ah_engine::actlog::followup_add(&w.state, "stall", "escalate", "ws-1", 0, json!({"last_activity_ms": 0}), 0);
     wire.stall_followups(now());
     assert_eq!(stall_report(&w)["mistakes_by_kind"]["escalation_then_active"], json!(1));
+}
+
+// ---- benchmark --------------------------------------------------------------------------------------------------------------
+
+fn cpu_s() -> f64 {
+    // SAFETY: getrusage fills the zeroed struct it is given.
+    let mut ru: libc::rusage = unsafe { std::mem::zeroed() };
+    // SAFETY: as above.
+    unsafe { libc::getrusage(libc::RUSAGE_SELF, &mut ru) };
+    let t = |v: libc::timeval| v.tv_sec as f64 + v.tv_usec as f64 / 1e6;
+    t(ru.ru_utime) + t(ru.ru_stime)
+}
+
+#[test]
+#[ignore = "benchmark: run alone (--ignored --exact); prints the DevSwarm thread's CPU under a synthetic load of five sessions"]
+fn dswire_cpu_under_a_synthetic_load() {
+    let w = world("bench");
+    // SAFETY: the benchmark runs alone (--exact), so no other thread reads the environment; the engine state dir (the statusline
+    // line file, counted below as one write per reconcile) goes to the scratch state dir, never the real home
+    unsafe { std::env::set_var("AH_ENGINE_DIR", &w.state) };
+    mesh_store(&w);
+    let c = Connection::open(&w.db).unwrap();
+    for i in 2..=5 {
+        c.execute(&format!("INSERT INTO builders VALUES ('ws-{i}','r1','b{i}',?1,'Child {i}',0,NULL,'standard',1,NULL)"), params![w.wt.to_str().unwrap()])
+            .unwrap();
+        let root = w.home.join(".anti-hall/devswarm");
+        write(&root.join(format!("workspaces/ws-{i}.json")), &json!({"id": format!("ws-{i}"), "worktreePath": w.wt, "sessionId": format!("s{i}")}));
+        write(&root.join(format!("heartbeats/ws-{i}.json")), &json!({"ts": now()}));
+    }
+    // the rest of a long-lived machine (live 2026-10-15: 301 builders, 106 descriptors, 683 heartbeats): archived workspaces
+    for i in 0..300 {
+        c.execute(&format!("INSERT INTO builders VALUES ('old-{i}','r1','o{i}','/gone/{i}','Old {i}',1,NULL,'standard',0,NULL)"), []).unwrap();
+        let root = w.home.join(".anti-hall/devswarm");
+        if i < 100 {
+            write(
+                &root.join(format!("workspaces/old-{i}.json")),
+                &json!({"id": format!("old-{i}"), "worktreePath": format!("/gone/{i}"), "sessionId": format!("o{i}")}),
+            );
+        }
+        write(&root.join(format!("heartbeats/old-{i}.json")), &json!({"ts": now() - 86_400_000}));
+    }
+    drop(c);
+    for i in 1..=5 {
+        let p = facts::transcript_path(&w.home, w.wt.to_str().unwrap(), &format!("s{i}"));
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(&p, "{}\n").unwrap();
+    }
+    let wire = Arc::new(wire(&w, &Arc::new(Stub::default()), Executor::Off));
+    let stop = Arc::new(AtomicBool::new(false));
+    let (wr, st) = (wire.clone(), stop.clone());
+    let h = std::thread::Builder::new().name("ah-dswire".into()).spawn(move || watching::run(&wr, &|| st.load(Ordering::SeqCst))).unwrap();
+    // the load: five sessions, each appending a transcript line every 2 s, and one heartbeat rewrite every 2 s
+    let (home, wt, gen_stop) = (w.home.clone(), w.wt.clone(), Arc::new(AtomicBool::new(false)));
+    let gs = gen_stop.clone();
+    let load = std::thread::spawn(move || {
+        let mut n = 0u64;
+        while !gs.load(Ordering::SeqCst) {
+            let i = n % 5 + 1;
+            let p = facts::transcript_path(&home, wt.to_str().unwrap(), &format!("s{i}"));
+            use std::io::Write;
+            std::fs::OpenOptions::new().append(true).open(&p).unwrap().write_all(format!("{{\"n\":{n}}}\n").as_bytes()).unwrap();
+            if n.is_multiple_of(5) {
+                write(&home.join(format!(".anti-hall/devswarm/heartbeats/ws-{i}.json")), &json!({"ts": now()}));
+            }
+            n += 1;
+            std::thread::sleep(Duration::from_millis(400));
+        }
+    });
+    std::thread::sleep(Duration::from_secs(3)); // warm-up
+    let line = w.state.join("devswarm-line.json");
+    let ino = |p: &Path| std::fs::metadata(p).ok().map(|m| (std::os::unix::fs::MetadataExt::ino(&m), m.modified().ok()));
+    let (c0, t0) = (cpu_s(), Instant::now());
+    let (mut prev, mut writes) = (ino(&line), 0u64);
+    while t0.elapsed() < Duration::from_secs(20) {
+        std::thread::sleep(Duration::from_millis(10));
+        let cur = ino(&line);
+        if cur != prev {
+            writes += 1;
+            prev = cur;
+        }
+    }
+    let (cpu, wall) = (cpu_s() - c0, t0.elapsed().as_secs_f64());
+    gen_stop.store(true, Ordering::SeqCst);
+    load.join().unwrap();
+    stop.store(true, Ordering::SeqCst);
+    h.join().unwrap();
+    eprintln!("BENCH cpu={:.2}% of one core over {wall:.1} s, reconciles={writes} ({:.2}/s)", 100.0 * cpu / wall, writes as f64 / wall);
 }

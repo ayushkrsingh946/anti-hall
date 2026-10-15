@@ -60,6 +60,8 @@ pub struct Config {
     pub fs_poll_types: Vec<String>,
     /// Side-file suffixes of a SQLite database.
     pub sqlite_suffixes: Vec<String>,
+    /// Name suffixes never reported (files that change when they are only read, such as a SQLite shared-memory index).
+    pub ignore_suffixes: Vec<String>,
     /// Detection latency target (p95).
     pub latency_target: Duration,
     /// Idle CPU budget in thousandths of one core.
@@ -78,15 +80,21 @@ impl Config {
             max_entries: defaults::num("realtime.max_entries") as usize,
             fs_poll_types: defaults::list("realtime.fs_poll_types").into_iter().map(String::from).collect(),
             sqlite_suffixes: defaults::list("realtime.sqlite_suffixes").into_iter().map(String::from).collect(),
+            ignore_suffixes: defaults::list("realtime.ignore_suffixes").into_iter().map(String::from).collect(),
             latency_target: defaults::millis("realtime.latency_target_ms"),
             cpu_budget_permille: defaults::num("realtime.cpu_budget_permille"),
         }
     }
 
-    /// A [`Filter`] for a SQLite database name and its side files.
+    /// A [`Filter`] for a SQLite database name and its side files, less the ignored ones.
     pub fn sqlite_filter(&self, db: &str) -> Filter {
-        let suffixes: Vec<&str> = self.sqlite_suffixes.iter().map(String::as_str).collect();
+        let suffixes: Vec<&str> = self.sqlite_suffixes.iter().map(String::as_str).filter(|s| !self.ignore_suffixes.iter().any(|i| i == s)).collect();
         Filter::sqlite(db, &suffixes)
+    }
+
+    /// A [`Filter`] for every entry of a directory except the ignored names (`realtime.ignore_suffixes`).
+    pub fn all_filter(&self) -> Filter {
+        Filter::Except(self.ignore_suffixes.clone())
     }
 }
 

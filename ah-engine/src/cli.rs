@@ -299,6 +299,19 @@ fn cmd_hook(p: &Parsed) -> i32 {
 }
 
 fn cmd_status(p: &Parsed) -> i32 {
+    // `--threads`: the live daemon's per-thread CPU % and work counters per second, over `diagnostics.threads_window_ms`
+    if p.rest.iter().any(|a| a == defaults::text("diagnostics.threads_flag")) {
+        let ctl = defaults::text("diagnostics.threads_ctl");
+        let first = client::ctl_json(ctl);
+        let t0 = std::time::Instant::now();
+        std::thread::sleep(defaults::millis("diagnostics.threads_window_ms"));
+        let v = match (first, client::ctl_json(ctl)) {
+            (Some(a), Some(b)) => crate::threads::report(&a, &b, t0.elapsed().as_micros() as u64),
+            _ => json!({"running": false, "note": defaults::text("msg.cli_not_running")}),
+        };
+        emit(p, human(&v), v);
+        return 0;
+    }
     let v = client::status_value();
     // `--memory`: just the memory breakdown (live heap against RSS, and the size of every long-lived in-memory structure)
     let v = if p.rest.iter().any(|a| a == "--memory") {

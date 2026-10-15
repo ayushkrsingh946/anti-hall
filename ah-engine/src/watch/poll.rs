@@ -15,6 +15,9 @@ pub enum Filter {
     All,
     /// Exactly these names (stat'ed directly, so no directory listing is needed).
     Names(Vec<OsString>),
+    /// Every entry except the names that end with one of these suffixes (files that change without any data changing, such as
+    /// a SQLite shared-memory index, which every reader's open touches: watching one makes a reader wake itself).
+    Except(Vec<String>),
 }
 
 impl Filter {
@@ -32,6 +35,10 @@ impl Filter {
         match self {
             Filter::All => true,
             Filter::Names(v) => v.iter().any(|n| n == name),
+            Filter::Except(sfx) => {
+                let n = name.to_string_lossy();
+                !sfx.iter().any(|s| n.ends_with(s.as_str()))
+            }
         }
     }
 
@@ -100,9 +107,12 @@ impl DirState {
                 }
                 (now, false)
             }
-            Filter::All => {
+            Filter::All | Filter::Except(_) => {
                 let Ok(rd) = std::fs::read_dir(&self.dir) else { return (now, false) };
                 for e in rd.flatten() {
+                    if !self.filter.matches(&e.file_name()) {
+                        continue;
+                    }
                     if now.len() >= max_entries {
                         return (now, true);
                     }

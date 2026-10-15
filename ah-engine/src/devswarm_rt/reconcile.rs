@@ -205,6 +205,11 @@ impl Rt {
         self.hold.edges.lock().unwrap_or_else(|e| e.into_inner()).iter().filter(|e| e.generation > generation).cloned().collect()
     }
 
+    /// How many edges the in-memory log holds now (the memory breakdown).
+    pub fn edge_log_len(&self) -> usize {
+        self.hold.edges.lock().unwrap_or_else(|e| e.into_inner()).len()
+    }
+
     /// Changes found by a periodic or overflow reconcile that events had not applied.
     pub fn repairs(&self) -> u64 {
         self.repairs.load(Ordering::Relaxed)

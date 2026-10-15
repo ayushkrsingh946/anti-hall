@@ -1631,6 +1631,43 @@ gh attestation verify <asset> --repo talas9/anti-hall
 | `spool.quarantine` has entries | Records that were damaged or refused for good (for example a full mailbox), each with its reason; nothing was dropped. |
 | The engine says it is degraded | An engine file fell back to the last-known-good or pristine copy. `ah-engine config --json` shows `last_error`; fix the edit, or `ah-engine config heal` for a missing setting. |
 | A check misbehaves | Run `ah-engine check git` with the payload on stdin to see its verdict without a daemon. |
+| The daemon uses CPU while nothing happens | `ah-engine status --threads` names the busy thread and the work counters behind it; see [CPU and memory profiling](#cpu-and-memory-profiling). |
+
+### CPU and memory profiling
+
+**Which thread is busy.** `ah-engine status --threads [--json]` asks the live daemon for every thread's CPU time twice,
+`diagnostics.threads_window_ms` apart (1 s by default, `AH_ENGINE_THREADS_WINDOW_MS` for one run), and prints the CPU % of
+one core per thread name (`by_name`, the workers summed) and per thread (`threads`). Thread names: `ah-dswire` (the DevSwarm
+wire), `ah-kqueue` / `ah-watch` (the file watcher), `worker` (hook requests), `scheduler`, `ah-db-writer`, `ah-dswire-jev`
+(a per-child Jev sweep). macOS reads `task_threads` / `thread_info`; Linux reads `/proc/self/task/*/stat`. The daemon only
+takes snapshots; the client waits out the window, so no worker is held.
+
+**What the busy thread is doing.** The same report has `work_per_s`, the counters per second over the window, and `work_total`:
+
+| Counter | Meaning |
+|---|---|
+| `dswire_batches`, `dswire_paths` | change batches the watcher delivered to the DevSwarm thread, and the paths in them |
+| `dswire_reconciles` | full re-reads of the DevSwarm state (at most one per `devswarm_wire.reconcile_min_gap_ms`) |
+| `dswire_reconciles_deferred` | reconcile requests folded into one already waiting for the gap |
+| `probe_files_read`, `probe_bytes_read` | files (and bytes) the DevSwarm probes read: heartbeats, descriptors, plans |
+
+Healthy idle: a reconcile every few seconds at most, `ah-dswire` well under 1%. A reconcile rate stuck at one per gap with no
+real changes means a source changes all the time; the watcher ignores names ending in `realtime.ignore_suffixes` (a SQLite
+`-shm` index changes when any process only opens its database, so a watched store used to wake the reconcile that opened it).
+
+**Readable stacks.** Release binaries ship stripped; their symbols are built separately (`Cargo.toml`: `debug =
+"line-tables-only"`, `split-debuginfo = "packed"`). A local build leaves `target/<triple>/release/ah-engine.dSYM` (macOS) or
+`ah-engine.dwp` (Linux) beside the binary; a release run uploads them as the workflow artifact `symbols-<triple>`
+(`scripts/package.sh` writes `dist/symbols/ah-engine-v<version>-<triple>.symbols.tar.gz`). They match only the binary of the
+same build (check with `dwarfdump --uuid`). On macOS: `sample <pid> 3 -file s.txt`, then name a frame with
+`atos -o ah-engine.dSYM/Contents/Resources/DWARF/<file> -arch arm64 -l <load address> <address>` (the load address is
+printed on each `???` line of the sample). On Linux: `perf record -g -p <pid>` and `perf report` with the `.dwp` next to the
+binary, or `eu-stack -p <pid>`.
+
+**Memory.** `ah-engine status --memory` gives the heap against RSS, the allocator's own figures, the memory budgets of every
+long-lived cache, and `components`: the sizes of the in-memory structures per subsystem (guard state, session counters, rate
+buckets, Jev lanes, the DevSwarm state's workspaces and edge log, the thread count). For allocation sites see
+[DEVELOPMENT.md](DEVELOPMENT.md) (`diagnostics.allocator`, `MallocStackLogging`, `heaptrack`).
 
 ## FAQ
 

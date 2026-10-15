@@ -7114,6 +7114,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_wire.nudge_state_file` | `rt-nudges.json` |  |  | The engine's own record of pokes made (attempts, last time, escalated), under the engine state directory. |
 | `devswarm_wire.owner_verbs` | `13 items` |  |  | The `ah-engine devswarm <verb>` verbs and what each does: status, line, advisory, supervisor, ingest and ledger (the action audit: per-feature counts, success rate, refusals by reason, mistake rate, in-doubt keys, witness agreement) read the state; archive, plan-prune, prune and recover (kill and resume one session; Node's recovery code does the kill after the engine's refusals) act at the owner's request; wake-watch runs the idle-wake Monitor until the session ends. `create` answers deferred (the Node verb keeps it, because the engine cannot reproduce its source-freshness check yet); `merge` is a devswarm.js verb (compat_verbs) and runs the hivecontrol merge itself. |
 | `devswarm_wire.plan_flag` | `--plan` |  |  | The flag of prune that names the plan. |
+| `devswarm_wire.reconcile_min_gap_ms` | `1000` |  | ms | The least time between two reconciles the file events ask for. Changes inside the gap are folded into one reconcile at its end (none is lost), so a burst of changes, or a source that changes all the time, costs at most one reconcile per gap. 0 reconciles on every batch. |
 | `devswarm_wire.request_flag` | `--request` |  |  | The flag that carries an owner request's own id (the idempotency key's last part). |
 | `devswarm_wire.role_child_env` | `ANTIHALL_DEVSWARM_SOURCE_BRANCH` |  |  | The environment variable whose non-blank value marks a DevSwarm workspace child. |
 | `devswarm_wire.role_codex_env` | `` |  |  | Environment variables whose presence marks a Codex session (empty: no Codex marker is known). |
@@ -8580,6 +8581,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `realtime.cpu_budget_permille` | `5` |  |  | The CPU the idle watcher may use, in thousandths of one core (5 means 0.5 percent); the benchmark test and the rollout gate compare against it. |
 | `realtime.debounce_ms` | `100` | `AH_ENGINE_RT_DEBOUNCE_MS` | ms | A changed file is reported once it has been quiet this long, so a burst of writes becomes one report. |
 | `realtime.fs_poll_types` | `14 items` |  |  | Filesystem types whose watched directories are always polled because OS change events do not arrive there (WSL2 /mnt drives report 9p or drvfs; network and FUSE filesystems report no events). A trailing or leading * matches any text. |
+| `realtime.ignore_suffixes` | `-shm` |  |  | File-name suffixes a watched directory never reports, in every backend. A SQLite shared-memory index (-shm) is rewritten or has its attributes touched whenever any process opens the database, even a read-only reader, and it never holds data (a commit lands in the database or its -wal): a consumer that watches the directory of a database it reads would otherwise wake itself on every read, in a loop. |
 | `realtime.latency_target_ms` | `1000` |  | ms | The detection latency (change to report) the watcher must stay within at the 95th percentile, for OS events and for polled directories alike; the benchmark test and the rollout gate compare against it. |
 | `realtime.max_delay_ms` | `1000` | `AH_ENGINE_RT_MAX_DELAY_MS` | ms | A file that keeps changing is still reported at least this often (the ceiling on debounce_ms), so a busy source is never starved. |
 | `realtime.max_entries` | `2048` |  |  | The most matching files one watched directory is tracked for. A directory with more reports a rescan signal when it changes, so a huge directory cannot grow the watcher's memory. |
@@ -9350,6 +9352,12 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `diagnostics.mem_snapshot_wait_ms` | `3000` |  | ms | Longest the snapshot waits for every worker to report its interpreter and caches (a busy worker reports after its request); workers that have not reported by then are listed as missing. |
 | `diagnostics.summary_read_bytes` | `8388608` |  | bytes | Most of the memory log (newest part) `status --memory` reads to build its summary. |
 | `diagnostics.summary_top` | `10` |  |  | Rows shown per ranking (events, checks) in the memory summary of `ah-engine status --memory`. |
+| `diagnostics.threads_ctl` | `threads` |  |  | The control request that asks the daemon for one snapshot of every thread's CPU time and the work counters (the client asks twice, the window apart, and reports the difference). |
+| `diagnostics.threads_flag` | `--threads` |  |  | The `ah-engine status` flag that reports the live daemon's per-thread CPU and work counters over a short window (`status --threads [--json]`). |
+| `diagnostics.threads_name_max` | `64` |  |  | macOS: the size of the buffer a thread name is read into (the OS limit, MAXTHREADNAMESIZE). |
+| `diagnostics.threads_proc_dir` | `/proc/self/task` |  |  | Linux: the directory listing this process's threads (each has a `stat` file with its CPU ticks and name). |
+| `diagnostics.threads_proc_stat` | `stat` |  |  | Linux: the per-thread file holding the CPU ticks (fields 14 and 15) and the name. |
+| `diagnostics.threads_window_ms` | `1000` | `AH_ENGINE_THREADS_WINDOW_MS` | ms | The window of `status --threads`: per-thread CPU % and counters per second are measured over this long. |
 
 ### diagnostics.toml / files
 
