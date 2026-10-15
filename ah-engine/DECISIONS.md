@@ -817,3 +817,24 @@ kept outside the tree (`~/.anti-hall/work/lanea-ab-watch-crates.patch`).
 drops `realtime.max_delay_ms` (a file that never stops changing is not reported) and bounds nothing. Its only gain is lines of code.
 Revisit if the client and the daemon become separate binaries (the thin launcher), so the daemon alone links the frameworks.
 
+
+## Memory: defaults reload, QuickJS pool, allocator tuning (lane ENG-MEM, 2026-10-16)
+
+Scratch daemon (HOME and state in a scratch dir, release build, macOS arm64, machine load 25-46 so CPU figures are noisy), replaying the frozen corpus (`replay/sample-frozen.ndjson`).
+
+**Reload leak.** Cause: every applied defaults reload kept (a) each `defaults::Cache` value leaked, (b) a second copy of every shipped file (`Report.clean`) and of every entry's canonical text (`Data.canon`) for the life of the snapshot, (c) the `defaults::all()` slice leaked. 50 reloads, one edited entry each: `defaults_leak` +73,286 B/reload and counted heap +52 KB/reload before; +700 B and +2 KB after (`tests/mem_reload.rs`, bounds in `tests/budgets.toml`). The 3.25 MB first-load figure is the shipped values themselves (`'static`).
+
+**QuickJS pool.** One interpreter per worker (4), already bounded by `mem.quickjs_soft_bytes` / `mem.quickjs_hard_bytes`. Added `script.idle_free_ms` (60 s): an idle worker drops its interpreter. Soft limit sweep, 600 events each:
+
+| mem.quickjs_soft_bytes | interpreters | footprint | CPU s |
+|---|---|---|---|
+| 6 MiB (old) | 18.9 MB | 58.8 MB | 6.7 |
+| **4 MiB (new)** | 14.7 MB | 55.2 MB | 7.6 |
+| 3 MiB | 8.7 MB | 51.8 MB | 19.6 (checks reloaded constantly) |
+| 2 MiB | 6.8 MB | 49.2 MB | 17.3 |
+
+Verdict: 4 MiB (the knee; below it CPU triples).
+
+**Allocator.** 600 events each: shipped `narenas:1,dirty_decay_ms:0,muzzy_decay_ms:0` 57.9 MB; + `background_thread:true` 58.9; `dirty_decay_ms:1000` 61.0; `narenas:2` 61.7; + `oversize_threshold:65536,lg_tcache_max:12` 56.4 (within the run-to-run spread of about 3 MB, CPU not separable at this load). Verdict: keep the shipped setting; no measured option beats it outside noise. The 29 MB active-vs-allocated gap seen live came from the reload history above, not from the setting.
+
+**Plateau.** 30 min of continuous replay: footprint 19.3 / 62.2 / 63.4 / 65.1 / 64.3 MB at 0 / 5 / 10 / 20 / 30 min, counted heap 7.4 / 40.7 / 41.9 / 43.3 / 41.4: warm-up to about 62 MB in the first 5 minutes, then flat (no monotone growth).
