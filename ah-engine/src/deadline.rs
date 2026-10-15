@@ -33,13 +33,13 @@ struct Req {
     soft: Option<Instant>,
     /// When the request is cut (after the reply slack).
     hard: Option<Instant>,
+    /// Whether the soft overrun was already reported (once per request).
+    noted: bool,
 }
 
 thread_local! {
     /// When the current request arrived (accepted), and when its client stops waiting (after the slack).
     static REQ: Cell<Option<Req>> = const { Cell::new(None) };
-    /// Whether the soft-deadline overrun of the current request was already reported (once per request).
-    static SOFT_NOTED: Cell<bool> = const { Cell::new(false) };
     /// The state writes the current request staged, in order.
     static STAGED: RefCell<Vec<Staged>> = const { RefCell::new(Vec::new()) };
     /// Whether the script call in progress on this thread may be cut at the request's deadline (armed, not lifted by `commit()`).
@@ -91,10 +91,11 @@ pub fn soft_remaining() -> Option<Duration> {
 /// True once, the first time it is called after the soft deadline has passed in this request: the caller logs and counts the
 /// overrun (the request keeps running). False outside a request, before the deadline, and on every later call.
 pub fn note_soft_overrun() -> bool {
-    if soft_remaining() != Some(Duration::ZERO) || SOFT_NOTED.with(Cell::get) {
+    let Some(req) = REQ.with(|r| r.get()) else { return false };
+    if soft_remaining() != Some(Duration::ZERO) || req.noted {
         return false;
     }
-    SOFT_NOTED.with(|n| n.set(true));
+    REQ.with(|r| r.set(Some(Req { noted: true, ..req })));
     true
 }
 
@@ -120,8 +121,7 @@ pub fn discard_staged_since(mark: usize) {
 /// request names its own ([`client_deadline`]).
 pub fn begin(arrived: Instant) {
     discard_staged(); // nothing a previous request left can belong to this one
-    SOFT_NOTED.with(|n| n.set(false));
-    REQ.with(|r| r.set(Some(Req { arrived, soft: None, hard: None })));
+    REQ.with(|r| r.set(Some(Req { arrived, soft: None, hard: None, noted: false })));
     client_window(crate::defaults::num("client.deadline_ms"));
 }
 

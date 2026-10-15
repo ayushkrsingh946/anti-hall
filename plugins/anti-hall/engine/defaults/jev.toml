@@ -360,6 +360,10 @@ value = "usage: ah-engine jev ask|status|scrub|triage|evidence (ask reads one JS
 doc = "Jev decisions asked for, by backend (jev, cache or baseline-only) and mode."
 value = { kind = "counter", unit = "calls", labels = ["backend", "mode"] }
 
+[metric.jev_slow]
+doc = "Jev calls slower than the SOFT limit (jev.soft_ms); their answers were still used."
+value = { kind = "counter", unit = "calls", labels = [] }
+
 [metric.jev_timeouts]
 doc = "Jev calls that ran out of their time budget."
 value = { kind = "counter", unit = "calls", labels = [] }
