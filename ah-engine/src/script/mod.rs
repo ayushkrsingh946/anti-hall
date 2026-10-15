@@ -111,6 +111,63 @@ pub struct Deadline {
     /// answer, so the call is cut and the check defers to its own Node hook. Never moved by blocked time (the client waits in
     /// real time); lifted with the other limits by `commit()`.
     pub req: AtomicU64,
+    /// Which limit interrupted the call in progress ([`Trip`] as a number; 0 = none yet). The first limit to fire stays.
+    pub trip: AtomicU64,
+}
+
+/// The limit that interrupted a script call.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Trip {
+    /// The thread's CPU time reached `script.time_limit_ms`.
+    Cpu = 1,
+    /// The wall-clock backstop (`script.wall_limit_factor` times the CPU limit) passed.
+    Wall = 2,
+    /// The request's client stopped waiting.
+    Request = 3,
+}
+
+impl Trip {
+    fn of(n: u64) -> Option<Trip> {
+        match n {
+            1 => Some(Trip::Cpu),
+            2 => Some(Trip::Wall),
+            3 => Some(Trip::Request),
+            _ => None,
+        }
+    }
+
+    fn message_key(self) -> &'static str {
+        match self {
+            Trip::Cpu => "msg.script_limit_cpu",
+            Trip::Wall => "msg.script_limit_wall",
+            Trip::Request => "msg.script_limit_request",
+        }
+    }
+}
+
+impl Deadline {
+    /// The limit the call has run past, given the thread's CPU time and the pool clock now (CPU first, then wall, then the
+    /// client's deadline); a limit that is not armed (0) never fires.
+    fn exceeded(&self, cpu_now: u64, now_ns: u64) -> Option<Trip> {
+        let (cpu, wall, req) = (self.cpu.load(Ordering::Relaxed), self.wall.load(Ordering::Relaxed), self.req.load(Ordering::Relaxed));
+        if cpu != 0 && cpu_now > cpu {
+            Some(Trip::Cpu)
+        } else if wall != 0 && now_ns > wall {
+            Some(Trip::Wall)
+        } else if req != 0 && now_ns > req {
+            Some(Trip::Request)
+        } else {
+            None
+        }
+    }
+
+    /// `error` with the limit that interrupted the call and its numbers, when one did.
+    fn explain(&self, error: &str, limit_ms: u64) -> String {
+        let Some(trip) = Trip::of(self.trip.load(Ordering::Relaxed)) else { return error.to_string() };
+        let limit = defaults::text(trip.message_key());
+        let wall_ms = limit_ms.saturating_mul(defaults::num("script.wall_limit_factor").max(1));
+        defaults::render("msg.script_interrupted", &[("error", &error), ("limit", &limit), ("cpu_ms", &limit_ms), ("wall_ms", &wall_ms)])
+    }
 }
 
 impl Pool {
@@ -126,6 +183,7 @@ impl Pool {
             (now.as_nanos() as u64).saturating_add(left.as_nanos() as u64).max(1)
         });
         self.deadline.req.store(req, Ordering::Relaxed);
+        self.deadline.trip.store(0, Ordering::Relaxed);
         crate::deadline::set_cut_armed(req != 0);
     }
 
@@ -152,14 +210,19 @@ impl Pool {
         let epoch = Instant::now();
         let d = deadline.clone();
         rt.set_interrupt_handler(Some(Box::new(move || {
-            let cpu = d.cpu.load(Ordering::Relaxed);
-            let wall = d.wall.load(Ordering::Relaxed);
-            let req = d.req.load(Ordering::Relaxed);
+            let (cpu, wall) = (d.cpu.load(Ordering::Relaxed), d.wall.load(Ordering::Relaxed));
             if cpu != 0 || wall != 0 {
                 crate::deadline::beat(); // the interpreter is running: a slow call, not a hung worker
             }
             let now = epoch.elapsed().as_nanos() as u64;
-            (cpu != 0 && crate::limits::thread_cpu_us() > cpu) || (wall != 0 && now > wall) || (req != 0 && now > req)
+            match d.exceeded(crate::limits::thread_cpu_us(), now) {
+                Some(trip) => {
+                    // the first limit to fire is the one reported
+                    crate::discard::harmless(d.trip.compare_exchange(0, trip as u64, Ordering::Relaxed, Ordering::Relaxed)); // keep: a loser means a limit already fired
+                    true
+                }
+                None => false,
+            }
         })));
         Some(Pool { ctx: None, checks: HashMap::new(), used: HashMap::new(), tick: 0, inst: budget().instance(), calls: 0, deadline, epoch, rt })
     }
@@ -636,6 +699,7 @@ fn call(name: &str, libs: &Fingerprint, own: &Fingerprint, payload: &Value, opts
                 Ok(s.and_then(|s| s.to_string().ok()).unwrap_or_else(|| "null".into()))
             });
             was_cut = out.is_err() && pool.past_request();
+            let out = out.map_err(|e| pool.deadline.explain(&e, limit));
             pool.disarm();
             host::set_deadline(None);
             let text = out?;
