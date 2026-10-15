@@ -238,6 +238,9 @@ function decide(p) {
     cited = sgCites(lastText, tailLines);
   }
   var wouldBlock = hit !== null && !sgHasAck(lastText) && !cited;
+  // the Stop gate: Jev is waited for only when the rule layer flagged a likely unverified claim (the predicate is speculation_guard.jev_gate)
+  var gateMode = ah.cfg('speculation_guard.jev_gate');
+  var flagged = gateMode === 'always' ? true : gateMode === 'would_block' ? wouldBlock : hit !== null;
 
   // JEV: the speculation question (add-block). A confident "speculative" adds a block; any failure leaves the regex verdict.
   var entry = null, jevBlock = false, jevHash = '';
@@ -245,7 +248,7 @@ function decide(p) {
     entry = { backend: 'none', reason: 'loop-safe', ms: null, confidence: null, regexVerdict: wouldBlock };
   } else if (jevText !== null) {
     var d = sgAsk({
-      id: jevId, state: jevText, trust: 'add_block', baseline: false, compare: wouldBlock, sessionId: sessionRaw, turnRefFrom: payloadText === null ? transcript : undefined,
+      id: jevId, state: jevText, trust: 'add_block', baseline: false, flagged: flagged, compare: wouldBlock, sessionId: sessionRaw, turnRefFrom: payloadText === null ? transcript : undefined,
       question: { type: 'noul', instructions: ah.cfg('speculation_guard.jev_instructions'), criteria: [['true', ah.cfg('speculation_guard.jev_true')], ['false', ah.cfg('speculation_guard.jev_false')]] },
     }, p);
     if (d === null) d = { jev: null, outcome: false, reason: null };
@@ -281,7 +284,7 @@ function decide(p) {
     sgLog(home, JSON.stringify({ ts: new Date(ah.clock.now()).toISOString(), event: 'trigger', id: ah.cfg('speculation_guard.jev_framed_id'), outcome: 'seen' }) + '\n');
     if (jevText === null) return 'defer';
     var fd = sgAsk({
-      id: ah.cfg('speculation_guard.jev_framed_id'), state: jevText, trust: 'relax_block', baseline: true, sessionId: sessionRaw, turnRefFrom: payloadText === null ? transcript : undefined,
+      id: ah.cfg('speculation_guard.jev_framed_id'), state: jevText, trust: 'relax_block', baseline: true, flagged: true, sessionId: sessionRaw, turnRefFrom: payloadText === null ? transcript : undefined,
       question: { type: 'noul', instructions: ah.cfg('speculation_guard.framed_instructions'), criteria: [['true', ah.cfg('speculation_guard.framed_true')], ['false', ah.cfg('speculation_guard.framed_false')]] },
     }, p);
     if (fd !== null && fd.outcome === false) return finish('allow', 'allow');

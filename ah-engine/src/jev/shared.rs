@@ -154,6 +154,18 @@ fn queue_budget() -> &'static Budget {
     })
 }
 
+/// Move the counts every live lane gathered since the last call into `m` (the daemon's `metrics` and its snapshot call this, so
+/// `jev_calls`, `jev_asked_sync`, `jev_skipped_unflagged` and the other Jev counters show in `ah-engine metrics`).
+pub fn drain_stats(m: &mut crate::metrics::Metrics) {
+    let lanes: Vec<Arc<Jev>> = {
+        let g = LANES.lock().unwrap_or_else(|e| e.into_inner());
+        g.iter().filter_map(|slot| slot.jev.upgrade()).collect()
+    };
+    for j in lanes {
+        j.stats.drain_into(m);
+    }
+}
+
 /// How many lanes are held (a memory report reads it).
 pub fn lane_count() -> usize {
     lane_budget().observe();

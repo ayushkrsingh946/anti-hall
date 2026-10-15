@@ -228,6 +228,10 @@ value = "verify it with a tool, or say what is unverified ('I don't know, here i
 doc = "The Jev integration id of the speculation question (add-block trust)."
 value = "speculation"
 
+[speculation_guard.jev_gate]
+doc = "When the Stop waits for Jev on the speculation question: `hit` (default) only when the hedge scan found a marker (acknowledged or not), `would_block` only when the rule layer would itself block, `always` on every Stop. Any other value is read as `hit`. Ignored while jev.gate_enabled is 0."
+value = "hit"
+
 [speculation_guard.jev_framed_id]
 doc = "The Jev integration id of the framed-expectation question (relax-block trust)."
 value = "speculationFramed"

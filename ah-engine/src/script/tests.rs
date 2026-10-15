@@ -1318,6 +1318,77 @@ mod output_verify_jev {
     }
 }
 
+// ---- speculation-guard: the Stop gate on the Jev wait (a sync ask only for a flagged reply) ----
+
+mod speculation_stop_gate {
+    use super::*;
+    use crate::jev::testkit::{install_scripted, ok};
+    use crate::jev::transport::NetError;
+
+    const ON: [(&str, &str); 2] = [("ANTIHALL_JEV", "1"), ("CLAUDE_PLUGIN_OPTION_JEV_VERCEL_API_KEY", "vk")];
+    /// No hedge word at all: the rule layer flags nothing.
+    const UNFLAGGED: &str = "The build is green and the change is merged.";
+    /// A hedge the reply itself acknowledges (a command it ran): flagged by the hit scan, yet the rule layer alone would not block.
+    const FLAGGED: &str = "This probably fixes it, verified in main.js:42.";
+
+    fn run(tag: &str, text: &str, extra: &[(&str, &str)], script: Vec<Result<crate::jev::transport::RawResponse, NetError>>) -> (Option<Option<Verdict>>, std::sync::Arc<crate::jev::Jev>, std::sync::Arc<crate::jev::testkit::Fake>, String) {
+        let h = home(tag);
+        let t = format!("{h}/t.jsonl");
+        std::fs::write(&t, "").unwrap();
+        let mut pairs = vec![("HOME".to_string(), h.clone())];
+        pairs.extend(ON.iter().chain(extra.iter()).map(|(k, v)| (k.to_string(), v.to_string())));
+        let (jev, fake) = install_scripted(std::path::Path::new(&h), &ON, script);
+        let payload = json!({"transcript_path": t, "session_id": tag, "last_assistant_message": text});
+        let v = super::super::run_forced("speculation-guard", &payload, &Value::Null, "Stop", &RequestEnv::from_pairs(pairs));
+        (v, jev, fake, h)
+    }
+
+    fn drained(jev: &crate::jev::Jev) -> crate::metrics::Metrics {
+        let mut m = crate::metrics::Metrics::default();
+        jev.stats.drain_into(&mut m);
+        m
+    }
+
+    #[test]
+    fn an_unflagged_stop_makes_no_sync_jev_call_and_stays_inside_the_stop_limit() {
+        // one call first, so the timed one does not include the interpreter's cold start
+        let _ = run("sg-gate-warm", UNFLAGGED, &[], vec![]);
+        let started = std::time::Instant::now();
+        let (v, jev, fake, _) = run("sg-gate-unflagged", UNFLAGGED, &[], vec![ok(200, r#"{"answers":{"decision":{"noul":0.9}}}"#)]);
+        let took = started.elapsed();
+        assert_eq!(v, Some(Some(Verdict::Allow)), "{v:?}");
+        assert!(fake.seen.lock().unwrap().is_empty(), "no request went to Jev");
+        assert!(took < std::time::Duration::from_millis(defaults::num("jev.stop_soft_ms")), "{took:?}");
+        assert!(format!("{:?}", drained(&jev)).contains("jev_skipped_unflagged"));
+    }
+
+    #[test]
+    fn the_gate_is_on_and_the_background_ask_off_by_default() {
+        // both are TOML values
+        assert_eq!(defaults::num("jev.gate_background_ask"), 0);
+        assert_eq!(defaults::num("jev.gate_enabled"), 1);
+    }
+
+    #[test]
+    fn a_flagged_stop_waits_for_jev_and_uses_its_verdict() {
+        let (v, jev, fake, _) = run("sg-gate-flagged", FLAGGED, &[], vec![ok(200, r#"{"answers":{"decision":{"noul":0.95}}}"#)]);
+        assert_eq!(fake.seen.lock().unwrap().len(), 1, "the flagged reply was asked about, synchronously");
+        assert!(matches!(v, Some(Some(Verdict::Exact(_)))), "Jev's confident verdict added the block: {v:?}");
+        assert!(format!("{:?}", drained(&jev)).contains("jev_asked_sync"));
+    }
+
+    #[test]
+    fn a_flagged_stop_whose_wait_times_out_fails_open_with_the_fail_open_reason() {
+        let (v, jev, _, h) = run("sg-gate-timeout", FLAGGED, &[], vec![Err(NetError::Timeout), Err(NetError::Timeout)]);
+        assert_eq!(v, Some(Some(Verdict::Allow)), "the baseline stands: {v:?}");
+        let log = std::fs::read_to_string(format!("{h}/.anti-hall/logs/jev-judge.ndjson")).unwrap_or_default();
+        let m = format!("{:?}", drained(&jev));
+        assert!(log.contains("fail_open") || m.contains("jev_gate_timeouts"), "log: {log}; metrics: {m}");
+        assert!(log.contains("fail_open"), "the reason is named: {log}");
+        assert!(m.contains("jev_gate_timeouts"), "{m}");
+    }
+}
+
 #[test]
 fn tail_entries_projects_parsed_lines_and_hands_back_what_its_parser_refused() {
     let h = home("tail-entries");

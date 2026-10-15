@@ -161,6 +161,25 @@ fn jev_ask(spec: &str) -> rquickjs::Result<Option<String>> {
     if flag("sync") {
         req.env = Some(env.clone());
         let started = std::time::Instant::now();
+        // The Stop gate (`flagged`): a check whose rule layer found nothing to judge does not wait for Jev. It keeps its baseline
+        // (no row, no reason), the skip is counted, and the question may go out in the background (`jev.gate_background_ask`).
+        let gate = v.get("flagged").and_then(serde_json::Value::as_bool).filter(|_| crate::defaults::num("jev.gate_enabled") == 1);
+        if gate == Some(false) {
+            if let Some(lane) = crate::jev::shared::lane(home, &env) {
+                lane.note_gate(&req.id, "skipped_unflagged");
+            }
+            let baseline = req.baseline.clone();
+            if crate::defaults::num("jev.gate_background_ask") == 1 {
+                crate::jev::shared::ask_detached(home, &env, req);
+            }
+            return Ok(Some(if flag("full") {
+                serde_json::json!({"outcome": baseline, "jev": serde_json::Value::Null, "baseline": baseline, "confidence": serde_json::Value::Null,
+                    "confident": serde_json::Value::Null, "ms": 0, "backend": "baseline", "reason": serde_json::Value::Null, "hash": "", "changed": false})
+                .to_string()
+            } else {
+                baseline.to_string()
+            }));
+        }
         let Some(lane) = crate::jev::shared::lane(home, &env) else {
             super::host::credit_blocking(started);
             if flag("full") {
@@ -184,6 +203,18 @@ fn jev_ask(spec: &str) -> rquickjs::Result<Option<String>> {
         };
         let d = lane.ask_in_time(&req);
         super::host::credit_blocking(started);
+        if gate == Some(true) {
+            lane.note_gate(&req.id, "asked_sync");
+            if d.reason == Some(crate::jev::Reason::Timeout) {
+                lane.note_gate(&req.id, "timeout");
+                if flag("full") {
+                    // a flagged Stop whose wait ran out fails open on its baseline, and says so
+                    let mut j: serde_json::Value = serde_json::from_str(&decision_json(&d)).unwrap_or_default();
+                    j["reason"] = serde_json::Value::String(crate::defaults::text("jev.reason_fail_open").to_string());
+                    return Ok(Some(j.to_string()));
+                }
+            }
+        }
         return Ok(Some(shape(&d)));
     }
     crate::jev::shared::ask_detached(home, &env, req);

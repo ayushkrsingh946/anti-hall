@@ -1948,6 +1948,8 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `jev.env_cache_cap` | `8` |  |  | Distinct session environments whose resolved settings are kept (the engine serves many sessions, each with its own environment); the oldest is dropped first. |
 | `jev.fallback_reserve_ms` | `600` |  | ms | Budget held back from the primary for the fallback when one is configured (Node: FALLBACK_RESERVE_MS). |
 | `jev.fallback_reserve_pct` | `40` |  |  | The reserve is at most this percent of the total budget (Node: Math.floor(totalMs * 0.4)). |
+| `jev.gate_background_ask` | `0` |  |  | 1 also sends the question of an unflagged Stop out in the background (its answer lands in the cache and the log for a later turn, adding no Stop latency); 0 (default) does not ask at all. |
+| `jev.gate_enabled` | `1` |  |  | 1 (default) gates the Stop/SubagentStop Jev wait: a check that passes `flagged` (its cheap rule layer found a likely unverified claim, with the evidence in hand) waits for Jev within jev.stop_soft_ms / jev.stop_hard_ms; an unflagged one keeps its baseline without asking synchronously. 0 asks on every Stop, as before the gate. |
 | `jev.hash_len` | `16` |  |  | Hex characters of the SHA-256 content hash kept as the cache key and the log's h field (Node: slice(0, 16)). |
 | `jev.integrations` | `21 entries` |  |  | Default mode of every known integration, on, shadow or off: the Node settings schema's jevIntegrations defaults. Jev only changes an outcome in on mode, and never removes a block or advisory (D36). |
 | `jev.key_file_max_bytes` | `4096` |  | bytes | Largest key file that is read (Node: MAX_KEY_FILE_BYTES). |
@@ -1972,6 +1974,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `jev.price_usd_per_m_output` | `0` |  |  | USD per million output tokens used when a response reports tokens but no cost; output is free on the published rate (Node: jev.priceUsdPerMOutput). |
 | `jev.question_version` | `v1` |  |  | Part of the cache key, bumped when a question's wording changes so old answers are not reused (Node: QUESTION_VERSION). |
 | `jev.queue_cap` | `64` |  |  | Calls the asynchronous queue holds; a call that finds it full is logged as busy and gets its baseline, so the queue can never grow without bound (D15). |
+| `jev.reason_fail_open` | `fail_open` |  |  | The reason a flagged Stop reports when its wait for Jev ran out and the check kept its baseline (fail-open). |
 | `jev.relax_sync_cap_ms` | `1500` |  | ms | Longest a relax-block consult inside a hook that is about to nudge or block waits for Jev when the integration is on; a slower answer keeps today's verdict (Node: RELAX_SYNC_CAP_MS). |
 | `jev.retry_status_min` | `500` |  |  | An HTTP status at or above this one is a retry-eligible failure of the primary (Node: status >= 500). |
 | `jev.retry_statuses` | `402, 429` |  |  | HTTP statuses below jev.retry_status_min that are retry-eligible (Node: 402, 429). |
@@ -2950,6 +2953,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `speculation_guard.inference_setting` | `6 entries` |  |  | The switch of the causal-claim scan (guards.inferenceCheck, default off); the scan reads tool evidence and stays on Node, so with the switch on a reply without a hedge is left to Node. |
 | `speculation_guard.jev_false` | `Not speculative: it reports what a tool actually showed (command output such ...` |  |  | The label for a false answer of the speculation question. |
 | `speculation_guard.jev_framed_id` | `speculationFramed` |  |  | The Jev integration id of the framed-expectation question (relax-block trust). |
+| `speculation_guard.jev_gate` | `hit` |  |  | When the Stop waits for Jev on the speculation question: `hit` (default) only when the hedge scan found a marker (acknowledged or not), `would_block` only when the rule layer would itself block, `always` on every Stop. Any other value is read as `hit`. Ignored while jev.gate_enabled is 0. |
 | `speculation_guard.jev_id` | `speculation` |  |  | The Jev integration id of the speculation question (add-block trust). |
 | `speculation_guard.jev_instructions` | `Is this assistant message speculative, i.e. does it assert a cause or an outc...` |  |  | The Noul question of the speculation ask (byte-identical to the Node hook's JEV_QUESTION). |
 | `speculation_guard.jev_state_chars` | `8000` |  |  | How many UTF-16 units of the reply the two Jev asks evaluate (Node: jevText.slice(0, 8000)). |
@@ -10217,11 +10221,14 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `tier_misses` | gauge | reads |  | Key-value reads that went to SQLite since the daemon started. |
 | `uptime_s` | gauge | s |  | Seconds since the daemon started. |
 | `wire_events` | counter | events | kind | Ack protocol events by kind: acked, delivered, ack_timeout, retry, abandoned. |
+| `jev_asked_sync` | counter | calls | id | Stop/SubagentStop asks the gate let wait for Jev (the rule layer had flagged a likely unverified claim), by integration. |
 | `jev_calls` | counter | calls | backend, mode | Jev decisions asked for, by backend (jev, cache or baseline-only) and mode. |
 | `jev_changed` | counter | decisions |  | Decisions in on mode where Jev changed the outcome (always an added block or advisory). |
 | `jev_cooldowns` | counter | calls |  | Jev calls skipped because a vendor's circuit breaker was open. |
 | `jev_cost_micro_usd` | counter | micro-usd |  | Cost of fresh Jev calls in millionths of a US dollar, as reported by the vendor or priced from the reported tokens; a cache hit adds nothing. Never an estimate of what a judge call would have cost. |
+| `jev_gate_timeouts` | counter | calls | id | Flagged Stop/SubagentStop asks whose wait for Jev ran out (the check failed open on its baseline), by integration. |
 | `jev_latency_us` | histogram | us |  | Latency of fresh Jev network calls. |
+| `jev_skipped_unflagged` | counter | calls | id | Stop/SubagentStop asks the gate skipped because the rule layer flagged nothing: no synchronous Jev call, the check kept its baseline. By integration. |
 | `jev_slow` | counter | calls |  | Jev calls slower than the SOFT limit (jev.soft_ms); their answers were still used. |
 | `jev_timeouts` | counter | calls |  | Jev calls that ran out of their time budget. |
 | `jev_verdicts` | counter | decisions | id, verdict | What each Jev decision did, by integration and verdict: added or changed (an on-mode outcome moved), would-change (a shadow call that would have moved it), none (Jev agreed with the baseline) or no-answer (it failed or was skipped). |
