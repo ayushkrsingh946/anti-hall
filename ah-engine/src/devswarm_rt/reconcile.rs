@@ -15,7 +15,7 @@ use crate::metrics::Metrics;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::mem::size_of;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock, Weak};
 
 /// Why a reconcile runs.
@@ -122,6 +122,8 @@ impl Owner for Hold {
 pub struct Rt {
     cfg: Cfg,
     det: Detection,
+    /// The mode in force now (`Mode` as `u8`); starts as `det.mode` and follows the live configuration ([`Rt::set_mode`]).
+    mode: AtomicU8,
     hold: Arc<Hold>,
     budget: crate::mem::Budget,
     repairs: AtomicU64,
@@ -144,6 +146,7 @@ impl Rt {
         );
         Rt {
             cfg,
+            mode: AtomicU8::new(det.mode as u8),
             det,
             hold,
             budget,
@@ -157,7 +160,12 @@ impl Rt {
 
     /// The configured mode (consumers act only on `On`).
     pub fn mode(&self) -> Mode {
-        self.det.mode
+        Mode::from_u8(self.mode.load(Ordering::Relaxed))
+    }
+
+    /// Follow the live configuration: consumers see `mode` from now on. Returns the mode it replaced.
+    pub fn set_mode(&self, mode: Mode) -> Mode {
+        Mode::from_u8(self.mode.swap(mode as u8, Ordering::Relaxed))
     }
 
     /// How often the owner of the event layer should call [`Rt::run`] with [`Cause::Periodic`].

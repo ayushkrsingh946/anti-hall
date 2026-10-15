@@ -417,6 +417,8 @@ pub const MESHW_ALTER_REGISTRY_WRITE_SEQ: &str = "ALTER TABLE registry ADD COLUM
 pub const MESHW_JOURNAL_WAL: &str = "PRAGMA journal_mode = WAL;";
 /// Node's foreign-keys pragma.
 pub const MESHW_FOREIGN_KEYS: &str = "PRAGMA foreign_keys = ON;";
+/// SQLite's change counter as seen by one connection: it differs between two reads exactly when another connection committed in between.
+pub const DATA_VERSION: &str = "PRAGMA data_version;";
 /// The DevSwarm app's `builders` columns (`devswarm-app-db.js` `tableColumns`), read-only.
 pub const MESHW_APP_BUILDER_COLUMNS: &str = "PRAGMA table_info(builders)";
 /// Start of the `builders` read `builderForWorktree` needs: id and active flag, then the worktree and type columns.

@@ -92,6 +92,15 @@ impl Config {
         Filter::sqlite(db, &suffixes)
     }
 
+    /// A [`Filter`] for every entry of a directory except the ignored names and the SQLite database `db` with its side files
+    /// (their commits are found another way, by `PRAGMA data_version`).
+    pub fn no_sqlite_filter(&self, db: &str) -> Filter {
+        let mut except = self.ignore_suffixes.clone();
+        except.extend(self.sqlite_suffixes.iter().cloned());
+        except.push(db.to_string());
+        Filter::Except(except)
+    }
+
     /// A [`Filter`] for every entry of a directory except the ignored names (`realtime.ignore_suffixes`).
     pub fn all_filter(&self) -> Filter {
         Filter::Except(self.ignore_suffixes.clone())

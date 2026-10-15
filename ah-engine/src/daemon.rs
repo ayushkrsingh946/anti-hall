@@ -1510,7 +1510,12 @@ fn start_devswarm(sh: &Arc<Shared>) {
     });
     let s = sh.clone();
     let stop: Arc<dyn Fn() -> bool + Send + Sync> = Arc::new(move || s.draining.load(SeqCst));
-    crate::dswire::Wire::start(&home, &paths::dir(), sh.db.clone(), sink, stop.clone()); // None is the inert case: nothing was started
+    // `devswarm_rt.mode` is read from the daemon's live configuration, so an edit (on, observe, off) takes effect without a restart
+    let weak = Arc::downgrade(sh);
+    let mode: crate::dswire::ModeSource = Box::new(move || {
+        weak.upgrade().map_or(crate::devswarm_rt::Mode::Off, |sh| crate::devswarm_rt::Mode::parse(&sh.cfg().effective.text("devswarm_rt.mode")))
+    });
+    crate::dswire::Wire::start_with(&home, &paths::dir(), sh.db.clone(), sink, stop.clone(), mode); // None is the inert case: nothing was started
     // the native ingest drain: nothing at all unless devswarm_ingest.mode is `engine` (the Node ingest daemons drain otherwise)
     let s = sh.clone();
     let restart: Arc<dyn Fn(&str) + Send + Sync> = Arc::new(move |thread| {
