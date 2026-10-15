@@ -17,6 +17,19 @@ const DENY_IN: &str =
     r#"{"session_id":"s1","cwd":"/tmp","hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git push --force origin main"}}"#;
 static ENV_LOCK: Mutex<()> = Mutex::new(());
 
+fn copy_dir(from: &Path, to: &Path) {
+    std::fs::create_dir_all(to).unwrap();
+    for ent in std::fs::read_dir(from).unwrap() {
+        let ent = ent.unwrap();
+        let dest = to.join(ent.file_name());
+        if ent.file_type().unwrap().is_dir() {
+            copy_dir(&ent.path(), &dest);
+        } else {
+            std::fs::copy(ent.path(), dest).unwrap();
+        }
+    }
+}
+
 fn wrapper_timing_lock() -> MutexGuard<'static, ()> {
     ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
 }
@@ -830,7 +843,25 @@ fn a_cold_hook_client_starts_the_daemon_before_any_last_known_good_copy_is_writt
 #[test]
 fn a_cold_first_wrapper_call_starts_the_daemon() {
     let _timing = wrapper_timing_lock();
-    let e = Env::new_no_prime("cold1", &[("AH_HOOK_TIMEOUT_MS", "5000")]);
+    let mut e = Env::new_no_prime("cold1", &[("AH_HOOK_TIMEOUT_MS", "5000"), ("AH_HOOK_TIMEOUT_S", "30")]);
+    // This debug-build daemon needs ~2.7 s from a cold state to bind its socket, longer than the shipped client.cold_guard_wait_ms
+    // (2000, sized for a release build's ~0.6 s), so against the shipped value the wait legitimately ends and the wrapper fails open
+    // (rc 0). The assertion below stays strict; only the wait cap is widened, in a private copy of the engine config (the shipped
+    // file is untouched), so the test measures the kick/wait/decision path and not the debug build's speed. The hook timeout (AH_HOOK_TIMEOUT_S) is
+    // widened with it: the wait never exceeds what that timeout leaves after the 5 s engine attempt.
+    let root = e.dir.join("plugin");
+    copy_dir(&plugin_root().join("engine"), &root.join("engine"));
+    let toml = root.join("engine/defaults/engine.toml");
+    let src = std::fs::read_to_string(&toml).unwrap();
+    let marker = "[client.cold_guard_wait_ms]";
+    let at = src.find(marker).expect("client.cold_guard_wait_ms present");
+    let rest = &src[at..];
+    let val = rest.find("\nvalue = 2000\n").expect("cold_guard_wait_ms value is 2000");
+    let patched = format!("{}{}{}", &src[..at], &rest[..val], rest[val..].replacen("value = 2000", "value = 10000", 1));
+    std::fs::write(&toml, patched).unwrap();
+    for k in ["AH_ENGINE_PLUGIN_ROOT", "CLAUDE_PLUGIN_ROOT"] {
+        e.extra.push((k.to_string(), root.display().to_string()));
+    }
     let (code, out, _) = wrapper_once(&e);
     // a guard event no longer runs against a daemon that is still starting: the wrapper kicks it, waits for the socket
     // (client.cold_guard_wait_ms) and returns the engine's real decision (DENY_IN is a block)
