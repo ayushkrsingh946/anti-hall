@@ -32,11 +32,19 @@ pub fn repo_defaults() -> PathBuf {
 /// Replace the `value = ...` line of the first `[section]` in a TOML text.
 pub fn set_value(text: &str, section: &str, value: &str) -> String {
     let head = format!("[{section}]");
-    let at = text.find(&head).unwrap_or_else(|| panic!("no section {section}"));
+    let at = text
+        .find(&head)
+        .unwrap_or_else(|| panic!("no section {section}"));
     let rest = &text[at..];
     let v = rest.find("\nvalue = ").expect("value line") + 1;
     let end = rest[v..].find('\n').map_or(rest.len(), |e| v + e);
-    format!("{}{}value = {}{}", &text[..at], &rest[..v], value, &rest[end..])
+    format!(
+        "{}{}value = {}{}",
+        &text[..at],
+        &rest[..v],
+        value,
+        &rest[end..]
+    )
 }
 
 impl Env {
@@ -50,11 +58,21 @@ impl Env {
         std::fs::create_dir_all(&defaults).unwrap();
         std::fs::create_dir_all(root.join("hooks")).unwrap();
         std::fs::create_dir_all(&home).unwrap();
-        for f in ["index.toml", "engine.toml", "dispatch.toml", "messages.toml"] {
+        for f in [
+            "index.toml",
+            "engine.toml",
+            "dispatch.toml",
+            "messages.toml",
+        ] {
             std::fs::copy(repo_defaults().join(f), defaults.join(f)).unwrap();
         }
         let state = home.join(".anti-hall/ah-engine");
-        Env { dir, home, root, state }
+        Env {
+            dir,
+            home,
+            root,
+            state,
+        }
     }
 
     pub fn edit_toml(&self, file: &str, f: impl FnOnce(&str) -> String) {
@@ -98,7 +116,13 @@ impl Env {
         std::fs::read_to_string(self.state.join("launcher.log")).unwrap_or_default()
     }
 
-    pub fn command(&self, event: &str, args: &[&str], engine: Option<&Path>, envs: &[(&str, &str)]) -> Command {
+    pub fn command(
+        &self,
+        event: &str,
+        args: &[&str],
+        engine: Option<&Path>,
+        envs: &[(&str, &str)],
+    ) -> Command {
         let mut c = Command::new(env!("CARGO_BIN_EXE_ah-hook"));
         c.env_clear()
             .env("PATH", "/usr/bin:/bin")
@@ -121,20 +145,42 @@ impl Env {
     }
 
     /// Run the launcher with `input` on stdin (written by a thread, so a launcher that stops reading cannot deadlock the test).
-    pub fn run(&self, event: &str, input: &[u8], engine: Option<&Path>, envs: &[(&str, &str)]) -> Out {
+    pub fn run(
+        &self,
+        event: &str,
+        input: &[u8],
+        engine: Option<&Path>,
+        envs: &[(&str, &str)],
+    ) -> Out {
         self.run_args(event, &[], input, engine, envs)
     }
 
-    pub fn run_args(&self, event: &str, args: &[&str], input: &[u8], engine: Option<&Path>, envs: &[(&str, &str)]) -> Out {
+    pub fn run_args(
+        &self,
+        event: &str,
+        args: &[&str],
+        input: &[u8],
+        engine: Option<&Path>,
+        envs: &[(&str, &str)],
+    ) -> Out {
         let data = input.to_vec();
         self.run_with(self.command(event, args, engine, envs), move |mut si| {
             let _ = si.write_all(&data);
         })
     }
 
-    pub fn run_with(&self, mut cmd: Command, feed: impl FnOnce(ChildStdin) + Send + 'static) -> Out {
+    pub fn run_with(
+        &self,
+        mut cmd: Command,
+        feed: impl FnOnce(ChildStdin) + Send + 'static,
+    ) -> Out {
         let t = Instant::now();
-        let mut child = cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().expect("spawn ah-hook");
+        let mut child = cmd
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn ah-hook");
         let si = child.stdin.take().unwrap();
         let feeder = std::thread::spawn(move || feed(si));
         let (mut so, mut se) = (child.stdout.take().unwrap(), child.stderr.take().unwrap());
@@ -160,7 +206,11 @@ impl Env {
     }
 
     pub fn spawn(&self, cmd: &mut Command) -> Child {
-        cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().expect("spawn ah-hook")
+        cmd.stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn ah-hook")
     }
 }
 
@@ -189,10 +239,17 @@ pub fn wait_until(limit: Duration, mut f: impl FnMut() -> bool) -> bool {
 }
 
 pub fn pid_from(path: &Path) -> Option<i32> {
-    std::fs::read_to_string(path).ok()?.split_whitespace().next()?.parse().ok()
+    std::fs::read_to_string(path)
+        .ok()?
+        .split_whitespace()
+        .next()?
+        .parse()
+        .ok()
 }
 
 /// A deterministic non-trivial byte stream (not all zeros, so a lost chunk shows).
 pub fn pattern(len: usize) -> Vec<u8> {
-    (0..len).map(|i| (i.wrapping_mul(31) ^ (i >> 7)) as u8).collect()
+    (0..len)
+        .map(|i| (i.wrapping_mul(31) ^ (i >> 7)) as u8)
+        .collect()
 }

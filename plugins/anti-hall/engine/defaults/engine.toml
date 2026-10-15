@@ -1186,6 +1186,12 @@ value = "wait"
 doc = "Name, inside a per-call run directory, of the private copy of a large payload (see launcher.spool_max_bytes)."
 value = "payload"
 
+[launcher.io_drain_ms]
+doc = "How long, after the engine has exited, the launcher waits for its output pipes to reach end of file before it treats a helper still holding them as a failure."
+value = 100
+min = 1
+unit = "ms"
+
 [launcher.selftest_engine_timeout_ms]
 doc = "How long --selftest lets the engine binary run its version check before it calls the binary broken."
 value = 3000

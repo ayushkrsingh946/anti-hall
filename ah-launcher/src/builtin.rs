@@ -30,6 +30,7 @@ pub const NUMS: &[(&str, u64)] = &[
     ("launcher.log_hard_bytes", 1048576),
     ("launcher.log_line_max", 512),
     ("launcher.log_rotate_min_s", 60),
+    ("launcher.io_drain_ms", 100),
     ("launcher.spool_max_bytes", 67108864),
     ("launcher.selftest_engine_timeout_ms", 3000),
     ("launcher.reaper", 1),
@@ -46,6 +47,43 @@ pub const NUMS: &[(&str, u64)] = &[
 ];
 
 pub const STRS: &[(&str, &str)] = &[
+    ("msg.launcher_st_unusable", "unusable: {files}"),
+    ("msg.launcher_st_missing", "missing or wrong type: {keys}"),
+    ("msg.launcher_st_incoherent", "incoherent: {rules}"),
+    (
+        "msg.launcher_st_no_state",
+        "no state directory (home directory unset or not absolute)",
+    ),
+    (
+        "msg.launcher_st_socket_len",
+        "socket path is {len} bytes, limit {max}",
+    ),
+    ("msg.launcher_st_no_engine", "no executable engine binary"),
+    ("msg.launcher_st_not_exec", "not an executable file: {path}"),
+    (
+        "msg.launcher_st_ver_empty",
+        "the version check printed nothing",
+    ),
+    (
+        "msg.launcher_st_ver_exit",
+        "the version check exited {code}",
+    ),
+    (
+        "msg.launcher_st_ver_timeout",
+        "the version check did not finish in {ms} ms",
+    ),
+    (
+        "msg.launcher_st_cannot_start",
+        "cannot start (errno {errno})",
+    ),
+    (
+        "msg.launcher_st_mem_below",
+        "hard heap limit is below the current heap",
+    ),
+    (
+        "msg.launcher_st_no_wall",
+        "cannot arm the wall-clock backstop",
+    ),
     ("launcher.knob_fault", "AH_LAUNCHER_FAULT"),
     ("launcher.run_done_file", "done"),
     ("launcher.run_wait_file", "wait"),

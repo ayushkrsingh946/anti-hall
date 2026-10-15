@@ -388,6 +388,7 @@ impl L {
                 wait_file: None,
                 slow_max: Duration::ZERO,
                 grace,
+                drain: Duration::from_millis(self.s.num("launcher.io_drain_ms")),
                 strict_group: true,
                 out_cap: self.s.num("launcher.err_cap_bytes") as usize,
                 err_cap: self.s.num("launcher.err_cap_bytes") as usize,
@@ -467,6 +468,7 @@ impl L {
             wait_file: None,
             slow_max: Duration::ZERO,
             grace: self.grace,
+            drain: Duration::from_millis(self.s.num("launcher.io_drain_ms")),
             strict_group: false,
             out_cap: self.s.num("launcher.out_cap_bytes") as usize,
             err_cap: self.s.num("launcher.err_cap_bytes") as usize,
@@ -564,6 +566,7 @@ impl L {
             wait_file,
             slow_max: Duration::from_millis(slow_max),
             grace: self.grace,
+            drain: Duration::from_millis(self.s.num("launcher.io_drain_ms")),
             strict_group: true,
             out_cap: self.s.num("launcher.out_cap_bytes") as usize,
             err_cap: self.s.num("launcher.err_cap_bytes") as usize,
@@ -666,7 +669,7 @@ impl L {
         match kind.as_str() {
             "panic" => panic!("injected"),
             "hang" => loop {
-                std::thread::sleep(Duration::from_secs(1));
+                std::thread::park();
             },
             "spin" => {
                 let mut x = 0u64;
@@ -677,7 +680,7 @@ impl L {
             "alloc" => {
                 let mut keep: Vec<Vec<u8>> = Vec::new();
                 loop {
-                    keep.push(vec![1u8; 1 << 20]);
+                    keep.push(vec![1u8; self.s.num("launcher.io_chunk_bytes") as usize]);
                     std::hint::black_box(&keep);
                 }
             }

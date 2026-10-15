@@ -36,7 +36,10 @@ impl Report<'_> {
 /// Every key the built-in copy holds must be present in the shipped files with the same type, and the numbers must be coherent.
 fn check_config(s: &Settings) -> Result<(), String> {
     if !s.bad_files.is_empty() {
-        return Err(format!("unusable: {}", s.bad_files.join(",")));
+        return Err(s.msg(
+            "msg.launcher_st_unusable",
+            &[("files", &s.bad_files.join(","))],
+        ));
     }
     let mut missing = Vec::new();
     for (k, _) in builtin::NUMS {
@@ -55,7 +58,7 @@ fn check_config(s: &Settings) -> Result<(), String> {
         }
     }
     if !missing.is_empty() {
-        return Err(format!("missing or wrong type: {}", missing.join(",")));
+        return Err(s.msg("msg.launcher_st_missing", &[("keys", &missing.join(","))]));
     }
     let n = |k: &str| s.num(k);
     let coherent = [
@@ -103,13 +106,16 @@ fn check_config(s: &Settings) -> Result<(), String> {
 
 fn check_socket(s: &Settings, state_dir: &Path) -> Result<(), String> {
     if state_dir.as_os_str().is_empty() {
-        return Err("no state directory (home directory unset or not absolute)".into());
+        return Err(s.text("msg.launcher_st_no_state"));
     }
     let sock = state_dir.join(s.text("paths.socket_file"));
     let max = s.num("paths.socket_max_len");
     let len = sock.as_os_str().len() as u64;
     if max == 0 || len > max {
-        return Err(format!("socket path is {len} bytes, limit {max}"));
+        return Err(s.msg(
+            "msg.launcher_st_socket_len",
+            &[("len", &len.to_string()), ("max", &max.to_string())],
+        ));
     }
     Ok(())
 }
@@ -127,12 +133,15 @@ fn check_engine(s: &Settings, state_dir: &Path, engine: Option<String>) -> Resul
             let _ = state_dir;
             match installed.filter(|p| is_exec(p)) {
                 Some(p) => p,
-                None => return Err("no executable engine binary".into()),
+                None => return Err(s.text("msg.launcher_st_no_engine")),
             }
         }
     };
     if !is_exec(&path) {
-        return Err(format!("not an executable file: {}", path.display()));
+        return Err(s.msg(
+            "msg.launcher_st_not_exec",
+            &[("path", &path.display().to_string())],
+        ));
     }
     let argv = [path.display().to_string(), "version".to_string()];
     let ms = s.num("launcher.selftest_engine_timeout_ms");
@@ -158,29 +167,34 @@ fn check_engine(s: &Settings, state_dir: &Path, engine: Option<String>) -> Resul
             cap_ms: s.num("launcher.spawn_backoff_cap_ms"),
             jitter_pct: s.num("launcher.spawn_jitter_pct"),
         },
+        drain: Duration::from_millis(s.num("launcher.io_drain_ms")),
         reaper: None,
     });
     match r {
         Run::Exited { code: 0, out, .. } if !out.is_empty() => Ok(()),
-        Run::Exited { code: 0, .. } => Err("the version check printed nothing".into()),
-        Run::Exited { code, .. } => Err(format!("the version check exited {code}")),
-        Run::TimedOut | Run::GroupAlive => {
-            Err(format!("the version check did not finish in {ms} ms"))
+        Run::Exited { code: 0, .. } => Err(s.text("msg.launcher_st_ver_empty")),
+        Run::Exited { code, .. } => {
+            Err(s.msg("msg.launcher_st_ver_exit", &[("code", &code.to_string())]))
         }
-        Run::SpawnFailed { errno } => Err(format!("cannot start (errno {})", errno.unwrap_or(0))),
+        Run::TimedOut | Run::GroupAlive => {
+            Err(s.msg("msg.launcher_st_ver_timeout", &[("ms", &ms.to_string())]))
+        }
+        Run::SpawnFailed { errno } => Err(s.msg(
+            "msg.launcher_st_cannot_start",
+            &[("errno", &errno.unwrap_or(0).to_string())],
+        )),
     }
 }
 
 fn check_limits(s: &Settings) -> Result<(), String> {
     if s.num("launcher.mem_hard_bytes") <= limits::mem_now() as u64 {
-        return Err("hard heap limit is below the current heap".into());
+        return Err(s.text("msg.launcher_st_mem_below"));
     }
     if !limits::arm_wall(
         s.num("launcher.selftest_engine_timeout_ms")
-            .saturating_mul(4)
-            .max(1000),
+            .saturating_mul(4),
     ) {
-        return Err("cannot arm the wall-clock backstop".into());
+        return Err(s.text("msg.launcher_st_no_wall"));
     }
     // the timer is re-armed per call; disarm this probe
     // SAFETY: setitimer with a zero value cancels the timer.

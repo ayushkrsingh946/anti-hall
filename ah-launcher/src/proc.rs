@@ -204,7 +204,7 @@ fn write_all_stall(fd: RawFd, mut buf: &[u8], stall: Duration) -> io::Result<()>
 /// payload may continue past the prefix. A closed or unreadable stdin is an empty payload.
 pub fn read_prefix(fd: RawFd, cap: usize, idle: Duration, chunk: usize) -> (Vec<u8>, bool) {
     let mut out = Vec::new();
-    let mut buf = vec![0u8; chunk.clamp(512, cap.max(512))];
+    let mut buf = vec![0u8; chunk.clamp(1, cap.max(1))];
     while out.len() < cap {
         match poll_fd(fd, libc::POLLIN, idle) {
             Ready::Yes => {}
@@ -403,6 +403,8 @@ pub struct Opts<'a> {
     pub wait_file: Option<&'a Path>,
     pub slow_max: Duration,
     pub grace: Duration,
+    /// how long after the child has exited its output pipes may take to reach end of file
+    pub drain: Duration,
     /// true: a helper left in the child's group after it exited is a failure (the engine); false: it is killed quietly (the
     /// shell fallback runner leaves watchdog helpers behind)
     pub strict_group: bool,
@@ -447,7 +449,7 @@ fn go<F: FnOnce() + Send + 'static>(f: F) -> bool {
 
 fn stream_file(fd: RawFd, path: &Path, feed: &Feed) -> io::Result<()> {
     let mut f = std::fs::File::open(path)?;
-    let mut buf = vec![0u8; feed.chunk.max(512)];
+    let mut buf = vec![0u8; feed.chunk.max(1)];
     loop {
         let n = f.read(&mut buf)?;
         if n == 0 {
@@ -495,7 +497,7 @@ fn pump_stdin(fd: RawFd, feed: &Feed, st: &PumpState, mut child_ok: bool) {
     if soft_hit {
         limits::bump(Ctr::StdinSoft);
     }
-    let mut buf = vec![0u8; feed.chunk.max(512)];
+    let mut buf = vec![0u8; feed.chunk.max(1)];
     loop {
         if !child_ok && spool.is_none() {
             return;
@@ -555,7 +557,7 @@ fn capture(
     go(move || {
         let mut out = Vec::new();
         let mut overflow = false;
-        let mut buf = vec![0u8; chunk.max(512)];
+        let mut buf = vec![0u8; chunk.max(1)];
         loop {
             match r.read(&mut buf) {
                 Ok(0) | Err(_) => break,
@@ -577,11 +579,38 @@ fn seed() -> u64 {
     crate::util::now_ms() ^ (u64::from(std::process::id()) << 20) | 1
 }
 
+/// True when the file starts like something the kernel can run: a `#!` script, an ELF or a Mach-O image. `execvp` runs any other
+/// file as a shell script (the ENOEXEC fallback), which would execute a corrupt or truncated binary as commands; never do that.
+pub fn loadable(path: &str) -> bool {
+    if !path.contains('/') {
+        return true; // looked up on PATH by the kernel's rules; not a file we vouch for here
+    }
+    let mut head = [0u8; 4];
+    let ok = std::fs::File::open(path)
+        .and_then(|mut f| f.read_exact(&mut head))
+        .is_ok();
+    let images: [[u8; 4]; 6] = [
+        [0x7f, b'E', b'L', b'F'],
+        [0xfe, 0xed, 0xfa, 0xce],
+        [0xfe, 0xed, 0xfa, 0xcf],
+        [0xce, 0xfa, 0xed, 0xfe],
+        [0xcf, 0xfa, 0xed, 0xfe],
+        [0xca, 0xfe, 0xba, 0xbe],
+    ];
+    ok && (head[..2] == *b"#!" || images.contains(&head))
+}
+
 pub fn run_child(o: &Opts) -> Run {
     let start = Instant::now();
     let Some((prog, rest)) = o.argv.split_first() else {
         return Run::SpawnFailed { errno: None };
     };
+    if !loadable(prog) {
+        limits::bump(Ctr::SpawnFail);
+        return Run::SpawnFailed {
+            errno: Some(libc::ENOEXEC),
+        };
+    }
     let mut cmd = Command::new(prog);
     cmd.args(rest)
         .stdin(Stdio::piped())
@@ -692,7 +721,7 @@ pub fn run_child(o: &Opts) -> Run {
         Ok(st) => st.code().unwrap_or_else(|| 128 + st.signal().unwrap_or(0)),
         Err(_) => return Run::SpawnFailed { errno: None },
     };
-    let wait = o.grace.max(Duration::from_millis(1));
+    let wait = o.drain;
     let (Ok((out, o1)), Ok((err, o2))) = (orx.recv_timeout(wait), erx.recv_timeout(wait)) else {
         return Run::GroupAlive;
     };
@@ -700,7 +729,7 @@ pub fn run_child(o: &Opts) -> Run {
         true
     } else if o.feed.spool.is_some() {
         // the pump may still be copying the rest of the payload into the spool (the engine need not have read it all)
-        let _ = drx.recv_timeout(o.feed.idle.max(Duration::from_millis(1)));
+        let _ = drx.recv_timeout(o.feed.idle);
         st.eof.load(AO::SeqCst) && !st.spool_failed.load(AO::SeqCst)
     } else {
         false
@@ -720,7 +749,12 @@ mod tests {
     use std::cell::Cell;
 
     fn pol() -> Retry {
-        Retry { max: 3, base_ms: 5, cap_ms: 40, jitter_pct: 50 }
+        Retry {
+            max: 3,
+            base_ms: 5,
+            cap_ms: 40,
+            jitter_pct: 50,
+        }
     }
     fn err(code: i32) -> io::Error {
         io::Error::from_raw_os_error(code)
@@ -733,7 +767,11 @@ mod tests {
         let r = retry_spawn(
             || {
                 calls.set(calls.get() + 1);
-                if calls.get() < 3 { Err(err(libc::EAGAIN)) } else { Ok(7) }
+                if calls.get() < 3 {
+                    Err(err(libc::EAGAIN))
+                } else {
+                    Ok(7)
+                }
             },
             &pol(),
             Instant::now() + Duration::from_secs(5),
@@ -744,8 +782,14 @@ mod tests {
         assert_eq!(calls.get(), 3);
         let w = waits.borrow();
         assert_eq!(w.len(), 2);
-        assert!(w[0] <= Duration::from_millis(5) && w[1] <= Duration::from_millis(10), "{w:?}");
-        assert!(w[0] >= Duration::from_millis(2) && w[1] >= Duration::from_millis(5), "jitter takes off at most half: {w:?}");
+        assert!(
+            w[0] <= Duration::from_millis(5) && w[1] <= Duration::from_millis(10),
+            "{w:?}"
+        );
+        assert!(
+            w[0] >= Duration::from_millis(2) && w[1] >= Duration::from_millis(5),
+            "jitter takes off at most half: {w:?}"
+        );
     }
 
     #[test]
@@ -803,7 +847,40 @@ mod tests {
         for n in 0..12 {
             let d = backoff(&p, n, 9);
             let full = (5u64 << n.min(20)).min(40);
-            assert!(d <= Duration::from_millis(full) && d >= Duration::from_millis(full - full / 2), "n={n} d={d:?}");
+            assert!(
+                d <= Duration::from_millis(full) && d >= Duration::from_millis(full - full / 2),
+                "n={n} d={d:?}"
+            );
         }
+    }
+}
+
+#[cfg(test)]
+mod loadable_tests {
+    use super::*;
+
+    #[test]
+    fn only_runnable_images_and_scripts_are_loadable() {
+        let d = std::env::temp_dir().join(format!(
+            "ah-load-{}-{}",
+            std::process::id(),
+            crate::util::now_ms()
+        ));
+        std::fs::create_dir_all(&d).unwrap();
+        let w = |n: &str, b: &[u8]| {
+            let p = d.join(n);
+            std::fs::write(&p, b).unwrap();
+            p.display().to_string()
+        };
+        assert!(loadable(&w("sh", b"#!/bin/sh\nexit 0\n")));
+        assert!(loadable(&w("elf", b"\x7fELF\x02\x01\x01")));
+        assert!(loadable(&w("macho", &[0xcf, 0xfa, 0xed, 0xfe, 0, 0])));
+        assert!(!loadable(&w(
+            "junk",
+            b"echo this would run as a shell script\n"
+        )));
+        assert!(!loadable(&w("short", b"#")));
+        assert!(!loadable(&d.join("missing").display().to_string()));
+        assert!(loadable("ls"), "a bare name is left to PATH lookup");
     }
 }

@@ -167,6 +167,28 @@ mod tests {
     }
 
     #[test]
+    fn full_backlog_probe_is_bounded_and_never_reads_as_absent() {
+        let d = dir("b");
+        let s = d.join("s");
+        let _l = UnixListener::bind(&s).unwrap(); // never accepts
+        let t = std::time::Instant::now();
+        let mut seen = Vec::new();
+        for _ in 0..400 {
+            seen.push(probe(&s, Duration::from_millis(50)));
+        }
+        assert!(
+            t.elapsed() < Duration::from_secs(5),
+            "each probe is bounded: {:?}",
+            t.elapsed()
+        );
+        assert!(
+            seen.iter().all(|p| *p != Sock::Absent),
+            "a listening socket is never absent (ECONNREFUSED -> Stale or EAGAIN -> Live)"
+        );
+        assert_eq!(seen[0], Sock::Live);
+    }
+
+    #[test]
     fn one_asker_then_wait_then_trip() {
         let d = dir("g");
         let first = acquire(&d, "l.lock", "l.spawns", 10_000, 60, 3);
