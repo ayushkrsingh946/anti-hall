@@ -584,7 +584,7 @@ function migrateGlobalStoreToPerProject(opts) {
             // may have no physical seq at all). Use `index` — the ordinal is stable
             // because the source is append-only, so existing indices never shift.
             const h = (m.hash != null) ? String(m.hash) : synthGlobalHash(id, m.index, m.body);
-            const r = dst.appendMessage({ workspaceId: id, body: m.body, hash: h, ts: Number.isFinite(m.ts) ? m.ts : o.now });
+            const r = dst.appendMessage({ workspaceId: id, body: m.body, hash: h, ts: Number.isFinite(m.ts) ? m.ts : o.now, sender: m.sender, recipient: m.recipient, mtype: m.mtype });
             if (r && r.inserted) { wsCopied++; copied++; }
           }
           const regEntry = reg.find((d) => d && String(d.id) === String(id));

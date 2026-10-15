@@ -1035,11 +1035,14 @@ function openSqlite(home, workspaceId, opts) {
       const body = (m && m.body != null) ? String(m.body) : '';
       // sender (additive): who the native message came from, resolved by the caller from its branch; NULL when unknown.
       const sender = m && m.sender != null ? String(m.sender) : null;
+      // recipient / mtype (additive, only when the caller knows them): a copy of a mesh row keeps who it went to and what kind it was.
+      const recipient = m && m.recipient != null ? String(m.recipient) : null;
+      const mtype = m && m.mtype != null ? String(m.mtype) : null;
       const stmt = db.prepare(
         'INSERT ' + (hash !== null ? 'OR IGNORE ' : '')
-        + 'INTO messages (workspace_id, ts, hash, body, sender) VALUES (?, ?, ?, ?, ?);'
+        + 'INTO messages (workspace_id, ts, hash, body, sender, recipient, mtype) VALUES (?, ?, ?, ?, ?, ?, ?);'
       );
-      const r = stmt.run(String(m.workspaceId), ts, hash, body, sender);
+      const r = stmt.run(String(m.workspaceId), ts, hash, body, sender, recipient, mtype);
       return { inserted: r.changes > 0 };
     },
     // appendMeshRow(m) -> {inserted, seq}. The mesh-aware insert (D3/D6/D7/D22) —
@@ -1753,6 +1756,8 @@ function openJournal(home, workspaceId, fsi, lockOpts, opts) {
           body: (m && m.body != null) ? String(m.body) : '',
           // sender (additive, only when known): rows written without one keep their old shape.
           ...(m && m.sender != null ? { sender: String(m.sender) } : {}),
+          ...(m && m.recipient != null ? { recipient: String(m.recipient) } : {}),
+          ...(m && m.mtype != null ? { mtype: String(m.mtype) } : {}),
         });
         return { inserted: true };
       };

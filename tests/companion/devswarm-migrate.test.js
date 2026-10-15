@@ -721,3 +721,33 @@ for (const backend of ['journal', 'sqlite']) {
     } finally { rm(home); }
   });
 }
+
+// ---- the global legacy copy keeps who a message came from and went to --------------------------------------------------------
+// The copy used to append {workspaceId, body, hash, ts} only, so a mesh row lost its sender, recipient and mtype on the way to
+// the per-project store (and a direct message then read as a row of unknown kind).
+for (const srcBackend of ['journal', 'sqlite']) {
+  for (const dstBackend of ['journal', 'sqlite']) {
+    test(`global migrate keeps sender, recipient and mtype (legacy ${srcBackend} -> ${dstBackend})`, { skip: (srcBackend === 'sqlite' || dstBackend === 'sqlite') && !storeLib.sqliteAvailable() }, () => {
+      const home = tmpHome();
+      try {
+        const legacyDir = storeLib.storeRootDir(home);
+        const src = storeLib.openStore({ home, backend: srcBackend, dir: legacyDir, hash: 'legacy' });
+        try {
+          src.appendMeshRow({ workspaceId: 'primary-aaaaaaaa', body: 'HELLO', hash: 'mesh:1', sender: 'child-bbbbbbbb', recipient: 'primary-aaaaaaaa', mtype: 'direct' });
+          src.appendMeshRow({ workspaceId: 'primary-aaaaaaaa', body: 'ALL', hash: 'mesh:2', sender: 'child-bbbbbbbb', recipient: null, mtype: 'broadcast' });
+          src.appendMessage({ workspaceId: 'primary-aaaaaaaa', body: 'PLAIN', hash: 'native:3' });
+        } finally { src.close(); }
+
+        const rep = migrate.migrateGlobalStoreToPerProject({ home, backend: dstBackend, env: {} });
+        assert.equal(rep.copied, 3);
+        const dst = storeLib.openStore({ home, workspaceId: 'primary-aaaaaaaa', backend: dstBackend });
+        try {
+          const by = Object.fromEntries(dst.listMessages('primary-aaaaaaaa').map((m) => [m.body, m]));
+          assert.deepEqual([by.HELLO.sender, by.HELLO.recipient, by.HELLO.mtype], ['child-bbbbbbbb', 'primary-aaaaaaaa', 'direct']);
+          assert.deepEqual([by.ALL.sender, by.ALL.recipient, by.ALL.mtype], ['child-bbbbbbbb', null, 'broadcast']);
+          assert.deepEqual([by.PLAIN.sender, by.PLAIN.recipient, by.PLAIN.mtype], [null, null, null], 'a row that had none stays without');
+        } finally { dst.close(); }
+      } finally { rm(home); }
+    });
+  }
+}
