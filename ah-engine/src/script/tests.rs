@@ -115,12 +115,20 @@ fn a_runaway_script_is_interrupted_and_defers() {
     put_override(&h, "zz-loop", "function decide() { for (;;) {} }");
     let t = Instant::now();
     assert_eq!(run_forced("zz-loop", &json!({}), &e), Some(Some(Verdict::Defer)));
-    assert!(t.elapsed() < std::time::Duration::from_millis(defaults::num("script.time_limit_ms") * 10), "{:?}", t.elapsed());
+    assert!(
+        t.elapsed() < std::time::Duration::from_millis(defaults::num("script.time_limit_ms") * defaults::num("script.time_hard_factor") * 3),
+        "{:?}",
+        t.elapsed()
+    );
     // a catastrophic native regex is interrupted too
     put_override(&h, "zz-redos", "function decide() { return /^(a+)+$/.test('a'.repeat(40) + 'b') ? 'allow' : 'defer'; }");
     let t = Instant::now();
     assert_eq!(run_forced("zz-redos", &json!({}), &e), Some(Some(Verdict::Defer)));
-    assert!(t.elapsed() < std::time::Duration::from_millis(defaults::num("script.time_limit_ms") * 10), "{:?}", t.elapsed());
+    assert!(
+        t.elapsed() < std::time::Duration::from_millis(defaults::num("script.time_limit_ms") * defaults::num("script.time_hard_factor") * 3),
+        "{:?}",
+        t.elapsed()
+    );
     // the same thread's runtime still works afterwards
     put_override(&h, "zz-ok", "function decide() { return 'allow'; }");
     assert_eq!(run_forced("zz-ok", &json!({}), &e), Some(Some(Verdict::Allow)));
@@ -1483,4 +1491,26 @@ fn the_shared_regex_cache_is_bounded_by_bytes_and_shared_across_threads() {
     let b = std::thread::spawn(|| super::recache::get("zzshared\\d+", "").unwrap()).join().unwrap();
     assert!(std::sync::Arc::ptr_eq(&a, &b), "two threads got two compiled copies");
     assert!(super::recache::get("(", "").is_err(), "an invalid pattern is an error, not a cache entry");
+}
+
+#[test]
+fn the_limit_that_interrupted_a_call_is_named_in_its_failure() {
+    use super::{Deadline, Trip};
+    use std::sync::atomic::Ordering::Relaxed;
+    let d = Deadline::default();
+    assert_eq!(d.exceeded(10, 10), None, "nothing armed, nothing fires");
+    d.cpu.store(100, Relaxed);
+    d.wall.store(5_000, Relaxed);
+    d.req.store(9_000, Relaxed);
+    assert_eq!(d.exceeded(100, 10), None, "at the limit is not past it");
+    assert_eq!(d.exceeded(101, 10), Some(Trip::Cpu));
+    assert_eq!(d.exceeded(0, 5_001), Some(Trip::Wall));
+    assert_eq!(d.exceeded(0, 9_001), Some(Trip::Wall), "the wall backstop is reported ahead of the client deadline");
+    d.wall.store(0, Relaxed);
+    assert_eq!(d.exceeded(0, 9_001), Some(Trip::Request));
+    assert_eq!(d.explain("interrupted", 50), "interrupted", "no trip recorded: the error is left as it was");
+    d.trip.store(Trip::Cpu as u64, Relaxed);
+    let cpu_ms = (50 * defaults::num("script.time_hard_factor")).min(defaults::num("script.time_hard_cap_ms"));
+    let wall_ms = cpu_ms * defaults::num("script.wall_limit_factor");
+    assert_eq!(d.explain("interrupted", 50), format!("interrupted (interrupted by the cpu limit; cpu limit {cpu_ms} ms, wall backstop {wall_ms} ms)"));
 }

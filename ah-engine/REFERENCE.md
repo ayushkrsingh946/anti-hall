@@ -218,7 +218,8 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `daemon.drain_grace_ms` | `1000` |  | ms | After a drain starts, a worker or loop that has not finished in this long is cut off. |
 | `daemon.drain_max_ms` | `10000` |  | ms | Longest a clean drain (handoff, stop, idle exit, SIGTERM) may take before the daemon exits anyway, so a worker stuck while draining can never keep the process (and the singleton lock) alive with its socket already gone. Above daemon.stuck_ms, so the stuck-worker check normally ends such a drain first. |
 | `daemon.drain_poll_ms` | `20` |  | ms | Accept-loop poll interval while draining. |
-| `daemon.eval_budget_us` | `200000` | `AH_ENGINE_EVAL_BUDGET_US` | us | Per-request thread CPU budget for rule evaluation; 0 turns the budget off. |
+| `daemon.eval_budget_us` | `1000000` | `AH_ENGINE_EVAL_BUDGET_US` | us | HARD per-request thread CPU budget for rule evaluation: past it every remaining check defers to its Node hook. The SOFT budget (a warning only) is daemon.eval_soft_us. 0 turns the hard budget off. |
+| `daemon.eval_soft_us` | `200000` |  | us | SOFT per-request thread CPU budget for rule evaluation: a request that used more is logged (budget_soft) and counted, and every check keeps its answer. The HARD budget is daemon.eval_budget_us. 0 turns the warning off. |
 | `daemon.forced_exit_code` | `75` |  |  | Exit status of a forced drain exit (sysexits EX_TEMPFAIL, 75); the next client call starts a fresh daemon. |
 | `daemon.healthy_after_s` | `30` | `AH_ENGINE_HEALTHY_AFTER_S` | s | How long the daemon must stay up before its binary is recorded as having run healthy (files.healthy_binary). A binary that dies earlier never earns the record, so a roll-back may replace it. |
 | `daemon.idle_check_ms` | `1000` |  | ms | How often the watchdog compares the last request time with idle_exit_s. |
@@ -238,6 +239,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `daemon.queue` | `16` | `AH_ENGINE_QUEUE` |  | Connections that may wait for a worker; beyond this the daemon answers BUSY and the client falls back. |
 | `daemon.read_ms` | `1000` | `AH_ENGINE_READ_MS` | ms | Total time a client has to deliver its request. |
 | `daemon.reply_slack_ms` | `50` |  | ms | Time kept back from a request's client deadline (client.deadline_ms, or what a dispatch request says) to write the reply: the inner budgets that could outlast the client's wait (a git call, a Jev consult) are clamped to the deadline minus this, so a slow dependency costs a fallback, not a lost answer. |
+| `daemon.request_hard_ms` | `2000` |  | ms | HARD deadline of a request, measured from its arrival (less daemon.reply_slack_ms): the point where a scripted check still running is cut and a check not yet started is deferred to its Node hook. The SOFT deadline is client.deadline_ms (past it the request is logged as deadline_soft and counted, nothing is cut). A client whose daemon is alive waits for a late reply up to client.slow_fallback_max_ms less client.slow_wait_margin_ms and uses it, so this must stay below that window. |
 | `daemon.rss_cap_kb` | `131072` | `AH_ENGINE_RSS_CAP_KB` | KB | Memory cap, compared with the figure `daemon.mem_metric` selects (default: the footprint, not the resident set); above it the daemon drains and exits cleanly and the next call starts a fresh one; 0 = none. The measurement below is of the resident set. Set from measurement, not guessed (DECISIONS.md 1.111, 2026-10-09): on the real-payload replay (2,113 recorded hook calls, unpaced, isolated home) the engine with 16 scripted checks sits at 69 MB after one pass and 78 MB after three (jemalloc, aarch64-apple-darwin), and at 102 MB after one pass with the system allocator (the x86_64-apple-darwin and musl builds, measured as a system-allocator build on this Mac); the live heap is 45-52 MB. The engine before the scripted checks (live4) measured 62 and 68 MB on the same replay, so the previous 64 MB cap (set from a synthetic soak with a 16-18 MB live heap) sat inside the steady state of both: the daemon restarted 4 times in 600 s and the crash-loop breaker sent every hook to Node. The cap sits above the larger figure with room for the slow growth both builds show on repeated passes (about 1.5 MB per 1,000 calls), so only real growth trips it. |
 | `daemon.rss_check_ms` | `10000` | `AH_ENGINE_RSS_CHECK_MS` | ms | How often the watchdog samples resident memory. |
 | `daemon.rules_check_ms` | `200` |  | ms | How often the daemon checks the rules file (and SIGHUP) for a change. |
@@ -1615,6 +1617,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `jev.bool_true_tokens` | `1, on, true, yes` |  |  | Words that read as true in an environment or settings value (Node: TRUE_TOKENS). |
 | `jev.breaker_cooldown_ms` | `300000` |  | ms | How long an open breaker skips its vendor before a probe is allowed (Node: BREAKER_COOLDOWN_MS). |
 | `jev.breaker_file` | `cache/jev-breaker.json` |  |  | The breaker state file, relative to the anti-hall home directory; the same file the Node hooks use, so both see one breaker (Node: jev-breaker.json under cache/). |
+| `jev.breaker_scope_sep` | `/` |  |  | Joins a vendor and an integration id in the breaker file (`vendor/integration`), so one integration's failures open only its own breaker. A call that names no integration uses the bare vendor key, which the Node hooks also read and write. |
 | `jev.breaker_threshold` | `3` |  |  | Consecutive fallback-eligible failures that open a vendor's breaker (Node: BREAKER_THRESHOLD). |
 | `jev.budget_file` | `jev-budget.json` |  |  | The budget-watch state file in jev.state_dir: the day, the spend so far and the day a warning was last given (Node: jev-budget.json). |
 | `jev.cache_file` | `cache/jev-assist.json` |  |  | The answer cache file, relative to the anti-hall home directory; the same file the Node hooks use (Node: cache/jev-assist.json), so a text asked by either side is asked once. |
@@ -1661,8 +1664,12 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `jev.scrub_rules` | `17 items` |  |  | The outbound secret-scrub rules every Jev request body passes through, in order (Node: hooks/lib/secret-scrub.js scrubSecrets, rule for rule): `pattern` (Rust regex syntax: JavaScript look-behind is `no_alnum_before`, a hit right after an ASCII letter or digit is skipped; `\s` is spelled as JavaScript's whitespace set; the `i` flag as explicit [xX] classes), `to` the replacement (`${n}` a group). A rule that does not compile makes the scrubber redact the whole text (jev.scrub_failed_text). |
 | `jev.settings_file` | `settings.json` |  |  | The unified settings file, relative to the anti-hall home directory (Node: settings.json). |
 | `jev.settings_recheck_ms` | `2000` |  | ms | How often the settings files are re-checked for changes: at most one stat of each of the two files per window, taken by the first call after it elapses; between checks a call costs one clock read, so an off Jev stays off the hot path. |
+| `jev.soft_ms` | `800` |  | ms | SOFT limit of one Jev call: a call slower than this is logged (jev_slow) and counted, and its answer is still used. The HARD limit that cuts the call (and falls back to the baseline) is jev.timeout_ms, capped by jev.max_timeout_ms. |
 | `jev.state_dir` | `state` |  |  | Directory of the Jev budget-watch state, relative to the anti-hall home directory (Node: state/). |
-| `jev.timeout_ms` | `1500` |  | ms | Per-call time budget for one Jev call, request, headers and body together (Node: DEFAULT_TIMEOUT_MS). |
+| `jev.stop_hard_ms` | `1000` |  | ms | HARD limit of a Jev call made by a Stop or SubagentStop: the wait is cut there and the check keeps its baseline (fail-open). PreToolUse and UserPromptSubmit never wait: they answer from the baseline and the cache while the question goes out asynchronously. |
+| `jev.stop_soft_ms` | `500` |  | ms | SOFT limit of a Jev call made by a Stop or SubagentStop (dispatch.stop_events), the only events that wait for Jev: slower is logged (jev_slow) and counted, the answer is still used. |
+| `jev.sync_min_ms` | `700` |  | ms | Least time a request must still have for a check inside it to wait on Jev; with less, the check keeps its baseline, the question goes out asynchronously and its answer is cached for the next ask of the same text. Jev answered in 300-680 ms in live use while a hook client waits about 250 ms, so a shorter wait could only time out and open the breaker. |
+| `jev.timeout_ms` | `1500` |  | ms | HARD limit (the per-call time budget) for one Jev call, request, headers and body together; the SOFT limit is jev.soft_ms (Node: DEFAULT_TIMEOUT_MS). |
 | `jev.turn_ref_window_bytes` | `65536` |  | bytes | How much of the end of a transcript is scanned for the turn pointer on a decision row (Node: the 64 KiB window of turnRefFromTranscript). |
 | `jev.unlisted_mode` | `shadow` |  |  | Mode of an integration id that is not in the table (Node: every id that is not one of the legacy on-by-default ones). |
 
@@ -1916,7 +1923,10 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `dispatch.max_timeout_s` | `86400` | `AH_ENGINE_DISPATCH_MAX_TIMEOUT_S` | s | An upper bound on any Node hook's timeout, whatever its hooks.json entry says (the default is above every real timeout, so it changes nothing; tests lower it to exercise a hook that never exits). |
 | `dispatch.message_joiner` | `\n` |  |  | Text placed between the systemMessage values of several hooks when they are joined into one. |
 | `dispatch.msg_bad_map` | `cannot read the fallback map {path}: {err}` |  |  | Error printed when the `--fallback-map` file cannot be read as a JSON object of events to hook ids to commands. |
-| `dispatch.msg_conflict` | `hooks {ids} returned outputs that cannot be combined into one` |  |  | Reason logged when several hooks returned output one hook output cannot combine. |
+| `dispatch.msg_conflict` | `hooks {ids} returned outputs that cannot be combined into one: {why}` |  |  | Reason logged when several hooks returned output one hook output cannot combine. |
+| `dispatch.msg_conflict_exit` | `hook {id} exited with status {code}` |  |  | Why a combine conflicted: a hook exited with a non-zero (or no) status. |
+| `dispatch.msg_conflict_field` | `hook {id} set field {field} to a value another hook set differently` |  |  | Why a combine conflicted: two hooks set the same top-level field to different values; `id` is the later hook. |
+| `dispatch.msg_conflict_plain` | `hook {id} printed output that is not a JSON object` |  |  | Why a combine conflicted: a hook printed output that is not a JSON object while others were combined. |
 | `dispatch.msg_context_over_cap` | `joined context is {len} characters, over the {cap} the host delivers inline` |  |  | Event-log detail when the joined additionalContext of an event is over the host's inline cap. |
 | `dispatch.msg_context_spilled` | `joined context spilled: {inline} characters inline, {file} characters of {hoo...` |  |  | Event-log detail when an over-cap joined context was spilled to a file. Placeholders: {inline}, {file}, {hooks}, {path}. |
 | `dispatch.msg_defer` | `dispatcher deferred the whole call: {why}` |  |  | Event-log detail when the dispatcher cannot answer an event and defers the whole call. |
@@ -3998,6 +4008,13 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `doctor.installed_max_bytes` | `4194304` |  |  | The largest plugin registry file read when scanning other plugins. |
 | `doctor.installed_plugins_rel` | `.claude/plugins/installed_plugins.json` |  |  | The host's registry of installed plugins, relative to the home directory. |
 | `doctor.intel_name` | `x86_64` |  |  | The architecture name of 64-bit Intel/AMD. |
+| `doctor.jev_check` | `1` |  |  | 1 = when Jev is enabled, the doctor makes one minimal test call to it and reports OK, WARN or FAIL by latency and error; 0 skips the check. |
+| `doctor.jev_fail_ms` | `2000` |  | ms | Latency of the doctor's Jev test call from which the report is a FAIL; it is also the call's time budget, so a timeout is a FAIL. |
+| `doctor.jev_no` | `the text is anything else` |  |  | The no criterion of the doctor's Jev test call. |
+| `doctor.jev_question` | `Is this text a plain health check?` |  |  | The question of the doctor's Jev test call. |
+| `doctor.jev_state` | `anti-hall doctor health check` |  |  | The text of the doctor's Jev test call (no user content). |
+| `doctor.jev_warn_ms` | `800` |  | ms | Latency of the doctor's Jev test call from which the report is a WARN (a slow Jev). |
+| `doctor.jev_yes` | `the text is a health check` |  |  | The yes criterion of the doctor's Jev test call. |
 | `doctor.kind_base` | `legacy-base` |  |  | The kind of a unit whose name has no suffix. |
 | `doctor.kind_hash` | `hash` |  |  | The kind of a unit named for a worktree hash. |
 | `doctor.kind_key` | `repoKey` |  |  | The kind of a unit named for a project key. |
@@ -4254,6 +4271,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `doctor_msg.head_hooks` | `Hooks (present)` |  |  | The heading of the hooks section. |
 | `doctor_msg.head_install` | `Engine install` |  |  | Section heading. |
 | `doctor_msg.head_integrations` | `Integrations` |  |  | The heading of the notes about companions that are not installed (oh-my-claudecode, the Codex port). |
+| `doctor_msg.head_jev` | `Jev` |  |  | The heading of the Jev health section (shown only when Jev is enabled). |
 | `doctor_msg.head_leaks` | `leaked test-fixture stores` |  |  | The heading of the report of leaked test-fixture stores. |
 | `doctor_msg.head_logs` | `Logs and telemetry` |  |  | Section heading. |
 | `doctor_msg.head_omc` | `OMC (oh-my-claudecode) — detected` |  |  | The heading of the oh-my-claudecode section. |
@@ -4277,6 +4295,12 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `doctor_msg.hooks_valid` | `hooks.json is valid JSON ({n} hook script(s) registered)` |  |  | hooks.json and its registry parse. Placeholder: {n}. |
 | `doctor_msg.inbox_corrupt` | `{n} of the last {m} lines of {file} are not JSON` |  |  | LG-04. Placeholders: {n}, {m}, {file}. |
 | `doctor_msg.inbox_huge` | `{file} is {mb} MB (cap {cap_mb} MB) - Fix: ah-engine maintain` |  |  | LG-03. Placeholders: {file}, {mb}, {cap_mb}. |
+| `doctor_msg.jev_fail` | `Jev call failed via {transport}: {why} (after {ms} ms)` |  |  | Finding: the Jev test call failed. Placeholders: {why}, {ms}, {transport}. |
+| `doctor_msg.jev_no_key` | `Jev is enabled but has no API key for {transport}` |  |  | Finding: Jev is enabled but no API key resolves for its transport, so the test call was not made. Placeholder: {transport}. |
+| `doctor_msg.jev_ok` | `Jev answered in {ms} ms ({transport})` |  |  | Finding: the Jev test call answered in time. Placeholders: {ms}, {transport}, {limit}. |
+| `doctor_msg.jev_slow_fail` | `Jev is too slow: {ms} ms via {transport} (limit {limit} ms)` |  |  | Finding: the Jev test call answered, but past the fail limit. Placeholders: {ms}, {transport}, {limit}. |
+| `doctor_msg.jev_slow_warn` | `Jev is slow: {ms} ms via {transport} (fails at {limit} ms)` |  |  | Finding: the Jev test call answered, but slowly. Placeholders: {ms}, {transport}, {limit}. |
+| `doctor_msg.jev_timeout` | `no answer within {limit} ms` |  |  | The reason shown when the Jev test call ran out of its budget. Placeholders: {ms}, {transport}, {limit}. |
 | `doctor_msg.kind_dangling` | `a symlink to nothing` |  |  | What a path turned out to be. |
 | `doctor_msg.kind_dir` | `a directory` |  |  | What a path turned out to be. |
 | `doctor_msg.kind_file` | `a regular file` |  |  | What a path turned out to be. |
@@ -5371,7 +5395,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `script.call_memory_by_check` | `1 entries` |  | bytes | Per-check heap a single script call may allocate (bytes), replacing script.call_memory_bytes for a rules script that engine code calls with call_fn from a command-line process. `rules/jev-report` aggregates every retained generation of the Jev decision log (about 28,000 rows for 7 MB of log) in one call. |
 | `script.call_memory_bytes` | `16777216` |  | bytes | Heap a single script call may allocate above the runtime's size after its scripts were loaded; past it the call fails and defers. |
 | `script.check_scope` | `(function () {\n{source}\n;return typeof {entry} === 'function' ? {entry} : u...` |  |  | How a check's own files (its includes, then its script, joined by newlines) are evaluated in the one context a worker thread shares between all checks: as the body of a function, so the check's top-level declarations (its entry and helpers) stay private to it while the lib files are evaluated once per thread. The value it evaluates to must be the check's entry function. Placeholders: {entry} (script.entry), {source}. Measured 2026-10-09 (DECISIONS.md 1.111, one thread, the 16 shipped scripts): a context per check held 3.3 MB of interpreter heap (about 150 KB per check for the intrinsics, host bindings and lib files again), one shared context 1.0 MB. |
-| `script.cut_at_request_deadline` | `1` | `AH_ENGINE_SCRIPT_CUT_AT_DEADLINE` |  | 1 = a scripted check still running when its request's client stops waiting (client.deadline_ms minus daemon.reply_slack_ms) is interrupted there, and a check not yet started by then is not started: each such entry defers to its own Node hook while the entries answered in time keep the engine's answer, so a loaded machine costs single checks instead of the whole event (before, the reply came after the client had given up and every entry of the event ran in Node). Not counted as a script error. An engine-only check whose failure mode is closed (script.failure_mode_by_check) keeps only its own limit on a guard event. 0 = the checks run to their own limits whatever the client's deadline. |
+| `script.cut_at_request_deadline` | `1` | `AH_ENGINE_SCRIPT_CUT_AT_DEADLINE` |  | 1 = a scripted check still running when its request's client stops waiting (client.deadline_ms minus daemon.reply_slack_ms) is interrupted there, and a check not yet started by then is not started: each such entry defers to its own Node hook while the entries answered in time keep the engine's answer, so a loaded machine costs single checks instead of the whole event (before, the reply came after the client had given up and every entry of the event ran in Node). Not counted as a script error. An engine-only check whose failure mode is closed (script.failure_mode_by_check) keeps only its own limit on a guard event. 0 = the checks run to their own limits whatever the client's deadline (the Node parity harness sets AH_ENGINE_SCRIPT_CUT_AT_DEADLINE=0 so its daemon answers every case, however loaded the machine). |
 | `script.enabled` | `1` | `AH_ENGINE_SCRIPT` |  | 1: a check whose script exists runs the script instead of its compiled port; 0: the compiled port always runs (the parity baseline). |
 | `script.engine_only_checks` | `7 items` |  |  | Checks with NO Node twin (their fallback command is a no-op). When one of these scripts cannot answer, its failure mode decides (script.failure_mode_by_check): `open` allows (logged and counted), `closed` blocks on a guard event (dispatch.guard_events). Every other check defers to its Node hook on a script failure, so a broken script never changes a decision. |
 | `script.entry` | `decide` |  |  | Global function a check script defines; it is called with the hook payload and returns the verdict. |
@@ -5423,10 +5447,12 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `script.sweep_max_remove` | `200` |  |  | Most files one `ah.state.sweep` call may delete, whatever the script asks for. |
 | `script.tail_buf_bytes` | `65536` |  | bytes | Size of the buffer `ah.transcript.tailLines` reads a file through. |
 | `script.tail_max_bytes` | `16777216` |  | bytes | Largest window `ah.transcript.tailLines` reads from the end of a file, whatever the script asks for. |
+| `script.time_hard_cap_ms` | `5000` |  | ms | Ceiling of the HARD CPU limit of a script call that has a normal soft limit; a soft limit already above it (a batch job's, in script.time_limit_by_check) is its own hard limit. |
+| `script.time_hard_factor` | `10` |  |  | The HARD CPU limit of a script call as a multiple of its SOFT limit (script.time_limit_ms, or the per-check entry of script.time_limit_by_check). Past the soft limit a call is only logged and counted; the interpreter is interrupted at the hard one. |
 | `script.time_limit_by_check` | `21 entries` |  |  | Per-check limit of one script call (ms; the interpreter thread's CPU time, and the wall-clock backstop is script.wall_limit_factor times it), replacing script.time_limit_ms. A key is the check name, or `<check>:<event>` for one event, which wins. handover-hygiene reads and writes a whole directory tree, so its command-line and scheduled-job runs (event Cli) get seconds; `command` (command-guard) resolves repositories and runs `git` for its edit parity and carve-outs (a child process wait is credited back, but a loaded machine stretches the interpreter's own time as well); `git` (git-guard) tokenizes the whole command and its heredoc bodies (the frozen replay of 2026-10-09 interrupted it at 50 ms on 3 long heredoc commands, each answered the same with the time); api-guard and ship-it-guard parse Bash writes with command-guard's parsers (script.includes) and compact-declaration-guard parses the current turn of a 1.5 MB transcript tail, so they get command-guard's order of time and more; `precompact-snapshot` reads the transcript tail of a PreCompact (a real 1.5 MB tail takes about 190 ms in the interpreter, so 50 ms would defer it to Node every time); `claim-ledger` walks up to 2 MB of transcript evidence; the Stop-time and prompt-time checks that scan the transcript tail or state (tasklist-guard, task-guard, silent-agent-nudge, stale-agent-stop-note, auto-handover, auto-handover-pause-nag, compact-advice-guard, limit-conserve-inject, idle-agent-sweep) get 500 ms because, measured 2026-10-09 on the frozen replay (2113 calls), the 50 ms default interrupted tasklist-guard on 2 and silent-agent-nudge on 6 of 61 Stop calls (and stale-agent-stop-note on a 156 MB transcript), each deferring a decision the script makes identically when given the time; its SessionStart advisory only lists and stats files. |
-| `script.time_limit_ms` | `50` | `AH_ENGINE_SCRIPT_TIME_MS` | ms | CPU-time limit of one script call (the interpreter thread's own CPU time, see script.wall_limit_factor for the wall-clock backstop); past it the interpreter is interrupted and the call defers to Node (never a silent allow). |
+| `script.time_limit_ms` | `50` | `AH_ENGINE_SCRIPT_TIME_MS` | ms | SOFT CPU-time limit of one script call (the interpreter thread's own CPU time): a call that used more is logged (script_soft) and counted, and keeps running. The HARD limit that interrupts it is this value times script.time_hard_factor (the call then defers to Node, never a silent allow); script.wall_limit_factor sets the wall-clock backstop from the hard limit. |
 | `script.unload_batch` | `4` |  |  | Checks unloaded per collection while an interpreter is above mem.quickjs.soft_bytes. |
-| `script.wall_limit_factor` | `10` |  |  | The wall-clock backstop of a script call, as a multiple of its time limit. The limit itself counts the interpreter thread's CPU time, so a thread kept waiting for a core by a loaded machine is not interrupted; the backstop ends a script that waits without using CPU. Time a host function spends blocked (a child process, a lock) is credited back to the backstop. |
+| `script.wall_limit_factor` | `4` |  |  | The wall-clock backstop of a script call, as a multiple of its HARD CPU limit (script.time_limit_ms times script.time_hard_factor). The limit itself counts the interpreter thread's CPU time, so a thread kept waiting for a core by a loaded machine is not interrupted; the backstop ends a script that waits without using CPU. Time a host function spends blocked (a child process, a lock) is credited back to the backstop. |
 | `script.write_max_bytes` | `1048576` |  | bytes | Largest text one `ah.state.writeAtomic` call may write; a larger text is refused. |
 | `script.write_path_max` | `600` |  |  | Longest relative path one `ah.state.writeAtomic` call may name. |
 | `script.write_root` | `.anti-hall` |  |  | The one directory under the home directory that a script may write to through `ah.state.writeAtomic` (a path must start with it; nothing outside it, no link below it). |
@@ -9510,11 +9536,15 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `msg.hint_socket_path` | Self-fix hint when the socket path is too long. Placeholder: {env_dir}. |
 | `msg.hint_state_dir` | Self-fix hint when the state directory is not writable or not private. Placeholders: {state_dir}, {env_dir}. |
 | `msg.impact_no_routing` | Status shown in place of a model-routing saving figure while no routing events are recorded. |
+| `msg.jev_slow` | Log detail (code jev_slow, rate-limited) of a Jev call slower than its SOFT limit; its answer was still used. |
 | `msg.log_accept_error` | Event-log detail (rate-limited) when the daemon's accept failed for a reason other than nothing pending. Placeholders: {code} (os<n>), {err}. |
 | `msg.log_accept_recovered` | Event-log detail when the daemon accepts a connection again after accept failures (logged then, because a full descriptor table can keep the failure's own log line from being written). Placeholders: {n}, {code} (os<n> of the last failure). |
 | `msg.log_allocator_invalid` | Event-log detail (kind alloc_invalid) when diagnostics.allocator holds a value that is not an accepted allocator; the daemon starts with jemalloc. Placeholder: {value}. |
 | `msg.log_bind_fail` | Start-failure detail when binding the socket fails. Placeholders: {path}, {err}. |
 | `msg.log_budget` | Log detail when a rule evaluation exceeded its CPU budget. |
+| `msg.log_budget_crossed` | Log detail when a check ran and the request's CPU budget was crossed while it did: the check's own thread CPU and wall time. |
+| `msg.log_budget_skipped` | Log detail when a check was not started because the request's CPU budget was already spent; `by` names the check that crossed it (empty when it was crossed before the first check). |
+| `msg.log_budget_soft` | Log detail when a request used more thread CPU than its SOFT budget (a warning; nothing was cut). |
 | `msg.log_client_panic` | Log detail when the hook client hit an internal error (a panic) and failed open. |
 | `msg.log_cpu_sustained` | Event-log detail when the daemon CPU self-check observes sustained CPU and backs off scheduled jobs. Placeholders: {pct}, {ms}, {backoff_ms}. |
 | `msg.log_crash_context` | Log detail when a daemon is found dead without a clean exit, with the last breadcrumb. Placeholders: {pid}, {context}. |
@@ -9522,6 +9552,7 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `msg.log_crashloop_rollback` | Log detail added when a crash-loop trip also requested a roll-back. |
 | `msg.log_daemon_killed` | Log detail when the daemon was killed by a signal while starting. |
 | `msg.log_daemon_spawn_failed` | Event-log detail (kind spawn_fail, code os<n>) when the client could not start the daemon (fork or exec failed: EAGAIN, ENOMEM, a missing executable). Placeholder: {err}. |
+| `msg.log_deadline_soft` | Log detail when a request is still being evaluated after the client's fail-fast wait (its SOFT deadline); the checks keep running up to the hard deadline. |
 | `msg.log_fallback_read_error` | Log detail when reading the Node fallback's stdout or stderr failed part-way. |
 | `msg.log_fallback_read_timeout` | Log detail when the Node fallback finished but its stdout or stderr was still open at the deadline. |
 | `msg.log_fallback_signal` | Log detail when the Node fallback was killed by a signal (out of memory, a crash). |
@@ -9571,6 +9602,11 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `msg.schedule_timeout` | Detail of a run that passed its timeout. |
 | `msg.schedule_unknown_action` | A job names an action the scheduler does not know; the job is ignored. Placeholders: {job}, {action}. |
 | `msg.schedule_unknown_job` | `schedule run` named a job that is not configured. Placeholder: {job}. |
+| `msg.script_interrupted` | Failure detail of a script call that was interrupted: the interpreter's error, the limit that fired and the limits' sizes. |
+| `msg.script_limit_cpu` | Name of the script CPU-time limit in the line that says which limit interrupted a script call. |
+| `msg.script_limit_request` | Name of the request's client deadline in the line that says which limit interrupted a script call. |
+| `msg.script_limit_wall` | Name of the script wall-clock backstop in the line that says which limit interrupted a script call. |
+| `msg.script_soft_overrun` | Log detail (code script_soft, rate-limited) of a script call that used more thread CPU than its SOFT limit; it was not cut. |
 | `msg.spool_damaged` | Quarantine reason for spool bytes that are not a valid record. |
 | `msg.spool_full` | Printed by `proj` when the spool is full, so the write was not kept. |
 | `msg.spool_io` | Printed by `proj` when the spool could not be written. Placeholder: {err}. |
@@ -9671,6 +9707,7 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | Name | Kind | Unit | Labels | What it counts |
 |---|---|---|---|---|
 | `accept_errors` | counter | errors | code | Accept calls that failed for a reason other than nothing pending (EMFILE, ENFILE, ENOBUFS, ENOMEM), by OS error code (os<n>); each one backs the accept loop off for daemon.accept_error_backoff_ms. |
+| `budget_soft` | counter | requests |  | Requests that used more thread CPU than the SOFT budget (daemon.eval_soft_us); only warned about, every check kept its answer. |
 | `budget_trips` | counter | evaluations |  | Evaluations cut off by the per-request CPU budget. |
 | `bus_dropped` | gauge | notifications |  | Pub/sub notifications a full subscriber queue could not take since the daemon started (the data stays in SQLite). |
 | `bus_published` | gauge | notifications |  | Pub/sub notifications delivered to subscriber queues since the daemon started. |
@@ -9684,6 +9721,7 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `db_hot_bytes` | gauge | bytes |  | Size of hot.db. |
 | `db_hot_wal_bytes` | gauge | bytes |  | Size of hot.db's write-ahead log. |
 | `db_writes` | gauge | writes |  | Writes carried by those transactions since the daemon started. |
+| `deadline_soft` | counter | requests |  | Requests answered after the client's fail-fast wait (client.deadline_ms) but inside the hard deadline; only warned about. |
 | `dispatch_checks` | counter | entries | event, check, answer | Built-in check entries the dispatcher sent to the daemon, by event, check and answer (decided, or defer = its Node hook ran instead) (D58). |
 | `dispatch_entries` | counter | entries | event, entry, outcome, cfg | What the dispatcher's plan did to each table entry of an event it asked the daemon about (D87): ran, skipped_predicate, skipped_max_rules, skipped_budget, shadowed or off, by event, entry, outcome and the hash of the non-default hook configuration the plan was made under (`default` when none). |
 | `errors` | counter | requests |  | Requests answered ERR. |
@@ -9709,6 +9747,7 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `rule_hits` | counter | matches | action | Regex rule matches, by action (deny, warn, context). |
 | `schedule_missed` | counter | runs | job | Runs that caught up a missed window or skipped it, by job (D33). |
 | `schedule_runs` | counter | runs | job, status | Scheduled runs that finished, by job and status (ok, failed, timeout, planned, skipped) (D33). |
+| `script_soft` | counter | calls |  | Script calls that used more thread CPU than their SOFT limit (script.time_limit_ms); only warned about, the call was not cut. |
 | `slow_replies` | counter | replies |  | Replies finished after their client's deadline had passed: slow but healthy (the client fell back to Node), counted apart from errors. |
 | `spool_applied` | counter | writes |  | Spooled writes the daemon applied (D24). |
 | `spool_quarantined` | counter | records |  | Spool records moved to quarantine: damaged, or refused for good by the store (D24). |
@@ -9727,6 +9766,7 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `jev_cooldowns` | counter | calls |  | Jev calls skipped because a vendor's circuit breaker was open. |
 | `jev_cost_micro_usd` | counter | micro-usd |  | Cost of fresh Jev calls in millionths of a US dollar, as reported by the vendor or priced from the reported tokens; a cache hit adds nothing. Never an estimate of what a judge call would have cost. |
 | `jev_latency_us` | histogram | us |  | Latency of fresh Jev network calls. |
+| `jev_slow` | counter | calls |  | Jev calls slower than the SOFT limit (jev.soft_ms); their answers were still used. |
 | `jev_timeouts` | counter | calls |  | Jev calls that ran out of their time budget. |
 | `jev_verdicts` | counter | decisions | id, verdict | What each Jev decision did, by integration and verdict: added or changed (an on-mode outcome moved), would-change (a shadow call that would have moved it), none (Jev agreed with the baseline) or no-answer (it failed or was skipped). |
 | `rt_edges` | counter | edges |  | Workspace state changes emitted. |

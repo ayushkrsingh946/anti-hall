@@ -111,21 +111,98 @@ pub struct Deadline {
     /// answer, so the call is cut and the check defers to its own Node hook. Never moved by blocked time (the client waits in
     /// real time); lifted with the other limits by `commit()`.
     pub req: AtomicU64,
+    /// Which limit interrupted the call in progress ([`Trip`] as a number; 0 = none yet). The first limit to fire stays.
+    pub trip: AtomicU64,
+    /// The thread CPU time (us) at which the call in progress was armed, for the soft-limit check after it.
+    pub start_cpu: AtomicU64,
+}
+
+/// Calls that ran past their SOFT limit (and were not cut), since the last [`take_soft_overruns`].
+static SOFT_OVERRUNS: AtomicU64 = AtomicU64::new(0);
+
+/// The soft-limit overruns counted since the last call; the daemon adds them to its metrics.
+pub fn take_soft_overruns() -> u64 {
+    SOFT_OVERRUNS.swap(0, Ordering::Relaxed)
+}
+
+/// The HARD CPU limit (ms) of a call whose SOFT limit is `soft_ms`.
+fn hard_ms_of(soft_ms: u64) -> u64 {
+    // never past `script.time_hard_cap_ms`, except that a soft limit already above the cap (a batch job's) is its own hard limit
+    soft_ms.saturating_mul(defaults::num("script.time_hard_factor").max(1)).min(defaults::num("script.time_hard_cap_ms").max(soft_ms))
+}
+
+/// The limit that interrupted a script call.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Trip {
+    /// The thread's CPU time reached `script.time_limit_ms`.
+    Cpu = 1,
+    /// The wall-clock backstop (`script.wall_limit_factor` times the CPU limit) passed.
+    Wall = 2,
+    /// The request's client stopped waiting.
+    Request = 3,
+}
+
+impl Trip {
+    fn of(n: u64) -> Option<Trip> {
+        match n {
+            1 => Some(Trip::Cpu),
+            2 => Some(Trip::Wall),
+            3 => Some(Trip::Request),
+            _ => None,
+        }
+    }
+
+    fn message_key(self) -> &'static str {
+        match self {
+            Trip::Cpu => "msg.script_limit_cpu",
+            Trip::Wall => "msg.script_limit_wall",
+            Trip::Request => "msg.script_limit_request",
+        }
+    }
+}
+
+impl Deadline {
+    /// The limit the call has run past, given the thread's CPU time and the pool clock now (CPU first, then wall, then the
+    /// client's deadline); a limit that is not armed (0) never fires.
+    fn exceeded(&self, cpu_now: u64, now_ns: u64) -> Option<Trip> {
+        let (cpu, wall, req) = (self.cpu.load(Ordering::Relaxed), self.wall.load(Ordering::Relaxed), self.req.load(Ordering::Relaxed));
+        if cpu != 0 && cpu_now > cpu {
+            Some(Trip::Cpu)
+        } else if wall != 0 && now_ns > wall {
+            Some(Trip::Wall)
+        } else if req != 0 && now_ns > req {
+            Some(Trip::Request)
+        } else {
+            None
+        }
+    }
+
+    /// `error` with the limit that interrupted the call and its numbers, when one did.
+    fn explain(&self, error: &str, limit_ms: u64) -> String {
+        let Some(trip) = Trip::of(self.trip.load(Ordering::Relaxed)) else { return error.to_string() };
+        let limit = defaults::text(trip.message_key());
+        let hard_ms = hard_ms_of(limit_ms);
+        let wall_ms = hard_ms.saturating_mul(defaults::num("script.wall_limit_factor").max(1));
+        defaults::render("msg.script_interrupted", &[("error", &error), ("limit", &limit), ("cpu_ms", &hard_ms), ("wall_ms", &wall_ms)])
+    }
 }
 
 impl Pool {
     /// Start the limits of a call of `limit_ms` script time; `cut` also arms the request's client deadline.
     fn arm(&self, limit_ms: u64, cut: bool) {
         let cpu_now = crate::limits::thread_cpu_us();
-        self.deadline.cpu.store(cpu_now.saturating_add(limit_ms.saturating_mul(1000)).max(1), Ordering::Relaxed);
+        let hard_ms = hard_ms_of(limit_ms);
+        self.deadline.start_cpu.store(cpu_now, Ordering::Relaxed);
+        self.deadline.cpu.store(cpu_now.saturating_add(hard_ms.saturating_mul(1000)).max(1), Ordering::Relaxed);
         let now = self.epoch.elapsed();
-        let wall = limit_ms.saturating_mul(defaults::num("script.wall_limit_factor").max(1)).saturating_mul(1_000_000);
+        let wall = hard_ms.saturating_mul(defaults::num("script.wall_limit_factor").max(1)).saturating_mul(1_000_000);
         self.deadline.wall.store((now.as_nanos() as u64).saturating_add(wall).max(1), Ordering::Relaxed);
         let req = crate::deadline::at().filter(|_| cut).map_or(0, |at| {
             let left = at.saturating_duration_since(Instant::now());
             (now.as_nanos() as u64).saturating_add(left.as_nanos() as u64).max(1)
         });
         self.deadline.req.store(req, Ordering::Relaxed);
+        self.deadline.trip.store(0, Ordering::Relaxed);
         crate::deadline::set_cut_armed(req != 0);
     }
 
@@ -133,6 +210,22 @@ impl Pool {
     fn past_request(&self) -> bool {
         let req = self.deadline.req.load(Ordering::Relaxed);
         req != 0 && self.epoch.elapsed().as_nanos() as u64 > req
+    }
+
+    /// A call that finished (or was interrupted) having used more thread CPU than its SOFT limit: logged and counted.
+    fn note_soft(&self, name: &str, event: &str, soft_ms: u64) {
+        let used = crate::limits::thread_cpu_us().saturating_sub(self.deadline.start_cpu.load(Ordering::Relaxed));
+        if self.deadline.start_cpu.load(Ordering::Relaxed) != 0 && used > soft_ms.saturating_mul(1000) {
+            SOFT_OVERRUNS.fetch_add(1, Ordering::Relaxed);
+            let hard = hard_ms_of(soft_ms);
+            crate::discard::note(
+                "script_soft",
+                &defaults::render(
+                    "msg.script_soft_overrun",
+                    &[("check", &name), ("event", &event), ("used_us", &used), ("soft_ms", &soft_ms), ("hard_ms", &hard)],
+                ),
+            );
+        }
     }
 
     fn disarm(&self) {
@@ -152,14 +245,19 @@ impl Pool {
         let epoch = Instant::now();
         let d = deadline.clone();
         rt.set_interrupt_handler(Some(Box::new(move || {
-            let cpu = d.cpu.load(Ordering::Relaxed);
-            let wall = d.wall.load(Ordering::Relaxed);
-            let req = d.req.load(Ordering::Relaxed);
+            let (cpu, wall) = (d.cpu.load(Ordering::Relaxed), d.wall.load(Ordering::Relaxed));
             if cpu != 0 || wall != 0 {
                 crate::deadline::beat(); // the interpreter is running: a slow call, not a hung worker
             }
             let now = epoch.elapsed().as_nanos() as u64;
-            (cpu != 0 && crate::limits::thread_cpu_us() > cpu) || (wall != 0 && now > wall) || (req != 0 && now > req)
+            match d.exceeded(crate::limits::thread_cpu_us(), now) {
+                Some(trip) => {
+                    // the first limit to fire is the one reported
+                    crate::discard::harmless(d.trip.compare_exchange(0, trip as u64, Ordering::Relaxed, Ordering::Relaxed)); // keep: a loser means a limit already fired
+                    true
+                }
+                None => false,
+            }
         })));
         Some(Pool { ctx: None, checks: HashMap::new(), used: HashMap::new(), tick: 0, inst: budget().instance(), calls: 0, deadline, epoch, rt })
     }
@@ -575,6 +673,7 @@ pub fn call_fn(name: &str, func: &str, args: &Value) -> Option<Value> {
                 let s = c.json_stringify(v).catch(&c).map_err(|e| e.to_string())?;
                 Ok(s.and_then(|s| s.to_string().ok()).unwrap_or_else(|| "null".into()))
             });
+            pool.note_soft(name, func, limit);
             pool.disarm();
             host::set_deadline(None);
             reset_heap(pool);
@@ -636,6 +735,8 @@ fn call(name: &str, libs: &Fingerprint, own: &Fingerprint, payload: &Value, opts
                 Ok(s.and_then(|s| s.to_string().ok()).unwrap_or_else(|| "null".into()))
             });
             was_cut = out.is_err() && pool.past_request();
+            pool.note_soft(name, event, limit);
+            let out = out.map_err(|e| pool.deadline.explain(&e, limit));
             pool.disarm();
             host::set_deadline(None);
             let text = out?;

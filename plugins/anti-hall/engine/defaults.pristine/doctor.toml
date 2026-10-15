@@ -50,6 +50,40 @@ value = 48
 doc = "Flags of the Node doctor that the engine doctor does not handle yet; each is reported and the run continues."
 value = ["--prune-cache", "--reclaim-ingest-lock"]
 
+[doctor.jev_check]
+doc = "1 = when Jev is enabled, the doctor makes one minimal test call to it and reports OK, WARN or FAIL by latency and error; 0 skips the check."
+value = 1
+min = 0
+max = 1
+
+[doctor.jev_warn_ms]
+doc = "Latency of the doctor's Jev test call from which the report is a WARN (a slow Jev)."
+value = 800
+min = 1
+unit = "ms"
+
+[doctor.jev_fail_ms]
+doc = "Latency of the doctor's Jev test call from which the report is a FAIL; it is also the call's time budget, so a timeout is a FAIL."
+value = 2000
+min = 1
+unit = "ms"
+
+[doctor.jev_question]
+doc = "The question of the doctor's Jev test call."
+value = "Is this text a plain health check?"
+
+[doctor.jev_yes]
+doc = "The yes criterion of the doctor's Jev test call."
+value = "the text is a health check"
+
+[doctor.jev_no]
+doc = "The no criterion of the doctor's Jev test call."
+value = "the text is anything else"
+
+[doctor.jev_state]
+doc = "The text of the doctor's Jev test call (no user content)."
+value = "anti-hall doctor health check"
+
 [doctor.node_twins]
 doc = "Whether the doctor may start Node: to run a check's Node twin where the engine defers (live self-tests, the statusline render) and to syntax-check the Node supervisor and statusline files. Node is not a doctor requirement either way: with this off, or with no Node on PATH, a deferral is reported as a warning, never a pass. On while the engine still defers some self-tests to their Node twins (git, command and edit guards, DevSwarm hooks), so the report stays as complete as the live hook path; the runtime cutover turns it off. The test-only statusline stand-in always runs under Node."
 value = true
@@ -2227,3 +2261,31 @@ value = "wake-watch limit-skips: {n} (rearm-cues.jsonl, trigger limit-skip — L
 [doctor_msg.ds_cron_missing]
 doc = "\"Mailbox cron missing\" warnings shown. Placeholder: {n}."
 value = "mailbox-cron-missing warnings shown: {n} (cron-missing-warned.jsonl — a cron that keeps going missing after restores may need a supervisor-level recreate instead of relying on the per-session Stop-gate nudge)"
+
+[doctor_msg.head_jev]
+doc = "The heading of the Jev health section (shown only when Jev is enabled)."
+value = "Jev"
+
+[doctor_msg.jev_ok]
+doc = "Finding: the Jev test call answered in time. Placeholders: {ms}, {transport}, {limit}."
+value = "Jev answered in {ms} ms ({transport})"
+
+[doctor_msg.jev_slow_warn]
+doc = "Finding: the Jev test call answered, but slowly. Placeholders: {ms}, {transport}, {limit}."
+value = "Jev is slow: {ms} ms via {transport} (fails at {limit} ms)"
+
+[doctor_msg.jev_slow_fail]
+doc = "Finding: the Jev test call answered, but past the fail limit. Placeholders: {ms}, {transport}, {limit}."
+value = "Jev is too slow: {ms} ms via {transport} (limit {limit} ms)"
+
+[doctor_msg.jev_timeout]
+doc = "The reason shown when the Jev test call ran out of its budget. Placeholders: {ms}, {transport}, {limit}."
+value = "no answer within {limit} ms"
+
+[doctor_msg.jev_fail]
+doc = "Finding: the Jev test call failed. Placeholders: {why}, {ms}, {transport}."
+value = "Jev call failed via {transport}: {why} (after {ms} ms)"
+
+[doctor_msg.jev_no_key]
+doc = "Finding: Jev is enabled but no API key resolves for its transport, so the test call was not made. Placeholder: {transport}."
+value = "Jev is enabled but has no API key for {transport}"

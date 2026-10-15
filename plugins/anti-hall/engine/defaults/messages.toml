@@ -137,6 +137,46 @@ value = "daemon service thread {thread} exceeded panic restart cap"
 doc = "Log detail when a rule evaluation exceeded its CPU budget."
 value = "rule evaluation exceeded its cpu budget"
 
+[msg.log_budget_crossed]
+doc = "Log detail when a check ran and the request's CPU budget was crossed while it did: the check's own thread CPU and wall time."
+value = "cpu budget crossed by {check}: it used {cpu_us} us of cpu and {wall_us} us of wall time"
+
+[msg.log_budget_skipped]
+doc = "Log detail when a check was not started because the request's CPU budget was already spent; `by` names the check that crossed it (empty when it was crossed before the first check)."
+value = "{check} deferred, cpu budget already spent (crossed by {by})"
+
+[msg.script_limit_cpu]
+doc = "Name of the script CPU-time limit in the line that says which limit interrupted a script call."
+value = "cpu limit"
+
+[msg.script_limit_wall]
+doc = "Name of the script wall-clock backstop in the line that says which limit interrupted a script call."
+value = "wall-clock backstop"
+
+[msg.script_limit_request]
+doc = "Name of the request's client deadline in the line that says which limit interrupted a script call."
+value = "request deadline"
+
+[msg.script_interrupted]
+doc = "Failure detail of a script call that was interrupted: the interpreter's error, the limit that fired and the limits' sizes."
+value = "{error} (interrupted by the {limit}; cpu limit {cpu_ms} ms, wall backstop {wall_ms} ms)"
+
+[msg.log_budget_soft]
+doc = "Log detail when a request used more thread CPU than its SOFT budget (a warning; nothing was cut)."
+value = "request used {used_us} us of thread cpu, over the soft budget of {soft_us} us (hard budget {hard_us} us)"
+
+[msg.log_deadline_soft]
+doc = "Log detail when a request is still being evaluated after the client's fail-fast wait (its SOFT deadline); the checks keep running up to the hard deadline."
+value = "{check} ({event}): past the client's fail-fast wait, still evaluating"
+
+[msg.script_soft_overrun]
+doc = "Log detail (code script_soft, rate-limited) of a script call that used more thread CPU than its SOFT limit; it was not cut."
+value = "{check} ({event}) used {used_us} us of cpu, over its soft limit of {soft_ms} ms (hard limit {hard_ms} ms)"
+
+[msg.jev_slow]
+doc = "Log detail (code jev_slow, rate-limited) of a Jev call slower than its SOFT limit; its answer was still used."
+value = "{id}: Jev took {ms} ms, over the soft limit of {soft_ms} ms"
+
 [msg.log_panic]
 doc = "Log and failure detail when a request handler panicked."
 value = "a request handler panicked"

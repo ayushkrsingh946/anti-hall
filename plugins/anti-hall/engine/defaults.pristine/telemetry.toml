@@ -200,6 +200,18 @@ value = { kind = "counter", unit = "requests", labels = [] }
 doc = "Evaluations cut off by the per-request CPU budget."
 value = { kind = "counter", unit = "evaluations", labels = [] }
 
+[metric.budget_soft]
+doc = "Requests that used more thread CPU than the SOFT budget (daemon.eval_soft_us); only warned about, every check kept its answer."
+value = { kind = "counter", unit = "requests", labels = [] }
+
+[metric.deadline_soft]
+doc = "Requests answered after the client's fail-fast wait (client.deadline_ms) but inside the hard deadline; only warned about."
+value = { kind = "counter", unit = "requests", labels = [] }
+
+[metric.script_soft]
+doc = "Script calls that used more thread CPU than their SOFT limit (script.time_limit_ms); only warned about, the call was not cut."
+value = { kind = "counter", unit = "calls", labels = [] }
+
 [metric.panics]
 doc = "Request-handler panics that were contained."
 value = { kind = "counter", unit = "panics", labels = [] }

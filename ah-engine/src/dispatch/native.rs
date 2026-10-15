@@ -103,6 +103,7 @@ pub fn evaluate(meta: &Meta, p: &Value, over_cpu: &dyn Fn() -> bool, observe: &d
         crate::gate::global().turn(sid);
     }
     let mut tripped = false;
+    let mut culprit: Option<String> = None;
     let mut out = Vec::new();
     for e in table::select(&meta.host, &meta.event, p, meta.tool.as_deref())
         .into_iter()
@@ -111,11 +112,17 @@ pub fn evaluate(meta: &Meta, p: &Value, over_cpu: &dyn Fn() -> bool, observe: &d
         let started = std::time::Instant::now();
         crate::deadline::beat();
         let check = e.check.as_deref().unwrap_or("");
-        // past the client's deadline nobody reads this reply's answer for the entry: it is not started, and its own Node hook
+        if crate::deadline::note_soft_overrun() {
+            // the client's fail-fast wait is over: this and the later checks still run (up to the hard deadline), the Node hook is not needed
+            crate::health::log_event("deadline_soft", check, &crate::defaults::render("msg.log_deadline_soft", &[("check", &check), ("event", &meta.event)]));
+        }
+        // past the request's HARD deadline nobody reads this reply's answer for the entry: it is not started, and its own Node hook
         // answers it (the entries answered in time still count), so a slow machine costs single checks, never the event
+        let cpu_before = crate::limits::thread_cpu_us();
         let a = if tripped || over_cpu() {
             tripped = true;
-            crate::health::log_event("budget", check, crate::defaults::text("msg.log_budget"));
+            let by = culprit.as_deref().unwrap_or("");
+            crate::health::log_event("budget", check, &crate::defaults::render("msg.log_budget_skipped", &[("check", &check), ("by", &by)]));
             Answer::Defer
         } else if !crate::deadline::in_time() && crate::script::cut_at_deadline(check, &meta.event) {
             crate::script::cut(check, &meta.event);
@@ -124,7 +131,17 @@ pub fn evaluate(meta: &Meta, p: &Value, over_cpu: &dyn Fn() -> bool, observe: &d
             let mark = crate::deadline::staged_mark();
             let a = run_entry(&e, meta, p);
             if matches!(a, Answer::Defer) || over_cpu() {
-                tripped |= !matches!(a, Answer::Defer);
+                if !matches!(a, Answer::Defer) {
+                    tripped = true;
+                    // this check ran, and the budget was crossed while it did: the line says how much it spent
+                    culprit = Some(check.to_string());
+                    let (cpu_us, wall_us) = (crate::limits::thread_cpu_us().saturating_sub(cpu_before), started.elapsed().as_micros());
+                    crate::health::log_event(
+                        "budget",
+                        check,
+                        &crate::defaults::render("msg.log_budget_crossed", &[("check", &check), ("cpu_us", &cpu_us), ("wall_us", &wall_us)]),
+                    );
+                }
                 // the Node hook decides this entry, or the CPU budget was crossed while it ran: what the check staged must not
                 // land for a decision nobody received.
                 crate::deadline::discard_staged_since(mark);
@@ -234,6 +251,17 @@ mod tests {
         assert!(got.iter().all(|(_, a)| matches!(a, Answer::Defer)), "{:?}", got.iter().map(|(id, _)| id).collect::<Vec<_>>());
         let again = evaluate(&meta(), &p, &|| false, &|_, _, _| {});
         assert!(again.iter().any(|(id, a)| id == "git-guard" && matches!(a, Answer::Decided(r, _) if r.code == Some(2))), "in time it decides");
+    }
+
+    /// Past the client's fail-fast wait (the SOFT deadline) every entry still runs and decides; only the hard deadline cuts.
+    #[test]
+    fn past_the_soft_deadline_the_entries_still_run_and_decide() {
+        let p = json!({"session_id": "s", "cwd": "/", "hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "git push --force origin main"}});
+        crate::deadline::begin(std::time::Instant::now());
+        crate::deadline::client_window(0); // the fail-fast wait is over, the hard deadline is not
+        let got = evaluate(&meta(), &p, &|| false, &|_, _, _| {});
+        crate::deadline::end();
+        assert!(got.iter().any(|(id, a)| id == "git-guard" && matches!(a, Answer::Decided(r, _) if r.code == Some(2))), "the guard still decides");
     }
 
     #[test]

@@ -285,7 +285,19 @@ value = "entry {id} deferred with no runnable Node command"
 
 [dispatch.msg_conflict]
 doc = "Reason logged when several hooks returned output one hook output cannot combine."
-value = "hooks {ids} returned outputs that cannot be combined into one"
+value = "hooks {ids} returned outputs that cannot be combined into one: {why}"
+
+[dispatch.msg_conflict_exit]
+doc = "Why a combine conflicted: a hook exited with a non-zero (or no) status."
+value = "hook {id} exited with status {code}"
+
+[dispatch.msg_conflict_plain]
+doc = "Why a combine conflicted: a hook printed output that is not a JSON object while others were combined."
+value = "hook {id} printed output that is not a JSON object"
+
+[dispatch.msg_conflict_field]
+doc = "Why a combine conflicted: two hooks set the same top-level field to different values; `id` is the later hook."
+value = "hook {id} set field {field} to a value another hook set differently"
 
 [dispatch.msg_unknown_host]
 doc = "Error printed when `--host` names a host the dispatch table does not have."

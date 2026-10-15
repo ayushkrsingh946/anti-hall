@@ -868,9 +868,9 @@ fn run_core(raw: &str, args: &Args, payload: Option<&File>, complete: bool, tele
             let err = format!("{}{}", pre_err, defaults::render("dispatch.msg_defer_separately", &[("event", &args.event), ("len", &len), ("cap", &cap)]));
             Outcome { out: String::new(), code: defaults::num("dispatch.defer_exit") as i32, err: format!("{err}\n") }
         }
-        combine::Combined::Conflict(ids) => {
+        combine::Combined::Conflict { ids, why } => {
             crate::discard::harmless(crate::limits::ensure_private_dir(&crate::paths::dir())); // keep: a failure surfaces at the next create in that directory
-            health::log_event("dispatch_conflict", &args.event, &defaults::render("dispatch.msg_conflict", &[("ids", &ids.join(","))]));
+            health::log_event("dispatch_conflict", &args.event, &defaults::render("dispatch.msg_conflict", &[("ids", &ids.join(",")), ("why", &why)]));
             let mut o = combine::sequential(&results, &args.event);
             o.err = format!("{}{}", pre_err, o.err);
             o
