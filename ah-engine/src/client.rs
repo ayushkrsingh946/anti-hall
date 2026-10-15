@@ -96,9 +96,8 @@ fn exchange_inner(sock: &Path, payload: &[u8], deadline: Duration, window: Durat
     let mut buf = Vec::new();
     let (start, max_reply) = (Instant::now(), defaults::num("client.max_reply"));
     let mut late = false;
-    loop {
-        // read_to_end keeps the bytes read before an error, so a timeout resumes the same reply instead of restarting it
-        let Err(e) = (&mut s).take(max_reply.saturating_sub(buf.len() as u64)).read_to_end(&mut buf) else { break };
+    // read_to_end keeps the bytes read before an error, so a timeout resumes the same reply instead of restarting it
+    while let Err(e) = (&mut s).take(max_reply.saturating_sub(buf.len() as u64)).read_to_end(&mut buf) {
         let why = defaults::render("msg.client_io", &[("what", &"read"), ("err", &e)]);
         if !matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) {
             return Exch::Failed(why);
