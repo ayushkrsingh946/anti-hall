@@ -597,7 +597,10 @@ fn spec_cases() -> Vec<Case> {
     v.push(c("skip-all").file(".anti-hall/skip.json", &format!(r#"{{"all": {future}}}"#)).same(msg("It is probably the cache.")));
     v.push(c("skip-expired").file(".anti-hall/skip.json", r#"{"speculation-guard": 5}"#).same(msg("It is probably the cache.")));
     v.push(c("jev-env-answered").env("ANTIHALL_JEV", "1").same(msg("It is probably the cache.")));
-    v.push(c("jev-env-answered-no-hedge").env("ANTIHALL_JEV", "1").same(msg("All fine.")));
+    // Intended divergence (owner option B, the Stop-Jev gate, fix/stop-jev-gate 25832add): Node asks Jev about every reply and logs a
+    // jev-judge row, the engine asks only when the rule layer flagged a claim, so an unflagged reply leaves no row. Only that
+    // log row may differ; the verdict, exit code and stdout of this step are still compared exactly.
+    v.push(c("jev-env-answered-no-hedge").env("ANTIHALL_JEV", "1").engine_omits(".anti-hall/logs/jev-judge.ndjson").same(msg("All fine.")));
     v.push(c("jev-settings-answered").file(".anti-hall/settings.json", r#"{"jev":{"enabled":true}}"#).same(msg("It is probably the cache.")));
     v.push(c("jev-legacy-file-answered").file(".anti-hall/jev.json", r#"{"enabled":true}"#).same(msg("It is probably the cache.")));
     v.push(

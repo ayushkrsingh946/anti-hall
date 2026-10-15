@@ -45,14 +45,22 @@ pub struct Case {
     pub env: Vec<(String, String)>,
     pub transcript: Option<String>,
     pub steps: Vec<Step>,
+    /// State files Node writes and the engine deliberately does not (a documented, reasoned difference; the verdict, exit code and
+    /// stdout still have to match exactly). Skipped in the state comparison ONLY while the engine has not written the file.
+    pub engine_omits: Vec<String>,
 }
 
 impl Case {
     pub fn new(name: &str) -> Case {
-        Case { name: name.into(), files: Vec::new(), aged: Vec::new(), env: Vec::new(), transcript: None, steps: Vec::new() }
+        Case { name: name.into(), files: Vec::new(), aged: Vec::new(), env: Vec::new(), transcript: None, steps: Vec::new(), engine_omits: Vec::new() }
     }
     pub fn file(mut self, rel: &str, body: &str) -> Case {
         self.files.push((rel.into(), body.into()));
+        self
+    }
+    /// The engine deliberately leaves `rel` unwritten where Node writes it (see [`Case::engine_omits`]).
+    pub fn engine_omits(mut self, rel: &str) -> Case {
+        self.engine_omits.push(rel.into());
         self
     }
     pub fn aged(mut self, rel: &str, body: &str) -> Case {
@@ -284,6 +292,7 @@ pub fn run_case(hook: &str, check: &str, case: &Case, t: &mut Tally) {
                 // tests/jev_integrations_parity.rs, which waits for them
                 let tn: BTreeMap<_, _> = tn.into_iter().filter(|(k, _)| k != ".anti-hall/logs/jev-assist.ndjson").collect();
                 let te: BTreeMap<_, _> = te.into_iter().filter(|(k, _)| k != ".anti-hall/logs/jev-assist.ndjson").collect();
+                let tn: BTreeMap<_, _> = tn.into_iter().filter(|(k, _)| !(case.engine_omits.contains(k) && !te.contains_key(k))).collect();
                 if tn.keys().any(|k| k.contains(".jsonl") || k.contains("state-") || k.contains("tg-")) || tn.values().any(|v| v.contains("lastSweep")) {
                     t.wrote += 1;
                 }
