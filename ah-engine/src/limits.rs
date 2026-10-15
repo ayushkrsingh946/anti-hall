@@ -7,7 +7,7 @@ use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::os::unix::io::AsRawFd;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
-use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering::SeqCst};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::Instant;
 
@@ -127,6 +127,14 @@ fn bucket_budget(core: &Arc<BucketCore>) -> Budget {
         .clone()
 }
 
+/// Requests served without a rate bucket because the memory budget refused the new key (`bucket_untracked`).
+static UNTRACKED: AtomicU64 = AtomicU64::new(0);
+
+/// How many requests were served untracked since the process started.
+pub fn bucket_untracked() -> u64 {
+    UNTRACKED.load(SeqCst)
+}
+
 impl Buckets {
     /// A bucket map allowing `rps` per second with bursts up to `burst`.
     pub fn new(rps: f64, burst: f64) -> Buckets {
@@ -174,7 +182,11 @@ impl Buckets {
             let weight = BucketCore::weight(key);
             drop(map);
             if self.budget.admit(weight) == Admit::Refused {
-                return false;
+                // a memory refusal is not a rate verdict: the key is served without a bucket (the memory module counts the
+                // refusal and owns the recovery), because answering Busy here turned every hook into a Node fallback for as long
+                // as the process stayed in the dead band under the global hard limit
+                UNTRACKED.fetch_add(1, SeqCst);
+                return true;
             }
             map = self.core.lock();
             if map.len() >= self.cap && !map.contains_key(key) {
@@ -393,6 +405,41 @@ pub fn ensure_private_dir(dir: &Path) -> Result<(), DirError> {
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    /// A bucket map on its own registry (the process-wide one is shared by every test), with the owner kept alive.
+    fn buckets_in(reg: &crate::mem::Registry) -> (Buckets, Arc<BucketOwners>) {
+        let core = Arc::new(BucketCore::new());
+        let owners = Arc::new(BucketOwners::default());
+        owners.add(&core);
+        let owner: Arc<dyn Owner> = owners.clone();
+        let budget = reg.register(Spec::new("buckets", "b.soft", "b.hard", "b.low"), Arc::downgrade(&owner));
+        (Buckets { core, rps: 10.0, burst: 3.0, cap: 4096, budget }, owners)
+    }
+
+    #[test]
+    fn a_memory_refusal_serves_the_request_untracked_instead_of_busy() {
+        use std::collections::HashMap;
+        let cfg: HashMap<String, u64> = [("b.soft", 1 << 20), ("b.hard", 1 << 21), ("b.low", 80), ("mem.global_soft_bytes", 1000), ("mem.global_hard_bytes", 2000), ("mem.global_low_water_pct", 90), ("mem.global_restart_after_s", 60)]
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v))
+            .collect();
+        let reg = crate::mem::Registry::new(Box::new(move |k| cfg.get(k).copied().unwrap_or(0)), Box::new(|_| {}));
+        let (mut b, _owners) = buckets_in(&reg);
+        let t0 = Instant::now();
+        assert!(reg.tick(2500, 0).is_none(), "over the global hard limit: the latch is set and the holders are recycled");
+        let before = bucket_untracked();
+        // the dead band: back under the hard limit, above the low-water mark, so the latch stays set (the case seen live)
+        assert!(reg.tick(1950, 1_000).is_none());
+        assert!(reg.snapshot()["global"]["hard_active"] == true, "still latched in the dead band");
+        assert!(b.allow_at("new-session", t0), "a new key is served, never refused as if it were a rate hit");
+        assert!(b.allow_at("another", t0));
+        assert_eq!(b.len(), 0, "nothing was tracked while the latch held");
+        assert_eq!(bucket_untracked() - before, 2);
+        // once the latch clears, keys are tracked and rate-limited again
+        assert!(reg.tick(100, 2_000).is_none());
+        assert!(b.allow_at("s", t0) && b.allow_at("s", t0) && b.allow_at("s", t0));
+        assert!(!b.allow_at("s", t0), "the rate limit applies again");
+    }
 
     #[test]
     fn bucket_allows_burst_then_throttles_then_refills() {

@@ -176,6 +176,25 @@ fn a_process_total_that_stays_over_the_global_hard_limit_requests_a_restart() {
 }
 
 #[test]
+fn a_latch_that_persists_in_the_dead_band_below_hard_requests_a_restart() {
+    // the live failure: the total trips hard once, recycling does not return the fragmented pages, and the process then sits
+    // between the low-water mark (1800) and hard (2000) for good: every insert refused, and no restart because the old check
+    // only ran while the total was over hard
+    let mut cfg = GLOBAL.to_vec();
+    cfg.extend(BASE);
+    let (reg, events) = registry(&cfg);
+    assert!(reg.tick(2100, 0).is_none(), "first sight over hard: recycle");
+    assert_eq!(reg.snapshot()["global"]["hard_active"], true);
+    assert!(reg.tick(1900, 30_000).is_none(), "in the dead band, not yet N seconds");
+    assert_eq!(reg.snapshot()["global"]["hard_active"], true, "the latch holds in the band");
+    assert!(!reg.restart_requested());
+    let r = reg.tick(1900, 61_000).expect("latched for 61 s in the dead band: restart");
+    assert_eq!((r.holder.as_str(), r.usage, r.limit, r.secs), ("global", 1900, 2000, 61));
+    assert!(kinds(&events).contains(&Kind::Restart));
+    assert!(reg.tick(1900, 90_000).is_none(), "asked once");
+}
+
+#[test]
 fn recovering_below_the_low_water_mark_resets_the_restart_clock() {
     let mut cfg = GLOBAL.to_vec();
     cfg.extend(BASE);

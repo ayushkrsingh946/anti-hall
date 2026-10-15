@@ -294,20 +294,18 @@ impl Registry {
                         o.recycle();
                     }
                 }
-            } else {
-                let since = *g.over_since.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-                if let Some(t) = since
-                    && now_ms.saturating_sub(t) >= wait
-                    && !g.restart_asked.swap(true, SeqCst)
-                {
-                    g.restarts.fetch_add(1, SeqCst);
-                    self.emit(None, Kind::Restart, GLOBAL_NAME, p, hard);
-                    return Some(Restart { holder: GLOBAL_NAME.into(), usage: p, limit: hard, secs: now_ms.saturating_sub(t) / 1000 });
-                }
+            } else if let Some(r) = self.latched_restart(p, hard, wait, now_ms) {
+                return Some(r);
             }
         } else if p as u128 <= hard as u128 * pct as u128 / 100 {
             g.hard_active.store(false, SeqCst);
             *g.over_since.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+        } else if g.hard_active.load(SeqCst) {
+            // the dead band: back under the hard limit but not yet down to the low-water mark. Recycling a fragmented heap often
+            // leaves the process here for good, with every insert refused, so a latch that persists restarts the daemon too.
+            if let Some(r) = self.latched_restart(p, hard, wait, now_ms) {
+                return Some(r);
+            }
         }
         // a holder that recycling cannot bring under its own hard limit (leaked memory) is freed only by a restart
         for e in entries.iter().filter(|e| e.sum.is_none()) {
@@ -328,6 +326,20 @@ impl Registry {
             }
         }
         None
+    }
+
+    /// The clean-restart request once the global hard latch has held for `wait` ms (`mem.global_restart_after_s`), whether the
+    /// process is still over the hard limit or already back in the band below it.
+    fn latched_restart(&self, p: usize, hard: usize, wait: u64, now_ms: u64) -> Option<Restart> {
+        let g = &self.0.g;
+        let since = *g.over_since.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let t = since.filter(|t| now_ms.saturating_sub(*t) >= wait)?;
+        if g.restart_asked.swap(true, SeqCst) {
+            return None;
+        }
+        g.restarts.fetch_add(1, SeqCst);
+        self.emit(None, Kind::Restart, GLOBAL_NAME, p, hard);
+        Some(Restart { holder: GLOBAL_NAME.into(), usage: p, limit: hard, secs: now_ms.saturating_sub(t) / 1000 })
     }
 
     /// Whether a restart has been requested and not yet acted on (the daemon drains after the first request).

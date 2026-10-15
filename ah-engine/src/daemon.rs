@@ -431,6 +431,7 @@ impl Shared {
             "workers": cfg.workers,
             "requests": self.stats.requests.load(SeqCst),
             "busy_replies": self.stats.busy.load(SeqCst),
+            "bucket_untracked": crate::limits::bucket_untracked(),
             "errors": self.stats.errors.load(SeqCst),
             "budget_trips": self.stats.budget_trips.load(SeqCst),
             "panics": self.stats.panics.load(SeqCst),
