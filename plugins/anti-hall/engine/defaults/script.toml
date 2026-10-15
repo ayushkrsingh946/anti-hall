@@ -135,6 +135,11 @@ doc = "Calls after which a worker collects its script interpreter's garbage and 
 value = 1000
 min = 1
 
+[script.idle_free_ms]
+doc = "A worker whose script interpreter has not been called for this long, and that has nothing queued, frees the interpreter (its heap goes back to the allocator; the next scripted call rebuilds it from the plugin's files, a cold call). Bounds the memory the script pool holds when the load is bursty. 0 = never free."
+value = 60000
+unit = "ms"
+
 [script.p95_budget_us]
 doc = "Latency a scripted check may ADD over its compiled port at the 95th percentile, per call (the D88 go/no-go gate measures against it; the primitives a script calls, such as a transcript read, cost the same either way)."
 value = 1000

@@ -22,7 +22,7 @@ struct Pats {
     compact_cmd: Regex,
 }
 
-fn pats() -> &'static Pats {
+fn pats() -> std::sync::Arc<Pats> {
     static P: crate::defaults::Cache<Pats> = crate::defaults::Cache::new();
     P.get_or_init(|| Pats {
         not_typed: jsre::compile(defaults::text("compact_decl.not_typed"), false),

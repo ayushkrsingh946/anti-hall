@@ -26,7 +26,7 @@ struct Res {
     created: Regex,
 }
 
-fn res() -> &'static Res {
+fn res() -> std::sync::Arc<Res> {
     static R: crate::defaults::Cache<Res> = crate::defaults::Cache::new();
     R.get_or_init(|| Res {
         terminal: jsre::compile(defaults::text("taskstate.terminal_status_re"), true),

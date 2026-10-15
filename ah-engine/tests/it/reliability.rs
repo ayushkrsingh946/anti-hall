@@ -393,7 +393,7 @@ fn settle_after_cold_slow(e: &Env) {
 }
 
 fn clamped_num(key: &str, value: u64) -> u64 {
-    let e = ah_engine::defaults::all().iter().find(|e| e.key == key).unwrap();
+    let e = *ah_engine::defaults::all().iter().find(|e| e.key == key).unwrap();
     let min = e.min.map(|n| n.max(0) as u64).unwrap_or(0);
     let max = e.max.map(|n| n.max(0) as u64).unwrap_or(u64::MAX);
     value.max(min).min(max)

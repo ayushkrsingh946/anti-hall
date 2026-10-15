@@ -400,7 +400,7 @@ impl Effective {
     /// not settings of this kind: they travel with each request (`request_env`, D76) and the checks read them from there.
     pub fn resolve(layers: &Layers, env: &dyn Fn(&str) -> Option<String>) -> Effective {
         let mut map = BTreeMap::new();
-        for e in defaults::all() {
+        for e in defaults::all().iter().copied() {
             let from_env = e
                 .env
                 .and_then(env)
@@ -913,7 +913,7 @@ mod tests {
     /// switch (`ANTIHALL_*`) would stick to whichever client started the daemon, so none may be an integer setting.
     #[test]
     fn only_engine_tunables_read_the_process_environment() {
-        for e in defaults::all() {
+        for e in defaults::all().iter().copied() {
             if let (Some(name), V::Int(_)) = (e.env, &e.value) {
                 assert!(name.starts_with("AH_ENGINE_"), "{} reads {name} from the daemon's environment", e.key);
             }
@@ -1041,7 +1041,7 @@ mod tests {
     #[test]
     fn every_shipped_setting_resolves_to_its_default_without_overrides() {
         let r = Effective::resolve(&Layers::default(), &no_env);
-        for e in defaults::all() {
+        for e in defaults::all().iter().copied() {
             let got = r.get(e.key).unwrap_or_else(|| panic!("{} missing", e.key));
             assert_eq!((&got.value, got.source), (&e.value.to_json(), Source::Default), "{}", e.key);
         }

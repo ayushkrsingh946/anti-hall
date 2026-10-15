@@ -85,6 +85,8 @@ struct Pool {
     /// Interrupt deadlines of the call in progress.
     deadline: Arc<Deadline>,
     epoch: Instant,
+    /// When a script was last called on this interpreter, for `script.idle_free_ms`.
+    last_call: Instant,
     rt: Runtime,
 }
 
@@ -161,7 +163,7 @@ impl Pool {
             let now = epoch.elapsed().as_nanos() as u64;
             (cpu != 0 && crate::limits::thread_cpu_us() > cpu) || (wall != 0 && now > wall) || (req != 0 && now > req)
         })));
-        Some(Pool { ctx: None, checks: HashMap::new(), used: HashMap::new(), tick: 0, inst: budget().instance(), calls: 0, deadline, epoch, rt })
+        Some(Pool { ctx: None, checks: HashMap::new(), used: HashMap::new(), tick: 0, inst: budget().instance(), calls: 0, deadline, epoch, last_call: Instant::now(), rt })
     }
 }
 
@@ -415,6 +417,7 @@ fn limit_ms(name: &str, event: &str) -> u64 {
 fn ensure_entry(pool: &mut Pool, key: &str, libs: &Fingerprint, own: &Fingerprint, entry: &str) -> Result<Context, String> {
     pool.tick += 1;
     pool.calls += 1;
+    pool.last_call = Instant::now();
     pool.used.insert(key.to_string(), pool.tick);
     let libs_stale = pool.ctx.as_ref().is_none_or(|(fp, _)| fp != libs);
     if libs_stale || pool.checks.get(key).is_none_or(|fp| fp != own) {
@@ -478,6 +481,10 @@ fn fit(pool: &mut Pool, ctx: &Context, keep: &str, mut size: usize) -> Option<us
 pub fn maintain(idle: bool) {
     POOL.with(|cell| {
         let mut slot = cell.borrow_mut();
+        if idle && slot.as_ref().is_some_and(idle_expired) {
+            *slot = None; // dropping the pool frees the interpreter; the next scripted call on this thread builds a new one
+            return;
+        }
         let Some(pool) = slot.as_mut() else { return };
         if pool.calls == 0 || (!idle && pool.calls < defaults::num("script.gc_every_calls").max(1)) {
             return;
@@ -494,6 +501,12 @@ pub fn maintain(idle: bool) {
             }
         }
     })
+}
+
+/// Whether `pool` has gone unused for `script.idle_free_ms` (0 = never).
+fn idle_expired(pool: &Pool) -> bool {
+    let ms = defaults::num("script.idle_free_ms");
+    ms > 0 && pool.last_call.elapsed() >= std::time::Duration::from_millis(ms)
 }
 
 /// Unload the least recently called entries (never `keep`) until the runtime holds at most `target` bytes (the registry's low-water mark), `script.unload_batch` entries per collection; returns the size it ends at. An unloaded
