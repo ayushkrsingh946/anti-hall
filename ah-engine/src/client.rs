@@ -47,13 +47,22 @@ pub enum Exch {
     Absent,
     /// A daemon may be there but the exchange failed: unsafe socket, bad or truncated frame, an I/O error.
     Failed(String),
-    /// No reply within the deadline (on macOS an SO_RCVTIMEO expiry reads as EAGAIN, os error 35). The daemon is alive but
-    /// late: this call gets no engine verdict and runs its Node hooks, but no down marker, spawn or breaker failure follows
-    /// unless `client.slow_down_n` slow replies come in a row (a wedged daemon).
+    /// No reply within the whole wait window (the deadline, extended to `client.slow_fallback_max_ms` for a daemon that is alive
+    /// but late; on macOS an SO_RCVTIMEO expiry reads as EAGAIN, os error 35). The daemon may already have processed the
+    /// request, so this call runs no Node hook (it would count twice): it fails open, and no down marker, spawn or breaker
+    /// failure follows unless `client.slow_down_n` such calls come in a row (a wedged daemon).
     Slow(String),
 }
 
-fn exchange_inner(sock: &Path, payload: &[u8], deadline: Duration) -> Exch {
+/// The longest one exchange waits for its reply: the deadline, extended to `client.slow_fallback_max_ms` less `client.slow_wait_margin_ms` (a daemon
+/// that is alive answers late rather than never; the wrapper's watchdog waits for the whole `client.slow_fallback_max_ms`).
+fn wait_window(deadline: Duration) -> Duration {
+    let max = defaults::millis("client.slow_fallback_max_ms");
+    let ends = if max.is_zero() { Duration::ZERO } else { max.saturating_sub(defaults::millis("client.slow_wait_margin_ms")) };
+    deadline.max(ends)
+}
+
+fn exchange_inner(sock: &Path, payload: &[u8], deadline: Duration, window: Duration) -> Exch {
     match std::fs::symlink_metadata(sock) {
         // only a missing socket means "no daemon"; any other error (EACCES, ENOTDIR, ELOOP, EIO) is a failed exchange the
         // breaker counts and the log names, never a reason to start a second daemon (review finding 18)
@@ -76,9 +85,26 @@ fn exchange_inner(sock: &Path, payload: &[u8], deadline: Duration) -> Exch {
         return e;
     }
     let mut buf = Vec::new();
-    if let Err(e) = (&mut s).take(defaults::num("client.max_reply")).read_to_end(&mut buf) {
+    let (start, max_reply) = (Instant::now(), defaults::num("client.max_reply"));
+    let mut late = false;
+    loop {
+        // read_to_end keeps the bytes read before an error, so a timeout resumes the same reply instead of restarting it
+        let Err(e) = (&mut s).take(max_reply.saturating_sub(buf.len() as u64)).read_to_end(&mut buf) else { break };
         let why = defaults::render("msg.client_io", &[("what", &"read"), ("err", &e)]);
-        return if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) { Exch::Slow(why) } else { Exch::Failed(why) };
+        if !matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) {
+            return Exch::Failed(why);
+        }
+        let left = window.saturating_sub(start.elapsed());
+        if left.is_zero() {
+            return Exch::Slow(why);
+        }
+        if !late {
+            late = true;
+            health::log_event("client_late", "daemon", &why); // past the deadline but still waiting for the daemon's own reply
+        }
+        if let Err(e) = io(s.set_read_timeout(Some(left)), defaults::text("msg.client_what_timeout")) {
+            return e;
+        }
     }
     match frame::decode(&buf) {
         Ok((k, body)) => Exch::Reply(k, body),
@@ -89,12 +115,18 @@ fn exchange_inner(sock: &Path, payload: &[u8], deadline: Duration) -> Exch {
 /// One exchange under a hard overall deadline (the work runs on a thread so even a blocking connect
 /// cannot outlive it).
 pub fn exchange(sock: &Path, payload: &[u8], deadline: Duration) -> Exch {
+    exchange_for(sock, payload, deadline, deadline)
+}
+
+/// `exchange` that keeps waiting for the reply up to `window` (>= `deadline`) once the deadline has passed.
+fn exchange_for(sock: &Path, payload: &[u8], deadline: Duration, window: Duration) -> Exch {
+    let window = window.max(deadline);
     let (tx, rx) = mpsc::channel();
     let (sock, payload) = (sock.to_path_buf(), payload.to_vec());
     std::thread::spawn(move || {
-        crate::discard::harmless(tx.send(exchange_inner(&sock, &payload, deadline))); // keep: the receiver is gone; nobody is waiting for the result
+        crate::discard::harmless(tx.send(exchange_inner(&sock, &payload, deadline, window))); // keep: the receiver is gone; nobody is waiting for the result
     });
-    rx.recv_timeout(deadline + defaults::millis("client.deadline_slack_ms")).unwrap_or_else(|_| Exch::Slow(defaults::text("msg.client_timeout").into()))
+    rx.recv_timeout(window + defaults::millis("client.deadline_slack_ms")).unwrap_or_else(|_| Exch::Slow(defaults::text("msg.client_timeout").into()))
 }
 
 fn state_file(key: &str) -> PathBuf {
@@ -322,7 +354,7 @@ pub(crate) fn attempt(payload: &[u8], cfg: &ClientConfig, have_fallback: bool) -
     }
     let sock = paths::socket();
     wait_marker(true);
-    match exchange(&sock, payload, cfg.deadline) {
+    match exchange_for(&sock, payload, cfg.deadline, wait_window(cfg.deadline)) {
         Exch::Reply(Kind::Ok, body) => {
             wait_marker(false);
             clear_daemon_down_marker();
@@ -349,11 +381,13 @@ pub(crate) fn attempt(payload: &[u8], cfg: &ClientConfig, have_fallback: bool) -
             None
         }
         Exch::Slow(why) => {
-            // late, not down: hand THIS call to its Node hooks (the non-OK-reply path), never a silent allow
+            // nothing came within the whole window, but the daemon may have processed the request already: running the Node
+            // hooks too would count the call twice, so this call fails open (the unavailable path), never to Node
+            wait_marker(false);
+            note_unavailable();
             health::log_event("client_slow", "daemon", &why);
-            LAST_NON_OK_REPLY.set(true);
             if slow_streak_tripped() {
-                mark_daemon_down(&why); // wedged: later clients skip it; this call still runs its Node hooks
+                mark_daemon_down(&why); // wedged: later clients skip it
             }
             None
         }
@@ -776,9 +810,9 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("not-a-dir");
         std::fs::write(&file, "x").unwrap();
-        assert!(matches!(exchange_inner(&dir.join("absent.sock"), b"CTL ping\n", Duration::from_millis(200)), Exch::Absent));
+        assert!(matches!(exchange_inner(&dir.join("absent.sock"), b"CTL ping\n", Duration::from_millis(200), Duration::from_millis(200)), Exch::Absent));
         // a path through a regular file: ENOTDIR, a broken install, not an absent daemon
-        let r = exchange_inner(&file.join("e.sock"), b"CTL ping\n", Duration::from_millis(200));
+        let r = exchange_inner(&file.join("e.sock"), b"CTL ping\n", Duration::from_millis(200), Duration::from_millis(200));
         assert!(matches!(r, Exch::Failed(_)), "{r:?}");
         crate::discard::harmless(std::fs::remove_dir_all(&dir)); // keep: cleanup that raced; an absent file is the goal state
     }
