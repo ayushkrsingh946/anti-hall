@@ -109,3 +109,19 @@ fn the_setting_is_followed_without_a_restart_and_the_flag_and_the_environment_ho
     let d = Daemon::start("env0", &[("AH_ENGINE_DEBUG", "0")], &[]);
     assert_eq!(status(&d.root).unwrap()["debug"]["enabled"], false, "0 is off");
 }
+
+#[test]
+fn a_memory_budget_breach_is_reported_when_it_begins_and_clears_when_the_budget_is_lifted() {
+    let d = Daemon::start("budget", &[("AH_ENGINE_RSS_CHECK_MS", "200")], &[]);
+    let toml = d.root.join("eng").join("config.toml");
+    wait_for("a memory reading", || status(&d.root).is_some_and(|s| s["budget"]["mem_mb"].as_u64().unwrap_or(0) > 0));
+    let s = status(&d.root).unwrap();
+    assert_eq!(s["budget"]["breached"], serde_json::json!([]), "a scratch daemon is within the shipped budget: {s}");
+    put(&toml, "[diagnostics]\nbudget_mem_mb = 1\n");
+    wait_for("the breach", || status(&d.root).is_some_and(|s| s["budget"]["breached"] == serde_json::json!(["mem"])));
+    let s = status(&d.root).unwrap();
+    assert_eq!(s["budget"]["mem_budget_mb"], 1);
+    assert_eq!(s["budget"]["breaches"], 1);
+    put(&toml, "[diagnostics]\nbudget_mem_mb = 0\n");
+    wait_for("the breach to clear", || status(&d.root).is_some_and(|s| s["budget"]["breached"] == serde_json::json!([])));
+}

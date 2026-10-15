@@ -448,7 +448,7 @@ impl Shared {
             "malloc_stack_logging": cfg.malloc_stack_logging,
             "storage": self.storage,
             "rss_cap_kb": cfg.rss_cap_kb,
-            "budget": lk(&self.budget).report(),
+            "budget": lk(&self.budget).report(cfg.effective.num("diagnostics.budget_cpu_pct"), cfg.effective.num("diagnostics.budget_mem_mb")),
             "debug": crate::debug::stats(),
             "inject_gate": {"sessions": gs.sessions, "slots": gs.slots, "bytes": gs.bytes, "evictions": gs.evictions,
                 "max_sessions": defaults::num("inject_gate.max_sessions"), "max_slots": defaults::num("inject_gate.max_slots")},
@@ -2087,8 +2087,8 @@ mod tests {
         assert_eq!(fields(&sh.health_event()), (Some(75), Some(3)));
         let st: serde_json::Value = serde_json::from_str(&sh.status()).unwrap();
         assert_eq!(st["budget"]["breached"], serde_json::json!(["cpu", "mem"]));
-        assert_eq!(st["budget"]["cpu_budget_pct"], defaults::num("diagnostics.budget_cpu_pct"));
-        assert_eq!(st["budget"]["mem_budget_mb"], defaults::num("diagnostics.budget_mem_mb"));
+        assert_eq!(st["budget"]["cpu_budget_pct"], sh.cfg().effective.num("diagnostics.budget_cpu_pct"));
+        assert_eq!(st["budget"]["mem_budget_mb"], sh.cfg().effective.num("diagnostics.budget_mem_mb"));
         assert!(st["debug"]["enabled"].is_boolean());
     }
 }

@@ -5,7 +5,6 @@
 //! percent of one core over each `daemon.cpu_check_ms` window; it breaches after `budget_cpu_windows` windows in a row at or above
 //! the limit (one busy window is a burst). Memory is the figure `daemon.mem_metric` selects, and it breaches while over the limit.
 //! A budget of 0 is off. Reporting only: a breach never stops or slows anything (the RSS cap and the CPU back-off are other rules).
-use crate::defaults;
 use serde_json::{Value, json};
 
 /// Which budget.
@@ -90,16 +89,16 @@ impl State {
         (self.cpu_pct * 10.0).round().max(0.0) as u64
     }
 
-    /// The report for `status`.
-    pub fn report(&self) -> Value {
+    /// The report for `status`, with the budgets now in force.
+    pub fn report(&self, cpu_budget_pct: u64, mem_budget_mb: u64) -> Value {
         let breached: Vec<&str> =
             [(self.cpu_breached, Which::Cpu), (self.mem_breached, Which::Mem)].into_iter().filter(|(on, _)| *on).map(|(_, w)| w.name()).collect();
         json!({
             "cpu_pct": (self.cpu_pct * 100.0).round() / 100.0,
-            "cpu_budget_pct": defaults::num("diagnostics.budget_cpu_pct"),
+            "cpu_budget_pct": cpu_budget_pct,
             "cpu_over_windows": self.over_windows,
             "mem_mb": self.mem_kb / 1024,
-            "mem_budget_mb": defaults::num("diagnostics.budget_mem_mb"),
+            "mem_budget_mb": mem_budget_mb,
             "breached": breached,
             "breaches": self.breaches,
         })
@@ -119,7 +118,7 @@ mod tests {
         assert_eq!(s.mask(), 1);
         assert_eq!(s.cpu_window(0.5, 2, 2), Some((Which::Cpu, false)));
         assert_eq!(s.cpu_window(5.0, 2, 2), None, "the count restarted");
-        assert_eq!(s.report()["breaches"], 1);
+        assert_eq!(s.report(2, 100)["breaches"], 1);
     }
 
     #[test]
@@ -139,7 +138,7 @@ mod tests {
         let mut s = State::default();
         s.cpu_window(7.25, 2, 1);
         s.mem_sample(200 * 1024, 100);
-        let r = s.report();
+        let r = s.report(2, 100);
         assert_eq!(r["breached"], json!(["cpu", "mem"]));
         assert_eq!(r["mem_mb"], 200);
         assert_eq!(s.cpu_permille(), 73);
