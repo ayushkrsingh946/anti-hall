@@ -370,18 +370,23 @@ pub fn builder_states(home: &Path, env: &Env, now: i64, xcache: bool) -> R<Optio
 pub fn archived_verdict(home: &Path, env: &Env, now: i64, id: &str, worktree: Option<&str>, xcache: bool) -> R<(Option<bool>, Option<CacheWrite>)> {
     let Some(found) = builder_states(home, env, now, xcache)? else { return Ok((None, None)) };
     let cache = found.cache;
+    Ok((verdict_in(&found.states, id, worktree)?, cache))
+}
+
+/// The verdict of [`archived_verdict`] for states already read: a caller that asks about many workspaces reads them once.
+pub fn verdict_in(states: &[State], id: &str, worktree: Option<&str>) -> R<Option<bool>> {
     if !id.is_empty()
-        && let Some(st) = found.states.iter().find(|s| s.id == id)
+        && let Some(st) = states.iter().find(|s| s.id == id)
     {
-        return Ok((st.archived, cache));
+        return Ok(st.archived);
     }
-    let Some(wt) = worktree.map(norm_path).transpose()?.flatten() else { return Ok((None, cache)) };
+    let Some(wt) = worktree.map(norm_path).transpose()?.flatten() else { return Ok(None) };
     let mut saw_archived = false;
-    for b in found.states.iter().filter(|b| b.worktree.as_deref() == Some(wt.as_str())) {
+    for b in states.iter().filter(|b| b.worktree.as_deref() == Some(wt.as_str())) {
         if b.active || b.archived != Some(true) {
-            return Ok((Some(false), cache));
+            return Ok(Some(false));
         }
         saw_archived = true;
     }
-    Ok((saw_archived.then_some(true), cache))
+    Ok(saw_archived.then_some(true))
 }

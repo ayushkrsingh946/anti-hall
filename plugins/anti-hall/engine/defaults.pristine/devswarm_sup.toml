@@ -706,6 +706,23 @@ min = 100
 max = 600000
 unit = "ms"
 
+[devswarm_sup.lv_git_sig_files]
+doc = "Files of a worktree's git directory that change when its HEAD moves (a checkout rewrites HEAD, a commit appends to its reflog). The last-commit-time answer is remembered while their size and modification time are unchanged."
+value = ["HEAD", "logs/HEAD"]
+
+[devswarm_sup.lv_git_cache_max_ms]
+doc = "The longest a remembered last-commit time is kept without asking git again, whatever the files say (a safety net for a repository that keeps no reflog)."
+value = 600000
+min = 1000
+max = 86400000
+unit = "ms"
+
+[devswarm_sup.lv_git_cache_max_entries]
+doc = "Most worktrees whose last-commit time is remembered; past it the memory is cleared and refilled by the next sweep."
+value = 4096
+min = 16
+max = 1000000
+
 [devswarm_sup.lv_git_bin]
 doc = "The git executable (resolved on PATH)."
 value = "git"

@@ -18,6 +18,14 @@ pub enum Filter {
     /// Every entry except the names that end with one of these suffixes (files that change without any data changing, such as
     /// a SQLite shared-memory index, which every reader's open touches: watching one makes a reader wake itself).
     Except(Vec<String>),
+    /// Every entry except the names that start with one of `prefixes` or end with one of `suffixes` (a writer whose files are
+    /// never an input of the reader, such as a sibling daemon's heartbeat, would otherwise wake it on every beat).
+    Ignoring {
+        /// Name prefixes never reported.
+        prefixes: Vec<String>,
+        /// Name suffixes never reported.
+        suffixes: Vec<String>,
+    },
 }
 
 impl Filter {
@@ -38,6 +46,10 @@ impl Filter {
             Filter::Except(sfx) => {
                 let n = name.to_string_lossy();
                 !sfx.iter().any(|s| n.ends_with(s.as_str()))
+            }
+            Filter::Ignoring { prefixes, suffixes } => {
+                let n = name.to_string_lossy();
+                !prefixes.iter().any(|p| n.starts_with(p.as_str())) && !suffixes.iter().any(|s| n.ends_with(s.as_str()))
             }
         }
     }
@@ -107,7 +119,7 @@ impl DirState {
                 }
                 (now, false)
             }
-            Filter::All | Filter::Except(_) => {
+            Filter::All | Filter::Except(_) | Filter::Ignoring { .. } => {
                 let Ok(rd) = std::fs::read_dir(&self.dir) else { return (now, false) };
                 for e in rd.flatten() {
                     if !self.filter.matches(&e.file_name()) {

@@ -584,6 +584,80 @@ fn watched_directories_cover_every_source_and_batches_are_classified() {
     assert_eq!(watching::plan(&have, false, &[PathBuf::from("/elsewhere/x")]), watching::Plan::default());
 }
 
+#[test]
+fn an_ingest_daemon_heartbeat_is_not_a_reconcile_hint() {
+    let w = world("ingest-beat");
+    let wire = wire(&w, &Arc::new(Stub::default()), Executor::Engine);
+    wire.reconcile(Cause::Startup);
+    let want = watching::wanted(&wire, &ah_engine::watch::Config::load());
+    let beats = w.home.join(".anti-hall/devswarm/heartbeats");
+    let (_, filter, _) = want.iter().find(|(d, _, _)| *d == beats).expect("the heartbeats directory is watched");
+    assert!(filter.matches(std::ffi::OsStr::new("ws-1.json")), "a workspace heartbeat is a hint");
+    assert!(!filter.matches(std::ffi::OsStr::new("ingest-some-project-123.json")), "an ingest daemon heartbeat is not");
+}
+
+/// Measurement, not a gate: CPU of one periodic reconcile split into the read/derive part and the action sweeps, at live weight.
+#[test]
+#[ignore = "measurement: cargo test --release --test it -- --ignored --nocapture where_a_periodic_reconcile_spends_its_cpu"]
+fn where_a_periodic_reconcile_spends_its_cpu() {
+    let w = world("prof");
+    unsafe { std::env::set_var("AH_ENGINE_DIR", &w.state) };
+    let root = w.home.join(".anti-hall/devswarm");
+    let c = Connection::open(&w.db).unwrap();
+    for i in 2..=10usize {
+        let wt = w.dir.join(format!("wt-{i}"));
+        std::fs::create_dir_all(&wt).unwrap();
+        sh(&wt, &["init", "-q"]);
+        sh(&wt, &["commit", "-q", "--allow-empty", "-m", "x"]);
+        c.execute(&format!("INSERT INTO builders VALUES ('ws-{i}','r1','b{i}',?1,'Child {i}',0,NULL,'standard',1,NULL)"), params![wt.to_str().unwrap()]).unwrap();
+        write(&root.join(format!("workspaces/ws-{i}.json")), &json!({"id": format!("ws-{i}"), "worktreePath": wt, "sessionId": format!("s{i}")}));
+        write(&root.join(format!("heartbeats/ws-{i}.json")), &json!({"ts": now()}));
+    }
+    for i in 0..700 {
+        write(&root.join(format!("heartbeats/old-{i}.json")), &json!({"ts": now() - 86_400_000}));
+    }
+    drop(c);
+    let wire = wire(&w, &Arc::new(Stub::default()), Executor::Engine);
+    wire.reconcile(Cause::Startup);
+    let cpu = |f: &dyn Fn()| {
+        let t = ah_engine::limits::thread_cpu_us();
+        f();
+        (ah_engine::limits::thread_cpu_us() - t) as f64 / 1000.0
+    };
+    for round in 0..3 {
+        let ev = cpu(&|| drop(wire.rt.run_live(Cause::Event, None, None)));
+        let per = cpu(&|| drop(wire.rt.run_live(Cause::Periodic, None, None)));
+        let sw = cpu(&|| drop(wire.act_sweeps(true)));
+        let sw_soft = cpu(&|| drop(wire.act_sweeps(false)));
+        eprintln!("PROFILE round {round}: run_live(Event)={ev:.1} ms run_live(Periodic)={per:.1} ms act_sweeps(true)={sw:.1} ms act_sweeps(false)={sw_soft:.1} ms");
+    }
+}
+
+#[test]
+fn a_periodic_reconcile_sweeps_in_full_only_when_something_changed_or_the_interval_passed() {
+    let w = world("periodic-full");
+    let stub = Arc::new(Stub::default());
+    let wire = wire(&w, &stub, Executor::Engine).with_full_sweep_every(3_600_000);
+    wire.reconcile(Cause::Startup);
+    assert!(wire.full_sweeps() >= 1, "the start-up reconcile sweeps in full");
+    wire.reconcile(Cause::Periodic); // the first run after the seed still sees the world's first edges
+    let base = wire.full_sweeps();
+    wire.reconcile(Cause::Periodic);
+    assert_eq!(wire.full_sweeps(), base, "nothing changed and the interval has not passed: no full sweep");
+    app_db(&w, "merged");
+    wire.reconcile(Cause::Periodic);
+    assert_eq!(wire.full_sweeps(), base + 1, "a change in the state is swept in full");
+    wire.reconcile(Cause::Periodic);
+    assert_eq!(wire.full_sweeps(), base + 1, "and the next quiet one is not");
+    wire.reconcile(Cause::Overflow);
+    assert_eq!(wire.full_sweeps(), base + 2, "an overflow is still a full sweep");
+    let wire = wire_with(&w, &stub, Executor::Engine, &[]).with_full_sweep_every(0);
+    wire.reconcile(Cause::Startup);
+    let n = wire.full_sweeps();
+    wire.reconcile(Cause::Periodic);
+    assert_eq!(wire.full_sweeps(), n + 1, "an interval of 0 sweeps in full on every periodic run");
+}
+
 // ---- roles -----------------------------------------------------------------------------------------------------------------
 
 fn env_of(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
@@ -1175,6 +1249,10 @@ fn drive(tag: &str, n: usize, warm: Duration, window: Duration) -> (f64, f64, f6
                 }
                 if tick % 50 == (*i as u64) % 50 {
                     write(&home.join(format!(".anti-hall/devswarm/heartbeats/ws-{i}.json")), &json!({"ts": now()}));
+                }
+                if tick % 20 == 0 && *i <= 2 {
+                    // the Node ingest companions beat every ~2 s into the same directory; no reconcile reads these files
+                    write(&home.join(format!(".anti-hall/devswarm/heartbeats/ingest-proj{i}.json")), &json!({"ts": now()}));
                 }
                 if tick % 100 == (*i as u64) % 100 {
                     let key = facts::repo_key(wt.to_str().unwrap()).unwrap();

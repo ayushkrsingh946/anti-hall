@@ -1189,6 +1189,10 @@ fn serve_conn(mut s: UnixStream, sh: &Shared, wait: Duration, in_flight: u64) ->
             return After::Continue;
         }
     }
+    if wire {
+        // an ack-mode client keeps its connection open until it has the verdict: from here an end-of-stream means it gave up
+        crate::deadline::watch_peer(s.as_raw_fd());
+    }
     let acked_at = Instant::now();
     let (request, event) = request_context(&req);
     let _breadcrumb = crate::crash::enter("request", &request, &event, "", "");
@@ -1210,6 +1214,10 @@ fn serve_conn(mut s: UnixStream, sh: &Shared, wait: Duration, in_flight: u64) ->
     let soft_scripts = crate::script::take_soft_overruns();
     if soft_scripts > 0 {
         sh.telemetry.with_metrics(|m| m.add("script_soft", &[], soft_scripts));
+    }
+    let gone_skips = crate::deadline::take_client_gone_skips();
+    if gone_skips > 0 {
+        sh.telemetry.with_metrics(|m| m.add("client_gone_skipped", &[], gone_skips));
     }
     let mem_after = mem_before.is_some().then(crate::memdiag::measure_after);
     crate::debug_log!(

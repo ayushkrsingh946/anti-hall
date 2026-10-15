@@ -84,6 +84,13 @@ min = 0
 max = 600000
 unit = "ms"
 
+[devswarm_wire.periodic_full_sweep_ms]
+doc = "The longest the periodic reconcile goes without a full action sweep (every workspace's git facts, the mistake scan, the nag pass). In between it sweeps in full only when the reconcile saw a change in the DevSwarm state; edges are acted on through the event path either way."
+value = 300000
+min = 0
+max = 86400000
+unit = "ms"
+
 [devswarm_wire.act_min_gap_ms]
 doc = "The least time between two action sweeps (auto-archive, poke/escalate). An event burst triggers at most one sweep per gap; the periodic reconcile always triggers one."
 value = 5000
@@ -109,6 +116,10 @@ value = "git"
 [devswarm_wire.watch_state_dirs]
 doc = "Directories under the DevSwarm state directory whose changes are hints for a reconcile (each key is a mesh_write.* setting that names the directory)."
 value = ["mesh_write.dir_heartbeats", "mesh_write.dir_plans", "mesh_write.dir_workspaces", "mesh_write.dir_summaries", "mesh_write.dir_archived"]
+
+[devswarm_wire.state_ignore_prefixes]
+doc = "File-name prefixes in the watched state directories that are not hints for a reconcile (each key is a setting that names the prefix). The ingest daemons' heartbeats (ingest-*.json, written every ~2 s) are never a reconcile input; without this they drove most reconciles."
+value = ["mesh_write.ingest_beat_prefix"]
 
 [devswarm_wire.watch_git_names]
 doc = "Files of a worktree's git directory whose change means a commit or a checkout happened (a Jev hint for that workspace)."
@@ -321,6 +332,10 @@ value = { kind = "counter", unit = "changes", labels = ["mode"] }
 [metric.dswire_standdown]
 doc = "Action sweeps the engine skipped because the action's executor is not the engine."
 value = { kind = "counter", unit = "sweeps", labels = ["kind"] }
+
+[metric.dswire_full_sweeps]
+doc = "Full action sweeps (every workspace's facts read, plus the mistake scan and the nag pass) run by the DevSwarm layer."
+value = { kind = "counter", unit = "sweeps", labels = [] }
 
 [metric.dswire_advisory]
 doc = "Advisories injected into a session."

@@ -48,6 +48,39 @@ thread_local! {
     static CUT_ARMED: std::sync::atomic::AtomicBool = const { std::sync::atomic::AtomicBool::new(false) };
     /// The daemon worker's progress beat (its watchdog slot and the daemon's start), set once per worker thread.
     static BEAT: RefCell<Option<(Arc<AtomicU64>, Instant)>> = const { RefCell::new(None) };
+    /// The connection of the request being served when its client keeps it open until it has the verdict (an ack-mode client).
+    static PEER: Cell<Option<std::os::fd::RawFd>> = const { Cell::new(None) };
+    /// Checks skipped on this thread because their client had gone, since [`take_client_gone_skips`].
+    static GONE_SKIPS: Cell<u64> = const { Cell::new(0) };
+}
+
+/// The client of the request on this thread keeps `fd` open until it has the verdict (an ack-mode client): from now on an
+/// end-of-stream on it means the client gave up, and [`client_gone`] says so. Cleared by [`end`].
+pub fn watch_peer(fd: std::os::fd::RawFd) {
+    PEER.with(|p| p.set(Some(fd)));
+}
+
+/// True when the request's client has closed its connection, so nothing that is computed from here on can be read
+/// (`daemon.skip_when_client_gone`; false for a client that does not keep its connection open, and outside a request).
+pub fn client_gone() -> bool {
+    let Some(fd) = PEER.with(|p| p.get()) else { return false };
+    if crate::defaults::raw("daemon.skip_when_client_gone").as_bool() != Some(true) {
+        return false;
+    }
+    let mut byte = 0u8;
+    // SAFETY: `recv` reads at most one byte into `byte`, a live local, from a descriptor the serving thread owns for the whole
+    // request ([`watch_peer`] is cleared by [`end`] before the connection is dropped); MSG_PEEK leaves the stream untouched.
+    let n = unsafe { libc::recv(fd, (&mut byte as *mut u8).cast(), 1, libc::MSG_PEEK | libc::MSG_DONTWAIT) };
+    let gone = n == 0 || (n < 0 && matches!(std::io::Error::last_os_error().kind(), std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::BrokenPipe));
+    if gone {
+        GONE_SKIPS.with(|c| c.set(c.get() + 1));
+    }
+    gone
+}
+
+/// How many checks were skipped on this thread because their client had gone, since the last call.
+pub fn take_client_gone_skips() -> u64 {
+    GONE_SKIPS.with(|c| c.replace(0))
 }
 
 /// Make `slot` (milliseconds since `base`, plus 1; 0 = idle) this thread's progress beat: the daemon watchdog reads it.
@@ -154,6 +187,7 @@ pub fn end() {
     discard_staged();
     EVENT.with(|e| *e.borrow_mut() = None);
     REQ.with(|r| r.set(None));
+    PEER.with(|p| p.set(None));
 }
 
 /// The request being served on this thread is a dispatch of hook event `event`.

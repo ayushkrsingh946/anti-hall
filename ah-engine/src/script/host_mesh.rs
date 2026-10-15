@@ -30,11 +30,21 @@ use std::path::Path;
 thread_local! {
     /// The app-cache writes the lookups of this call owe.
     static OWED: RefCell<Vec<crate::meshw::appdb::CacheWrite>> = const { RefCell::new(Vec::new()) };
+    /// The app database's builder states as this call first read them (with the handle of the cache write that read owes), so a
+    /// gate that asks about hundreds of workspaces reads (and parses) the states once, not once per workspace.
+    static APP: RefCell<Option<AppRead>> = const { RefCell::new(None) };
+}
+
+/// One read of the app database's builder states, for the `cache` flag it was made with.
+struct AppRead {
+    cache: bool,
+    found: Option<(Vec<crate::meshw::appdb::State>, Option<usize>)>,
 }
 
 /// A new script call starts: no cache write is owed yet.
 pub(super) fn reset_call() {
     OWED.with(|o| o.borrow_mut().clear());
+    APP.with(|a| *a.borrow_mut() = None);
 }
 
 /// Why an answer cannot be given exactly.
@@ -195,15 +205,26 @@ fn union_of(st: &Settings, key: &str, id: &str, inbox: Option<&str>, cursor: Opt
 
 fn app_archived(st: &Settings, id: &str, worktree: &str, cache: bool) -> Result<Value, No> {
     let now = crate::meshw::common::now_ms();
-    let (verdict, owed) = crate::meshw::appdb::archived_verdict(Path::new(&st.home), &st.env, now, id, Some(worktree), cache).map_err(|_| No)?;
-    let handle = owed.map(|c| {
-        OWED.with(|o| {
-            let mut o = o.borrow_mut();
-            o.push(c);
-            o.len() - 1
-        })
-    });
-    Ok(json!({"verdict": verdict, "cache": handle}))
+    APP.with(|a| {
+        let mut a = a.borrow_mut();
+        if a.as_ref().is_none_or(|r| r.cache != cache) {
+            let found = crate::meshw::appdb::builder_states(Path::new(&st.home), &st.env, now, cache).map_err(|_| No)?;
+            let found = found.map(|f| {
+                let handle = f.cache.map(|c| {
+                    OWED.with(|o| {
+                        let mut o = o.borrow_mut();
+                        o.push(c);
+                        o.len() - 1
+                    })
+                });
+                (f.states, handle)
+            });
+            *a = Some(AppRead { cache, found });
+        }
+        let Some((states, handle)) = a.as_ref().and_then(|r| r.found.as_ref()) else { return Ok(json!({"verdict": null, "cache": null})) };
+        let verdict = crate::meshw::appdb::verdict_in(states, id, Some(worktree)).map_err(|_| No)?;
+        Ok(json!({"verdict": verdict, "cache": handle}))
+    })
 }
 
 fn child_busy(st: &Settings, id: &str, worktree: &str, session: &str, now: f64, fresh: f64) -> Result<Value, No> {
@@ -292,4 +313,65 @@ pub(super) fn install<'js>(c: &Ctx<'js>, h: &Object<'js>) -> rquickjs::Result<()
         })?,
     )?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    #[test]
+    fn one_script_call_reads_the_app_database_once_however_many_workspaces_it_asks_about() {
+        defaults::init().unwrap();
+        let t = crate::db::TempDir::new("host-mesh-app");
+        let db = t.0.join("app.db");
+        let c = rusqlite::Connection::open(&db).unwrap();
+        c.execute_batch("CREATE TABLE builders (id TEXT PRIMARY KEY, isActive INTEGER, isHidden INTEGER, worktreePath TEXT);").unwrap();
+        for i in 0..50 {
+            c.execute("INSERT INTO builders VALUES (?1, 0, 1, ?2)", rusqlite::params![format!("old-{i}"), format!("/gone/{i}")]).unwrap();
+        }
+        c.execute("INSERT INTO builders VALUES ('live', 1, 0, '/live')", []).unwrap();
+        drop(c);
+        let mut env = HashMap::new();
+        env.insert(defaults::text("mesh_write.env_app_db").to_string(), db.to_string_lossy().into_owned());
+        let st = Settings { home: t.0.to_string_lossy().into_owned(), env };
+        reset_call();
+        let first = app_archived(&st, "old-1", "/gone/1", true).ok().unwrap();
+        for i in 2..50 {
+            let a = app_archived(&st, &format!("old-{i}"), &format!("/gone/{i}"), true).ok().unwrap();
+            assert_eq!(a["verdict"], json!(true));
+        }
+        assert_eq!(first["verdict"], json!(true));
+        assert_eq!(app_archived(&st, "live", "/live", true).ok().unwrap()["verdict"], json!(false));
+        assert_eq!(OWED.with(|o| o.borrow().len()), 1, "the states are read once and one cache write is owed, not one per workspace");
+        // a new call starts from the database again
+        std::fs::remove_file(&db).unwrap();
+        reset_call();
+        assert_eq!(app_archived(&st, "old-1", "/gone/1", true).ok().unwrap()["verdict"], json!(null), "no database, no opinion");
+    }
+    /// Measurement, not a gate: the CPU of 700 `meshAppArchived` lookups in one call over a 700-row app database.
+    #[test]
+    #[ignore = "measurement: cargo test --release --lib -- --ignored --nocapture app_archived_cpu_for_700_workspaces"]
+    fn app_archived_cpu_for_700_workspaces() {
+        defaults::init().unwrap();
+        let t = crate::db::TempDir::new("host-mesh-app-cpu");
+        let db = t.0.join("app.db");
+        let c = rusqlite::Connection::open(&db).unwrap();
+        c.execute_batch("CREATE TABLE builders (id TEXT PRIMARY KEY, isActive INTEGER, isHidden INTEGER, worktreePath TEXT);").unwrap();
+        for i in 0..700 {
+            c.execute("INSERT INTO builders VALUES (?1, 0, 1, ?2)", rusqlite::params![format!("old-{i}"), format!("/gone/{i}")]).unwrap();
+        }
+        drop(c);
+        let mut env = HashMap::new();
+        env.insert(defaults::text("mesh_write.env_app_db").to_string(), db.to_string_lossy().into_owned());
+        let st = Settings { home: t.0.to_string_lossy().into_owned(), env };
+        for round in 0..3 {
+            reset_call();
+            let t0 = crate::limits::thread_cpu_us();
+            for i in 0..700 {
+                app_archived(&st, &format!("old-{i}"), &format!("/gone/{i}"), true).ok().unwrap();
+            }
+            eprintln!("APPCPU round {round}: {} ms for 700 lookups", (crate::limits::thread_cpu_us() - t0) / 1000);
+        }
+    }
 }

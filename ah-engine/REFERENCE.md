@@ -473,6 +473,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `daemon.rules_check_ms` | `200` |  | ms | How often the daemon checks the rules file (and SIGHUP) for a change. |
 | `daemon.session_burst` | `200` | `AH_ENGINE_SESSION_BURST` |  | Token-bucket burst per session. |
 | `daemon.session_rps` | `50` | `AH_ENGINE_SESSION_RPS` |  | Sustained requests per second allowed per session; 0 = unlimited. |
+| `daemon.skip_when_client_gone` | `true` |  |  | Stop running the remaining checks of a request once its client has closed the connection (an ack-mode client keeps it open until it has the verdict, so an end-of-stream means it gave up and nobody reads the reply). Off runs them all. |
 | `daemon.stall_ms` | `5000` | `AH_ENGINE_STALL_MS` | ms | An accept loop silent for longer than this trips a drain and exit. |
 | `daemon.start_fail_exit_code` | `78` |  |  | Exit status when the daemon cannot start (sysexits EX_CONFIG, 78). |
 | `daemon.stuck_ms` | `8000` | `AH_ENGINE_STUCK_MS` | ms | A worker that makes no progress on its request for longer than this trips a drain and exit (a hung worker). Progress is a check starting or finishing and the script interpreter running, so a worker a loaded machine only slows down is not stuck; the time without progress is what a blocked host call (a lock, a child process, a disk sync) adds. |
@@ -7566,6 +7567,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_wire.msg_unknown_verb` | `unknown devswarm verb {verb}` |  |  | Printed for an unknown verb. {verb}. |
 | `devswarm_wire.nudge_state_file` | `rt-nudges.json` |  |  | The engine's own record of pokes made (attempts, last time, escalated), under the engine state directory. |
 | `devswarm_wire.owner_verbs` | `13 items` |  |  | The `ah-engine devswarm <verb>` verbs and what each does: status, line, advisory, supervisor, ingest and ledger (the action audit: per-feature counts, success rate, refusals by reason, mistake rate, in-doubt keys, witness agreement) read the state; archive, plan-prune, prune and recover (kill and resume one session; Node's recovery code does the kill after the engine's refusals) act at the owner's request; wake-watch runs the idle-wake Monitor until the session ends. `create` answers deferred (the Node verb keeps it, because the engine cannot reproduce its source-freshness check yet); `merge` is a devswarm.js verb (compat_verbs) and runs the hivecontrol merge itself. |
+| `devswarm_wire.periodic_full_sweep_ms` | `300000` |  | ms | The longest the periodic reconcile goes without a full action sweep (every workspace's git facts, the mistake scan, the nag pass). In between it sweeps in full only when the reconcile saw a change in the DevSwarm state; edges are acted on through the event path either way. |
 | `devswarm_wire.plan_flag` | `--plan` |  |  | The flag of prune that names the plan. |
 | `devswarm_wire.reconcile_min_gap_ms` | `1000` |  | ms | The least time between two reconciles the file events ask for. Changes inside the gap are folded into one reconcile at its end (none is lost), so a burst of changes, or a source that changes all the time, costs at most one reconcile per gap. 0 reconciles on every batch. |
 | `devswarm_wire.request_flag` | `--request` |  |  | The flag that carries an owner request's own id (the idempotency key's last part). |
@@ -7575,6 +7577,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_wire.role_words` | `main, child, subagent, codex` |  |  | The roles a caller can have, in this order: main (the interactive main session), child (a DevSwarm workspace child), subagent (a spawned agent or any automated caller), codex (a Codex session). |
 | `devswarm_wire.session_flag` | `--session` |  |  | The flag that names the session an advisory is for. |
 | `devswarm_wire.sql_last_selected` | `SELECT {col} FROM {table} WHERE {id} = ?1` |  |  | The statement that reads when a workspace was last selected in the app. {col} {table} {id} are the column, table and id column names. |
+| `devswarm_wire.state_ignore_prefixes` | `mesh_write.ingest_beat_prefix` |  |  | File-name prefixes in the watched state directories that are not hints for a reconcile (each key is a setting that names the prefix). The ingest daemons' heartbeats (ingest-*.json, written every ~2 s) are never a reconcile input; without this they drove most reconciles. |
 | `devswarm_wire.store_poll_ms` | `500` |  | ms | How often the held connection of each active mesh store, and of the app database, is asked `PRAGMA data_version` (it changes when another process commits). This replaces watching the SQLite files, which a reader's own open touches. |
 | `devswarm_wire.transcript_dir` | `.claude/projects` |  |  | Where Claude Code keeps session transcripts, relative to the home directory; a worktree's directory is its path with the characters in transcript_encode replaced by '-'. |
 | `devswarm_wire.transcript_encode` | `/\:.` |  |  | The characters of a worktree path replaced by '-' to name its transcript directory. |
@@ -7795,6 +7798,9 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_sup.lv_field_ts` | `ts` |  |  | The field of a heartbeat record that holds its time. |
 | `devswarm_sup.lv_git_args` | `-C, {worktree}, log, -1, --format=%ct` |  |  | The arguments of the last-commit-time call; {worktree} is the workspace's worktree. |
 | `devswarm_sup.lv_git_bin` | `git` |  |  | The git executable (resolved on PATH). |
+| `devswarm_sup.lv_git_cache_max_entries` | `4096` |  |  | Most worktrees whose last-commit time is remembered; past it the memory is cleared and refilled by the next sweep. |
+| `devswarm_sup.lv_git_cache_max_ms` | `600000` |  | ms | The longest a remembered last-commit time is kept without asking git again, whatever the files say (a safety net for a repository that keeps no reflog). |
+| `devswarm_sup.lv_git_sig_files` | `HEAD, logs/HEAD` |  |  | Files of a worktree's git directory that change when its HEAD moves (a checkout rewrites HEAD, a commit appends to its reflog). The last-commit-time answer is remembered while their size and modification time are unchanged. |
 | `devswarm_sup.lv_git_timeout_ms` | `4000` |  | ms | Bound of the git call that reads a worktree's last commit time (liveness.js GIT_TIMEOUT_MS). |
 | `devswarm_sup.lv_grace_skew_ms` | `5000` |  | ms | A descriptor written up to this far in the future (clock jitter) still counts as just spawned (Node SKEW_TOLERANCE_MS). |
 | `devswarm_sup.lv_heartbeat_fresh_ms` | `900000` |  | ms | How recent a heartbeat must be to count as proof the workspace is alive (liveness.js DEFAULT_HEARTBEAT_FRESH_MS, 15 minutes). |
@@ -10277,6 +10283,7 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `check_decisions` | counter | runs | check, decision | Built-in check outcomes, by check and decision (allow, block, advisory, defer). |
 | `check_latency_by_size_us` | histogram | us | check, size | Wall time of a built-in check run, by check and by the size class of the transcript the request named (load.size_labels). |
 | `check_latency_us` | histogram | us | check | Wall time of a built-in check run, by check. |
+| `client_gone_skipped` | counter | checks |  | Checks not run because the request's client had already closed its connection (daemon.skip_when_client_gone). |
 | `db_archive_bytes` | gauge | bytes |  | Size of archive.db (0 until it is first used). |
 | `db_archive_wal_bytes` | gauge | bytes |  | Size of archive.db's write-ahead log. |
 | `db_commits` | gauge | commits |  | hot.db transactions the writer committed since the daemon started; fewer than db_writes means group commit is sharing syncs. |
@@ -10353,6 +10360,7 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `dsx_nag_success_rate` | gauge | ratio |  | ok / (ok + failed) of nag attempts since the engine started (gauge, 0..1). |
 | `dswire_actions` | counter | actions | kind, outcome | DevSwarm actions the engine ran or declined from a state change, by kind and outcome. |
 | `dswire_advisory` | counter | advisories |  | Advisories injected into a session. |
+| `dswire_full_sweeps` | counter | sweeps |  | Full action sweeps (every workspace's facts read, plus the mistake scan and the nag pass) run by the DevSwarm layer. |
 | `dswire_jev_dirty` | counter | marks |  | Workspaces marked dirty for a per-child Jev sweep. |
 | `dswire_mode_change` | counter | changes | mode | Times the DevSwarm layer's mode (devswarm_rt.mode) changed while the daemon ran, by the new mode. |
 | `dswire_stall_actions` | counter | actions | kind, outcome | Pokes and escalations of silent workspaces the engine ran or refused (feature 5), by kind (poke, escalate) and outcome (ok, failed, refused); the same actions, their inputs and the mistake signals found later are in the action log (`ah-engine telemetry actions stall`). |

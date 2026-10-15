@@ -124,6 +124,10 @@ pub fn evaluate(meta: &Meta, p: &Value, over_cpu: &dyn Fn() -> bool, observe: &d
             let by = culprit.as_deref().unwrap_or("");
             crate::health::log_event("budget", check, &crate::defaults::render("msg.log_budget_skipped", &[("check", &check), ("by", &by)]));
             Answer::Defer
+        } else if crate::deadline::client_gone() {
+            // the client closed its connection: nobody reads this reply, so the check is not worth running (its Node hook is the
+            // client's own business). live19: 478 replies in 1000 s hit a closed pipe after their work was done.
+            Answer::Defer
         } else if !crate::deadline::in_time() && crate::script::cut_at_deadline(check, &meta.event) {
             crate::script::cut(check, &meta.event);
             Answer::Defer
@@ -251,6 +255,26 @@ mod tests {
         assert!(got.iter().all(|(_, a)| matches!(a, Answer::Defer)), "{:?}", got.iter().map(|(id, _)| id).collect::<Vec<_>>());
         let again = evaluate(&meta(), &p, &|| false, &|_, _, _| {});
         assert!(again.iter().any(|(id, a)| id == "git-guard" && matches!(a, Answer::Decided(r, _) if r.code == Some(2))), "in time it decides");
+    }
+
+    /// A client that closed its connection (an ack-mode client gave up) has no use for the rest of the checks: none is started.
+    #[test]
+    fn once_the_client_has_gone_the_remaining_entries_are_not_run() {
+        use std::os::fd::AsRawFd;
+        let p = json!({"session_id": "s", "cwd": "/", "hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "git push --force origin main"}});
+        let (ours, theirs) = std::os::unix::net::UnixStream::pair().unwrap();
+        crate::deadline::begin(std::time::Instant::now());
+        crate::deadline::watch_peer(ours.as_raw_fd());
+        let started = std::cell::Cell::new(0usize);
+        let alive = evaluate(&meta(), &p, &|| false, &|_, _, _| started.set(started.get() + 1));
+        assert!(alive.iter().any(|(id, a)| id == "git-guard" && matches!(a, Answer::Decided(r, _) if r.code == Some(2))), "a client that waits is answered");
+        assert_eq!(crate::deadline::take_client_gone_skips(), 0);
+        drop(theirs);
+        let gone = evaluate(&meta(), &p, &|| false, &|_, _, _| {});
+        crate::deadline::end();
+        assert!(!gone.is_empty() && gone.iter().all(|(_, a)| matches!(a, Answer::Defer)), "no entry is run for a client that has gone");
+        assert_eq!(crate::deadline::take_client_gone_skips(), gone.len() as u64, "each skipped entry is counted");
+        assert!(!crate::deadline::client_gone(), "outside a request nothing is watched");
     }
 
     /// Past the client's fail-fast wait (the SOFT deadline) every entry still runs and decides; only the hard deadline cuts.

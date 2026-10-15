@@ -31,8 +31,11 @@ pub enum Role {
 pub fn wanted(w: &Wire, cfg: &Config) -> Vec<(PathBuf, Filter, Role)> {
     let mut out: Vec<(PathBuf, Filter, Role)> = Vec::new();
     let root = devswarm_root(&w.home);
+    // files a sibling daemon writes into the state directories that no reconcile reads (its heartbeat every ~2 s was 76 % of
+    // all hints in the live19 profile): not hints
+    let ignore: Vec<String> = defaults::list("devswarm_wire.state_ignore_prefixes").into_iter().map(|k| defaults::text(k).to_string()).collect();
     for k in defaults::list("devswarm_wire.watch_state_dirs") {
-        out.push((root.join(defaults::text(k)), cfg.all_filter(), Role::State));
+        out.push((root.join(defaults::text(k)), cfg.all_but_prefixed(ignore.clone()), Role::State));
     }
     let snap = w.rt.current();
     let descs = facts::descriptors_with(&w.home, Some(w.rt.read_cache())); // read once for every workspace

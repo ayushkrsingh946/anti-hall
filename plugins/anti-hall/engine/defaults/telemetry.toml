@@ -220,6 +220,10 @@ value = { kind = "counter", unit = "panics", labels = [] }
 doc = "Accept calls that failed for a reason other than nothing pending (EMFILE, ENFILE, ENOBUFS, ENOMEM), by OS error code (os<n>); each one backs the accept loop off for daemon.accept_error_backoff_ms."
 value = { kind = "counter", unit = "errors", labels = ["code"] }
 
+[metric.client_gone_skipped]
+doc = "Checks not run because the request's client had already closed its connection (daemon.skip_when_client_gone)."
+value = { kind = "counter", unit = "checks", labels = [] }
+
 [metric.slow_replies]
 doc = "Replies finished after their client's deadline had passed: slow but healthy (the client fell back to Node), counted apart from errors."
 value = { kind = "counter", unit = "replies", labels = [] }
