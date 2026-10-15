@@ -636,7 +636,11 @@ fn run_guard_with(o: &Opts, hooks: &Path, scenarios: &[Scenario], golden: &Golde
                         // cold start: the probe goes on in the daemon and the answer is kept for the repeat
                         let cold = e.code == "0" && e.out.is_empty() && (e.err.is_empty() || e.err.contains("verification skipped"));
                         // the block itself was right but its interpreter version line was still being probed: the name stands in
-                        let unversioned = e.code == n.code && e.err == n.err && runtime_blanked(&e.out) == runtime_blanked(&n.out) && e.out != n.out;
+                        // (the shell and patch tools carry the same reason on stderr, so its version line is blanked too)
+                        let unversioned = e.code == n.code
+                            && runtime_blanked(&e.err) == runtime_blanked(&n.err)
+                            && runtime_blanked(&e.out) == runtime_blanked(&n.out)
+                            && (e.out != n.out || e.err != n.err);
                         if !((n.code_is(2) || !n.out.is_empty() || !e.err.is_empty()) && (cold || unversioned) && !same(&e, &n)) {
                             break;
                         }

@@ -156,10 +156,9 @@ fn spawn_probe_in(
     // the request waits for it only as long as its own deadline allows. A request cut short fails open as before, and the
     // finished answer serves the next one (the interpreter is not probed again for `host_spawn.cache_ttl_ms`).
     let ceiling = budget_ceiling(timeout_ms);
-    // reserve the request's wait first: with nothing left no worker is claimed or started
-    let Some(wait) = budget(timeout_ms) else {
-        return Ok(json!({"found": true, "skipped": true}).to_string());
-    };
+    // The request's wait, if it has time left. With none the probe still warms the cache in a worker (below) when a global slot is
+    // free and no worker has the key; the request never waits on it and gains no time from it.
+    let wait = budget(timeout_ms);
     let (tx, rx) = std::sync::mpsc::channel();
     if !take_slot() {
         // the global worker cap is reached (timed-out probes still running count): fail open, nothing starts
@@ -187,6 +186,9 @@ fn spawn_probe_in(
         free_slot();
         return Ok(json!({"found": true, "skipped": true}).to_string());
     }
+    let Some(wait) = wait else {
+        return Ok(json!({"found": true, "skipped": true}).to_string());
+    };
     let started = Instant::now();
     let got = rx.recv_timeout(wait);
     credit_blocking(started);
@@ -388,8 +390,15 @@ mod tests {
         r
     }
 
+    /// The worker counter is process-wide: the tests that read or fill it run one at a time.
+    fn worker_lock() -> std::sync::MutexGuard<'static, ()> {
+        static L: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        L.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
     #[test]
     fn sp_05_timed_out_probes_stay_under_the_global_worker_cap() {
+        let _g = worker_lock();
         let env = fake_python("cap", "#!/bin/sh\n/bin/sleep 2\necho Python 3.12.1\n");
         let cap = defaults::num("host_spawn.max_workers");
         let slack = defaults::num("daemon.reply_slack_ms");
@@ -408,13 +417,52 @@ mod tests {
     }
 
     #[test]
-    fn sp_06_no_budget_left_starts_no_worker() {
-        let env = fake_python("nobudget", "#!/bin/sh\n/bin/sleep 2\n");
-        request(env, 0, || {
-            let out = spawn_probe_cached("python3", &["nb".to_string()], None, 15000.0).unwrap();
+    fn sp_06_no_budget_left_starts_one_warm_worker_and_the_next_request_hits_the_cache() {
+        let _g = worker_lock();
+        // workers left by the cap test (sleeping probes) finish first, so a slot is free
+        assert!((0..300).any(|_| {
+            std::thread::sleep(Duration::from_millis(50));
+            WORKERS.load(std::sync::atomic::Ordering::SeqCst) == 0
+        }), "earlier workers drain");
+        let count = std::env::temp_dir().join(format!("ah-sp-warm-count-{}", std::process::id()));
+        crate::discard::harmless(std::fs::remove_file(&count));
+        let env = fake_python("warm", &format!("#!/bin/sh\necho x >>{}\necho Python 3.12.1\n", count.display()));
+        let a = vec!["--version".to_string()];
+        let t = Instant::now();
+        // no request time left: the call answers skipped at once, and a worker still warms the cache
+        request(env.clone(), 0, || {
+            let out = spawn_probe_cached("python3", &a, None, 15000.0).unwrap();
             assert!(out.contains("skipped"), "{out}");
         });
-        // (the worker counter is shared with sp_05 running alongside, so the claim set is what names this probe)
-        assert!(inflight().iter().all(|k| !k.contains("nobudget")), "{:?}", *inflight());
+        assert!(t.elapsed() < Duration::from_millis(500), "the request never waits on the warm worker: {:?}", t.elapsed());
+        let warmed = (0..100).any(|_| {
+            std::thread::sleep(Duration::from_millis(50));
+            WORKERS.load(std::sync::atomic::Ordering::SeqCst) == 0 && inflight().iter().all(|k| !k.contains("ah-sp-warm"))
+        });
+        assert!(warmed, "the warm worker finishes");
+        // a second request, with time, is served from the cache and runs nothing
+        let out = request(env, 5000, || spawn_probe_cached("python3", &a, None, 15000.0).unwrap());
+        assert!(out.contains("Python 3.12.1") && !out.contains("skipped"), "{out}");
+        assert_eq!(std::fs::read_to_string(&count).unwrap().lines().count(), 1, "exactly one run warmed the cache");
+    }
+
+    #[test]
+    fn sp_07_a_full_worker_cap_starts_no_warm_worker() {
+        let _g = worker_lock();
+        let env = fake_python("capfull", "#!/bin/sh\n/bin/sleep 2\n");
+        let mut taken = 0;
+        while take_slot() {
+            taken += 1;
+        }
+        let before = WORKERS.load(std::sync::atomic::Ordering::SeqCst);
+        request(env, 0, || {
+            let out = spawn_probe_cached("python3", &["cf".to_string()], None, 15000.0).unwrap();
+            assert!(out.contains("skipped"), "{out}");
+        });
+        assert_eq!(WORKERS.load(std::sync::atomic::Ordering::SeqCst), before, "no worker grew past the cap");
+        assert!(inflight().iter().all(|k| !k.contains("capfull")), "{:?}", *inflight());
+        for _ in 0..taken {
+            free_slot();
+        }
     }
 }
