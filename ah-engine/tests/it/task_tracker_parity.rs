@@ -229,14 +229,18 @@ fn run_side(engine: bool, home: &Path, case: &Case) -> Vec<Out> {
         .collect()
 }
 
-/// Wait for the detached Jev asks of this home to land (the row count stops changing).
-fn settle(home: &Path) {
-    let log = home.join(".anti-hall/logs/jev-assist.ndjson");
-    let count = || std::fs::read_to_string(&log).map(|t| t.lines().count()).unwrap_or(0);
-    let (mut last, mut since) = (count(), Instant::now());
-    while since.elapsed() < Duration::from_millis(400) {
+/// Wait for the detached Jev asks of the two homes to land: both row counts have stopped changing AND are equal. A quiet
+/// spell alone is no sign of arrival: on a loaded machine a detached worker can need longer than the quiet spell to start
+/// and write its row, and the engine's worker starts after the Node one (gate run 2026-10-15: the Node home had the row, the
+/// engine home had not yet). The two sides must end with the same rows, so waiting for equal counts loses nothing; a real
+/// difference in the rows still fails, after the deadline.
+fn settle(a: &Path, b: &Path) {
+    let count = |home: &Path| std::fs::read_to_string(home.join(".anti-hall/logs/jev-assist.ndjson")).map(|t| t.lines().count()).unwrap_or(0);
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let (mut last, mut since) = ((count(a), count(b)), Instant::now());
+    while since.elapsed() < Duration::from_millis(400) || (last.0 != last.1 && Instant::now() < deadline) {
         std::thread::sleep(Duration::from_millis(40));
-        let n = count();
+        let n = (count(a), count(b));
         if n != last {
             (last, since) = (n, Instant::now());
         }
@@ -259,8 +263,7 @@ fn drive(name: &str, cases: Vec<Case>) -> (usize, usize, usize) {
         let seeded = snapshot(&he, now);
         let node = run_side(false, &hn, case);
         let eng = run_side(true, &he, case);
-        settle(&hn);
-        settle(&he);
+        settle(&hn, &he);
         let (an, ae) = (snapshot(&hn, now), snapshot(&he, now));
         let ctx = |what: &str| {
             format!(

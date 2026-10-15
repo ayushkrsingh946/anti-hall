@@ -227,14 +227,21 @@ fn mk_home(dir: &Path, sc: &Sc, mtime: u64) {
     std::fs::create_dir_all(dir.join("proj")).expect("proj dir");
 }
 
-/// path to the file's content (directories: `D`); in a JSON file every number within ten minutes of now reads as `<NOW>`.
+/// The instant the corpus was expanded at (`now0` of the running lane): fixture clock values are `now0` plus an offset.
+static FROZEN_NOW0: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+
+/// path to the file's content (directories: `D`); in a JSON file every number within ten minutes of now (the clock a
+/// hook writes) or of the corpus instant (a fixture value a hook may rewrite) reads as `<NOW>`. Reading only the live
+/// clock made a fixture stamp (`NOW-60000`) flip from `<NOW>` to a number between the Node pass and the engine pass of a
+/// scenario that straddled the ten-minute mark of a long (loaded) run: a difference of the harness, not of the hook.
 fn snap(dir: &Path) -> BTreeMap<String, String> {
     let now = now_ms() as f64;
-    fn norm(j: J, now: f64) -> J {
+    let frozen = FROZEN_NOW0.load(std::sync::atomic::Ordering::Relaxed) as f64;
+    fn norm(j: J, now: f64, frozen: f64) -> J {
         match j {
-            J::Num(n) if (n - now).abs() < 600_000.0 => J::Str("<NOW>".into()),
-            J::Obj(o) => J::Obj(o.into_iter().map(|(k, v)| (k, norm(v, now))).collect()),
-            J::Arr(a) => J::Arr(a.into_iter().map(|v| norm(v, now)).collect()),
+            J::Num(n) if (n - now).abs() < 600_000.0 || (n - frozen).abs() < 600_000.0 => J::Str("<NOW>".into()),
+            J::Obj(o) => J::Obj(o.into_iter().map(|(k, v)| (k, norm(v, now, frozen))).collect()),
+            J::Arr(a) => J::Arr(a.into_iter().map(|v| norm(v, now, frozen)).collect()),
             other => other,
         }
     }
@@ -268,7 +275,7 @@ fn snap(dir: &Path) -> BTreeMap<String, String> {
             }
         }
     }
-    walk(dir, "", now, &mut out, &norm);
+    walk(dir, "", now, &mut out, &|j, n| norm(j, n, frozen));
     out
 }
 
@@ -292,6 +299,7 @@ pub(crate) struct Stats {
 
 pub(crate) fn run_lane(hooks_dir: &Path, mutate: Option<usize>) -> (BTreeMap<String, Stats>, String) {
     let now0 = now_ms() as i64;
+    FROZEN_NOW0.store(now0, std::sync::atomic::Ordering::Relaxed);
     let mut scenarios = load(now0);
     if let Some(n) = mutate {
         scenarios.truncate(n);
