@@ -208,14 +208,16 @@ pub(crate) struct KnownVersions {
     pub cache_root: String,
 }
 
-fn cached_rx() -> Option<&'static Rx> {
-    static RX: defaults::Cache<Option<Rx>> = defaults::Cache::new();
-    RX.get_or_init(|| Rx::new().ok()).as_ref()
+/// The compiled patterns for the active defaults (`None` when they do not compile).
+fn cached_rx() -> Option<std::sync::Arc<Rx>> {
+    static RX: defaults::Cache<Option<std::sync::Arc<Rx>>> = defaults::Cache::new();
+    (*RX.get_or_init(|| Rx::new().ok().map(std::sync::Arc::new))).clone()
 }
 
 /// The versions `checkStaleVersion` of the wake watcher compares (`update.js` `resolvePaths` and the three readers).
 pub(crate) fn known_versions(env: &Env, home: &str) -> Option<KnownVersions> {
     let rx = cached_rx()?;
+    let rx = &*rx;
     let paths = resolve_paths(env, home);
     Some(KnownVersions {
         registry: version_from_installed_json(rx, &paths.installed_json),
@@ -227,12 +229,12 @@ pub(crate) fn known_versions(env: &Env, home: &str) -> Option<KnownVersions> {
 
 /// `isSemver(v)` of `update.js`.
 pub(crate) fn semver_ok(v: &str) -> bool {
-    cached_rx().is_some_and(|rx| is_semver(rx, v))
+    cached_rx().is_some_and(|rx| is_semver(&rx, v))
 }
 
 /// `compareVersions(a, b)` of `update.js`: -1, 0 or 1.
 pub(crate) fn compare_versions(a: &str, b: &str) -> i32 {
-    cached_rx().map_or(0, |rx| compare(rx, a, b))
+    cached_rx().map_or(0, |rx| compare(&rx, a, b))
 }
 
 /// The registry and the cache both read, and disagree.

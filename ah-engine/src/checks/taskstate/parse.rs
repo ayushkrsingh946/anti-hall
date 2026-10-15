@@ -35,7 +35,7 @@ struct Res {
     since_status: Regex,
 }
 
-fn res() -> &'static Res {
+fn res() -> std::sync::Arc<Res> {
     static R: crate::defaults::Cache<Res> = crate::defaults::Cache::new();
     R.get_or_init(|| Res {
         created: jsre::compile(defaults::text("taskstate.re_created"), true),

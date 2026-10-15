@@ -340,7 +340,7 @@ pub(crate) fn check_shipped(entries: &[&defaults::Entry]) -> Result<(), String> 
 }
 
 /// The shipped layer for the active defaults.
-fn shipped() -> &'static Layer {
+fn shipped() -> std::sync::Arc<Layer> {
     static L: crate::defaults::Cache<Layer> = crate::defaults::Cache::new();
     L.get_or_init(|| {
         let mut entries = defaults::with_prefix("events.");
@@ -408,7 +408,8 @@ impl HookCfg {
             budget_ms: defaults::num("hooks.event_budget_ms"),
             order: defaults::list("hooks.event_order").into_iter().map(str::to_string).collect(),
         };
-        for layer in [shipped(), &self.project, &self.user] {
+        let shipped = shipped();
+        for layer in [&*shipped, &self.project, &self.user] {
             if let Some(p) = layer.events.get(event) {
                 cfg.mode = p.mode.unwrap_or(cfg.mode);
                 cfg.max_rules = p.max_rules.map_or(cfg.max_rules, |n| n as usize);
@@ -432,7 +433,8 @@ impl HookCfg {
             when: defaults::raw("hooks.entry_when").as_table().filter(|t| !t.is_empty()).and_then(|_| When::from_v(defaults::raw("hooks.entry_when")).ok()),
         };
         let qualified = format!("{event}/{id}");
-        for layer in [shipped(), &self.project, &self.user] {
+        let shipped = shipped();
+        for layer in [&*shipped, &self.project, &self.user] {
             for k in [id, qualified.as_str()] {
                 if let Some(p) = layer.entries.get(k) {
                     cfg.mode = p.mode.unwrap_or(cfg.mode);

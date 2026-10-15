@@ -9,7 +9,7 @@ use regex::Regex;
 use serde_json::Value;
 use std::io::{Read, Seek, SeekFrom};
 
-fn pat(k: &str) -> Option<&'static Regex> {
+fn pat(k: &str) -> Option<Regex> {
     static C: crate::defaults::Cache<Vec<(String, Option<Regex>)>> = crate::defaults::Cache::new();
     let all = C.get_or_init(|| {
         defaults::raw("agent_tracker.patterns")
@@ -19,7 +19,7 @@ fn pat(k: &str) -> Option<&'static Regex> {
             })
             .unwrap_or_default()
     });
-    all.iter().find(|(n, _)| n == k).and_then(|(_, r)| r.as_ref())
+    all.iter().find(|(n, _)| n == k).and_then(|(_, r)| r.clone())
 }
 
 fn str_of<'a>(v: &'a Value, k: &str) -> &'a str {

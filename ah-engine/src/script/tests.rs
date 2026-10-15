@@ -1514,3 +1514,35 @@ fn the_limit_that_interrupted_a_call_is_named_in_its_failure() {
     let wall_ms = cpu_ms * defaults::num("script.wall_limit_factor");
     assert_eq!(d.explain("interrupted", 50), format!("interrupted (interrupted by the cpu limit; cpu limit {cpu_ms} ms, wall backstop {wall_ms} ms)"));
 }
+
+/// R1 ENG-MEM: a worker that has not called a script for `script.idle_free_ms` frees its interpreter when it goes idle, and its next call
+/// builds a new one that answers the same. A busy worker (`maintain(false)`) and an interpreter still inside the window keep theirs.
+#[test]
+fn an_idle_worker_frees_its_interpreter_and_the_next_call_rebuilds_it() {
+    let h = home("idlefree");
+    let e = env(&h);
+    put_override(&h, "zz-idle", "function decide(p) { return {block: 'seen ' + p.tool_name}; }");
+    let p = json!({"tool_name": "Write"});
+    let ms = defaults::num("script.idle_free_ms");
+    assert!(ms > 0, "the shipped default frees idle interpreters");
+    let seen = std::thread::spawn(move || {
+        let first = run_forced("zz-idle", &p, &e);
+        assert!(super::pool_usage().is_some(), "a call builds the interpreter");
+        super::maintain(true);
+        assert!(super::pool_usage().is_some(), "inside script.idle_free_ms the interpreter stays");
+        let old = std::time::Instant::now().checked_sub(std::time::Duration::from_millis(ms + 1)).expect("a clock older than the window");
+        POOL.with(|c| c.borrow_mut().as_mut().expect("pool").last_call = old);
+        super::maintain(false);
+        assert!(super::pool_usage().is_some(), "a worker with a request waiting is not idle");
+        super::maintain(true);
+        assert!(super::pool_usage().is_none(), "an idle worker past the window frees its interpreter");
+        let again = run_forced("zz-idle", &p, &e);
+        assert!(super::pool_usage().is_some(), "the next call rebuilds it");
+        (first, again)
+    })
+    .join()
+    .expect("assertions hold");
+    assert_eq!(seen.0, Some(Some(Verdict::Block("seen Write".into()))));
+    assert_eq!(seen.0, seen.1, "the rebuilt interpreter answers the same");
+    crate::discard::harmless(std::fs::remove_dir_all(&h)); // keep: cleanup
+}

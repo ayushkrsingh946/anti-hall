@@ -54,11 +54,12 @@ impl std::error::Error for DefaultsError {}
 pub struct Data {
     pub(super) root: PathBuf,
     /// In file order (keys sorted within a file).
-    pub(super) entries: &'static [&'static Entry],
+    pub(super) entries: std::sync::Arc<[&'static Entry]>,
     /// Sorted by key, for binary search.
     pub(super) index: Vec<(&'static str, &'static Entry)>,
-    /// Canonical text of each entry's source table, to tell a changed entry from an unchanged one at the next load.
-    canon: HashMap<&'static str, String>,
+    /// Fingerprint of each entry's canonical source table, to tell a changed entry from an unchanged one at the next load
+    /// (the text itself would keep a second copy of every shipped file in memory for the life of the snapshot).
+    canon: HashMap<&'static str, Print>,
     /// What the load fell back on, what to heal and what to keep as last-known-good.
     pub(super) report: Report,
     /// [`files_print`] of the root, taken before the files were read (a change during the load makes the cache stale, not wrong).
@@ -80,6 +81,20 @@ impl Data {
         let i = self.index.binary_search_by(|(k, _)| (*k).cmp(key)).ok()?;
         Some(self.index[i].1)
     }
+}
+
+/// A 128-bit fingerprint of a text (two independently keyed SipHash runs; compared only against another from the same process).
+type Print = [u64; 2];
+
+fn print_of(text: &str) -> Print {
+    use std::hash::{Hash, Hasher};
+    let run = |salt: u8| {
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        salt.hash(&mut h);
+        text.hash(&mut h);
+        h.finish()
+    };
+    [run(0), run(1)]
 }
 
 fn leak_str(s: &str) -> &'static str {
@@ -479,9 +494,9 @@ fn assemble(d: &Dirs, base: Layer, kinds: &HashMap<&str, Kind>, report: &mut Rep
 /// Build the snapshot from the chosen settings and run the cross-file checks.
 fn finish(root: &Path, picks: Vec<Pick>, prev: Option<&Data>) -> Result<Data, DefaultsError> {
     let mut entries: Vec<&'static Entry> = Vec::new();
-    let mut canon: HashMap<&'static str, String> = HashMap::new();
+    let mut canon: HashMap<&'static str, Print> = HashMap::new();
     for Pick { file, key, e } in picks {
-        let text = format!("{e:?}");
+        let text = print_of(&format!("{e:?}"));
         let reused = prev.and_then(|p| p.find(&key).filter(|old| old.file == file && p.canon.get(old.key).is_some_and(|c| *c == text)));
         let entry: &'static Entry = match reused {
             Some(old) => old,
@@ -517,12 +532,7 @@ fn finish(root: &Path, picks: Vec<Pick>, prev: Option<&Data>) -> Result<Data, De
     }
     crate::hookcfg::check_shipped(&entries).map_err(|e| DefaultsError::new("hooks", "", "", e))?;
     check_rows(root, &entries).map_err(|e| DefaultsError::new("dispatch", "", "", e))?;
-    // an unchanged load reuses the previous snapshot's entry list instead of leaking another one per reload (~48 KB at 6,000 settings)
-    let entries: &'static [&'static Entry] = match prev {
-        Some(p) if p.entries.len() == entries.len() && p.entries.iter().zip(&entries).all(|(a, b)| std::ptr::eq(*a, *b)) => p.entries,
-        _ => leak_slice(entries),
-    };
-    Ok(Data { root: root.to_path_buf(), entries, index, canon, report: Report::default(), print: String::new() })
+    Ok(Data { root: root.to_path_buf(), entries: entries.into(), index, canon, report: Report::default(), print: String::new() })
 }
 
 /// Read and validate the defaults of the plugin at `root`, falling back per file and per setting to the last-known-good

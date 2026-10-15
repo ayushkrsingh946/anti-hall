@@ -25,7 +25,7 @@ struct Rule {
 
 /// The rules of `jev.scrub_rules`, compiled once per defaults snapshot (a reload applies an edit). `None` when a rule is
 /// malformed or does not compile: the scrubber then redacts the whole text.
-fn rules() -> Option<&'static [Rule]> {
+fn rules() -> std::sync::Arc<Option<Vec<Rule>>> {
     static RULES: defaults::Cache<Option<Vec<Rule>>> = defaults::Cache::new();
     RULES
         .get_or_init(|| {
@@ -41,7 +41,6 @@ fn rules() -> Option<&'static [Rule]> {
                 })
                 .collect()
         })
-        .as_deref()
 }
 
 /// True when `c` is an ASCII letter or digit.
@@ -75,7 +74,8 @@ fn replace_lb(re: &Regex, hay: &str, to: &str) -> String {
 /// Node: `secret-scrub.js` `scrubSecrets`. The rules run in the same order, because the named shapes must be scrubbed
 /// before the generic long-run catch-all so their short placeholders never re-trigger it.
 pub fn scrub_secrets(text: &str) -> String {
-    let Some(rules) = rules() else { return defaults::text("jev.scrub_failed_text").to_string() };
+    let rules = rules();
+    let Some(rules) = rules.as_deref() else { return defaults::text("jev.scrub_failed_text").to_string() };
     let mut s = text.to_string();
     for r in rules {
         s = if r.no_alnum_before { replace_lb(&r.re, &s, &r.to) } else { r.re.replace_all(&s, r.to.as_str()).into_owned() };
@@ -89,7 +89,7 @@ mod tests {
 
     #[test]
     fn every_pattern_compiles() {
-        assert_eq!(rules().map(<[Rule]>::len), Some(17), "one rule per replace() in secret-scrub.js");
+        assert_eq!(rules().as_deref().map(<[Rule]>::len), Some(17), "one rule per replace() in secret-scrub.js");
     }
 
     #[test]

@@ -121,7 +121,7 @@ pub fn markdown() -> String {
 
     crate::discard::harmless(writeln!(o)); // keep: formatting into a String cannot fail
     flags_section(&mut o);
-    env_section(&mut o, all);
+    env_section(&mut o, &all);
     crate::discard::harmless(writeln!(o, "\n## Socket protocol\n\n| Name | Request | Reply | What it does |\n|---|---|---|---|")); // keep: formatting into a String cannot fail
     for e in all.iter().filter(|e| e.key.starts_with("protocol.")) {
         crate::discard::harmless(writeln!(

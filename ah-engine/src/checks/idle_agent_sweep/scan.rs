@@ -43,7 +43,7 @@ struct Res {
     system_reminder_notice: Regex,
 }
 
-fn res() -> &'static Res {
+fn res() -> std::sync::Arc<Res> {
     static R: crate::defaults::Cache<Res> = crate::defaults::Cache::new();
     R.get_or_init(|| {
         let c = |k: &str, ci: bool| jsre::compile(defaults::text(k), ci);

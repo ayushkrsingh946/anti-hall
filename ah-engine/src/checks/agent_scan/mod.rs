@@ -180,7 +180,7 @@ struct Pats {
     surrogate: Regex,
 }
 
-fn pats() -> &'static Pats {
+fn pats() -> std::sync::Arc<Pats> {
     static P: crate::defaults::Cache<Pats> = crate::defaults::Cache::new();
     P.get_or_init(|| Pats {
         block: crate::checks::lit_re(defaults::text("agent_scan.re_notification_block")),
@@ -515,7 +515,7 @@ struct Prefilter {
     finders: Vec<memchr::memmem::Finder<'static>>,
 }
 
-fn prefilter() -> &'static Prefilter {
+fn prefilter() -> std::sync::Arc<Prefilter> {
     static P: crate::defaults::Cache<Prefilter> = crate::defaults::Cache::new();
     P.get_or_init(|| {
         let k = defaults::raw("agent_scan.prefilter");

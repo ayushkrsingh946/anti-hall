@@ -12,3 +12,13 @@ debug_factor = 10.0
 # Seconds measured after the warm-up.
 window_s = 30
 warmup_s = 5
+
+[mem_reload]
+# tests/mem_reload.rs: a live daemon re-reads the plugin's defaults after each edit. Every reload may keep what the edit
+# changed (the values are `'static`), not a copy of the whole set. Measured over `reloads` edits after `warmup` more.
+reloads = 50
+warmup = 5
+# Bytes the `defaults_leak` holder may grow by, per reload.
+leak_bytes_per_reload = 4096
+# Kilobytes the counted heap (`status --memory` heap_live_kb) may grow by, per reload.
+heap_kb_per_reload = 8

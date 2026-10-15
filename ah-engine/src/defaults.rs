@@ -253,9 +253,10 @@ pub fn init() -> Result<(), DefaultsError> {
         key: String::new(),
         detail: "no plugin root with engine/defaults/index.toml (see bootstrap)".into(),
     })?;
-    let data = load::load(&root, None)?;
+    let mut data = load::load(&root, None)?;
     cache_best_effort(&data);
     let (report, root) = (data.report.clone(), data.root().to_path_buf());
+    data.report.clean = Vec::new(); // the files' text is only for `after_load`; the snapshot keeps the notes, not a second copy of every file
     install_first(Backend::Full(data));
     GENERATION.fetch_add(1, Ordering::SeqCst);
     after_load(&report, &root);
@@ -263,10 +264,10 @@ pub fn init() -> Result<(), DefaultsError> {
 }
 
 /// A value derived from the defaults (a compiled regex, a parsed table) that stays valid until the defaults change. It is
-/// rebuilt on first use after each applied reload and the previous one is leaked, which is bounded by the number of reloads
-/// (a plugin update or an edit of a defaults file). Reads take a shared lock only.
+/// rebuilt on first use after each applied reload; the previous one is dropped when its last user lets go of it, so a reload
+/// leaves nothing behind. Reads take a shared lock only.
 pub struct Cache<T: 'static> {
-    slot: RwLock<Option<(u64, &'static T)>>,
+    slot: RwLock<Option<(u64, Arc<T>)>>,
 }
 
 impl<T: 'static> Cache<T> {
@@ -276,22 +277,21 @@ impl<T: 'static> Cache<T> {
     }
 
     /// The value built by `build` for the current defaults.
-    pub fn get_or_init(&self, build: impl FnOnce() -> T) -> &'static T {
+    pub fn get_or_init(&self, build: impl FnOnce() -> T) -> Arc<T> {
         let generation = generation();
-        if let Some((g, v)) = *self.slot.read().unwrap_or_else(|e| e.into_inner())
-            && g == generation
+        if let Some((g, v)) = &*self.slot.read().unwrap_or_else(|e| e.into_inner())
+            && *g == generation
         {
-            return v;
+            return Arc::clone(v);
         }
         let mut w = self.slot.write().unwrap_or_else(|e| e.into_inner());
-        if let Some((g, v)) = *w
-            && g == generation
+        if let Some((g, v)) = &*w
+            && *g == generation
         {
-            return v;
+            return Arc::clone(v);
         }
-        crate::mem::note_leak(std::mem::size_of::<T>());
-        let v: &'static T = Box::leak(Box::new(build()));
-        *w = Some((generation, v));
+        let v = Arc::new(build());
+        *w = Some((generation, Arc::clone(&v)));
         v
     }
 }
@@ -325,11 +325,11 @@ pub fn reload(root: Option<&Path>) -> Result<Reloaded, DefaultsError> {
         key: String::new(),
         detail: "nothing to reload".into(),
     })?;
-    let data = load::load(&root, prev_data)?;
+    let mut data = load::load(&root, prev_data)?;
     if let Some(p) = prev_data
         && p.root() == data.root()
         && p.entries.len() == data.entries.len()
-        && p.entries.iter().zip(data.entries).all(|(a, b)| std::ptr::eq(*a, *b))
+        && p.entries.iter().zip(data.entries.iter()).all(|(a, b)| std::ptr::eq(*a, *b))
     {
         // the same values, but possibly from another layer (a broken edit answered by its last-known-good copy): say so
         after_load(&data.report, data.root());
@@ -337,6 +337,7 @@ pub fn reload(root: Option<&Path>) -> Result<Reloaded, DefaultsError> {
     }
     cache_best_effort(&data);
     let (report, root) = (data.report.clone(), data.root().to_path_buf());
+    data.report.clean = Vec::new(); // as in `init`
     {
         let _w = CUR_W.lock().unwrap_or_else(|e| e.into_inner());
         CUR.store(Some(Arc::new(Backend::Full(data))));
@@ -621,10 +622,10 @@ pub fn with_prefix(prefix: &str) -> Vec<&'static Entry> {
 }
 
 /// Every shipped setting, in file order (sorted by key within a file). A cache-backed snapshot has no docs and lists by key.
-pub fn all() -> &'static [&'static Entry] {
+pub fn all() -> Arc<[&'static Entry]> {
     match backend().as_ref() {
-        Backend::Full(d) => d.entries,
-        Backend::Lazy(l) => l.all(),
+        Backend::Full(d) => d.entries.clone(),
+        Backend::Lazy(l) => l.all().into(),
     }
 }
 
@@ -635,7 +636,7 @@ mod tests {
     #[test]
     fn every_setting_has_a_value_and_a_sentence_doc() {
         assert!(all().len() > 100, "defaults are not being enumerated: {}", all().len());
-        for e in all() {
+        for e in all().iter().copied() {
             assert!(e.doc.trim().ends_with('.'), "{} doc should be a sentence ending in a period: {:?}", e.key, e.doc);
             assert!(has(e.key));
         }
@@ -644,10 +645,10 @@ mod tests {
     #[test]
     fn keys_are_unique_and_the_index_is_sorted() {
         let mut seen = std::collections::HashSet::new();
-        for e in all() {
+        for e in all().iter().copied() {
             assert!(seen.insert(e.key), "duplicate setting {}", e.key);
         }
-        for e in all() {
+        for e in all().iter().copied() {
             assert!(find(e.key).is_some_and(|f| std::ptr::eq(f, find(e.key).unwrap())), "{} is not findable by key", e.key);
         }
     }
@@ -655,7 +656,7 @@ mod tests {
     #[test]
     fn env_names_are_unique_and_prefixed() {
         let mut seen = std::collections::HashSet::new();
-        for e in all() {
+        for e in all().iter().copied() {
             if let Some(n) = e.env {
                 assert!(n.starts_with("AH_ENGINE_"), "{} env {n} lacks the AH_ENGINE_ prefix", e.key);
                 assert!(seen.insert(n), "env var {n} is used twice");

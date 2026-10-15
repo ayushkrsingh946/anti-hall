@@ -31,7 +31,7 @@ pub struct ScanTasks {
     pub open_task_ids: Vec<String>,
 }
 
-fn created_re() -> &'static Regex {
+fn created_re() -> std::sync::Arc<Regex> {
     static R: crate::defaults::Cache<Regex> = crate::defaults::Cache::new();
     R.get_or_init(|| jsre::compile(defaults::text("taskstate.re_created"), true))
 }
