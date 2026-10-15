@@ -394,4 +394,26 @@ mod tests {
             crate::discard::harmless(std::fs::remove_file(p)); // keep: cleanup; an absent file is the goal state
         }
     }
+
+    #[test]
+    fn edge_files_and_windows_answer_as_the_reader_does() {
+        let p = path("edge");
+        let long_line = format!("{}\n", json!({"type": "user", "message": {"role": "user", "content": "q".repeat(5000)}}));
+        let bodies: Vec<Vec<u8>> = vec![
+            b"".to_vec(),
+            b"\n".to_vec(),
+            b"\n\n\r\n".to_vec(),
+            long_line.clone().into_bytes(),
+            [long_line.as_bytes(), b"\xff\xfe not utf8\n", long_line.as_bytes()].concat(),
+            b"{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"no newline at all\"}}".to_vec(),
+        ];
+        for (i, body) in bodies.iter().enumerate() {
+            std::fs::write(&p, body).unwrap();
+            // windows below, at and above a line: a window with no newline in it holds no whole line
+            for w in [1u64, 100, 4_999, 5_000, 5_060, 10_000, 1 << 20] {
+                same(&p, w, &format!("body {i}"));
+            }
+        }
+        crate::discard::harmless(std::fs::remove_file(&p)); // keep: cleanup; an absent file is the goal state
+    }
 }
