@@ -205,9 +205,9 @@ pub fn prewarm() {
     }
     let args: Vec<String> = defaults::list("api_guard_v1.version_args").iter().map(|a| (*a).to_string()).collect();
     let timeout = defaults::num("host_spawn.prewarm_timeout_ms") as f64;
+    let env: std::collections::HashMap<String, String> = std::env::vars().collect();
     for prog in defaults::list("host_spawn.prewarm_programs") {
-        let env: std::collections::HashMap<String, String> = std::env::vars().collect();
-        crate::discard::logged("probe_prewarm", spawn_probe_in(prog, &args, None, timeout, true, Some(env)).map_err(|e| e.to_string()));
+        crate::discard::logged("probe_prewarm", spawn_probe_in(prog, &args, None, timeout, true, Some(env.clone())).map_err(|e| e.to_string()));
     }
 }
 
