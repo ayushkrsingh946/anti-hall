@@ -389,6 +389,19 @@ fn builtin_equals_shipped_defaults() {
             "{k}: built-in text differs from the shipped file"
         );
     }
+    for (k, fields) in builtin::TABLES {
+        let t = value(&docs, k)
+            .and_then(toml::Value::as_table)
+            .unwrap_or_else(|| panic!("{k}: no shipped table"));
+        for (f, v) in *fields {
+            assert_eq!(
+                t.get(*f).and_then(toml::Value::as_integer),
+                Some(*v as i64),
+                "{k}.{f}: built-in {v} differs from the shipped file"
+            );
+        }
+        assert_eq!(t.len(), fields.len(), "{k}: field sets differ");
+    }
     for (k, v) in builtin::LISTS {
         let got: Vec<&str> = value(&docs, k)
             .and_then(toml::Value::as_array)
@@ -411,7 +424,10 @@ fn every_launcher_key_in_the_shipped_files_has_a_builtin() {
         ("messages.toml", shipped("messages.toml")),
     ];
     let known = |k: &str| {
-        builtin::num(k).is_some() || builtin::text(k).is_some() || builtin::list(k).is_some()
+        builtin::num(k).is_some()
+            || builtin::text(k).is_some()
+            || builtin::list(k).is_some()
+            || builtin::TABLES.iter().any(|(t, _)| *t == k)
     };
     let mut missing = Vec::new();
     let engine = &docs[0].1;

@@ -445,9 +445,10 @@ impl HookCfg {
         cfg
     }
 
-    /// Whether `event` or any of its entries is configured away from the defaults (so the dispatcher must plan, not just look up).
+    /// Whether no project or user layer applies: only the shipped defaults, which include the per-event tables shipped in
+    /// `hooks.toml` (a shipped per-event budget is the default, not a configuration away from it).
     pub fn is_default(&self) -> bool {
-        self.hash.is_empty() && shipped().is_empty()
+        self.hash.is_empty()
     }
 }
 
@@ -477,6 +478,24 @@ mod tests {
         assert_eq!((e.mode, e.max_rules, e.budget_ms, e.order.len()), (Mode::On, 0, 0, 0));
         assert_eq!(c.entry("PostToolUse", "git-guard:audit"), EntryCfg { mode: Mode::On, when: None });
         assert!(c.hash().is_empty() && c.is_default());
+    }
+
+    /// Launcher RCA: the per-event budget was unbounded while the launcher cuts a call at `client.slow_fallback_max_ms`, so the
+    /// dispatcher could plan Node work the launcher would kill. Every shipped budget must end, with the client's wait margin,
+    /// inside the launcher's hard limit; the events the RCA measured must have one.
+    #[test]
+    fn shipped_event_budgets_fit_the_launcher_limit() {
+        let c = HookCfg::default();
+        let (hard, margin) = (defaults::num("client.slow_fallback_max_ms"), defaults::num("client.slow_wait_margin_ms"));
+        for ev in ["SessionStart", "UserPromptSubmit", "SessionEnd"] {
+            let b = c.event(ev).budget_ms;
+            assert!(b > 0, "{ev} has no budget");
+            assert!(b + margin <= hard, "{ev}: budget {b} + margin {margin} must fit the launcher hard limit {hard}");
+        }
+        for (ev, cfg) in shipped().events.iter() {
+            let b = cfg.budget_ms.unwrap_or(0);
+            assert!(b == 0 || b + margin <= hard, "{ev}: budget {b} + margin {margin} must fit the launcher hard limit {hard}");
+        }
     }
 
     #[test]

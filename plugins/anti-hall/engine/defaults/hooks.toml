@@ -48,6 +48,18 @@ min = 0
 max = 600000
 unit = "ms"
 
+[events.SessionStart]
+doc = "SessionStart: the wall budget of one occurrence (see hooks.event_budget_ms). Kept below the launcher's slow-reply extension (client.slow_fallback_max_ms) less client.slow_wait_margin_ms and a tail for the output write, so the dispatcher starts no Node work the launcher would cut; the test shipped_event_budgets_fit_the_launcher_limit pins the relation."
+value = { budget_ms = 2400 }
+
+[events.UserPromptSubmit]
+doc = "UserPromptSubmit: the wall budget of one occurrence (see events.SessionStart for why 2400)."
+value = { budget_ms = 2400 }
+
+[events.SessionEnd]
+doc = "SessionEnd: the wall budget of one occurrence (see events.SessionStart for why 2400)."
+value = { budget_ms = 2400 }
+
 [hooks.event_order]
 doc = "Default of `order` in `[events.<Event>]`: entry ids that run and combine before the others, in this order (empty = the table's order). An id the event's table does not have is a config error."
 value = []

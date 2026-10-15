@@ -810,3 +810,98 @@ fn a_normally_finished_call_leaves_no_watcher_kill_behind() {
     let _ = by.kill();
     let _ = by.wait();
 }
+
+// ---------------------------------------------------------------------------------------------------------------------------
+// 9. the wait-marker race (LAUNCHER-RCA): a finished answer is never dropped, soft walls are per event
+// ---------------------------------------------------------------------------------------------------------------------------
+
+/// The engine writes its answer and the done mark, then drops the wait marker, then needs a while to exit (telemetry flush):
+/// at the budget instant only the done mark exists. The launcher used to look for the wait marker alone, kill the engine and
+/// drop the captured answer.
+#[test]
+fn a_done_mark_without_the_wait_marker_extends_the_budget_and_the_answer_is_delivered() {
+    let env = Env::new("race");
+    let e = engine(
+        &env,
+        ": >\"$AH_ENGINE_WAIT_FILE\"\nsleep 0.2\nprintf ANSWER\n: >\"$AH_ENGINE_DONE_FILE\"\nrm -f \"$AH_ENGINE_WAIT_FILE\"\nsleep 0.8\nexit 0",
+    );
+    let o = env.run(
+        "SessionStart",
+        PAYLOAD,
+        Some(&e),
+        &[("AH_HOOK_TIMEOUT_MS", "700")],
+    );
+    assert_eq!((o.code, o.out.as_slice()), (0, b"ANSWER".as_slice()), "{}", env.log());
+    assert!(
+        !env.log().contains("engine_timed") && !env.diag().contains("engine_timed"),
+        "no timeout may be logged for a call that answered: {} {}",
+        env.log(),
+        env.diag()
+    );
+}
+
+/// An engine that answered but does not leave before the hard deadline is cut, and what it printed is still delivered.
+#[test]
+fn an_answered_engine_cut_at_the_hard_deadline_still_delivers_its_output() {
+    let env = Env::new("race-cut");
+    let e = engine(&env, "printf ANSWER\n: >\"$AH_ENGINE_DONE_FILE\"\nexec sleep 60");
+    let o = env.run(
+        "SessionStart",
+        PAYLOAD,
+        Some(&e),
+        &[
+            ("AH_HOOK_TIMEOUT_MS", "1500"),
+            ("AH_ENGINE_SLOW_FALLBACK_MAX_MS", "2500"),
+        ],
+    );
+    assert_eq!((o.code, o.out.as_slice()), (0, b"ANSWER".as_slice()), "{}", env.log());
+    assert!(!env.log().contains("engine_timed"), "{}", env.log());
+}
+
+/// No marker at all: the call is cut at the budget, and the log line now says how long the launcher had run.
+#[test]
+fn engine_timed_logs_the_wall_time() {
+    let env = Env::new("timed-wall");
+    let e = engine(&env, "exec sleep 60");
+    let o = env.run(
+        "UserPromptSubmit",
+        PAYLOAD,
+        Some(&e),
+        &[("AH_HOOK_TIMEOUT_MS", "400")],
+    );
+    assert_eq!(o.code, 0);
+    let log = env.log();
+    let line = log
+        .lines()
+        .find(|l| l.contains("engine_timed"))
+        .unwrap_or_else(|| panic!("no engine_timed line: {log}"));
+    let wall: u128 = line
+        .split("wall_ms=")
+        .nth(1)
+        .and_then(|r| r.split_whitespace().next())
+        .and_then(|n| n.parse().ok())
+        .unwrap_or_else(|| panic!("no wall_ms in {line}"));
+    assert!((400..4000).contains(&wall), "{line}");
+}
+
+/// `launcher.wall_soft_ms` is a per-event table: an event with an entry is judged against it, an event without one against the
+/// `default` (0 = the fail-fast formula), and the soft_limit line carries the wall time.
+#[test]
+fn the_soft_wall_is_a_per_event_table_and_logs_the_wall_time() {
+    let env = Env::new("soft-table");
+    env.set(
+        "launcher.wall_soft_ms",
+        "{ default = 0, SessionStart = 50, SessionEnd = 99999 }",
+    );
+    let e = engine(&env, "sleep 0.3\n: >\"$AH_ENGINE_DONE_FILE\"\nexit 0");
+    for ev in ["SessionStart", "SessionEnd", "UserPromptSubmit"] {
+        env.run(ev, PAYLOAD, Some(&e), &[]);
+    }
+    let log = env.log();
+    let soft: Vec<&str> = log.lines().filter(|l| l.contains("soft_limit")).collect();
+    assert_eq!(soft.len(), 1, "only SessionStart is over its soft wall: {log}");
+    assert!(
+        soft[0].contains("event=SessionStart") && soft[0].contains("wall_ms="),
+        "{log}"
+    );
+}

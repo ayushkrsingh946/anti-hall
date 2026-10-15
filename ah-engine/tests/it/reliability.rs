@@ -675,6 +675,27 @@ fn slow_sender_cannot_wedge_the_daemon() {
     assert!(e.hook(DENY_IN, false).0.contains("engine-blocked"), "daemon still serves");
 }
 
+/// Launcher RCA side finding: the launcher's liveness probe connects and closes without a byte. The daemon used to run it as an
+/// empty request on a worker and fail to write the reply (`reply write_failed: Broken pipe`, one log line and 6-40 ms each). A
+/// connect-only probe is now recognised: counted in `probes`, never a request, never an error, never logged.
+#[test]
+fn a_connect_only_probe_is_counted_and_costs_no_request_error_or_log_line() {
+    let e = Env::new("probe", &[]);
+    e.warm();
+    let before = e.status();
+    for _ in 0..30 {
+        drop(std::os::unix::net::UnixStream::connect(e.eng().join("e.sock")).unwrap());
+    }
+    assert!(wait_for(|| e.status()["probes"].as_u64() == Some(30)), "probes never counted: {}", e.diag());
+    let after = e.status();
+    // the two status calls above are the only requests since `before`, besides the ones wait_for made
+    let calls = after["requests"].as_u64().unwrap() - before["requests"].as_u64().unwrap();
+    assert!(calls >= 1, "the status calls count as requests");
+    assert_eq!(after["errors"], before["errors"], "a probe is not an error request");
+    assert_eq!(after["reply_write_errors"], before["reply_write_errors"], "{}", e.diag());
+    assert!(!e.health_log().contains("write_failed"), "{}", e.diag());
+}
+
 // ---- 3. watchdog + breaker --------------------------------------------------------------------
 
 /// R0 P0: a daemon killed right after its start was not restarted by the wrapper. The single-flight spawn lock outlived the

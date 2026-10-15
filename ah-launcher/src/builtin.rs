@@ -201,6 +201,18 @@ pub const STRS: &[(&str, &str)] = &[
     ),
 ];
 
+/// Per-field number tables (`{ default = .., <Event> = .. }`).
+pub const TABLES: &[(&str, &[(&str, u64)])] = &[(
+    "launcher.wall_soft_ms",
+    &[
+        ("default", 0),
+        ("SessionStart", 1100),
+        ("UserPromptSubmit", 900),
+        ("SessionEnd", 800),
+        ("Stop", 3000),
+    ],
+)];
+
 pub const LISTS: &[(&str, &[&str])] = &[
     (
         "launcher.plugin_root_envs",
@@ -225,6 +237,14 @@ pub const HOOKS_DIR: &str = "hooks";
 
 pub fn num(key: &str) -> Option<u64> {
     NUMS.iter().find(|(k, _)| *k == key).map(|(_, v)| *v)
+}
+
+pub fn table_num(key: &str, field: &str) -> Option<u64> {
+    TABLES
+        .iter()
+        .find(|(k, _)| *k == key)
+        .and_then(|(_, t)| t.iter().find(|(f, _)| *f == field))
+        .map(|(_, v)| *v)
 }
 
 pub fn text(key: &str) -> Option<&'static str> {

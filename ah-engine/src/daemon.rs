@@ -87,6 +87,9 @@ pub struct Stats {
     pub panics: AtomicU64,
     /// Connections dropped because the peer uid was not ours.
     pub rejected: AtomicU64,
+    /// Connections that closed without sending a byte: the launcher's liveness probe (connect only). Not requests: nothing is
+    /// dispatched, answered or logged for them (a reply would only hit a closed pipe).
+    pub probes: AtomicU64,
 }
 
 /// Everything the request handler and the threads share.
@@ -439,6 +442,7 @@ impl Shared {
             "accept_errors": ACCEPT_ERRORS.load(SeqCst),
             "slow_replies": SLOW_REPLIES.load(SeqCst),
             "rejected_peers": self.stats.rejected.load(SeqCst),
+            "probes": self.stats.probes.load(SeqCst),
             "starts": self.starts,
             "restarts": self.starts.saturating_sub(1),
             "breaker": b.map_or("closed".to_string(), |d| defaults::render("msg.state_open", &[("secs", &(d.as_secs() + 1))])),
@@ -979,6 +983,13 @@ fn serve_conn(mut s: UnixStream, sh: &Shared, wait: Duration, in_flight: u64) ->
             return After::Continue;
         }
     };
+    if req.is_empty() {
+        // a connect-only liveness probe (the launcher's gate): the peer is already gone, so there is nothing to dispatch and no
+        // reply to write (it used to cost a worker 6-40 ms and log `reply write_failed: Broken pipe`)
+        sh.stats.probes.fetch_add(1, SeqCst);
+        crate::deadline::end();
+        return After::Continue;
+    }
     let (request, event) = request_context(&req);
     let _breadcrumb = crate::crash::enter("request", &request, &event, "", "");
     health::write_crash_breadcrumb(&request, &event, "", sh.started.elapsed().as_secs(), sh.memory());
