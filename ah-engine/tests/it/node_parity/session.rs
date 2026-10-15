@@ -628,7 +628,11 @@ pub(crate) fn run_hook(hook: &str, hooks_dir: &Path, repo: &Path, mutate: Option
             (init_tree, node_res, spawned, node_tree, eng_res, eng_tree)
         };
         let mut first = attempt();
-        if sc.id().contains("fake-git") {
+        // a scenario on a real repository asks `git check-ignore` of both sides: Node gives up after 2000 ms, the engine after the
+        // probe deadline above, so a `git` that takes 2000-2200 ms (a loaded machine) is silent in Node and an advisory in the
+        // engine (a `git` shim sleeping 2.6 s makes Node silent where a fast one gives the hint; gate run 2026-10-15, progress-prune-fuzz-20261007-95). A real
+        // difference between the hook and the check repeats on the second attempt; a timing straddle does not.
+        if sc.id().contains("fake-git") || sc.field("git").is_some() {
             let (_, nr, sp, nt, er, et) = &first;
             let disagreed =
                 er.out.trim() != "AHFALLBACK" && (nr.code != er.code || nr.out != er.out || !sp.is_empty() || !diff_trees(nt, et, &norm).is_empty());
