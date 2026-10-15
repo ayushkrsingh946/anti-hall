@@ -1163,13 +1163,6 @@ fn drive(tag: &str, n: usize, warm: Duration, window: Duration) -> (f64, f64, f6
         write(&root.join(format!("heartbeats/old-{i}.json")), &json!({"ts": now() - 86_400_000}));
     }
     drop(c);
-    let rss_before = ah_engine::limits::rss_kb() as f64 / 1024.0;
-    let before: std::collections::HashSet<u64> = ah_engine::threads::snapshot().iter().map(|t| t.tid).collect();
-    let (sweeper, _) = recording_sweeper();
-    let wire = Arc::new(wire(&w, &Arc::new(Stub::default()), Executor::Off).with_jev_sweeper(sweeper));
-    let stop = Arc::new(AtomicBool::new(false));
-    let (wr, st) = (wire.clone(), stop.clone());
-    let h = std::thread::Builder::new().name("ah-dswire".into()).spawn(move || watching::run(&wr, &|| st.load(Ordering::SeqCst))).unwrap();
     let load_stop = Arc::new(AtomicBool::new(false));
     let (ls, home, wts2) = (load_stop.clone(), w.home.clone(), wts.clone());
     let load = std::thread::spawn(move || {
@@ -1193,12 +1186,29 @@ fn drive(tag: &str, n: usize, warm: Duration, window: Duration) -> (f64, f64, f6
             std::thread::sleep(Duration::from_millis(100));
         }
     });
+    let rss_before = ah_engine::limits::rss_kb() as f64 / 1024.0;
+    let before: std::collections::HashSet<u64> = ah_engine::threads::snapshot().iter().map(|t| t.tid).collect();
+    let (sweeper, _) = recording_sweeper();
+    let wire = Arc::new(wire(&w, &Arc::new(Stub::default()), Executor::Off).with_jev_sweeper(sweeper));
+    let stop = Arc::new(AtomicBool::new(false));
+    let (wr, st) = (wire.clone(), stop.clone());
+    let h = std::thread::Builder::new().name("ah-dswire".into()).spawn(move || watching::run(&wr, &|| st.load(Ordering::SeqCst))).unwrap();
     std::thread::sleep(warm);
-    let own: std::collections::HashSet<u64> =
-        ah_engine::threads::snapshot().iter().filter(|t| !before.contains(&t.tid) && t.name.starts_with("ah-")).map(|t| t.tid).collect();
+    let own: std::collections::HashSet<u64> = ah_engine::threads::snapshot().iter().filter(|t| !before.contains(&t.tid)).map(|t| t.tid).collect();
     assert!(!own.is_empty(), "the engine's threads were found");
-    let (c0, r0, k0, t0) = (cpu_of(&own), wire.reconciles(), watching::work::snapshot(), Instant::now());
+    let per_thread = |own: &std::collections::HashSet<u64>| -> std::collections::BTreeMap<String, f64> {
+        let mut m = std::collections::BTreeMap::new();
+        for t in ah_engine::threads::snapshot().iter().filter(|t| own.contains(&t.tid)) {
+            *m.entry(t.name.clone()).or_insert(0.0) += t.cpu_us as f64 / 1e6;
+        }
+        m
+    };
+    let (c0, r0, k0, t0, p0) = (cpu_of(&own), wire.reconciles(), watching::work::snapshot(), Instant::now(), per_thread(&own));
     std::thread::sleep(window);
+    for (name, v) in per_thread(&own) {
+        eprintln!("SCALE thread {name}: {:.3}% of one core", 100.0 * (v - p0.get(&name).copied().unwrap_or(0.0)) / t0.elapsed().as_secs_f64());
+    }
+    eprintln!("SCALE work: {:?}", watching::work::snapshot().iter().zip(k0.iter()).map(|(a, b)| (a.0, a.1 - b.1)).collect::<Vec<_>>());
     let (cpu, wall, rec) = (cpu_of(&own) - c0, t0.elapsed().as_secs_f64(), wire.reconciles() - r0);
     let wakes = watching::work::snapshot().iter().find(|(k, _)| *k == "wakes").map_or(0, |x| x.1) - k0.iter().find(|(k, _)| *k == "wakes").map_or(0, |x| x.1);
     let rss_mb = ah_engine::limits::rss_kb() as f64 / 1024.0;
