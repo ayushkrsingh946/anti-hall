@@ -10,6 +10,7 @@
 //! | `shellHeredocAt(cmd, i)` | a heredoc opener at code point `i` of a shell command (not inside arithmetic): `[end, openerLen]` in code points, or `null` |
 //! | `platform()` | the operating system the engine runs on (`macos`, `linux`, ...) |
 //! | `readTail(path, window)` | the last `window` bytes of a file as text (lossy UTF-8), the possibly partial first line dropped when the file is larger; `null` when unreadable |
+//! | `tailLines(path, window, crlf, needles)` | the lines of that same window (split on `\n`, or on `\r?\n` when `crlf`), only those holding one of `needles` when any are given; `null` when unreadable |
 //! | `maskQuoted(text)` | the reply with its quoted material blanked (the speculation guard's `maskQuotedText`) |
 //! | `jevMode(id)` | the mode (`on`, `shadow`, `off`) of Jev integration `id` for this request |
 //! | `judgeCliCall(spec)` | the speculation judge's model call (`{transcript, message}` as JSON text): the model's parsed answer as JSON text, or `null` when the call must be left to the Node hook (see [`crate::judge::host`]) |
@@ -72,6 +73,25 @@ fn heredoc_at(cmd: &str, i: usize) -> Option<Vec<i64>> {
         }
         crate::checks::git::tokenize::parse_heredoc_at(&cs, i, &mut h.1).map(|r| vec![r.end as i64, r.opener_len as i64])
     })
+}
+
+/// `tailLines(path, window, crlf, needles)`: the lines of `readTail(path, window)` (so the window, the dropped partial first line and
+/// the lossy decoding are exactly `readTail`'s), as `text.split('\n')` gives them, or as `text.split(/\r?\n/)` gives them when `crlf`
+/// (a `\r` before a newline goes with the separator, a lone one stays). With `needles`, only the lines that contain at least one of
+/// them (a plain substring, as `indexOf`) come back, in order: a script that skips every other line anyway no longer pulls them
+/// into the interpreter. `None` where `readTail` answers `null`.
+fn tail_lines_matching(path: &str, window: u64, crlf: bool, needles: &[String]) -> Option<Vec<String>> {
+    let text = read_tail(path, window)?;
+    let pieces = text.split('\n').collect::<Vec<_>>();
+    let last = pieces.len().saturating_sub(1);
+    let mut out = Vec::new();
+    for (i, piece) in pieces.into_iter().enumerate() {
+        let line = if crlf && i != last { piece.strip_suffix('\r').unwrap_or(piece) } else { piece };
+        if needles.is_empty() || needles.iter().any(|n| line.contains(n.as_str())) {
+            out.push(line.to_string());
+        }
+    }
+    Some(out)
 }
 
 fn read_tail(path: &str, window: u64) -> Option<String> {
@@ -232,6 +252,10 @@ pub fn install<'a>(c: &Ctx<'a>, h: &Object<'a>) -> rquickjs::Result<()> {
     h.set("stateProbe", Function::new(c.clone(), |ns: String, key: String| state_probe(&ns, &key))?)?;
     h.set("shellHeredocAt", Function::new(c.clone(), |cmd: String, i: f64| heredoc_at(&cmd, i.max(0.0) as usize))?)?;
     h.set("readTail", Function::new(c.clone(), |p: String, w: f64| read_tail(&p, w.max(0.0) as u64))?)?;
+    h.set(
+        "tailLines",
+        Function::new(c.clone(), |p: String, w: f64, crlf: bool, needles: Vec<String>| tail_lines_matching(&p, w.max(0.0) as u64, crlf, &needles))?,
+    )?;
     h.set("maskQuoted", Function::new(c.clone(), |t: String| crate::checks::guardkit::mask::mask_quoted_text(&t))?)?;
     h.set("jevMode", Function::new(c.clone(), |id: String| jev_mode(&id))?)?;
     h.set("jevAskSpec", Function::new(c.clone(), |spec: String| jev_ask(&spec))?)?;
@@ -248,4 +272,72 @@ pub fn install<'a>(c: &Ctx<'a>, h: &Object<'a>) -> rquickjs::Result<()> {
     h.set("platform", Function::new(c.clone(), || std::env::consts::OS.to_string())?)?;
     h.set("stateUpdate", Function::new(c.clone(), state_update)?)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tail_lines_tests {
+    use super::*;
+
+    fn file(tag: &str, bytes: &[u8]) -> String {
+        let p = std::env::temp_dir().join(format!("ah-taillines-{tag}-{}", std::process::id()));
+        std::fs::write(&p, bytes).unwrap();
+        p.to_string_lossy().into_owned()
+    }
+
+    /// What the scripts did before: `readTail`, then `split('\n')` or `split(/\r?\n/)` (the regex crate splits the way a
+    /// JavaScript regular expression does, the empty last piece after a final newline included), then the `indexOf` filter.
+    fn reference(path: &str, window: u64, crlf: bool, needles: &[String]) -> Option<Vec<String>> {
+        let text = read_tail(path, window)?;
+        let pieces: Vec<String> = if crlf { regex::Regex::new(r"\r?\n").unwrap().split(&text).map(str::to_string).collect() } else { text.split('\n').map(str::to_string).collect() };
+        Some(pieces.into_iter().filter(|l| needles.is_empty() || needles.iter().any(|n| l.contains(n.as_str()))).collect())
+    }
+
+    #[test]
+    fn the_host_lines_are_what_the_script_split_gave_for_every_window_and_separator() {
+        let mut body: Vec<u8> = Vec::new();
+        for (i, l) in ["alpha tool_use", "beta\r", "", "gamma \\u0041", "delta\r\r", "tool_use epsilon", "no newline here \u{e9}\u{4e2d}"].iter().enumerate() {
+            body.extend_from_slice(l.as_bytes());
+            if i != 6 {
+                body.push(b'\n');
+            }
+        }
+        body.extend_from_slice(b"\xff\xfe broken utf8\nlone\rcarriage\r\nlast");
+        let p = file("mix", &body);
+        let needle_sets: Vec<Vec<String>> = vec![vec![], vec!["tool_use".into()], vec!["tool_use".into(), "\\u".into()], vec!["zzz".into()], vec!["".into()]];
+        for window in [0u64, 1, 7, 20, 41, 64, 100, body.len() as u64 - 1, body.len() as u64, body.len() as u64 + 10, 1 << 20] {
+            for crlf in [false, true] {
+                for needles in &needle_sets {
+                    assert_eq!(
+                        tail_lines_matching(&p, window, crlf, needles),
+                        reference(&p, window, crlf, needles),
+                        "window {window} crlf {crlf} needles {needles:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn an_empty_file_has_one_empty_line_and_a_missing_one_is_null() {
+        let p = file("empty", b"");
+        assert_eq!(tail_lines_matching(&p, 100, true, &[]), Some(vec![String::new()]));
+        assert_eq!(tail_lines_matching(&p, 100, true, &["x".into()]), Some(vec![]));
+        assert_eq!(tail_lines_matching("/no/such/ah-transcript", 100, false, &[]), None);
+    }
+
+    #[test]
+    fn a_generated_large_transcript_matches_the_script_split_at_many_windows() {
+        let mut body = String::new();
+        for i in 0..4000 {
+            body.push_str(&format!("{{\"type\":\"{}\",\"n\":{i},\"t\":\"{}\"}}{}", if i % 3 == 0 { "tool_use" } else { "text" }, "x".repeat(i % 97), if i % 5 == 0 { "\r\n" } else { "\n" }));
+        }
+        let p = file("big", body.as_bytes());
+        for window in [4096u64, 65_536, 262_144, body.len() as u64] {
+            for crlf in [false, true] {
+                let n = vec!["tool_use".to_string()];
+                assert_eq!(tail_lines_matching(&p, window, crlf, &n), reference(&p, window, crlf, &n));
+                assert_eq!(tail_lines_matching(&p, window, crlf, &[]), reference(&p, window, crlf, &[]));
+            }
+        }
+    }
 }

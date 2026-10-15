@@ -19,6 +19,8 @@ ah.shell = {
 ah.platform = function () { return ahHost.platform(); };
 // Transcript tail, quoted-text masking and Jev (raw primitives; the questions and rules live in the check scripts).
 ah.fs.readTail = function (p, window) { return ahNull(ahHost.readTail(p, window)); };
+// The lines of that window (`split('\n')`, or `split(/\r?\n/)` with `crlf`), only those holding one of `needles` when given: null when unreadable.
+ah.fs.tailLines = function (p, window, crlf, needles) { return ahNull(ahHost.tailLines(p, window, !!crlf, needles || [])); };
 ah.text = { maskQuoted: function (t) { return ahHost.maskQuoted(t); } };
 Object.assign(ah.jev, {
   mode: function (id) { return ahHost.jevMode(id); },

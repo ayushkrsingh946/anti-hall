@@ -237,9 +237,10 @@ function tgOmcActive(home, cwd, sid, now) {
 function tgPromptKey(p, transcript) {
   var pid = p[ah.cfg('task_guard.prompt_id_key')];
   if (typeof pid === 'string' && pid) return pid;
-  var tail = ah.fs.readTail(transcript, ah.cfgNum('taskstate.tail_bytes'));
-  if (tail === null) return '';
-  var lines = tail.split('\n'), user = ah.cfg('task_guard.user_type');
+  var user = ah.cfg('task_guard.user_type');
+  // only the lines that name a user entry are read below, so only those are fetched
+  var lines = ah.fs.tailLines(transcript, ah.cfgNum('taskstate.tail_bytes'), false, ['"' + user + '"']);
+  if (lines === null) return '';
   for (var i = lines.length - 1; i >= 0; i--) {
     var t = lines[i].trim();
     if (!t || t.indexOf('"' + user + '"') < 0) continue;
