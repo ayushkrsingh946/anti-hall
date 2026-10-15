@@ -65,6 +65,10 @@ aho-corasick = "1.1.5"
 name = "parsers"
 harness = false
 
+[[bench]]
+name = "defaults_num"
+harness = false
+
 [profile.release]
 opt-level = "z"
 lto = true
