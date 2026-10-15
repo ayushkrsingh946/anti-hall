@@ -63,6 +63,9 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: ah-engine
+          shared-key: engine-${{ runner.os }}
+          save-if: ${{ github.ref == 'refs/heads/engine-proto' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' }}
+          cache-on-failure: true
       - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
           tool: cargo-nextest
@@ -135,6 +138,8 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: ah-engine
+          shared-key: engine-${{ runner.os }}
+          save-if: false
       - run: ah-engine/scripts/doc-check.sh ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && '' || '--fast' }}
 
   # Supply chain (D84): known vulnerabilities (RustSec) and licence/source policy (ah-engine/deny.toml).
@@ -175,6 +180,8 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: ah-engine
+          shared-key: engine-${{ runner.os }}
+          save-if: false
       - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
           tool: cargo-llvm-cov,cargo-nextest
@@ -197,6 +204,8 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: ah-engine
+          shared-key: engine-${{ runner.os }}
+          save-if: false
       - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
           tool: cargo-bloat
