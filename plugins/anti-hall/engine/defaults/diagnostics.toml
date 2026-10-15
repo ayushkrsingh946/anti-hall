@@ -67,6 +67,36 @@ unit = "bytes"
 doc = "Diagnostic label for an operator-run macOS `MallocStackLogging` repro (`lite` or empty). The engine only accepts and reports it; the OS facility must be enabled in the process environment before start."
 value = ""
 
+[diagnostics.threads_flag]
+doc = "The `ah-engine status` flag that reports the live daemon's per-thread CPU and work counters over a short window (`status --threads [--json]`)."
+value = "--threads"
+
+[diagnostics.threads_ctl]
+doc = "The control request that asks the daemon for one snapshot of every thread's CPU time and the work counters (the client asks twice, the window apart, and reports the difference)."
+value = "threads"
+
+[diagnostics.threads_window_ms]
+doc = "The window of `status --threads`: per-thread CPU % and counters per second are measured over this long."
+value = 1000
+min = 100
+max = 60000
+unit = "ms"
+env = "AH_ENGINE_THREADS_WINDOW_MS"
+
+[diagnostics.threads_proc_dir]
+doc = "Linux: the directory listing this process's threads (each has a `stat` file with its CPU ticks and name)."
+value = "/proc/self/task"
+
+[diagnostics.threads_proc_stat]
+doc = "Linux: the per-thread file holding the CPU ticks (fields 14 and 15) and the name."
+value = "stat"
+
+[diagnostics.threads_name_max]
+doc = "macOS: the size of the buffer a thread name is read into (the OS limit, MAXTHREADNAMESIZE)."
+value = 64
+min = 16
+max = 1024
+
 [files.mem_log]
 doc = "Per-request memory log file name (state directory)."
 value = "mem.ndjson"
@@ -74,3 +104,65 @@ value = "mem.ndjson"
 [files.mem_snapshot]
 doc = "Cap-trip memory snapshot file name (state directory)."
 value = "mem-snapshot.json"
+
+# ---- debug mode (one build, two runtime modes) ---------------------------------------------------------------------------------------
+
+[diagnostics.debug_mode]
+doc = "Debug mode: the same binary also writes verbose per-module logs to the debug log (files.debug_log), checks runtime invariants (a violation is logged and counted, never fatal), samples per-thread CPU every diagnostics.debug_thread_sample_ms and writes a memory line every diagnostics.debug_mem_snapshot_ms. Off in normal use; the cost of the switch while off is one atomic load per call site. The environment variable env.debug or the --debug flag (diagnostics.debug_flag) of `serve` and `hook` turns it on for that process regardless of this setting; this setting is read again on every change of the config files, so a running daemon follows it without a restart."
+value = false
+
+[diagnostics.debug_flag]
+doc = "The command-line flag that turns debug mode on for one `serve` or `hook` process."
+value = "--debug"
+
+[diagnostics.debug_modules]
+doc = "Modules whose debug log lines are written (a module name such as `daemon/queue`, or a prefix ending in a slash such as `daemon/`). An empty list means every module."
+value = []
+
+[diagnostics.debug_log_max_bytes]
+doc = "Size at which the debug log is rotated (the old file is kept once, as <name>.1, replacing the previous one), so it never holds more than twice this."
+value = 8388608
+min = 4096
+unit = "bytes"
+
+[diagnostics.debug_thread_sample_ms]
+doc = "In debug mode, how often the watchdog samples every thread's CPU time and logs the busiest threads and the work counters per second over that interval."
+value = 5000
+min = 500
+unit = "ms"
+
+[diagnostics.debug_thread_top]
+doc = "Threads (grouped by name) listed per per-thread CPU sample in the debug log."
+value = 8
+min = 1
+max = 64
+
+[diagnostics.debug_mem_snapshot_ms]
+doc = "In debug mode, how often the watchdog writes a memory line (resident set, footprint, allocator and component sizes) to the debug log; in normal mode memory is only snapshotted when the resident-set cap trips."
+value = 30000
+min = 1000
+unit = "ms"
+
+# ---- resource budgets (reported in `status`, the health event and the health log) ---------------------------------------------------------
+
+[diagnostics.budget_cpu_pct]
+doc = "CPU budget of the daemon, percent of one core. A breach is reported when the CPU over diagnostics.budget_cpu_windows consecutive daemon.cpu_check_ms windows stays at or above it; 0 turns the CPU budget off."
+value = 2
+min = 0
+unit = "%"
+
+[diagnostics.budget_cpu_windows]
+doc = "Consecutive daemon.cpu_check_ms windows over the CPU budget that make a breach (one busy window is a burst, not a breach)."
+value = 2
+min = 1
+max = 100
+
+[diagnostics.budget_mem_mb]
+doc = "Memory budget of the daemon in MB, measured with the figure daemon.mem_metric selects. A breach is reported while the daemon is over it; 0 turns the memory budget off."
+value = 100
+min = 0
+unit = "MB"
+
+[files.debug_log]
+doc = "Debug log file name (state directory): one NDJSON line per debug event, written only in debug mode."
+value = "debug.ndjson"

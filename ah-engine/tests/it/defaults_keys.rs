@@ -151,6 +151,9 @@ fn every_key_the_source_reads_is_shipped_and_every_shipped_key_is_read() {
             || k.starts_with("opcli.dr_")
             || k.starts_with("opcli.fd_")
             || k.starts_with("opcli.cwb_")
+            || k.starts_with("flag.") // the documented flags, read whole by the reference generator (`docs::documented_flags`)
+            || k == "docs.external_flags" // read by the flag drift test (tests/it/reference.rs)
+            || ["env.auto_update", "env.install_lock_token", "env.release_base", "env.wrapper_diag"].contains(&k) // read by the shell wrappers, named here so the reference lists them
             || k.starts_with("cmd.") // handlers are checked against the registry by cli::tests; planned commands have no handler
             || k.starts_with("protocol.") // documents the wire format; the request words are parsed in daemon.rs
             || k.starts_with("job.") // scheduled jobs are read by prefix in schedule.rs
@@ -158,6 +161,14 @@ fn every_key_the_source_reads_is_shipped_and_every_shipped_key_is_read() {
             || k.starts_with("git.msg_") // block messages are rendered by block(name); the name is a literal there
             || k.starts_with("coordinator_work.lock_") // the lock timings of the coordinator-work-guard script, read as a group (`Params::from_group("coordinator_work")`)
             || k.starts_with("ctxbudget.ca_advice_") // regex sources named by the ctxbudget.ca_advice list
+            || k.starts_with("client.wrapper_") // the shell wrapper (`hooks/ah-hook.sh`) reads these before Rust starts
+            || k == "client.slow_fallback_max_ms" // the shell wrapper's watchdog extension for a call waiting on a slow daemon
+            || k.starts_with("client.cold_guard_") // the shell wrapper's cold-start wait for a guard event (the engine reads only the kick event's name)
+            || k == "files.cold_guard_notice" // the wrapper's once-per-session notice stamp
+            || k == "msg.cold_guard_notice" // the wrapper's notice text
+            || k.starts_with("rollback.") // the integrity script (`hooks/ah-engine-integrity.sh`) reads its names and thresholds itself; the engine reads only script and shell
+            || k == "files.integrity_log" // written by that script
+            || k == "files.wrapper_fail_log" // written by that script, from the hook wrapper's failure reports
             || k.starts_with("dispatch.hooks_") // the dispatch table, read by host and event (dispatch::table::key)
             || k == "script.p95_budget_by_check" // read by tests/script_latency.rs, the go/no-go gate of the scripted checks
             || k.starts_with("procwatch.mode_") // each orphan class names its mode setting by key (procwatch.classes mode_key)

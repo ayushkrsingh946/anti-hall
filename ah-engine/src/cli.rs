@@ -207,6 +207,9 @@ pub fn run(args: &[String]) -> i32 {
     if hook || statusline || p.command == "serve" {
         defaults::write_cache_on_load();
     }
+    if hook {
+        defaults::leave_after_load_to_daemon();
+    }
     if let Err(e) = defaults::init() {
         if p.command == "doctor" {
             // the doctor must still diagnose a plugin whose defaults cannot load; it writes nothing and hands over to the shell doctor
@@ -219,6 +222,8 @@ pub fn run(args: &[String]) -> i32 {
         // nothing can be answered without settings: a hook defers to Node through the wrapper, anything else is a plain failure
         return if hook { crate::bootstrap::UNAVAILABLE_EXIT } else { 70 };
     }
+    // debug mode for this process (the environment variable or the flag); the daemon also follows the config setting
+    crate::debug::init(&p.rest);
     let infos = commands();
     let Some(info) = infos.iter().find(|c| c.name == p.command) else {
         let names: Vec<String> = infos.iter().map(|c| c.name.clone()).collect();
@@ -296,6 +301,19 @@ fn cmd_hook(p: &Parsed) -> i32 {
 }
 
 fn cmd_status(p: &Parsed) -> i32 {
+    // `--threads`: the live daemon's per-thread CPU % and work counters per second, over `diagnostics.threads_window_ms`
+    if p.rest.iter().any(|a| a == defaults::text("diagnostics.threads_flag")) {
+        let ctl = defaults::text("diagnostics.threads_ctl");
+        let first = client::ctl_json(ctl);
+        let t0 = std::time::Instant::now();
+        std::thread::sleep(defaults::millis("diagnostics.threads_window_ms"));
+        let v = match (first, client::ctl_json(ctl)) {
+            (Some(a), Some(b)) => crate::threads::report(&a, &b, t0.elapsed().as_micros() as u64),
+            _ => json!({"running": false, "note": defaults::text("msg.cli_not_running")}),
+        };
+        emit(p, human(&v), v);
+        return 0;
+    }
     let v = client::status_value();
     // `--memory`: just the memory breakdown (live heap against RSS, and the size of every long-lived in-memory structure)
     let v = if p.rest.iter().any(|a| a == "--memory") {

@@ -11,6 +11,7 @@ files = [
     "git.toml",
     "command.toml",
     "commands.toml",
+    "flags.toml",
     "telemetry.toml",
     "storage.toml",
     "config.toml",
@@ -82,5 +83,6 @@ files = [
     "guards_l12.toml",
     "codex_scripts.toml",
     "diagnostics.toml",
+    "mem.toml",
 ]
 extra_dir = "hooks.d"

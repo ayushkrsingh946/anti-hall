@@ -575,6 +575,31 @@ new files produced one rescan.
 Intel macOS and WSL2 are covered by CI builds and by fixture tests of the mount-table parser (`tests/` of `fstype.rs`), not run.
 FSEvents replays changes made a moment before a stream starts; they are hints, and a consumer reconciles at start anyway.
 
+## Debug logging backend (lane B, 2026-10-15)
+
+Question: for debug mode (`src/debug.rs`), the `tracing` + `tracing-subscriber` stack (reloadable `EnvFilter`) against a small leveled
+log on the engine's own append-only NDJSON pattern. Both were built in the real release profile (`opt-level = "z"`, LTO, one codegen
+unit) from the same tree; the tracing variant is kept as a patch in the lane's work directory (`tracing-variant.patch`). Measured on
+macOS arm64 under a load average of 30 to 40 from other lanes, so wall time is noise and the table uses instructions and CPU time.
+
+| | base (no debug mode) | own log (shipped) | tracing |
+|---|---|---|---|
+| binary size | 9,911,792 B | 9,928,320 B (+16,528) | 10,111,536 B (+199,744) |
+| distinct crates in the normal graph (macOS arm64, engine excluded) | 60 | 60 (+0) | 68 (+8: tracing, tracing-core, tracing-subscriber, sharded-slab, thread_local, matchers, lazy_static, pin-project-lite) |
+| hook client, debug off: instructions per call (hyperfine 2.0, 300 runs, mean) | 48.69 to 48.84 M | 48.69 to 48.71 M | 48.91 M |
+| hook client, debug on: instructions per call | n/a | 49.03 M | 49.22 M |
+| daemon idle CPU, debug off (120 s) | 0.373 % of a core | 0.370 % | not measured at 120 s (30 s: same as own) |
+| daemon RSS after 300 requests | 38 to 39 MB | 38 to 39 MB | 39 MB |
+
+Decision: the own log. Equal CPU, RSS and start-up within noise; tracing costs eight crates (68 on macOS and 75 on the Linux hosts against `max_crates = 67` in
+`deps-budget.toml`, so it would need a raise) and about 12 times the binary growth for features the debug log does not use (spans,
+subscribers, layers). The client never installs a subscriber when debug mode is off in either variant, so the start-up comparison is
+the binary size and relocation cost only. Revisit only if per-request spans are wanted.
+
+mach2 (macOS thread_info bindings) was not adopted for `status --threads`: `libc` already exposes the calls used (`task_threads`,
+`thread_info`, `THREAD_BASIC_INFO`), mach2 would add one crate to the macOS graph, and the call cost is the kernel's, not the binding's
+(inference; not benchmarked).
+
 ## Revision log
 
 - **1.0** (2026-10-04): initial record, D1–D43.
@@ -792,3 +817,28 @@ FSEvents replays changes made a moment before a stream starts; they are hints, a
 - **1.121** (2026-10-10, lane v1-l10a, issue #67): D88, D74. The task family answers where it deferred. **Cause of the 79% task-tracker defer rate** (94 of 119 prompt calls in the replay): the delivery search of the emit-dedupe store (`scanTail` in `lib/74-emit-dedupe.js`) split and parsed up to a 4 MiB transcript window line by line in the interpreter, past the 50 ms script limit; confirmed by running the live11 binary twice per transcript (the second prompt is the one that scans): 3 of 11 frozen transcripts fell back, 0 of 11 with the host primitive. **Host primitives** (`src/script/host_transcript.rs`, documented in docs/AH-ENGINE.md): `transcriptDedupeTail` (the scan itself, cached per path, window, size and modification time), `transcriptGrep` (lines of a window holding every needle and matching a pattern), `agentCountProof` (the running agents with what the count rests on), `jevCachePeek`. **task-tracker** now answers the per-turn DISPATCH NOW line (the cover and cap logic moved from task-guard into `lib/69-tasks.js`, shared), the dispatchTier annotation with its request and recommendation records, and the outcome tracking of earlier recommendations; 40 new Node-parity scenarios (`task_tracker_parity`, home compared after every step). The delivery search skips a marker line `JSON.parse` rejects, as Node's try/catch does, and still defers on a line only JavaScript may read. **Backfill bound** raised from 8 MiB to Node's own 64 MiB byte cap (`taskstate.backfill_exact_bytes`): a long session whose tasks were created long ago deferred on every prompt; the engine's scan is deterministic where Node's 150 ms clock is not, so on a slow machine it can find a subject Node missed (a fuller note, never a missing one). **Left to Node, each a shape only V8 reads exactly**: a payload that is not an object, an id or timestamp of another type, a surrogate cut through a subject, a state file whose shape JavaScript would index differently on a write, an unknown or relative working directory; the golden corpora count them (task-tracker 39 of 332 (45 before this lane), task-guard 12 of 136, tasklist-guard 7 of 199, dispatch-tier 12 of 112, idle-agent-sweep 6 of 219, task-lifecycle-log 3 of 67).
 
 - **1.122** (2026-10-10, lane broadkill, issue #38): D74, D87, D88. **The all-agents broad-kill guard.** `command-guard` is coordinator-only and passes every subagent call silently (its own header says so), but the incident behind #38 was a subagent's broad `pkill` killing the user's dev servers, so a rule inside `command-guard` could not have fired for it. New check `broad-kill-guard` (PreToolUse on Bash, both hosts, engine-only like `engine-role-guard`, stricter than Node, which has no such guard): no role test, it judges the command for every caller. Logic is plugin JS (`engine/logic/broad-kill-guard.js`), every list, pattern and text is `engine/defaults/broad_kill.toml` (+ pristine twin), the switch is `guards.broadKill` (default on, a locked safety switch: lowering it asks for confirmation like `stashGuard`). **Decisions.** Blocked: `pkill`, `killall`, `killall5`, `fuser -k` and `taskkill /IM` (match by name, pattern, port or image); a `kill` whose target is `-1` or `0` (every process you own, your whole group); a `kill` whose target is a `$(...)` / backtick substitution that runs `pgrep`, `pidof`, `ps`, `lsof`, `fuser`, `pstree`, `netstat` or `ss`; `xargs kill` (also `xargs pkill`) when an earlier stage of the same pipeline is such a lookup. Allowed: `kill <explicit pid>` in any signal form, a `kill` of a variable (`$pid`, `$!`), of a job (`%1`), of an explicit process group (`kill -- -4242`) and of a `$(cat pidfile)`; `pkill -P <pid>` / `--parent` when the value is `$$`, `$BASHPID` or a PID of 2 or more (the children of one explicit process, so `pkill -P $$` stops the caller's own children), but not `-P 1` (every orphan on the machine), and not a `-P` with no value. **Reach.** It reads simple commands: quotes, `$(...)` and backticks (also inside double quotes), heredocs only when a shell reads them (`sh <<EOF`), `sh -c` / `bash -lc` / `eval` scripts, wrappers (`sudo`, `env`, `nohup`, `timeout`, ...) and keywords (`{`, `if`, `then`, ...); the same word as an `echo`, `grep`, `man` or `git commit -m` argument is text. Out of reach, by design: a script file (`bash run.sh`), an interpreter's own kill call, a remote shell (`ssh host pkill`) and `docker kill`. `ps` in a substitution is a lookup, so `kill $(ps -o pid= --ppid $$)` is blocked; the message sends the caller to `pkill -P $$`. **Failure and hosts.** A script failure allows (`script.failure_mode_by_check`: open), because a guard that blocks by breaking would stop the whole agent. The block is exit 2 with the decision JSON on stdout and the same reason on stderr (Codex honors exit 2 only with it there). Wired in `dispatch.toml` for Claude and Codex, the generated hooks / fallback files, the settings schema (and its generated engine copies), `docs/AH-ENGINE.md`, `docs/GUIDE.md` and the generated reference and skills. Tests: `tests/it/broad_kill.rs` (the decision table, 100 commands x main / subagent / Codex / Codex subagent), `tests/golden/broad-kill-guard.jsonl` (28 recorded cases including the exact texts).
+
+## Watch stack A/B: hand-written kqueue backend and Coalescer against `notify` (FSEvents) + `notify-debouncer-full` (lane A, 2026-10-15)
+
+Owner rule: swap an established crate in only when an A/B benchmark proves it at least as good. B = `notify` 8.2.0 with its default
+FSEvents backend on macOS, behind `notify-debouncer-full` =0.6.0 (feature `watch-crates`, the Coalescer reduced to its queue cap),
+against A = `src/watch/kq.rs` + `src/watch/notify.rs` + the Coalescer. Same machine (Apple Silicon, load 12-20 from other lanes), same
+tests (`tests/watch_bench.rs`, the scale test `the_thread_stays_inside_its_budget_at_scale`), alternating runs; the experiment patch is
+kept outside the tree (`~/.anti-hall/work/lanea-ab-watch-crates.patch`).
+
+| measure | A (kq.rs + Coalescer) | B (notify FSEvents + debouncer-full) |
+|---|---|---|
+| idle CPU, realistic watch set (1260 files) | 0.002 permille | 0.63-0.69 permille (the debouncer sleeps a quarter of its timeout in a loop: 40 wakes/s) |
+| watcher threads under the scale load (1 primary + 10 workspaces + 10 sessions) | 0.03% of a core | 0.17% (debouncer 0.105, FSEvents loop 0.065) |
+| whole DevSwarm machinery, same load | 0.53 / 0.66 / 0.73% | 0.64 / 0.73% |
+| detection latency p50 / p95 | 104 / 106 ms | 121 / 137 ms |
+| lost changes over 3000 fast writes | none without a rescan signal (the queue cap sends one) | none, no rescan (the debouncer queue is unbounded) |
+| process RSS after the scale load | 56 MB (+4) | 62.5 MB (+6) |
+| release binary | 9,928,464 bytes | 9,980,912 bytes (+52 KB) |
+| client start-up CPU (`ah-engine status`, 600 alternating runs, p50) | 6.14 ms | 7.59 ms (+1.45 ms: CoreFoundation and CoreServices load into every invocation, the binary being the client too) |
+| code | about 700 lines hand-written | about 80 lines of glue |
+
+**Verdict: keep A.** B loses on idle CPU, latency, memory, binary size and above all on the client start-up that every hook pays; it also
+drops `realtime.max_delay_ms` (a file that never stops changing is not reported) and bounds nothing. Its only gain is lines of code.
+Revisit if the client and the daemon become separate binaries (the thin launcher), so the daemon alone links the frameworks.
+

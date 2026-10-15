@@ -14,8 +14,10 @@ pub struct Config {
     pub read_deadline: Duration,
     /// Time to write a reply.
     pub write_deadline: Duration,
-    /// Per-request thread-CPU budget for rule evaluation, in microseconds.
+    /// Per-request thread-CPU HARD budget for rule evaluation, in microseconds: past it the remaining checks defer (0 = none).
     pub eval_budget_us: u64,
+    /// Per-request thread-CPU SOFT budget: past it the request is warned about and counted, nothing is cut.
+    pub eval_soft_us: u64,
     /// Address-space/data limit applied with setrlimit, in MB (0 = none).
     pub mem_mb: u64,
     /// Resident-set cap in KB; above it the daemon drains and exits cleanly (0 = none).
@@ -63,6 +65,7 @@ impl Config {
             read_deadline: millis("daemon.read_ms"),
             write_deadline: millis("daemon.write_ms"),
             eval_budget_us: num("daemon.eval_budget_us"),
+            eval_soft_us: num("daemon.eval_soft_us"),
             mem_mb: num("daemon.mem_mb"),
             rss_cap_kb: num("daemon.rss_cap_kb"),
             rss_check: millis("daemon.rss_check_ms"),
@@ -101,6 +104,10 @@ pub struct ClientConfig {
     pub crash_window: Duration,
     /// How long respawning stays stopped after a crash loop.
     pub crash_cooldown: Duration,
+    /// Spawn storm: `spawn_n` daemon starts within `spawn_window` count as a crash loop even when no crash was reported.
+    pub spawn_n: usize,
+    /// Window in which daemon starts are counted.
+    pub spawn_window: Duration,
     /// Node fallback hook is killed after this long (then plain allow: it is unavailable).
     pub fallback_timeout: Duration,
 }
@@ -117,6 +124,8 @@ impl ClientConfig {
             crash_n: num("client.crash_n") as usize,
             crash_window: secs("client.crash_window_s"),
             crash_cooldown: secs("client.crash_cooldown_s"),
+            spawn_n: num("client.spawn_n") as usize,
+            spawn_window: secs("client.spawn_window_s"),
             fallback_timeout: millis("client.fallback_ms"),
         }
     }

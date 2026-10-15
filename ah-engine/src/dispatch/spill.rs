@@ -120,7 +120,7 @@ mod tests {
     fn joined(rs: &[HookResult]) -> String {
         match combine::combine(rs) {
             combine::Combined::Answer(o) => o.out,
-            combine::Combined::Conflict(_) => String::new(),
+            combine::Combined::Conflict { .. } => String::new(),
         }
     }
 

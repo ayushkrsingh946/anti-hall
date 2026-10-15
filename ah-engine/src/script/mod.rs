@@ -20,10 +20,11 @@
 //! times every worker thread, all of it in the C allocator's zone outside the heap counters; see DECISIONS.md, revision
 //! 1.111. The runtime allocates through the Rust allocator, so its heap is in `status --memory`'s live heap.
 //!
-//! Bounds (issue #21): a worker's interpreter holds only as many loaded checks as fit `script.runtime_soft_bytes` after a
-//! collection; past it the least recently called checks are unloaded (down to `script.runtime_unload_to_bytes`) and rebuilt from
+//! Bounds (issue #21): a worker's interpreter reports its size to the memory registry (holder `quickjs`, limits `mem.quickjs_*`,
+//! per worker) and holds only as many loaded checks as fit `mem.quickjs_soft_bytes` after a
+//! collection; past it the least recently called checks are unloaded (down to the low-water mark (`mem.quickjs_low_water_pct`)) and rebuilt from
 //! their files by their next call. The per-call heap ceiling is `script.call_memory_bytes` above the size after loading, never
-//! past the absolute `script.runtime_max_bytes`. Measured on a replay, the interpreter's size after a collection equals its size
+//! past the absolute `mem.quickjs_hard_bytes`. Measured on a replay, the interpreter's size after a collection equals its size
 //! before it (no garbage waits for the collector) and is flat once every check has been loaded, so the bound is on what is kept
 //! loaded, not on garbage.
 //!
@@ -77,6 +78,10 @@ struct Pool {
     /// When each loaded entry was last called (a per-pool counter), for least-recently-used unloading.
     used: HashMap<String, u64>,
     tick: u64,
+    /// This worker's share of the `quickjs` memory holder.
+    inst: crate::mem::Instance,
+    /// Calls since the last collection by [`maintain`].
+    calls: u64,
     /// Interrupt deadlines of the call in progress.
     deadline: Arc<Deadline>,
     epoch: Instant,
@@ -106,21 +111,98 @@ pub struct Deadline {
     /// answer, so the call is cut and the check defers to its own Node hook. Never moved by blocked time (the client waits in
     /// real time); lifted with the other limits by `commit()`.
     pub req: AtomicU64,
+    /// Which limit interrupted the call in progress ([`Trip`] as a number; 0 = none yet). The first limit to fire stays.
+    pub trip: AtomicU64,
+    /// The thread CPU time (us) at which the call in progress was armed, for the soft-limit check after it.
+    pub start_cpu: AtomicU64,
+}
+
+/// Calls that ran past their SOFT limit (and were not cut), since the last [`take_soft_overruns`].
+static SOFT_OVERRUNS: AtomicU64 = AtomicU64::new(0);
+
+/// The soft-limit overruns counted since the last call; the daemon adds them to its metrics.
+pub fn take_soft_overruns() -> u64 {
+    SOFT_OVERRUNS.swap(0, Ordering::Relaxed)
+}
+
+/// The HARD CPU limit (ms) of a call whose SOFT limit is `soft_ms`.
+fn hard_ms_of(soft_ms: u64) -> u64 {
+    // never past `script.time_hard_cap_ms`, except that a soft limit already above the cap (a batch job's) is its own hard limit
+    soft_ms.saturating_mul(defaults::num("script.time_hard_factor").max(1)).min(defaults::num("script.time_hard_cap_ms").max(soft_ms))
+}
+
+/// The limit that interrupted a script call.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Trip {
+    /// The thread's CPU time reached `script.time_limit_ms`.
+    Cpu = 1,
+    /// The wall-clock backstop (`script.wall_limit_factor` times the CPU limit) passed.
+    Wall = 2,
+    /// The request's client stopped waiting.
+    Request = 3,
+}
+
+impl Trip {
+    fn of(n: u64) -> Option<Trip> {
+        match n {
+            1 => Some(Trip::Cpu),
+            2 => Some(Trip::Wall),
+            3 => Some(Trip::Request),
+            _ => None,
+        }
+    }
+
+    fn message_key(self) -> &'static str {
+        match self {
+            Trip::Cpu => "msg.script_limit_cpu",
+            Trip::Wall => "msg.script_limit_wall",
+            Trip::Request => "msg.script_limit_request",
+        }
+    }
+}
+
+impl Deadline {
+    /// The limit the call has run past, given the thread's CPU time and the pool clock now (CPU first, then wall, then the
+    /// client's deadline); a limit that is not armed (0) never fires.
+    fn exceeded(&self, cpu_now: u64, now_ns: u64) -> Option<Trip> {
+        let (cpu, wall, req) = (self.cpu.load(Ordering::Relaxed), self.wall.load(Ordering::Relaxed), self.req.load(Ordering::Relaxed));
+        if cpu != 0 && cpu_now > cpu {
+            Some(Trip::Cpu)
+        } else if wall != 0 && now_ns > wall {
+            Some(Trip::Wall)
+        } else if req != 0 && now_ns > req {
+            Some(Trip::Request)
+        } else {
+            None
+        }
+    }
+
+    /// `error` with the limit that interrupted the call and its numbers, when one did.
+    fn explain(&self, error: &str, limit_ms: u64) -> String {
+        let Some(trip) = Trip::of(self.trip.load(Ordering::Relaxed)) else { return error.to_string() };
+        let limit = defaults::text(trip.message_key());
+        let hard_ms = hard_ms_of(limit_ms);
+        let wall_ms = hard_ms.saturating_mul(defaults::num("script.wall_limit_factor").max(1));
+        defaults::render("msg.script_interrupted", &[("error", &error), ("limit", &limit), ("cpu_ms", &hard_ms), ("wall_ms", &wall_ms)])
+    }
 }
 
 impl Pool {
     /// Start the limits of a call of `limit_ms` script time; `cut` also arms the request's client deadline.
     fn arm(&self, limit_ms: u64, cut: bool) {
         let cpu_now = crate::limits::thread_cpu_us();
-        self.deadline.cpu.store(cpu_now.saturating_add(limit_ms.saturating_mul(1000)).max(1), Ordering::Relaxed);
+        let hard_ms = hard_ms_of(limit_ms);
+        self.deadline.start_cpu.store(cpu_now, Ordering::Relaxed);
+        self.deadline.cpu.store(cpu_now.saturating_add(hard_ms.saturating_mul(1000)).max(1), Ordering::Relaxed);
         let now = self.epoch.elapsed();
-        let wall = limit_ms.saturating_mul(defaults::num("script.wall_limit_factor").max(1)).saturating_mul(1_000_000);
+        let wall = hard_ms.saturating_mul(defaults::num("script.wall_limit_factor").max(1)).saturating_mul(1_000_000);
         self.deadline.wall.store((now.as_nanos() as u64).saturating_add(wall).max(1), Ordering::Relaxed);
         let req = crate::deadline::at().filter(|_| cut).map_or(0, |at| {
             let left = at.saturating_duration_since(Instant::now());
             (now.as_nanos() as u64).saturating_add(left.as_nanos() as u64).max(1)
         });
         self.deadline.req.store(req, Ordering::Relaxed);
+        self.deadline.trip.store(0, Ordering::Relaxed);
         crate::deadline::set_cut_armed(req != 0);
     }
 
@@ -128,6 +210,22 @@ impl Pool {
     fn past_request(&self) -> bool {
         let req = self.deadline.req.load(Ordering::Relaxed);
         req != 0 && self.epoch.elapsed().as_nanos() as u64 > req
+    }
+
+    /// A call that finished (or was interrupted) having used more thread CPU than its SOFT limit: logged and counted.
+    fn note_soft(&self, name: &str, event: &str, soft_ms: u64) {
+        let used = crate::limits::thread_cpu_us().saturating_sub(self.deadline.start_cpu.load(Ordering::Relaxed));
+        if self.deadline.start_cpu.load(Ordering::Relaxed) != 0 && used > soft_ms.saturating_mul(1000) {
+            SOFT_OVERRUNS.fetch_add(1, Ordering::Relaxed);
+            let hard = hard_ms_of(soft_ms);
+            crate::discard::note(
+                "script_soft",
+                &defaults::render(
+                    "msg.script_soft_overrun",
+                    &[("check", &name), ("event", &event), ("used_us", &used), ("soft_ms", &soft_ms), ("hard_ms", &hard)],
+                ),
+            );
+        }
     }
 
     fn disarm(&self) {
@@ -147,17 +245,35 @@ impl Pool {
         let epoch = Instant::now();
         let d = deadline.clone();
         rt.set_interrupt_handler(Some(Box::new(move || {
-            let cpu = d.cpu.load(Ordering::Relaxed);
-            let wall = d.wall.load(Ordering::Relaxed);
-            let req = d.req.load(Ordering::Relaxed);
+            let (cpu, wall) = (d.cpu.load(Ordering::Relaxed), d.wall.load(Ordering::Relaxed));
             if cpu != 0 || wall != 0 {
                 crate::deadline::beat(); // the interpreter is running: a slow call, not a hung worker
             }
             let now = epoch.elapsed().as_nanos() as u64;
-            (cpu != 0 && crate::limits::thread_cpu_us() > cpu) || (wall != 0 && now > wall) || (req != 0 && now > req)
+            match d.exceeded(crate::limits::thread_cpu_us(), now) {
+                Some(trip) => {
+                    // the first limit to fire is the one reported
+                    crate::discard::harmless(d.trip.compare_exchange(0, trip as u64, Ordering::Relaxed, Ordering::Relaxed)); // keep: a loser means a limit already fired
+                    true
+                }
+                None => false,
+            }
         })));
-        Some(Pool { ctx: None, checks: HashMap::new(), used: HashMap::new(), tick: 0, deadline, epoch, rt })
+        Some(Pool { ctx: None, checks: HashMap::new(), used: HashMap::new(), tick: 0, inst: budget().instance(), calls: 0, deadline, epoch, rt })
     }
+}
+
+/// The `quickjs` holder of the memory registry (one instance per worker thread; the limits apply to each).
+fn budget() -> &'static crate::mem::Budget {
+    static BUDGET: std::sync::OnceLock<crate::mem::Budget> = std::sync::OnceLock::new();
+    BUDGET.get_or_init(|| {
+        crate::mem::global().register_instances(crate::mem::Spec::new(
+            "quickjs",
+            "mem.quickjs_soft_bytes",
+            "mem.quickjs_hard_bytes",
+            "mem.quickjs_low_water_pct",
+        ))
+    })
 }
 
 thread_local! {
@@ -396,6 +512,7 @@ fn limit_ms(name: &str, event: &str) -> u64 {
 /// files or the entry's files changed since.
 fn ensure_entry(pool: &mut Pool, key: &str, libs: &Fingerprint, own: &Fingerprint, entry: &str) -> Result<Context, String> {
     pool.tick += 1;
+    pool.calls += 1;
     pool.used.insert(key.to_string(), pool.tick);
     let libs_stale = pool.ctx.as_ref().is_none_or(|(fp, _)| fp != libs);
     if libs_stale || pool.checks.get(key).is_none_or(|fp| fp != own) {
@@ -416,22 +533,70 @@ fn ensure_entry(pool: &mut Pool, key: &str, libs: &Fingerprint, own: &Fingerprin
         load_check(&ctx, key, own, entry)?;
         pool.checks.insert(key.to_string(), own.clone());
         pool.rt.run_gc();
-        let mut base = pool.rt.memory_usage().malloc_size.max(0) as usize;
-        let soft = defaults::num("script.runtime_soft_bytes") as usize;
-        if base > soft {
-            base = unload_cold(pool, &ctx, key, soft);
-        }
+        let base = pool.rt.memory_usage().malloc_size.max(0) as usize;
+        let base = fit(pool, &ctx, key, base).ok_or("memory")?;
         // the ceiling is relative to what the scripts hold now, but never past the absolute per-runtime one
-        let limit = base.saturating_add(defaults::num("script.call_memory_bytes") as usize).min(defaults::num("script.runtime_max_bytes") as usize);
+        let limit = base.saturating_add(defaults::num("script.call_memory_bytes") as usize).min(pool.inst.hard_limit());
         pool.rt.set_memory_limit(limit);
     }
     pool.ctx.as_ref().map(|(_, c)| c.clone()).ok_or_else(|| "context".to_string())
 }
 
-/// Unload the least recently called entries (never `keep`) until the runtime holds at most `script.runtime_unload_to_bytes`, `script.unload_batch` entries per collection; returns the size it ends at. An unloaded
+/// Report the interpreter's `size` (just after a collection) to the registry and act on its answer: at the soft limit unload the
+/// coldest checks (never `keep`) down to the low-water mark; over the hard limit unload everything but `keep` and, if that is not
+/// enough, recycle the interpreter (`None`: the call that needed it fails open). Returns the size it ends at.
+fn fit(pool: &mut Pool, ctx: &Context, keep: &str, mut size: usize) -> Option<usize> {
+    match pool.inst.report(size) {
+        crate::mem::Action::None => {}
+        crate::mem::Action::Shrink(target) => {
+            size = unload_cold(pool, ctx, keep, target);
+            pool.inst.report(size);
+        }
+        crate::mem::Action::Recycle => {
+            size = unload_cold(pool, ctx, keep, 0);
+            if matches!(pool.inst.report(size), crate::mem::Action::Recycle) {
+                pool.checks.clear();
+                pool.used.clear();
+                pool.ctx = None;
+                pool.rt.run_gc();
+                pool.inst.report(pool.rt.memory_usage().malloc_size.max(0) as usize);
+                return None;
+            }
+        }
+    }
+    Some(size)
+}
+
+/// Between requests (the worker loop, after the reply went out; `idle`: no request is waiting): every `script.gc_every_calls`
+/// calls, and once when the worker goes idle after any call, collect this worker's interpreter, report its size to the memory
+/// registry and act on it ([`fit`]). QuickJS frees acyclic garbage at once but leaves cycles (closures, objects that point at
+/// each other) to a collector that otherwise runs only at 1.5 times its size after the previous run, and the `quickjs` holder was
+/// measured only when a check loaded: with every check loaded (about 5.7 MB a worker) up to about 2.8 MB of garbage per worker
+/// waited, unseen by the registry (the 30-minute soak's footprint rise). Its own collector stays the backstop within a call.
+pub fn maintain(idle: bool) {
+    POOL.with(|cell| {
+        let mut slot = cell.borrow_mut();
+        let Some(pool) = slot.as_mut() else { return };
+        if pool.calls == 0 || (!idle && pool.calls < defaults::num("script.gc_every_calls").max(1)) {
+            return;
+        }
+        pool.calls = 0;
+        pool.rt.run_gc();
+        let size = pool.rt.memory_usage().malloc_size.max(0) as usize;
+        match pool.ctx.as_ref().map(|(_, c)| c.clone()) {
+            Some(ctx) => {
+                crate::discard::harmless(fit(pool, &ctx, "", size).ok_or(())); // keep: a recycled interpreter is rebuilt by its next call
+            }
+            None => {
+                pool.inst.report(size);
+            }
+        }
+    })
+}
+
+/// Unload the least recently called entries (never `keep`) until the runtime holds at most `target` bytes (the registry's low-water mark), `script.unload_batch` entries per collection; returns the size it ends at. An unloaded
 /// entry is rebuilt from its files by its next call (`ensure_entry` finds it missing from `checks`).
-fn unload_cold(pool: &mut Pool, ctx: &Context, keep: &str, soft: usize) -> usize {
-    let target = (defaults::num("script.runtime_unload_to_bytes") as usize).min(soft);
+fn unload_cold(pool: &mut Pool, ctx: &Context, keep: &str, target: usize) -> usize {
     let batch = (defaults::num("script.unload_batch") as usize).max(1);
     let mut size = pool.rt.memory_usage().malloc_size.max(0) as usize;
     while size > target {
@@ -473,6 +638,9 @@ pub fn call_fn(name: &str, func: &str, args: &Value) -> Option<Value> {
     let st = Settings::from_env(&env);
     let (libs, own) = resolve(name, &st.home)?;
     let key = format!("{name}#{func}");
+    let event = args.get("event").or_else(|| args.get("hookEventName")).or_else(|| args.pointer("/subject/event")).and_then(Value::as_str).unwrap_or("");
+    let check = args.get("checkId").or_else(|| args.get("check")).or_else(|| args.pointer("/check/id")).and_then(Value::as_str).unwrap_or(name);
+    let _boundary = crate::crash::enter("check", "", event, check, "");
     let r = POOL.with(|cell| -> Result<Value, String> {
         let mut slot = cell.borrow_mut();
         if slot.is_none() {
@@ -505,6 +673,7 @@ pub fn call_fn(name: &str, func: &str, args: &Value) -> Option<Value> {
                 let s = c.json_stringify(v).catch(&c).map_err(|e| e.to_string())?;
                 Ok(s.and_then(|s| s.to_string().ok()).unwrap_or_else(|| "null".into()))
             });
+            pool.note_soft(name, func, limit);
             pool.disarm();
             host::set_deadline(None);
             reset_heap(pool);
@@ -514,7 +683,8 @@ pub fn call_fn(name: &str, func: &str, args: &Value) -> Option<Value> {
     match r {
         Ok(v) => Some(v),
         Err(e) => {
-            crate::discard::note("script_error", &format!("{name}.{func}: {e}"));
+            let args: [(&str, &dyn std::fmt::Display); 5] = [("name", &name), ("func", &func), ("check", &check), ("event", &event), ("error", &e)];
+            crate::discard::note("script_error", &defaults::render("script.msg_call_error", &args));
             None
         }
     }
@@ -565,6 +735,8 @@ fn call(name: &str, libs: &Fingerprint, own: &Fingerprint, payload: &Value, opts
                 Ok(s.and_then(|s| s.to_string().ok()).unwrap_or_else(|| "null".into()))
             });
             was_cut = out.is_err() && pool.past_request();
+            pool.note_soft(name, event, limit);
+            let out = out.map_err(|e| pool.deadline.explain(&e, limit));
             pool.disarm();
             host::set_deadline(None);
             let text = out?;
@@ -608,7 +780,7 @@ pub fn expand_now(s: &str, now_ms: f64) -> String {
             match (kind, delta) {
                 ("NOW", Some(d)) => Some((close, format!("{}", (now_ms + d) as i64))),
                 ("ISO", Some(d)) => Some((close, crate::checks::agent_scan::iso_utc(now_ms + d))),
-                ("DATE", Some(d)) => Some((close, crate::checks::agent_scan::iso_utc(now_ms + d)[..10].to_string())),
+                ("DATE", Some(d)) => Some((close, crate::checks::agent_scan::iso_utc(now_ms + d).get(..10).unwrap_or("").to_string())),
                 _ => None,
             }
         });

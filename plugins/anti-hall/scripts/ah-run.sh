@@ -135,14 +135,23 @@ if [ "$stdin_mode" -eq 1 ]; then
   rc=$?
 else
   # Long-running (a Monitor): run the engine as a child so a deferral can still fall back, and pass SIGTERM/SIGINT on to it.
-  signalled=0
+  # The traps go in before the child starts: a signal in between would otherwise kill this launcher with its default action
+  # and leave the engine running unowned (dash). One that comes before the child is started ends the launcher by that signal
+  # (nothing started); one that comes while it is being started is passed on as soon as its pid is known.
+  signalled=
+  pid=
+  trap 'signalled=TERM; [ -z "$pid" ] || kill -TERM "$pid" 2>/dev/null' TERM
+  trap 'signalled=INT; [ -z "$pid" ] || kill -INT "$pid" 2>/dev/null' INT
+  if [ -n "$signalled" ]; then
+    trap - "$signalled"
+    kill -"$signalled" $$
+  fi
   "$engine" "$@" </dev/null &
   pid=$!
-  trap 'signalled=1; kill -TERM "$pid" 2>/dev/null' TERM
-  trap 'signalled=1; kill -INT "$pid" 2>/dev/null' INT
+  [ -z "$signalled" ] || kill -"$signalled" "$pid" 2>/dev/null
   wait "$pid"
   rc=$?
-  if [ "$signalled" -eq 1 ]; then
+  if [ -n "$signalled" ]; then
     wait "$pid" 2>/dev/null
     rc=$?
     exit "$rc"

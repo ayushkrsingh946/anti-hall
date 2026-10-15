@@ -1,11 +1,14 @@
 //! Resource limits and process-level safety: token buckets, rlimit/nice, RSS and CPU readings,
 //! peer-uid check, private-directory check.
 use crate::error::DirError;
+use crate::mem::{Admit, Budget, Owner, Spec};
 use std::collections::HashMap;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::os::unix::io::AsRawFd;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering::SeqCst};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::Instant;
 
 /// Real uid of this process.
@@ -16,24 +19,140 @@ pub fn uid() -> u32 {
 
 /// Token bucket per key. Bounded: when the map grows past `cap`, idle (full) buckets are dropped.
 pub struct Buckets {
-    map: HashMap<String, (f64, Instant)>,
+    core: Arc<BucketCore>,
     rps: f64,
     burst: f64,
     cap: usize,
+    budget: Budget,
+}
+
+struct BucketCore {
+    map: Mutex<HashMap<String, (f64, Instant)>>,
+    bytes: AtomicUsize,
+}
+
+#[derive(Default)]
+struct BucketOwners {
+    buckets: Mutex<Vec<Weak<BucketCore>>>,
+}
+
+impl BucketOwners {
+    fn add(&self, core: &Arc<BucketCore>) {
+        let mut buckets = self.buckets.lock().unwrap_or_else(|e| e.into_inner());
+        buckets.retain(|w| w.strong_count() > 0);
+        buckets.push(Arc::downgrade(core));
+    }
+
+    fn each(&self, mut f: impl FnMut(&Arc<BucketCore>)) {
+        let mut buckets = self.buckets.lock().unwrap_or_else(|e| e.into_inner());
+        buckets.retain(|w| w.strong_count() > 0);
+        for core in buckets.iter().filter_map(Weak::upgrade) {
+            f(&core);
+        }
+    }
+}
+
+impl Owner for BucketOwners {
+    fn bytes(&self) -> usize {
+        let mut n = 0;
+        self.each(|core| n += core.bytes.load(SeqCst));
+        n
+    }
+    fn shrink(&self, target: usize) {
+        loop {
+            let mut total = 0;
+            let mut oldest: Option<(Arc<BucketCore>, String, Instant)> = None;
+            self.each(|core| {
+                let map = core.lock();
+                total += BucketCore::refresh_bytes(&map);
+                if let Some((k, (_, last))) = map.iter().min_by_key(|(_, (_, last))| *last)
+                    && oldest.as_ref().is_none_or(|(_, _, old)| last < old)
+                {
+                    oldest = Some((core.clone(), k.clone(), *last));
+                }
+            });
+            if total <= target {
+                break;
+            }
+            let Some((core, key, _)) = oldest else { break };
+            let mut map = core.lock();
+            map.remove(&key);
+            map.shrink_to_fit();
+            core.store_bytes(&map);
+        }
+    }
+    fn recycle(&self) {
+        self.each(|core| {
+            let mut map = core.map.lock().unwrap_or_else(|e| e.into_inner());
+            map.clear();
+            map.shrink_to_fit();
+            core.store_bytes(&map);
+        });
+    }
+}
+
+impl BucketCore {
+    fn new() -> BucketCore {
+        BucketCore { map: Mutex::new(HashMap::new()), bytes: AtomicUsize::new(0) }
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, (f64, Instant)>> {
+        self.map.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn weight(key: &str) -> usize {
+        key.len().saturating_add(std::mem::size_of::<(String, f64, Instant)>())
+    }
+
+    fn refresh_bytes(map: &HashMap<String, (f64, Instant)>) -> usize {
+        map.capacity().saturating_mul(std::mem::size_of::<(String, (f64, Instant))>()).saturating_add(map.keys().map(|k| Self::weight(k)).sum::<usize>())
+    }
+
+    fn store_bytes(&self, map: &HashMap<String, (f64, Instant)>) {
+        self.bytes.store(Self::refresh_bytes(map), SeqCst);
+    }
+}
+
+fn bucket_budget(core: &Arc<BucketCore>) -> Budget {
+    static OWNERS: OnceLock<Arc<BucketOwners>> = OnceLock::new();
+    static BUDGET: OnceLock<Budget> = OnceLock::new();
+    let owners = OWNERS.get_or_init(|| Arc::new(BucketOwners::default()));
+    owners.add(core);
+    BUDGET
+        .get_or_init(|| {
+            let owner: Arc<dyn Owner> = owners.clone();
+            crate::mem::global()
+                .register(Spec::new("buckets", "mem.buckets_soft_bytes", "mem.buckets_hard_bytes", "mem.buckets_low_water_pct"), Arc::downgrade(&owner))
+        })
+        .clone()
+}
+
+/// Requests served without a rate bucket because the memory budget refused the new key (`bucket_untracked`).
+static UNTRACKED: AtomicU64 = AtomicU64::new(0);
+
+/// How many requests were served untracked since the process started.
+pub fn bucket_untracked() -> u64 {
+    UNTRACKED.load(SeqCst)
 }
 
 impl Buckets {
     /// A bucket map allowing `rps` per second with bursts up to `burst`.
     pub fn new(rps: f64, burst: f64) -> Buckets {
-        Buckets { map: HashMap::new(), rps, burst: burst.max(1.0), cap: crate::defaults::num("daemon.bucket_cap") as usize }
+        let core = Arc::new(BucketCore::new());
+        let budget = bucket_budget(&core);
+        Buckets { core, rps, burst: burst.max(1.0), cap: crate::defaults::num("daemon.bucket_cap") as usize, budget }
     }
     /// Keys held.
     pub fn len(&self) -> usize {
-        self.map.len()
+        self.core.lock().len()
+    }
+    /// Estimated bytes held.
+    pub fn bytes(&self) -> usize {
+        self.core.bytes.load(SeqCst)
     }
     /// True when no key is held.
     pub fn is_empty(&self) -> bool {
-        self.map.is_empty()
+        self.len() == 0
     }
     /// Change the rate and burst for later requests (a config swap, D18); existing tokens are kept.
     pub fn set_rate(&mut self, rps: f64, burst: f64) {
@@ -49,23 +168,45 @@ impl Buckets {
         if self.rps <= 0.0 {
             return true; // 0 = unlimited
         }
-        if self.map.len() >= self.cap && !self.map.contains_key(key) {
+        let mut map = self.core.lock();
+        if map.len() >= self.cap && !map.contains_key(key) {
             let (rps, burst) = (self.rps, self.burst);
-            self.map.retain(|_, (t, last)| *t + now.saturating_duration_since(*last).as_secs_f64() * rps < burst);
-            if self.map.len() >= self.cap {
+            map.retain(|_, (t, last)| *t + now.saturating_duration_since(*last).as_secs_f64() * rps < burst);
+            map.shrink_to_fit();
+            self.core.store_bytes(&map);
+            if map.len() >= self.cap {
                 return false; // under a key flood, refuse unknown keys rather than grow without bound
             }
         }
-        let e = self.map.entry(key.to_string()).or_insert((self.burst, now));
-        let refill = now.saturating_duration_since(e.1).as_secs_f64() * self.rps;
-        e.0 = (e.0 + refill).min(self.burst);
-        e.1 = now;
-        if e.0 >= 1.0 {
-            e.0 -= 1.0;
-            true
-        } else {
-            false
+        if !map.contains_key(key) {
+            let weight = BucketCore::weight(key);
+            drop(map);
+            if self.budget.admit(weight) == Admit::Refused {
+                // a memory refusal is not a rate verdict: the key is served without a bucket (the memory module counts the
+                // refusal and owns the recovery), because answering Busy here turned every hook into a Node fallback for as long
+                // as the process stayed in the dead band under the global hard limit
+                UNTRACKED.fetch_add(1, SeqCst);
+                return true;
+            }
+            map = self.core.lock();
+            if map.len() >= self.cap && !map.contains_key(key) {
+                return false;
+            }
         }
+        let allowed = {
+            let e = map.entry(key.to_string()).or_insert((self.burst, now));
+            let refill = now.saturating_duration_since(e.1).as_secs_f64() * self.rps;
+            e.0 = (e.0 + refill).min(self.burst);
+            e.1 = now;
+            if e.0 >= 1.0 {
+                e.0 -= 1.0;
+                true
+            } else {
+                false
+            }
+        };
+        self.core.store_bytes(&map);
+        allowed
     }
 }
 
@@ -265,6 +406,49 @@ mod tests {
     use super::*;
     use std::time::Duration;
 
+    /// A bucket map on its own registry (the process-wide one is shared by every test), with the owner kept alive.
+    fn buckets_in(reg: &crate::mem::Registry) -> (Buckets, Arc<BucketOwners>) {
+        let core = Arc::new(BucketCore::new());
+        let owners = Arc::new(BucketOwners::default());
+        owners.add(&core);
+        let owner: Arc<dyn Owner> = owners.clone();
+        let budget = reg.register(Spec::new("buckets", "b.soft", "b.hard", "b.low"), Arc::downgrade(&owner));
+        (Buckets { core, rps: 10.0, burst: 3.0, cap: 4096, budget }, owners)
+    }
+
+    #[test]
+    fn a_memory_refusal_serves_the_request_untracked_instead_of_busy() {
+        use std::collections::HashMap;
+        let cfg: HashMap<String, u64> = [
+            ("b.soft", 1 << 20),
+            ("b.hard", 1 << 21),
+            ("b.low", 80),
+            ("mem.global_soft_bytes", 1000),
+            ("mem.global_hard_bytes", 2000),
+            ("mem.global_low_water_pct", 90),
+            ("mem.global_restart_after_s", 60),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v))
+        .collect();
+        let reg = crate::mem::Registry::new(Box::new(move |k| cfg.get(k).copied().unwrap_or(0)), Box::new(|_| {}));
+        let (mut b, _owners) = buckets_in(&reg);
+        let t0 = Instant::now();
+        assert!(reg.tick(2500, 0).is_none(), "over the global hard limit: the latch is set and the holders are recycled");
+        let before = bucket_untracked();
+        // the dead band: back under the hard limit, above the low-water mark, so the latch stays set (the case seen live)
+        assert!(reg.tick(1950, 1_000).is_none());
+        assert!(reg.snapshot()["global"]["hard_active"] == true, "still latched in the dead band");
+        assert!(b.allow_at("new-session", t0), "a new key is served, never refused as if it were a rate hit");
+        assert!(b.allow_at("another", t0));
+        assert_eq!(b.len(), 0, "nothing was tracked while the latch held");
+        assert_eq!(bucket_untracked() - before, 2);
+        // once the latch clears, keys are tracked and rate-limited again
+        assert!(reg.tick(100, 2_000).is_none());
+        assert!(b.allow_at("s", t0) && b.allow_at("s", t0) && b.allow_at("s", t0));
+        assert!(!b.allow_at("s", t0), "the rate limit applies again");
+    }
+
     #[test]
     fn bucket_allows_burst_then_throttles_then_refills() {
         let mut b = Buckets::new(10.0, 3.0);
@@ -282,7 +466,39 @@ mod tests {
         for i in 0..10_000 {
             b.allow_at(&format!("k{i}"), t0);
         }
-        assert!(b.map.len() <= 4096);
+        assert!(b.len() <= 4096);
+    }
+
+    #[test]
+    fn bucket_map_is_byte_bounded_under_long_key_flood() {
+        let mut b = Buckets::new(1.0, 1.0);
+        let t0 = Instant::now();
+        for i in 0..2_000 {
+            b.allow_at(&format!("{}-{i}", "x".repeat(2_000)), t0);
+        }
+        assert!(b.bytes() <= crate::defaults::num("mem.buckets_hard_bytes") as usize, "bucket map exceeded hard memory budget");
+    }
+
+    #[test]
+    fn aggregate_bucket_shrink_targets_combined_bytes() {
+        let owners = BucketOwners::default();
+        let a = Arc::new(BucketCore::new());
+        let b = Arc::new(BucketCore::new());
+        owners.add(&a);
+        owners.add(&b);
+        let t0 = Instant::now();
+        a.lock().insert("a".repeat(200), (1.0, t0));
+        b.lock().insert("b".repeat(200), (1.0, t0 + Duration::from_secs(1)));
+        {
+            let m = a.lock();
+            a.store_bytes(&m);
+        }
+        {
+            let m = b.lock();
+            b.store_bytes(&m);
+        }
+        owners.shrink(BucketCore::weight(&"x".repeat(200)));
+        assert!(owners.bytes() <= BucketCore::weight(&"x".repeat(200)), "aggregate shrink must honor the combined target");
     }
 
     #[test]

@@ -281,6 +281,77 @@ wait "$DAEMON" || true
 
 If hooks seem slow or the engine seems absent, read `running`, `breaker` and `crashloop` in `status --json`; `ah-engine reset` clears a breaker or crash-loop stop. The troubleshooting table in [AH-ENGINE.md](AH-ENGINE.md) lists the rest. Run a daemon in the foreground with `ah-engine serve` to see it directly. To debug a check without a daemon, pipe a payload to `ah-engine check <name>`. Plugin hooks write under `~/.anti-hall/` and `<project>/.anti-hall/`; `node plugins/anti-hall/hooks/doctor.js` explains what is wrong.
 
+## A debugging session
+
+A walkthrough for "the engine misbehaves on my machine", from a switch you can flip on a running install to a stack of a frozen
+daemon. Every step names the setting behind it; the generated [reference](../ah-engine/REFERENCE.md) lists every flag, environment
+variable and key. The same steps apply to the Codex port: the engine is one binary for both hosts, and a Codex hook payload goes
+through `ah-engine hook --event <Event> --host codex` exactly like a Claude one.
+
+**The rules of an experiment.** Never touch the live daemon's state: reproduce in a scratch home (step 7), read the live logs
+only. Stop a process by its PID (`kill <pid>`), never by name (`pkill` also stops the daemons of your other sessions). Do not
+roll back the engine on a hunch: roll back only when hooks exceed their timeout or the guards stop blocking.
+
+1. **Debug mode on, and off again.** Debug mode is a run-time switch of the one release build; nothing is rebuilt. Turn it on for one
+   command with `--debug`, for one process tree with `AH_ENGINE_DEBUG=1`, or for the daemon with the setting
+   `diagnostics.debug_mode` (a plugin defaults file or your config file; the reference entry says whether a daemon restart is needed).
+   Turn it off by dropping the flag, unsetting the variable or setting the key back to its default. Leave it off in normal use.
+2. **Where the logs are.** The state directory is `~/.anti-hall/ah-engine/`, or `AH_ENGINE_DIR`. In it: `ah-engine.log` (the event
+   log: starts, crashes, breaker changes, failures), `last-crash.json` (the daemon's last panic or abnormal exit, with its
+   breadcrumb), `cli-crash.json` (the last panic of a command-line run or hook client; it is not a daemon crash and never counts
+   as a restart), `mem.ndjson` (one memory line per request) and `mem-snapshot.json` (written when the memory cap trips).
+   `ah-engine status --json` reads them for you: `health.degraded`, `health.restarts`, `health.last_crash`.
+3. **Which thread is busy.** `ah-engine status --threads` prints the CPU % of every daemon thread over a short window, with the work
+   counters per second behind it. `ah-engine status --memory` prints the heap against RSS, the budget of each cache and the
+   sizes of the in-memory structures. Both are described in [CPU and memory profiling](AH-ENGINE.md#cpu-and-memory-profiling).
+4. **A profile.** [samply](https://github.com/mstange/samply) works on both platforms: `samply record -p <pid>` samples the
+   daemon until you stop it and opens the Firefox Profiler; on macOS the `ah-engine.dSYM` beside a local build (or the release's
+   `symbols-<triple>` artifact for the same build) names the frames. Without samply, macOS has `sample <pid> 5 -file s.txt`,
+   symbolised with `atos -o ah-engine.dSYM/Contents/Resources/DWARF/ah-engine -arch arm64 -l <load address> <address>`; Linux
+   has `perf record -g -p <pid>`.
+5. **A frozen daemon.** If `ah-engine ctl ping` does not answer, do not restart it first: take its stacks. With the debugger
+   attached for only as long as the command runs:
+
+   ```text
+   rust-lldb -p <pid> --batch -o 'thread backtrace all' -o detach -o quit
+   ```
+
+   On Linux, `eu-stack -p <pid>` or `gdb -p <pid> -batch -ex 'thread apply all bt'`. Save the output next to
+   `last-crash.json`, then restart the daemon (`ah-engine ctl stop`, or `kill <pid>`; the next hook call starts a fresh one).
+6. **Memory.** `status --memory` first. If a number grows, `mem.ndjson` shows which request kind and event it grew on, and
+   `mem-snapshot.json` is the picture at the moment the cap tripped. For allocation sites switch the allocator: set
+   `diagnostics.allocator` to `system` (or run one daemon with `AH_ENGINE_ALLOCATOR=system`) and attach the platform's tools
+   (`MallocStackLogging` and `leaks` on macOS, `heaptrack` on Linux); the details are under "Heap diagnostics" above. Switch back
+   to the default afterwards; the daemon must restart for either change.
+7. **Reproduce in a scratch home.** Never point an experiment at the live state. Copy what you need, read-only, into a scratch
+   directory and run a second daemon there:
+
+   ```text
+   SCRATCH=$(mktemp -d /tmp/ah-debug.XXXXXX)
+   ah-engine backup --to "$SCRATCH/snapshot"             # a consistent copy of the databases; the live ones are only read
+   cp ~/.anti-hall/ah-engine/ah-engine.log "$SCRATCH/"    # logs are plain files
+   export HOME="$SCRATCH/home" AH_ENGINE_DIR="$SCRATCH/state"
+   mkdir -p "$HOME" "$AH_ENGINE_DIR"
+   ah-engine serve >"$SCRATCH/serve.out" 2>&1 &           # its socket lives under AH_ENGINE_DIR, not next to the live one
+   DAEMON=$!
+   ah-engine ctl ping && ah-engine status --threads
+   kill "$DAEMON"                                          # by PID, never by name
+   ```
+
+   Run the block in a subshell so that `HOME` and `AH_ENGINE_DIR` change nothing in your own shell, and remove the scratch
+   directory when you are done.
+
+**Worked example: a daemon at 55 to 60 % CPU with nothing to do.** `status` showed a healthy daemon (no restarts, no breaker). `status
+--threads` named one thread: `ah-dswire`, the DevSwarm wire, at 55 to 60 % of a core while every hook worker was idle. The work
+counters showed about 10 `dswire_reconciles` per second although no workspace changed: the thread was waking itself. Reading the
+reconcile showed why. It opens each active workspace's SQLite store to count unread mail, and opening a store touches its `-shm`
+index file; the store's directory was watched, so the touch became the next reconcile's trigger a tenth of a second later, forever.
+The fix ignores file names ending in `realtime.ignore_suffixes` (default `-shm`) in the watcher, allows at most one event-driven
+reconcile per `devswarm_wire.reconcile_min_gap_ms`, and reads the workspace descriptors once per reconcile instead of once per
+open store. The proof is the same counters: a failing-first test saw 20 idle reconciles in 3 seconds before and none after, and a
+benchmark with live-like data went from 22.0 % to 1.23 % of a core. The lesson for your own session: name the thread first
+(`status --threads`), read the counters behind it, and only then read code.
+
 ## Porting a guard to the engine
 
 The workflow is the one in D31 and D57: port check by check, each through parity, shadow and review. The plugin stays Node and live until a guard has passed all three.

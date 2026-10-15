@@ -323,13 +323,18 @@ pub fn compare(dir: &Path) -> i32 {
             cmd.env(k, v);
         }
     }
-    if job.get("stdin").and_then(|v| v.as_bool()) == Some(true) {
-        cmd.stdin(std::fs::File::open(dir.join(defaults::text("ops.shadow_stdin_file"))).map_or(Stdio::null(), Stdio::from));
+    let stdin = if job.get("stdin").and_then(|v| v.as_bool()) == Some(true) {
+        std::fs::File::open(dir.join(defaults::text("ops.shadow_stdin_file"))).map_or(Stdio::null(), Stdio::from)
     } else {
-        cmd.stdin(Stdio::null());
-    }
-    let Ok(o) = crate::proc::run(cmd, defaults::text("ops.shadow_node"), defaults::millis("ops.shadow_timeout_ms"), defaults::millis("statusline.poll_ms"))
-    else {
+        Stdio::null()
+    };
+    let Ok(o) = crate::proc::run_with_stdin(
+        cmd,
+        stdin,
+        defaults::text("ops.shadow_node"),
+        defaults::millis("ops.shadow_timeout_ms"),
+        defaults::millis("statusline.poll_ms"),
+    ) else {
         return 1;
     };
     let node_code = o.status.code().unwrap_or(-1);

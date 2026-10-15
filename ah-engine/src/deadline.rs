@@ -6,6 +6,13 @@
 //! `daemon.reply_slack_ms` to write the reply), and the inner budgets that can outlast it (a git call, a Jev consult) are
 //! clamped to what is left. Outside a request (a CLI command, a test) there is no deadline and nothing is clamped.
 //!
+//! Every deadline here is a SOFT/HARD pair (owner rule). The SOFT deadline is the client's fail-fast wait (`client.deadline_ms`
+//! minus the slack): past it the request is only warned about and counted, and everything keeps running. The HARD deadline
+//! (`daemon.request_hard_ms` minus the slack, never below the soft one) is what cuts: a client whose daemon is alive waits for a
+//! late reply up to `client.slow_fallback_max_ms` less `client.slow_wait_margin_ms` and uses it, so a guard keeps deciding under
+//! load instead of deferring to Node. [`remaining`], [`clamp`], [`in_time`], [`at`] and [`cut_due`] speak for the hard deadline;
+//! [`soft_remaining`] and [`note_soft_overrun`] for the soft one.
+//!
 //! State that silences a later answer (a Stop block's loop counter, a nudge's once-only cap) is staged here during the request
 //! ([`crate::atomic::write_after_reply`]) and renamed into place only when the reply reached the client in time
 //! ([`commit_staged`]): a client that fell back to Node must not find a stamp for a decision it never received (review P1-2).
@@ -18,9 +25,23 @@ use std::time::{Duration, Instant};
 /// A staged state write: the written temporary file, its target, and how to rename it.
 type Staged = (PathBuf, PathBuf, crate::atomic::Style);
 
+/// The deadlines of the request on this thread.
+#[derive(Clone, Copy)]
+struct Req {
+    arrived: Instant,
+    /// When the client's fail-fast wait ends (after the reply slack): warn only.
+    soft: Option<Instant>,
+    /// When the request is cut (after the reply slack).
+    hard: Option<Instant>,
+    /// Whether the soft overrun was already reported (once per request).
+    noted: bool,
+}
+
 thread_local! {
     /// When the current request arrived (accepted), and when its client stops waiting (after the slack).
-    static REQ: Cell<Option<(Instant, Option<Instant>)>> = const { Cell::new(None) };
+    static REQ: Cell<Option<Req>> = const { Cell::new(None) };
+    /// The hook event of the request being served (set by the dispatch, empty outside one).
+    static EVENT: RefCell<Option<String>> = const { RefCell::new(None) };
     /// The state writes the current request staged, in order.
     static STAGED: RefCell<Vec<Staged>> = const { RefCell::new(Vec::new()) };
     /// Whether the script call in progress on this thread may be cut at the request's deadline (armed, not lifted by `commit()`).
@@ -61,7 +82,23 @@ pub fn cut_due() -> bool {
 
 /// When the client of the request this thread serves stops waiting (after the reply slack); `None` outside a request.
 pub fn at() -> Option<Instant> {
-    REQ.with(|r| r.get()).and_then(|(_, at)| at)
+    REQ.with(|r| r.get()).and_then(|r| r.hard)
+}
+
+/// Time left before the client's fail-fast wait (the soft deadline) ends; `None` outside a request.
+pub fn soft_remaining() -> Option<Duration> {
+    REQ.with(|r| r.get()).and_then(|r| r.soft).map(|at| at.saturating_duration_since(Instant::now()))
+}
+
+/// True once, the first time it is called after the soft deadline has passed in this request: the caller logs and counts the
+/// overrun (the request keeps running). False outside a request, before the deadline, and on every later call.
+pub fn note_soft_overrun() -> bool {
+    let Some(req) = REQ.with(|r| r.get()) else { return false };
+    if soft_remaining() != Some(Duration::ZERO) || req.noted {
+        return false;
+    }
+    REQ.with(|r| r.set(Some(Req { noted: true, ..req })));
+    true
 }
 
 /// How many writes the current request has staged so far: [`discard_staged_since`] drops the ones staged after this mark.
@@ -86,16 +123,28 @@ pub fn discard_staged_since(mark: usize) {
 /// request names its own ([`client_deadline`]).
 pub fn begin(arrived: Instant) {
     discard_staged(); // nothing a previous request left can belong to this one
-    REQ.with(|r| r.set(Some((arrived, None))));
-    client_deadline(crate::defaults::num("client.deadline_ms"));
+    EVENT.with(|e| *e.borrow_mut() = None);
+    REQ.with(|r| r.set(Some(Req { arrived, soft: None, hard: None, noted: false })));
+    client_window(crate::defaults::num("client.deadline_ms"));
 }
 
-/// The client said it waits `ms` milliseconds from sending the request.
+/// The client said it waits `ms` milliseconds from sending the request, and the request is cut there too (soft = hard).
 pub fn client_deadline(ms: u64) {
+    set_window(ms, ms);
+}
+
+/// The client's fail-fast wait is `soft_ms` (a warning past it); the request is cut at `daemon.request_hard_ms`, or at `soft_ms`
+/// when that is larger.
+pub fn client_window(soft_ms: u64) {
+    set_window(soft_ms, soft_ms.max(crate::defaults::num("daemon.request_hard_ms")));
+}
+
+fn set_window(soft_ms: u64, hard_ms: u64) {
     REQ.with(|r| {
-        if let Some((arrived, _)) = r.get() {
-            let usable = Duration::from_millis(ms).saturating_sub(crate::defaults::millis("daemon.reply_slack_ms"));
-            r.set(Some((arrived, Some(arrived + usable))));
+        if let Some(req) = r.get() {
+            let slack = crate::defaults::millis("daemon.reply_slack_ms");
+            let at = |ms: u64| req.arrived + Duration::from_millis(ms).saturating_sub(slack);
+            r.set(Some(Req { soft: Some(at(soft_ms)), hard: Some(at(hard_ms)), ..req }));
         }
     });
 }
@@ -103,7 +152,18 @@ pub fn client_deadline(ms: u64) {
 /// The request is answered: no deadline on this thread any more. A staged write not committed by now is dropped.
 pub fn end() {
     discard_staged();
+    EVENT.with(|e| *e.borrow_mut() = None);
     REQ.with(|r| r.set(None));
+}
+
+/// The request being served on this thread is a dispatch of hook event `event`.
+pub fn set_event(event: &str) {
+    EVENT.with(|e| *e.borrow_mut() = Some(event.to_string()));
+}
+
+/// The hook event of the request being served, when the dispatch named it.
+pub fn event() -> Option<String> {
+    EVENT.with(|e| e.borrow().clone().filter(|s| !s.is_empty()))
 }
 
 /// Whether a request is being served on this thread (state writes are then staged until its reply is delivered).
@@ -143,7 +203,7 @@ pub fn discard_staged() {
 
 /// Time left before the client stops waiting, if a request with a deadline is being served on this thread.
 pub fn remaining() -> Option<Duration> {
-    REQ.with(|r| r.get()).and_then(|(_, at)| at).map(|at| at.saturating_duration_since(Instant::now()))
+    REQ.with(|r| r.get()).and_then(|r| r.hard).map(|at| at.saturating_duration_since(Instant::now()))
 }
 
 /// `budget`, cut to the time left before the client stops waiting.
@@ -155,18 +215,44 @@ pub fn clamp(budget: Duration) -> Duration {
 mod tests {
     use super::*;
 
+    /// Start a request now, with the defaults already loaded: the first read of a setting parses the shipped file (hundreds of
+    /// milliseconds in a debug build), which would otherwise be spent inside the request window. The window is the fail-fast
+    /// client deadline (300 ms), not the former 2 s, so the cost of loading must not count against it.
+    fn begin_now() {
+        crate::defaults::num("client.deadline_ms");
+        crate::defaults::millis("daemon.reply_slack_ms");
+        begin(Instant::now());
+    }
+
     #[test]
     fn a_budget_is_cut_to_what_the_client_still_waits_and_untouched_outside_a_request() {
         let long = Duration::from_secs(60);
         assert_eq!(clamp(long), long, "no request: nothing is clamped");
-        begin(Instant::now());
+        begin_now();
         let left = remaining().unwrap();
-        let client = Duration::from_millis(crate::defaults::num("client.deadline_ms"));
-        assert!(left <= client && clamp(long) <= client, "{left:?}");
+        let hard = Duration::from_millis(crate::defaults::num("daemon.request_hard_ms"));
+        assert!(left <= hard && clamp(long) <= hard, "{left:?}");
+        assert!(soft_remaining().unwrap() <= Duration::from_millis(crate::defaults::num("client.deadline_ms")));
         client_deadline(0);
         assert_eq!(clamp(long), Duration::ZERO, "a client that no longer waits leaves no budget");
         end();
         assert_eq!(clamp(long), long);
+    }
+
+    #[test]
+    fn past_the_soft_deadline_the_request_is_only_noted_once_and_cut_at_the_hard_one() {
+        assert!(!note_soft_overrun(), "no request");
+        begin_now();
+        assert!(!note_soft_overrun(), "inside the soft deadline");
+        // soft passed, hard far away: the request goes on
+        set_window(0, 60_000);
+        assert_eq!(soft_remaining(), Some(Duration::ZERO));
+        assert!(in_time(), "past the soft deadline the client still waits");
+        assert!(note_soft_overrun(), "reported the first time");
+        assert!(!note_soft_overrun(), "and only once per request");
+        set_window(0, 0);
+        assert!(!in_time(), "past the hard deadline it is cut");
+        end();
     }
 
     #[test]
@@ -185,7 +271,7 @@ mod tests {
     #[test]
     fn a_native_scan_is_cut_only_inside_an_armed_call_past_its_deadline() {
         assert!(!cut_due(), "no request");
-        begin(Instant::now());
+        begin_now();
         set_cut_armed(true);
         assert!(!cut_due(), "the client still waits");
         client_deadline(0);
@@ -201,7 +287,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let (a, b) = (dir.join("a.json"), dir.join("b.json"));
         let style = crate::atomic::Style::default();
-        begin(Instant::now());
+        begin_now();
         crate::atomic::write_after_reply(&a, "a", style).unwrap();
         let mark = staged_mark();
         crate::atomic::write_after_reply(&b, "b", style).unwrap();
@@ -222,20 +308,20 @@ mod tests {
         let f = dir.join("state.json");
         std::fs::write(&f, "old").unwrap();
         let style = crate::atomic::Style::default();
-        begin(Instant::now());
+        begin_now();
         crate::atomic::write_after_reply(&f, "new", style).unwrap();
         assert_eq!(std::fs::read_to_string(&f).unwrap(), "old", "staged, not yet in place");
         settle_staged(false); // the reply could not be written
         end();
         assert_eq!(std::fs::read_to_string(&f).unwrap(), "old", "an unwritten reply leaves the state as it was");
-        begin(Instant::now());
+        begin_now();
         crate::atomic::write_after_reply(&f, "new", style).unwrap();
         client_deadline(0); // the client has stopped waiting: it answers with the Node hooks
         settle_staged(true);
         end();
         assert_eq!(std::fs::read_to_string(&f).unwrap(), "old", "a reply nobody used leaves the state as it was");
         assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1, "no temporary file is left behind");
-        begin(Instant::now());
+        begin_now();
         crate::atomic::write_after_reply(&f, "new", style).unwrap();
         settle_staged(true);
         end();

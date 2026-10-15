@@ -1,16 +1,16 @@
 # ah-engine
 
 `ah-engine` is anti-hall's core component: a small resident program that answers the hooks instead of a new Node process for every
-tool call. The Node hooks are a temporary compatibility fallback during the migration; v1.0 removes them and the engine is then the only runtime. This page explains what it is, why it exists, what works today and what is not built yet. Anything not built
+tool call. The Node hooks are a temporary compatibility fallback during the migration; v0.301 removes them and the engine is then the only runtime. This page explains what it is, why it exists, what works today and what is not built yet. Anything not built
 is marked **planned** with the number of its decision, for example planned (D33) for the scheduler; each number is an entry
 in [`ah-engine/DECISIONS.md`](../ah-engine/DECISIONS.md).
 The exact list of commands, settings, metrics and error codes is generated from the engine itself and lives in
 [`ah-engine/REFERENCE.md`](../ah-engine/REFERENCE.md).
 
-**Status: ready for release; the plugin installs it itself once a release pins it.** The plugin's hooks are one thin trigger
+**Status: being brought back online (release v0.300.3); see the [roadmap](ROADMAP.md). The plugin installs it itself once a release pins it.** The plugin's hooks are one thin trigger
 per event (`hooks/ah-hook.sh <Event>`). When the engine binary is installed, the trigger asks the engine, which decides
 natively what it can prove identical to the Node hook and hands every other case to that Node hook, so it is never weaker
-than Node. While the migration lasts, when the binary is absent or cannot answer, the trigger runs the temporary Node compatibility hooks (removed in v1.0). The binary is
+than Node. While the migration lasts, when the binary is absent or cannot answer, the trigger runs the temporary Node compatibility hooks (removed in v0.301). The binary is
 fetched by a shell bootstrap, checked against a sha256 pinned in the plugin ([Install, go-live and rollback](#install-go-live-and-rollback)).
 Supported platforms: macOS and Linux (including WSL, which runs the Linux build). Windows is not supported yet.
 
@@ -33,7 +33,7 @@ labelled with how it was measured in the README of `ah-engine/`.
    v
  ah-engine serve                                 (daemon, one per user, ~5 MB)
    |-- rules (JSON file)        regex rules: deny / warn / context
-   |-- checks (compiled in)     real logic a regex cannot express: the git and command checks
+   |-- checks (Rust + plugin JS)  real logic a regex cannot express: the git and command checks
    |-- telemetry                metrics (snapshots + rollups), the impact ledger, and the lock-free telemetry recorder, stored
    |-- project state            per-project mailbox and key-value pairs, in hot.db
    |-- memory layer             active key-value items (budgeted, TTL) + pub/sub channels
@@ -322,6 +322,17 @@ transcript file. When the resident-set cap trips (`diagnostics.mem_snapshot`) th
 allocator statistics, thread count, each worker's interpreter and regex cache, the transcript caches and the platform memory map.
 `ah-engine status --memory` prints the live figures, the latest snapshot and a summary of the log (top events and checks by total
 resident-set growth; a check's row counts every request it took part in, so rows overlap). Nothing here changes a decision.
+
+Memory budgets (issues #21 and #158, defaults file `mem.toml`). Every long-lived in-memory holder (the shared regex cache, each worker's
+QuickJS interpreter, the transcript-tail cache, the config values leaked on purpose) registers with one registry in `src/mem` and gets a
+soft and a hard limit from `mem.<holder>_soft_bytes` / `_hard_bytes` (and `_low_water_pct`); `mem.global_*` bounds the process. At the soft
+limit the holder is logged once and evicted (least recently used first) down to its low-water mark, with hysteresis, while requests keep
+being served. An insert that would cross the hard limit is refused (a cache miss; a script call fails open) and the holder is recycled; if
+the process total (or a holder that cannot shrink) then stays over its hard limit for `mem.global_restart_after_s`, the daemon drains and
+restarts cleanly with the reason in the event log. `ah-engine status --memory` lists each holder's bytes against its limits, the trigger
+counts and the global totals under `memory.budgets`. A guard test (`tests/it/mem_guard.rs`, allowlist `tests/mem_allowlist.txt`) fails the
+build when a long-lived collection appears outside `src/mem` without a stated bound. Helper-process output is cut at
+`mem.proc_output_max_bytes`.
 see [PRIVACY.md](../PRIVACY.md).
 
 **Go-live.** An engine check is trusted only after it has agreed with the Node hook it replaces. Before release the whole
@@ -423,7 +434,7 @@ arguments, is in the generated reference.
 | `ah-engine jev-report [--json] [--days N] [--window 24h\|7d] [--by project\|session] [--project <name>] [--weekly] [--since <iso>] [--until <iso>] [--exclude-window <iso>..<iso>] [--exclude-project <name>]`, `jev-report label <hash> [tp\|fp]`, `jev-report prune-audit --days N` | no | The port of `scripts/jev-report.js` (the Jev report of the `/anti-hall:jev` skill), byte-for-byte: the command reads the decision, triage, judge and supervision logs (every retained generation), the daily rollups, the human labels, `jev.json`, the budget settings and the cached Vercel credit balance, and the plugin script `engine/logic/rules/jev-report.js` aggregates and renders the text or `--json` report (KEEP / REVIEW / REMOVE verdicts included); `label` and `prune-audit` are the two forms that write the Jev logs, the report itself only refreshes the credit cache and the once-a-day low-credit latch. Every threshold, list and word is `jev_report.toml`; a run it cannot reproduce exits 75 and writes nothing, so `scripts/ah-run.sh jev-report` runs the Node script. |
 | `ah-engine statusline` | no | The port of `statusline/statusline.js` and its renderers (L9a): reads the session JSON on stdin, prints the two lines; runs from the `statusLine` setting through the thin launcher `scripts/ah-run.sh`, which tries the engine first and runs `statusline/statusline.js` when the engine is absent or answers exit 75 (the same stdin goes to whichever runs; see `install-statusline` and the `migrate-statusline-engine` step). Sampled shadow against Node, off the hot path (`ops.shadow_rate_statusline`, per thousand). |
 | `ah-engine phase <set\|advance\|step\|agents\|update\|clear> [args]` | no | The port of `statusline/phase.js` (L9a), byte-for-byte: writes the phase state (`~/.anti-hall/phase-state.json`) the status line's phase bar shows. Fails open like the script; a state that is not a JSON object, or `update` with a numeric key or `__proto__`, is left to Node (exit 75, nothing written). Replayed by Node in a scratch home (`ops.shadow_rate_phase`). |
-| `ah-engine install-statusline [--user\|--project] [--consolidate]` | no | The port of `statusline/install-statusline.js` (L9a): every Node safety kept (one-time backup never overwritten, other keys merged, a foreign statusLine wrapped as line 1, shell-metacharacter refusal, idempotent, test guard); the write is atomic and keeps the file's mode and link. The command it writes is the launcher form `sh "<plugin>/scripts/ah-run.sh" --stdin statusline -- "<plugin>/statusline/statusline.js"` when the plugin ships the launcher (the Node installer writes `node "<dispatcher>"`, and recognises the launcher form as anti-hall's because it still names `statusline.js`); `ANTIHALL_STATUSLINE_NODE_ONLY` makes it write the Node form, which the parity tests set. `ah-engine migrate` (and `doctor --repair`) has one engine-only step, `migrate-statusline-engine`, that rewrites an existing Node-only anti-hall command in place (user settings, and the project's two settings files) after the one-time backup: idempotent, fail-open (a command it cannot replace as one plain string is left as it is), no row when there is nothing to do. The command it writes is the launcher form `sh "<plugin>/scripts/ah-run.sh" --stdin statusline -- "<plugin>/statusline/statusline.js"` when the plugin ships the launcher (the Node installer writes `node "<dispatcher>"`, and recognises the launcher form as anti-hall's because it still names `statusline.js`); `ANTIHALL_STATUSLINE_NODE_ONLY` makes it write the Node form, which the parity tests set. `ah-engine migrate` (and `doctor --repair`) has one engine-only step, `migrate-statusline-engine`, that rewrites an existing Node-only anti-hall command in place (user settings, and the project's two settings files) after the one-time backup: idempotent, fail-open (a command it cannot replace as one plain string is left as it is), no row when there is nothing to do. A settings file Node's JSON parser would reject is left to Node (exit 75, nothing written). Its shadow runs the Node installer on a scratch copy of the settings files, never a second real write (`ops.shadow_rate_install`). |
+| `ah-engine install-statusline` | no | Retired no-op kept for old invocations: prints that anti-hall no longer writes a command-backed `statusLine` and exits 0. |
 | `ah-engine uninstall-statusline [--user\|--project] [--purge-base]` | no | The port of `statusline/uninstall-statusline.js` (L9a): restores the saved original statusLine, else the settings backup, else removes the key; the shared base is kept unless `--purge-base`. Same safeties and shadow as the installer (`ops.shadow_rate_uninstall`). |
 | `ah-engine shadow-compare <dir>` | no | Internal: the detached half of a Node shadow; runs the Node version on a scratch home and logs a mismatch. |
 | `ah-engine backup [--to <dir>]` | no | A consistent, scrubbed snapshot of `hot.db` and `archive.db`; prints its manifest. |
@@ -466,7 +477,7 @@ cache copy) is Rust's, not Node's.
 
 **Metrics** are counters, gauges and latency histograms kept in memory and bounded. Latency percentiles are reported as
 the upper bound of the histogram bucket that holds that rank, so they are upper estimates. The registered names are:
-`requests`, `busy_replies`, `errors`, `budget_trips`, `panics`, `rejected_peers`, `accept_errors` (accepts that failed with EMFILE and the like, by OS error code), `slow_replies` (replies finished after their client's deadline: slow but healthy), `hook_calls`, `hook_latency_us`, `dispatch_checks`,
+`requests`, `busy_replies`, `errors`, `budget_trips`, `budget_soft` (requests past the soft CPU budget `daemon.eval_soft_us`: logged, still served), `panics`, `rejected_peers`, `accept_errors` (accepts that failed with EMFILE and the like, by OS error code), `slow_replies` (replies finished after their client's deadline: slow but healthy), `hook_calls`, `hook_latency_us`, `dispatch_checks`,
 `check_calls`, `check_decisions`, `check_latency_us`, `rule_hits`, `rss_kb`, `queue_depth`, `uptime_s`, and for the
 memory layer `tier_items`, `tier_bytes`, `tier_hits`, `tier_misses`, `tier_evictions`, `tier_expired`, `bus_published`
 and `bus_dropped`, for the writer `db_commits` and `db_writes` (fewer commits than writes means group commit is sharing syncs), and for
@@ -669,11 +680,11 @@ segment is on by default and is advisory only. Settings (`~/.anti-hall/settings.
 
 ## DevSwarm wiring and the Node cutover (lane dswire)
 
-The daemon starts the DevSwarm layer only where DevSwarm exists (the app database or a workspace descriptor) and `devswarm_rt.mode` is not `off`; otherwise no thread, watcher or file is created. One thread (`ah-dswire`) owns the file watcher over the app database directory and its `-wal`, the DevSwarm state directories, each active workspace's mesh store directory, transcript directory and git directory. A change is only a hint: the state is always re-derived from the sources. A watcher overflow is a full reconcile, and the scheduler job `devswarm_reconcile` (`devswarm_rt.reconcile_ms`) is the safety net; what it finds that events missed counts in `rt_reconcile_repairs`.
+The daemon starts the DevSwarm layer only where DevSwarm exists (the app database or a workspace descriptor) and `devswarm_rt.mode` is not `off`; otherwise no thread, watcher or file is created. One thread (`ah-dswire`) owns the file watcher over the DevSwarm state directories and each active workspace's transcript directory, git directory and mesh store directory (never the SQLite files in it), and holds one read-only connection per SQLite source (the app database and each active workspace's mesh store) that it asks `PRAGMA data_version` every `devswarm_wire.store_poll_ms`: the counter moves exactly when another process commits, and this process's own reads never move it. A change is only a hint: the state is always re-derived from the sources. The thread sleeps until the next thing is due (never longer than `devswarm_wire.wait_ms`). `devswarm_rt.mode` is read from the daemon's live configuration: `off` at start starts nothing, and turning it `off` later drops the watcher and stops every reconcile and Jev sweep (the thread only checks the mode, every `wait_ms`) until it is `on` again. A transcript event is gated by a stat (inode, size): it counts only when a file grew, and at most once per `devswarm_wire.transcript_min_interval_ms` per workspace (growth inside the interval is acted on once, when it ends). A watcher overflow is a full reconcile, and the scheduler job `devswarm_reconcile` (`devswarm_rt.reconcile_ms`) is the safety net; what it finds that events missed counts in `rt_reconcile_repairs`.
 
 - **Actions from state.** After a reconcile that found a change of a kind in `devswarm_wire.act_edge_kinds` (or on every periodic and start-up reconcile) the engine runs the three automatic actions under Node's own settings (`devswarm.autoArchive.{mode,idleMin,maxPerSweep,ignorePings}`, `devswarm.nudgeMaxAttempts`, `devswarm.nudgeCooldownSec`): auto-archive of finished workspaces (executor `engine`), and poke / escalate of stale ones (only where their executor is `engine`; the default `auto` follows `devswarm_sup.mode`, see the cutover below). Sweeps are at least `act_min_gap_ms` apart; a change inside the gap is run when the gap has passed. Facts are re-read from the sources right before each action; the one deliberate narrowing is that the idle gate uses Node's pre-0.109 rule (newest heartbeat or transcript time), so the engine can archive later than Node but never earlier. A poke waits one `nudgeCooldownSec` before the next decision about that workspace. Owner actions go through `ah-engine devswarm` under the role matrix.
-- **Consumers.** The `devswarm-rt-advisory` hook check (UserPromptSubmit, main thread only, engine-only; its Node fallback is a no-op; its decision is the plugin script `engine/logic/devswarm-rt-advisory.js`, the engine only reads the state and the session marker) tells each session once about the changes since the generation it last saw (`advisory_max_edges`, `advisory_max_chars`; a session's first look starts from now). `ah-engine devswarm line` prints the statusline segment. A change of kind `plan_step`, `activity`, `pr` or `checks`, or a commit or transcript write in a workspace, queues a per-child `jev::sweep::sweep_only` (the slow `jev_sweep` job stays as the safety net).
-- **Telemetry.** `dswire_actions` (by kind and outcome), `dswire_standdown` (sweeps skipped because the executor is not the engine), `dswire_advisory`, `dswire_jev_dirty`, `dswire_stall_actions` (pokes and escalations of silent workspaces by kind and outcome), plus `rt_edges` and `rt_reconcile_repairs`.
+- **Consumers.** The `devswarm-rt-advisory` hook check (UserPromptSubmit, main thread only, engine-only; its Node fallback is a no-op; its decision is the plugin script `engine/logic/devswarm-rt-advisory.js`, the engine only reads the state and the session marker) tells each session once about the changes since the generation it last saw (`advisory_max_edges`, `advisory_max_chars`; a session's first look starts from now). `ah-engine devswarm line` prints the statusline segment. A change of kind `plan_step`, `activity`, `pr` or `checks`, or a commit or transcript write in a workspace, queues a per-child `jev::sweep::sweep_only` (the slow `jev_sweep` job stays as the safety net). The queue is held in memory and saved to `rt-jev-dirty.json` every `devswarm_wire.jev_dirty_flush_ms` when it changed and when the thread stops.
+- **Telemetry.** `dswire_actions` (by kind and outcome), `dswire_standdown` (sweeps skipped because the executor is not the engine), `dswire_advisory`, `dswire_jev_dirty`, `dswire_mode_change` (the layer's mode changed while running, by the new mode), `dswire_stall_actions` (pokes and escalations of silent workspaces by kind and outcome), plus `rt_edges` and `rt_reconcile_repairs`.
 - **Event-driven auto-archive and the done-but-open nag** (`src/dsact/events.rs`, `nag.rs`; on by default, settings `devswarm.autoArchive.eventTrigger` / `eventDebounceMs`, `devswarm.nag.{enabled,everyMs,hourlyCap}`). A `lifecycle`, `activity` or `pr` edge marks the workspace dirty; once quiet for the debounce the event path runs the same archive as the sweep (gates a-h, ledger key `auto-archive:<id>:<doneHead>`, a re-check against the live app database right before acting, a per-workspace in-flight lock shared with the timer sweep, a bounded call, a check that the app shows it archived). The timer sweep stays as the safety net. The nag tells the Primary once when a workspace is done (`devswarm_act.nag_done_requires`, clean, no unread, past idleMin) and still open, then a digest every `nag.everyMs`, capped per hour; it is silent for archived / closed workspaces and for ids auto-archive owns, and acts on nothing. Telemetry: every attempt is an `act` event (shared schema) and a line in `dsact.events` (feature, action, target, every gate's value, outcome, reason, latency); mistake signals (`unarchived`, `activity-after-archive`, `nag-ignored`) are `mistake` events about the action's key, recorded once. Metrics: `dsx_actions` (feature, outcome), `dsx_mistakes` (feature, signal), `dsx_latency_us`, and the gauges `dsx_auto_archive_success_rate`, `dsx_auto_archive_mistake_rate`, `dsx_nag_success_rate`, `dsx_nag_mistake_rate` (success = ok / (ok + failed); mistake rate = mistakes per ok).
 - **Stuck and silent children on events (feature 5).** A workspace's silence clock is the newest of its heartbeat, its transcript and its git directory (`devswarm_rt.stall_sources`, `stall_git_paths`); with `devswarm_rt.stall_require_quiet_sources` at its default 3, activity on any of them resets it. The watcher reads the state again the moment a transcript or git event hits a workspace the state calls stuck, and the moment a working workspace's clock reaches `stall_ms` (`stall_check_min_gap_ms`), instead of waiting for the periodic reconcile. The poke and escalate are unchanged (the descriptor's own commands, `nudgeMaxAttempts` / `nudgeCooldownSec`, keys `poke:<id>:<n>` and `escalate:<id>`), and every condition is read again from its source right before: still active (not archived, hidden or closed), not paused (`paused?` counts), not waiting on CI, still silent on enough sources. Each action is written to the action log and followed up after `stall_followup_wait_ms`: a poke that changed nothing is a `nudge_no_change` mistake, an escalation after which the workspace worked again is `escalation_then_active`.
 - **Action log and mistake report.** Every acting feature (`stall`, `merge_ready`) appends to `actions.ndjson` in the state directory: feature, action, target, the value of each decision input, the outcome (`ok`, `refused`, `failed`), the reason and the latency, plus the mistake signals found later and the follow-up results; the shared `act` / `mistake` telemetry events carry the same facts. `ah-engine telemetry actions [feature] [--window <ms>]` reports per feature the action counts by outcome, the success rate (ok of the actions that ran), the mistakes by kind and the mistake rate (distinct mistaken actions of the ok ones); `--mistake <feature> <action> <target> <kind>` records one the engine cannot see, such as an escalation the owner dismissed. Settings: `actions.toml`.
@@ -1185,7 +1196,17 @@ judgement calls do.
 - **Fallback, never a silent allow.** A truncated, empty, corrupt, late or busy reply, an open breaker or a crash loop all
   run the Node hook (D11). Replies are length-framed and checksummed.
 - **Breaker and crash loop.** Five failures in a minute open the breaker for a minute; four daemon deaths in ten minutes
-  stop respawning for half an hour. Both are recorded and reported once per session.
+  stop respawning for half an hour. Both are recorded and reported once per session. A binary that exits at once reports no
+  death, so the starts are counted too: six daemon starts in a minute (`client.spawn_n`, `client.spawn_window_s`) trip the same
+  stop. Events from before a trip or a reset never count toward the next one, and the stop ends early when the binary is
+  replaced by a different one.
+- **Damaged binary roll-back.** The daemon records its binary's sha256 once it has stayed up `daemon.healthy_after_s`; a
+  binary that did so is copied to `bin/ah-engine.good`. The installers (bootstrap, `ah-update.sh`) record the sha256 they
+  installed as the expected one. When the installed binary differs from the expected sha256, has never run healthy and is
+  failing (a crash-loop trip, or `rollback.fail_n` hook-wrapper failures in `rollback.fail_window_s`),
+  `hooks/ah-engine-integrity.sh` renames it to `bin/ah-engine.rolledback-<UTC time>-<sha8>` (never deleted) and restores the
+  known-good copy. A binary that ran healthy, or that matches the expected sha256, is never touched. `rollback.on_mismatch = 0`
+  turns it off. `sh hooks/ah-engine-integrity.sh status` shows what is known.
 - **Resource caps.** Bounded worker pool and queue (overflow answers busy, which means fallback), a per-request CPU budget,
   an RSS cap that restarts the daemon cleanly, `nice`, and per-session and per-project rate limits.
 - **Security.** The socket is mode 0600 in a private 0700 directory the daemon owner-checks; the peer's uid is checked;
@@ -1263,6 +1284,7 @@ Files:
 | `devswarm_cli.toml` | the DevSwarm CLI verbs ported from `scripts/devswarm.js` that need no store (`src/meshw/simple.rs`): the verb list in dispatch order, the help table (synopsis and side-effect note of every verb), the texts, flag names, limits and paths of `help`, the unknown-command answer, `skip`, `archive-ignore`, `archive-unignore`, `gate-intent`, `notice --list`, `plan`, `scope`, `gate`, `workspaces`, `logs`, `wake-directive`, `ready-check`, `app-state`, `app-sync`, `done`, `primary`, `relay`, `archive-request`, `nudge`, `supervision-report`, `sync-ui` and `retention`, and the Node witness's scratch paths, links and program |
 | `command.toml` | every table, pattern and limit of the command check (heavy verbs and patterns, light exceptions, wrapper grammar, cloud CLI grammars, write-scan markers, the defer triggers) |
 | `commands.toml` | the command registry data |
+| `flags.toml` | the description of every command-line flag (`flag.<name>`), and the flags of other programs the source mentions (`docs.external_flags`); a test fails when a flag has no entry |
 | `schedules.toml` | the scheduled jobs (maintain, backup, metrics snapshot, spool drain) and the scheduler settings |
 | `telemetry.toml` | the metric and impact-kind registries, the savings method and the telemetry settings (`telemetry.enabled`, `telemetry.flush_ms`, `telemetry.retention_days`, table sizes and window defaults) |
 | `storage.toml` | database file names, SQLite durability settings, the writer queue and group-commit window, the in-memory layer, the spool, retention, backups |
@@ -1583,7 +1605,8 @@ An offline build from the vendored source tarball published with each release us
 
 Copy your build to `~/.anti-hall/ah-engine/bin/ah-engine`. The wrapper uses the binary at that path, and the bootstrap never
 overwrites a binary it did not install (it checks the marker `bootstrap.installed` and the recorded binary sha256), so a local
-build stays until you delete it. A binary-path override exists for the test suite only and is ignored otherwise.
+build stays until you delete it. Run `sh <plugin>/hooks/ah-engine-integrity.sh accept` after copying it: that records it as the
+expected binary and vouches for it, so a crash-looping build you are developing is never swapped for the known-good one. A binary-path override exists for the test suite only and is ignored otherwise.
 
 ## Verifying release artifacts
 
@@ -1609,6 +1632,66 @@ gh attestation verify <asset> --repo talas9/anti-hall
 | `spool.quarantine` has entries | Records that were damaged or refused for good (for example a full mailbox), each with its reason; nothing was dropped. |
 | The engine says it is degraded | An engine file fell back to the last-known-good or pristine copy. `ah-engine config --json` shows `last_error`; fix the edit, or `ah-engine config heal` for a missing setting. |
 | A check misbehaves | Run `ah-engine check git` with the payload on stdin to see its verdict without a daemon. |
+| The daemon uses CPU while nothing happens | `ah-engine status --threads` names the busy thread and the work counters behind it; see [CPU and memory profiling](#cpu-and-memory-profiling). |
+
+### CPU and memory profiling
+
+**Which thread is busy.** `ah-engine status --threads [--json]` asks the live daemon for every thread's CPU time twice,
+`diagnostics.threads_window_ms` apart (1 s by default, `AH_ENGINE_THREADS_WINDOW_MS` for one run), and prints the CPU % of
+one core per thread name (`by_name`, the workers summed) and per thread (`threads`). Thread names: `ah-dswire` (the DevSwarm
+wire), `ah-kqueue` / `ah-watch` (the file watcher), `worker` (hook requests), `scheduler`, `ah-db-writer`, `ah-dswire-jev`
+(a per-child Jev sweep). macOS reads `task_threads` / `thread_info`; Linux reads `/proc/self/task/*/stat`. The daemon only
+takes snapshots; the client waits out the window, so no worker is held.
+
+**What the busy thread is doing.** The same report has `work_per_s`, the counters per second over the window, and `work_total`:
+
+| Counter | Meaning |
+|---|---|
+| `dswire_wakes` | times the DevSwarm thread woke from its sleep (it sleeps until the next deadline, at most `devswarm_wire.wait_ms`) |
+| `dswire_store_commits` | polls in which a held SQLite source showed a commit by another process |
+| `dswire_transcript_skipped` | transcript events the gate did not act on (no growth, or inside the interval) |
+| `dswire_batches`, `dswire_paths` | change batches the watcher delivered to the DevSwarm thread, and the paths in them |
+| `dswire_reconciles` | full re-reads of the DevSwarm state (at most one per `devswarm_wire.reconcile_min_gap_ms`) |
+| `dswire_reconciles_deferred` | reconcile requests folded into one already waiting for the gap |
+| `probe_cache_hits` | file reads a reconcile answered from the read cache (an unchanged heartbeat, plan or descriptor costs one `stat`; files modified within `devswarm_rt.probe_cache_racy_ms` are always read) |
+| `probe_files_read`, `probe_bytes_read` | files (and bytes) the DevSwarm probes read: heartbeats, descriptors, plans |
+
+Healthy idle: a reconcile every few seconds at most, `ah-dswire` well under 1%. A reconcile rate stuck at one per gap with no
+real changes means a source changes all the time; the watcher ignores names ending in `realtime.ignore_suffixes` (a SQLite
+`-shm` index changes when any process only opens its database, so a watched store used to wake the reconcile that opened it).
+
+**Readable stacks.** Release binaries ship stripped; their symbols are built separately (`Cargo.toml`: `debug =
+"line-tables-only"`, `split-debuginfo = "packed"`). A local build leaves `target/<triple>/release/ah-engine.dSYM` (macOS) or
+`ah-engine.dwp` (Linux) beside the binary; a release run uploads them as the workflow artifact `symbols-<triple>`
+(`scripts/package.sh` writes `dist/symbols/ah-engine-v<version>-<triple>.symbols.tar.gz`). They match only the binary of the
+same build (check with `dwarfdump --uuid`). On macOS: `sample <pid> 3 -file s.txt`, then name a frame with
+`atos -o ah-engine.dSYM/Contents/Resources/DWARF/<file> -arch arm64 -l <load address> <address>` (the load address is
+printed on each `???` line of the sample). On Linux: `perf record -g -p <pid>` and `perf report` with the `.dwp` next to the
+binary, or `eu-stack -p <pid>`.
+
+### Debug mode and resource budgets
+
+**One build, two runtime modes.** The shipped binary is the debug build too; debug mode only switches on extra work. Turn it on
+with the setting `diagnostics.debug_mode` (the running daemon follows a change of the config files without a restart), with
+`AH_ENGINE_DEBUG=1` in the environment, or with `--debug` on `serve` / `hook` (the last two are per process and hold it on
+whatever the setting says). While on it writes `debug.ndjson` in the state directory (rotated at
+`diagnostics.debug_log_max_bytes`): verbose lines per module (`daemon/request`, `daemon/cpu`, `client/hook`, ...; narrow them with
+`diagnostics.debug_modules`, a name or a `daemon/` prefix), runtime invariant checks (`daemon/queue`: the depth counter against
+the queue length; `daemon/watchdog`: busy workers against workers; a violation is logged and counted, never fatal), a per-thread
+CPU sample every `diagnostics.debug_thread_sample_ms` and a memory line every `diagnostics.debug_mem_snapshot_ms`. `ah-engine
+status --json` shows `debug` (enabled, forced, lines written, invariant violations). While off, each call site costs one relaxed
+atomic load and its arguments are not evaluated.
+
+**Budgets.** `diagnostics.budget_cpu_pct` (2 % of one core, over `diagnostics.budget_cpu_windows` consecutive
+`daemon.cpu_check_ms` windows) and `diagnostics.budget_mem_mb` (100 MB, the figure `daemon.mem_metric` selects) are the daemon's
+resource budgets; 0 turns one off. The daemon reports a breach when it begins and when it ends in the health log (kind
+`budget`, code `cpu` or `mem`), in `status --json` (`budget`: the readings, the budgets, `breached`, `breaches`), and in every
+`daemon` health event (`cpu_permille`, `budget_breach`: bit 0 CPU, bit 1 memory). Reporting only: a breach changes nothing else.
+
+**Memory.** `ah-engine status --memory` gives the heap against RSS, the allocator's own figures, the memory budgets of every
+long-lived cache, and `components`: the sizes of the in-memory structures per subsystem (guard state, session counters, rate
+buckets, Jev lanes, the DevSwarm state's workspaces and edge log, the thread count). For allocation sites see
+[DEVELOPMENT.md](DEVELOPMENT.md) (`diagnostics.allocator`, `MallocStackLogging`, `heaptrack`).
 
 ## FAQ
 

@@ -14,6 +14,7 @@ use ah_engine::reqenv::RequestEnv;
 use rusqlite::{Connection, params};
 use serde_json::{Value, json};
 use std::collections::HashMap;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -177,7 +178,18 @@ fn wire_with(w: &World, stub: &Arc<Stub>, exec: Executor, extra: &[(&str, &str)]
     let mut pairs = vec![("HOME".to_string(), w.home.to_string_lossy().into_owned())];
     pairs.extend(extra.iter().map(|(k, v)| (k.to_string(), v.to_string())));
     let env = RequestEnv::from_pairs(pairs);
-    Wire::new(rt(w), &w.home, &w.state, None, sink, Box::new(Shared(stub.clone()))).with_executor(move |_| exec).with_env(env).with_act_gap(0)
+    Wire::new(rt(w), &w.home, &w.state, None, sink, Box::new(Shared(stub.clone())))
+        .with_executor(move |_| exec)
+        .with_env(env)
+        .with_act_gap(0)
+        .with_jev_sweeper(Arc::new(|_, _, _| {})) // never the engine's real Jev sweep (it reads the process home)
+}
+
+/// A Jev sweeper that records the ids of every sweep it is asked for.
+fn recording_sweeper() -> (ah_engine::dswire::JevSweeper, Arc<Mutex<Vec<Vec<String>>>>) {
+    let seen: Arc<Mutex<Vec<Vec<String>>>> = Arc::new(Mutex::new(Vec::new()));
+    let s = seen.clone();
+    (Arc::new(move |_, only, _| s.lock().unwrap().push(only.to_vec())), seen)
 }
 
 fn archives(stub: &Stub) -> Vec<Vec<String>> {
@@ -287,6 +299,78 @@ fn a_real_file_event_drives_the_archive() {
     stop.store(true, Ordering::SeqCst);
     h.join().unwrap();
     assert_eq!(archives(&stub).len(), 1, "one archive, driven by the file event (no periodic tick ran)");
+}
+
+/// ws-1's per-repo mesh store, SQLite-backed, with its write-ahead log and shared-memory index on disk and no process holding it
+/// (what a Node writer leaves behind): the next reader to open it rebuilds the index, so opening it changes a file in the store.
+fn mesh_store(w: &World) -> PathBuf {
+    let key = facts::repo_key(w.wt.to_str().unwrap()).unwrap();
+    let dir = w.home.join(".anti-hall/devswarm/store").join(key);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("BACKEND"), "sqlite\n").unwrap();
+    let src = w.dir.join("store-src.db");
+    let c = Connection::open(&src).unwrap();
+    c.pragma_update(None, "journal_mode", "wal").unwrap();
+    c.execute_batch("CREATE TABLE t (x INTEGER); INSERT INTO t VALUES (1);").unwrap();
+    for sfx in ["", "-wal", "-shm"] {
+        std::fs::copy(format!("{}{sfx}", src.display()), dir.join(format!("devswarm.db{sfx}"))).unwrap();
+    }
+    drop(c);
+    dir
+}
+
+#[test]
+fn a_reconcile_does_not_wake_itself_through_the_files_it_reads() {
+    // the live P0 (2026-10-15): every reconcile opened the mesh store, the open touched the store's -shm, the watcher reported
+    // that as a change of a state source, and the next reconcile followed 100 ms later, forever (55-60% CPU on one core)
+    let w = world("selfwake");
+    let store = mesh_store(&w);
+    let wire = Arc::new(wire(&w, &Arc::new(Stub::default()), Executor::Off));
+    let stop = Arc::new(AtomicBool::new(false));
+    let (wr, st) = (wire.clone(), stop.clone());
+    let h = std::thread::spawn(move || watching::run(&wr, &|| st.load(Ordering::SeqCst)));
+    std::thread::sleep(Duration::from_millis(1500)); // the watcher is up
+    write(&w.home.join(".anti-hall/devswarm/heartbeats/ws-1.json"), &json!({"ts": now() - 7_100_000})); // one real change
+    std::thread::sleep(Duration::from_millis(1500)); // its reconcile, and that reconcile's own echo if any, are behind us
+    let before = wire.reconciles();
+    std::thread::sleep(Duration::from_millis(3000)); // nothing changes on disk in this window
+    let idle = wire.reconciles() - before;
+    // a real commit to the store still counts: it moves the store's data_version, which the thread polls on a held connection
+    Connection::open(store.join("devswarm.db")).unwrap().execute("INSERT INTO t VALUES (2)", []).unwrap();
+    let t0 = Instant::now();
+    while wire.reconciles() - before == idle && t0.elapsed() < Duration::from_secs(10) {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let woke = wire.reconciles() - before > idle;
+    stop.store(true, Ordering::SeqCst);
+    h.join().unwrap();
+    assert!(idle <= 1, "{idle} reconciles in 3 s with nothing changing: a reconcile wakes itself");
+    assert!(woke, "a real write to the mesh store must still reconcile");
+}
+
+#[test]
+fn a_storm_of_real_changes_costs_at_most_one_reconcile_per_gap() {
+    let w = world("storm");
+    let wire = Arc::new(wire(&w, &Arc::new(Stub::default()), Executor::Off));
+    let stop = Arc::new(AtomicBool::new(false));
+    let (wr, st) = (wire.clone(), stop.clone());
+    let h = std::thread::spawn(move || watching::run(&wr, &|| st.load(Ordering::SeqCst)));
+    std::thread::sleep(Duration::from_millis(1500));
+    let gap = ah_engine::defaults::num("devswarm_wire.reconcile_min_gap_ms");
+    let before = wire.reconciles();
+    let t0 = Instant::now();
+    for i in 0..60 {
+        // sixty different heartbeat files, one every 25 ms: each is its own batch once the debounce passes
+        write(&w.home.join(format!(".anti-hall/devswarm/heartbeats/storm-{i}.json")), &json!({"ts": now()}));
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    std::thread::sleep(Duration::from_millis(gap + 1000)); // the last change's reconcile has run
+    let ran = wire.reconciles() - before;
+    let window = t0.elapsed().as_millis() as u64;
+    stop.store(true, Ordering::SeqCst);
+    h.join().unwrap();
+    assert!(ran >= 1, "the changes were reconciled");
+    assert!(ran <= window / gap + 1, "{ran} reconciles in {window} ms with a {gap} ms gap");
 }
 
 #[test]
@@ -460,11 +544,12 @@ fn state_edges_queue_a_per_child_jev_sweep() {
     app_db(&w, "merged");
     let app = sources::read_app(&w.db).unwrap();
     let edges = rt.run(Cause::Event, &Inputs { app: Some(&app), probe: &NoProbe, gh: None, now: now() }, None).edges;
-    assert_eq!(consume::mark_dirty(&rt, &w.state, &edges), 1, "ws-1 is queued once however many edges it had");
-    assert_eq!(consume::mark_dirty(&rt, &w.state, &edges), 0, "and not again while queued");
-    let taken = consume::take_dirty(&rt, &w.state);
+    let q = consume::JevQueue::load(&w.state);
+    assert_eq!(consume::mark_dirty(&rt, &q, &edges), 1, "ws-1 is queued once however many edges it had");
+    assert_eq!(consume::mark_dirty(&rt, &q, &edges), 0, "and not again while queued");
+    let taken = consume::take_dirty(&rt, &q);
     assert!(taken.contains(&"ws-1".to_string()) && taken.contains(&w.wt.to_string_lossy().into_owned()), "id and worktree: {taken:?}");
-    assert!(consume::take_dirty(&rt, &w.state).is_empty(), "taking empties the queue");
+    assert!(consume::take_dirty(&rt, &q).is_empty(), "taking empties the queue");
     // a sweep restricted to a child nobody has a plan for looks at nothing
     let env = ah_engine::jev::settings::Env::from_pairs([("HOME", w.home.to_string_lossy().into_owned())]);
     let r = ah_engine::jev::sweep::sweep_only(&w.home, &env, now(), Some(&["ws-1".to_string()]));
@@ -482,14 +567,16 @@ fn watched_directories_cover_every_source_and_batches_are_classified() {
     let cfg = ah_engine::watch::Config::load();
     let want = watching::wanted(&wire, &cfg);
     let dirs: Vec<&PathBuf> = want.iter().map(|(d, _, _)| d).collect();
-    assert!(dirs.contains(&&w.dir), "the app database directory");
+    assert!(!dirs.contains(&&w.dir), "the app database is polled by data_version, its directory is not watched");
+    let versions = watching::version_sources(&wire);
+    assert!(versions.contains(&w.db), "the app database is a data_version source: {versions:?}");
     for sub in ["heartbeats", "plans", "workspaces", "summaries"] {
         assert!(dirs.contains(&&w.home.join(".anti-hall/devswarm").join(sub)), "{sub}");
     }
     assert!(want.iter().any(|(d, _, r)| *d == w.wt.join(".git") && matches!(r, watching::Role::Git(id) if id == "ws-1")), "the worktree's git directory");
     assert!(want.iter().any(|(_, _, r)| matches!(r, watching::Role::Transcript(id) if id == "ws-1")), "its transcript directory");
     let have: HashMap<PathBuf, watching::Role> = want.into_iter().map(|(d, _, r)| (d, r)).collect();
-    let p = watching::plan(&have, false, &[w.dir.join("devswarm.db-wal")]);
+    let p = watching::plan(&have, false, &[w.home.join(".anti-hall/devswarm/heartbeats/ws-1.json")]);
     assert_eq!(p.reconcile, Some(Cause::Event));
     let p = watching::plan(&have, false, &[w.wt.join(".git/HEAD")]);
     assert_eq!((p.reconcile, p.dirty), (None, vec!["ws-1".to_string()]), "a commit dirties the child, it does not reconcile");
@@ -785,4 +872,404 @@ fn a_nudge_that_changed_nothing_and_an_escalation_followed_by_activity_are_logge
     ah_engine::actlog::followup_add(&w.state, "stall", "escalate", "ws-1", 0, json!({"last_activity_ms": 0}), 0);
     wire.stall_followups(now());
     assert_eq!(stall_report(&w)["mistakes_by_kind"]["escalation_then_active"], json!(1));
+}
+
+// ---- benchmark --------------------------------------------------------------------------------------------------------------
+
+fn cpu_s() -> f64 {
+    // SAFETY: getrusage fills the zeroed struct it is given.
+    let mut ru: libc::rusage = unsafe { std::mem::zeroed() };
+    // SAFETY: as above.
+    unsafe { libc::getrusage(libc::RUSAGE_SELF, &mut ru) };
+    let t = |v: libc::timeval| v.tv_sec as f64 + v.tv_usec as f64 / 1e6;
+    t(ru.ru_utime) + t(ru.ru_stime)
+}
+
+#[test]
+#[ignore = "benchmark: run alone (--ignored --exact); prints the DevSwarm thread's CPU under a synthetic load of five sessions"]
+fn dswire_cpu_under_a_synthetic_load() {
+    let w = world("bench");
+    // SAFETY: the benchmark runs alone (--exact), so no other thread reads the environment; the engine state dir (the statusline
+    // line file, counted below as one write per reconcile) goes to the scratch state dir, never the real home
+    unsafe { std::env::set_var("AH_ENGINE_DIR", &w.state) };
+    mesh_store(&w);
+    let c = Connection::open(&w.db).unwrap();
+    for i in 2..=5 {
+        c.execute(&format!("INSERT INTO builders VALUES ('ws-{i}','r1','b{i}',?1,'Child {i}',0,NULL,'standard',1,NULL)"), params![w.wt.to_str().unwrap()])
+            .unwrap();
+        let root = w.home.join(".anti-hall/devswarm");
+        write(&root.join(format!("workspaces/ws-{i}.json")), &json!({"id": format!("ws-{i}"), "worktreePath": w.wt, "sessionId": format!("s{i}")}));
+        write(&root.join(format!("heartbeats/ws-{i}.json")), &json!({"ts": now()}));
+    }
+    // the rest of a long-lived machine (live 2026-10-15: 301 builders, 106 descriptors, 683 heartbeats): archived workspaces
+    for i in 0..300 {
+        c.execute(&format!("INSERT INTO builders VALUES ('old-{i}','r1','o{i}','/gone/{i}','Old {i}',1,NULL,'standard',0,NULL)"), []).unwrap();
+        let root = w.home.join(".anti-hall/devswarm");
+        if i < 100 {
+            write(
+                &root.join(format!("workspaces/old-{i}.json")),
+                &json!({"id": format!("old-{i}"), "worktreePath": format!("/gone/{i}"), "sessionId": format!("o{i}")}),
+            );
+        }
+        write(&root.join(format!("heartbeats/old-{i}.json")), &json!({"ts": now() - 86_400_000}));
+    }
+    drop(c);
+    for i in 1..=5 {
+        let p = facts::transcript_path(&w.home, w.wt.to_str().unwrap(), &format!("s{i}"));
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(&p, "{}\n").unwrap();
+    }
+    let wire = Arc::new(wire(&w, &Arc::new(Stub::default()), Executor::Off));
+    let stop = Arc::new(AtomicBool::new(false));
+    let (wr, st) = (wire.clone(), stop.clone());
+    let h = std::thread::Builder::new().name("ah-dswire".into()).spawn(move || watching::run(&wr, &|| st.load(Ordering::SeqCst))).unwrap();
+    // the load: five sessions, each appending a transcript line every 2 s, and one heartbeat rewrite every 2 s
+    let (home, wt, gen_stop) = (w.home.clone(), w.wt.clone(), Arc::new(AtomicBool::new(false)));
+    let gs = gen_stop.clone();
+    let load = std::thread::spawn(move || {
+        let mut n = 0u64;
+        while !gs.load(Ordering::SeqCst) {
+            let i = n % 5 + 1;
+            let p = facts::transcript_path(&home, wt.to_str().unwrap(), &format!("s{i}"));
+            use std::io::Write;
+            std::fs::OpenOptions::new().append(true).open(&p).unwrap().write_all(format!("{{\"n\":{n}}}\n").as_bytes()).unwrap();
+            if n.is_multiple_of(5) {
+                write(&home.join(format!(".anti-hall/devswarm/heartbeats/ws-{i}.json")), &json!({"ts": now()}));
+            }
+            n += 1;
+            std::thread::sleep(Duration::from_millis(400));
+        }
+    });
+    std::thread::sleep(Duration::from_secs(3)); // warm-up
+    let line = w.state.join("devswarm-line.json");
+    let ino = |p: &Path| std::fs::metadata(p).ok().map(|m| (std::os::unix::fs::MetadataExt::ino(&m), m.modified().ok()));
+    let (c0, t0) = (cpu_s(), Instant::now());
+    let (mut prev, mut writes) = (ino(&line), 0u64);
+    while t0.elapsed() < Duration::from_secs(20) {
+        std::thread::sleep(Duration::from_millis(10));
+        let cur = ino(&line);
+        if cur != prev {
+            writes += 1;
+            prev = cur;
+        }
+    }
+    let (cpu, wall) = (cpu_s() - c0, t0.elapsed().as_secs_f64());
+    gen_stop.store(true, Ordering::SeqCst);
+    load.join().unwrap();
+    stop.store(true, Ordering::SeqCst);
+    h.join().unwrap();
+    eprintln!("BENCH cpu={:.2}% of one core over {wall:.1} s, reconciles={writes} ({:.2}/s)", 100.0 * cpu / wall, writes as f64 / wall);
+}
+
+// ---- mode, gate, queue, change detection (lane A) ---------------------------------------------------------------------------
+
+/// `devswarm_rt.mode` as a switch the test flips.
+fn mode_switch(start: Mode) -> (Arc<std::sync::atomic::AtomicU8>, ah_engine::dswire::ModeSource) {
+    let m = Arc::new(std::sync::atomic::AtomicU8::new(start as u8));
+    let r = m.clone();
+    (m, Box::new(move || Mode::from_u8(r.load(Ordering::SeqCst))))
+}
+
+#[test]
+fn mode_off_starts_nothing_and_turning_it_off_stops_the_thread_and_the_jev_sweep() {
+    let w = world("mode-off");
+    let env: HashMap<String, String> = HashMap::new();
+    assert!(ah_engine::devswarm_rt::start_with(&w.home, &env, Mode::Off).is_none(), "off at start: no layer, as if DevSwarm were absent");
+    assert!(ah_engine::devswarm_rt::start_with(&w.home, &env, Mode::On).is_some());
+    // on at start, then off while running
+    let (sw, src) = mode_switch(Mode::On);
+    let (sweeper, sweeps) = recording_sweeper();
+    let wire = Arc::new(wire(&w, &Arc::new(Stub::default()), Executor::Off).with_mode_source(src).with_jev_sweeper(sweeper));
+    let stop = Arc::new(AtomicBool::new(false));
+    let (wr, st) = (wire.clone(), stop.clone());
+    let h = std::thread::spawn(move || watching::run(&wr, &|| st.load(Ordering::SeqCst)));
+    std::thread::sleep(Duration::from_millis(1500));
+    assert!(wire.reconciles() >= 1, "on: the start-up reconcile ran");
+    sw.store(Mode::Off as u8, Ordering::SeqCst);
+    std::thread::sleep(Duration::from_millis(ah_engine::defaults::num("devswarm_wire.wait_ms") + 1500)); // the thread notices within one wait
+    let (rec, sw_n) = (wire.reconciles(), sweeps.lock().unwrap().len());
+    // everything that used to wake it: a state file, a transcript, a Jev dirty mark, the scheduled reconcile
+    write(&w.home.join(".anti-hall/devswarm/heartbeats/ws-1.json"), &json!({"ts": now() - 7_000_000}));
+    transcript(&w, 10);
+    wire.jev.queue(&["ws-1".to_string()]);
+    wire.run_jev();
+    wire.reconcile(Cause::Periodic);
+    std::thread::sleep(Duration::from_millis(3500));
+    assert_eq!(wire.reconciles(), rec, "off: no reconcile, from the thread or from the scheduler");
+    assert_eq!(sweeps.lock().unwrap().len(), sw_n, "off: no Jev sweep");
+    assert_eq!(wire.jev.take_ids(), vec!["ws-1".to_string()], "off: the queue is kept untouched");
+    // and back on: the thread reads the state again
+    sw.store(Mode::On as u8, Ordering::SeqCst);
+    let t0 = Instant::now();
+    while wire.reconciles() == rec && t0.elapsed() < Duration::from_secs(8) {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    stop.store(true, Ordering::SeqCst);
+    h.join().unwrap();
+    assert!(wire.reconciles() > rec, "on again: reconciling resumes");
+}
+
+#[test]
+fn the_jev_queue_lives_in_memory_and_is_saved_only_when_flushed() {
+    ah_engine::defaults::init().unwrap();
+    let t = TempDir::new("jevq");
+    let dir = t.0.clone();
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join(ah_engine::defaults::text("devswarm_wire.jev_dirty_file"));
+    let q = consume::JevQueue::load(&dir);
+    assert_eq!(q.queue(&["a".into(), "b".into(), "a".into()]), 2, "a workspace queued twice stays once");
+    assert_eq!(q.queue(&["a".into()]), 0);
+    assert!(!file.exists(), "queueing writes nothing: the queue is in memory");
+    assert!(q.unsaved());
+    q.flush();
+    assert_eq!(
+        serde_json::from_str::<Vec<String>>(&std::fs::read_to_string(&file).unwrap()).unwrap(),
+        ["a", "b"],
+        "the file keeps its shape: a JSON array of ids"
+    );
+    let m = std::fs::metadata(&file).unwrap().modified().unwrap();
+    q.flush();
+    assert_eq!(std::fs::metadata(&file).unwrap().modified().unwrap(), m, "nothing changed: no rewrite");
+    // a restart sees the saved queue (this is also the file an earlier version wrote)
+    let q2 = consume::JevQueue::load(&dir);
+    assert_eq!(q2.take_ids(), ["a", "b"]);
+    assert!(q2.take_ids().is_empty());
+    q2.flush();
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "[]", "taking is saved too");
+    std::fs::write(&file, "not json").unwrap();
+    assert!(consume::JevQueue::load(&dir).take_ids().is_empty(), "a malformed file is the empty queue");
+    let cap = ah_engine::defaults::num("devswarm_wire.jev_dirty_cap") as usize;
+    let many: Vec<String> = (0..cap + 5).map(|i| format!("w{i}")).collect();
+    q.take_ids();
+    assert_eq!(q.queue(&many), cap, "past the cap the oldest are dropped");
+    assert_eq!(q.take_ids().first().map(String::as_str), Some("w5"));
+}
+
+#[test]
+fn a_held_connection_sees_another_processs_commit_and_not_its_own_reads() {
+    use ah_engine::dswire::storewatch::VersionWatch;
+    let w = world("versions");
+    let store = mesh_store(&w);
+    let db = store.join("devswarm.db");
+    let mut v = VersionWatch::new();
+    assert_eq!(v.sync(&[db.clone(), w.dir.join("absent.db")]), 1, "the missing database is not held");
+    assert!(!v.changed(), "nothing committed yet");
+    for _ in 0..5 {
+        let c = Connection::open_with_flags(&db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+        c.query_row("SELECT count(*) FROM t", [], |r| r.get::<_, i64>(0)).unwrap(); // a reader's open and read
+    }
+    assert!(!v.changed(), "other readers do not move the counter");
+    Connection::open(&db).unwrap().execute("INSERT INTO t VALUES (9)", []).unwrap();
+    assert!(v.changed(), "a commit by another connection does");
+    assert!(!v.changed(), "and is reported once");
+    assert_eq!(v.sync(&[]), 0);
+}
+
+#[test]
+fn the_transcript_gate_acts_on_growth_once_per_interval_and_never_loses_held_back_growth() {
+    use ah_engine::dswire::gate::TranscriptGate;
+    let t = TempDir::new("gate");
+    std::fs::create_dir_all(&t.0).unwrap();
+    let f = t.0.join("s1.jsonl");
+    std::fs::write(&f, "{}\n").unwrap();
+    let min = Duration::from_millis(400);
+    let mut g = TranscriptGate::new(min);
+    let t0 = Instant::now();
+    assert!(g.observe("ws-1", std::slice::from_ref(&f), t0), "first sight of a file is growth");
+    assert!(!g.observe("ws-1", std::slice::from_ref(&f), t0 + Duration::from_millis(10)), "an event without growth is nothing");
+    std::fs::OpenOptions::new().append(true).open(&f).unwrap().write_all(b"{}\n").unwrap();
+    assert!(!g.observe("ws-1", std::slice::from_ref(&f), t0 + Duration::from_millis(100)), "growth inside the interval waits");
+    assert_eq!(g.next_due(), Some(t0 + min), "and has a deadline");
+    assert!(g.tick(t0 + Duration::from_millis(200)).is_empty(), "not before it");
+    assert_eq!(g.tick(t0 + min), ["ws-1"], "at the deadline the held-back growth is acted on");
+    assert!(g.next_due().is_none());
+    // no growth since: nothing is due even if events come
+    assert!(!g.observe("ws-1", std::slice::from_ref(&f), t0 + Duration::from_millis(900)));
+    // a deadline with no growth left (the file was truncated back) acts on nothing
+    std::fs::OpenOptions::new().append(true).open(&f).unwrap().write_all(b"{}\n").unwrap();
+    assert!(!g.observe("ws-1", std::slice::from_ref(&f), t0 + Duration::from_millis(500)), "inside the interval that began at the deadline");
+    std::fs::write(&f, "").unwrap();
+    assert!(g.tick(t0 + Duration::from_secs(5)).is_empty());
+    // a rotated file (a new inode) is growth, and a second workspace has its own interval
+    std::fs::remove_file(&f).unwrap();
+    std::fs::write(&f, "{}\n").unwrap();
+    assert!(g.observe("ws-1", std::slice::from_ref(&f), t0 + Duration::from_secs(10)));
+    assert!(g.observe("ws-2", std::slice::from_ref(&f), t0 + Duration::from_secs(10)));
+}
+
+// ---- the scale test: the budget -------------------------------------------------------------------------------------------
+
+/// A mesh store for the worktree `wt` (see [`mesh_store`]): SQLite-backed with its WAL and index on disk and no process holding it.
+fn mesh_store_of(w: &World, wt: &Path, tag: &str) -> PathBuf {
+    let key = facts::repo_key(wt.to_str().unwrap()).unwrap();
+    let dir = w.home.join(".anti-hall/devswarm/store").join(key);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("BACKEND"), "sqlite\n").unwrap();
+    let src = w.dir.join(format!("store-src-{tag}.db"));
+    let c = Connection::open(&src).unwrap();
+    c.pragma_update(None, "journal_mode", "wal").unwrap();
+    c.execute_batch("CREATE TABLE t (x INTEGER); INSERT INTO t VALUES (1);").unwrap();
+    for sfx in ["", "-wal", "-shm"] {
+        std::fs::copy(format!("{}{sfx}", src.display()), dir.join(format!("devswarm.db{sfx}"))).unwrap();
+    }
+    drop(c);
+    dir
+}
+
+/// CPU seconds used so far by the threads `own` names (by thread id).
+fn cpu_of(own: &std::collections::HashSet<u64>) -> f64 {
+    ah_engine::threads::snapshot().iter().filter(|t| own.contains(&t.tid)).map(|t| t.cpu_us as f64 / 1e6).sum()
+}
+
+/// A realistic DevSwarm machine, driven for a while; returns (average CPU % of one core of the engine's threads, resident MB at
+/// the end, reconciles per second, thread wakes per second). `n` active workspaces each have their own repository, mesh store,
+/// transcript and descriptor; on top of them is the weight of a long-lived machine (300 archived builders, 100 descriptors, 300
+/// heartbeats). Every session appends to its transcript once a second, every workspace rewrites its heartbeat every 5 s, and
+/// every mesh store receives a commit every 10 s.
+fn drive(tag: &str, n: usize, warm: Duration, window: Duration) -> (f64, f64, f64, f64, f64) {
+    let w = world(tag);
+    // SAFETY: nothing else in this test reads the environment while it runs alone (nextest: one process per test); the engine state
+    // dir (the statusline line file, one write per reconcile) goes to the scratch state dir, never the real home
+    unsafe { std::env::set_var("AH_ENGINE_DIR", &w.state) };
+    let root = w.home.join(".anti-hall/devswarm");
+    let c = Connection::open(&w.db).unwrap();
+    let mut stores = Vec::new();
+    let mut wts = vec![(1usize, w.wt.clone())];
+    for i in 2..=n {
+        let wt = w.dir.join(format!("wt-{i}"));
+        std::fs::create_dir_all(&wt).unwrap();
+        sh(&wt, &["init", "-q"]);
+        sh(&wt, &["commit", "-q", "--allow-empty", "-m", "x"]);
+        c.execute(&format!("INSERT INTO builders VALUES ('ws-{i}','r1','b{i}',?1,'Child {i}',0,NULL,'standard',1,NULL)"), params![wt.to_str().unwrap()])
+            .unwrap();
+        write(&root.join(format!("workspaces/ws-{i}.json")), &json!({"id": format!("ws-{i}"), "worktreePath": wt, "sessionId": format!("s{i}")}));
+        wts.push((i, wt));
+    }
+    for (i, wt) in &wts {
+        write(&root.join(format!("heartbeats/ws-{i}.json")), &json!({"ts": now()}));
+        stores.push(mesh_store_of(&w, wt, &format!("{i}")).join("devswarm.db"));
+        let p = facts::transcript_path(&w.home, wt.to_str().unwrap(), &format!("s{i}"));
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(&p, "{}\n").unwrap();
+    }
+    for i in 0..300 {
+        c.execute(&format!("INSERT INTO builders VALUES ('old-{i}','r1','o{i}','/gone/{i}','Old {i}',1,NULL,'standard',0,NULL)"), []).unwrap();
+        if i < 100 {
+            write(
+                &root.join(format!("workspaces/old-{i}.json")),
+                &json!({"id": format!("old-{i}"), "worktreePath": format!("/gone/{i}"), "sessionId": format!("o{i}")}),
+            );
+        }
+        write(&root.join(format!("heartbeats/old-{i}.json")), &json!({"ts": now() - 86_400_000}));
+    }
+    drop(c);
+    let load_stop = Arc::new(AtomicBool::new(false));
+    let (ls, home, wts2) = (load_stop.clone(), w.home.clone(), wts.clone());
+    let load = std::thread::spawn(move || {
+        let mut tick = 0u64;
+        while !ls.load(Ordering::SeqCst) {
+            for (i, wt) in &wts2 {
+                if tick % 10 == (*i as u64) % 10 {
+                    let p = facts::transcript_path(&home, wt.to_str().unwrap(), &format!("s{i}"));
+                    std::fs::OpenOptions::new().append(true).open(&p).unwrap().write_all(format!("{{\"n\":{tick}}}\n").as_bytes()).unwrap();
+                }
+                if tick % 50 == (*i as u64) % 50 {
+                    write(&home.join(format!(".anti-hall/devswarm/heartbeats/ws-{i}.json")), &json!({"ts": now()}));
+                }
+                if tick % 100 == (*i as u64) % 100 {
+                    let key = facts::repo_key(wt.to_str().unwrap()).unwrap();
+                    let db = home.join(".anti-hall/devswarm/store").join(key).join("devswarm.db");
+                    Connection::open(db).unwrap().execute("INSERT INTO t VALUES (7)", []).unwrap();
+                }
+            }
+            tick += 1;
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    });
+    let rss_before = ah_engine::limits::rss_kb() as f64 / 1024.0;
+    let before: std::collections::HashSet<u64> = ah_engine::threads::snapshot().iter().map(|t| t.tid).collect();
+    let (sweeper, _) = recording_sweeper();
+    let wire = Arc::new(wire(&w, &Arc::new(Stub::default()), Executor::Off).with_jev_sweeper(sweeper));
+    let stop = Arc::new(AtomicBool::new(false));
+    let (wr, st) = (wire.clone(), stop.clone());
+    let h = std::thread::Builder::new().name("ah-dswire".into()).spawn(move || watching::run(&wr, &|| st.load(Ordering::SeqCst))).unwrap();
+    std::thread::sleep(warm);
+    let own: std::collections::HashSet<u64> = ah_engine::threads::snapshot().iter().filter(|t| !before.contains(&t.tid)).map(|t| t.tid).collect();
+    assert!(!own.is_empty(), "the engine's threads were found");
+    let per_thread = |own: &std::collections::HashSet<u64>| -> std::collections::BTreeMap<String, f64> {
+        let mut m = std::collections::BTreeMap::new();
+        for t in ah_engine::threads::snapshot().iter().filter(|t| own.contains(&t.tid)) {
+            *m.entry(t.name.clone()).or_insert(0.0) += t.cpu_us as f64 / 1e6;
+        }
+        m
+    };
+    let (c0, r0, k0, t0, p0) = (cpu_of(&own), wire.reconciles(), watching::work::snapshot(), Instant::now(), per_thread(&own));
+    std::thread::sleep(window);
+    for (name, v) in per_thread(&own) {
+        eprintln!("SCALE thread {name}: {:.3}% of one core", 100.0 * (v - p0.get(&name).copied().unwrap_or(0.0)) / t0.elapsed().as_secs_f64());
+    }
+    eprintln!("SCALE work: {:?}", watching::work::snapshot().iter().zip(k0.iter()).map(|(a, b)| (a.0, a.1 - b.1)).collect::<Vec<_>>());
+    let (cpu, wall, rec) = (cpu_of(&own) - c0, t0.elapsed().as_secs_f64(), wire.reconciles() - r0);
+    let wakes = watching::work::snapshot().iter().find(|(k, _)| *k == "wakes").map_or(0, |x| x.1) - k0.iter().find(|(k, _)| *k == "wakes").map_or(0, |x| x.1);
+    let rss_mb = ah_engine::limits::rss_kb() as f64 / 1024.0;
+    load_stop.store(true, Ordering::SeqCst);
+    load.join().unwrap();
+    stop.store(true, Ordering::SeqCst);
+    h.join().unwrap();
+    (100.0 * cpu / wall, rss_mb, rss_mb - rss_before, rec as f64 / wall, wakes as f64 / wall)
+}
+
+#[test]
+fn the_thread_stays_inside_its_budget_at_scale() {
+    let b: toml::Table = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/budgets.toml")).unwrap().parse().unwrap();
+    let b = &b["devswarm_scale"];
+    let f = |k: &str| b[k].as_float().unwrap_or_else(|| b[k].as_integer().unwrap() as f64);
+    let (cpu_budget, rss_budget) = (f("cpu_pct"), f("rss_mb"));
+    let factor = if cfg!(debug_assertions) { f("debug_factor") } else { 1.0 };
+    let (window, warm) = (Duration::from_secs(f("window_s") as u64), Duration::from_secs(f("warmup_s") as u64));
+    let (cpu, rss, grown, rec, wakes) = drive("scale", 10, warm, window);
+    eprintln!(
+        "SCALE 1 primary + 10 workspaces + 10 sessions: cpu={cpu:.2}% (budget {cpu_budget}% x{factor}) rss={rss:.1} MB (+{grown:.1} since the start; budget {rss_budget}) reconciles={rec:.2}/s wakes={wakes:.2}/s"
+    );
+    assert!(cpu < cpu_budget * factor, "the DevSwarm threads used {cpu:.2}% of one core, over the {cpu_budget}% budget (x{factor})");
+    assert!(grown < rss_budget, "the DevSwarm machinery grew the process by {grown:.1} MB, over the {rss_budget} MB budget");
+    // the whole process counts when it is alone (nextest runs each test in its own process; `cargo test` shares one with every other test)
+    if std::env::var_os("NEXTEST").is_some() {
+        assert!(rss < rss_budget, "the process holds {rss:.1} MB, over the {rss_budget} MB budget");
+    }
+}
+
+#[test]
+fn the_read_cache_parses_a_settled_file_once_and_never_trusts_a_fresh_or_changed_one() {
+    use ah_engine::devswarm_rt::sources::ReadCache;
+    ah_engine::defaults::init().unwrap();
+    let t = TempDir::new("rcache");
+    std::fs::create_dir_all(&t.0).unwrap();
+    let f = t.0.join("hb.json");
+    std::fs::write(&f, r#"{"ts": 111}"#).unwrap();
+    age(&f, 60_000); // settled: well past devswarm_rt.probe_cache_racy_ms
+    let c = ReadCache::new();
+    c.begin();
+    let (a, b) = (c.json(&f).unwrap(), c.json(&f).unwrap());
+    assert!(Arc::ptr_eq(&a, &b), "an unchanged settled file is parsed once");
+    // changed in place with the same size: only its modification time differs
+    std::fs::write(&f, r#"{"ts": 222}"#).unwrap();
+    age(&f, 30_000);
+    let d = c.json(&f).unwrap();
+    assert!(!Arc::ptr_eq(&a, &d), "a changed file is read again");
+    assert_eq!(format!("{:?}", d.get("ts")), format!("{:?}", ah_engine::checks::guardkit::ojson::OVal::parse(r#"{"ts": 222}"#).unwrap().get("ts")));
+    // a file modified just now could be rewritten within the clock's granularity: never kept
+    let g = t.0.join("fresh.json");
+    std::fs::write(&g, r#"{"ts": 1}"#).unwrap();
+    let (x, y) = (c.json(&g).unwrap(), c.json(&g).unwrap());
+    assert!(!Arc::ptr_eq(&x, &y), "a fresh file is read every time");
+    // what a reconcile did not use is dropped at its end
+    c.end();
+    c.begin();
+    c.end();
+    let e = c.json(&f).unwrap();
+    assert!(!Arc::ptr_eq(&d, &e), "an entry unused by a whole reconcile is gone");
+    // an unreadable file is nothing, not a stale answer
+    std::fs::remove_file(&f).unwrap();
+    assert!(c.json(&f).is_none());
 }

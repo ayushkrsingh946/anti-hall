@@ -36,10 +36,52 @@ value = ["auto_archive", "poke", "escalate"]
 # ---- the daemon thread ------------------------------------------------------------------------------------------------------
 
 [devswarm_wire.wait_ms]
-doc = "How long the DevSwarm thread waits for a file event before it checks whether the daemon is draining and whether the periodic reconcile is due."
-value = 500
+doc = "The longest the DevSwarm thread sleeps. It sleeps until the next thing is due (a file event, a deferred reconcile, a store poll, a gate deadline, an action or stall deadline), and never longer than this, so the daemon's drain and a change of devswarm_rt.mode are noticed within it."
+value = 2000
 min = 10
 max = 60000
+unit = "ms"
+
+[devswarm_wire.min_sleep_ms]
+doc = "The shortest sleep of the DevSwarm thread: a deadline that is already due is handled at once, but never busy-waits."
+value = 10
+min = 1
+max = 1000
+unit = "ms"
+
+[devswarm_wire.store_poll_ms]
+doc = "How often the held connection of each active mesh store, and of the app database, is asked `PRAGMA data_version` (it changes when another process commits). This replaces watching the SQLite files, which a reader's own open touches."
+value = 500
+min = 50
+max = 60000
+unit = "ms"
+
+[devswarm_wire.transcript_min_interval_ms]
+doc = "The least time between two reactions to one workspace's transcript growing (a Jev sweep mark and a stuck re-check). The gate only stats the transcript files (inode, size): growth inside the interval is acted on once, when the interval ends."
+value = 5000
+min = 0
+max = 3600000
+unit = "ms"
+
+[devswarm_wire.jev_dirty_flush_ms]
+doc = "How often the in-memory Jev dirty queue is written to its file when it changed (it is also written when the thread stops). A crash loses at most this much of queue changes; the scheduled sweep still covers every workspace."
+value = 5000
+min = 100
+max = 600000
+unit = "ms"
+
+[devswarm_wire.events_recheck_ms]
+doc = "How long the event-driven auto-archive waits before looking at its dirty workspaces again when it cannot act (the event trigger is off or the engine is not the executor)."
+value = 30000
+min = 1000
+max = 3600000
+unit = "ms"
+
+[devswarm_wire.reconcile_min_gap_ms]
+doc = "The least time between two reconciles the file events ask for. Changes inside the gap are folded into one reconcile at its end (none is lost), so a burst of changes, or a source that changes all the time, costs at most one reconcile per gap. 0 reconciles on every batch."
+value = 1000
+min = 0
+max = 600000
 unit = "ms"
 
 [devswarm_wire.act_min_gap_ms]
@@ -159,7 +201,7 @@ doc = "The kinds of state change that mark a workspace's Jev data dirty and queu
 value = ["plan_step", "activity", "pr", "checks"]
 
 [devswarm_wire.jev_dirty_file]
-doc = "The file (under the engine state directory) listing the workspaces whose Jev sweep is queued, so a restart does not lose the queue."
+doc = "The file (under the engine state directory) the in-memory queue of workspaces whose Jev sweep is queued is saved to (every devswarm_wire.jev_dirty_flush_ms when it changed, and at shutdown), so a restart does not lose the queue."
 value = "rt-jev-dirty.json"
 
 [devswarm_wire.jev_dirty_cap]
@@ -271,6 +313,10 @@ value = "rt-nudges.json"
 [metric.dswire_actions]
 doc = "DevSwarm actions the engine ran or declined from a state change, by kind and outcome."
 value = { kind = "counter", unit = "actions", labels = ["kind", "outcome"] }
+
+[metric.dswire_mode_change]
+doc = "Times the DevSwarm layer's mode (devswarm_rt.mode) changed while the daemon ran, by the new mode."
+value = { kind = "counter", unit = "changes", labels = ["mode"] }
 
 [metric.dswire_standdown]
 doc = "Action sweeps the engine skipped because the action's executor is not the engine."

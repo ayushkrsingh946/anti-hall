@@ -22,17 +22,17 @@ Every command accepts `--json`. Read-only commands never change state.
 | `devswarm` | `<status\|line\|supervisor\|ingest\|ledger [--since <window>]\|recover --id <ws> --request <id>\|advisory --session <id>\|archive --id <ws> --request <id>\|plan-prune --older-than <days>\|prune --confirm-ids <ids> --plan <nonce>\|help [<verb>]\|skip <guard> [--ttl <min>]\|archive-ignore <id>\|archive-unignore <id>\|gate-intent --reason <text>\|notice --list\|plan set\|show <id>\|scope add <id> --glob <g> --note <t>\|gate <id> --set <csv> --clear <csv>\|workspaces list\|logs [--limit <n>]\|wake-directive <id>\|ready-check <sha> [--base <ref>]\|app-state [--json]\|app-sync [--dry-run]\|done [--summary <text>]\|primary [status\|takeover] [--session <id>]\|relay <seq> --to <id> [--note-file <path>]\|archive-request <childId> [--reason <text>]\|nudge <id>\|supervision-report [--days <n>] [--json]\|sync-ui --titles-json <file> [--yes]\|retention status\|run [--dry-run] [--store <key>]\|unarchive <id>\|migrate-owner-keys\|ensure <id> [--worktree <p> --session <s>]\|register <id> --worktree <p> --session <s> [--nudge <word>]\|correct <id> [--dry-run]\|reap-orphans [--apply --max <n>]\|wake-watch [--auto]\|register-primary [--worktree <p> --session <s> --force]\|diagnose [--json]\|healthcheck [--json]\|merge [<hivecontrol merge-into-source args>]\|spawn <branch> [-s <src> -a <agent> -p <brief> -t <title>]\|respawn <id> [--dry-run]\|reconcile-registry\|reap-stale [--yes]\|reconcile-active --active <ids> [--yes]\|auto-archive>` | no | implemented | The DevSwarm realtime state and owner actions (lane dswire). `status` and `line` print the live workspace state and its statusline segment; `advisory --session <id>` prints the changes that session has not seen; `archive --id <ws> --request <id>`, `plan-prune --older-than <days>` and `prune --confirm-ids <a,b> --plan <nonce>` run the hivecontrol actions at the owner's request, with Node's preconditions, ledger and confirmations. `ingest` prints who drains the native queue (devswarm_ingest.mode), the projects and each project's lock and heartbeat (read-only). Roles (devswarm_wire.role_matrix): reads are open; the acting verbs are for the main session only. `create` is left to scripts/devswarm.js (exit 75); `merge` is the devswarm.js verb below. The devswarm.js verbs `help`, `skip`, `archive-ignore`, `archive-unignore`, `gate-intent`, `notice --list`, `plan set\|show`, `scope add`, `gate`, `workspaces list`, `logs`, `wake-directive` (a child workspace), `ready-check`, `app-state`, `app-sync`, `done`, `primary`, `relay`, `archive-request`, `nudge`, `supervision-report`, `sync-ui`, `retention`, `unarchive`, `migrate-owner-keys`, `ensure`, `register`, `correct`, `reap-orphans`, `register-primary`, `diagnose`, `healthcheck`, `merge`, `spawn`, `respawn`, `reconcile-registry`, `reap-stale`, `reconcile-active` and `auto-archive` are native too (the guarded fronts: `spawn` answers its refusals, `respawn` its usage and not-primary refusals, `reap-stale` and `reconcile-active` their dry runs and an empty confirmed run, `auto-archive` the plan without the app database; Node answers the rest): `devswarm <verb> <the devswarm.js arguments>` prints what `node scripts/devswarm.js <verb> ...` prints (Node answers what the engine defers). `supervisor` prints who owns the supervisor duties (devswarm_sup.mode), whether the Node supervisor is still running and each duty's gate; `recover --id <ws> --request <id>` kills and resumes ONE session on demand (never from a sweep): the engine refuses an automated caller, an unsafe id, a repeated request, a workspace without a worktree and session and one already recovered the most times allowed, then Node's devswarm-recover.js `run` does the kill with its exactly-one-target, identity and working-directory confirmations. Roles (devswarm_wire.role_matrix): reads are open; the acting verbs are for the main session only. `create` is left to scripts/devswarm.js (exit 75); `merge` is the devswarm.js verb below. Inert (exit 64) where DevSwarm is absent. `wake-watch [--auto]` is the idle-wake Monitor the plugin runs for the whole session: it prints one line per event (armed, new mail, a persistent read error, a newer build) and runs until the session ends, on the realtime watch layer (OS events, polling where there are none) and the Node watcher's own tick; it reads plain files only and consumes nothing; roles: main session and workspace child. It answers exit 75 (nothing printed or written) for what only Node can decide, and the launcher then runs the Node watcher. |
 | `dispatch-report` | `[--json]` | yes | implemented | Read-only effectiveness metrics (L03, the port of scripts/dispatch-report.js): the parallel-dispatch demand shown, followed and ignored with its compliance rate, the idle-neglect blocks, the Jev dispatch-tier verdicts and follow rate, and the coordinator-work window's nudges, blocks and work share per plugin version. |
 | `docs` | `[--format md]` | yes | implemented | Print the generated reference: every command, setting, metric, impact kind, check and error code. |
-| `doctor` | `[--check] [--repair\|--fix] [--dry-run] [--migrations-only] [--quiet] [--home <dir>] [--cwd <dir>] [--plugin-root <dir>]` | no | implemented | The health check and repair of anti-hall (D81), with the Node doctor's report layout and finding texts: the platform and versions, the hook scripts the registry names, the live behaviour of the guards (each built-in check run in-process on a crafted payload; a payload the engine defers to its Node hook is reported as a deferral, never a pass), the statusline configuration and the saved Workflow templates. Read-only by default; `--repair` (or `--fix`) runs the repair pass of `migrate` after the diagnostics, `--dry-run` previews it, and `--migrations-only` with either prints only the migration report as JSON. |
+| `doctor` | `[--check] [--repair\|--fix] [--dry-run] [--migrations-only] [--quiet] [--home <dir>] [--cwd <dir>] [--plugin-root <dir>] [--repair-ingest-orphans] [--repair-test-stores] [--repair-resurrected] [--apply]` | no | implemented | The health check and repair of anti-hall (D81), with the Node doctor's report layout and finding texts: the platform and versions, the hook scripts the registry names, the live behaviour of the guards (each built-in check run in-process on a crafted payload; a payload the engine defers to its Node hook is reported as a deferral, never a pass), the statusline configuration and the saved Workflow templates. Read-only by default; `--repair` (or `--fix`) runs the repair pass of `migrate` after the diagnostics, `--dry-run` previews it, and `--migrations-only` with either prints only the migration report as JSON. |
 | `finding-dedup` | `[--file <findings.json>]` | yes | implemented | Advisory duplicate-finding detector for the deadly-loop reviewers (L03, the port of scripts/finding-dedup.js): reads a JSON array of findings (stdin or `--file`), asks Jev whether candidate pairs describe the same root cause, and prints `{groups}` on stdout and one `possible duplicates` line per confirmed pair on stderr. It never collapses anything; with Jev off or unkeyed it prints no groups. |
 | `gen-hooks` | `--host claude\|codex [--kind hooks\|registry\|list\|map]` | yes | implemented | Print a file generated from the dispatch table (D87): the thin hooks.json (one trigger per event), the per-hook registry, the wrapper's fallback list or its fallback map, for one host. |
 | `gh` | `<status\|segment\|poll> [--cwd <dir>] [--force]` | no | implemented | GitHub realtime (feature #20, independent of DevSwarm): `status` prints, from the state file with no network, what is followed (the repos of the working directories of live sessions, their pull request, review, CI and mergeability), the rate-limit budget, the hold in force (backoff, budget, gh missing, logged out or offline) and the measured rate-limit cost of 200 and 304 answers; `segment [--cwd <dir>]` prints the statusline piece for the repo that holds the directory (empty when there is nothing to say); `poll [--force]` runs one tick now. |
-| `gh_poll` | `` | no | implemented | The scheduled GitHub realtime tick (the `gh_poll` job): notices pushes, polls the followed repos that are due inside the rate budget and records the edges; prints its counts with --json and always exits 0. |
+| `gh_poll` | `` | no | implemented | The scheduled GitHub realtime tick (the `gh_poll` job): notices pushes, polls the followed repos that are due inside the rate budget and records the edges; prints its counts with --json; exits nonzero when recent sessions exist and the tick leaves gh missing/logged-out/offline so the scheduler backs off. |
 | `handovers` | `<index\|check\|search> [query] [--project <dir>] [--registered] [--force] [--limit <n>]` | no | implemented | The handover brief tree: `index` rebuilds the root brief and the per-day briefs (BRIEF.md plus a typed BRIEF.json) of the changed days under .anti-hall/handovers (`--registered` walks every project the SessionStart check has seen, `--force` rebuilds all days), `check` reports unindexed or stale handovers, missing briefs, malformed handovers and broken references without writing (exit 3 when there are any), `search <words> [date:..] [session:..] [decision:..] [file:..]` ranks entries from the sidecars. Never edits a handover file and never deletes. The logic is the plugin script handover-hygiene.js; the scheduled job `handovers` runs `index --registered`. |
 | `harvest` | `[--dir <path>] [--stale-days <n>]` | yes | implemented | Scan a code tree for deliberate-debt markers, `anti-hall: <ceiling>, <when>` in any comment syntax (D81, the port of scripts/harvest-debt.js), and flag the ones with no payback trigger or in files untouched for the stale window. |
 | `hook` | `[--fallback <hook.js>] \| --event <Event> [--tool <Tool>] [--host claude\|codex] [--fallback-map <file>]` | no | implemented | The hook client: read one hook payload from stdin, ask the daemon, print the answer; falls back to the Node hook given by --fallback. With --event it is the per-event dispatcher: it runs every hook entry hooks.json registers for that event and tool, built-in checks in the engine and the rest as their Node hooks (--fallback-map overrides their commands), and combines the results the way the host would. |
 | `impact` | `[--kind <kind>] [--project <hash>] [--window <7d>]` | yes | implemented | Show everything the engine affected: blocks by reason, warnings, context injected, fallbacks, and labelled savings estimates, including the NET of model-routing savings minus what injection and Jev cost (D77). |
 | `install-codex` | `[--global] [--dry-run] [--root <plugin dir>]` | no | implemented | Install the anti-hall hooks for Codex (D81, lane L9b, the port of codex/install-codex.js): merge the generated hook registration into .codex/hooks.json (project, or --global for the home directory), replacing only anti-hall's own groups, and enable the hooks feature in config.toml. A changed file is copied to <file>.bak-<time> first; --dry-run writes nothing. |
-| `install-statusline` | `[--user\|--project] [--consolidate]` | no | implemented | Put the anti-hall status line into the host's statusLine setting (L9a, the port of statusline/install-statusline.js): `--user` (default, ~/.claude/settings.json) or `--project` (./.claude/settings.local.json), `--consolidate` to merge an existing status line into one line. Wraps an existing statusLine as line 1, backs the settings up once, never clobbers other keys, a re-run changes nothing. |
+| `install-statusline` | `` | no | implemented | Retired no-op kept for old invocations: prints that anti-hall no longer writes a command-backed statusLine and exits 0. Use uninstall-statusline to clean up older installs. |
 | `jev` | `<ask\|status\|scrub\|evidence>` | no | implemented | The optional Jev lane (D34-D38): `ask` reads JSON requests, one per stdin line, and prints each decision (a real call when Jev is enabled and keyed), `status` prints the resolved settings and each integration's mode without any key, `scrub` redacts secrets from JSON strings read one per stdin line. |
 | `jev-report` | `[--json] [--days N] [--window 24h\|7d] [--by project\|session] [--project <name>] [--weekly] \| label <hash> [tp\|fp] \| prune-audit --days N` | no | implemented | The Jev report of the /anti-hall:jev skill (the port of scripts/jev-report.js): per-integration calls, agreement, changed decisions, precision, cost and the KEEP / REVIEW / REMOVE verdict from the decision log, with `--json`, `--days`, `--window 24h\|7d`, `--by project\|session`, `--project`, `--weekly`, `--since`, `--until`, `--exclude-window`, `--exclude-project`; `label <hash> [tp\|fp]` reads or records a human precision label and `prune-audit --days N` trims the audit snippets (the only two forms that write). |
 | `jev-setup` | `<status\|enable\|disable\|set-key\|bind-generic-key\|test\|mode\|review-due\|reviewed\|snooze> [--days <n>] [--transport vercel\|typesafe] [--fallback vercel\|typesafe\|none] [--role fallback] [--vendor vercel\|typesafe]` | no | implemented | Activate, configure and inspect the opt-in Jev classifier (D81, the port of scripts/jev-setup.js): `status` (resolved settings, key presence yes or no, every integration's mode, calls in the last 24 hours, the Vercel credit balance), `enable` and `disable`, `set-key` (the key is read from stdin only and written 0600), `bind-generic-key`, `mode <integration> on\|shadow\|off`, `test` (one real gateway call per configured transport, each on its own) and the shadow-review verbs `review-due [--json]`, `reviewed <integration>` and `snooze <integration> --days N`. |
@@ -47,13 +47,13 @@ Every command accepts `--json`. Read-only commands never change state.
 | `restore` | `<snapshot-dir>` | no | implemented | Restore a snapshot directory: first keep the current state as an unscrubbed pre-restore snapshot (never deleted), stop the daemon, then swap the databases. |
 | `schedule` | `<list\|run <job>\|history> [--job <name>] [--limit <n>]` | no | implemented | The scheduler (D33): `list` the jobs with their next run and last result, `run <job>` now (waits briefly for the result), or show the run `history` from hot.db; adding and removing jobs from the command line is planned (D33), today they come from schedules.toml and schedules.json. |
 | `serve` | `` | no | implemented | Run the resident daemon in the foreground (the client starts it detached when needed). |
-| `settings` | `<show\|get\|set\|reset\|judge\|tunables\|trust-command-allow\|trust-edit-allow> [args] [--json]` | no | implemented | Show or change any anti-hall setting (L9a, the port of scripts/settings.js): `show [--section <key>] [--all]`, `get <section.key>`, `set <section.key> <value> [--confirmed]`, `reset <section.key> [--confirmed]`, `judge on\|off\|status`, `tunables [<category\|key prefix>] [--all]` (every key of the plugin's engine/defaults/*.toml with its default, env variable and description, grouped by file; read-only, edit the file to change one), and `trust-command-allow` / `trust-edit-allow [<repo>] [--confirmed]`; the settings.json file and the registry are the plugin's own. |
+| `settings` | `<show\|get\|set\|reset\|judge\|tunables\|trust-command-allow\|trust-edit-allow> [args] [--section <key>] [--all] [--confirmed] [--json]` | no | implemented | Show or change any anti-hall setting (L9a, the port of scripts/settings.js): `show [--section <key>] [--all]`, `get <section.key>`, `set <section.key> <value> [--confirmed]`, `reset <section.key> [--confirmed]`, `judge on\|off\|status`, `tunables [<category\|key prefix>] [--all]` (every key of the plugin's engine/defaults/*.toml with its default, env variable and description, grouped by file; read-only, edit the file to change one), and `trust-command-allow` / `trust-edit-allow [<repo>] [--confirmed]`; the settings.json file and the registry are the plugin's own. |
 | `shadow-compare` | `<scratch dir>` | no | implemented | Internal: the detached half of a Node shadow (L9a). Runs the Node version of a sampled operator command on a scratch home and logs a mismatch to telemetry; started by the engine, not by people. |
-| `status` | `[--memory]` | yes | implemented | Show the daemon's state: version, uptime, memory, counters, breaker and crash-loop state, rules, and a headline summary of what it did. |
+| `status` | `[--memory] [--threads]` | yes | implemented | Show the daemon's state: version, uptime, memory, counters, breaker and crash-loop state, rules, and a headline summary of what it did. |
 | `statusline` | `(session JSON on stdin)` | no | implemented | The two-line status line the host runs after each turn (L9a, the port of statusline/statusline.js and its renderers): reads the session JSON on stdin; line 1 is the configured base command or the rich line, line 2 the phase bar, swarm activity or context gauge. Fails open. |
 | `stop` | `` | no | implemented | Ask the daemon to drain and exit. |
-| `telemetry` | `[summary\|events\|rollup\|actions [feature]] [--window <7d>] [--kind <k>] [--limit <n>]` | no | implemented | Telemetry (D78): `summary` (invocations, outcomes, latency and injected bytes per hook and check), `events` (routing, spawn, Jev and spill events), `rollup` (move complete days into archive.db and apply the retention), `actions [feature]` (what the acting features did and got wrong: action counts, success rate, mistake signals and mistake rate; `--mistake <feature> <action> <target> <kind>` records one the engine cannot see, such as a dismissed escalation). Local only. |
-| `uninstall-statusline` | `[--user\|--project] [--purge-base]` | no | implemented | Take the anti-hall status line out of the host's settings (L9a, the port of statusline/uninstall-statusline.js): restores the saved original statusLine, else the settings backup, else removes the key; `--project` for ./.claude/settings.local.json, `--purge-base` to also remove the shared base configuration. |
+| `telemetry` | `[summary\|events\|rollup\|actions [feature]] [--window <7d>] [--kind <k>] [--limit <n>] [--mistake <feature> <action> <target> <kind>]` | no | implemented | Telemetry (D78): `summary` (invocations, outcomes, latency and injected bytes per hook and check), `events` (routing, spawn, Jev and spill events), `rollup` (move complete days into archive.db and apply the retention), `actions [feature]` (what the acting features did and got wrong: action counts, success rate, mistake signals and mistake rate; `--mistake <feature> <action> <target> <kind>` records one the engine cannot see, such as a dismissed escalation). Local only. |
+| `uninstall-statusline` | `[--user\|--project] [--purge-base]` | no | implemented | Take an older anti-hall status line out of the host's settings (L9a, the port of statusline/uninstall-statusline.js): restores the saved original statusLine, else the settings backup, else removes the key; `--project` for ./.claude/settings.local.json, `--purge-base` to also remove the shared base configuration. |
 | `update` | `[--check] [--post-pull-only]` | no | implemented | Update anti-hall (D81, lane L9b, the port of skills/update/scripts/update.js): `git pull --ff-only` of the marketplace clone (a dirty tree or a diverged history is a hard STOP, offline fails open), a copy of the plugin into a new version-pinned cache directory, the harness's own `claude plugin update` when its registry is behind (bounded, never answering a confirmation; installed_plugins.json is only read), the changelog delta, then one JSON status line and a human summary. `--check` only compares versions. The DevSwarm store sweeps and the settings migration still run by the plugin's own update.js --post-pull-only and are merged into the status. |
 | `version` | `` | yes | implemented | Print the version this build reports. |
 | `mcp-reaper` | `run [--dry-run]` | no | implemented | The standalone MCP orphan reaper as an engine command (the port of companion/mcp-reaper.js): `run` makes one sweep (the scheduled job `mcp_reaper` runs it every mcp_reaper.job_every_ms), `--dry-run` logs what it would reap and signals nothing. It does nothing while maintenance.mcpReaperJob is off, on auto until the Node reaper's opt-in was carried over (`ah-engine units heal`), and while a Node reaper unit is still installed, so the reaper never runs twice. Prints one JSON line. |
@@ -62,6 +62,220 @@ Every command accepts `--json`. Read-only commands never change state.
 | `units` | `<status\|install\|heal\|uninstall> [--dry-run] [--bin <path>]` | no | implemented | The engine's service units: `status` lists the engine unit and the units the Node installers wrote, with whether the engine runs their duty; `install` writes (or refreshes) the one unit that keeps `ah-engine serve` running (launchd on macOS, a systemd user service and timer on Linux) and loads it; `heal` installs and then retires each Node unit whose duty the engine runs (the MCP reaper when its job is on, the DevSwarm supervisor and ingest when devswarm_sup.mode / devswarm_ingest.mode is engine); `uninstall` unloads the engine unit. `--dry-run` reports and changes nothing; `--bin <path>` names the engine binary the unit runs. A removed unit file is moved into the state directory, never deleted. A retired unit that comes back is recorded as a mistake and left alone. |
 | `codex-activate` | `` | no | implemented | Write the advisory Codex activation marker ~/.anti-hall/codex-activated.json ({activatedAt, scope = the working directory}) that the anti-hall-activate skill leaves after installing the hooks; it changes no real configuration and deleting it is harmless. Replaces codex/scripts/write-activation-sentinel.js. |
 | `codex-limit-status` | `` | yes | implemented | Print whether limit conservation is active, as JSON (active, reason, weekly, fiveHour, sonnetWeekly, source, stale, resetsAt): the Codex skill anti-hall-context-conserve runs it instead of codex/scripts/limit-conserve-status.js. Same decision as the limit-conserve-inject hook: the limitConserve.mode setting (on, off, auto), else the OMC usage cache with the threshold, the reset-aware and snapshot-age rules and the account-switch guard. Read-only apart from the account-switch state file the hook keeps current. Fail-open: an unreadable cache is inactive. |
+
+## Flags
+
+Every flag in a command's arguments, with the commands that take it. A flag shared by several commands is described once; the command's own entry says how it uses it.
+
+| Flag | Commands | What it does |
+|---|---|---|
+| `--active` | `devswarm` | Comma-separated workspace ids that are currently active in the app (`devswarm reconcile-active`). |
+| `--all` | `settings` | Include every item, also the advanced ones (`settings show`, `settings tunables`). |
+| `--apply` | `devswarm`, `doctor` | Carry out the previewed change instead of only reporting it (`devswarm reap-orphans`, `doctor --repair-*`). |
+| `--auto` | `devswarm`, `engine-update` | Run in the automatic mode the plugin starts (`devswarm wake-watch`). |
+| `--base` | `devswarm` | The base ref to compare against (`devswarm ready-check`). |
+| `--bin` | `units` | Path of the engine binary the installed service unit runs (`units`). |
+| `--by` | `jev-report` | Group the report by `project` or `session` (`jev-report`). |
+| `--channel` | `engine-update` | Update channel to install from: `stable` or `dev` (`engine-update`). |
+| `--check` | `doctor`, `metrics`, `update` | Name of one check to limit the output to (`metrics`), or a read-only check without repairs (`doctor`, `update`). |
+| `--clear` | `devswarm` | Comma-separated gates to clear (`devswarm gate`). |
+| `--confirm-ids` | `devswarm` | Comma-separated workspace ids the owner confirmed for pruning (`devswarm prune`). |
+| `--confirmed` | `settings` | Confirm a change to a safety-relevant setting, after the one-line warning (`settings set`, `settings reset`). |
+| `--cwd` | `coordinator-work-baseline`, `doctor`, `gh`, `migrate` | Directory to treat as the working directory instead of the current one. |
+| `--days` | `devswarm`, `jev-report`, `jev-setup` | Look-back window in days, or the snooze length for `jev-setup snooze`. |
+| `--db` | `mesh` | Path of a DevSwarm database to read instead of the live one (`mesh`; makes the verb read-only). |
+| `--debug` |  | Turns debug mode (diagnostics.debug_mode) on for one `serve` or `hook` process. |
+| `--dir` | `harvest` | Directory to scan (`harvest`). |
+| `--dry-run` | `devswarm`, `doctor`, `install-codex`, `migrate`, `mcp-reaper`, `engine-update`, `units` | Show what would change and write nothing. |
+| `--event` | `hook` | The hook event name to dispatch (`hook --event`). |
+| `--fallback` | `hook`, `jev-setup` | Path of the Node hook to run when the engine cannot answer (`hook`), or the fallback transport (`jev-setup`). |
+| `--fallback-map` | `hook` | File that maps hook entries to their Node fallback commands (`hook --event`). |
+| `--file` | `finding-dedup` | Read the input from this file instead of stdin. |
+| `--fix` | `doctor` | Same as `--repair` (`doctor`). |
+| `--force` | `devswarm`, `gh`, `handovers`, `refresh` | Go past the usual skip: `gh poll` polls now, `handovers index` rebuilds every day, `devswarm register-primary` overrides the existing registration. |
+| `--format` | `docs` | Output format; `md` prints the Markdown reference (`docs`). |
+| `--from` | `engine-update` | Install from this local file, a release .tar.gz or a bare engine binary (`engine-update`). |
+| `--from-line` | `coordinator-work-baseline` | First transcript line to replay (`coordinator-work-baseline`). |
+| `--glob` | `devswarm` | Path glob a workspace is allowed to touch (`devswarm scope add`). |
+| `--global` | `install-codex` | Install into the home directory instead of the current project (`install-codex`). |
+| `--home` | `doctor`, `migrate`, `refresh` | Home directory to use instead of the real one (scratch-HOME runs). |
+| `--host` | `gen-hooks`, `hook` | The host the output is for: `claude` or `codex`. |
+| `--id` | `devswarm`, `mesh` | Workspace id (`devswarm`, `mesh`). |
+| `--job` | `schedule` | Name of one scheduled job (`schedule`). |
+| `--json` | `agents`, `auto-handover-config`, `coordinator-work-baseline`, `defect`, `devswarm`, `dispatch-report`, `jev-report`, `settings` | Print machine-readable JSON instead of text. Accepted by every command. |
+| `--kind` | `gen-hooks`, `impact`, `telemetry` | Limit the output to one kind (an impact kind, a telemetry kind, or the generated file kind for `gen-hooks`). |
+| `--last` | `mesh` | Only the last N entries (`mesh`). |
+| `--limit` | `devswarm`, `handovers`, `schedule`, `telemetry` | Maximum number of rows to print. |
+| `--list` | `devswarm` | List instead of acting (`devswarm notice --list`). |
+| `--max` | `devswarm` | Upper bound on how many items one run may act on (`devswarm reap-orphans`). |
+| `--memory` | `status` | Add the per-subsystem memory breakdown to the output (`status`). |
+| `--migrations-only` | `doctor` | With `--repair` or `--fix`, run only the migration pass and print its report as JSON (`doctor`). |
+| `--mistake` | `telemetry` | Record a mistake signal the engine cannot see itself: `--mistake <feature> <action> <target> <kind> [detail]` (`telemetry actions`). |
+| `--no-restart` | `engine-update` | Install without restarting the daemon; the next hook call starts the new one (`engine-update`). |
+| `--note` | `devswarm` | Free-text note stored with the entry (`devswarm scope add`). |
+| `--note-file` | `devswarm` | File whose contents are sent as the note (`devswarm relay`). |
+| `--nudge` | `devswarm` | The nudge word a registered workspace answers to (`devswarm register`). |
+| `--older-than` | `devswarm` | Only items older than this many days (`devswarm plan-prune`). |
+| `--plan` | `devswarm` | The nonce printed by `plan-prune`, proving the prune was planned first (`devswarm prune`). |
+| `--plugin-root` | `doctor`, `migrate` | Plugin directory whose files are read, before anything is loaded. |
+| `--post-pull-only` | `update` | Run only the steps that follow a plugin update pull (`update`). |
+| `--project` | `handovers`, `impact`, `jev-report`, `uninstall-statusline` | Limit the output to one project (a hash, name or directory, per command), or the project-level settings file (`uninstall-statusline`). |
+| `--purge-base` | `uninstall-statusline` | Also remove the saved base statusline (`uninstall-statusline`). |
+| `--quiet` | `doctor` | Print only problems (`doctor`). |
+| `--reason` | `devswarm` | Why the action is taken; recorded with it (`devswarm`). |
+| `--registered` | `handovers` | Walk every project the SessionStart check has seen (`handovers index`). |
+| `--repair` | `doctor` | Run the repair pass after the diagnostics (`doctor`). |
+| `--repair-ingest-orphans` | `doctor` | Add the report section that previews retiring orphaned ingest entries; with `--apply` it does so (`doctor`). |
+| `--repair-resurrected` | `doctor` | Add the report section that previews retiring resurrected entries (`doctor`). |
+| `--repair-test-stores` | `doctor` | Add the report section that previews moving test stores out of the live state; with `--apply` it does so (`doctor`). |
+| `--request` | `devswarm` | Request id that makes a repeated owner action idempotent (`devswarm`). |
+| `--role` | `jev-setup` | Which key to set; only `fallback` (`jev-setup`). |
+| `--rollback` | `engine-update` | Restore the previous engine binary; run twice to toggle (`engine-update`). |
+| `--rollup` | `metrics` | Show the stored rollups of one resolution (minute or hour) (`metrics`). |
+| `--root` | `briefing`, `capability-scan`, `install-codex` | Plugin tree to inspect or install from (`capability-scan`, `briefing`, `install-codex`). |
+| `--section` | `settings` | Show one settings section only (`settings show`). |
+| `--session` | `devswarm` | Session id (`devswarm`). |
+| `--set` | `devswarm` | Comma-separated gates to set (`devswarm gate`). |
+| `--sha256` | `engine-update` | Expected sha256 of the `--from` file (64 lowercase hex digits); without it the SHA256SUMS next to the file, then the plugin's ah-engine.lock decide (`engine-update`). |
+| `--since` | `devswarm`, `mesh`, `metrics` | Only entries from this point on: a number of seconds, or a message sequence for `mesh`. |
+| `--stale-days` | `harvest` | A file untouched this many days counts as stale (`harvest`). |
+| `--store` | `devswarm` | Limit to one retention store key (`devswarm retention run`). |
+| `--summary` | `devswarm` | One-line summary reported to the Primary (`devswarm done`). |
+| `--threads` | `status` | Report the live daemon's per-thread CPU and work counters over a short window (`status`). |
+| `--titles-json` | `devswarm` | JSON file of workspace titles to sync into the app (`devswarm sync-ui`). |
+| `--to` | `backup`, `devswarm` | Destination: a directory (`backup`) or a workspace id (`devswarm relay`). |
+| `--tool` | `hook` | The tool name of the hook event (`hook --event`). |
+| `--transport` | `jev-setup` | Gateway transport for the Jev classifier: `vercel` or `typesafe` (`jev-setup`). |
+| `--ttl` | `devswarm` | How long the skip lasts, in minutes (`devswarm skip`). |
+| `--user` | `uninstall-statusline` | The user-level settings file (`uninstall-statusline`). |
+| `--vendor` | `jev-setup` | Gateway vendor: `vercel` or `typesafe` (`jev-setup`). |
+| `--weekly` | `jev-report` | Print the weekly summary form (`jev-report`). |
+| `--window` | `impact`, `jev-report`, `telemetry` | Time window such as `24h` or `7d`. |
+| `--worktree` | `devswarm` | Worktree path of a workspace (`devswarm`). |
+| `--yes` | `devswarm`, `engine-update` | Confirm the action. Without it the verb only plans or does a dry run (`devswarm`). |
+
+## Environment variables
+
+Every `AH_ENGINE_*` variable the engine or its wrappers read. A variable that overrides a setting names that setting.
+
+| Variable | Setting | What it does |
+|---|---|---|
+| `AH_ENGINE_ACK_TIMEOUT_MS` | `storage.ack_timeout_ms` | How long a request waits for its write to commit before it is answered with an error (the client then retries or spools; the write id makes a late commit harmless); kept below client.ctl_timeout_ms so the client hears the error. |
+| `AH_ENGINE_AGENT_TICK_MS` | `schedule.agent_tick_ms` | Interval of the agent_tick job; 0 turns the tracker's ticks off. |
+| `AH_ENGINE_ALLOCATOR` |  | Selects the daemon's allocator: jemalloc (default) or system. The client sets it from `diagnostics.allocator` on the daemon it spawns, unless it is already set; the daemon reads it before its first allocation. Environment variable the client sets on the daemon it spawns to select the allocator (the daemon reads it before its first allocation). An existing value in the client's own environment wins. |
+| `AH_ENGINE_AUTO_UPDATE` |  | Read by hooks/ah-update.sh in auto mode: off, stable or dev overrides the `engine.autoUpdate` setting for one run. |
+| `AH_ENGINE_BACKUP_MS` | `schedule.backup_ms` | Interval of the backup job (D27); 0 (the default) turns it off. |
+| `AH_ENGINE_BIN` |  | Test-only: the engine binary the hook wrapper runs instead of the installed one. The wrapper unsets it unless AH_WRAPPER_TEST=1 is also set, so a stray value can never turn the safety net into a silent allow. |
+| `AH_ENGINE_BOOTSTRAP` |  | Set to 0 or 1 to turn the first-run download of the sha256-pinned engine binary off or on; overrides the `engine.bootstrap` setting. Read by hooks/ah-engine-bootstrap.sh. |
+| `AH_ENGINE_BREAKER_COOLDOWN_S` | `client.breaker_cooldown_s` | How long the breaker stays open once tripped. |
+| `AH_ENGINE_BREAKER_N` | `client.breaker_n` | Engine failures within the window that open the breaker (the client then skips the engine). |
+| `AH_ENGINE_BREAKER_WINDOW_S` | `client.breaker_window_s` | Window in which breaker failures are counted. |
+| `AH_ENGINE_CLAUDE_BIN` |  | Overrides the Claude Code program the agent tracker asks for its session listing (tests point it at a stand-in). |
+| `AH_ENGINE_COMMIT_MARK` | `mesh_write.env_commit_mark` | The environment variable by which the stable launcher names a marker file; the engine creates it at its commit point, so a launcher that has to stop the engine (time limit) can tell that the verb already acted and must not be run again in Node. |
+| `AH_ENGINE_CONFIG` |  | Overrides the path of the engine's own user config file (default: config.toml in the state directory). |
+| `AH_ENGINE_CONFIG_DEBOUNCE_MS` | `config.debounce_ms` | A change must stay unchanged this long before it is loaded, so a half-written or rapidly edited file is read once. |
+| `AH_ENGINE_CONFIG_WATCH_MS` | `config.watch_ms` | How often the daemon checks the config files for a change. |
+| `AH_ENGINE_CRASH_COOLDOWN_S` | `client.crash_cooldown_s` | How long respawning stays stopped after a crash loop. |
+| `AH_ENGINE_CRASH_N` | `client.crash_n` | Daemon deaths within the window that stop respawning. |
+| `AH_ENGINE_CRASH_WINDOW_S` | `client.crash_window_s` | Window in which daemon deaths are counted. |
+| `AH_ENGINE_DEADLINE_MS` | `client.deadline_ms` | Overall hook-client deadline for one engine exchange (connect, write, read); a hard watchdog thread enforces it so a hung daemon fails open quickly. |
+| `AH_ENGINE_DEBUG` |  | When set to anything but 0 or empty, turns debug mode (diagnostics.debug_mode) on for that process. |
+| `AH_ENGINE_DEFER_TO_NODE` | `dispatch.defer_to_node` | 1 (until the Node cutover) = a path the engine cannot decide (infrastructure fault, spent event budget, panic) hands the event to the wrapper's Node hooks with dispatch.defer_exit. 0 = no Node exists: advisory events skip their hooks (logged, counted in telemetry as dispatcher-<path>, one stderr line) and guard events follow dispatch.failure_mode; an over-cap context is delivered for the host to spill when it cannot be spilled natively. |
+| `AH_ENGINE_DIR` |  | Overrides the state directory (default: base_dir/state_dir under the home directory). |
+| `AH_ENGINE_DISPATCH_IN_PROCESS` | `dispatch.in_process` | Run the built-in checks inside the hook client (1) instead of asking the daemon (0, the default). |
+| `AH_ENGINE_DISPATCH_MAX_TIMEOUT_S` | `dispatch.max_timeout_s` | An upper bound on any Node hook's timeout, whatever its hooks.json entry says (the default is above every real timeout, so it changes nothing; tests lower it to exercise a hook that never exits). |
+| `AH_ENGINE_DONE_FILE` |  | A file the dispatcher creates once it has dispatched an event and decided its exit code (D87). The reliability wrapper sets it, so that an engine exit code of a hook's own (1, say) is told from an engine failure and is not answered by running every hook a second time. |
+| `AH_ENGINE_DOWN_MARKER_TTL_MS` | `client.down_marker_ttl_ms` | How long other clients skip connecting after one client finds the daemon absent or failed, or hung (client.heartbeat_stale_ms) and not replaced, or after client.slow_down_n consecutive slow replies; this prevents hook pile-ups while a restart is attempted. |
+| `AH_ENGINE_EVAL_BUDGET_US` | `daemon.eval_budget_us` | HARD per-request thread CPU budget for rule evaluation: past it every remaining check defers to its Node hook. The SOFT budget (a warning only) is daemon.eval_soft_us. 0 turns the hard budget off. |
+| `AH_ENGINE_FALLBACK` |  | Path of the Node hook the client runs when the engine cannot answer (the `--fallback` argument wins). |
+| `AH_ENGINE_FALLBACK_MS` | `client.fallback_ms` | The Node fallback hook must finish, and its stdout and stderr must reach EOF, within this long. A hook still running at the deadline is killed (then plain allow, since it is unavailable); one that finished with output still unread is an error outcome, never an empty stdout. |
+| `AH_ENGINE_FULLFSYNC` | `storage.fullfsync` | 1 makes SQLite use F_FULLFSYNC on macOS, which also survives power loss at a large cost in commit rate (D73: 479 against 43k commits per second measured); 0 keeps the plain fsync. Off until metrics decide. |
+| `AH_ENGINE_GH_POLL_MS` | `schedule.gh_poll_ms` | Interval of the gh_poll job, the tick that decides which repos are due (the cadences below decide how often a repo is really polled); 0 turns GitHub realtime off. |
+| `AH_ENGINE_GITIGNORE_PROBE_MS` | `session.gitignore_probe_ms` | The longest the engine waits for the gitignore probe before it hands the hook to Node. Node waits 3000 ms, but the client gives up on the engine after client.deadline_ms, so a longer wait here could answer after the client has already left; a test keeps the shipped value below that deadline. |
+| `AH_ENGINE_GROUP_COMMIT_MS` | `storage.group_commit_ms` | Group-commit window: after taking a write, the writer waits up to this long for more before committing them together (D23); 0 commits at once with whatever is already queued, which still groups writes that arrive during a commit. |
+| `AH_ENGINE_HANDOVERS_MS` | `schedule.handovers_ms` | Interval of the handovers job; 0 turns it off. |
+| `AH_ENGINE_HEALTHY_AFTER_S` | `daemon.healthy_after_s` | How long the daemon must stay up before its binary is recorded as having run healthy (files.healthy_binary). A binary that dies earlier never earns the record, so a roll-back may replace it. |
+| `AH_ENGINE_HEALTH_SNAPSHOT_MS` | `telemetry.health_snapshot_ms` | How often the daemon records a `daemon` health snapshot event (resident set, its cap, restarts, degraded flag, queue and worker load, saturation). Events are kept for retention_days and capped by max_event_rows. |
+| `AH_ENGINE_HEARTBEAT_CONFIRM_MS` | `client.heartbeat_confirm_ms` | How long a stale daemon heartbeat (client.heartbeat_stale_ms) must stay unchanged, by the monotonic clock, before a client ends that daemon. The first stale sample only records a suspicion and fails open; any beat, a new daemon, or a wall-clock jump that only made a moving heartbeat read old resets it. Keep it at most client.down_marker_ttl_ms, so a stopped daemon is replaced by the first call after the down marker expires. |
+| `AH_ENGINE_HEARTBEAT_STALE_MS` | `client.heartbeat_stale_ms` | A hook call past client.deadline_ms keeps waiting for a late reply (client.slow_fallback_max_ms) only while the daemon's heartbeat (files.heartbeat) is younger than this. Older means the daemon may be stopped or wedged, not slow: the call fails open at once and marks it down (client.down_marker_ttl_ms). One stale sample only raises a suspicion (files.heartbeat_suspect); the client ends that daemon only once the same heartbeat stayed unchanged for client.heartbeat_confirm_ms, and only when it is the pid holding the singleton lock, verified as this engine's daemon, of this state dir, and still the process generation the heartbeat recorded (start time and executable from the operating system, re-read immediately before the signal); single-flight and under the crash-loop rule. Then it starts a new one. A heartbeat that names another pid or is missing counts as alive. Keep it well above daemon.watchdog_tick_ms and below client.slow_fallback_max_ms less client.slow_wait_margin_ms, so a stop is detected within the first slow call. 0 disables the check. |
+| `AH_ENGINE_IDLE_EXIT_S` | `daemon.idle_exit_s` | Seconds without any request after which the daemon exits cleanly (the next hook call starts a fresh one, and the scheduler catches up its missed jobs); 0 keeps it resident. Default is 1800 (about 30 minutes), so a daemon with no sessions does not linger forever. A daemon whose state dir, lock file or executable is gone still exits on its own (daemon.orphan_check_ms). |
+| `AH_ENGINE_INSTALL_LOCK_HOOK_WAIT_S` | `rollback.lock_hook_wait_s` | How long the integrity check started by the hook wrapper waits for the install lock before skipping (the next run checks). A held lock never holds a session. |
+| `AH_ENGINE_INSTALL_LOCK_STALE_S` | `rollback.lock_stale_s` | An install lock held longer than this is broken (one whose holder process is gone is broken at once). Longer than the slowest install: ah-update's go_live_timeout_s. |
+| `AH_ENGINE_INSTALL_LOCK_TOKEN` |  | Set by an installer (ah-update.sh) for the integrity script: the token of the install lock it already holds, so recording the expected sha256 runs under the caller's hold instead of waiting on it. |
+| `AH_ENGINE_INSTALL_LOCK_WAIT_S` | `rollback.lock_wait_s` | How long an install, a roll-back by ah-update, or the recording of the expected sha256 waits for the install lock before giving up (the installer then fails and keeps the old binary). |
+| `AH_ENGINE_JEV_SWEEP_MS` | `schedule.jev_sweep_ms` | Interval of the jev_sweep job; 0 turns it off. |
+| `AH_ENGINE_MAINTAIN_MS` | `schedule.maintain_ms` | Interval of the maintain job (D26); 0 turns it off. |
+| `AH_ENGINE_MAX_EVENTS` | `telemetry.max_events` | Most impact events kept in memory (oldest dropped first); counts per kind are kept exactly in separate counters. |
+| `AH_ENGINE_MAX_REQUEST` | `daemon.max_request` | Largest request the daemon reads; the client sends nothing larger (it falls back instead). |
+| `AH_ENGINE_MCP_REAPER_MS` | `mcp_reaper.job_every_ms` | Interval of the mcp_reaper job (the Node unit's StartInterval was 60 s); 0 turns the job off. |
+| `AH_ENGINE_MEM_MB` | `daemon.mem_mb` | Data-segment limit applied with setrlimit; 0 = none. It is a ceiling against runaway allocation, not a budget (the RSS cap is the budget), and Linux enforces it on thread stacks, so it must exceed daemon.workers times git.stack_mb plus headroom or a check thread cannot start. macOS does not support RLIMIT_DATA here, so the daemon reports unsupported and relies on the RSS/footprint cap. |
+| `AH_ENGINE_MESH_NOW_MS` |  | Pins `Date.now()` of an `ah-engine mesh` verb, in epoch milliseconds (the parity tests pin Node's `ctx.now` the same way). Never set in production. |
+| `AH_ENGINE_NICE` | `daemon.nice` | `nice` increment applied to the daemon process. |
+| `AH_ENGINE_NODE` |  | The Node binary used to run the fallback hook. |
+| `AH_ENGINE_NOSPAWN` |  | When set, the client never starts a daemon (tests, and hosts that manage the daemon themselves). |
+| `AH_ENGINE_PLUGIN_ROOT` |  | Plugin install directory, used by built-in checks that build override commands (a rule's `options.plugin_root` wins). |
+| `AH_ENGINE_PROCWATCH_MS` | `schedule.procwatch_ms` | Interval of the process watch job (resource sampling; orphan scans run every procwatch.scan_every_s); 0 turns it off. |
+| `AH_ENGINE_PROJECT_BURST` | `daemon.project_burst` | Token-bucket burst per project. |
+| `AH_ENGINE_PROJECT_RPS` | `daemon.project_rps` | Sustained requests per second allowed per project; 0 = unlimited. |
+| `AH_ENGINE_QUEUE` | `daemon.queue` | Connections that may wait for a worker; beyond this the daemon answers BUSY and the client falls back. |
+| `AH_ENGINE_READ_MS` | `daemon.read_ms` | Total time a client has to deliver its request. |
+| `AH_ENGINE_REFRESH_MS` | `refresh.every_ms` | How often the refresh job looks for requests; a request waits at most this long (plus jitter). Cheap when there is none: it reads a few small files. 0 turns the job off. |
+| `AH_ENGINE_RELEASE_BASE` |  | Test-only: download base URL for the engine binary (http allowed). Honored by hooks/ah-engine-bootstrap.sh only with AH_WRAPPER_TEST=1. |
+| `AH_ENGINE_ROLLBACK_FAIL_N` | `rollback.fail_n` | Engine failures seen by the hook wrapper (timeout, signal death, no answer) within rollback.fail_window_s that roll a never-healthy binary back. The wrapper counts them because a hung binary cannot count its own. |
+| `AH_ENGINE_ROLLBACK_FAIL_WINDOW_S` | `rollback.fail_window_s` | Window in which the wrapper's engine failures are counted for rollback.fail_n. |
+| `AH_ENGINE_ROLLBACK_ON_MISMATCH` | `rollback.on_mismatch` | 1 = a binary whose sha256 differs from the one the installer recorded (swapped by hand) and that has never run healthy is rolled back to the known-good binary at the next check. 0 = never roll back on a mismatch alone (a local build you are developing). `accept` records the installed binary as the expected one. |
+| `AH_ENGINE_RSS_CAP_KB` | `daemon.rss_cap_kb` | Memory cap, compared with the figure `daemon.mem_metric` selects (default: the footprint, not the resident set); above it the daemon drains and exits cleanly and the next call starts a fresh one; 0 = none. The measurement below is of the resident set. Set from measurement, not guessed (DECISIONS.md 1.111, 2026-10-09): on the real-payload replay (2,113 recorded hook calls, unpaced, isolated home) the engine with 16 scripted checks sits at 69 MB after one pass and 78 MB after three (jemalloc, aarch64-apple-darwin), and at 102 MB after one pass with the system allocator (the x86_64-apple-darwin and musl builds, measured as a system-allocator build on this Mac); the live heap is 45-52 MB. The engine before the scripted checks (live4) measured 62 and 68 MB on the same replay, so the previous 64 MB cap (set from a synthetic soak with a 16-18 MB live heap) sat inside the steady state of both: the daemon restarted 4 times in 600 s and the crash-loop breaker sent every hook to Node. The cap sits above the larger figure with room for the slow growth both builds show on repeated passes (about 1.5 MB per 1,000 calls), so only real growth trips it. |
+| `AH_ENGINE_RSS_CHECK_MS` | `daemon.rss_check_ms` | How often the watchdog samples resident memory. |
+| `AH_ENGINE_RT_DEBOUNCE_MS` | `realtime.debounce_ms` | A changed file is reported once it has been quiet this long, so a burst of writes becomes one report. |
+| `AH_ENGINE_RT_MAX_DELAY_MS` | `realtime.max_delay_ms` | A file that keeps changing is still reported at least this often (the ceiling on debounce_ms), so a busy source is never starved. |
+| `AH_ENGINE_RT_POLL_MS` | `realtime.poll_ms` | How often a polled directory is listed and its watched files stat'ed, in milliseconds. Only directories that cannot use OS events are polled (9p, drvfs, NFS, SMB, FUSE, a directory that does not exist yet, backend = poll), so this is the detection latency of those: at most this plus debounce_ms. Polling costs CPU in proportion to the files watched divided by this interval. |
+| `AH_ENGINE_RULES` |  | Overrides the rules file path. |
+| `AH_ENGINE_SCRIPT` | `script.enabled` | 1: a check whose script exists runs the script instead of its compiled port; 0: the compiled port always runs (the parity baseline). |
+| `AH_ENGINE_SCRIPT_CUT_AT_DEADLINE` | `script.cut_at_request_deadline` | 1 = a scripted check still running when its request's client stops waiting (client.deadline_ms minus daemon.reply_slack_ms) is interrupted there, and a check not yet started by then is not started: each such entry defers to its own Node hook while the entries answered in time keep the engine's answer, so a loaded machine costs single checks instead of the whole event (before, the reply came after the client had given up and every entry of the event ran in Node). Not counted as a script error. An engine-only check whose failure mode is closed (script.failure_mode_by_check) keeps only its own limit on a guard event. 0 = the checks run to their own limits whatever the client's deadline (the Node parity harness sets AH_ENGINE_SCRIPT_CUT_AT_DEADLINE=0 so its daemon answers every case, however loaded the machine). |
+| `AH_ENGINE_SCRIPT_EXEC_SCALE` | `script.exec_timeout_scale` | Multiplier on the time every `ah.exec` run and every process listing a script asks for may take (the limit a script asks for, and the longest one, are both multiplied). 1 in production; a test build on a loaded machine raises it so a slow child process is not read as a failure. |
+| `AH_ENGINE_SCRIPT_TIME_MS` | `script.time_limit_ms` | SOFT CPU-time limit of one script call (the interpreter thread's own CPU time): a call that used more is logged (script_soft) and counted, and keeps running. The HARD limit that interrupts it is this value times script.time_hard_factor (the call then defers to Node, never a silent allow); script.wall_limit_factor sets the wall-clock backstop from the hard limit. |
+| `AH_ENGINE_SESSION` |  | Session id a `proj` write is spooled under; spooled writes keep their order per session (D24). |
+| `AH_ENGINE_SESSION_BURST` | `daemon.session_burst` | Token-bucket burst per session. |
+| `AH_ENGINE_SESSION_RPS` | `daemon.session_rps` | Sustained requests per second allowed per session; 0 = unlimited. |
+| `AH_ENGINE_SETTINGS` |  | Overrides the path of anti-hall's settings.json (default: settings.json in the base directory under the home directory). |
+| `AH_ENGINE_SHADOW_CHILD` | `ops.shadow_child_env` | Set in the shadow child so it never starts a shadow of its own. |
+| `AH_ENGINE_SHADOW_RATE_DEFECT` | `ops.shadow_rate_defect` | How many runs in a thousand of the defect command are also run by the Node version in the background and compared (0 turns the shadow off). The engine result is always the real one. |
+| `AH_ENGINE_SHADOW_RATE_INSTALL` | `ops.shadow_rate_install` | How many runs in a thousand of install-statusline are also run by the Node installer in the background, on a scratch copy of the settings (never a second real write), and compared (0 turns the shadow off). |
+| `AH_ENGINE_SHADOW_RATE_PHASE` | `ops.shadow_rate_phase` | How many runs in a thousand of the phase command are also run by the Node version in the background and compared (0 turns the shadow off). The engine result is always the real one. |
+| `AH_ENGINE_SHADOW_RATE_SETTINGS` | `ops.shadow_rate_settings` | How many runs in a thousand of the settings command are also run by the Node version in the background and compared (0 turns the shadow off). The engine result is always the real one. |
+| `AH_ENGINE_SHADOW_RATE_STATUSLINE` | `ops.shadow_rate_statusline` | How many runs in a thousand of the statusline command are also run by the Node version in the background and compared (0 turns the shadow off). The engine result is always the real one. |
+| `AH_ENGINE_SHADOW_RATE_UNINSTALL` | `ops.shadow_rate_uninstall` | How many runs in a thousand of uninstall-statusline are also run by the Node uninstaller in the background, on a scratch copy of the settings, and compared (0 turns the shadow off). |
+| `AH_ENGINE_SLOW_DOWN_N` | `client.slow_down_n` | Consecutive slow (late) daemon replies within client.slow_window_ms after which the daemon is treated as wedged and marked down. A single call that gets no reply in the window never marks it down: it fails open and the next client asks the daemon again. |
+| `AH_ENGINE_SLOW_FALLBACK_MAX_MS` | `client.slow_fallback_max_ms` | How long, measured from the engine start, a hook call keeps waiting for the daemon's own reply once client.deadline_ms has passed (a daemon that is alive answers late rather than never). The wrapper's watchdog waits the same bound (never past the hook's own timeout), so a delayed block still blocks. A reply that arrives in the window is used as is: the daemon's decision, no Node hook run (the daemon has already processed the request). Nothing by then fails the call open and counts toward client.slow_down_n; a late call never runs its Node hooks. A normal or unavailable daemon keeps the short fail-fast budget (client.deadline_ms + client.deadline_slack_ms + client.wrapper_extra_ms). 0 disables the extension. |
+| `AH_ENGINE_SLOW_WINDOW_MS` | `client.slow_window_ms` | Window in which consecutive slow daemon replies are counted toward client.slow_down_n; a streak older than this starts over. |
+| `AH_ENGINE_SNAPSHOT_MS` | `telemetry.snapshot_ms` | Interval of the scheduled metrics snapshot job, which keeps the counters in hot.db and their rollups in archive.db (D51); the daemon also keeps one when it exits. |
+| `AH_ENGINE_SPAWN_LOCK_TTL_MS` | `client.spawn_lock_ttl_ms` | How old the single-flight daemon spawn lock may get before another client treats it as stale and may try one restart. |
+| `AH_ENGINE_SPAWN_N` | `client.spawn_n` | Daemon starts within the spawn window that count as a crash loop even when the daemon reported no crash (a binary that exits at once reports nothing). Respawning then stops for client.crash_cooldown_s. |
+| `AH_ENGINE_SPAWN_WINDOW_S` | `client.spawn_window_s` | Window in which daemon starts are counted for client.spawn_n. |
+| `AH_ENGINE_SPILL_OVER_CAP` | `dispatch.spill_over_cap` | 1 = a SessionStart (or any event that cannot block) whose joined additionalContext is over dispatch.context_cap is delivered natively: the hooks' contexts that fit stay inline whole and in hook order, the rest is written to a file under dispatch.spill_dir and a pointer line (dispatch.msg_spill_pointer) names it, so nothing is cut and no Node hook runs. The host would spill an over-cap value itself but keeps only about 2000 characters of it inline. 0 = the previous answer: hand the event to the wrapper's Node hooks (dispatch.defer_exit) while dispatch.defer_to_node is 1, else deliver the join and let the host spill it. Used only when the join is exactly the hooks' contexts joined by dispatch.context_joiner and the file can be written; otherwise the previous answer stands. |
+| `AH_ENGINE_SPOOL_BACKOFF_MS` | `spool.backoff_ms` | First retry delay; each retry doubles it, up to backoff_max_ms, with random jitter of up to half the delay. |
+| `AH_ENGINE_SPOOL_DRAIN_MS` | `spool.drain_ms` | Interval of the scheduled spool drain job (it also drains on start and before each project write). |
+| `AH_ENGINE_SPOOL_MAX_BYTES` | `spool.max_bytes` | Largest spool; a write that would grow it past this is refused instead of spooled, so the client learns it was not kept. |
+| `AH_ENGINE_SPOOL_RETRIES` | `spool.retries` | Retries of a project write before it is spooled (the first attempt is not counted). |
+| `AH_ENGINE_STALL_MS` | `daemon.stall_ms` | An accept loop silent for longer than this trips a drain and exit. |
+| `AH_ENGINE_STATUSLINE_DEADLINE_MS` | `statusline.total_deadline_ms` | Longest the whole status line run may take, input wait included, in milliseconds. Past it the first line already rendered is printed and the run ends, and every step's own limit (git, base command) is cut to what is left, so a loaded machine costs a late second line, never a status line the host has stopped waiting for. Set it just under the host's own wait. |
+| `AH_ENGINE_STUCK_MS` | `daemon.stuck_ms` | A worker that makes no progress on its request for longer than this trips a drain and exit (a hung worker). Progress is a check starting or finishing and the script interpreter running, so a worker a loaded machine only slows down is not stuck; the time without progress is what a blocked host call (a lock, a child process, a disk sync) adds. |
+| `AH_ENGINE_TELEMETRY_FLUSH_MS` | `telemetry.flush_ms` | How often the recorder's counters and events are stored in hot.db, and at shutdown. A kill -9 loses at most this much (the data recorded since the last flush). |
+| `AH_ENGINE_TELEMETRY_ROLLUP_MS` | `schedule.telemetry_rollup_ms` | Interval of the telemetry rollup job (D78); 0 turns it off. |
+| `AH_ENGINE_TEST_HOOKS` |  | When set, the daemon accepts the test-only control verbs (sleep, stall, panic). Never set in production. |
+| `AH_ENGINE_THREADS_WINDOW_MS` | `diagnostics.threads_window_ms` | The window of `status --threads`: per-thread CPU % and counters per second are measured over this long. |
+| `AH_ENGINE_TICK_MS` | `schedule.tick_ms` | Longest the ticker sleeps between checks; it wakes earlier when a job is due sooner or `schedule run` asks. |
+| `AH_ENGINE_TIER_BUDGET_KB` | `tier.budget_kb` | Memory budget of the active key-value items; past it the least recently used item is dropped from memory (SQLite keeps it). |
+| `AH_ENGINE_UPDATE_MS` | `engine_update.every_ms` | How often the job starts the updater's automatic check; the script's own daily limit decides whether it does any work. 0 turns the job off. |
+| `AH_ENGINE_VERIFY_NONCE` | `mesh_write.env_verify_nonce` | The environment variable that hands the engine's reader nonce to the tick verifier (the detached verifier does not share the caller's process ancestry, which Node derives the reader from); it is the name the verify_tick_node_snippet reads. |
+| `AH_ENGINE_VERSION` |  | Overrides the version this build reports and compares for handoff (the plugin version in production, arbitrary in tests). |
+| `AH_ENGINE_WAIT_FILE` |  | A file the client creates while it waits on the daemon and keeps when the daemon answered BUSY/ERR, so the call is handed to its Node hooks; it removes it when the daemon answered with nothing left for Node to decide (an OK reply whose entries defer to Node hooks keeps it until the call's final result is ready), gave no reply in the wait window, or none was there. The reliability wrapper sets it, so that its watchdog can tell a call that is still deciding (give it up to client.slow_fallback_max_ms) from a hung engine (kill at the normal budget). |
+| `AH_ENGINE_WATCHDOG_TICK_MS` | `daemon.watchdog_tick_ms` | How often the watchdog thread wakes to look at heartbeats. |
+| `AH_ENGINE_WORKERS` | `daemon.workers` | Worker threads evaluating requests. |
+| `AH_ENGINE_WRAPPER_DIAG` |  | Test-only: absolute path of a file the hook wrapper appends its diagnostic lines to. Honored only with AH_WRAPPER_TEST=1. |
+| `AH_ENGINE_WRITE_MS` | `daemon.write_ms` | Time allowed to write a reply. |
+| `AH_ENGINE_WRITE_QUEUE` | `storage.write_queue` | Writes that may wait for the writer thread; beyond this a write is refused as busy (the client retries, then spools). |
+
 
 ## Socket protocol
 
@@ -179,19 +393,41 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `client.breaker_cooldown_s` | `60` | `AH_ENGINE_BREAKER_COOLDOWN_S` | s | How long the breaker stays open once tripped. |
 | `client.breaker_n` | `5` | `AH_ENGINE_BREAKER_N` |  | Engine failures within the window that open the breaker (the client then skips the engine). |
 | `client.breaker_window_s` | `60` | `AH_ENGINE_BREAKER_WINDOW_S` | s | Window in which breaker failures are counted. |
+| `client.cold_guard_kick_event` | `ColdStartKick` |  |  | Event name of the empty request the wrapper sends to start a cold daemon before a guard event waits for it; it names no hook, so it decides nothing. |
+| `client.cold_guard_poll_ms` | `50` |  | ms | Poll interval of the cold-start wait for a guard event (the daemon socket appearing). |
+| `client.cold_guard_wait_ms` | `2000` |  | ms | How long a guard event (PreToolUse, PermissionRequest, Stop, SubagentStop) waits for a cold-starting daemon before it is let through with one notice per session; 0 turns the wait off. Prompts and advisories never wait. The wait never exceeds what the hook's own timeout leaves after the engine attempt. It is one absolute deadline: the kick, its kill grace and the socket poll all end within it, so a cold guard call takes at most this plus the normal engine attempt. |
 | `client.cold_start_poll_ms` | `1` |  | ms | Poll interval while waiting for a cold-started daemon. |
 | `client.cold_start_wait_ms` | `40` |  | ms | How long a client with no fallback waits for a cold-started daemon before giving up (prints nothing). |
 | `client.crash_cooldown_s` | `1800` | `AH_ENGINE_CRASH_COOLDOWN_S` | s | How long respawning stays stopped after a crash loop. |
 | `client.crash_n` | `4` | `AH_ENGINE_CRASH_N` |  | Daemon deaths within the window that stop respawning. |
 | `client.crash_window_s` | `600` | `AH_ENGINE_CRASH_WINDOW_S` | s | Window in which daemon deaths are counted. |
 | `client.ctl_timeout_ms` | `1500` |  | ms | Deadline for a control exchange (ping, status, reload, stop, project ops). |
-| `client.deadline_ms` | `2000` | `AH_ENGINE_DEADLINE_MS` | ms | Overall deadline for one engine exchange (connect, write, read); a hard watchdog thread enforces it. |
-| `client.deadline_slack_ms` | `50` |  | ms | Extra wait for the exchange thread to report after the deadline before the client declares a timeout. |
+| `client.deadline_ms` | `300` | `AH_ENGINE_DEADLINE_MS` | ms | Overall hook-client deadline for one engine exchange (connect, write, read); a hard watchdog thread enforces it so a hung daemon fails open quickly. |
+| `client.deadline_slack_ms` | `10` |  | ms | Extra wait for the exchange thread to report after the deadline before the client declares a timeout. |
+| `client.down_marker_ttl_ms` | `3000` | `AH_ENGINE_DOWN_MARKER_TTL_MS` | ms | How long other clients skip connecting after one client finds the daemon absent or failed, or hung (client.heartbeat_stale_ms) and not replaced, or after client.slow_down_n consecutive slow replies; this prevents hook pile-ups while a restart is attempted. |
 | `client.fallback_ms` | `8000` | `AH_ENGINE_FALLBACK_MS` | ms | The Node fallback hook must finish, and its stdout and stderr must reach EOF, within this long. A hook still running at the deadline is killed (then plain allow, since it is unavailable); one that finished with output still unread is an error outcome, never an empty stdout. |
 | `client.fallback_poll_ms` | `2` |  | ms | Poll interval while the Node fallback runs. |
+| `client.heartbeat_confirm_ms` | `1000` | `AH_ENGINE_HEARTBEAT_CONFIRM_MS` | ms | How long a stale daemon heartbeat (client.heartbeat_stale_ms) must stay unchanged, by the monotonic clock, before a client ends that daemon. The first stale sample only records a suspicion and fails open; any beat, a new daemon, or a wall-clock jump that only made a moving heartbeat read old resets it. Keep it at most client.down_marker_ttl_ms, so a stopped daemon is replaced by the first call after the down marker expires. |
+| `client.heartbeat_poll_ms` | `100` |  | ms | While a hook call waits past its deadline for a late reply, how often it re-reads the daemon's heartbeat (client.heartbeat_stale_ms). |
+| `client.heartbeat_stale_ms` | `1500` | `AH_ENGINE_HEARTBEAT_STALE_MS` | ms | A hook call past client.deadline_ms keeps waiting for a late reply (client.slow_fallback_max_ms) only while the daemon's heartbeat (files.heartbeat) is younger than this. Older means the daemon may be stopped or wedged, not slow: the call fails open at once and marks it down (client.down_marker_ttl_ms). One stale sample only raises a suspicion (files.heartbeat_suspect); the client ends that daemon only once the same heartbeat stayed unchanged for client.heartbeat_confirm_ms, and only when it is the pid holding the singleton lock, verified as this engine's daemon, of this state dir, and still the process generation the heartbeat recorded (start time and executable from the operating system, re-read immediately before the signal); single-flight and under the crash-loop rule. Then it starts a new one. A heartbeat that names another pid or is missing counts as alive. Keep it well above daemon.watchdog_tick_ms and below client.slow_fallback_max_ms less client.slow_wait_margin_ms, so a stop is detected within the first slow call. 0 disables the check. |
 | `client.max_reply` | `2097152` |  | bytes | Largest reply the client reads. |
 | `client.max_stdin` | `8388608` |  | bytes | Largest hook payload the client reads from stdin. |
-| `client.slow_probe_ms` | `200` |  | ms | After an exchange times out, how long the client waits for a ping: a daemon that answers is slow but healthy (logged as client_slow, not counted toward the breaker); one that does not counts as a failure. |
+| `client.slow_down_n` | `5` | `AH_ENGINE_SLOW_DOWN_N` |  | Consecutive slow (late) daemon replies within client.slow_window_ms after which the daemon is treated as wedged and marked down. A single call that gets no reply in the window never marks it down: it fails open and the next client asks the daemon again. |
+| `client.slow_fallback_max_ms` | `3000` | `AH_ENGINE_SLOW_FALLBACK_MAX_MS` | ms | How long, measured from the engine start, a hook call keeps waiting for the daemon's own reply once client.deadline_ms has passed (a daemon that is alive answers late rather than never). The wrapper's watchdog waits the same bound (never past the hook's own timeout), so a delayed block still blocks. A reply that arrives in the window is used as is: the daemon's decision, no Node hook run (the daemon has already processed the request). Nothing by then fails the call open and counts toward client.slow_down_n; a late call never runs its Node hooks. A normal or unavailable daemon keeps the short fail-fast budget (client.deadline_ms + client.deadline_slack_ms + client.wrapper_extra_ms). 0 disables the extension. |
+| `client.slow_wait_margin_ms` | `400` |  | ms | How much earlier than the wrapper's watchdog (client.slow_fallback_max_ms from the engine start) the client stops waiting for a late daemon reply, so the client fails open and counts the slow call itself instead of being killed by the watchdog first. Covers the client's own start-up before it begins to wait. |
+| `client.slow_window_ms` | `10000` | `AH_ENGINE_SLOW_WINDOW_MS` | ms | Window in which consecutive slow daemon replies are counted toward client.slow_down_n; a streak older than this starts over. |
+| `client.spawn_lock_ttl_ms` | `3000` | `AH_ENGINE_SPAWN_LOCK_TTL_MS` | ms | How old the single-flight daemon spawn lock may get before another client treats it as stale and may try one restart. |
+| `client.spawn_n` | `6` | `AH_ENGINE_SPAWN_N` |  | Daemon starts within the spawn window that count as a crash loop even when the daemon reported no crash (a binary that exits at once reports nothing). Respawning then stops for client.crash_cooldown_s. |
+| `client.spawn_window_s` | `60` | `AH_ENGINE_SPAWN_WINDOW_S` | s | Window in which daemon starts are counted for client.spawn_n. |
+| `client.wrapper_extra_ms` | `250` |  | ms | Extra shell watchdog budget beyond the client deadline and client slack; this lets the client write the daemon-down marker and release the single-flight spawn lock before the wrapper kills it. |
+| `client.wrapper_watchdog_poll_ms` | `2` |  | ms | Poll interval for the hook wrapper millisecond watchdog. |
+
+### engine.toml / crash
+
+| Key | Default | Env override | Unit | What it is |
+|---|---|---|---|---|
+| `crash.closed_pipe_marker` | `Broken pipe` |  |  | Text of the I/O error that marks the closed-pipe panic (see `crash.closed_pipe_prefix`). |
+| `crash.closed_pipe_prefix` | `failed printing to std` |  |  | Start of the panic message Rust prints when a write to stdout or stderr fails; with `crash.closed_pipe_marker` it recognises a closed pipe (`ah-engine docs \| head`), which is the reader leaving and not an engine crash. |
 
 ### engine.toml / daemon
 
@@ -201,13 +437,17 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `daemon.accept_poll_ms` | `200` |  | ms | Accept-loop poll interval while serving. |
 | `daemon.bucket_cap` | `4096` |  |  | Most distinct keys one token-bucket map tracks; idle full buckets are dropped first and unknown keys are refused under a key flood. |
 | `daemon.close_max_ms` | `30000` |  | ms | Longest a drain's exit timer waits for the database close (the commit of everything queued) once it has started, so a timer that fires during the close cannot lose queued commits. A close wedged longer than this is cut off. |
+| `daemon.cpu_check_ms` | `30000` |  | ms | How often the watchdog compares process CPU time to wall time for the sustained-CPU self-check; 0 disables the check. |
+| `daemon.cpu_warn_pct` | `80` |  | % | Warn and back off scheduled jobs when daemon CPU over daemon.cpu_check_ms exceeds this percent of one core; 0 disables the warning. |
 | `daemon.drain_grace_ms` | `1000` |  | ms | After a drain starts, a worker or loop that has not finished in this long is cut off. |
 | `daemon.drain_max_ms` | `10000` |  | ms | Longest a clean drain (handoff, stop, idle exit, SIGTERM) may take before the daemon exits anyway, so a worker stuck while draining can never keep the process (and the singleton lock) alive with its socket already gone. Above daemon.stuck_ms, so the stuck-worker check normally ends such a drain first. |
 | `daemon.drain_poll_ms` | `20` |  | ms | Accept-loop poll interval while draining. |
-| `daemon.eval_budget_us` | `200000` | `AH_ENGINE_EVAL_BUDGET_US` | us | Per-request thread CPU budget for rule evaluation; 0 turns the budget off. |
+| `daemon.eval_budget_us` | `1000000` | `AH_ENGINE_EVAL_BUDGET_US` | us | HARD per-request thread CPU budget for rule evaluation: past it every remaining check defers to its Node hook. The SOFT budget (a warning only) is daemon.eval_soft_us. 0 turns the hard budget off. |
+| `daemon.eval_soft_us` | `200000` |  | us | SOFT per-request thread CPU budget for rule evaluation: a request that used more is logged (budget_soft) and counted, and every check keeps its answer. The HARD budget is daemon.eval_budget_us. 0 turns the warning off. |
 | `daemon.forced_exit_code` | `75` |  |  | Exit status of a forced drain exit (sysexits EX_TEMPFAIL, 75); the next client call starts a fresh daemon. |
+| `daemon.healthy_after_s` | `30` | `AH_ENGINE_HEALTHY_AFTER_S` | s | How long the daemon must stay up before its binary is recorded as having run healthy (files.healthy_binary). A binary that dies earlier never earns the record, so a roll-back may replace it. |
 | `daemon.idle_check_ms` | `1000` |  | ms | How often the watchdog compares the last request time with idle_exit_s. |
-| `daemon.idle_exit_s` | `0` | `AH_ENGINE_IDLE_EXIT_S` | s | Seconds without any request after which the daemon exits (the next hook call starts a fresh one, and the scheduler catches up its missed jobs); 0 keeps it resident. 0 by default: the daemon is always resident so the scheduler and mailbox keep running after every session closes (D7). A daemon whose state dir, lock file or executable is gone still exits on its own (daemon.orphan_check_ms). |
+| `daemon.idle_exit_s` | `1800` | `AH_ENGINE_IDLE_EXIT_S` | s | Seconds without any request after which the daemon exits cleanly (the next hook call starts a fresh one, and the scheduler catches up its missed jobs); 0 keeps it resident. Default is 1800 (about 30 minutes), so a daemon with no sessions does not linger forever. A daemon whose state dir, lock file or executable is gone still exits on its own (daemon.orphan_check_ms). |
 | `daemon.lock_poll_ms` | `10` |  | ms | Poll interval while waiting for the singleton lock. |
 | `daemon.lock_wait_ms` | `1500` |  | ms | How long a starting daemon waits for an outgoing (version-handoff) daemon to release the singleton lock. |
 | `daemon.malloc_conf` | `narenas:1,dirty_decay_ms:0,muzzy_decay_ms:0` |  |  | Allocator purge tuning handed to the daemon at start (jemalloc `malloc_conf` syntax): one arena for the four worker threads (less fragmentation) and decay 0 (freed pages go back to the OS at once; the system allocators keep them, which left RSS at 2.5x the live heap). Measured on 1000 mixed calls, this Mac: system allocator 45-48 MB RSS, jemalloc with only decay 0 37 MB, with narenas:1 as well 32 MB (live heap 16 MB), adding tcache:false 27 MB but p50 call latency 10 ms against 6.5-7 ms, so tcache stays on. empty = the allocator's own defaults. A variable the caller already set is not overridden. |
@@ -222,7 +462,8 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `daemon.project_rps` | `100` | `AH_ENGINE_PROJECT_RPS` |  | Sustained requests per second allowed per project; 0 = unlimited. |
 | `daemon.queue` | `16` | `AH_ENGINE_QUEUE` |  | Connections that may wait for a worker; beyond this the daemon answers BUSY and the client falls back. |
 | `daemon.read_ms` | `1000` | `AH_ENGINE_READ_MS` | ms | Total time a client has to deliver its request. |
-| `daemon.reply_slack_ms` | `150` |  | ms | Time kept back from a request's client deadline (client.deadline_ms, or what a dispatch request says) to write the reply: the inner budgets that could outlast the client's wait (a git call, a Jev consult) are clamped to the deadline minus this, so a slow dependency costs a fallback, not a lost answer. |
+| `daemon.reply_slack_ms` | `50` |  | ms | Time kept back from a request's client deadline (client.deadline_ms, or what a dispatch request says) to write the reply: the inner budgets that could outlast the client's wait (a git call, a Jev consult) are clamped to the deadline minus this, so a slow dependency costs a fallback, not a lost answer. |
+| `daemon.request_hard_ms` | `2000` |  | ms | HARD deadline of a request, measured from its arrival (less daemon.reply_slack_ms): the point where a scripted check still running is cut and a check not yet started is deferred to its Node hook. The SOFT deadline is client.deadline_ms (past it the request is logged as deadline_soft and counted, nothing is cut). A client whose daemon is alive waits for a late reply up to client.slow_fallback_max_ms less client.slow_wait_margin_ms and uses it, so this must stay below that window. |
 | `daemon.rss_cap_kb` | `131072` | `AH_ENGINE_RSS_CAP_KB` | KB | Memory cap, compared with the figure `daemon.mem_metric` selects (default: the footprint, not the resident set); above it the daemon drains and exits cleanly and the next call starts a fresh one; 0 = none. The measurement below is of the resident set. Set from measurement, not guessed (DECISIONS.md 1.111, 2026-10-09): on the real-payload replay (2,113 recorded hook calls, unpaced, isolated home) the engine with 16 scripted checks sits at 69 MB after one pass and 78 MB after three (jemalloc, aarch64-apple-darwin), and at 102 MB after one pass with the system allocator (the x86_64-apple-darwin and musl builds, measured as a system-allocator build on this Mac); the live heap is 45-52 MB. The engine before the scripted checks (live4) measured 62 and 68 MB on the same replay, so the previous 64 MB cap (set from a synthetic soak with a 16-18 MB live heap) sat inside the steady state of both: the daemon restarted 4 times in 600 s and the crash-loop breaker sent every hook to Node. The cap sits above the larger figure with room for the slow growth both builds show on repeated passes (about 1.5 MB per 1,000 calls), so only real growth trips it. |
 | `daemon.rss_check_ms` | `10000` | `AH_ENGINE_RSS_CHECK_MS` | ms | How often the watchdog samples resident memory. |
 | `daemon.rules_check_ms` | `200` |  | ms | How often the daemon checks the rules file (and SIGHUP) for a change. |
@@ -231,6 +472,8 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `daemon.stall_ms` | `5000` | `AH_ENGINE_STALL_MS` | ms | An accept loop silent for longer than this trips a drain and exit. |
 | `daemon.start_fail_exit_code` | `78` |  |  | Exit status when the daemon cannot start (sysexits EX_CONFIG, 78). |
 | `daemon.stuck_ms` | `8000` | `AH_ENGINE_STUCK_MS` | ms | A worker that makes no progress on its request for longer than this trips a drain and exit (a hung worker). Progress is a check starting or finishing and the script interpreter running, so a worker a loaded machine only slows down is not stuck; the time without progress is what a blocked host call (a lock, a child process, a disk sync) adds. |
+| `daemon.thread_restart_backoff_ms` | `100` |  | ms | Sleep before a supervised daemon service thread restarts after a panic. |
+| `daemon.thread_restart_max` | `3` |  |  | Panics a daemon service thread may recover from before the daemon requests a clean restart. |
 | `daemon.watchdog_tick_ms` | `250` | `AH_ENGINE_WATCHDOG_TICK_MS` | ms | How often the watchdog thread wakes to look at heartbeats. |
 | `daemon.worker_wait_ms` | `200` |  | ms | How long an idle worker sleeps on the queue before looking again. |
 | `daemon.workers` | `4` | `AH_ENGINE_WORKERS` |  | Worker threads evaluating requests. |
@@ -261,19 +504,28 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 
 | Key | Default | Env override | Unit | What it is |
 |---|---|---|---|---|
+| `env.allocator` | `AH_ENGINE_ALLOCATOR` |  |  | Selects the daemon's allocator: jemalloc (default) or system. The client sets it from `diagnostics.allocator` on the daemon it spawns, unless it is already set; the daemon reads it before its first allocation. |
+| `env.auto_update` | `AH_ENGINE_AUTO_UPDATE` |  |  | Read by hooks/ah-update.sh in auto mode: off, stable or dev overrides the `engine.autoUpdate` setting for one run. |
+| `env.bin` | `AH_ENGINE_BIN` |  |  | Test-only: the engine binary the hook wrapper runs instead of the installed one. The wrapper unsets it unless AH_WRAPPER_TEST=1 is also set, so a stray value can never turn the safety net into a silent allow. |
+| `env.bootstrap` | `AH_ENGINE_BOOTSTRAP` |  |  | Set to 0 or 1 to turn the first-run download of the sha256-pinned engine binary off or on; overrides the `engine.bootstrap` setting. Read by hooks/ah-engine-bootstrap.sh. |
+| `env.debug` | `AH_ENGINE_DEBUG` |  |  | When set to anything but 0 or empty, turns debug mode (diagnostics.debug_mode) on for that process. |
 | `env.dir` | `AH_ENGINE_DIR` |  |  | Overrides the state directory (default: base_dir/state_dir under the home directory). |
 | `env.done_file` | `AH_ENGINE_DONE_FILE` |  |  | A file the dispatcher creates once it has dispatched an event and decided its exit code (D87). The reliability wrapper sets it, so that an engine exit code of a hook's own (1, say) is told from an engine failure and is not answered by running every hook a second time. |
 | `env.fallback` | `AH_ENGINE_FALLBACK` |  |  | Path of the Node hook the client runs when the engine cannot answer (the `--fallback` argument wins). |
 | `env.home` | `HOME` |  |  | Home directory variable. |
 | `env.home_alt` | `USERPROFILE` |  |  | Fallback home directory variable (used by the git check when the home variable is unset). |
+| `env.install_lock_token` | `AH_ENGINE_INSTALL_LOCK_TOKEN` |  |  | Set by an installer (ah-update.sh) for the integrity script: the token of the install lock it already holds, so recording the expected sha256 runs under the caller's hold instead of waiting on it. |
 | `env.node` | `AH_ENGINE_NODE` |  |  | The Node binary used to run the fallback hook. |
 | `env.nospawn` | `AH_ENGINE_NOSPAWN` |  |  | When set, the client never starts a daemon (tests, and hosts that manage the daemon themselves). |
 | `env.plugin_root` | `AH_ENGINE_PLUGIN_ROOT` |  |  | Plugin install directory, used by built-in checks that build override commands (a rule's `options.plugin_root` wins). |
+| `env.release_base` | `AH_ENGINE_RELEASE_BASE` |  |  | Test-only: download base URL for the engine binary (http allowed). Honored by hooks/ah-engine-bootstrap.sh only with AH_WRAPPER_TEST=1. |
 | `env.rules` | `AH_ENGINE_RULES` |  |  | Overrides the rules file path. |
 | `env.session` | `AH_ENGINE_SESSION` |  |  | Session id a `proj` write is spooled under; spooled writes keep their order per session (D24). |
 | `env.test_hooks` | `AH_ENGINE_TEST_HOOKS` |  |  | When set, the daemon accepts the test-only control verbs (sleep, stall, panic). Never set in production. |
 | `env.tmpdir` | `TMPDIR` |  |  | Temporary directory variable, used for the short-path socket fallback. |
 | `env.version` | `AH_ENGINE_VERSION` |  |  | Overrides the version this build reports and compares for handoff (the plugin version in production, arbitrary in tests). |
+| `env.wait_file` | `AH_ENGINE_WAIT_FILE` |  |  | A file the client creates while it waits on the daemon and keeps when the daemon answered BUSY/ERR, so the call is handed to its Node hooks; it removes it when the daemon answered with nothing left for Node to decide (an OK reply whose entries defer to Node hooks keeps it until the call's final result is ready), gave no reply in the wait window, or none was there. The reliability wrapper sets it, so that its watchdog can tell a call that is still deciding (give it up to client.slow_fallback_max_ms) from a hung engine (kill at the normal budget). |
+| `env.wrapper_diag` | `AH_ENGINE_WRAPPER_DIAG` |  |  | Test-only: absolute path of a file the hook wrapper appends its diagnostic lines to. Honored only with AH_WRAPPER_TEST=1. |
 
 ### engine.toml / files
 
@@ -282,16 +534,31 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `files.advised_dir` | `advised` |  |  | Directory with one empty file per session that has already seen the failure advisory. |
 | `files.backups_dir` | `backups` |  |  | Directory inside the state directory that holds backups and pre-restore snapshots (D27); nothing in it is ever deleted by the engine. |
 | `files.breaker_until` | `breaker.until` |  |  | Marker holding the time (ms since the epoch) until which the client breaker stays open. |
+| `files.cli_crash` | `cli-crash.json` |  |  | Last panic of a non-daemon process (a CLI verb or the hook client). Kept apart from last-crash.json so it never counts as a daemon crash or restart. |
+| `files.cold_guard_notice` | `cold-guard.notice` |  |  | Holds the session id that already got the cold-start notice, so the notice is shown once per session (the next session overwrites it). |
+| `files.crash_breadcrumb` | `crash-breadcrumb.json` |  |  | Last request/job/check breadcrumb written at boundary entry so an abnormal exit can be reported with context on the next start. |
+| `files.crashloop_bin` | `crashloop.bin` |  |  | Holds the size, modification time and sha256 of the binary the crash-loop rule tripped on. A cooldown ends early when the binary is replaced by a different one. |
 | `files.crashloop_until` | `crashloop.until` |  |  | Marker holding the time until which respawning is stopped after a crash loop. |
+| `files.daemon_down_marker` | `daemon.down.until` |  |  | Short-lived client marker: when a hook client finds the daemon absent or hung, other clients skip connecting until this expires. |
 | `files.failure` | `failure.json` |  |  | Last recorded failure, for the once-per-session advisory. |
+| `files.healthy_binary` | `healthy.binary` |  |  | Holds the sha256 of the engine binary that last stayed up for daemon.healthy_after_s. The integrity script promotes that binary to the known-good copy; a binary with no entry here has never proven itself. |
+| `files.heartbeat` | `daemon.heartbeat` |  |  | The daemon's liveness heartbeat: names the daemon's process generation, one field per line (pid, start time and executable as the operating system reports them, and the state dir); the watchdog thread touches its modification time at the start of every daemon.watchdog_tick_ms tick, before any maintenance, apart from request handling. A client past its deadline reads it to tell a slow daemon (heartbeat fresh) from a stopped or wedged one (stale, see client.heartbeat_stale_ms). |
+| `files.heartbeat_suspect` | `daemon.heartbeat.suspect` |  |  | Client suspicion carried between hook calls: when a stale heartbeat (client.heartbeat_stale_ms) was first seen (monotonic clock), and which heartbeat (modification time and generation). A later call confirms the hang only when that same heartbeat is still unchanged client.heartbeat_confirm_ms later. |
+| `files.integrity_log` | `integrity.log` |  |  | Log of the integrity script (checks, promotions, roll-backs), inside the state directory. |
+| `files.last_crash` | `last-crash.json` |  |  | Last panic or stale-run-marker crash report, shown by status and doctor. |
 | `files.log` | `ah-engine.log` |  |  | Event log file name (state directory). |
 | `files.reaped_prefix` | `daemon.run.reaped.` |  |  | Prefix of the temporary name a stale run marker is renamed to when it is claimed (the pid is appended). |
+| `files.rollback_last` | `rollback.last` |  |  | One line the integrity script writes when it rolls the engine binary back (time, reason, which binary was set aside). Shown by status and doctor. |
+| `files.rollback_request` | `rollback.request` |  |  | Written when the crash-loop rule trips on a binary with no healthy history: asks the integrity script to restore the known-good binary. Holds the sha256 of the binary to replace. |
 | `files.run_marker` | `daemon.run` |  |  | Written while a daemon runs; a leftover one with a dead pid is logged as one crash. |
 | `files.schedules_override` | `schedules.json` |  |  | User overrides of the shipped schedules (D33): JSON, `{"jobs": {"<name>": {...}}}`; read when the daemon starts. |
+| `files.slow_streak` | `daemon.slow.streak` |  |  | Client marker holding the count of consecutive slow (late) daemon replies and when the streak began; a normal reply removes it. |
+| `files.spawn_lock` | `daemon.spawn.lock` |  |  | Short-lived client single-flight lock: only the client that creates it attempts to restart a missing daemon. |
 | `files.spool` | `spool.log` |  |  | The write spool: project writes a client could not deliver, applied by the daemon in order (D24). |
 | `files.spool_quarantine` | `spool.quarantine` |  |  | Spool records that could not be parsed or that the store refused for good, kept with their reason, never dropped (D24). |
 | `files.starts` | `starts` |  |  | Counter of daemon starts, surfaced as `starts` and `restarts` in status. |
 | `files.telemetry_inbox` | `telemetry-inbox.jsonl` |  |  | Events recorded by processes other than the daemon (the hook dispatcher, one-shot commands), one JSON line each, in the state directory; the daemon reads and empties it on every telemetry flush. |
+| `files.wrapper_fail_log` | `wrapper.fails` |  |  | Epoch seconds, one per line, of the hook wrapper's engine failures (timeout, signal death, no answer). The integrity script counts them against rollback.fail_n. |
 
 ### engine.toml / health
 
@@ -307,6 +574,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `health.diag_lines` | `8` |  |  | Event-log lines included in the diagnostic block of a permanent-failure advisory. |
 | `health.error_codes` | `3 entries, 3 entries, 3 entries, 3 entries, 3 entries` |  |  | Error-code classification: environment-class codes get a plain self-fix hint (a message key); every other code is a permanent failure that asks for an issue. |
 | `health.event_text_max` | `300` |  | chars | Longest kind, code or detail written to one log line (newlines and tabs become spaces). |
+| `health.judged_kinds` | `crashloop, crashloop_reset, reset` |  |  | Event kinds that mark a crash-loop judgement (a trip, a reset by a new binary, an operator reset): crashes and daemon starts logged before the latest of them no longer count toward the next trip. |
 | `health.log_cap` | `65536` |  | bytes | Event log size above which it is trimmed to its last log_keep_lines lines. |
 | `health.log_keep_lines` | `200` |  |  | Lines kept when the event log is trimmed. |
 | `health.pid_probe` | `ps, -p, {pid}, -o, command=` |  |  | Command used to read a process's command line when checking whether a pid is a live engine: the program, then its arguments with `{pid}` substituted. |
@@ -369,11 +637,34 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `request_env.line_prefix` | `E ` |  |  | Prefix of the request line that carries the forwarded environment as one JSON object. |
 | `request_env.max_bytes` | `65536` |  | bytes | Largest forwarded environment (sum of names and values); a client whose allowed variables exceed it forwards none of them and the request is marked incomplete, so every check defers to the Node guard (a missing or empty HOME marks it incomplete too). |
 
+### engine.toml / rollback
+
+| Key | Default | Env override | Unit | What it is |
+|---|---|---|---|---|
+| `rollback.accepted_suffix` | `.accepted` |  |  | Suffix added to the expected-sha file for the note that the operator vouched for exactly that binary (`accept`): a vouched-for binary is never rolled back. |
+| `rollback.aside_infix` | `.rolledback-` |  |  | A binary set aside by a roll-back is renamed bin/ah-engine.rolledback-<UTC time>-<sha prefix>; this is the word between. Set-aside binaries are never deleted. |
+| `rollback.bin_dir` | `bin` |  |  | Directory inside the state directory that holds the engine binary and its copies. |
+| `rollback.bin_name` | `ah-engine` |  |  | File name of the installed engine binary. |
+| `rollback.expected_suffix` | `.expected` |  |  | Suffix of the file holding the sha256 the installer expects the installed binary to have (bin/ah-engine.expected). |
+| `rollback.fail_n` | `3` | `AH_ENGINE_ROLLBACK_FAIL_N` |  | Engine failures seen by the hook wrapper (timeout, signal death, no answer) within rollback.fail_window_s that roll a never-healthy binary back. The wrapper counts them because a hung binary cannot count its own. |
+| `rollback.fail_window_s` | `120` | `AH_ENGINE_ROLLBACK_FAIL_WINDOW_S` | s | Window in which the wrapper's engine failures are counted for rollback.fail_n. |
+| `rollback.field_sep` | ` ` |  |  | Separator between the fields of the crash-loop binary record (files.crashloop_bin: size, modification time, sha256). |
+| `rollback.good_suffix` | `.good` |  |  | Suffix of the known-good copy of the binary (bin/ah-engine.good) and of its sha256 file (.good.sha256). Never deleted. |
+| `rollback.hash_chunk` | `65536` |  | bytes | Bytes read at a time when the engine hashes its own binary (sha256). |
+| `rollback.install_lock` | `install.lock` |  |  | Directory (inside the state directory) of the ONE lock every writer of the engine binary shares: the integrity script's check and roll-back, the bootstrap's and ah-update's install and roll-back, and the recording of the expected sha256. Taken and given back through the integrity script's lock and unlock verbs. |
+| `rollback.line_end` | `\n` |  |  | Line terminator of the crash-loop binary record. |
+| `rollback.lock_hook_wait_s` | `2` | `AH_ENGINE_INSTALL_LOCK_HOOK_WAIT_S` | s | How long the integrity check started by the hook wrapper waits for the install lock before skipping (the next run checks). A held lock never holds a session. |
+| `rollback.lock_stale_s` | `900` | `AH_ENGINE_INSTALL_LOCK_STALE_S` | s | An install lock held longer than this is broken (one whose holder process is gone is broken at once). Longer than the slowest install: ah-update's go_live_timeout_s. |
+| `rollback.lock_wait_s` | `60` | `AH_ENGINE_INSTALL_LOCK_WAIT_S` | s | How long an install, a roll-back by ah-update, or the recording of the expected sha256 waits for the install lock before giving up (the installer then fails and keeps the old binary). |
+| `rollback.on_mismatch` | `1` | `AH_ENGINE_ROLLBACK_ON_MISMATCH` |  | 1 = a binary whose sha256 differs from the one the installer recorded (swapped by hand) and that has never run healthy is rolled back to the known-good binary at the next check. 0 = never roll back on a mismatch alone (a local build you are developing). `accept` records the installed binary as the expected one. |
+| `rollback.script` | `hooks/ah-engine-integrity.sh` |  |  | The integrity script, relative to the plugin root. verbs: record, accept, check, fail, status. |
+| `rollback.sha_suffix` | `.sha256` |  |  | Suffix of the file holding the sha256 of the known-good copy (bin/ah-engine.good.sha256). |
+| `rollback.shell` | `sh` |  |  | The shell that runs the integrity script. |
+
 ### engine.toml / store
 
 | Key | Default | Env override | Unit | What it is |
 |---|---|---|---|---|
-| `store.key_cache_cap` | `1024` |  |  | Most cwd-to-project-key mappings cached (cleared when full) so the hot path does not stat per request. |
 | `store.kv_cap` | `64` |  |  | Most active (unexpired) key-value pairs per project. |
 | `store.mailbox_cap` | `64` |  |  | Most pending (unconsumed) mailbox entries per project. |
 | `store.max_projects` | `256` |  |  | Most project partitions holding a key or a pending message; a write that would start one more is refused. |
@@ -742,6 +1033,12 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `command.wrappers` | `18 items` |  |  | Words skipped when finding a segment's effective verb (command-guard.js WRAPPERS). |
 | `command.write_target_unknowable` | `$`*?[]{}` |  |  | A write target containing one of these characters cannot be resolved and is skipped (command-guard.js resolveWriteTarget). |
 
+### flags.toml / docs
+
+| Key | Default | Env override | Unit | What it is |
+|---|---|---|---|---|
+| `docs.external_flags` | `16 items` |  |  | Flags that appear as string literals in the engine's source but belong to other programs it runs (git, gh, cargo, node, claude) or to its shell wrappers, so the flag drift test does not ask for a `[flag.*]` entry. |
+
 ### telemetry.toml / telemetry
 
 | Key | Default | Env override | Unit | What it is |
@@ -974,12 +1271,14 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `schedule.actions` | `16 items` |  |  | Actions a job may name; anything else in a user override is refused and logged. |
 | `schedule.backoff_shift_max` | `30` |  |  | The largest doubling exponent of a failed job's retry delay (backoff_ms times 2^(failures-1), at most this power), before the job's backoff_max_ms cap; it keeps the shift from overflowing. |
 | `schedule.backup_ms` | `0` | `AH_ENGINE_BACKUP_MS` | ms | Interval of the backup job (D27); 0 (the default) turns it off. |
+| `schedule.cpu_backoff_ms` | `60000` |  | ms | How long scheduled jobs pause after the daemon sustained-CPU self-check warns; 0 logs only. |
 | `schedule.detail_max` | `2000` |  | chars | Longest result detail kept with a run in the history (longer text is cut). |
 | `schedule.handovers_ms` | `600000` | `AH_ENGINE_HANDOVERS_MS` | ms | Interval of the handovers job; 0 turns it off. |
 | `schedule.history_default` | `50` |  |  | Runs `schedule history` lists unless asked for more. |
 | `schedule.maintain_ms` | `86400000` | `AH_ENGINE_MAINTAIN_MS` | ms | Interval of the maintain job (D26); 0 turns it off. |
 | `schedule.procwatch_ms` | `30000` | `AH_ENGINE_PROCWATCH_MS` | ms | Interval of the process watch job (resource sampling; orphan scans run every procwatch.scan_every_s); 0 turns it off. |
 | `schedule.run_wait_ms` | `5000` |  | ms | How long `schedule run <job>` waits for the run it asked for before answering that it is still running; below daemon.stuck_ms. |
+| `schedule.skip_without_work` | `gh_poll, refresh` |  |  | Subprocess actions the scheduler skips when they have no recent session or pending-request work. The command itself still reports the skip reason for manual runs. |
 | `schedule.subprocess_actions` | `9 items` |  |  | Actions that run as an `ah-engine <action> --json` subprocess in its own process group, so a timeout kills it and everything it started. |
 | `schedule.telemetry_rollup_ms` | `86400000` | `AH_ENGINE_TELEMETRY_ROLLUP_MS` | ms | Interval of the telemetry rollup job (D78); 0 turns it off. |
 | `schedule.test_sleep_argv` | `sleep, 3600` |  |  | Command the test-only `test_sleep` action runs (accepted only when the test-hooks variable is set), to exercise timeouts. |
@@ -1559,6 +1858,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `jev.bool_true_tokens` | `1, on, true, yes` |  |  | Words that read as true in an environment or settings value (Node: TRUE_TOKENS). |
 | `jev.breaker_cooldown_ms` | `300000` |  | ms | How long an open breaker skips its vendor before a probe is allowed (Node: BREAKER_COOLDOWN_MS). |
 | `jev.breaker_file` | `cache/jev-breaker.json` |  |  | The breaker state file, relative to the anti-hall home directory; the same file the Node hooks use, so both see one breaker (Node: jev-breaker.json under cache/). |
+| `jev.breaker_scope_sep` | `/` |  |  | Joins a vendor and an integration id in the breaker file (`vendor/integration`), so one integration's failures open only its own breaker. A call that names no integration uses the bare vendor key, which the Node hooks also read and write. |
 | `jev.breaker_threshold` | `3` |  |  | Consecutive fallback-eligible failures that open a vendor's breaker (Node: BREAKER_THRESHOLD). |
 | `jev.budget_file` | `jev-budget.json` |  |  | The budget-watch state file in jev.state_dir: the day, the spend so far and the day a warning was last given (Node: jev-budget.json). |
 | `jev.cache_file` | `cache/jev-assist.json` |  |  | The answer cache file, relative to the anti-hall home directory; the same file the Node hooks use (Node: cache/jev-assist.json), so a text asked by either side is asked once. |
@@ -1578,7 +1878,6 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `jev.key_file_roots` | `.config, .anti-hall` |  |  | Directories under the home directory a key file must really live in once symlinks are resolved (Node: readKeyFile). |
 | `jev.key_file_typesafe` | `.config/typesafe/key` |  |  | Default key file for the TypeSafe vendor, relative to the home directory; read only when jev.allowLegacyKeyRead is on (Node: defaultKeyFilePath). |
 | `jev.key_file_vercel` | `.config/vercel/ai-gateway-key` |  |  | Default key file for the Vercel vendor, relative to the home directory; read only when jev.allowLegacyKeyRead is on (Node: defaultKeyFilePath). |
-| `jev.lane_cap` | `8` |  |  | How many home directories keep a resident Jev lane at once (one per user in practice; the oldest is dropped past the cap). |
 | `jev.latency_samples_max` | `4096` |  |  | Most call-latency samples held between two metrics flushes; past it new samples are dropped until the flush drains them (a bound on memory if the flush stalls). |
 | `jev.legacy_file` | `jev.json` |  |  | The legacy Jev config file, relative to the anti-hall home directory, read below settings.json (Node: jev.json). |
 | `jev.legacy_on_default` | `speculation, triage` |  |  | Integrations that predate the per-integration modes and stay on by default; consulted only for an id missing from the table (Node: LEGACY_ON_DEFAULT). |
@@ -1606,8 +1905,12 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `jev.scrub_rules` | `17 items` |  |  | The outbound secret-scrub rules every Jev request body passes through, in order (Node: hooks/lib/secret-scrub.js scrubSecrets, rule for rule): `pattern` (Rust regex syntax: JavaScript look-behind is `no_alnum_before`, a hit right after an ASCII letter or digit is skipped; `\s` is spelled as JavaScript's whitespace set; the `i` flag as explicit [xX] classes), `to` the replacement (`${n}` a group). A rule that does not compile makes the scrubber redact the whole text (jev.scrub_failed_text). |
 | `jev.settings_file` | `settings.json` |  |  | The unified settings file, relative to the anti-hall home directory (Node: settings.json). |
 | `jev.settings_recheck_ms` | `2000` |  | ms | How often the settings files are re-checked for changes: at most one stat of each of the two files per window, taken by the first call after it elapses; between checks a call costs one clock read, so an off Jev stays off the hot path. |
+| `jev.soft_ms` | `800` |  | ms | SOFT limit of one Jev call: a call slower than this is logged (jev_slow) and counted, and its answer is still used. The HARD limit that cuts the call (and falls back to the baseline) is jev.timeout_ms, capped by jev.max_timeout_ms. |
 | `jev.state_dir` | `state` |  |  | Directory of the Jev budget-watch state, relative to the anti-hall home directory (Node: state/). |
-| `jev.timeout_ms` | `1500` |  | ms | Per-call time budget for one Jev call, request, headers and body together (Node: DEFAULT_TIMEOUT_MS). |
+| `jev.stop_hard_ms` | `1000` |  | ms | HARD limit of a Jev call made by a Stop or SubagentStop: the wait is cut there and the check keeps its baseline (fail-open). PreToolUse and UserPromptSubmit never wait: they answer from the baseline and the cache while the question goes out asynchronously. |
+| `jev.stop_soft_ms` | `500` |  | ms | SOFT limit of a Jev call made by a Stop or SubagentStop (dispatch.stop_events), the only events that wait for Jev: slower is logged (jev_slow) and counted, the answer is still used. |
+| `jev.sync_min_ms` | `700` |  | ms | Least time a request must still have for a check inside it to wait on Jev; with less, the check keeps its baseline, the question goes out asynchronously and its answer is cached for the next ask of the same text. Jev answered in 300-680 ms in live use while a hook client waits about 250 ms, so a shorter wait could only time out and open the breaker. |
+| `jev.timeout_ms` | `1500` |  | ms | HARD limit (the per-call time budget) for one Jev call, request, headers and body together; the SOFT limit is jev.soft_ms (Node: DEFAULT_TIMEOUT_MS). |
 | `jev.turn_ref_window_bytes` | `65536` |  | bytes | How much of the end of a transcript is scanned for the turn pointer on a decision row (Node: the 64 KiB window of turnRefFromTranscript). |
 | `jev.unlisted_mode` | `shadow` |  |  | Mode of an integration id that is not in the table (Node: every id that is not one of the legacy on-by-default ones). |
 
@@ -1861,7 +2164,10 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `dispatch.max_timeout_s` | `86400` | `AH_ENGINE_DISPATCH_MAX_TIMEOUT_S` | s | An upper bound on any Node hook's timeout, whatever its hooks.json entry says (the default is above every real timeout, so it changes nothing; tests lower it to exercise a hook that never exits). |
 | `dispatch.message_joiner` | `\n` |  |  | Text placed between the systemMessage values of several hooks when they are joined into one. |
 | `dispatch.msg_bad_map` | `cannot read the fallback map {path}: {err}` |  |  | Error printed when the `--fallback-map` file cannot be read as a JSON object of events to hook ids to commands. |
-| `dispatch.msg_conflict` | `hooks {ids} returned outputs that cannot be combined into one` |  |  | Reason logged when several hooks returned output one hook output cannot combine. |
+| `dispatch.msg_conflict` | `hooks {ids} returned outputs that cannot be combined into one: {why}` |  |  | Reason logged when several hooks returned output one hook output cannot combine. |
+| `dispatch.msg_conflict_exit` | `hook {id} exited with status {code}` |  |  | Why a combine conflicted: a hook exited with a non-zero (or no) status. |
+| `dispatch.msg_conflict_field` | `hook {id} set field {field} to a value another hook set differently` |  |  | Why a combine conflicted: two hooks set the same top-level field to different values; `id` is the later hook. |
+| `dispatch.msg_conflict_plain` | `hook {id} printed output that is not a JSON object` |  |  | Why a combine conflicted: a hook printed output that is not a JSON object while others were combined. |
 | `dispatch.msg_context_over_cap` | `joined context is {len} characters, over the {cap} the host delivers inline` |  |  | Event-log detail when the joined additionalContext of an event is over the host's inline cap. |
 | `dispatch.msg_context_spilled` | `joined context spilled: {inline} characters inline, {file} characters of {hoo...` |  |  | Event-log detail when an over-cap joined context was spilled to a file. Placeholders: {inline}, {file}, {hooks}, {path}. |
 | `dispatch.msg_defer` | `dispatcher deferred the whole call: {why}` |  |  | Event-log detail when the dispatcher cannot answer an event and defers the whole call. |
@@ -1911,7 +2217,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `dispatch.stop_state_dir` | `stop-blocks` |  |  | The directory under the state dir holding one consecutive-block counter file per event and session. |
 | `dispatch.stop_state_max_age_days` | `7` |  | days | Counter files of the Stop block counter older than this many days are removed (a session that ended while its guards were failing leaves one behind). |
 | `dispatch.stop_unknown_session` | `unknown` |  |  | Counter key for a Stop whose payload names no session (unreadable or cut off). |
-| `dispatch.thin_command` | `sh "${{var}}/hooks/ah-hook.sh" {event}{extra}` |  |  | The command of each event's thin trigger in the generated hooks.json (D87). Placeholders: {var} the host's plugin-root variable (the first of dispatch.root_vars), {event} the event, {extra} the host's dispatch.thin_host_args. |
+| `dispatch.thin_command` | `sh "${{var}}/hooks/ah-hook.sh" {event}{extra}` |  |  | The command of each event's thin trigger in the generated hooks.json (D87). Placeholders: {var} the host's plugin-root variable (the first of dispatch.root_vars), {event} the event, {extra} the host's dispatch.thin_host_args. The wrapper derives its engine-process deadline from client config. |
 | `dispatch.thin_events` | `2 entries` |  |  | Per host, the events that get a thin trigger in the generated hooks.json besides the events the table has entries for (D87; WorktreeCreate and WorktreeRemove are excluded on Claude because a hook there replaces the operation and cannot be a silent trigger). |
 | `dispatch.thin_host_args` | `2 entries` |  |  | Per host, the extra arguments of the thin trigger's command: the wrapper reads the host's table and fallback list from `--host` (Claude is the wrapper's default). |
 | `dispatch.thin_timeout_s` | `10` |  | s | The timeout of the thin trigger of an event the table has no entry for (an event with entries takes the longest timeout among them). |
@@ -1960,7 +2266,6 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `hooks.outcomes` | `ran, skipped_predicate, skipped_max_rules, skipped_budget, shadowed, off` |  |  | The words the telemetry uses for what happened to a table entry in one dispatch, in this order: ran, skipped_predicate (its `when` was false), skipped_max_rules (cut by max_rules), skipped_budget (the event's budget had passed), shadowed (ran, never changed the outcome) and off (configured off, or a guard entry's engine check turned off so its Node hook decides). |
 | `hooks.project_file` | `.anti-hall/engine.toml` |  |  | The project-level hook configuration file, relative to the payload's cwd; read when it exists, below the user file in precedence. It may not configure guard events or guard entries. |
 | `hooks.reasons` | `23 entries` |  |  | Short reasons the config errors above quote in their {what} placeholder. |
-| `hooks.session_max_keys` | `4096` |  |  | The most session-condition counters kept at once; past it the oldest are dropped (a dropped counter starts again, which only makes its condition fire sooner). |
 | `hooks.session_ops` | `first, every, at_least` |  |  | The per-session counters a `session` condition may use: first (true the first time per session within the TTL), every (true on the 1st, then every Nth evaluation: a once-per-N-turns dedupe) and at_least (true once the evaluation count in the session reaches N). |
 | `hooks.session_ttl_s` | `3600` |  | s | How long the engine keeps a `session` condition's state after its last evaluation (a condition's own `ttl_s` overrides it). |
 | `hooks.transcript_facts` | `9 entries` |  |  | The transcript-index facts a `transcript` condition may read, with their types (int, bool or str). Only facts the index already computes: records, compact_boundaries, sidechain_rows, meta_rows (counts), has_last_prompt and has_last_assistant (whether the index holds them), last_tool (the newest tool use's name), terminal_agents (background agents with a terminal notification) and unresolved_agents (agents a compaction re-injected as live that no terminal notification closed). |
@@ -2618,7 +2923,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `agent_scan.cache_fingerprint_bytes` | `4096` |  | bytes | Bytes at the start of a transcript, and bytes just before the kept offset, hashed to notice a rewritten or rotated file; a kept walk whose file no longer matches is rebuilt from the start. |
 | `agent_scan.cache_idle_ms` | `900000` |  | ms | How long a kept walk may sit unused before it is dropped. |
 | `agent_scan.cache_max_bytes` | `16777216` |  | bytes | Largest estimated size of one kept walk; a walk that grows past it is not kept (the next scan reads the file afresh, as it did before the cache). |
-| `agent_scan.cache_max_paths` | `4` |  | count | How many transcripts the scan keeps a walk for between calls, so a Stop reads only the bytes appended since the last scan (0 turns the cache off). The least recently used one is dropped first. |
+| `agent_scan.cache_max_paths` | `12` |  | count | How many walks the scan keeps between calls (one per transcript and window size), so a Stop reads only the bytes appended since the last scan (0 turns the cache off). The least recently used one is dropped first. |
 | `agent_scan.delivery_tools` | `TaskOutput, SendMessage` |  |  | Tools whose tool_result can deliver an agent's result. |
 | `agent_scan.empty_object` | `{}` |  |  | What JSON.stringify gives for a missing tool input. |
 | `agent_scan.inbox_phrase` | `'s inbox` |  |  | Phrase of the result of a message sent to a teammate's inbox. |
@@ -2665,6 +2970,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `agent_scan.undefined_string` | `undefined` |  |  | What String() gives for a missing value. |
 | `agent_scan.utc_suffix` | ` UTC` |  |  | Suffix of a clock time in a note. |
 | `agent_scan.wide_tail_bytes` | `12582912` |  | bytes | Bytes read by the one widened scan that proves a zero running-agent count on a transcript longer than the default window (WIDE_TAIL_BYTES of hooks/lib/agent-scan.js). |
+| `agent_scan.window_slack_pct` | `25` |  | percent | How far, as a percent of the scan window, the kept walk of a transcript longer than the window may begin before the window start; past that it is rebuilt from the window start. The walk is used only while it provably gives the answer of a fresh scan of the exact window (nothing older than the window start touched a launch, a stop or a teammate event, and no call older than it has its answer inside it), so this only bounds what the walk holds. 0 reads every window afresh. |
 
 ### agent_controls.toml / ask_guard
 
@@ -3712,7 +4018,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `migrate.gate_intents_key` | `intents` |  |  | The key of the stated-intent map a gate-loop state file gains when it lacks it. |
 | `migrate.gate_state_excluded_re` | `(?i)-replies\.json$` |  |  | A parent-gate JSON file whose name matches this is a reply-state file, not a gate-loop state file (case-insensitive). |
 | `migrate.host_settings_file` | `.claude/settings.json` |  |  | The host's settings file under the home directory, read for the plugin options it stores (never written). |
-| `migrate.ids` | `20 entries` |  |  | The step ids of the report (Node's), and the action word of the steps whose action differs from their id. |
+| `migrate.ids` | `19 entries` |  |  | The step ids of the report (Node's), and the action word of the steps whose action differs from their id. |
 | `migrate.integrations_key_prefix` | `integrations.` |  |  | The prefix of the old dotted key of a per-integration value inside the jev section. |
 | `migrate.jev_integration_ids` | `13 items` |  |  | The Jev integration ids whose per-integration value moved from the jev section to the jevIntegrations section of settings.json. |
 | `migrate.jev_triage_cache` | `cache/jev-triage.json` |  |  | The Jev triage cache under the anti-hall directory. |
@@ -3943,6 +4249,13 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `doctor.installed_max_bytes` | `4194304` |  |  | The largest plugin registry file read when scanning other plugins. |
 | `doctor.installed_plugins_rel` | `.claude/plugins/installed_plugins.json` |  |  | The host's registry of installed plugins, relative to the home directory. |
 | `doctor.intel_name` | `x86_64` |  |  | The architecture name of 64-bit Intel/AMD. |
+| `doctor.jev_check` | `1` |  |  | 1 = when Jev is enabled, the doctor makes one minimal test call to it and reports OK, WARN or FAIL by latency and error; 0 skips the check. |
+| `doctor.jev_fail_ms` | `2000` |  | ms | Latency of the doctor's Jev test call from which the report is a FAIL; it is also the call's time budget, so a timeout is a FAIL. |
+| `doctor.jev_no` | `the text is anything else` |  |  | The no criterion of the doctor's Jev test call. |
+| `doctor.jev_question` | `Is this text a plain health check?` |  |  | The question of the doctor's Jev test call. |
+| `doctor.jev_state` | `anti-hall doctor health check` |  |  | The text of the doctor's Jev test call (no user content). |
+| `doctor.jev_warn_ms` | `800` |  | ms | Latency of the doctor's Jev test call from which the report is a WARN (a slow Jev). |
+| `doctor.jev_yes` | `the text is a health check` |  |  | The yes criterion of the doctor's Jev test call. |
 | `doctor.kind_base` | `legacy-base` |  |  | The kind of a unit whose name has no suffix. |
 | `doctor.kind_hash` | `hash` |  |  | The kind of a unit named for a worktree hash. |
 | `doctor.kind_key` | `repoKey` |  |  | The kind of a unit named for a project key. |
@@ -4199,6 +4512,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `doctor_msg.head_hooks` | `Hooks (present)` |  |  | The heading of the hooks section. |
 | `doctor_msg.head_install` | `Engine install` |  |  | Section heading. |
 | `doctor_msg.head_integrations` | `Integrations` |  |  | The heading of the notes about companions that are not installed (oh-my-claudecode, the Codex port). |
+| `doctor_msg.head_jev` | `Jev` |  |  | The heading of the Jev health section (shown only when Jev is enabled). |
 | `doctor_msg.head_leaks` | `leaked test-fixture stores` |  |  | The heading of the report of leaked test-fixture stores. |
 | `doctor_msg.head_logs` | `Logs and telemetry` |  |  | Section heading. |
 | `doctor_msg.head_omc` | `OMC (oh-my-claudecode) — detected` |  |  | The heading of the oh-my-claudecode section. |
@@ -4222,10 +4536,17 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `doctor_msg.hooks_valid` | `hooks.json is valid JSON ({n} hook script(s) registered)` |  |  | hooks.json and its registry parse. Placeholder: {n}. |
 | `doctor_msg.inbox_corrupt` | `{n} of the last {m} lines of {file} are not JSON` |  |  | LG-04. Placeholders: {n}, {m}, {file}. |
 | `doctor_msg.inbox_huge` | `{file} is {mb} MB (cap {cap_mb} MB) - Fix: ah-engine maintain` |  |  | LG-03. Placeholders: {file}, {mb}, {cap_mb}. |
+| `doctor_msg.jev_fail` | `Jev call failed via {transport}: {why} (after {ms} ms)` |  |  | Finding: the Jev test call failed. Placeholders: {why}, {ms}, {transport}. |
+| `doctor_msg.jev_no_key` | `Jev is enabled but has no API key for {transport}` |  |  | Finding: Jev is enabled but no API key resolves for its transport, so the test call was not made. Placeholder: {transport}. |
+| `doctor_msg.jev_ok` | `Jev answered in {ms} ms ({transport})` |  |  | Finding: the Jev test call answered in time. Placeholders: {ms}, {transport}, {limit}. |
+| `doctor_msg.jev_slow_fail` | `Jev is too slow: {ms} ms via {transport} (limit {limit} ms)` |  |  | Finding: the Jev test call answered, but past the fail limit. Placeholders: {ms}, {transport}, {limit}. |
+| `doctor_msg.jev_slow_warn` | `Jev is slow: {ms} ms via {transport} (fails at {limit} ms)` |  |  | Finding: the Jev test call answered, but slowly. Placeholders: {ms}, {transport}, {limit}. |
+| `doctor_msg.jev_timeout` | `no answer within {limit} ms` |  |  | The reason shown when the Jev test call ran out of its budget. Placeholders: {ms}, {transport}, {limit}. |
 | `doctor_msg.kind_dangling` | `a symlink to nothing` |  |  | What a path turned out to be. |
 | `doctor_msg.kind_dir` | `a directory` |  |  | What a path turned out to be. |
 | `doctor_msg.kind_file` | `a regular file` |  |  | What a path turned out to be. |
 | `doctor_msg.kind_other` | `not a file` |  |  | What a path turned out to be. |
+| `doctor_msg.last_crash` | `last crash: {crash}` |  |  | DMN-12. Placeholder: {crash}. |
 | `doctor_msg.leak_example` | `{hash} -> {worktree}` |  |  | One leaked store. Placeholders: {hash}, {worktree}. |
 | `doctor_msg.leak_more` | `, +{n} more` |  |  | How many more leaked stores are not listed. Placeholder: {n}. |
 | `doctor_msg.leak_summary` | `(warn) leaked test-fixture stores: {count} (run doctor --repair-test-stores t...` |  |  | The leaked stores. Placeholders: {count}, {shown}, {more}. |
@@ -4321,9 +4642,9 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `doctor_msg.state_unwritable` | `state directory {dir} is not writable ({err}) - Fix: chmod u+w {dir}, or remo...` |  |  | ST-03. Placeholders: {dir}, {err}. |
 | `doctor_msg.state_windows_mount` | `{dir} is on a Windows drive ({mount}); file locks and sockets are unreliable ...` |  |  | ST-07. Placeholders: {dir}, {mount}. |
 | `doctor_msg.statusline_dispatcher_missing` | `statusline.js dispatcher missing` |  |  | The statusline dispatcher script is not installed. |
-| `doctor_msg.statusline_installed` | `statusline installed ({label}) -> anti-hall dispatcher` |  |  | The statusline is the anti-hall dispatcher. Placeholder: {label}. |
+| `doctor_msg.statusline_installed` | `legacy anti-hall statusLine still configured ({label}) -> uninstall-statuslin...` |  |  | A legacy anti-hall statusLine is still configured. Placeholder: {label}. |
 | `doctor_msg.statusline_no_output` | `statusline.js produced no output (exit {code})` |  |  | The statusline printed nothing, or failed. Placeholder: {code}. |
-| `doctor_msg.statusline_none` | `no statusLine configured — run the install-statusline skill (then restart)` |  |  | No statusLine is configured. |
+| `doctor_msg.statusline_none` | `no anti-hall statusLine configured (installer retired)` |  |  | No statusLine is configured. |
 | `doctor_msg.statusline_one_line` | `statusline rendered only 1 line — line 2 (context gauge) did NOT render despi...` |  |  | The statusline printed only one line although the payload carried a context window. |
 | `doctor_msg.statusline_renders` | `statusline renders {n} lines (line 1 + live context gauge on line 2)` |  |  | The statusline printed both lines. Placeholder: {n}. |
 | `doctor_msg.statusline_rich_bad` | `statusline-rich.js missing/invalid — line 1 falls back to the simple renderer` |  |  | The line-1 renderer script is missing or invalid. |
@@ -4454,7 +4775,6 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `setup.cap_hash_len` | `8` |  |  | The length of a per-worktree suffix, in hexadecimal digits. |
 | `setup.cap_how_companion` | `node "${CLAUDE_PLUGIN_ROOT}/companion/{file}"` |  |  | How a companion is enabled. Placeholder: file. |
 | `setup.cap_how_migrations` | `node "${CLAUDE_PLUGIN_ROOT}/scripts/migrate-state.js"` |  |  | How pending state migrations are applied. |
-| `setup.cap_how_statusline` | `node "${CLAUDE_PLUGIN_ROOT}/statusline/install-statusline.js" --user` |  |  | How the status line is enabled. |
 | `setup.cap_installer_prefix` | `install-` |  |  | What a companion installer's file name starts with. |
 | `setup.cap_installer_suffix` | `.js` |  |  | What a companion installer's file name ends with. |
 | `setup.cap_key_max` | `40` |  |  | The longest head of a per-project suffix, in characters. |
@@ -4465,7 +4785,6 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `setup.cap_legacy_files` | `.anti-hall-progress.md, .anti-hall-history.md` |  |  | The legacy root progress and history files whose copy under .anti-hall/history/legacy is the state migration. |
 | `setup.cap_listing_fn` | `listInstalledIngestUnits` |  |  | The name of the installer export that lists every installed unit; an installer that exports it is checked with it (the per-worktree readback contract). |
 | `setup.cap_name_migrations` | `state-migrations` |  |  | The capability name of the state migrations. |
-| `setup.cap_name_statusline` | `statusline` |  |  | The capability name of the status line. |
 | `setup.cap_os_names` | `2 entries` |  |  | Operating-system names as Node reports them, by the name Rust reports. |
 | `setup.cap_plat_darwin` | `darwin` |  |  | The platform name of macOS. |
 | `setup.cap_plat_linux` | `linux` |  |  | The platform name of Linux. |
@@ -4474,11 +4793,6 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `setup.cap_service_suffix` | `.service` |  |  | The end of a systemd service file's name. |
 | `setup.cap_state_active` | `active` |  |  | How the text report says a capability is active. |
 | `setup.cap_state_inactive` | `available, not active` |  |  | How the text report says a capability is shipped but not active. |
-| `setup.cap_status_command_key` | `command` |  |  | The member of the status-line setting that holds its command. |
-| `setup.cap_status_key` | `statusLine` |  |  | The settings member that configures the status line. |
-| `setup.cap_status_project_files` | `.claude/settings.local.json, .claude/settings.json` |  |  | The project-scope settings files a status line may be configured in, strongest first, relative to the working directory. |
-| `setup.cap_status_user_files` | `.claude/settings.json` |  |  | The user-scope settings files a status line may be configured in, relative to the home directory. |
-| `setup.cap_statusline_marker` | `statusline.js` |  |  | The file name a status line command must contain for the statusline capability to count as active. |
 | `setup.cap_systemd_dir` | `.config/systemd/user` |  |  | The Linux per-user systemd directory, under the home directory. |
 | `setup.cap_timer_suffix` | `.timer` |  |  | The end of a systemd timer file's name. |
 | `setup.cap_unit_sep` | `-` |  |  | What separates a systemd unit name from its per-worktree or per-project suffix. |
@@ -5322,7 +5636,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `script.call_memory_by_check` | `1 entries` |  | bytes | Per-check heap a single script call may allocate (bytes), replacing script.call_memory_bytes for a rules script that engine code calls with call_fn from a command-line process. `rules/jev-report` aggregates every retained generation of the Jev decision log (about 28,000 rows for 7 MB of log) in one call. |
 | `script.call_memory_bytes` | `16777216` |  | bytes | Heap a single script call may allocate above the runtime's size after its scripts were loaded; past it the call fails and defers. |
 | `script.check_scope` | `(function () {\n{source}\n;return typeof {entry} === 'function' ? {entry} : u...` |  |  | How a check's own files (its includes, then its script, joined by newlines) are evaluated in the one context a worker thread shares between all checks: as the body of a function, so the check's top-level declarations (its entry and helpers) stay private to it while the lib files are evaluated once per thread. The value it evaluates to must be the check's entry function. Placeholders: {entry} (script.entry), {source}. Measured 2026-10-09 (DECISIONS.md 1.111, one thread, the 16 shipped scripts): a context per check held 3.3 MB of interpreter heap (about 150 KB per check for the intrinsics, host bindings and lib files again), one shared context 1.0 MB. |
-| `script.cut_at_request_deadline` | `1` | `AH_ENGINE_SCRIPT_CUT_AT_DEADLINE` |  | 1 = a scripted check still running when its request's client stops waiting (client.deadline_ms minus daemon.reply_slack_ms) is interrupted there, and a check not yet started by then is not started: each such entry defers to its own Node hook while the entries answered in time keep the engine's answer, so a loaded machine costs single checks instead of the whole event (before, the reply came after the client had given up and every entry of the event ran in Node). Not counted as a script error. An engine-only check whose failure mode is closed (script.failure_mode_by_check) keeps only its own limit on a guard event. 0 = the checks run to their own limits whatever the client's deadline. |
+| `script.cut_at_request_deadline` | `1` | `AH_ENGINE_SCRIPT_CUT_AT_DEADLINE` |  | 1 = a scripted check still running when its request's client stops waiting (client.deadline_ms minus daemon.reply_slack_ms) is interrupted there, and a check not yet started by then is not started: each such entry defers to its own Node hook while the entries answered in time keep the engine's answer, so a loaded machine costs single checks instead of the whole event (before, the reply came after the client had given up and every entry of the event ran in Node). Not counted as a script error. An engine-only check whose failure mode is closed (script.failure_mode_by_check) keeps only its own limit on a guard event. 0 = the checks run to their own limits whatever the client's deadline (the Node parity harness sets AH_ENGINE_SCRIPT_CUT_AT_DEADLINE=0 so its daemon answers every case, however loaded the machine). |
 | `script.enabled` | `1` | `AH_ENGINE_SCRIPT` |  | 1: a check whose script exists runs the script instead of its compiled port; 0: the compiled port always runs (the parity baseline). |
 | `script.engine_only_checks` | `7 items` |  |  | Checks with NO Node twin (their fallback command is a no-op). When one of these scripts cannot answer, its failure mode decides (script.failure_mode_by_check): `open` allows (logged and counted), `closed` blocks on a guard event (dispatch.guard_events). Every other check defers to its Node hook on a script failure, so a broken script never changes a decision. |
 | `script.entry` | `decide` |  |  | Global function a check script defines; it is called with the hook payload and returns the verdict. |
@@ -5336,6 +5650,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `script.failure_mode_by_check` | `7 entries` |  |  | Failure mode of an engine-only check whose script cannot answer (an exception, the CPU-time limit, out of memory, a verdict of the wrong shape, no script file): `open` ALLOWS (the failure is logged as script_error and counted as a telemetry check event with outcome error), `closed` BLOCKS on a guard event with script.msg_fail_closed. A check's own failure must never block the user's agent, so only a security guard whose silent allow would let through what it exists to stop is `closed`. None ships `closed`: sibling-sweep, agent-reminders, gh-rt-advisory, handover-hygiene and procwatch-advisory are advisories, broad-kill-guard is a stricter-than-Node block whose own failure must not stop the agent, and engine-role-guard is a second line (the ah-engine command line refuses a verb the caller's role may not run by itself). A check not listed takes script.failure_mode_default. On 2026-10-09 sibling-sweep was fail-closed and blocked a SubagentStop when its script hit the CPU limit on a long transcript. |
 | `script.failure_mode_closed` | `closed` |  |  | The failure-mode value that blocks on a guard event (any other value allows). |
 | `script.failure_mode_default` | `open` |  |  | Failure mode of an engine-only check not listed in script.failure_mode_by_check. |
+| `script.gc_every_calls` | `1000` |  |  | Calls after which a worker collects its script interpreter's garbage and reports the size to the memory registry (between requests, after the reply went out; also once when the worker goes idle). QuickJS frees most garbage at once but leaves cycles (closures, objects that point at each other) to its own collector, which runs only at 1.5 times the size after its last run: about 2.8 MB of waiting garbage per worker with every check loaded. The registry then unloads cold checks if the interpreter grew past mem.quickjs_soft_bytes. |
 | `script.grep_max_bytes` | `2097152` |  | bytes | Most bytes of lines `ahHost.transcriptGrep` hands back to a script; a search that matches more is answered unsure and the script defers. |
 | `script.heap_budget_base_bytes` | `524288` |  | bytes | Memory budget the interpreter test holds one worker thread to (DECISIONS.md 1.111): this much for the runtime, the shared context, the host bindings and the lib files, plus script.heap_budget_per_check_bytes for every check script it has run. Measured 2026-10-09: 224 KB base, 1.04 MB with all 16 shipped scripts (git.js 365 KB, the others 1-195 KB); a context per check held 3.3 MB. |
 | `script.heap_budget_per_check_bytes` | `98304` |  | bytes | Per check script share of the interpreter budget above (DECISIONS.md 1.111). |
@@ -5345,6 +5660,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `script.lock_wait_max_ms` | `5000` |  | ms | Longest wait a script may ask `ah.state.lock` for in place of its group's wait. |
 | `script.logic_dir` | `engine/logic` |  |  | Directory of the shipped check scripts, relative to the plugin root. |
 | `script.msg_bad_verdict` | `unexpected verdict {value}` |  |  | Logged reason (then the call defers) when a script returns a value that is not a verdict. |
+| `script.msg_call_error` | `{name}.{func} check={check} event={event}: {error}` |  |  | Reason logged when a loaded script call fails. Placeholders: {name}, {func}, {check}, {event}, {error}. |
 | `script.msg_deadline_cut` | `{check} ({event}): past the client's deadline, deferred to its Node hook` |  |  | Log detail (code script_deadline, rate-limited) of a check cut or not started at its request's client deadline; it defers to its Node hook. Placeholders: {check}, {event}. |
 | `script.msg_env_incomplete` | `request environment incomplete` |  |  | Reason logged (then the failure policy applies) when the request's environment is incomplete, so no check can be evaluated. |
 | `script.msg_fail_closed` | `anti-hall {check}: BLOCKED. Its check script failed ({why}) and this guard ha...` |  |  | Block reason of an engine-only check on a guard event whose script could not answer. Placeholders: {check}, {why}. |
@@ -5364,24 +5680,20 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `script.read_max_bytes` | `4194304` |  | bytes | Upper bound of one `ah.fs.readText` read, whatever the script asks for. |
 | `script.readdir_max` | `10000` |  |  | Most entries `ah.fs.readdir` returns; a directory with more entries answers null (a partial listing is never returned as a whole). |
 | `script.regex_bytes_per_src_byte` | `300` |  | bytes | Estimated compiled size per byte of a pattern's translated source, calibrated on the shipped patterns (about 250 on average; the `\s`, `.` and `i`-flag expansions make it uneven). |
-| `script.regex_cache_bytes` | `8388608` |  | bytes | Estimated bytes of compiled regular expressions the shared `ah.re.*` cache may hold (an entry weighs script.regex_entry_base_bytes plus script.regex_bytes_per_src_byte per byte of its translated source). The shipped patterns are about 3.3 MB compiled, so the default keeps all of them. |
-| `script.regex_cache_max` | `512` |  |  | Compiled regular expressions the process-wide `ah.re.*` cache keeps at most (all workers share one cache); past it, or past script.regex_cache_bytes, the least recently used pattern is dropped first. |
 | `script.regex_dfa_size_limit` | `524288` |  | bytes | Lazy-DFA scratch space one thread may grow per compiled `ah.re.*` pattern (regex builder dfa_size_limit); at the limit the engine falls back to a slower matcher instead of growing. |
 | `script.regex_entry_base_bytes` | `8192` |  | bytes | Fixed part of the estimated weight of one cached compiled regular expression. |
 | `script.regex_size_limit` | `2097152` |  | bytes | Largest compiled program one `ah.re.*` pattern may have (regex builder size_limit); a pattern past it does not compile and the script sees the invalid-pattern error. The largest shipped pattern compiles to about 0.3 MB. |
 | `script.registry_global` | `__ahCheckEntries` |  |  | Global object of the shared context that holds each loaded check's entry function, by check name. |
-| `script.runtime_max_bytes` | `33554432` |  | bytes | Absolute ceiling of one worker's script interpreter heap (bytes). A call's own allowance (script.call_memory_bytes above the size after loading) never lifts the ceiling past it, so a baseline that creeps up cannot raise the limit without bound. |
-| `script.runtime_soft_bytes` | `4194304` |  | bytes | What a worker thread's script interpreter may hold after loading a check (measured after a collection). Above it the least recently called checks are unloaded, down to script.runtime_unload_to_bytes, and rebuilt from their files by their next call. All shipped checks loaded take about 5 MB per worker; a limit near 3 MB made the replay about twice as slow (the checks one request runs are reloaded again and again), 4 MB costs a few percent. |
-| `script.runtime_unload_to_bytes` | `3774873` |  | bytes | Size an interpreter is unloaded down to once it passed script.runtime_soft_bytes (clamped to it), so the next load does not trigger another unload. |
 | `script.stack_bytes` | `262144` |  | bytes | Largest interpreter stack one script call may use. |
 | `script.sweep_max_remove` | `200` |  |  | Most files one `ah.state.sweep` call may delete, whatever the script asks for. |
 | `script.tail_buf_bytes` | `65536` |  | bytes | Size of the buffer `ah.transcript.tailLines` reads a file through. |
 | `script.tail_max_bytes` | `16777216` |  | bytes | Largest window `ah.transcript.tailLines` reads from the end of a file, whatever the script asks for. |
+| `script.time_hard_cap_ms` | `5000` |  | ms | Ceiling of the HARD CPU limit of a script call that has a normal soft limit; a soft limit already above it (a batch job's, in script.time_limit_by_check) is its own hard limit. |
+| `script.time_hard_factor` | `10` |  |  | The HARD CPU limit of a script call as a multiple of its SOFT limit (script.time_limit_ms, or the per-check entry of script.time_limit_by_check). Past the soft limit a call is only logged and counted; the interpreter is interrupted at the hard one. |
 | `script.time_limit_by_check` | `21 entries` |  |  | Per-check limit of one script call (ms; the interpreter thread's CPU time, and the wall-clock backstop is script.wall_limit_factor times it), replacing script.time_limit_ms. A key is the check name, or `<check>:<event>` for one event, which wins. handover-hygiene reads and writes a whole directory tree, so its command-line and scheduled-job runs (event Cli) get seconds; `command` (command-guard) resolves repositories and runs `git` for its edit parity and carve-outs (a child process wait is credited back, but a loaded machine stretches the interpreter's own time as well); `git` (git-guard) tokenizes the whole command and its heredoc bodies (the frozen replay of 2026-10-09 interrupted it at 50 ms on 3 long heredoc commands, each answered the same with the time); api-guard and ship-it-guard parse Bash writes with command-guard's parsers (script.includes) and compact-declaration-guard parses the current turn of a 1.5 MB transcript tail, so they get command-guard's order of time and more; `precompact-snapshot` reads the transcript tail of a PreCompact (a real 1.5 MB tail takes about 190 ms in the interpreter, so 50 ms would defer it to Node every time); `claim-ledger` walks up to 2 MB of transcript evidence; the Stop-time and prompt-time checks that scan the transcript tail or state (tasklist-guard, task-guard, silent-agent-nudge, stale-agent-stop-note, auto-handover, auto-handover-pause-nag, compact-advice-guard, limit-conserve-inject, idle-agent-sweep) get 500 ms because, measured 2026-10-09 on the frozen replay (2113 calls), the 50 ms default interrupted tasklist-guard on 2 and silent-agent-nudge on 6 of 61 Stop calls (and stale-agent-stop-note on a 156 MB transcript), each deferring a decision the script makes identically when given the time; its SessionStart advisory only lists and stats files. |
-| `script.time_limit_ms` | `50` | `AH_ENGINE_SCRIPT_TIME_MS` | ms | CPU-time limit of one script call (the interpreter thread's own CPU time, see script.wall_limit_factor for the wall-clock backstop); past it the interpreter is interrupted and the call defers to Node (never a silent allow). |
-| `script.transcript_cache_entries` | `64` |  |  | Most (transcript, window) answers `ahHost.transcriptDedupeTail` keeps in the engine process, each valid while the file keeps its size and modification time; past it the cache is emptied. |
-| `script.unload_batch` | `4` |  |  | Checks unloaded per collection while an interpreter is above script.runtime_soft_bytes. |
-| `script.wall_limit_factor` | `10` |  |  | The wall-clock backstop of a script call, as a multiple of its time limit. The limit itself counts the interpreter thread's CPU time, so a thread kept waiting for a core by a loaded machine is not interrupted; the backstop ends a script that waits without using CPU. Time a host function spends blocked (a child process, a lock) is credited back to the backstop. |
+| `script.time_limit_ms` | `50` | `AH_ENGINE_SCRIPT_TIME_MS` | ms | SOFT CPU-time limit of one script call (the interpreter thread's own CPU time): a call that used more is logged (script_soft) and counted, and keeps running. The HARD limit that interrupts it is this value times script.time_hard_factor (the call then defers to Node, never a silent allow); script.wall_limit_factor sets the wall-clock backstop from the hard limit. |
+| `script.unload_batch` | `4` |  |  | Checks unloaded per collection while an interpreter is above mem.quickjs.soft_bytes. |
+| `script.wall_limit_factor` | `4` |  |  | The wall-clock backstop of a script call, as a multiple of its HARD CPU limit (script.time_limit_ms times script.time_hard_factor). The limit itself counts the interpreter thread's CPU time, so a thread kept waiting for a core by a loaded machine is not interrupted; the backstop ends a script that waits without using CPU. Time a host function spends blocked (a child process, a lock) is credited back to the backstop. |
 | `script.write_max_bytes` | `1048576` |  | bytes | Largest text one `ah.state.writeAtomic` call may write; a larger text is refused. |
 | `script.write_path_max` | `600` |  |  | Longest relative path one `ah.state.writeAtomic` call may name. |
 | `script.write_root` | `.anti-hall` |  |  | The one directory under the home directory that a script may write to through `ah.state.writeAtomic` (a path must start with it; nothing outside it, no link below it). |
@@ -5510,6 +5822,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_rt.pr_closed` | `closed` |  |  | The `pull_requests.state` value of a closed, unmerged PR (compared case-insensitively). |
 | `devswarm_rt.pr_merged` | `merged` |  |  | The `pull_requests.state` value of a merged PR (compared case-insensitively). |
 | `devswarm_rt.pr_open` | `open` |  |  | The `pull_requests.state` value of an open PR (compared case-insensitively). |
+| `devswarm_rt.probe_cache_racy_ms` | `2000` |  | ms | A heartbeat, plan or descriptor file modified more recently than this when it is read is read again by the next reconcile, even if its size and modification time look unchanged (a rewrite inside the clock's granularity could otherwise be missed). Older files are parsed once and kept until their inode, modification time or size changes. |
 | `devswarm_rt.reconcile_ms` | `60000` |  | ms | How often the whole state is re-read from its sources and diffed (the safety net under the event layer); every change it finds that events missed counts in `rt_reconcile_repairs`. |
 | `devswarm_rt.restart_grace_ms` | `120000` |  | ms | Changes found by the start-up diff (flagged while_down) are not notified before this long after start, and only if the condition still holds then. |
 | `devswarm_rt.set_line_enabled` | `6 entries` |  |  | Show the DevSwarm workspace dashboard segment in the statusline (on by default; it shows nothing when DevSwarm is absent or no workspace is active). |
@@ -6157,13 +6470,12 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | Key | Default | Env override | Unit | What it is |
 |---|---|---|---|---|
 | `env.dispatcher_override` | `ANTIHALL_DISPATCHER_OVERRIDE` |  |  | Test-only switch of the installer: names the dispatcher path to embed without checking that it exists (Node: ANTIHALL_DISPATCHER_OVERRIDE). |
-| `env.statusline_node_only` | `ANTIHALL_STATUSLINE_NODE_ONLY` |  |  | When non-empty the installer writes the Node-only status line command (as the Node installer does) and the upgrade leaves an existing one alone. Used by the parity tests, which compare the two installers' output. |
+| `env.statusline_node_only` | `ANTIHALL_STATUSLINE_NODE_ONLY` |  |  | Legacy env name from the retired installer; it no longer re-enables statusLine writes. |
 
 ### slcfg.toml / ops
 
 | Key | Default | Env override | Unit | What it is |
 |---|---|---|---|---|
-| `ops.script_install` | `statusline/install-statusline.js` |  |  | The Node installer, relative to the plugin root. |
 | `ops.script_phase` | `statusline/phase.js` |  |  | The Node phase script, relative to the plugin root. |
 | `ops.script_uninstall` | `statusline/uninstall-statusline.js` |  |  | The Node uninstaller, relative to the plugin root. |
 | `ops.shadow_cwd_dir` | `cwd` |  |  | The scratch working directory of an installer shadow, inside its scratch directory. |
@@ -6202,8 +6514,8 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `slcfg.base_write_failed_1` | `⚠️ anti-hall · install-statusline: Could not write {path}: {msg}` |  |  | stderr: the base could not be written. Placeholders: path msg. |
 | `slcfg.base_write_failed_2` | `Why: the statusline will still work but your previous statusline will not be ...` |  |  | stderr: what that means. |
 | `slcfg.claude_dir` | `.claude` |  |  | The host's configuration directory (in the home directory and in a project). |
-| `slcfg.command_engine` | `"{engine}" statusline` |  |  | The statusLine command the installer writes: the engine's own status line, no launcher and no Node script. {engine}. |
-| `slcfg.command_launcher` | `sh "{launcher}" --stdin statusline -- "{dispatcher}"` |  |  | The launcher form of the statusLine command an earlier engine installer wrote. {launcher} {dispatcher}. Only used to recognise that form exactly for the migration. |
+| `slcfg.command_engine` | `"{engine}" statusline` |  |  | The legacy engine statusLine command recognised by uninstall/cleanup; the retired installer no longer writes it. {engine}. |
+| `slcfg.command_launcher` | `sh "{launcher}" --stdin statusline -- "{dispatcher}"` |  |  | The launcher form of the statusLine command an earlier engine installer wrote. {launcher} {dispatcher}. Legacy recognition only; no migration writes it. |
 | `slcfg.command_line` | `  command: {cmd}` |  |  | A command shown after its file. Placeholders: cmd. |
 | `slcfg.command_prefix` | `node "` |  |  | Before the dispatcher path in the statusLine command. |
 | `slcfg.command_suffix` | `"` |  |  | After the dispatcher path in the statusLine command. |
@@ -6255,18 +6567,14 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `slcfg.inst_not_found_2` | `Do instead: keep the installer in the same directory as statusline.js.` |  |  | stderr: what to do about it. |
 | `slcfg.inst_parse_failed` | `❌ anti-hall · install-statusline: Could not parse {path}: {msg}` |  |  | stderr: the settings file could not be read or parsed (exit 1, nothing written). Placeholders: path msg. |
 | `slcfg.inst_refused` | `⛔ anti-hall · install-statusline: refused under a test: {path} is outside a t...` |  |  | stderr: the installer refuses to write user configuration under a test. Placeholders: path. |
+| `slcfg.install_retired` | `anti-hall statusline installation has been retired; no statusLine setting was...` |  |  | Message printed by install-statusline after the anti-hall statusline was retired; the command is kept as a no-op so old docs and habits do not re-add statusLine. |
 | `slcfg.installed_dir_install` | `/anti-hall/` |  |  | The installer treats a command that also contains this directory part as the anti-hall dispatcher. |
 | `slcfg.installed_dir_uninstall` | `anti-hall/` |  |  | The uninstaller treats a command (backslashes turned into slashes) that also contains this directory part as the anti-hall dispatcher. |
 | `slcfg.installed_marker` | `statusline.js` |  |  | A statusLine command that contains this names the dispatcher. |
 | `slcfg.launcher_form_re` | `^sh "(?<launcher>[^"]+)" --stdin statusline -- "(?<dispatcher>[^"]+)"$` |  |  | Recognises the launcher form an earlier engine installer wrote; named groups launcher and dispatcher (checked again against slcfg.command_launcher). |
-| `slcfg.launcher_rel` | `../scripts/ah-run.sh` |  |  | The launcher an earlier engine installer named in the statusLine command (it ran the engine first and the Node script when the engine was absent or deferred), relative to the directory of the status line dispatcher. Only used to recognise that form for the migration. |
+| `slcfg.launcher_rel` | `../scripts/ah-run.sh` |  |  | The launcher an earlier engine installer named in the statusLine command, relative to the directory of the status line dispatcher. Legacy recognition only; no migration writes it. |
 | `slcfg.local_entry` | `.claude/settings.local.json` |  |  | The ignore-file line that keeps the local settings out of version control. |
 | `slcfg.local_file` | `settings.local.json` |  |  | The host's project-local settings file (highest precedence, not committed). |
-| `slcfg.mig_ambiguous` | `left the statusLine in {path} as it is (its command text is not a single plai...` |  |  | Migration row: the command appears other than once in the file's text, or the edit does not read back as intended, so the file is left exactly as it is. {path}. |
-| `slcfg.mig_backup_failed` | `left the statusLine in {path} as it is (its one-time backup could not be writ...` |  |  | Migration row: the one-time backup could not be made, so the file is left exactly as it is. {path}. |
-| `slcfg.mig_dry_run` | `would update the statusLine in {path} to run the engine directly: {command}` |  |  | Migration row (dry run): what would change. {path} {command}. |
-| `slcfg.mig_fixed` | `statusLine in {path} now runs the engine directly: {command}` |  |  | Migration row: an existing status line command now runs the engine directly. {path} {command}. |
-| `slcfg.mig_write_failed` | `could not write {path}; the statusLine there is unchanged` |  |  | Migration row: the settings file could not be written. {path}. |
 | `slcfg.new_statusline` | `New statusLine:` |  |  | Heading of the new value. |
 | `slcfg.no_changes` | `No changes made.` |  |  | Nothing was changed. |
 | `slcfg.no_command_1` | `Existing statusLine has no command string (type: {kind})` |  |  | The existing statusLine has no command string. Placeholders: kind. |
@@ -6275,7 +6583,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `slcfg.no_old_statusline` | `No existing statusLine.` |  |  | There was no old value. |
 | `slcfg.no_plugin_root` | `the anti-hall plugin directory was not found` |  |  | Why the installer cannot start: no plugin directory with the engine's defaults was found. |
 | `slcfg.note_project_1` | `NOTE: .claude/settings.json (committed) defines a statusLine:` |  |  | A committed project statusLine exists. |
-| `slcfg.note_project_2` | `  Installing into settings.local.json so anti-hall takes precedence (local > ...` |  |  | Why the installer writes the local file. |
+| `slcfg.note_project_2` | `  Installing into settings.local.json so anti-hall takes precedence (local > ...` |  |  | Legacy note for the retired installer when a committed project statusLine exists. |
 | `slcfg.note_user_1` | `NOTE: ~/.claude/settings.json (user/global) defines a statusLine:` |  |  | A user-level statusLine exists. |
 | `slcfg.note_user_2` | `  Installing into settings.local.json will take precedence over it.` |  |  | What the local file will do to it. |
 | `slcfg.old_statusline` | `Old statusLine:` |  |  | Heading of the old value. |
@@ -7048,6 +7356,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_wire.days_flag` | `--older-than` |  |  | The flag of plan-prune that sets the minimum archive age in days. |
 | `devswarm_wire.deferred_exit` | `75` |  |  | Exit code for a verb handed to Node (nothing was done). |
 | `devswarm_wire.desc_keys` | `5 entries` |  |  | The descriptor fields the fact readers use: worktree path, session id, nudge command, escalate command, id. |
+| `devswarm_wire.events_recheck_ms` | `30000` |  | ms | How long the event-driven auto-archive waits before looking at its dirty workspaces again when it cannot act (the event trigger is off or the engine is not the executor). |
 | `devswarm_wire.executor_auto` | `auto` |  |  | The executor word that follows devswarm_sup.mode (poke and escalate only; auto-archive has no auto word). |
 | `devswarm_wire.executor_words` | `engine, node, off` |  |  | The words of the executor settings, in the order engine, node, off. Anything else reads as node (the engine stands down). |
 | `devswarm_wire.git_bin` | `git` |  |  | The git executable the fact readers run. |
@@ -7056,9 +7365,11 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_wire.id_flag` | `--id` |  |  | The flag that names the workspace. |
 | `devswarm_wire.ids_flag` | `--confirm-ids` |  |  | The flag of prune that lists the approved ids (comma separated). |
 | `devswarm_wire.jev_dirty_cap` | `256` |  |  | Most workspaces held in the Jev dirty queue; past it the oldest entries are dropped (the slow scheduled sweep still covers them). |
-| `devswarm_wire.jev_dirty_file` | `rt-jev-dirty.json` |  |  | The file (under the engine state directory) listing the workspaces whose Jev sweep is queued, so a restart does not lose the queue. |
+| `devswarm_wire.jev_dirty_file` | `rt-jev-dirty.json` |  |  | The file (under the engine state directory) the in-memory queue of workspaces whose Jev sweep is queued is saved to (every devswarm_wire.jev_dirty_flush_ms when it changed, and at shutdown), so a restart does not lose the queue. |
+| `devswarm_wire.jev_dirty_flush_ms` | `5000` |  | ms | How often the in-memory Jev dirty queue is written to its file when it changed (it is also written when the thread stops). A crash loses at most this much of queue changes; the scheduled sweep still covers every workspace. |
 | `devswarm_wire.jev_dirty_kinds` | `plan_step, activity, pr, checks` |  |  | The kinds of state change that mark a workspace's Jev data dirty and queue a sweep of just that workspace. |
 | `devswarm_wire.label_chars` | `8` |  |  | How many characters of a workspace id stand in for a missing label in an advisory. |
+| `devswarm_wire.min_sleep_ms` | `10` |  | ms | The shortest sleep of the DevSwarm thread: a deadline that is already due is handled at once, but never busy-waits. |
 | `devswarm_wire.msg_advisory` | `DevSwarm: {changes}{more} (state generation {generation})` |  |  | The advisory text. {changes} is the list of changes, {more} the note about changes left out, {generation} the state generation. |
 | `devswarm_wire.msg_deferred` | `devswarm {verb} is run by scripts/devswarm.js (the engine cannot yet reproduc...` |  |  | Printed for a verb the engine hands to Node. {verb}. |
 | `devswarm_wire.msg_edge` | `{ws} {kind} {from} -> {to}` |  |  | One change in an advisory. {ws} the workspace label or id, {kind} what changed, {from} and {to} the old and new value. |
@@ -7074,6 +7385,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_wire.nudge_state_file` | `rt-nudges.json` |  |  | The engine's own record of pokes made (attempts, last time, escalated), under the engine state directory. |
 | `devswarm_wire.owner_verbs` | `13 items` |  |  | The `ah-engine devswarm <verb>` verbs and what each does: status, line, advisory, supervisor, ingest and ledger (the action audit: per-feature counts, success rate, refusals by reason, mistake rate, in-doubt keys, witness agreement) read the state; archive, plan-prune, prune and recover (kill and resume one session; Node's recovery code does the kill after the engine's refusals) act at the owner's request; wake-watch runs the idle-wake Monitor until the session ends. `create` answers deferred (the Node verb keeps it, because the engine cannot reproduce its source-freshness check yet); `merge` is a devswarm.js verb (compat_verbs) and runs the hivecontrol merge itself. |
 | `devswarm_wire.plan_flag` | `--plan` |  |  | The flag of prune that names the plan. |
+| `devswarm_wire.reconcile_min_gap_ms` | `1000` |  | ms | The least time between two reconciles the file events ask for. Changes inside the gap are folded into one reconcile at its end (none is lost), so a burst of changes, or a source that changes all the time, costs at most one reconcile per gap. 0 reconciles on every batch. |
 | `devswarm_wire.request_flag` | `--request` |  |  | The flag that carries an owner request's own id (the idempotency key's last part). |
 | `devswarm_wire.role_child_env` | `ANTIHALL_DEVSWARM_SOURCE_BRANCH` |  |  | The environment variable whose non-blank value marks a DevSwarm workspace child. |
 | `devswarm_wire.role_codex_env` | `` |  |  | Environment variables whose presence marks a Codex session (empty: no Codex marker is known). |
@@ -7081,11 +7393,13 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_wire.role_words` | `main, child, subagent, codex` |  |  | The roles a caller can have, in this order: main (the interactive main session), child (a DevSwarm workspace child), subagent (a spawned agent or any automated caller), codex (a Codex session). |
 | `devswarm_wire.session_flag` | `--session` |  |  | The flag that names the session an advisory is for. |
 | `devswarm_wire.sql_last_selected` | `SELECT {col} FROM {table} WHERE {id} = ?1` |  |  | The statement that reads when a workspace was last selected in the app. {col} {table} {id} are the column, table and id column names. |
+| `devswarm_wire.store_poll_ms` | `500` |  | ms | How often the held connection of each active mesh store, and of the app database, is asked `PRAGMA data_version` (it changes when another process commits). This replaces watching the SQLite files, which a reader's own open touches. |
 | `devswarm_wire.transcript_dir` | `.claude/projects` |  |  | Where Claude Code keeps session transcripts, relative to the home directory; a worktree's directory is its path with the characters in transcript_encode replaced by '-'. |
 | `devswarm_wire.transcript_encode` | `/\:.` |  |  | The characters of a worktree path replaced by '-' to name its transcript directory. |
 | `devswarm_wire.transcript_ext` | `.jsonl` |  |  | The extension of a session transcript file. |
+| `devswarm_wire.transcript_min_interval_ms` | `5000` |  | ms | The least time between two reactions to one workspace's transcript growing (a Jev sweep mark and a stuck re-check). The gate only stats the transcript files (inode, size): growth inside the interval is acted on once, when the interval ends. |
 | `devswarm_wire.usage_exit` | `64` |  |  | Exit code for a refused or malformed owner verb. |
-| `devswarm_wire.wait_ms` | `500` |  | ms | How long the DevSwarm thread waits for a file event before it checks whether the daemon is draining and whether the periodic reconcile is due. |
+| `devswarm_wire.wait_ms` | `2000` |  | ms | The longest the DevSwarm thread sleeps. It sleeps until the next thing is due (a file event, a deferred reconcile, a store poll, a gate deadline, an action or stall deadline), and never longer than this, so the daemon's drain and a change of devswarm_rt.mode are noticed within it. |
 | `devswarm_wire.watch_git_names` | `HEAD, index, ORIG_HEAD, FETCH_HEAD` |  |  | Files of a worktree's git directory whose change means a commit or a checkout happened (a Jev hint for that workspace). |
 | `devswarm_wire.watch_state_dirs` | `mesh_write.dir_heartbeats, mesh_write.dir_plans, mesh_write.dir_workspaces, m...` |  |  | Directories under the DevSwarm state directory whose changes are hints for a reconcile (each key is a mesh_write.* setting that names the directory). |
 
@@ -8540,6 +8854,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `realtime.cpu_budget_permille` | `5` |  |  | The CPU the idle watcher may use, in thousandths of one core (5 means 0.5 percent); the benchmark test and the rollout gate compare against it. |
 | `realtime.debounce_ms` | `100` | `AH_ENGINE_RT_DEBOUNCE_MS` | ms | A changed file is reported once it has been quiet this long, so a burst of writes becomes one report. |
 | `realtime.fs_poll_types` | `14 items` |  |  | Filesystem types whose watched directories are always polled because OS change events do not arrive there (WSL2 /mnt drives report 9p or drvfs; network and FUSE filesystems report no events). A trailing or leading * matches any text. |
+| `realtime.ignore_suffixes` | `-shm` |  |  | File-name suffixes a watched directory never reports, in every backend. A SQLite shared-memory index (-shm) is rewritten or has its attributes touched whenever any process opens the database, even a read-only reader, and it never holds data (a commit lands in the database or its -wal): a consumer that watches the directory of a database it reads would otherwise wake itself on every read, in a loop. |
 | `realtime.latency_target_ms` | `1000` |  | ms | The detection latency (change to report) the watcher must stay within at the 95th percentile, for OS events and for polled directories alike; the benchmark test and the rollout gate compare against it. |
 | `realtime.max_delay_ms` | `1000` | `AH_ENGINE_RT_MAX_DELAY_MS` | ms | A file that keeps changing is still reported at least this often (the ceiling on debounce_ms), so a busy source is never starved. |
 | `realtime.max_entries` | `2048` |  |  | The most matching files one watched directory is tracked for. A directory with more reports a rescan signal when it changes, so a huge directory cannot grow the watcher's memory. |
@@ -9099,13 +9414,21 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 
 | Key | Default | Env override | Unit | What it is |
 |---|---|---|---|---|
-| `host_spawn.deadline_reserve_ms` | `600` |  | ms | Time kept back from the request's deadline when a spawned program's timeout is cut to it: the other checks of the event and the reply still need it. |
+| `host_spawn.cache_enabled` | `true` |  |  | Whether `ahHost.spawnProbeCached` keeps completed probe answers (an interpreter's version line) per daemon. Off: every call runs the program. |
+| `host_spawn.cache_key_env` | `PATH, PYENV_VERSION, ASDF_PYTHON_VERSION, VIRTUAL_ENV, CONDA_PREFIX, CONDA_DE...` |  |  | Request environment variables whose values are part of a kept probe answer's key, because they pick the interpreter version behind a shim (pyenv, asdf, virtualenv, conda); a different value probes again. |
+| `host_spawn.cache_skip_stdout` | `^\s*\[[^\]]*\b2\b` |  |  | A regular expression: a probe run whose stdout matches is not kept, because its answer depends on what is installed and the key cannot see that (the Python probe's `[..., 2, ...]` means a module or attribute could not be resolved; installing the package changes it). Empty keeps every finished run. |
+| `host_spawn.cache_ttl_ms` | `600000` |  | ms | How long a kept probe answer is served before the program is run again (a changed interpreter file re-probes at once, whatever this says). |
+| `host_spawn.deadline_reserve_ms` | `60` |  | ms | Time kept back from the request's deadline when a spawned program's timeout is cut to it: the other checks of the event and the reply still need it. |
 | `host_spawn.default_path` | `/usr/bin:/bin` |  |  | The search path used when the request carries no PATH: the default of the C library's execvp, which is what Node's spawn falls back to. |
 | `host_spawn.max_calls` | `16` |  |  | Most programs one script call may start (api-guard: two version probes, one per module group up to api_guard_v1.max_modules, one Node probe, the version lines of the message). |
+| `host_spawn.max_workers` | `4` |  |  | The most probe workers (kept-answer runs that outlive their request) alive at once, across all requests; a request that would exceed it fails open without starting one, so timed-out probes cannot pile up. |
 | `host_spawn.min_run_ms` | `1` |  | ms | A spawn whose cut timeout is below this does not run at all (reported as skipped). |
 | `host_spawn.output_max_bytes` | `262144` |  | bytes | Largest stdout or stderr a spawned program may write; more marks the run `overflow` (the Node probe's maxBuffer) and both streams are cut here. |
 | `host_spawn.path_env` | `PATH` |  |  | The request environment variable that holds the search path for a spawned program. |
 | `host_spawn.poll_ms` | `2` |  | ms | How often a running spawned program is checked for exit. |
+| `host_spawn.prewarm` | `true` |  |  | Whether the daemon warms the probe cache at start (the interpreters' version probes the guards ask for first), on a background thread after the socket is listening, so the first guard call finds them kept instead of probing cold inside its deadline. Off: the first call probes. |
+| `host_spawn.prewarm_programs` | `python3, python` |  |  | The programs whose version probe (the arguments of api_guard_v1.version_args) the start-up warm-up runs, in the daemon's own environment. Each must be one of host_spawn.programs. |
+| `host_spawn.prewarm_timeout_ms` | `15000` |  | ms | How long one start-up warm-up probe may run on its background thread (a probe cut here is not kept). |
 | `host_spawn.programs` | `python3, python, node` |  |  | The only programs a script may start through the spawn primitive: bare names, each looked up on the request's PATH (the user's own install), never the daemon's PATH or the plugin's files. api-guard probes these interpreters. |
 | `host_spawn.scrub_env` | `^(NODE_OPTIONS\|NODE_PATH\|PYTHONSTARTUP\|PYTHONPATH\|PYTHONHOME\|PYTHONINSPECT\|PY...` |  |  | Names of request environment variables never passed to a spawned program (case-insensitive): interpreter start-up injection vectors, as the Node api-guard scrubs them. |
 | `host_spawn.timeout_max_ms` | `15000` |  | ms | Ceiling of one spawned program's run, whatever the script asks; it is also cut to what the request has left (see host_spawn.deadline_reserve_ms), so a slow interpreter costs a fail-open notice, never the reply. |
@@ -9292,6 +9615,16 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `diagnostics.allocator` | `jemalloc` |  |  | Allocator for the daemon the client spawns: jemalloc (default) or system. The client passes it on as AH_ENGINE_ALLOCATOR unless that is already set. Changing it requires a daemon restart. |
 | `diagnostics.allocator_choices` | `jemalloc, system` |  |  | Allocator names the client accepts from diagnostics.allocator; any other value is logged and the daemon starts with jemalloc. |
 | `diagnostics.allocator_env` | `AH_ENGINE_ALLOCATOR` |  |  | Environment variable the client sets on the daemon it spawns to select the allocator (the daemon reads it before its first allocation). An existing value in the client's own environment wins. |
+| `diagnostics.budget_cpu_pct` | `2` |  | % | CPU budget of the daemon, percent of one core. A breach is reported when the CPU over diagnostics.budget_cpu_windows consecutive daemon.cpu_check_ms windows stays at or above it; 0 turns the CPU budget off. |
+| `diagnostics.budget_cpu_windows` | `2` |  |  | Consecutive daemon.cpu_check_ms windows over the CPU budget that make a breach (one busy window is a burst, not a breach). |
+| `diagnostics.budget_mem_mb` | `100` |  | MB | Memory budget of the daemon in MB, measured with the figure daemon.mem_metric selects. A breach is reported while the daemon is over it; 0 turns the memory budget off. |
+| `diagnostics.debug_flag` | `--debug` |  |  | The command-line flag that turns debug mode on for one `serve` or `hook` process. |
+| `diagnostics.debug_log_max_bytes` | `8388608` |  | bytes | Size at which the debug log is rotated (the old file is kept once, as <name>.1, replacing the previous one), so it never holds more than twice this. |
+| `diagnostics.debug_mem_snapshot_ms` | `30000` |  | ms | In debug mode, how often the watchdog writes a memory line (resident set, footprint, allocator and component sizes) to the debug log; in normal mode memory is only snapshotted when the resident-set cap trips. |
+| `diagnostics.debug_mode` | `false` |  |  | Debug mode: the same binary also writes verbose per-module logs to the debug log (files.debug_log), checks runtime invariants (a violation is logged and counted, never fatal), samples per-thread CPU every diagnostics.debug_thread_sample_ms and writes a memory line every diagnostics.debug_mem_snapshot_ms. Off in normal use; the cost of the switch while off is one atomic load per call site. The environment variable env.debug or the --debug flag (diagnostics.debug_flag) of `serve` and `hook` turns it on for that process regardless of this setting; this setting is read again on every change of the config files, so a running daemon follows it without a restart. |
+| `diagnostics.debug_modules` | `` |  |  | Modules whose debug log lines are written (a module name such as `daemon/queue`, or a prefix ending in a slash such as `daemon/`). An empty list means every module. |
+| `diagnostics.debug_thread_sample_ms` | `5000` |  | ms | In debug mode, how often the watchdog samples every thread's CPU time and logs the busiest threads and the work counters per second over that interval. |
+| `diagnostics.debug_thread_top` | `8` |  |  | Threads (grouped by name) listed per per-thread CPU sample in the debug log. |
 | `diagnostics.malloc_stack_logging` | `` |  |  | Diagnostic label for an operator-run macOS `MallocStackLogging` repro (`lite` or empty). The engine only accepts and reports it; the OS facility must be enabled in the process environment before start. |
 | `diagnostics.mem_log` | `true` |  |  | Append one NDJSON line per served request to the memory log: time, request kind, event, the checks that ran, resident set and allocator figures before and after, and the size of the transcript file. Costs a few microseconds and one small append per request; turn it off once the memory question is closed. |
 | `diagnostics.mem_log_max_bytes` | `4194304` |  | bytes | Size at which the memory log is rotated (the old file is kept once, as <name>.1, replacing the previous one), so the log never holds more than twice this. |
@@ -9302,13 +9635,89 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `diagnostics.mem_snapshot_wait_ms` | `3000` |  | ms | Longest the snapshot waits for every worker to report its interpreter and caches (a busy worker reports after its request); workers that have not reported by then are listed as missing. |
 | `diagnostics.summary_read_bytes` | `8388608` |  | bytes | Most of the memory log (newest part) `status --memory` reads to build its summary. |
 | `diagnostics.summary_top` | `10` |  |  | Rows shown per ranking (events, checks) in the memory summary of `ah-engine status --memory`. |
+| `diagnostics.threads_ctl` | `threads` |  |  | The control request that asks the daemon for one snapshot of every thread's CPU time and the work counters (the client asks twice, the window apart, and reports the difference). |
+| `diagnostics.threads_flag` | `--threads` |  |  | The `ah-engine status` flag that reports the live daemon's per-thread CPU and work counters over a short window (`status --threads [--json]`). |
+| `diagnostics.threads_name_max` | `64` |  |  | macOS: the size of the buffer a thread name is read into (the OS limit, MAXTHREADNAMESIZE). |
+| `diagnostics.threads_proc_dir` | `/proc/self/task` |  |  | Linux: the directory listing this process's threads (each has a `stat` file with its CPU ticks and name). |
+| `diagnostics.threads_proc_stat` | `stat` |  |  | Linux: the per-thread file holding the CPU ticks (fields 14 and 15) and the name. |
+| `diagnostics.threads_window_ms` | `1000` | `AH_ENGINE_THREADS_WINDOW_MS` | ms | The window of `status --threads`: per-thread CPU % and counters per second are measured over this long. |
 
 ### diagnostics.toml / files
 
 | Key | Default | Env override | Unit | What it is |
 |---|---|---|---|---|
+| `files.debug_log` | `debug.ndjson` |  |  | Debug log file name (state directory): one NDJSON line per debug event, written only in debug mode. |
 | `files.mem_log` | `mem.ndjson` |  |  | Per-request memory log file name (state directory). |
 | `files.mem_snapshot` | `mem-snapshot.json` |  |  | Cap-trip memory snapshot file name (state directory). |
+
+### mem.toml / mem
+
+| Key | Default | Env override | Unit | What it is |
+|---|---|---|---|---|
+| `mem.agent_scan_walk_hard_bytes` | `33554432` |  | bytes | Bytes of retained transcript agent-scan walks at which an insert is refused and the cache is recycled. |
+| `mem.agent_scan_walk_low_water_pct` | `80` |  |  | Percent of mem.agent_scan_walk_soft_bytes the retained walk cache is evicted down to when the soft limit is reached. |
+| `mem.agent_scan_walk_soft_bytes` | `16777216` |  | bytes | Bytes of retained transcript agent-scan walks held before the least recently used are dropped down to the low-water mark. |
+| `mem.buckets_hard_bytes` | `1048576` |  | bytes | Estimated bytes of daemon session and project token-bucket keys at which unknown keys are refused and recoverable buckets are recycled. |
+| `mem.buckets_low_water_pct` | `80` |  |  | Percent of mem.buckets_soft_bytes token buckets are evicted down to when the soft limit is reached. |
+| `mem.buckets_soft_bytes` | `262144` |  | bytes | Estimated bytes of daemon session and project token-bucket keys held before idle/full buckets are evicted down to the low-water mark. |
+| `mem.db_kv_hard_bytes` | `8388608` |  | bytes | Estimated bytes of active project key-value items at which inserts are refused and the in-memory KV tier is recycled. |
+| `mem.db_kv_low_water_pct` | `80` |  |  | Percent of mem.db_kv_soft_bytes active project key-value items are evicted down to when the soft limit is reached. |
+| `mem.db_kv_soft_bytes` | `4194304` |  | bytes | Estimated bytes of active project key-value items held in memory before least recently used items are evicted down to the low-water mark. |
+| `mem.defaults_leak_hard_bytes` | `33554432` |  | bytes | Bytes of leaked config values past which the daemon requests a clean restart (after mem.global_restart_after_s), so repeated config reloads cannot grow the process without bound. |
+| `mem.defaults_leak_low_water_pct` | `80` |  |  | Percent of mem.defaults_leak_soft_bytes the leaked total must be at or under before the soft trigger re-arms (only a restart lowers it). |
+| `mem.defaults_leak_soft_bytes` | `16777216` |  | bytes | Bytes of config values leaked on purpose (the `'static` snapshots of the defaults, the previous generation of every derived cache) that are logged as a soft excursion. Only a restart frees them; one load of the shipped config leaks about 3.4 MB (measured), and a reload adds only what changed. |
+| `mem.devswarm_ingest_hard_bytes` | `1048576` |  | bytes | Estimated bytes held by DevSwarm ingest project scheduling state at which new idle project entries are refused and recoverable state is recycled. |
+| `mem.devswarm_ingest_idle_ttl_ms` | `600000` |  | ms | How long a DevSwarm ingest project may be idle before its resident drain worker is stopped and its slot becomes available. |
+| `mem.devswarm_ingest_low_water_pct` | `80` |  |  | Percent of mem.devswarm_ingest_soft_bytes the DevSwarm ingest project state is evicted down to when the soft limit is reached. |
+| `mem.devswarm_ingest_max_threads` | `4` |  |  | Maximum total DevSwarm ingest threads resident in the daemon, counting the manager thread plus project drain workers; value 1 permits only the manager and no project workers. |
+| `mem.devswarm_ingest_soft_bytes` | `524288` |  | bytes | Estimated bytes held by DevSwarm ingest project scheduling state before idle project entries are evicted down to the low-water mark. |
+| `mem.devswarm_rt_hard_bytes` | `8388608` |  | bytes | Estimated bytes of DevSwarm realtime snapshots and retained edges at which edge inserts are refused and recoverable state is recycled. |
+| `mem.devswarm_rt_low_water_pct` | `80` |  |  | Percent of mem.devswarm_rt_soft_bytes the DevSwarm realtime edge buffer is evicted down to when the soft limit is reached. |
+| `mem.devswarm_rt_max_edges` | `2048` |  |  | DevSwarm realtime edges retained at most; past it the oldest edge is dropped first. |
+| `mem.devswarm_rt_soft_bytes` | `4194304` |  | bytes | Estimated bytes of DevSwarm realtime snapshots and retained edges held before old edges are evicted down to the low-water mark. |
+| `mem.global_hard_bytes` | `125829120` |  | bytes | Process memory above which every holder is recycled and every cache insert is refused. If it is still above this `mem.global_restart_after_s` later, the daemon is asked to restart cleanly and the reason is recorded in the event log. |
+| `mem.global_log_min_interval_ms` | `60000` |  | ms | At most one soft or hard log line per holder per interval (the counters in `status --memory` still count every excursion), so a cache that cycles between its low-water mark and its soft limit cannot flood the event log. |
+| `mem.global_low_water_pct` | `90` |  |  | Percent of the global soft and hard limits that process memory must fall to before the global triggers re-arm (hysteresis, so a total hovering at a limit is one excursion, not many). |
+| `mem.global_restart_after_s` | `60` |  | s | How long the process total (or a holder that recycling cannot shrink, such as the defaults snapshots leaked on purpose) may stay over its hard limit after the recovery attempt before a clean restart is requested. |
+| `mem.global_soft_bytes` | `100663296` |  | bytes | Process memory (the figure `daemon.mem_metric` selects) at which every holder is asked to shrink to its low-water mark. Logged once per excursion. The RSS cap (`daemon.rss_cap_kb`) stays the absolute backstop above it. |
+| `mem.hook_sessions_hard_bytes` | `1048576` |  | bytes | Estimated bytes of hook session condition counters at which new counters are refused and the session store is recycled. |
+| `mem.hook_sessions_low_water_pct` | `80` |  |  | Percent of mem.hook_sessions_soft_bytes the hook session store is evicted down to when the soft limit is reached. |
+| `mem.hook_sessions_max_entries` | `4096` |  |  | Hook session condition counters kept at most; past it the least recently used or expired counter is dropped first. |
+| `mem.hook_sessions_soft_bytes` | `262144` |  | bytes | Estimated bytes of hook session condition counters held before idle counters are evicted down to the low-water mark. |
+| `mem.jev_lanes_hard_bytes` | `4194304` |  | bytes | Estimated bytes held by resident Jev lanes at which new lane or queue retention is refused and recoverable lanes are recycled. |
+| `mem.jev_lanes_idle_ttl_ms` | `600000` |  | ms | How long a resident Jev lane may be idle before its worker is stopped and its lane may be evicted. |
+| `mem.jev_lanes_low_water_pct` | `80` |  |  | Percent of mem.jev_lanes_soft_bytes resident Jev lanes are evicted down to when the soft limit is reached. |
+| `mem.jev_lanes_max_entries` | `16` |  |  | Resident Jev home lanes kept at most; past it the least recently used idle lane is dropped first. |
+| `mem.jev_lanes_soft_bytes` | `2097152` |  | bytes | Estimated bytes held by resident Jev lanes, including per-home settings, cache state and queued detached asks, before idle lanes are evicted down to the low-water mark. |
+| `mem.jev_queue_hard_bytes` | `1048576` |  | bytes | Estimated bytes of resident Jev async request payloads queued across lanes at which new async asks are logged busy instead of being retained. |
+| `mem.jev_queue_low_water_pct` | `80` |  |  | Percent of mem.jev_queue_soft_bytes the resident Jev async queue holder must fall to before soft and hard trips re-arm. |
+| `mem.jev_queue_max_bytes` | `1048576` |  | bytes | Estimated bytes of detached Jev ask payloads a resident lane queue may hold before further queued asks are answered busy. |
+| `mem.jev_queue_soft_bytes` | `524288` |  | bytes | Estimated bytes of resident Jev async request payloads queued across lanes before the holder reports a soft memory trip. |
+| `mem.key_cache_hard_bytes` | `1048576` |  | bytes | Estimated bytes of cached cwd-to-project keys at which new cache entries are refused and recoverable keys are recycled. |
+| `mem.key_cache_low_water_pct` | `80` |  |  | Percent of mem.key_cache_soft_bytes cwd-to-project keys are evicted down to when the soft limit is reached. |
+| `mem.key_cache_max_entries` | `4096` |  |  | Cwd-to-project cache entries kept at most; past it the least recently used cwd is dropped first. |
+| `mem.key_cache_soft_bytes` | `262144` |  | bytes | Estimated bytes of cached cwd-to-project keys held before least recently used paths are evicted down to the low-water mark. |
+| `mem.msg_exit_reason` | `memory: {holder} over its hard limit ({usage} over {limit} bytes) for {secs} ...` |  |  | Exit reason recorded when the daemon restarts because memory stayed over a hard limit. Placeholders: holder, usage, limit, secs. |
+| `mem.msg_hard` | `{holder} crossed its hard memory limit ({usage} over {limit} bytes): inserts ...` |  |  | Event-log line when a holder crosses its hard limit (the insert is refused and the holder recycled). Placeholders: holder, usage, limit. |
+| `mem.msg_restart` | `{holder} stayed over its hard memory limit ({usage} over {limit} bytes) after...` |  |  | Event-log line when a clean restart is requested because memory stayed over a hard limit. Placeholders: holder, usage, limit. |
+| `mem.msg_soft` | `{holder} reached its soft memory limit ({usage} of {limit} bytes): evicting t...` |  |  | Event-log line when a holder reaches its soft limit. Placeholders: holder, usage, limit. |
+| `mem.proc_output_marker` | `\n[output truncated]\n` |  |  | Appended to a helper's captured output that was cut at mem.proc_output_max_bytes. |
+| `mem.proc_output_max_bytes` | `8388608` |  | bytes | Most bytes of a helper process's stdout, and of its stderr, the daemon keeps (git, gh and the other helpers it runs). The rest is read and discarded so the helper does not block, and the kept text ends with mem.proc_output_marker. |
+| `mem.quickjs_hard_bytes` | `33554432` |  | bytes | Absolute ceiling of one worker's script interpreter heap (bytes). A call's own allowance (script.call_memory_bytes above the size after loading) never lifts the ceiling past it, so a baseline that creeps up cannot raise the limit without bound. An interpreter found above it is recycled and the call that needed it fails open (a deferral). |
+| `mem.quickjs_low_water_pct` | `90` |  |  | Percent of mem.quickjs_soft_bytes an interpreter is unloaded down to once it reached the soft limit, so the next load does not trigger another unload. |
+| `mem.quickjs_soft_bytes` | `6291456` |  | bytes | What ONE worker thread's script interpreter may hold after loading a check (measured after a collection). At or above it the least recently called checks are unloaded down to the low-water mark and rebuilt from their files by their next call. All shipped checks loaded take about 5 MB per worker; the default keeps headroom above that cold set so the first hook call does not unload and rebuild checks while racing the client deadline. A limit near 3 MB made the replay about twice as slow (the checks one request runs are reloaded again and again), and 4 MB costs a few percent. |
+| `mem.regex_hard_bytes` | `16777216` |  | bytes | Estimated bytes of compiled regular expressions at which the `ah.re.*` cache refuses an insert (the pattern is compiled and used, not kept) and is recycled. |
+| `mem.regex_low_water_pct` | `80` |  |  | Percent of mem.regex_soft_bytes the `ah.re.*` cache is evicted down to when the soft limit is reached. |
+| `mem.regex_max_entries` | `512` |  |  | Compiled regular expressions the process-wide `ah.re.*` cache keeps at most (all workers share one cache); past it the least recently used pattern is dropped first. |
+| `mem.regex_soft_bytes` | `8388608` |  | bytes | Estimated bytes of compiled regular expressions the shared `ah.re.*` cache may hold before it evicts the least recently used down to its low-water mark (an entry weighs script.regex_entry_base_bytes plus script.regex_bytes_per_src_byte per byte of its translated source). The shipped patterns are about 3.3 MB compiled, so the default keeps all of them. |
+| `mem.spawn_probe_hard_bytes` | `131072` |  | bytes | Bytes of kept spawn-probe answers at which an insert is refused (the answer is returned, not kept) and the cache is recycled. |
+| `mem.spawn_probe_low_water_pct` | `80` |  |  | Percent of mem.spawn_probe_soft_bytes the spawn-probe cache is evicted down to when the soft limit is reached. |
+| `mem.spawn_probe_max_entries` | `64` |  |  | Spawn-probe answers the cache keeps at most; past it the least recently used is dropped first. |
+| `mem.spawn_probe_soft_bytes` | `65536` |  | bytes | Bytes of kept spawn-probe answers (`spawnProbeCached`) held before the least recently used are dropped down to the low-water mark. |
+| `mem.transcript_tail_hard_bytes` | `8388608` |  | bytes | Bytes of cached transcript-tail answers at which an insert is refused (the answer is returned, not kept) and the cache is recycled. |
+| `mem.transcript_tail_low_water_pct` | `80` |  |  | Percent of mem.transcript_tail_soft_bytes the transcript-tail cache is evicted down to when the soft limit is reached. |
+| `mem.transcript_tail_max_entries` | `256` |  |  | Transcript-tail answers the cache keeps at most; past it the least recently used is dropped first. |
+| `mem.transcript_tail_soft_bytes` | `4194304` |  | bytes | Bytes of cached transcript-tail answers (`transcriptDedupeTail`) held before the least recently used are dropped down to the low-water mark. |
 
 ## Messages
 
@@ -9330,14 +9739,24 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `msg.client_bad_socket` | Exchange failure when the socket path is not a socket owned by this user. |
 | `msg.client_connect` | Exchange failure when connecting failed. Placeholder: {err}. |
 | `msg.client_fallback_unavailable` | Printed on stderr when stdin cannot safely be sent to the engine and the Node fallback cannot answer. Guard events exit 2; non-guard events exit 0 with this note. |
+| `msg.client_hung` | Log detail for a hook call that stopped waiting because the daemon's heartbeat is stale, seen for the first time (a suspicion, nothing is signalled). {pid} = the daemon, {age} = the heartbeat's age in ms. |
+| `msg.client_hung_confirmed` | Log detail for a hook call that stopped waiting because the daemon's heartbeat stayed stale and unchanged past client.heartbeat_confirm_ms (a confirmed hang). {pid} = the daemon, {age} = the heartbeat's age in ms, {held} = how long the same heartbeat was seen unchanged in ms. |
 | `msg.client_io` | Exchange failure for another I/O step. Placeholders: {what}, {err}. |
 | `msg.client_no_fallback_guard` | Printed on stderr (exit dispatch.defer_exit) when the legacy `hook` command gets a guard event, the engine cannot answer and no Node fallback was given: the caller must run the Node hook, never take silence as an allow. |
+| `msg.client_skip` | Log detail for a hook call that skipped the daemon because a down marker, the breaker or the crash-loop cooldown was active. |
 | `msg.client_timeout` | Exchange failure when the hard deadline passed. |
 | `msg.client_what_stat` | The step named in msg.client_io when the socket path cannot be examined (a permission or path error, not a missing socket). |
+| `msg.cold_guard_notice` | Printed once per session on stderr when a guard event gave up waiting for a cold-starting daemon and was let through unchecked; {event} is the event name. |
+| `msg.daemon_already_running` | Printed on stderr when a second daemon start finds an existing daemon/lock holder for the socket. Placeholders: {path}, {pid}, {live_engine}, {answers}. |
+| `msg.dbg_cpu_window` | Debug-log line for one CPU self-check window of the daemon. Placeholders: {ms} (window length), {pct} (percent of one core). |
+| `msg.dbg_hook` | Debug-log line for one finished hook invocation of the client. Placeholders: {code} (exit code), {out} and {err} (bytes written), {us} (microseconds spent). |
+| `msg.dbg_request` | Debug-log line for a served daemon request. Placeholders: {request}, {event}, {depth} (queued connections), {busy} (busy workers). |
 | `msg.diagnostics` | Secret-scrubbed diagnostic block attached to a permanent-failure advisory. Placeholders: {version}, {os}, {arch}, {code}, {log}. |
 | `msg.dispatch_stdin_spool` | Reason (event log and stderr, with dispatch.defer_exit) when the hook's stdin payload cannot be read, or an over-cap payload cannot be spooled for the Node hooks. Placeholder: {err}. |
 | `msg.dispatch_stdin_utf8` | Reason in dispatch.msg_fail_closed when a guard event's stdin payload is not valid UTF-8. |
 | `msg.docs_checks_note` | Paragraph under the checks heading of the generated reference. |
+| `msg.docs_env_intro` | Introduction of the Environment variables section of the generated reference. |
+| `msg.docs_flags_intro` | Introduction of the Flags section of the generated reference. |
 | `msg.docs_intro` | Opening paragraph of the generated reference. |
 | `msg.docs_rule_fields` | Paragraph listing the fields of a rule in the generated reference. |
 | `msg.err_db_busy` | The storage writer queue is full. |
@@ -9382,20 +9801,39 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `msg.hint_socket_path` | Self-fix hint when the socket path is too long. Placeholder: {env_dir}. |
 | `msg.hint_state_dir` | Self-fix hint when the state directory is not writable or not private. Placeholders: {state_dir}, {env_dir}. |
 | `msg.impact_no_routing` | Status shown in place of a model-routing saving figure while no routing events are recorded. |
+| `msg.inv_busy_workers` | Invariant violation: more workers are marked busy than there are workers. Placeholder: {workers}. |
+| `msg.inv_queue_pop` | Invariant violation: after a worker took a connection, the queue-depth counter and the queue length differ. Placeholders: {depth}, {len}. |
+| `msg.inv_queue_push` | Invariant violation: after the accept loop queued a connection, the queue-depth counter and the queue length differ. Placeholders: {depth}, {len}. |
+| `msg.inv_violated` | Debug-log line for a violated runtime invariant (checked only in debug mode). Placeholder: {what}, the specific check that failed. |
+| `msg.jev_slow` | Log detail (code jev_slow, rate-limited) of a Jev call slower than its SOFT limit; its answer was still used. |
 | `msg.log_accept_error` | Event-log detail (rate-limited) when the daemon's accept failed for a reason other than nothing pending. Placeholders: {code} (os<n>), {err}. |
 | `msg.log_accept_recovered` | Event-log detail when the daemon accepts a connection again after accept failures (logged then, because a full descriptor table can keep the failure's own log line from being written). Placeholders: {n}, {code} (os<n> of the last failure). |
 | `msg.log_allocator_invalid` | Event-log detail (kind alloc_invalid) when diagnostics.allocator holds a value that is not an accepted allocator; the daemon starts with jemalloc. Placeholder: {value}. |
 | `msg.log_bind_fail` | Start-failure detail when binding the socket fails. Placeholders: {path}, {err}. |
 | `msg.log_budget` | Log detail when a rule evaluation exceeded its CPU budget. |
-| `msg.log_crash` | Log detail when a daemon is found dead without a clean exit. Placeholder: {pid}. |
+| `msg.log_budget_cpu` | Event-log detail when the daemon CPU budget is breached or back within budget. Placeholders: {state}, {value} (percent of one core over the last window), {limit} (the budget, percent). |
+| `msg.log_budget_crossed` | Log detail when a check ran and the request's CPU budget was crossed while it did: the check's own thread CPU and wall time. |
+| `msg.log_budget_mem` | Event-log detail when the daemon memory budget is breached or back within budget. Placeholders: {state}, {value} (MB), {limit} (the budget, MB). |
+| `msg.log_budget_skipped` | Log detail when a check was not started because the request's CPU budget was already spent; `by` names the check that crossed it (empty when it was crossed before the first check). |
+| `msg.log_budget_soft` | Log detail when a request used more thread CPU than its SOFT budget (a warning; nothing was cut). |
+| `msg.log_client_panic` | Log detail when the hook client hit an internal error (a panic) and failed open. |
+| `msg.log_cpu_sustained` | Event-log detail when the daemon CPU self-check observes sustained CPU and backs off scheduled jobs. Placeholders: {pct}, {ms}, {backoff_ms}. |
+| `msg.log_crash_context` | Log detail when a daemon is found dead without a clean exit, with the last breadcrumb. Placeholders: {pid}, {context}. |
+| `msg.log_crashloop_new_binary` | Log detail when a crash-loop cooldown ends because the binary was replaced. Placeholder: {sha}. |
+| `msg.log_crashloop_rollback` | Log detail added when a crash-loop trip also requested a roll-back. |
 | `msg.log_daemon_killed` | Log detail when the daemon was killed by a signal while starting. |
 | `msg.log_daemon_spawn_failed` | Event-log detail (kind spawn_fail, code os<n>) when the client could not start the daemon (fork or exec failed: EAGAIN, ENOMEM, a missing executable). Placeholder: {err}. |
+| `msg.log_deadline_soft` | Log detail when a request is still being evaluated after the client's fail-fast wait (its SOFT deadline); the checks keep running up to the hard deadline. |
+| `msg.log_debug_off` | Event-log detail when debug mode turns off (the setting was switched off and neither the environment variable nor the flag holds it on). |
+| `msg.log_debug_on` | Event-log detail when debug mode turns on (the setting, the environment variable or the flag). |
 | `msg.log_fallback_read_error` | Log detail when reading the Node fallback's stdout or stderr failed part-way. |
 | `msg.log_fallback_read_timeout` | Log detail when the Node fallback finished but its stdout or stderr was still open at the deadline. |
 | `msg.log_fallback_signal` | Log detail when the Node fallback was killed by a signal (out of memory, a crash). |
 | `msg.log_fallback_timeout` | Log detail when the Node fallback did not finish in time. |
+| `msg.log_hung_kill` | Log detail when a client ends a hung daemon (verified pid) so a new one can start. {pid} = the ended daemon, {why} = the stale-heartbeat detail. |
+| `msg.log_hung_spared` | Log detail when a client declines to end a daemon it found hung, because the heartbeat moved, or the process generation (pid, start time, executable, state dir) could not be confirmed. {pid} = the pid the heartbeat names, {why} = the stale-heartbeat detail. |
 | `msg.log_lock_fail` | Start-failure detail when the lock file cannot be opened. Placeholders: {path}, {err}. |
-| `msg.log_lock_no_daemon` | Log detail when a starting daemon gives up on the singleton lock while no daemon answers on the socket. Placeholders: {path}, {pid} (the pid the lock file names, may be empty). |
+| `msg.log_lock_no_daemon` | Log detail when a starting daemon gives up on the singleton lock while no daemon answers on the socket. Placeholders: {path}, {pid} (the pid the lock file names, may be empty), {live_engine}. |
 | `msg.log_not_socket` | Start-failure detail when something other than a socket sits at the socket path. Placeholder: {path}. |
 | `msg.log_operator_reset` | Log detail for `reset`. |
 | `msg.log_panic` | Log and failure detail when a request handler panicked. |
@@ -9404,12 +9842,14 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `msg.log_proc_unread` | Event-log detail (rate-limited, code proc_unread) when a helper exited but its output did not reach end of file within proc.read_grace_ms (a process it left behind held a pipe); its group was killed. Placeholder: {what}. |
 | `msg.log_pruned` | Event-log detail when maintenance forgets old applied write ids. Placeholder: {n}. |
 | `msg.log_restored` | Event-log detail of a restore. Placeholders: {from}, {kept}. |
+| `msg.log_rollback_request` | Log detail when the crash-loop rule asks for a roll-back. Placeholder: {sha}. |
 | `msg.log_rss` | Log detail when the daemon is over its memory cap. Placeholders: {rss}, {cap}. |
 | `msg.log_stall` | Log detail when the accept loop stalled. |
 | `msg.log_start` | Log detail for a daemon start. Placeholders: {version}, {pid}, {rlimit}. |
 | `msg.log_stuck` | Log detail when a worker is stuck. Placeholder: {i}. |
 | `msg.metrics_quantile_note` | Printed with every latency histogram: how to read its percentiles. |
 | `msg.no_price_for_model` | Said by `impact` for a model that is not in the price table, instead of a guessed figure. Placeholder: {model}. |
+| `msg.panic_payload_unknown` | Panic payload text when Rust did not carry a string. |
 | `msg.reason_breaker` | Recorded reason when the client breaker opens. Placeholders: {n}, {secs}, {why}. |
 | `msg.reason_crashloop` | Recorded reason when the daemon keeps dying. Placeholders: {n}, {secs}. |
 | `msg.regex_literal_invalid` | Panic text when a literal regular expression in the source does not compile (a bug the tests catch). |
@@ -9430,15 +9870,25 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `msg.schedule_agent_planned` | Result of an agent-targeted job until mailbox delivery exists (D45). |
 | `msg.schedule_daemon_gone` | An in-process job found the daemon gone (it was exiting). |
 | `msg.schedule_failed` | Event-log detail of a failed run. Placeholders: {job}, {detail}. |
+| `msg.schedule_no_work` | Reason text when a scheduled job has no recent sessions or pending requests to handle. |
+| `msg.schedule_panic` | Detail of a scheduled run panic caught at the job boundary. |
+| `msg.schedule_skipped` | Event-log detail when a scheduled job skipped itself because there was no work. Placeholders: {job}, {detail}. |
 | `msg.schedule_snapshot_failed` | The metrics snapshot job could not keep its snapshot. |
 | `msg.schedule_timeout` | Detail of a run that passed its timeout. |
 | `msg.schedule_unknown_action` | A job names an action the scheduler does not know; the job is ignored. Placeholders: {job}, {action}. |
 | `msg.schedule_unknown_job` | `schedule run` named a job that is not configured. Placeholder: {job}. |
+| `msg.script_interrupted` | Failure detail of a script call that was interrupted: the interpreter's error, the limit that fired and the limits' sizes. |
+| `msg.script_limit_cpu` | Name of the script CPU-time limit in the line that says which limit interrupted a script call. |
+| `msg.script_limit_request` | Name of the request's client deadline in the line that says which limit interrupted a script call. |
+| `msg.script_limit_wall` | Name of the script wall-clock backstop in the line that says which limit interrupted a script call. |
+| `msg.script_soft_overrun` | Log detail (code script_soft, rate-limited) of a script call that used more thread CPU than its SOFT limit; it was not cut. |
 | `msg.spool_damaged` | Quarantine reason for spool bytes that are not a valid record. |
 | `msg.spool_full` | Printed by `proj` when the spool is full, so the write was not kept. |
 | `msg.spool_io` | Printed by `proj` when the spool could not be written. Placeholder: {err}. |
 | `msg.spool_rewrite_failed` | Log detail when the spool could not be replaced after a drain. The old spool stays whole (the records already applied are applied again, harmlessly, by their write ids). Placeholders: {err} the OS error, {n} unapplied records still in it. |
 | `msg.spool_spooled` | Printed by `proj` when the engine could not take a write and it was spooled. Placeholder: {id}. |
+| `msg.state_budget_over` | The word for a resource budget that has just been breached. |
+| `msg.state_budget_within` | The word for a resource budget that is back within its limit. |
 | `msg.state_open` | Status text for a breaker that is open. Placeholder: {secs}. |
 | `msg.state_stopped` | Status text for a crash-loop stop that is active. Placeholder: {secs}. |
 | `msg.storage_off` | Status value when the daemon runs without storage (unit tests, or before it opened). |
@@ -9447,6 +9897,9 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `msg.tel_loss_window` | Printed with the telemetry summary: how much a crash can lose. Placeholder: {flush_ms}. |
 | `msg.tel_net_status` | Status shown with the model-routing saving once routing decisions exist. Placeholders: {n} decisions, {days} days. |
 | `msg.tel_no_db` | The telemetry rollup cannot run: storage did not open. |
+| `msg.thread_panic` | Log detail when a daemon service thread panics. Placeholders: {thread}, {n}, {max}. |
+| `msg.thread_panic_restart` | Clean restart reason when a daemon service thread exceeds its panic restart cap. Placeholder: {thread}. |
+| `msg.thread_unknown` | Thread name used in panic reports for unnamed threads. |
 | `git.msg_commit_credit` | Block: an inline commit message with an AI self-credit. |
 | `git.msg_commit_file_credit` | Block: a commit message read from a file or heredoc with an AI self-credit. |
 | `git.msg_commit_file_jev` | Block: Jev judged a commit message read from a file or heredoc to credit an AI assistant (paraphrased). |
@@ -9531,6 +9984,7 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | Name | Kind | Unit | Labels | What it counts |
 |---|---|---|---|---|
 | `accept_errors` | counter | errors | code | Accept calls that failed for a reason other than nothing pending (EMFILE, ENFILE, ENOBUFS, ENOMEM), by OS error code (os<n>); each one backs the accept loop off for daemon.accept_error_backoff_ms. |
+| `budget_soft` | counter | requests |  | Requests that used more thread CPU than the SOFT budget (daemon.eval_soft_us); only warned about, every check kept its answer. |
 | `budget_trips` | counter | evaluations |  | Evaluations cut off by the per-request CPU budget. |
 | `bus_dropped` | gauge | notifications |  | Pub/sub notifications a full subscriber queue could not take since the daemon started (the data stays in SQLite). |
 | `bus_published` | gauge | notifications |  | Pub/sub notifications delivered to subscriber queues since the daemon started. |
@@ -9544,6 +9998,7 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `db_hot_bytes` | gauge | bytes |  | Size of hot.db. |
 | `db_hot_wal_bytes` | gauge | bytes |  | Size of hot.db's write-ahead log. |
 | `db_writes` | gauge | writes |  | Writes carried by those transactions since the daemon started. |
+| `deadline_soft` | counter | requests |  | Requests answered after the client's fail-fast wait (client.deadline_ms) but inside the hard deadline; only warned about. |
 | `dispatch_checks` | counter | entries | event, check, answer | Built-in check entries the dispatcher sent to the daemon, by event, check and answer (decided, or defer = its Node hook ran instead) (D58). |
 | `dispatch_entries` | counter | entries | event, entry, outcome, cfg | What the dispatcher's plan did to each table entry of an event it asked the daemon about (D87): ran, skipped_predicate, skipped_max_rules, skipped_budget, shadowed or off, by event, entry, outcome and the hash of the non-default hook configuration the plan was made under (`default` when none). |
 | `errors` | counter | requests |  | Requests answered ERR. |
@@ -9569,6 +10024,7 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `rule_hits` | counter | matches | action | Regex rule matches, by action (deny, warn, context). |
 | `schedule_missed` | counter | runs | job | Runs that caught up a missed window or skipped it, by job (D33). |
 | `schedule_runs` | counter | runs | job, status | Scheduled runs that finished, by job and status (ok, failed, timeout, planned, skipped) (D33). |
+| `script_soft` | counter | calls |  | Script calls that used more thread CPU than their SOFT limit (script.time_limit_ms); only warned about, the call was not cut. |
 | `slow_replies` | counter | replies |  | Replies finished after their client's deadline had passed: slow but healthy (the client fell back to Node), counted apart from errors. |
 | `spool_applied` | counter | writes |  | Spooled writes the daemon applied (D24). |
 | `spool_quarantined` | counter | records |  | Spool records moved to quarantine: damaged, or refused for good by the store (D24). |
@@ -9587,6 +10043,7 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `jev_cooldowns` | counter | calls |  | Jev calls skipped because a vendor's circuit breaker was open. |
 | `jev_cost_micro_usd` | counter | micro-usd |  | Cost of fresh Jev calls in millionths of a US dollar, as reported by the vendor or priced from the reported tokens; a cache hit adds nothing. Never an estimate of what a judge call would have cost. |
 | `jev_latency_us` | histogram | us |  | Latency of fresh Jev network calls. |
+| `jev_slow` | counter | calls |  | Jev calls slower than the SOFT limit (jev.soft_ms); their answers were still used. |
 | `jev_timeouts` | counter | calls |  | Jev calls that ran out of their time budget. |
 | `jev_verdicts` | counter | decisions | id, verdict | What each Jev decision did, by integration and verdict: added or changed (an on-mode outcome moved), would-change (a shadow call that would have moved it), none (Jev agreed with the baseline) or no-answer (it failed or was skipped). |
 | `rt_edges` | counter | edges |  | Workspace state changes emitted. |
@@ -9602,6 +10059,7 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `dswire_actions` | counter | actions | kind, outcome | DevSwarm actions the engine ran or declined from a state change, by kind and outcome. |
 | `dswire_advisory` | counter | advisories |  | Advisories injected into a session. |
 | `dswire_jev_dirty` | counter | marks |  | Workspaces marked dirty for a per-child Jev sweep. |
+| `dswire_mode_change` | counter | changes | mode | Times the DevSwarm layer's mode (devswarm_rt.mode) changed while the daemon ran, by the new mode. |
 | `dswire_stall_actions` | counter | actions | kind, outcome | Pokes and escalations of silent workspaces the engine ran or refused (feature 5), by kind (poke, escalate) and outcome (ok, failed, refused); the same actions, their inputs and the mistake signals found later are in the action log (`ah-engine telemetry actions stall`). |
 | `dswire_standdown` | counter | sweeps | kind | Action sweeps the engine skipped because the action's executor is not the engine. |
 
