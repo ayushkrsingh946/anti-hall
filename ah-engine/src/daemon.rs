@@ -1147,8 +1147,10 @@ fn watchdog(sh: Arc<Shared>) {
     let mut last_cpu_check = Instant::now();
     let mut last_cpu_secs = limits::process_cpu_secs();
     let mut debug_sampler = crate::debug::Sampler::new();
+    health::heartbeat_init();
     loop {
         std::thread::sleep(sh.cfg().watchdog_tick);
+        health::heartbeat();
         // the stall and stuck checks keep running while draining: a drain waits for its workers, so one stuck there would
         // otherwise hold the process (and the singleton lock) until the drain timer. Once a forced exit is scheduled there
         // is nothing left to decide, and a check that kept firing would log the same failure every tick (each one counts
