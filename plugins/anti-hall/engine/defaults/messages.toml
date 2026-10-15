@@ -293,6 +293,22 @@ value = "anti-hall: the engine was still starting, so this {event} was not check
 doc = "Log detail for a hook call that skipped the daemon because a down marker, the breaker or the crash-loop cooldown was active."
 value = "skipped"
 
+[msg.client_hung]
+doc = "Log detail for a hook call that stopped waiting because the daemon's heartbeat is stale, seen for the first time (a suspicion, nothing is signalled). {pid} = the daemon, {age} = the heartbeat's age in ms."
+value = "daemon {pid} heartbeat stale ({age} ms): suspected stopped or wedged"
+
+[msg.client_hung_confirmed]
+doc = "Log detail for a hook call that stopped waiting because the daemon's heartbeat stayed stale and unchanged past client.heartbeat_confirm_ms (a confirmed hang). {pid} = the daemon, {age} = the heartbeat's age in ms, {held} = how long the same heartbeat was seen unchanged in ms."
+value = "daemon {pid} heartbeat stale ({age} ms) and unchanged for {held} ms: stopped or wedged"
+
+[msg.log_hung_spared]
+doc = "Log detail when a client declines to end a daemon it found hung, because the heartbeat moved, or the process generation (pid, start time, executable, state dir) could not be confirmed. {pid} = the pid the heartbeat names, {why} = the stale-heartbeat detail."
+value = "did not end daemon {pid}: its heartbeat moved or its process generation could not be confirmed ({why})"
+
+[msg.log_hung_kill]
+doc = "Log detail when a client ends a hung daemon (verified pid) so a new one can start. {pid} = the ended daemon, {why} = the stale-heartbeat detail."
+value = "ended hung daemon {pid} with SIGKILL: {why}"
+
 [msg.client_timeout]
 doc = "Exchange failure when the hard deadline passed."
 value = "timeout"
