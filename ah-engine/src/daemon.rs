@@ -230,6 +230,11 @@ impl Shared {
     /// Re-read the config files (`ctl reload`, or the watcher once a change has settled) and apply new rate limits.
     fn reload_config(&self) -> crate::cfgstore::Reload {
         let r = self.config.reload();
+        if let crate::cfgstore::Reload::Invalid(code) = &r {
+            // the shipped defaults were rejected (a missing key among the reasons): the previous snapshot keeps serving, checks that
+            // need the new settings cannot run
+            crate::failopen::note(defaults::text("fail_open.reason_missing_key"), defaults::text("fail_open.check_none"), code);
+        }
         self.sync_limits();
         r
     }
@@ -445,6 +450,16 @@ impl Shared {
             "crashloop": c.map_or("clear".to_string(), |d| defaults::render("msg.state_stopped", &[("secs", &(d.as_secs() + 1))])),
             "rules": {"version": rules.version, "count": rules.rules.len(), "fingerprint": format!("{:016x}", rules.fingerprint())},
             "summary": self.telemetry.headline(),
+            "phases": phases_json(&self.telemetry),
+            "wire": self.telemetry.with_metrics(|m| {
+                let c = |k: &str| m.counter("wire_events", &[("kind", defaults::text(k))]);
+                serde_json::json!({
+                    "acked": c("wire.kind_acked"), "delivered": c("wire.kind_delivered"), "retries": c("wire.kind_retry"),
+                    "abandoned": c("wire.kind_abandoned"), "ack_timeouts": c("wire.kind_ack_timeout"),
+                })
+            }),
+            "fail_open": crate::failopen::status(&self.telemetry),
+            "degraded": crate::failopen::state(crate::failopen::window().0) != defaults::text("fail_open.state_ok"),
             "mem_limit": self.rlimit,
             "malloc_stack_logging": cfg.malloc_stack_logging,
             "storage": self.storage,
@@ -457,6 +472,30 @@ impl Shared {
         })
         .to_string()
     }
+}
+
+/// The latency of each phase of a hook call by event: `{event: {phase: {count, p50_us, p95_us, max_us}}}` (the client's connect,
+/// request-to-ACK and ACK-to-response, the daemon's queue wait, judging and delivery, the launcher's startup), and the time of each
+/// check apart under `checks`. Quantiles are upper bucket bounds, as everywhere in the metrics.
+fn phases_json(t: &crate::telemetry::Telemetry) -> serde_json::Value {
+    let snap = t.with_metrics(|m| m.snapshot(""));
+    let mut out = serde_json::Map::new();
+    let mut checks = serde_json::Map::new();
+    for h in snap["histograms"].as_array().into_iter().flatten() {
+        let row = serde_json::json!({"count": h["count"], "p50_us": h["p50_us"], "p95_us": h["p95_us"], "max_us": h["max_us"]});
+        match h["name"].as_str() {
+            Some("hook_phase_us") => {
+                let (event, phase) = (h["labels"]["event"].as_str().unwrap_or_default(), h["labels"]["phase"].as_str().unwrap_or_default());
+                out.entry(event.to_string()).or_insert_with(|| serde_json::json!({})).as_object_mut().map(|o| o.insert(phase.to_string(), row));
+            }
+            Some("check_latency_us") => {
+                checks.insert(h["labels"]["check"].as_str().unwrap_or_default().to_string(), row);
+            }
+            _ => {}
+        }
+    }
+    out.insert("checks".to_string(), serde_json::Value::Object(checks));
+    serde_json::Value::Object(out)
 }
 
 /// Pure-ish request handler (no socket I/O) so it is unit-testable.
@@ -865,19 +904,38 @@ pub fn drain_spool(sh: &Shared) -> crate::spool::Drained {
     r
 }
 
-/// Read a whole request within `read_deadline` and `max` bytes.
-fn read_request(s: &mut UnixStream, cfg: &Config) -> Result<Vec<u8>, &'static str> {
+/// Read a whole request within `read_deadline` and `max` bytes. An ack-mode request (its head line announces its body length, see
+/// `crate::wire`) is complete at that length, with the connection left open for the client's ACK(res); any other runs to end-of-stream.
+/// The flag says which kind it was.
+fn read_request(s: &mut UnixStream, cfg: &Config) -> Result<(Vec<u8>, bool), &'static str> {
     if s.set_nonblocking(true).is_err() {
         return Err(defaults::text("msg.reply_read_error"));
     }
     let deadline = Instant::now() + cfg.read_deadline;
     let (mut buf, mut chunk) = (Vec::new(), vec![0u8; defaults::num("io.small_chunk_bytes") as usize]);
+    // (offset of the first body byte, total request length) once an ack-mode head line has been read
+    let mut announced: Option<usize> = None;
+    let mut head_checked = false;
     loop {
+        if !head_checked && let Some(nl) = buf.iter().position(|&b| b == b'\n') {
+            head_checked = true;
+            announced = crate::wire::announced_len(&String::from_utf8_lossy(&buf[..nl])).and_then(|n| (nl + 1).checked_add(n));
+            if announced.is_some_and(|total| total as u64 > cfg.max_request) {
+                return Err(defaults::text("msg.reply_too_large"));
+            }
+        }
+        if let Some(total) = announced
+            && buf.len() >= total
+        {
+            buf.truncate(total);
+            return Ok((buf, true));
+        }
         match s.read(&mut chunk) {
-            Ok(0) => return Ok(buf),
+            Ok(0) if announced.is_some() => return Err(defaults::text("msg.reply_read_error")), // the client closed before its announced length arrived
+            Ok(0) => return Ok((buf, false)),
             Ok(n) => {
                 buf.extend_from_slice(&chunk[..n]);
-                if buf.len() as u64 > cfg.max_request {
+                if buf.len() as u64 > cfg.max_request && announced.is_none() {
                     return Err(defaults::text("msg.reply_too_large"));
                 }
             }
@@ -894,7 +952,13 @@ fn read_request(s: &mut UnixStream, cfg: &Config) -> Result<Vec<u8>, &'static st
 
 /// Write the reply; false when it could not be written (the client is gone or stopped reading).
 fn write_reply(s: &mut UnixStream, r: &Reply, cfg: &Config) -> bool {
-    let frame = r.frame();
+    write_reply_after(s, &[], r, cfg)
+}
+
+/// [`write_reply`] with `prefix` (an ack-mode client's fail-open line) written first, in the same stream.
+fn write_reply_after(s: &mut UnixStream, prefix: &[u8], r: &Reply, cfg: &Config) -> bool {
+    let mut frame = prefix.to_vec();
+    frame.extend_from_slice(&r.frame());
     let mut written = 0;
     let deadline = Instant::now() + cfg.write_deadline;
     if let Err(e) = s.set_nonblocking(true) {
@@ -928,6 +992,105 @@ fn write_reply(s: &mut UnixStream, r: &Reply, cfg: &Config) -> bool {
         }
     }
     true
+}
+
+/// True when the peer has closed its end: an ack-mode client keeps the connection open until it has the verdict, so an end-of-stream
+/// after the whole request means the client gave up on it (a write to a closed unix socket can still succeed, so the ack alone does not tell).
+fn peer_gone(s: &UnixStream) -> bool {
+    let mut byte = 0u8;
+    // SAFETY: `recv` reads at most one byte into `byte`, a live local, from the socket's own descriptor; MSG_PEEK leaves the stream untouched.
+    let n = unsafe { libc::recv(s.as_raw_fd(), (&mut byte as *mut u8).cast(), 1, libc::MSG_PEEK | libc::MSG_DONTWAIT) };
+    n == 0
+}
+
+/// Write a short control line (an ack) within the write deadline; the error is why the client is unreachable.
+fn write_line(s: &mut UnixStream, bytes: &[u8], cfg: &Config) -> Result<(), String> {
+    let deadline = Instant::now() + cfg.write_deadline;
+    let mut written = 0;
+    while written < bytes.len() {
+        match s.write(&bytes[written..]) {
+            Ok(0) => return Err(defaults::text("msg.reply_write_deadline").into()),
+            Ok(n) => written += n,
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                if !wait_stream(s, libc::POLLOUT, deadline) {
+                    return Err(defaults::text("msg.reply_write_deadline").into());
+                }
+            }
+            Err(e) => return Err(e.to_string()),
+        }
+    }
+    Ok(())
+}
+
+/// What the client said after the reply.
+enum ResWait {
+    /// ACK(res) arrived, `after` the reply was written.
+    Got(crate::wire::ClientPhases, Duration),
+    /// No usable ACK(res), and why.
+    Missing(&'static str),
+}
+
+/// Wait for the client's ACK(res) after the reply was written (`wire.res_wait_ms`). A client that went away closes its end, which
+/// answers at once; only a live client that never confirms costs the whole wait.
+fn wait_res(s: &mut UnixStream) -> ResWait {
+    let began = Instant::now();
+    let deadline = began + defaults::millis("wire.res_wait_ms");
+    let (max, mut buf, mut chunk) = (defaults::num("wire.res_max_bytes") as usize, Vec::new(), vec![0u8; defaults::num("io.small_chunk_bytes") as usize]);
+    loop {
+        match s.read(&mut chunk) {
+            Ok(0) => return ResWait::Missing(defaults::text("wire.why_closed")),
+            Ok(n) => {
+                buf.extend_from_slice(&chunk[..n]);
+                if let Some(nl) = buf.iter().position(|&b| b == b'\n') {
+                    return match crate::wire::parse_ack_res(&String::from_utf8_lossy(&buf[..nl])) {
+                        Some(p) => ResWait::Got(p, began.elapsed()),
+                        None => ResWait::Missing(defaults::text("wire.why_garbled")),
+                    };
+                }
+                if buf.len() > max {
+                    return ResWait::Missing(defaults::text("wire.why_garbled"));
+                }
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                if !wait_stream(s, libc::POLLIN, deadline) {
+                    return ResWait::Missing(defaults::text("wire.why_timeout"));
+                }
+            }
+            Err(_) => return ResWait::Missing(defaults::text("wire.why_closed")),
+        }
+    }
+}
+
+/// Record the phases of an ack-mode call: the daemon's own (queue wait, judging), the client's (connect, request to ACK, ACK to
+/// response, which ride in ACK(res)), the delivery time measured here, and the launcher's counters; or the undelivered verdict.
+fn record_wire(sh: &Shared, event: &str, queue_wait: Duration, judge: Duration, res: ResWait) {
+    let ev = if event.is_empty() { defaults::text("wire.event_none") } else { event };
+    let us = |d: Duration| d.as_micros() as u64;
+    sh.telemetry.with_metrics(|m| {
+        m.inc("wire_events", &[("kind", defaults::text("wire.kind_acked"))]);
+        m.observe("hook_phase_us", &[("event", ev), ("phase", defaults::text("wire.phase_queue_wait"))], us(queue_wait));
+        m.observe("hook_phase_us", &[("event", ev), ("phase", defaults::text("wire.phase_judge"))], us(judge));
+        if let ResWait::Got(p, delivery) = &res {
+            m.inc("wire_events", &[("kind", defaults::text("wire.kind_delivered"))]);
+            m.observe("hook_phase_us", &[("event", ev), ("phase", defaults::text("wire.phase_connect"))], p.connect_us);
+            m.observe("hook_phase_us", &[("event", ev), ("phase", defaults::text("wire.phase_req_ack"))], p.req_ack_us);
+            m.observe("hook_phase_us", &[("event", ev), ("phase", defaults::text("wire.phase_ack_response"))], p.ack_response_us);
+            m.observe("hook_phase_us", &[("event", ev), ("phase", defaults::text("wire.phase_delivery"))], us(*delivery));
+            m.add("wire_events", &[("kind", defaults::text("wire.kind_retry"))], p.retries);
+            let (startup, counters) = crate::wire::launcher_counters(&p.launcher);
+            if let Some(n) = startup {
+                m.observe("hook_phase_us", &[("event", ev), ("phase", defaults::text("wire.phase_launcher_startup"))], n);
+            }
+            for (name, n) in counters {
+                m.add("launcher_counter", &[("name", name.as_str())], n);
+            }
+        }
+    });
+    if let ResWait::Missing(why) = res {
+        crate::failopen::note(defaults::text("wire.reason_undelivered"), ev, &defaults::render("wire.msg_undelivered", &[("why", &why), ("event", &ev)]));
+    }
 }
 
 fn wait_stream(s: &UnixStream, events: libc::c_short, deadline: Instant) -> bool {
@@ -969,7 +1132,7 @@ fn serve_conn(mut s: UnixStream, sh: &Shared, wait: Duration, in_flight: u64) ->
     let cfg = sh.cfg();
     // the client stops waiting `client.deadline_ms` after it sent the request, which is about when it was accepted
     crate::deadline::begin(started.checked_sub(wait).unwrap_or(started));
-    let req = match read_request(&mut s, &cfg) {
+    let (req, wire) = match read_request(&mut s, &cfg) {
         Ok(r) => r,
         Err(why) => {
             sh.stats.errors.fetch_add(1, SeqCst);
@@ -979,10 +1142,23 @@ fn serve_conn(mut s: UnixStream, sh: &Shared, wait: Duration, in_flight: u64) ->
             return After::Continue;
         }
     };
+    if wire {
+        // ACK(req): the request is read and will be judged. A client that already gave up (it closed after its ack timeout and
+        // resent) refuses the write, and then nothing is judged: the resend is the only judging of that request.
+        let gone = if peer_gone(&s) { Err(defaults::text("wire.why_closed").to_string()) } else { Ok(()) };
+        if let Err(why) = gone.and_then(|()| write_line(&mut s, &crate::wire::ack_req(wait.as_micros() as u64), &cfg)) {
+            sh.telemetry.with_metrics(|m| m.inc("wire_events", &[("kind", defaults::text("wire.kind_abandoned"))]));
+            health::log_event("wire", defaults::text("wire.kind_abandoned"), &defaults::render("wire.msg_abandoned", &[("why", &why)]));
+            crate::deadline::end();
+            return After::Continue;
+        }
+    }
+    let acked_at = Instant::now();
     let (request, event) = request_context(&req);
     let _breadcrumb = crate::crash::enter("request", &request, &event, "", "");
     health::write_crash_breadcrumb(&request, &event, "", sh.started.elapsed().as_secs(), sh.memory());
     telemetry::stage_begin();
+    crate::failopen::begin_request();
     let mem_before = crate::memdiag::begin(cfg.effective.boolean("diagnostics.mem_log"));
     let (reply, after) = match catch_unwind(AssertUnwindSafe(|| handle_request_with(&req, sh, &cfg))) {
         Ok(r) => r,
@@ -991,6 +1167,7 @@ fn serve_conn(mut s: UnixStream, sh: &Shared, wait: Duration, in_flight: u64) ->
             sh.telemetry.with_metrics(|m| m.inc("panics", &[]));
             health::log_event("panic", "panic", defaults::text("msg.log_panic"));
             health::record_failure("panic", "panic", defaults::text("msg.log_panic"));
+            crate::failopen::note(defaults::text("fail_open.reason_internal"), &event, defaults::text("msg.log_panic"));
             (Reply::Err(defaults::text("msg.reply_internal").into()), After::Continue)
         }
     };
@@ -1011,8 +1188,23 @@ fn serve_conn(mut s: UnixStream, sh: &Shared, wait: Duration, in_flight: u64) ->
             ]
         )
     );
+    let judge = acked_at.elapsed();
+    match &reply {
+        Reply::Busy => crate::failopen::note(
+            defaults::text("fail_open.reason_busy"),
+            if event.is_empty() { defaults::text("fail_open.check_none") } else { &event },
+            defaults::text("msg.reply_busy_detail"),
+        ),
+        Reply::Err(why) if !why.is_empty() => crate::failopen::note(
+            defaults::text("fail_open.reason_internal"),
+            if event.is_empty() { defaults::text("fail_open.check_none") } else { &event },
+            why,
+        ),
+        _ => {}
+    }
+    let fo_line = wire.then(|| crate::failopen::take_request().map(|(r, c)| crate::wire::fail_open_line(&r, &c))).flatten().unwrap_or_default();
     let late = crate::deadline::soft_remaining() == Some(Duration::ZERO);
-    let delivered = write_reply(&mut s, &reply, &cfg);
+    let delivered = write_reply_after(&mut s, &fo_line, &reply, &cfg);
     if delivered {
         sh.telemetry.stage_commit();
     } else {
@@ -1020,6 +1212,7 @@ fn serve_conn(mut s: UnixStream, sh: &Shared, wait: Duration, in_flight: u64) ->
         telemetry::stage_discard();
     }
     crate::deadline::settle_staged(delivered);
+    let res = wire.then(|| if delivered { wait_res(&mut s) } else { ResWait::Missing(defaults::text("wire.why_closed")) });
     if late {
         // answered after the client's deadline: slow but healthy, which is not a failure of the engine
         SLOW_REPLIES.fetch_add(1, SeqCst);
@@ -1028,6 +1221,11 @@ fn serve_conn(mut s: UnixStream, sh: &Shared, wait: Duration, in_flight: u64) ->
     }
     crate::deadline::end();
     let (event, session) = crate::load::take_request();
+    crate::failopen::drain_into(&sh.telemetry);
+    crate::failopen::sync_notice(false);
+    if let Some(res) = res {
+        record_wire(sh, &event, wait, judge, res);
+    }
     if let (Some(before), Some(after_m)) = (mem_before, mem_after) {
         let kind = req.split(|b| *b == b' ' || *b == b'\n').next().map(|k| String::from_utf8_lossy(k).into_owned()).unwrap_or_default();
         crate::memdiag::finish(
@@ -1113,6 +1311,7 @@ fn begin_drain(sh: &Arc<Shared>, why: &str, forced_exit: bool) {
     let first = !sh.draining.swap(true, SeqCst);
     if first {
         crate::discard::harmless(std::fs::remove_file(paths::socket())); // keep: cleanup that raced; an absent file is the goal state
+        crate::wire::withdraw();
     }
     let armed = if forced_exit { &sh.forced_timer } else { &sh.drain_timer };
     if armed.swap(true, SeqCst) {
@@ -1524,6 +1723,7 @@ pub fn serve() {
             }
         }));
     }
+    crate::wire::announce();
     for i in 0..sh.cfg().workers {
         let s = sh.clone();
         let name: &'static str = "worker";
@@ -1559,6 +1759,7 @@ pub fn serve() {
         spawn_service(&sh, "telemetry_flusher", Arc::new(move || telemetry_flusher(s.clone())));
     }
     accept_loop(&sh, &listener);
+    crate::wire::withdraw();
     crate::dssup::ingest::join_all(); // a monitor call in flight has already taken its messages off the native queue
     if let Some(db) = &sh.db {
         sh.telemetry.flush(); // telemetry recorded since the last flush (D78)
@@ -1764,6 +1965,8 @@ fn accept_loop(sh: &Arc<Shared>, listener: &UnixListener) {
                 drop(q);
                 sh.stats.busy.fetch_add(1, SeqCst);
                 sh.telemetry.with_metrics(|m| m.inc("busy_replies", &[]));
+                crate::failopen::note(defaults::text("fail_open.reason_busy"), defaults::text("fail_open.check_none"), defaults::text("msg.reply_busy_detail"));
+                crate::failopen::drain_into(&sh.telemetry);
                 let mut s = s;
                 s.set_nonblocking(true).ok_logged("daemon_busy_nonblocking");
                 let frame = Reply::Busy.frame();

@@ -961,7 +961,7 @@ pub fn hook_main(args: &[String]) -> i32 {
         }
         // Non-guard events cannot block; keep matching Node's replacement-character decode there.
         let raw = String::from_utf8_lossy(raw_bytes).to_string();
-        let o = run_inner(&raw, &a, payload.file.as_ref(), !over_cap && utf8.is_ok());
+        let o = crate::failopen::with_notice(&raw, &a.event, run_inner(&raw, &a, payload.file.as_ref(), !over_cap && utf8.is_ok()));
         crate::discard::harmless(std::io::stderr().write_all(o.err.as_bytes())); // keep: a closed pipe leaves nobody to tell
         let mut so = std::io::stdout();
         crate::discard::harmless(so.write_all(o.out.as_bytes())); // keep: a closed pipe leaves nobody to tell

@@ -455,3 +455,19 @@ value = { date = "2026-10-05", source = "fitted exactly on 480 B1 runs, 2026-10-
 [impact.savings_method]
 doc = "How a model-routing saving is computed, shown next to every figure so it is never read as a measurement."
 value = "estimate: tokens the routed agent actually used x (price of the model it asked for or inherited - price of the model selected); it assumes the original model would have used the same tokens"
+
+[metric.hook_phase_us]
+doc = "Where the time of a hook call goes, by hook event and phase: the client's connect, request-to-ACK, ACK-to-response; the daemon's queue wait, judging and delivery (reply written to ACK(res)); the launcher's startup."
+value = { kind = "histogram", unit = "us", labels = ["event", "phase"] }
+
+[metric.wire_events]
+doc = "Ack protocol events by kind: acked, delivered, ack_timeout, retry, abandoned."
+value = { kind = "counter", unit = "events", labels = ["kind"] }
+
+[metric.launcher_counter]
+doc = "Counters the launcher reports with each call (soft and hard limit hits, retries, fallbacks, ...), summed by name."
+value = { kind = "counter", unit = "events", labels = ["name"] }
+
+[metric.fail_open]
+doc = "Engine-level fail-opens by reason and check: the request was answered without the check's verdict (missing_key, deadline_cut, script_timeout, jev_breaker_open, busy, internal_error, undelivered_verdict)."
+value = { kind = "counter", unit = "events", labels = ["reason", "check"] }

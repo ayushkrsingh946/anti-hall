@@ -1146,6 +1146,9 @@ impl Jev {
         };
         let asked = r.is_some() && backend != Backend::Cache;
         let breaker = if asked && self.client.breaker_open_for(s.transport, Some(&req.id)) { "open" } else { "closed" };
+        if breaker == "open" {
+            crate::failopen::note(defaults::text("fail_open.reason_jev_breaker"), &req.id, mode.as_str());
+        }
         let error = reason.map(ToString::to_string);
         emit::jev_call(&emit::JevCall {
             integration: &req.id,

@@ -703,12 +703,14 @@ pub fn cut_at_deadline(name: &str, event: &str) -> bool {
 /// A call cut at its request's client deadline: no failure of the script (nothing is counted as an error), the check defers to
 /// its own Node hook, which the client runs for this entry alone.
 pub fn cut(name: &str, event: &str) -> Verdict {
+    crate::failopen::note(defaults::text("fail_open.reason_deadline"), name, event);
     crate::discard::note("script_deadline", &defaults::render("script.msg_deadline_cut", &[("check", &name), ("event", &event)]));
     Verdict::Defer
 }
 
 fn call(name: &str, libs: &Fingerprint, own: &Fingerprint, payload: &Value, opts: &Value, event: &str, st: Settings) -> Option<Verdict> {
     let mut was_cut = false;
+    let mut timed_out = false;
     let r = POOL.with(|cell| -> Result<Option<Verdict>, String> {
         let mut slot = cell.borrow_mut();
         if slot.is_none() {
@@ -735,6 +737,7 @@ fn call(name: &str, libs: &Fingerprint, own: &Fingerprint, payload: &Value, opts
                 Ok(s.and_then(|s| s.to_string().ok()).unwrap_or_else(|| "null".into()))
             });
             was_cut = out.is_err() && pool.past_request();
+            timed_out = out.is_err() && matches!(Trip::of(pool.deadline.trip.load(Ordering::Relaxed)), Some(Trip::Cpu | Trip::Wall)); // a limit of its own, not the client's deadline
             pool.note_soft(name, event, limit);
             let out = out.map_err(|e| pool.deadline.explain(&e, limit));
             pool.disarm();
@@ -747,6 +750,10 @@ fn call(name: &str, libs: &Fingerprint, own: &Fingerprint, payload: &Value, opts
     match r {
         Ok(v) => v,
         Err(_) if was_cut => Some(cut(name, event)),
+        Err(e) if timed_out => {
+            crate::failopen::note(defaults::text("fail_open.reason_script_timeout"), name, &e);
+            Some(failed(name, event, &e))
+        }
         Err(e) => Some(failed(name, event, &e)),
     }
 }

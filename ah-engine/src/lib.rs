@@ -35,6 +35,7 @@ pub mod dsact;
 pub mod dssup;
 pub mod dswire;
 pub mod error;
+pub mod failopen;
 pub mod frame;
 pub mod gate;
 pub mod ghrt;
@@ -83,6 +84,7 @@ pub mod tier;
 pub mod transcript;
 pub mod wakew;
 pub mod watch;
+pub mod wire;
 
 /// Version this build reports and compares for handoff. The `version` env override (plugin
 /// version in production, arbitrary in tests).

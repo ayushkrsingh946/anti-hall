@@ -26,6 +26,10 @@ value = "AH_ENGINE_DONE_FILE"
 doc = "A file the client creates while it waits on the daemon and keeps when the daemon answered BUSY/ERR, so the call is handed to its Node hooks; it removes it when the daemon answered with nothing left for Node to decide (an OK reply whose entries defer to Node hooks keeps it until the call's final result is ready), gave no reply in the wait window, or none was there. The reliability wrapper sets it, so that its watchdog can tell a call that is still deciding (give it up to client.slow_fallback_max_ms) from a hung engine (kill at the normal budget)."
 value = "AH_ENGINE_WAIT_FILE"
 
+[env.fail_open_file]
+doc = "A file the client appends one line to (`<reason> <check>`) for every engine-level fail-open the daemon reported in a reply (GitHub #201). The launcher sets it inside its per-call run directory and counts the lines after the engine exits, so its own stats and log know the call failed open."
+value = "AH_ENGINE_FAIL_OPEN_FILE"
+
 [env.rules]
 doc = "Overrides the rules file path."
 value = "AH_ENGINE_RULES"
@@ -674,6 +678,19 @@ value = 250
 min = 1
 unit = "ms"
 
+[client.wrapper_kill_grace_ms]
+doc = "How long the hook launcher (ah-hook) waits after SIGTERM to a timed-out engine's process group before it sends SIGKILL. The soft stop lets the client write its markers; the hard stop bounds the call."
+value = 200
+min = 0
+max = 5000
+unit = "ms"
+
+[client.wrapper_default_timeout_s]
+doc = "Last-resort hook budget for the hook launcher (ah-hook) when the fallback list has no row for the event: the event's hook timeout it assumes, which also caps the slow-daemon window and the cold-start wait."
+value = 10
+min = 1
+unit = "s"
+
 [client.wrapper_watchdog_poll_ms]
 doc = "Poll interval for the hook wrapper millisecond watchdog."
 value = 2
@@ -1092,3 +1109,319 @@ value = "failed printing to std"
 [crash.closed_pipe_marker]
 doc = "Text of the I/O error that marks the closed-pipe panic (see `crash.closed_pipe_prefix`)."
 value = "Broken pipe"
+
+# ---- the hook launcher (ah-launcher, binary `ah-hook`): its own limits, names and switches ------------------------------------
+# The launcher is the bootloader in front of the engine; it reads these at start. A missing or invalid file falls back to the
+# launcher's built-in copy (ah-launcher/src/builtin.rs, kept equal to this file by a test).
+
+[launcher.stdin_idle_ms]
+doc = "How long the launcher waits for the host to deliver more of the hook payload before it stops reading and hands the engine what it has."
+value = 1000
+min = 1
+unit = "ms"
+
+[launcher.write_timeout_ms]
+doc = "How long a write of the payload to the engine may make no progress (the engine is not reading) before the launcher stops feeding it."
+value = 1000
+min = 1
+unit = "ms"
+
+[launcher.connect_timeout_ms]
+doc = "Bound on the launcher's probe connection to the daemon socket (it only tells a live daemon from a stale socket file)."
+value = 50
+min = 1
+unit = "ms"
+
+[launcher.spawn_retry_max]
+doc = "How many times the launcher retries starting the engine when the start itself failed for a transient reason (resource exhaustion, binary busy). Never after the engine was started."
+value = 2
+max = 10
+unit = "count"
+
+[launcher.spawn_backoff_base_ms]
+doc = "First wait between engine start retries; each retry doubles it up to launcher.spawn_backoff_cap_ms."
+value = 5
+min = 1
+unit = "ms"
+
+[launcher.spawn_backoff_cap_ms]
+doc = "Longest wait between engine start retries (before jitter). Every wait also stays inside the event's hard deadline."
+value = 40
+min = 1
+unit = "ms"
+
+[launcher.spawn_jitter_pct]
+doc = "Random share (percent) taken off each retry wait so concurrent launchers do not retry in step."
+value = 50
+max = 100
+unit = "percent"
+
+[launcher.io_chunk_bytes]
+doc = "Size of the fixed buffer the launcher moves the payload and the engine's output with. Memory stays this size however large the payload is."
+value = 65536
+min = 512
+unit = "bytes"
+
+[launcher.payload_prefix_bytes]
+doc = "How much of the payload the launcher keeps in memory: the part it inspects (session id, stop flag) and replays to the fallback runner. The rest is streamed through and never held."
+value = 1048576
+min = 4096
+unit = "bytes"
+
+[launcher.out_cap_bytes]
+doc = "Most engine standard output the launcher keeps. A hook answer is small; more than this is treated as a failed engine and the hook is let through."
+value = 4194304
+min = 4096
+unit = "bytes"
+
+[launcher.err_cap_bytes]
+doc = "Most engine standard error the launcher keeps (same rule as launcher.out_cap_bytes)."
+value = 1048576
+min = 4096
+unit = "bytes"
+
+[launcher.stdin_soft_bytes]
+doc = "Soft limit on the payload size: past it the launcher still streams the payload, warns and counts it."
+value = 8388608
+min = 1
+unit = "bytes"
+
+[launcher.stdin_hard_bytes]
+doc = "Hard limit on the payload size: the launcher stops reading there, closes the engine's input and counts it."
+value = 536870912
+min = 1
+unit = "bytes"
+
+[launcher.mem_soft_bytes]
+doc = "Soft limit on the launcher's own heap: past it the launcher warns and counts it (at exit)."
+value = 16777216
+min = 1
+unit = "bytes"
+
+[launcher.mem_hard_bytes]
+doc = "Hard limit on the launcher's own heap, enforced by its counting allocator and checked before any buffer grows: past it the launcher stops the engine, says so on stderr and lets the hook through (exit 0)."
+value = 67108864
+min = 1
+unit = "bytes"
+
+[launcher.cpu_soft_ms]
+doc = "Soft limit on the launcher's own CPU time: past it the launcher warns and counts it (at exit)."
+value = 500
+min = 1
+unit = "ms"
+
+[launcher.cpu_hard_s]
+doc = "Hard limit on the launcher's own CPU time (RLIMIT_CPU, whole seconds): past it the launcher stops the engine and lets the hook through. The engine does not inherit it."
+value = 5
+min = 1
+unit = "s"
+
+[launcher.wall_hard_margin_ms]
+doc = "Margin added to the longest planned path of a call (cold wait, engine budget, kill grace) to get the wall-clock backstop (SIGALRM): at it the launcher stops the engine and lets the hook through. Never beyond the event's hook timeout."
+value = 500
+min = 1
+unit = "ms"
+
+[launcher.crashloop_window_s]
+doc = "Window over which the launcher counts the daemon starts it asked for."
+value = 60
+min = 1
+unit = "s"
+
+[launcher.crashloop_max]
+doc = "Daemon starts the launcher may ask for inside launcher.crashloop_window_s; past it the launcher stops asking and the hook is let through."
+value = 5
+min = 1
+unit = "count"
+
+[launcher.log_soft_bytes]
+doc = "Size at which the launcher's failure log is rotated (one previous file is kept)."
+value = 262144
+min = 1024
+unit = "bytes"
+
+[launcher.log_hard_bytes]
+doc = "Size at which the launcher's failure log stops accepting lines: further lines are dropped and the drops counted."
+value = 1048576
+min = 1024
+unit = "bytes"
+
+[launcher.log_line_max]
+doc = "Longest line the launcher writes to its failure log; longer lines are cut."
+value = 512
+min = 64
+unit = "bytes"
+
+[launcher.log_rotate_min_s]
+doc = "Fewest seconds between two rotations of the launcher's failure log. A flood of lines therefore grows the current file to launcher.log_hard_bytes (then lines are dropped and counted) instead of rotating the older history away."
+value = 60
+min = 0
+unit = "s"
+
+[launcher.spool_max_bytes]
+doc = "Most of a payload larger than launcher.payload_prefix_bytes that the launcher copies to a private file in its run directory, so the shell fallback runner can be given the whole payload if the engine defers. Past it the payload is still streamed to the engine but cannot be replayed to the fallback runner."
+value = 67108864
+min = 0
+unit = "bytes"
+
+[launcher.run_done_file]
+doc = "Name, inside a per-call run directory, of the file the engine creates when it has dispatched the event."
+value = "done"
+
+[launcher.run_wait_file]
+doc = "Name, inside a per-call run directory, of the file the engine creates while it waits on a live daemon."
+value = "wait"
+
+[launcher.run_fail_open_file]
+doc = "Name, inside a per-call run directory, of the file the engine client appends the call's reported fail-opens to (see env.fail_open_file)."
+value = "fail_open"
+
+[launcher.run_spool_file]
+doc = "Name, inside a per-call run directory, of the private copy of a large payload (see launcher.spool_max_bytes)."
+value = "payload"
+
+[launcher.io_drain_ms]
+doc = "How long, after the engine has exited, the launcher waits for its output pipes to reach end of file before it treats a helper still holding them as a failure."
+value = 100
+min = 1
+unit = "ms"
+
+[launcher.selftest_engine_timeout_ms]
+doc = "How long --selftest lets the engine binary run its version check before it calls the binary broken."
+value = 3000
+min = 100
+unit = "ms"
+
+[launcher.reaper]
+doc = "1 = the launcher starts a tiny watcher that kills the engine's process group if the launcher is killed without cleaning up (SIGKILL); 0 = no watcher."
+value = 1
+max = 1
+unit = "flag"
+
+[launcher.stats_env]
+doc = "Environment variable through which the launcher hands its counters to the engine (sent inside the request, never written per call)."
+value = "AH_LAUNCHER_STATS"
+
+[launcher.knob_engine_bin]
+doc = "Test-only: environment variable that replaces the engine binary (honoured only when the test flag is set)."
+value = "AH_ENGINE_BIN"
+
+[launcher.knob_fallback_list]
+doc = "Test-only: environment variable that replaces the fallback list file."
+value = "AH_FALLBACK_LIST"
+
+[launcher.knob_fallback_map]
+doc = "Test-only: environment variable that replaces the fallback map file."
+value = "AH_FALLBACK_MAP"
+
+[launcher.knob_timeout_s]
+doc = "Test-only: environment variable that sets the hook budget in whole seconds."
+value = "AH_HOOK_TIMEOUT_S"
+
+[launcher.knob_timeout_ms]
+doc = "Test-only: environment variable that sets the hook budget in milliseconds."
+value = "AH_HOOK_TIMEOUT_MS"
+
+[launcher.knob_kill_grace_s]
+doc = "Test-only: environment variable that sets the kill grace in whole seconds."
+value = "AH_KILL_GRACE_S"
+
+[launcher.knob_sweep_age_s]
+doc = "Test-only: environment variable of the shell wrapper's run-directory sweep age (accepted for parity, unused by the launcher)."
+value = "AH_HOOK_SWEEP_AGE_S"
+
+[launcher.knob_fault]
+doc = "Test-only: environment variable that injects a fault into the launcher (panic, hang, spin or alloc) so its never-panic and hard-limit paths can be tested end to end."
+value = "AH_LAUNCHER_FAULT"
+
+[launcher.test_flag_env]
+doc = "Environment variable that must be 1 for the test-only knobs to be honoured."
+value = "AH_WRAPPER_TEST"
+
+[launcher.diag_env]
+doc = "Test-only: environment variable naming a file the launcher appends its diagnostic lines to (an absolute path)."
+value = "AH_ENGINE_WRAPPER_DIAG"
+
+[launcher.in_process_env]
+doc = "Environment variable that, set to 1, runs the engine's dispatch in process; the launcher then ignores the daemon-down marker."
+value = "AH_ENGINE_DISPATCH_IN_PROCESS"
+
+[launcher.plugin_root_envs]
+doc = "Environment variables the host uses to name the plugin root, in the order the launcher tries them."
+value = ["CLAUDE_PLUGIN_ROOT", "PLUGIN_ROOT"]
+
+[launcher.hosts]
+doc = "The hosts the launcher serves (the --host values); the first is the default."
+value = ["claude", "codex"]
+
+[launcher.fallback_list_claude]
+doc = "File name, inside the plugin's hooks directory, of the Claude fallback list (per-event timeouts)."
+value = "ah-fallback.list"
+
+[launcher.fallback_map_claude]
+doc = "File name, inside the plugin's hooks directory, of the Claude fallback map."
+value = "ah-fallback.map.json"
+
+[launcher.fallback_list_codex]
+doc = "File name, inside the plugin's hooks directory, of the Codex fallback list."
+value = "ah-fallback.codex.list"
+
+[launcher.fallback_map_codex]
+doc = "File name, inside the plugin's hooks directory, of the Codex fallback map."
+value = "ah-fallback.codex.map.json"
+
+[launcher.script_hook]
+doc = "Shell wrapper in the plugin's hooks directory; the launcher runs its fallback rows through it."
+value = "ah-hook.sh"
+
+[launcher.script_integrity]
+doc = "Integrity script in the plugin's hooks directory (failure counting and rollback)."
+value = "ah-engine-integrity.sh"
+
+[launcher.script_bootstrap]
+doc = "Bootstrap script in the plugin's hooks directory (installs the engine binary)."
+value = "ah-engine-bootstrap.sh"
+
+[launcher.script_doctor]
+doc = "Doctor script in the plugin's hooks directory (the --doctor mode runs it)."
+value = "ah-doctor.sh"
+
+[launcher.engine_lock_file]
+doc = "File name, in the plugin root, of the engine lock: when present the session start may bootstrap the engine."
+value = "ah-engine.lock"
+
+[launcher.engine_bin_rel]
+doc = "Path of the installed engine binary below the engine state directory."
+value = "bin/ah-engine"
+
+[launcher.engine_bin_name]
+doc = "Name of the engine binary looked up on PATH when none is installed."
+value = "ah-engine"
+
+[launcher.run_base_dir]
+doc = "Directory, below the anti-hall base directory, for the launcher's private per-call run directories."
+value = "tmp"
+
+[launcher.tmp_dir_prefix]
+doc = "Prefix of the private directory the launcher makes under the temp directory when the home directory is unusable (followed by the user id)."
+value = "ah-hook-"
+
+[launcher.run_dir_prefix]
+doc = "Prefix of a per-call run directory (followed by the launcher's process id)."
+value = "ah-launch."
+
+[files.launcher_log]
+doc = "The launcher's bounded failure log, inside the state directory."
+value = "launcher.log"
+
+[files.launcher_drops]
+doc = "Count of the log lines the launcher dropped at the hard log size, inside the state directory."
+value = "launcher.drops"
+
+[files.launcher_spawn_lock]
+doc = "Lock file that lets only one launcher at a time ask for a cold daemon start, inside the state directory."
+value = "launcher.spawn.lock"
+
+[files.launcher_spawn_log]
+doc = "Times (epoch ms, one per line) of the daemon starts the launcher asked for, inside the state directory; the crash-loop window counts them."
+value = "launcher.spawns"

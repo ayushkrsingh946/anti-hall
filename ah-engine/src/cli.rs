@@ -297,10 +297,9 @@ fn cmd_serve(_: &Parsed) -> i32 {
 }
 
 fn cmd_hook(p: &Parsed) -> i32 {
-    if crate::dispatch::requested(&p.rest) {
-        return crate::dispatch::hook_main(&p.rest);
-    }
-    client::hook_main(&p.rest)
+    let code = if crate::dispatch::requested(&p.rest) { crate::dispatch::hook_main(&p.rest) } else { client::hook_main(&p.rest) };
+    client::finish_ack(); // the verdict is printed and flushed: tell the daemon it arrived (ack protocol, `crate::wire`)
+    code
 }
 
 fn cmd_status(p: &Parsed) -> i32 {

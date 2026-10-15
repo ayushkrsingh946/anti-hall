@@ -714,3 +714,139 @@ value = "more workers busy than the {workers} there are"
 [msg.inv_violated]
 doc = "Debug-log line for a violated runtime invariant (checked only in debug mode). Placeholder: {what}, the specific check that failed."
 value = "INVARIANT VIOLATED: {what}"
+
+[msg.launcher_ignored_knobs]
+doc = "Printed when test-only variables are set without the test flag; {vars} lists them."
+value = "anti-hall: ignoring test-only variables (need AH_WRAPPER_TEST=1): {vars}"
+
+[msg.launcher_bad_host]
+doc = "Printed when --host names a host the launcher does not serve; the default host is used."
+value = "anti-hall: ignoring unknown --host value"
+
+[msg.launcher_no_doctor]
+doc = "Printed by --doctor when the doctor script is missing."
+value = "anti-hall: ah-doctor.sh is missing next to ah-hook.sh; reinstall the plugin"
+
+[msg.launcher_doctor_failed]
+doc = "Printed by --doctor when the doctor script cannot be started; {err} is the reason."
+value = "anti-hall: cannot run ah-doctor.sh: {err}"
+
+[msg.launcher_fail_closed]
+doc = "Printed when a guard event is blocked because the launcher cannot run it safely; {event} is the event, {why} the reason."
+value = "anti-hall: fail closed for {event}: {why}"
+
+[msg.launcher_fail_open_stop]
+doc = "Printed instead of blocking when the event is a stop hook that is already active; {event} and {why} as above."
+value = "anti-hall: fail open for {event} because stop_hook_active is true: {why}"
+
+[msg.launcher_why_timeout_s]
+doc = "Reason: the seconds budget knob is not a positive integer."
+value = "AH_HOOK_TIMEOUT_S must be a positive integer"
+
+[msg.launcher_why_timeout_ms]
+doc = "Reason: the milliseconds budget knob is not a positive integer."
+value = "AH_HOOK_TIMEOUT_MS must be a positive integer"
+
+[msg.launcher_why_fallback_unavailable]
+doc = "Reason: the fallback runner could not be started."
+value = "fallback runner unavailable"
+
+[msg.launcher_why_fallback_died]
+doc = "Reason: the fallback runner died without an exit code."
+value = "fallback runner died"
+
+[msg.launcher_why_fallback_payload]
+doc = "Reason: the payload was larger than the launcher keeps, so the fallback runner cannot be given it."
+value = "payload too large to replay to the fallback runner"
+
+[msg.launcher_internal]
+doc = "Printed (once) when the launcher itself failed and let the hook through; {what} is the failure."
+value = "anti-hall: launcher internal failure, hook let through: {what}"
+
+[msg.launcher_mem_hard]
+doc = "Printed when the launcher passed its hard heap limit and let the hook through."
+value = "anti-hall: launcher memory limit reached, hook let through"
+
+[msg.launcher_cpu_hard]
+doc = "Printed when the launcher passed its hard CPU limit and let the hook through."
+value = "anti-hall: launcher CPU limit reached, hook let through"
+
+[msg.launcher_wall_hard]
+doc = "Printed when the launcher passed its wall-clock backstop and let the hook through."
+value = "anti-hall: launcher time limit reached, hook let through"
+
+[msg.launcher_config_invalid]
+doc = "Log line when a defaults file is missing or invalid and the built-in copy is used; {file} names it."
+value = "defaults file unusable, built-in values used: {file}"
+
+[msg.launcher_selftest_ok]
+doc = "Selftest line for a passing check; {check} names it."
+value = "ok {check}"
+
+[msg.launcher_selftest_fail]
+doc = "Selftest line for a failing check; {check} names it, {why} the reason."
+value = "FAIL {check}: {why}"
+
+[msg.launcher_st_unusable]
+doc = "Selftest reason: a defaults file is missing or invalid; {files} names them."
+value = "unusable: {files}"
+
+[msg.launcher_st_missing]
+doc = "Selftest reason: shipped settings the launcher needs are missing or of the wrong type; {keys} names them."
+value = "missing or wrong type: {keys}"
+
+[msg.launcher_st_incoherent]
+doc = "Selftest reason: settings contradict each other; {rules} names the broken rules."
+value = "incoherent: {rules}"
+
+[msg.launcher_st_no_state]
+doc = "Selftest reason: there is no state directory."
+value = "no state directory (home directory unset or not absolute)"
+
+[msg.launcher_st_socket_len]
+doc = "Selftest reason: the socket path is longer than the operating system allows."
+value = "socket path is {len} bytes, limit {max}"
+
+[msg.launcher_st_no_engine]
+doc = "Selftest reason: no engine binary is installed."
+value = "no executable engine binary"
+
+[msg.launcher_st_not_exec]
+doc = "Selftest reason: the named engine binary is not an executable file."
+value = "not an executable file: {path}"
+
+[msg.launcher_st_ver_empty]
+doc = "Selftest reason: the engine's version check printed nothing."
+value = "the version check printed nothing"
+
+[msg.launcher_st_ver_exit]
+doc = "Selftest reason: the engine's version check failed with exit code {code}."
+value = "the version check exited {code}"
+
+[msg.launcher_st_ver_timeout]
+doc = "Selftest reason: the engine's version check did not finish in {ms} ms."
+value = "the version check did not finish in {ms} ms"
+
+[msg.launcher_st_cannot_start]
+doc = "Selftest reason: the engine binary could not be started; {errno} is the system error number."
+value = "cannot start (errno {errno})"
+
+[msg.launcher_st_mem_below]
+doc = "Selftest reason: the hard heap limit is below the heap already in use."
+value = "hard heap limit is below the current heap"
+
+[msg.launcher_st_no_wall]
+doc = "Selftest reason: the wall-clock backstop could not be armed."
+value = "cannot arm the wall-clock backstop"
+
+[msg.client_ack_timeout]
+doc = "Health-log and exchange text: the daemon did not acknowledge a request within wire.ack_timeout_ms."
+value = "no ACK(req) from the daemon"
+
+[msg.reply_busy_detail]
+doc = "Fail-open detail of a request that was shed (queue full or rate limited) and answered BUSY."
+value = "request shed under load"
+
+[msg.client_closed_before_ack]
+doc = "Exchange text: the daemon closed the connection before it acknowledged the request."
+value = "closed before ACK(req)"

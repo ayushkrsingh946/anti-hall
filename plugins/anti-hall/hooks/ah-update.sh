@@ -12,7 +12,7 @@
 #                                                   files when the live kit is installed)
 #   ah-update.sh --rollback                         restore the previous binary (bin/ah-engine.prev); run twice to toggle
 #   ah-update.sh --auto                             honour the engine.autoUpdate setting (off|stable|dev) and the daily limit
-# options: --dry-run (verify + smoke test, install nothing)  --extract-to PATH (verify + smoke test, write the binary to PATH and the
+# options: --launcher FILE (the launcher to self-test the candidate engine with; default: the plugin's hooks/ah-hook)  --dry-run (verify + smoke test, install nothing)  --extract-to PATH (verify + smoke test, write the binary to PATH and the
 #          recorded commit, if any, to PATH.commit, install nothing: used by the live-kit installer)  --no-restart  --no-plugin  --live-select LIST  -v  --config FILE
 #          --json (accepted, ignored)
 # Online sources are verified against the release's SHA256SUMS and, when `gh` is installed and logged in, the GitHub build
@@ -28,7 +28,7 @@
 # Exit: 0 done / already current / nothing to do, 1 failed (old binary kept), 2 usage, 3 --yes needed.
 
 from_file=; sha_arg=; channel=; do_rollback=0; auto=0; yes=0; dry=0; no_restart=0; no_plugin=0; verbose=0
-cfg_file=; live_select=all-agreeing; extract_to=
+cfg_file=; live_select=all-agreeing; extract_to=; launcher_arg=
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --from) from_file=${2:-}; shift ;;
@@ -43,6 +43,7 @@ while [ "$#" -gt 0 ]; do
     --no-plugin) no_plugin=1 ;;
     --live-select) live_select=${2:-all-agreeing}; shift ;;
     --config) cfg_file=${2:-}; shift ;;
+    --launcher) launcher_arg=${2:-}; shift ;;
     -v) verbose=1 ;;
     --json) ;;
     -h|--help) sed -n '2,/^# Exit:/p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
@@ -70,6 +71,8 @@ default_channel=$(cfg default_channel); sums_asset=$(cfg sums_asset); commit_ass
 per_page=$(num list_per_page 30); t_conn=$(num connect_timeout_s 10); t_dl=$(num download_timeout_s 180); run_s=$(num run_timeout_s 20)
 t_git=$(num git_timeout_s 240); t_live=$(num go_live_timeout_s 600); max_bytes=$(num max_download_bytes 134217728)
 auto_interval=$(num auto_interval_s 86400)
+launcher_bin=$(cfg launcher_bin); selftest_s=$(num launcher_selftest_timeout_s 20)
+case "$selftest_s" in 0) selftest_s=20 ;; esac
 if [ "$test_mode" -eq 1 ]; then
   api_base=${AH_UPDATE_API_BASE:-$api_base}; download_base=${AH_UPDATE_DOWNLOAD_BASE:-$download_base}; git_url=${AH_UPDATE_GIT_URL:-$git_url}
 fi
@@ -422,6 +425,26 @@ chmod 755 "$tmp/new"
 # ---- smoke test --------------------------------------------------------------------------------------------------------------
 smoke "$tmp/new" "$want_version" || fail "the new engine does not run on this machine (see the smoke test line above)" "$(unchanged); $bin was not replaced" "try the other channel (ah-update.sh --channel $ch_stable) or report the platform and the line above at https://github.com/$repo/issues"
 say "smoke test: ok (engine $smoke_version)"
+
+# ---- launcher self-test (#199) -------------------------------------------------------------------------------------------------
+# The launcher (`ah-hook`) must accept the candidate engine before anything is swapped in: `ah-hook --selftest --engine <new>` checks
+# its settings, the socket path, the engine binary and the limits. A rejection aborts the update with the installed engine kept.
+launcher_path=${launcher_arg:-}
+[ -n "$launcher_path" ] || { [ -n "$launcher_bin" ] && launcher_path=$proot/$launcher_bin; }
+if [ -n "$launcher_path" ] && [ -x "$launcher_path" ] && [ -f "$launcher_path" ]; then
+  AH_ENGINE_PLUGIN_ROOT=$proot AH_ENGINE_DIR=$tmp/state blim "$tmp/selftest.out" "$selftest_s" "$launcher_path" --selftest --engine "$tmp/new"
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    [ "$rc" -ne 124 ] || printf 'timed out after %ss\n' "$selftest_s" >>"$tmp/selftest.out"
+    say "launcher self-test: $(head -c 400 "$tmp/selftest.out" | tr '\n' ' ')"
+    fail "the launcher self-test rejected the new engine (exit $rc; see the line above)" "$(unchanged); $bin was not replaced" "run '$launcher_path --selftest --engine <the engine>' by hand to see which check fails, or try the other channel (ah-update.sh --channel $ch_stable)"
+  fi
+  say "launcher self-test: ok ($launcher_path)"
+elif [ -n "$launcher_arg" ]; then
+  fail "the launcher $launcher_arg is not an executable file" "$(unchanged); $bin was not replaced" "pass the path of the ah-hook binary to --launcher, or leave the option out"
+else
+  say "launcher self-test: skipped (no launcher at ${launcher_path:-the configured path})"
+fi
 newsha=$(sha256_of "$tmp/new")
 cursha=; [ -f "$bin" ] && cursha=$(sha256_of "$bin")
 

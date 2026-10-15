@@ -165,7 +165,7 @@ Every `AH_ENGINE_*` variable the engine or its wrappers read. A variable that ov
 | `AH_ENGINE_ALLOCATOR` |  | Selects the daemon's allocator: jemalloc (default) or system. The client sets it from `diagnostics.allocator` on the daemon it spawns, unless it is already set; the daemon reads it before its first allocation. Environment variable the client sets on the daemon it spawns to select the allocator (the daemon reads it before its first allocation). An existing value in the client's own environment wins. |
 | `AH_ENGINE_AUTO_UPDATE` |  | Read by hooks/ah-update.sh in auto mode: off, stable or dev overrides the `engine.autoUpdate` setting for one run. |
 | `AH_ENGINE_BACKUP_MS` | `schedule.backup_ms` | Interval of the backup job (D27); 0 (the default) turns it off. |
-| `AH_ENGINE_BIN` |  | Test-only: the engine binary the hook wrapper runs instead of the installed one. The wrapper unsets it unless AH_WRAPPER_TEST=1 is also set, so a stray value can never turn the safety net into a silent allow. |
+| `AH_ENGINE_BIN` |  | Test-only: the engine binary the hook wrapper runs instead of the installed one. The wrapper unsets it unless AH_WRAPPER_TEST=1 is also set, so a stray value can never turn the safety net into a silent allow. Test-only: environment variable that replaces the engine binary (honoured only when the test flag is set). |
 | `AH_ENGINE_BOOTSTRAP` |  | Set to 0 or 1 to turn the first-run download of the sha256-pinned engine binary off or on; overrides the `engine.bootstrap` setting. Read by hooks/ah-engine-bootstrap.sh. |
 | `AH_ENGINE_BREAKER_COOLDOWN_S` | `client.breaker_cooldown_s` | How long the breaker stays open once tripped. |
 | `AH_ENGINE_BREAKER_N` | `client.breaker_n` | Engine failures within the window that open the breaker (the client then skips the engine). |
@@ -187,6 +187,7 @@ Every `AH_ENGINE_*` variable the engine or its wrappers read. A variable that ov
 | `AH_ENGINE_DONE_FILE` |  | A file the dispatcher creates once it has dispatched an event and decided its exit code (D87). The reliability wrapper sets it, so that an engine exit code of a hook's own (1, say) is told from an engine failure and is not answered by running every hook a second time. |
 | `AH_ENGINE_DOWN_MARKER_TTL_MS` | `client.down_marker_ttl_ms` | How long other clients skip connecting after one client finds the daemon absent or failed, or hung (client.heartbeat_stale_ms) and not replaced, or after client.slow_down_n consecutive slow replies; this prevents hook pile-ups while a restart is attempted. |
 | `AH_ENGINE_EVAL_BUDGET_US` | `daemon.eval_budget_us` | HARD per-request thread CPU budget for rule evaluation: past it every remaining check defers to its Node hook. The SOFT budget (a warning only) is daemon.eval_soft_us. 0 turns the hard budget off. |
+| `AH_ENGINE_FAIL_OPEN_FILE` |  | A file the client appends one line to (`<reason> <check>`) for every engine-level fail-open the daemon reported in a reply (GitHub #201). The launcher sets it inside its per-call run directory and counts the lines after the engine exits, so its own stats and log know the call failed open. |
 | `AH_ENGINE_FALLBACK` |  | Path of the Node hook the client runs when the engine cannot answer (the `--fallback` argument wins). |
 | `AH_ENGINE_FALLBACK_MS` | `client.fallback_ms` | The Node fallback hook must finish, and its stdout and stderr must reach EOF, within this long. A hook still running at the deadline is killed (then plain allow, since it is unavailable); one that finished with output still unread is an error outcome, never an empty stdout. |
 | `AH_ENGINE_FULLFSYNC` | `storage.fullfsync` | 1 makes SQLite use F_FULLFSYNC on macOS, which also survives power loss at a large cost in commit rate (D73: 479 against 43k commits per second measured); 0 keeps the plain fsync. Off until metrics decide. |
@@ -271,8 +272,9 @@ Every `AH_ENGINE_*` variable the engine or its wrappers read. A variable that ov
 | `AH_ENGINE_VERSION` |  | Overrides the version this build reports and compares for handoff (the plugin version in production, arbitrary in tests). |
 | `AH_ENGINE_WAIT_FILE` |  | A file the client creates while it waits on the daemon and keeps when the daemon answered BUSY/ERR, so the call is handed to its Node hooks; it removes it when the daemon answered with nothing left for Node to decide (an OK reply whose entries defer to Node hooks keeps it until the call's final result is ready), gave no reply in the wait window, or none was there. The reliability wrapper sets it, so that its watchdog can tell a call that is still deciding (give it up to client.slow_fallback_max_ms) from a hung engine (kill at the normal budget). |
 | `AH_ENGINE_WATCHDOG_TICK_MS` | `daemon.watchdog_tick_ms` | How often the watchdog thread wakes to look at heartbeats. |
+| `AH_ENGINE_WIRE_ACK` | `wire.ack` | 1 = the client asks the daemon for ACK(req)/ACK(res) (retry-safe requests, undelivered verdicts counted, per-phase latency); 0 = the original request/reply exchange, no acks. The client only opts in when the daemon has announced the protocol (wire.caps_file), so an older daemon is never sent an ack-mode request. |
 | `AH_ENGINE_WORKERS` | `daemon.workers` | Worker threads evaluating requests. |
-| `AH_ENGINE_WRAPPER_DIAG` |  | Test-only: absolute path of a file the hook wrapper appends its diagnostic lines to. Honored only with AH_WRAPPER_TEST=1. |
+| `AH_ENGINE_WRAPPER_DIAG` |  | Test-only: absolute path of a file the hook wrapper appends its diagnostic lines to. Honored only with AH_WRAPPER_TEST=1. Test-only: environment variable naming a file the launcher appends its diagnostic lines to (an absolute path). |
 | `AH_ENGINE_WRITE_MS` | `daemon.write_ms` | Time allowed to write a reply. |
 | `AH_ENGINE_WRITE_QUEUE` | `storage.write_queue` | Writes that may wait for the writer thread; beyond this a write is refused as busy (the client retries, then spools). |
 
@@ -419,7 +421,9 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `client.spawn_lock_ttl_ms` | `3000` | `AH_ENGINE_SPAWN_LOCK_TTL_MS` | ms | How old the single-flight daemon spawn lock may get before another client treats it as stale and may try one restart. |
 | `client.spawn_n` | `6` | `AH_ENGINE_SPAWN_N` |  | Daemon starts within the spawn window that count as a crash loop even when the daemon reported no crash (a binary that exits at once reports nothing). Respawning then stops for client.crash_cooldown_s. |
 | `client.spawn_window_s` | `60` | `AH_ENGINE_SPAWN_WINDOW_S` | s | Window in which daemon starts are counted for client.spawn_n. |
+| `client.wrapper_default_timeout_s` | `10` |  | s | Last-resort hook budget for the hook launcher (ah-hook) when the fallback list has no row for the event: the event's hook timeout it assumes, which also caps the slow-daemon window and the cold-start wait. |
 | `client.wrapper_extra_ms` | `250` |  | ms | Extra shell watchdog budget beyond the client deadline and client slack; this lets the client write the daemon-down marker and release the single-flight spawn lock before the wrapper kills it. |
+| `client.wrapper_kill_grace_ms` | `200` |  | ms | How long the hook launcher (ah-hook) waits after SIGTERM to a timed-out engine's process group before it sends SIGKILL. The soft stop lets the client write its markers; the hard stop bounds the call. |
 | `client.wrapper_watchdog_poll_ms` | `2` |  | ms | Poll interval for the hook wrapper millisecond watchdog. |
 
 ### engine.toml / crash
@@ -511,6 +515,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `env.debug` | `AH_ENGINE_DEBUG` |  |  | When set to anything but 0 or empty, turns debug mode (diagnostics.debug_mode) on for that process. |
 | `env.dir` | `AH_ENGINE_DIR` |  |  | Overrides the state directory (default: base_dir/state_dir under the home directory). |
 | `env.done_file` | `AH_ENGINE_DONE_FILE` |  |  | A file the dispatcher creates once it has dispatched an event and decided its exit code (D87). The reliability wrapper sets it, so that an engine exit code of a hook's own (1, say) is told from an engine failure and is not answered by running every hook a second time. |
+| `env.fail_open_file` | `AH_ENGINE_FAIL_OPEN_FILE` |  |  | A file the client appends one line to (`<reason> <check>`) for every engine-level fail-open the daemon reported in a reply (GitHub #201). The launcher sets it inside its per-call run directory and counts the lines after the engine exits, so its own stats and log know the call failed open. |
 | `env.fallback` | `AH_ENGINE_FALLBACK` |  |  | Path of the Node hook the client runs when the engine cannot answer (the `--fallback` argument wins). |
 | `env.home` | `HOME` |  |  | Home directory variable. |
 | `env.home_alt` | `USERPROFILE` |  |  | Fallback home directory variable (used by the git check when the home variable is unset). |
@@ -546,6 +551,10 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `files.heartbeat_suspect` | `daemon.heartbeat.suspect` |  |  | Client suspicion carried between hook calls: when a stale heartbeat (client.heartbeat_stale_ms) was first seen (monotonic clock), and which heartbeat (modification time and generation). A later call confirms the hang only when that same heartbeat is still unchanged client.heartbeat_confirm_ms later. |
 | `files.integrity_log` | `integrity.log` |  |  | Log of the integrity script (checks, promotions, roll-backs), inside the state directory. |
 | `files.last_crash` | `last-crash.json` |  |  | Last panic or stale-run-marker crash report, shown by status and doctor. |
+| `files.launcher_drops` | `launcher.drops` |  |  | Count of the log lines the launcher dropped at the hard log size, inside the state directory. |
+| `files.launcher_log` | `launcher.log` |  |  | The launcher's bounded failure log, inside the state directory. |
+| `files.launcher_spawn_lock` | `launcher.spawn.lock` |  |  | Lock file that lets only one launcher at a time ask for a cold daemon start, inside the state directory. |
+| `files.launcher_spawn_log` | `launcher.spawns` |  |  | Times (epoch ms, one per line) of the daemon starts the launcher asked for, inside the state directory; the crash-loop window counts them. |
 | `files.log` | `ah-engine.log` |  |  | Event log file name (state directory). |
 | `files.reaped_prefix` | `daemon.run.reaped.` |  |  | Prefix of the temporary name a stale run marker is renamed to when it is claimed (the pid is appended). |
 | `files.rollback_last` | `rollback.last` |  |  | One line the integrity script writes when it rolls the engine binary back (time, reason, which binary was set aside). Shown by status and doctor. |
@@ -591,6 +600,71 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 |---|---|---|---|---|
 | `hook.event_keys` | `hook_event_name, hookEventName, event` |  |  | Payload fields that can carry the event name, tried in order (Claude Code and Codex send `hook_event_name`). |
 | `hook.warn_prefix` | `anti-hall warning: ` |  |  | Prefix of a `warn` rule's message in agent-visible output. |
+
+### engine.toml / launcher
+
+| Key | Default | Env override | Unit | What it is |
+|---|---|---|---|---|
+| `launcher.connect_timeout_ms` | `50` |  | ms | Bound on the launcher's probe connection to the daemon socket (it only tells a live daemon from a stale socket file). |
+| `launcher.cpu_hard_s` | `5` |  | s | Hard limit on the launcher's own CPU time (RLIMIT_CPU, whole seconds): past it the launcher stops the engine and lets the hook through. The engine does not inherit it. |
+| `launcher.cpu_soft_ms` | `500` |  | ms | Soft limit on the launcher's own CPU time: past it the launcher warns and counts it (at exit). |
+| `launcher.crashloop_max` | `5` |  | count | Daemon starts the launcher may ask for inside launcher.crashloop_window_s; past it the launcher stops asking and the hook is let through. |
+| `launcher.crashloop_window_s` | `60` |  | s | Window over which the launcher counts the daemon starts it asked for. |
+| `launcher.diag_env` | `AH_ENGINE_WRAPPER_DIAG` |  |  | Test-only: environment variable naming a file the launcher appends its diagnostic lines to (an absolute path). |
+| `launcher.engine_bin_name` | `ah-engine` |  |  | Name of the engine binary looked up on PATH when none is installed. |
+| `launcher.engine_bin_rel` | `bin/ah-engine` |  |  | Path of the installed engine binary below the engine state directory. |
+| `launcher.engine_lock_file` | `ah-engine.lock` |  |  | File name, in the plugin root, of the engine lock: when present the session start may bootstrap the engine. |
+| `launcher.err_cap_bytes` | `1048576` |  | bytes | Most engine standard error the launcher keeps (same rule as launcher.out_cap_bytes). |
+| `launcher.fallback_list_claude` | `ah-fallback.list` |  |  | File name, inside the plugin's hooks directory, of the Claude fallback list (per-event timeouts). |
+| `launcher.fallback_list_codex` | `ah-fallback.codex.list` |  |  | File name, inside the plugin's hooks directory, of the Codex fallback list. |
+| `launcher.fallback_map_claude` | `ah-fallback.map.json` |  |  | File name, inside the plugin's hooks directory, of the Claude fallback map. |
+| `launcher.fallback_map_codex` | `ah-fallback.codex.map.json` |  |  | File name, inside the plugin's hooks directory, of the Codex fallback map. |
+| `launcher.hosts` | `claude, codex` |  |  | The hosts the launcher serves (the --host values); the first is the default. |
+| `launcher.in_process_env` | `AH_ENGINE_DISPATCH_IN_PROCESS` |  |  | Environment variable that, set to 1, runs the engine's dispatch in process; the launcher then ignores the daemon-down marker. |
+| `launcher.io_chunk_bytes` | `65536` |  | bytes | Size of the fixed buffer the launcher moves the payload and the engine's output with. Memory stays this size however large the payload is. |
+| `launcher.io_drain_ms` | `100` |  | ms | How long, after the engine has exited, the launcher waits for its output pipes to reach end of file before it treats a helper still holding them as a failure. |
+| `launcher.knob_engine_bin` | `AH_ENGINE_BIN` |  |  | Test-only: environment variable that replaces the engine binary (honoured only when the test flag is set). |
+| `launcher.knob_fallback_list` | `AH_FALLBACK_LIST` |  |  | Test-only: environment variable that replaces the fallback list file. |
+| `launcher.knob_fallback_map` | `AH_FALLBACK_MAP` |  |  | Test-only: environment variable that replaces the fallback map file. |
+| `launcher.knob_fault` | `AH_LAUNCHER_FAULT` |  |  | Test-only: environment variable that injects a fault into the launcher (panic, hang, spin or alloc) so its never-panic and hard-limit paths can be tested end to end. |
+| `launcher.knob_kill_grace_s` | `AH_KILL_GRACE_S` |  |  | Test-only: environment variable that sets the kill grace in whole seconds. |
+| `launcher.knob_sweep_age_s` | `AH_HOOK_SWEEP_AGE_S` |  |  | Test-only: environment variable of the shell wrapper's run-directory sweep age (accepted for parity, unused by the launcher). |
+| `launcher.knob_timeout_ms` | `AH_HOOK_TIMEOUT_MS` |  |  | Test-only: environment variable that sets the hook budget in milliseconds. |
+| `launcher.knob_timeout_s` | `AH_HOOK_TIMEOUT_S` |  |  | Test-only: environment variable that sets the hook budget in whole seconds. |
+| `launcher.log_hard_bytes` | `1048576` |  | bytes | Size at which the launcher's failure log stops accepting lines: further lines are dropped and the drops counted. |
+| `launcher.log_line_max` | `512` |  | bytes | Longest line the launcher writes to its failure log; longer lines are cut. |
+| `launcher.log_rotate_min_s` | `60` |  | s | Fewest seconds between two rotations of the launcher's failure log. A flood of lines therefore grows the current file to launcher.log_hard_bytes (then lines are dropped and counted) instead of rotating the older history away. |
+| `launcher.log_soft_bytes` | `262144` |  | bytes | Size at which the launcher's failure log is rotated (one previous file is kept). |
+| `launcher.mem_hard_bytes` | `67108864` |  | bytes | Hard limit on the launcher's own heap, enforced by its counting allocator and checked before any buffer grows: past it the launcher stops the engine, says so on stderr and lets the hook through (exit 0). |
+| `launcher.mem_soft_bytes` | `16777216` |  | bytes | Soft limit on the launcher's own heap: past it the launcher warns and counts it (at exit). |
+| `launcher.out_cap_bytes` | `4194304` |  | bytes | Most engine standard output the launcher keeps. A hook answer is small; more than this is treated as a failed engine and the hook is let through. |
+| `launcher.payload_prefix_bytes` | `1048576` |  | bytes | How much of the payload the launcher keeps in memory: the part it inspects (session id, stop flag) and replays to the fallback runner. The rest is streamed through and never held. |
+| `launcher.plugin_root_envs` | `CLAUDE_PLUGIN_ROOT, PLUGIN_ROOT` |  |  | Environment variables the host uses to name the plugin root, in the order the launcher tries them. |
+| `launcher.reaper` | `1` |  | flag | 1 = the launcher starts a tiny watcher that kills the engine's process group if the launcher is killed without cleaning up (SIGKILL); 0 = no watcher. |
+| `launcher.run_base_dir` | `tmp` |  |  | Directory, below the anti-hall base directory, for the launcher's private per-call run directories. |
+| `launcher.run_dir_prefix` | `ah-launch.` |  |  | Prefix of a per-call run directory (followed by the launcher's process id). |
+| `launcher.run_done_file` | `done` |  |  | Name, inside a per-call run directory, of the file the engine creates when it has dispatched the event. |
+| `launcher.run_fail_open_file` | `fail_open` |  |  | Name, inside a per-call run directory, of the file the engine client appends the call's reported fail-opens to (see env.fail_open_file). |
+| `launcher.run_spool_file` | `payload` |  |  | Name, inside a per-call run directory, of the private copy of a large payload (see launcher.spool_max_bytes). |
+| `launcher.run_wait_file` | `wait` |  |  | Name, inside a per-call run directory, of the file the engine creates while it waits on a live daemon. |
+| `launcher.script_bootstrap` | `ah-engine-bootstrap.sh` |  |  | Bootstrap script in the plugin's hooks directory (installs the engine binary). |
+| `launcher.script_doctor` | `ah-doctor.sh` |  |  | Doctor script in the plugin's hooks directory (the --doctor mode runs it). |
+| `launcher.script_hook` | `ah-hook.sh` |  |  | Shell wrapper in the plugin's hooks directory; the launcher runs its fallback rows through it. |
+| `launcher.script_integrity` | `ah-engine-integrity.sh` |  |  | Integrity script in the plugin's hooks directory (failure counting and rollback). |
+| `launcher.selftest_engine_timeout_ms` | `3000` |  | ms | How long --selftest lets the engine binary run its version check before it calls the binary broken. |
+| `launcher.spawn_backoff_base_ms` | `5` |  | ms | First wait between engine start retries; each retry doubles it up to launcher.spawn_backoff_cap_ms. |
+| `launcher.spawn_backoff_cap_ms` | `40` |  | ms | Longest wait between engine start retries (before jitter). Every wait also stays inside the event's hard deadline. |
+| `launcher.spawn_jitter_pct` | `50` |  | percent | Random share (percent) taken off each retry wait so concurrent launchers do not retry in step. |
+| `launcher.spawn_retry_max` | `2` |  | count | How many times the launcher retries starting the engine when the start itself failed for a transient reason (resource exhaustion, binary busy). Never after the engine was started. |
+| `launcher.spool_max_bytes` | `67108864` |  | bytes | Most of a payload larger than launcher.payload_prefix_bytes that the launcher copies to a private file in its run directory, so the shell fallback runner can be given the whole payload if the engine defers. Past it the payload is still streamed to the engine but cannot be replayed to the fallback runner. |
+| `launcher.stats_env` | `AH_LAUNCHER_STATS` |  |  | Environment variable through which the launcher hands its counters to the engine (sent inside the request, never written per call). |
+| `launcher.stdin_hard_bytes` | `536870912` |  | bytes | Hard limit on the payload size: the launcher stops reading there, closes the engine's input and counts it. |
+| `launcher.stdin_idle_ms` | `1000` |  | ms | How long the launcher waits for the host to deliver more of the hook payload before it stops reading and hands the engine what it has. |
+| `launcher.stdin_soft_bytes` | `8388608` |  | bytes | Soft limit on the payload size: past it the launcher still streams the payload, warns and counts it. |
+| `launcher.test_flag_env` | `AH_WRAPPER_TEST` |  |  | Environment variable that must be 1 for the test-only knobs to be honoured. |
+| `launcher.tmp_dir_prefix` | `ah-hook-` |  |  | Prefix of the private directory the launcher makes under the temp directory when the home directory is unusable (followed by the user id). |
+| `launcher.wall_hard_margin_ms` | `500` |  | ms | Margin added to the longest planned path of a call (cold wait, engine budget, kill grace) to get the wall-clock backstop (SIGALRM): at it the launcher stops the engine and lets the hook through. Never beyond the event's hook timeout. |
+| `launcher.write_timeout_ms` | `1000` |  | ms | How long a write of the payload to the engine may make no progress (the engine is not reading) before the launcher stops feeding it. |
 
 ### engine.toml / load
 
@@ -4484,6 +4558,8 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `doctor_msg.explicit_retired` | `RE-RETIRED ` |  |  | The mark of a re-retired resurrected row. |
 | `doctor_msg.explicit_skipped` | `skipped ` |  |  | The mark of an explicit repair row that changed nothing. |
 | `doctor_msg.explicit_unloaded` | `UNLOADED ` |  |  | The mark of an unloaded orphan. |
+| `doctor_msg.fail_open_hard` | `the engine failed open {n} times in the last {window}s (most often {top}), pa...` |  |  | Finding: the engine has failed open more often than the hard limit in the recent window. Placeholders: {n}, {window}, {top}. |
+| `doctor_msg.fail_open_soft` | `the engine failed open {n} times in the last {window}s (most often {top}): ch...` |  |  | Finding: the engine has failed open more often than the soft limit in the recent window. Placeholders: {n}, {window}, {top}. |
 | `doctor_msg.failure_recorded` | `last recorded failure ({class}): {reason} {hint}` |  |  | DMN-11. Placeholders: {class}, {reason}, {hint}. |
 | `doctor_msg.fix_exec` | `made {path} executable` |  |  | Repair row. Placeholder: {path}. |
 | `doctor_msg.fix_heal_dry` | `would add the missing settings to {n} defaults file(s)` |  |  | Dry-run repair row. Placeholder: {n}. |
@@ -9720,6 +9796,66 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `mem.transcript_tail_max_entries` | `256` |  |  | Transcript-tail answers the cache keeps at most; past it the least recently used is dropped first. |
 | `mem.transcript_tail_soft_bytes` | `4194304` |  | bytes | Bytes of cached transcript-tail answers (`transcriptDedupeTail`) held before the least recently used are dropped down to the low-water mark. |
 
+### wire.toml / fail_open
+
+| Key | Default | Env override | Unit | What it is |
+|---|---|---|---|---|
+| `fail_open.check_none` | `-` |  |  | check label of a fail-open that is not tied to one check. |
+| `fail_open.hard_per_window` | `20` |  |  | Hard limit: this many fail-opens inside the window and the doctor check fails. The engine keeps failing open, it never blocks a session. |
+| `fail_open.log_detail_max` | `200` |  | chars | Longest detail text a fail-open writes to the health log, in characters. |
+| `fail_open.msg_log` | `check={check} {detail}` |  |  | Health-log detail of one fail-open. Placeholders: {check}, {detail}. |
+| `fail_open.msg_notice` | `anti-hall: the engine failed open {n} times in the last {window}s (most often...` |  |  | One-line session notice while the engine is degraded by fail-opens. Placeholders: {n}, {window}, {top}. |
+| `fail_open.notice_file` | `fail-open-notice` |  |  | File in the state directory that holds the one-line session notice while the engine is degraded by fail-opens; the daemon writes it past the soft limit and removes it when the rate falls back, the hook client adds its text to one answer per session. |
+| `fail_open.notice_tag` | `fail-open` |  |  | Tag of the once-per-session stamp of the degraded notice (distinct from the other advisories'). |
+| `fail_open.pending_max` | `1024` |  |  | Most fail-opens held between two drains into the telemetry counters (the daemon drains after every request); past it the extra ones still reach the window and the log. |
+| `fail_open.reason_busy` | `busy` |  |  | fail_open reason: the request was shed (queue full or rate limited). |
+| `fail_open.reason_deadline` | `deadline_cut` |  |  | fail_open reason: a check was cut at the request's deadline. |
+| `fail_open.reason_internal` | `internal_error` |  |  | fail_open reason: the daemon panicked or hit an internal error while serving a request. |
+| `fail_open.reason_jev_breaker` | `jev_breaker_open` |  |  | fail_open reason: the Jev circuit breaker was open, so the judgement was skipped. |
+| `fail_open.reason_missing_key` | `missing_key` |  |  | fail_open reason: the shipped defaults were unavailable or missing a key, so the check could not run. |
+| `fail_open.reason_script_timeout` | `script_timeout` |  |  | fail_open reason: a scripted check ran out of time. |
+| `fail_open.soft_per_window` | `5` |  |  | Soft limit: this many fail-opens inside the window and the engine reports itself degraded (status, a doctor WARN and a one-line session notice). Counting continues. |
+| `fail_open.state_hard` | `failing` |  |  | Degraded state name: at or past the hard limit. |
+| `fail_open.state_ok` | `ok` |  |  | Degraded state name: below the soft limit. |
+| `fail_open.state_soft` | `degraded` |  |  | Degraded state name: at or past the soft limit. |
+| `fail_open.window_s` | `60` |  | s | Length of the sliding window the engine counts its own fail-opens in (missing config, deadline cut, script timeout, Jev breaker open, busy, internal error, undelivered verdict). |
+
+### wire.toml / wire
+
+| Key | Default | Env override | Unit | What it is |
+|---|---|---|---|---|
+| `wire.ack` | `1` | `AH_ENGINE_WIRE_ACK` | flag | 1 = the client asks the daemon for ACK(req)/ACK(res) (retry-safe requests, undelivered verdicts counted, per-phase latency); 0 = the original request/reply exchange, no acks. The client only opts in when the daemon has announced the protocol (wire.caps_file), so an older daemon is never sent an ack-mode request. |
+| `wire.ack_magic` | `AHK1` |  |  | First word of an ack line (ACK(req) from the daemon, ACK(res) from the client); the digit is the ack protocol version. |
+| `wire.ack_timeout_ms` | `100` |  | ms | How long the client waits for ACK(req). No ack means the daemon has not started on the request (and, finding the connection closed when it does, will not judge it), so within the call's deadline the client retries; once acked it never retries and waits up to its hard deadline. A daemon that accepts and parses in well under a millisecond acks long before this. |
+| `wire.caps_file` | `wire-ack` |  |  | File in the state directory the daemon writes at start (and removes when it exits) to announce it speaks the ack protocol; the client checks for it before opting in. |
+| `wire.event_none` | `-` |  |  | Event label used for a request whose hook event is unknown. |
+| `wire.fo_word` | `FO` |  |  | Second word of the line that carries a fail-open to an ack-mode client: `AHK1 FO <reason> <check>`, sent just before the reply frame. |
+| `wire.head_tag` | `-w1.` |  |  | Marker inside the request head line's version suffix that announces an ack-mode request; the digits after it are the byte length of the request body, so the daemon needs no end-of-stream to know the request is complete. |
+| `wire.kind_abandoned` | `abandoned` |  |  | wire_events label: the client had closed the connection before the daemon could ack, so the request was not judged. |
+| `wire.kind_ack_timeout` | `ack_timeout` |  |  | wire_events label: a request was not acked within wire.ack_timeout_ms. |
+| `wire.kind_acked` | `acked` |  |  | wire_events label: a request was acked and judged. |
+| `wire.kind_delivered` | `delivered` |  |  | wire_events label: the client confirmed the verdict with ACK(res). |
+| `wire.kind_retry` | `retry` |  |  | wire_events label: a request was resent after a missing ACK(req). |
+| `wire.max_retries` | `1` |  |  | How many times the client resends a request that was not acked (a retry is a fresh connection after the first was closed). |
+| `wire.msg_abandoned` | `client gone before ACK(req), request not judged: {why}` |  |  | Health-log detail for a request the client had abandoned before ACK(req). Placeholders: {why}. |
+| `wire.msg_undelivered` | `verdict for {event} not confirmed by the client: {why}` |  |  | Health-log detail for a missing ACK(res). Placeholders: {why}, {event}. |
+| `wire.phase_ack_response` | `ack_response` |  |  | Phase label: from ACK(req) to the complete reply (the daemon's judging, seen from the client). |
+| `wire.phase_connect` | `connect` |  |  | Phase label: the client's connect to the daemon socket. |
+| `wire.phase_delivery` | `delivery` |  |  | Phase label: from the daemon finishing the reply write to receiving ACK(res) (the client reading, validating and handing over the verdict). |
+| `wire.phase_judge` | `judge` |  |  | Phase label: the daemon's own time from ACK(req) to the reply being ready (all checks). |
+| `wire.phase_launcher_startup` | `launcher_startup` |  |  | Phase label: the launcher's own time from process start to its stats being sent (reported by the launcher counters). |
+| `wire.phase_queue_wait` | `queue_wait` |  |  | Phase label: the time the request waited in the daemon's queue before a worker took it. |
+| `wire.phase_req_ack` | `req_ack` |  |  | Phase label: from the client finishing writing the request to receiving ACK(req) (daemon accept, queue wait, read and parse, seen from the client). |
+| `wire.reason_undelivered` | `undelivered_verdict` |  |  | fail_open reason for a verdict the client never confirmed with ACK(res). |
+| `wire.req_word` | `REQ` |  |  | Second word of ACK(req): the daemon has read and parsed the request and will judge it. |
+| `wire.res_max_bytes` | `1024` |  | bytes | Longest ACK(res) line the daemon reads (the client's phase timings and the launcher counters ride in it). |
+| `wire.res_wait_ms` | `250` |  | ms | How long the daemon waits, after writing a reply, for the client's ACK(res). A reply whose ACK(res) is missing, late or malformed is counted and logged as an undelivered_verdict fail-open (a client that died closes its end, so that case is answered at once). |
+| `wire.res_word` | `RES` |  |  | Second word of ACK(res): the client has the verdict and handed it to the host. |
+| `wire.retry_min_ms` | `150` |  | ms | The client retries a request that was not acked only when at least this much of its deadline is left. |
+| `wire.why_closed` | `closed` |  |  | Why text: the client closed the connection without ACK(res). |
+| `wire.why_garbled` | `garbled` |  |  | Why text: the bytes after the reply were not an ACK(res) line. |
+| `wire.why_timeout` | `timeout` |  |  | Why text: no ACK(res) arrived within wire.res_wait_ms. |
+
 ## Messages
 
 Text lives in `messages.toml` (and `git.toml` for the git check's block messages); keys and what they are for:
@@ -9736,8 +9872,10 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `msg.cli_planned` | Printed when a planned command is run. Placeholders: {command}, {decision}. |
 | `msg.cli_unknown` | Printed to stderr for an unknown command. Placeholder: {command}. |
 | `msg.cli_usage` | Usage text for an unknown or missing subcommand. The command list is generated from the command registry. |
+| `msg.client_ack_timeout` | Health-log and exchange text: the daemon did not acknowledge a request within wire.ack_timeout_ms. |
 | `msg.client_bad_frame` | Exchange failure when the reply frame was damaged. Placeholder: {err}. |
 | `msg.client_bad_socket` | Exchange failure when the socket path is not a socket owned by this user. |
+| `msg.client_closed_before_ack` | Exchange text: the daemon closed the connection before it acknowledged the request. |
 | `msg.client_connect` | Exchange failure when connecting failed. Placeholder: {err}. |
 | `msg.client_fallback_unavailable` | Printed on stderr when stdin cannot safely be sent to the engine and the Node fallback cannot answer. Guard events exit 2; non-guard events exit 0 with this note. |
 | `msg.client_hung` | Log detail for a hook call that stopped waiting because the daemon's heartbeat is stale, seen for the first time (a suspicion, nothing is signalled). {pid} = the daemon, {age} = the heartbeat's age in ms. |
@@ -9807,6 +9945,37 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `msg.inv_queue_push` | Invariant violation: after the accept loop queued a connection, the queue-depth counter and the queue length differ. Placeholders: {depth}, {len}. |
 | `msg.inv_violated` | Debug-log line for a violated runtime invariant (checked only in debug mode). Placeholder: {what}, the specific check that failed. |
 | `msg.jev_slow` | Log detail (code jev_slow, rate-limited) of a Jev call slower than its SOFT limit; its answer was still used. |
+| `msg.launcher_bad_host` | Printed when --host names a host the launcher does not serve; the default host is used. |
+| `msg.launcher_config_invalid` | Log line when a defaults file is missing or invalid and the built-in copy is used; {file} names it. |
+| `msg.launcher_cpu_hard` | Printed when the launcher passed its hard CPU limit and let the hook through. |
+| `msg.launcher_doctor_failed` | Printed by --doctor when the doctor script cannot be started; {err} is the reason. |
+| `msg.launcher_fail_closed` | Printed when a guard event is blocked because the launcher cannot run it safely; {event} is the event, {why} the reason. |
+| `msg.launcher_fail_open_stop` | Printed instead of blocking when the event is a stop hook that is already active; {event} and {why} as above. |
+| `msg.launcher_ignored_knobs` | Printed when test-only variables are set without the test flag; {vars} lists them. |
+| `msg.launcher_internal` | Printed (once) when the launcher itself failed and let the hook through; {what} is the failure. |
+| `msg.launcher_mem_hard` | Printed when the launcher passed its hard heap limit and let the hook through. |
+| `msg.launcher_no_doctor` | Printed by --doctor when the doctor script is missing. |
+| `msg.launcher_selftest_fail` | Selftest line for a failing check; {check} names it, {why} the reason. |
+| `msg.launcher_selftest_ok` | Selftest line for a passing check; {check} names it. |
+| `msg.launcher_st_cannot_start` | Selftest reason: the engine binary could not be started; {errno} is the system error number. |
+| `msg.launcher_st_incoherent` | Selftest reason: settings contradict each other; {rules} names the broken rules. |
+| `msg.launcher_st_mem_below` | Selftest reason: the hard heap limit is below the heap already in use. |
+| `msg.launcher_st_missing` | Selftest reason: shipped settings the launcher needs are missing or of the wrong type; {keys} names them. |
+| `msg.launcher_st_no_engine` | Selftest reason: no engine binary is installed. |
+| `msg.launcher_st_no_state` | Selftest reason: there is no state directory. |
+| `msg.launcher_st_no_wall` | Selftest reason: the wall-clock backstop could not be armed. |
+| `msg.launcher_st_not_exec` | Selftest reason: the named engine binary is not an executable file. |
+| `msg.launcher_st_socket_len` | Selftest reason: the socket path is longer than the operating system allows. |
+| `msg.launcher_st_unusable` | Selftest reason: a defaults file is missing or invalid; {files} names them. |
+| `msg.launcher_st_ver_empty` | Selftest reason: the engine's version check printed nothing. |
+| `msg.launcher_st_ver_exit` | Selftest reason: the engine's version check failed with exit code {code}. |
+| `msg.launcher_st_ver_timeout` | Selftest reason: the engine's version check did not finish in {ms} ms. |
+| `msg.launcher_wall_hard` | Printed when the launcher passed its wall-clock backstop and let the hook through. |
+| `msg.launcher_why_fallback_died` | Reason: the fallback runner died without an exit code. |
+| `msg.launcher_why_fallback_payload` | Reason: the payload was larger than the launcher keeps, so the fallback runner cannot be given it. |
+| `msg.launcher_why_fallback_unavailable` | Reason: the fallback runner could not be started. |
+| `msg.launcher_why_timeout_ms` | Reason: the milliseconds budget knob is not a positive integer. |
+| `msg.launcher_why_timeout_s` | Reason: the seconds budget knob is not a positive integer. |
 | `msg.log_accept_error` | Event-log detail (rate-limited) when the daemon's accept failed for a reason other than nothing pending. Placeholders: {code} (os<n>), {err}. |
 | `msg.log_accept_recovered` | Event-log detail when the daemon accepts a connection again after accept failures (logged then, because a full descriptor table can keep the failure's own log line from being written). Placeholders: {n}, {code} (os<n> of the last failure). |
 | `msg.log_allocator_invalid` | Event-log detail (kind alloc_invalid) when diagnostics.allocator holds a value that is not an accepted allocator; the daemon starts with jemalloc. Placeholder: {value}. |
@@ -9855,6 +10024,7 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `msg.reason_crashloop` | Recorded reason when the daemon keeps dying. Placeholders: {n}, {secs}. |
 | `msg.regex_literal_invalid` | Panic text when a literal regular expression in the source does not compile (a bug the tests catch). |
 | `msg.reply_budget` | ERR body when evaluation exceeded the CPU budget. |
+| `msg.reply_busy_detail` | Fail-open detail of a request that was shed (queue full or rate limited) and answered BUSY. |
 | `msg.reply_defer` | ERR body when a built-in check defers to the Node hook. |
 | `msg.reply_internal` | ERR body after a contained panic. |
 | `msg.reply_malformed` | ERR body for a hook payload that is not JSON. |
@@ -10004,8 +10174,10 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `dispatch_checks` | counter | entries | event, check, answer | Built-in check entries the dispatcher sent to the daemon, by event, check and answer (decided, or defer = its Node hook ran instead) (D58). |
 | `dispatch_entries` | counter | entries | event, entry, outcome, cfg | What the dispatcher's plan did to each table entry of an event it asked the daemon about (D87): ran, skipped_predicate, skipped_max_rules, skipped_budget, shadowed or off, by event, entry, outcome and the hash of the non-default hook configuration the plan was made under (`default` when none). |
 | `errors` | counter | requests |  | Requests answered ERR. |
+| `fail_open` | counter | events | reason, check | Engine-level fail-opens by reason and check: the request was answered without the check's verdict (missing_key, deadline_cut, script_timeout, jev_breaker_open, busy, internal_error, undelivered_verdict). |
 | `hook_calls` | counter | requests | event | Hook requests served, by hook event. |
 | `hook_latency_us` | histogram | us | event | Wall time to serve a hook request inside the daemon, by hook event. |
+| `hook_phase_us` | histogram | us | event, phase | Where the time of a hook call goes, by hook event and phase: the client's connect, request-to-ACK, ACK-to-response; the daemon's queue wait, judging and delivery (reply written to ACK(res)); the launcher's startup. |
 | `inject_emitted` | counter | blocks | cut | Gated hook blocks passed on whole, by cut (injection gate). |
 | `inject_emitted_bytes` | counter | bytes | cut | Bytes of the gated hook blocks that were injected (whole blocks, and the short keepalive forms), by cut. |
 | `inject_gate_bytes` | gauge | bytes |  | Estimated memory of the injection gate state. |
@@ -10015,6 +10187,7 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `inject_keepalive` | counter | blocks | cut | Unchanged gated blocks passed on again because their keepalive turn came, by cut. |
 | `inject_suppressed` | counter | blocks | cut | Gated hook blocks the model already held and the gate dropped, by cut. |
 | `inject_suppressed_bytes` | counter | bytes | cut | Bytes the gate kept out of the context (the dropped blocks, and what a keepalive form saved over the whole block), by cut. |
+| `launcher_counter` | counter | events | name | Counters the launcher reports with each call (soft and hard limit hits, retries, fallbacks, ...), summed by name. |
 | `maintain_last_ms` | gauge | ms |  | When the last maintenance run happened, in ms since the epoch (0: never). |
 | `maintain_runs` | gauge | runs |  | Maintenance runs recorded in hot.db (D26). |
 | `panics` | counter | panics |  | Request-handler panics that were contained. |
@@ -10040,6 +10213,7 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `tier_items` | gauge | items |  | Active key-value items held in memory (D22). |
 | `tier_misses` | gauge | reads |  | Key-value reads that went to SQLite since the daemon started. |
 | `uptime_s` | gauge | s |  | Seconds since the daemon started. |
+| `wire_events` | counter | events | kind | Ack protocol events by kind: acked, delivered, ack_timeout, retry, abandoned. |
 | `jev_calls` | counter | calls | backend, mode | Jev decisions asked for, by backend (jev, cache or baseline-only) and mode. |
 | `jev_changed` | counter | decisions |  | Decisions in on mode where Jev changed the outcome (always an added block or advisory). |
 | `jev_cooldowns` | counter | calls |  | Jev calls skipped because a vendor's circuit breaker was open. |
