@@ -171,6 +171,54 @@ value = "taking --ours/--theirs (or -X ours/theirs) silently drops the other sid
 doc = "Advisory advice."
 value = "run the tests first, review the discarded side in `git diff`, then push."
 
+[merge_side_pick.scope_unknown_re]
+doc = "Regex source: a segment after which the checkout a git command runs in cannot be told (cd, pushd, GIT_DIR, GIT_WORK_TREE, --git-dir, --work-tree). A push then keeps the advisory."
+value = '(?:^|\s)(?:cd|pushd|GIT_DIR=|GIT_WORK_TREE=|--git-dir|--work-tree)(?:\s|=|$)'
+
+[merge_side_pick.git_dir_levels]
+doc = "How many directory levels up from the working directory the search for the checkout's .git climbs at most."
+value = 64
+min = 1
+max = 256
+
+[merge_side_pick.git_file_max]
+doc = "Most bytes read from a .git file or a HEAD file."
+value = 4096
+min = 64
+max = 65536
+
+[merge_side_pick.gitdir_line_re]
+doc = "Regex source (multi-line): the gitdir line of a .git file (a linked worktree)."
+value = '^gitdir:[^\n]+'
+
+[merge_side_pick.gitdir_prefix]
+doc = "Regex source: the prefix cut from the gitdir line to leave the path."
+value = '^gitdir:\s*'
+
+[merge_side_pick.head_ref_re]
+doc = "Regex source: the ref line of a HEAD file (a detached HEAD has none, and the branch is then unknown)."
+value = '^ref:\s*refs/heads/[^\s]+'
+
+[merge_side_pick.head_ref_prefix]
+doc = "Regex source: the prefix cut from the HEAD ref line to leave the branch name."
+value = '^ref:\s*refs/heads/'
+
+[merge_side_pick.push_unscoped_opts_re]
+doc = "Regex source: a push argument that pushes more than the named refs or takes its value as the next word (--all, --mirror, --tags, --follow-tags, --prune, --branches, -o, --push-option, --repo, --receive-pack, --exec). The advisory stays for such a push."
+value = '^(?:--(?:all|mirror|tags|follow-tags|prune|branches|push-option|repo|receive-pack|exec)|-o)$'
+
+[merge_side_pick.head_word]
+doc = "The refspec word that means the current branch."
+value = "HEAD"
+
+[merge_side_pick.heads_prefix]
+doc = "The prefix of a full local branch ref in a refspec."
+value = "refs/heads/"
+
+[merge_side_pick.plain_branch_re]
+doc = "Regex source: a plain local branch name in a refspec (anything else, such as a tag, a sha or a revision, keeps the advisory)."
+value = '^[A-Za-z0-9][A-Za-z0-9._/@-]*$'
+
 [merge_side_pick.fallback_cmd]
 doc = "Text used for the side-pick command when none was recorded."
 value = "a side-pick"

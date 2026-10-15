@@ -1540,14 +1540,25 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `merge_side_pick.cmd_keep` | `120` |  |  | How many UTF-16 units of the side-pick command are kept for the advisory. |
 | `merge_side_pick.dry_run` | `\s(?:--dry-run\|-n)\b` |  |  | Regex that marks a push segment as a dry run, which is not a push. |
 | `merge_side_pick.fallback_cmd` | `a side-pick` |  |  | Text used for the side-pick command when none was recorded. |
+| `merge_side_pick.git_dir_levels` | `64` |  |  | How many directory levels up from the working directory the search for the checkout's .git climbs at most. |
+| `merge_side_pick.git_file_max` | `4096` |  |  | Most bytes read from a .git file or a HEAD file. |
 | `merge_side_pick.git_prefix` | `(?:^\|\s)git(?:\s+-C\s+\S+\|\s+-c\s+\S+\|\s+--no-pager)*\s+` |  |  | Regex source that every git pattern starts with: the git word with optional -C, -c and --no-pager options. |
+| `merge_side_pick.gitdir_line_re` | `^gitdir:[^\n]+` |  |  | Regex source (multi-line): the gitdir line of a .git file (a linked worktree). |
+| `merge_side_pick.gitdir_prefix` | `^gitdir:\s*` |  |  | Regex source: the prefix cut from the gitdir line to leave the path. |
 | `merge_side_pick.guard_name` | `merge-side-pick` |  |  | The guard id this check answers to in skip.json and in messages. |
+| `merge_side_pick.head_ref_prefix` | `^ref:\s*refs/heads/` |  |  | Regex source: the prefix cut from the HEAD ref line to leave the branch name. |
+| `merge_side_pick.head_ref_re` | `^ref:\s*refs/heads/[^\s]+` |  |  | Regex source: the ref line of a HEAD file (a detached HEAD has none, and the branch is then unknown). |
+| `merge_side_pick.head_word` | `HEAD` |  |  | The refspec word that means the current branch. |
+| `merge_side_pick.heads_prefix` | `refs/heads/` |  |  | The prefix of a full local branch ref in a refspec. |
 | `merge_side_pick.msg_instead` | `run the tests first, review the discarded side in `git diff`, then push.` |  |  | Advisory advice. |
 | `merge_side_pick.msg_what` | `pushing after a conflict was resolved by taking one side wholesale ({pick}) w...` |  |  | Advisory headline; {pick} is the recorded side-pick command. |
 | `merge_side_pick.msg_why` | `taking --ours/--theirs (or -X ours/theirs) silently drops the other side's ch...` |  |  | Advisory reason. |
 | `merge_side_pick.pick_tails` | `(?:checkout\\|restore)\b[^\n]*?\s--(?:ours\\|theirs)\b, (?:merge\\|pull\\|rebase\...` |  |  | Regex sources, each appended to git_prefix, that recognise taking one side of a conflict wholesale (checkout or restore --ours, -X ours, -s ours). |
+| `merge_side_pick.plain_branch_re` | `^[A-Za-z0-9][A-Za-z0-9._/@-]*$` |  |  | Regex source: a plain local branch name in a refspec (anything else, such as a tag, a sha or a revision, keeps the advisory). |
 | `merge_side_pick.push_tail` | `push\b` |  |  | Regex source appended to git_prefix that recognises a push. |
+| `merge_side_pick.push_unscoped_opts_re` | `^(?:--(?:all\|mirror\|tags\|follow-tags\|prune\|branches\|push-option\|repo\|receive-...` |  |  | Regex source: a push argument that pushes more than the named refs or takes its value as the next word (--all, --mirror, --tags, --follow-tags, --prune, --branches, -o, --push-option, --repo, --receive-pack, --exec). The advisory stays for such a push. |
 | `merge_side_pick.quote_masks` | `\x27[^\x27\n]*\x27, "(?:[^"\\\n]\\|\\.)*"` |  |  | Regexes whose matches (quoted spans) are blanked before a command is split into segments, so quoted text is never mistaken for a command (maskShellQuotes). |
+| `merge_side_pick.scope_unknown_re` | `(?:^\|\s)(?:cd\|pushd\|GIT_DIR=\|GIT_WORK_TREE=\|--git-dir\|--work-tree)(?:\s\|=\|$)` |  |  | Regex source: a segment after which the checkout a git command runs in cannot be told (cd, pushd, GIT_DIR, GIT_WORK_TREE, --git-dir, --work-tree). A push then keeps the advisory. |
 | `merge_side_pick.segment_split` | `[;&\|\n]+` |  |  | Regex that splits a masked command into segments (semicolon, ampersand, pipe, newline). |
 | `merge_side_pick.setting` | `6 entries` |  |  | Where the on/off switch is read from (guards.mergeSidePickAdvisory, default on). |
 | `merge_side_pick.state_ns` | `merge-side-pick` |  |  | Namespace of this check's per-session state in the guard state store. |
