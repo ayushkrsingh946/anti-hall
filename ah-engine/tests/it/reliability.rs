@@ -1176,7 +1176,7 @@ fn a_daemon_that_accepts_then_dies_fails_fast_not_after_the_slow_window() {
     for reset in [false, true] {
         let e = Env::new(if reset { "dyingrst" } else { "dyingeof" }, &[("AH_ENGINE_NOSPAWN", "1"), ("AH_ENGINE_SLOW_DOWN_N", "9")]);
         dying_server(&e, reset);
-        let (out, err, code, dt) = e.hook(DENY_IN, true);
+        let (out, err, _code, dt) = e.hook(DENY_IN, true);
         assert!(dt < Duration::from_secs(1), "reset={reset}: a dying daemon must fail fast: {dt:?} {err:?}");
         assert!(!out.contains("late deny"), "reset={reset}: no reply byte ever arrived: {out:?} {err:?}");
         let log = e.health_log();

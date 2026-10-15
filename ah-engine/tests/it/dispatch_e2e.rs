@@ -1781,7 +1781,6 @@ fn scripted_daemon(e: &Env, script: Vec<(u64, ah_engine::frame::Kind, &'static s
     ScriptedDaemon { alive, seen, thread: Some(thread) }
 }
 
-const SLOW: (u64, ah_engine::frame::Kind, &str) = (400, ah_engine::frame::Kind::Ok, "[]");
 const FAST_OK: (u64, ah_engine::frame::Kind, &str) = (0, ah_engine::frame::Kind::Ok, "[]");
 /// A reply that comes after the whole wait window (`AH_ENGINE_SLOW_FALLBACK_MAX_MS` 700 less the 400 ms margin = 300 ms in these tests).
 const NEVER: (u64, ah_engine::frame::Kind, &str) = (9000, ah_engine::frame::Kind::Ok, "[]");
