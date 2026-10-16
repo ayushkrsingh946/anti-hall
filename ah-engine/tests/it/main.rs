@@ -108,4 +108,5 @@ mod template_drift;
 mod transcript_index;
 mod transcript_parity;
 mod update_parity;
+mod update_post_stages;
 mod wake_watch_parity;

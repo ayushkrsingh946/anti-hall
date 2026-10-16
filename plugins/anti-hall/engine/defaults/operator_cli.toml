@@ -549,6 +549,10 @@ value = "node_kind"
 doc = "Migration reason prefix: the post-update stage names this Node function."
 value = "fn"
 
+[opcli.migration_why_fallback]
+doc = "Migration reason prefix: the native post-update stage names a Node function it falls back to when the port cannot answer."
+value = "fallback"
+
 [opcli.migration_why_key]
 doc = "Migration reason prefix: this Node key of the command still ships."
 value = "node_key"

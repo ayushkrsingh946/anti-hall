@@ -269,7 +269,7 @@ pub(crate) fn apply_ack(inv: &Inv, plan: AckPlan) -> Obj {
             home,
             &LogRec {
                 id: &op.partition,
-                caller_id: id,
+                caller_id: Some(id),
                 ns: defaults::text("mesh_write.log_ns_store"),
                 from: r.from,
                 to: if r.ok { r.own.map(|x| x as f64) } else { Some(op.target) },
