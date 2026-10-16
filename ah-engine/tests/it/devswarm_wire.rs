@@ -34,6 +34,8 @@ struct Stub {
     git_fail: Mutex<Vec<String>>,
     /// The app database the stand-in hivecontrol writes an archive into (the engine checks the database shows the archive).
     db: Mutex<Option<PathBuf>>,
+    /// When set, `git status --porcelain` reports an uncommitted file (and nothing under `.git` changes).
+    dirty: std::sync::atomic::AtomicBool,
 }
 
 impl Runner for Stub {
@@ -46,7 +48,7 @@ impl Runner for Stub {
             }
             return match rest.as_slice() {
                 ["rev-parse", "HEAD"] => ok(&format!("{HEAD}\n")),
-                ["status", "--porcelain"] => ok(""),
+                ["status", "--porcelain"] => ok(if self.dirty.load(std::sync::atomic::Ordering::Relaxed) { " M file\n" } else { "" }),
                 ["symbolic-ref", ..] => ok("refs/remotes/origin/main\n"),
                 ["rev-parse", "--verify", ..] => ok("x\n"),
                 ["merge-base", ..] => ok(""),
@@ -215,6 +217,20 @@ fn devswarm_absent_starts_nothing() {
 }
 
 // ---- end to end ------------------------------------------------------------------------------------------------------------
+
+#[test]
+fn an_archive_never_acts_on_a_remembered_clean_answer() {
+    let w = world("stale-clean");
+    let stub = Arc::new(Stub::default());
+    let wire = wire(&w, &stub, Executor::Engine);
+    // git's clean answer for the worktree is remembered (the cache is process-wide, keyed by worktree)
+    let runner = Shared(stub.clone());
+    assert_eq!(facts::Git { runner: &runner }.clean(w.wt.to_str().unwrap()), (Some(true), None));
+    // the tree is edited: no file under .git changes, so the remembered "clean" still looks valid to the git cache
+    stub.dirty.store(true, std::sync::atomic::Ordering::Relaxed);
+    wire.reconcile(Cause::Startup);
+    assert!(archives(&stub).is_empty(), "the re-check before the archive asked git itself and saw the dirty tree");
+}
 
 #[test]
 fn a_state_edge_leads_to_exactly_one_archive() {

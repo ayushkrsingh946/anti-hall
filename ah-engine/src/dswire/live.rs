@@ -71,7 +71,7 @@ impl RtLive<'_> {
             .and_then(|p| p.worktree.clone())
     }
 
-    fn auto_archive_facts(&self, app: &AppRead, b: &AppBuilder) -> Value {
+    fn auto_archive_facts(&self, app: &AppRead, b: &AppBuilder, fresh: bool) -> Value {
         let descs = facts::descriptors(&self.home);
         let mine = facts::descs_of(&descs, b);
         let mut ids = vec![b.id.clone()];
@@ -89,7 +89,7 @@ impl RtLive<'_> {
                 .flatten()
         });
         let merged = self.merged_fact(app, b, &wt, head.as_deref(), done["boundToHead"] == json!(true) && done["done"] == json!(true), verified.as_deref());
-        let (clean, why) = git.clean(&wt);
+        let (clean, why) = if fresh { git.clean_now(&wt) } else { git.clean(&wt) };
         let probe = FsProbe::new(&self.home, self.now);
         let act = facts::activity_ms(&self.home, &probe, b, &mine);
         let last = self.last_selected(&b.id);
@@ -257,6 +257,42 @@ fn archived_since(home: &Path, id: &str) -> Option<i64> {
     })
 }
 
+impl RtLive<'_> {
+    /// The facts of [`LiveState::facts`]; `fresh` reads the auto-archive workspace's git status from git itself.
+    fn facts_with(&self, kind: &str, id: &str, fresh: bool) -> Option<Value> {
+        let kinds = defaults::list("devswarm_act.automatic_kinds");
+        let owner = defaults::list("devswarm_act.owner_kinds");
+        let app = self.app();
+        if kind == kinds[0] {
+            let app = app?;
+            let b = app.builders.iter().find(|b| b.id == id)?;
+            return Some(self.auto_archive_facts(&app, b, fresh));
+        }
+        if kind == defaults::text("devswarm_act.nag_kind") {
+            let app = app?;
+            let b = app.builders.iter().find(|b| b.id == id)?;
+            let mut f = self.auto_archive_facts(&app, b, false);
+            let open = b.active == Some(true) && b.hidden == Some(false);
+            f["lifecycle"] = json!(if open { "active" } else { "inactive" });
+            if defaults::list("devswarm_act.nag_done_requires").contains(&"pushed") {
+                let wt = f["worktreePath"].as_str().unwrap_or_default().to_string();
+                f["pushed"] = json!(f["head"].as_str().and_then(|h| self.git().pushed(&wt, h)) == Some(true));
+            }
+            return Some(f);
+        }
+        if kind == format!("{}-or-{}", kinds[1], kinds[2]) {
+            return self.nudge_facts(id);
+        }
+        if kind == owner[0] || kind == owner[3] {
+            return Some(self.found(&app, id));
+        }
+        if kind == owner[1] || kind == owner[2] {
+            return Some(json!({}));
+        }
+        None
+    }
+}
+
 impl LiveState for RtLive<'_> {
     fn present(&self) -> bool {
         self.rt.detection().active() && self.app().is_some()
@@ -278,38 +314,11 @@ impl LiveState for RtLive<'_> {
     }
 
     fn facts(&self, kind: &str, id: &str) -> Option<Value> {
-        let kinds = defaults::list("devswarm_act.automatic_kinds");
-        let owner = defaults::list("devswarm_act.owner_kinds");
-        let app = self.app();
-        if kind == kinds[0] {
-            let app = app?;
-            let b = app.builders.iter().find(|b| b.id == id)?;
-            return Some(self.auto_archive_facts(&app, b));
-        }
-        if kind == defaults::text("devswarm_act.nag_kind") {
-            let app = app?;
-            let b = app.builders.iter().find(|b| b.id == id)?;
-            let mut f = self.auto_archive_facts(&app, b);
-            let open = b.active == Some(true) && b.hidden == Some(false);
-            f["lifecycle"] = json!(if open { "active" } else { "inactive" });
-            if defaults::list("devswarm_act.nag_done_requires").contains(&"pushed") {
-                let wt = f["worktreePath"].as_str().unwrap_or_default().to_string();
-                f["pushed"] = json!(f["head"].as_str().and_then(|h| self.git().pushed(&wt, h)) == Some(true));
-            }
-            return Some(f);
-        }
-        if kind == format!("{}-or-{}", kinds[1], kinds[2]) {
-            return self.nudge_facts(id);
-        }
-        if kind == owner[0] || kind == owner[3] {
-            return Some(self.found(&app, id));
-        }
-        if kind == owner[1] || kind == owner[2] {
-            return Some(json!({}));
-        }
-        None
+        self.facts_with(kind, id, false)
     }
-
+    fn facts_fresh(&self, kind: &str, id: &str) -> Option<Value> {
+        self.facts_with(kind, id, true)
+    }
     fn archived(&self, id: &str) -> Option<bool> {
         self.app()?.builders.iter().find(|b| b.id == id).map(archived_flags)
     }
