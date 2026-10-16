@@ -78,6 +78,7 @@ const ALLOW: &[(&str, &str, &str)] = &[
     ("src/memdiag.rs", "static ARRIVED", "a condition variable the snapshot waits on: a language construct, not a value"),
     ("src/memdiag.rs", "static REPORTED", "a thread-local marker initialised to zero (which snapshot this worker already answered): state, not a tunable"),
     ("src/script/tasks_cache.rs", "let mut b = [0u8; 1]", "a one-byte read buffer for the byte before a window start: structural, not a tunable"),
+    ("src/script/evidence_walk.rs", "static MINE", "a thread-local handle initialised to zero (the walk this worker made last): state, not a tunable"),
     ("src/load.rs", "static SCAN_BYTES", "a thread-local counter initialised to zero: state, not a tunable"),
     ("src/load.rs", "static CHECK_SCAN_BYTES", "a thread-local counter initialised to zero: state, not a tunable"),
     ("src/load.rs", "static CHECK_CPU_US", "a thread-local counter initialised to zero: state, not a tunable"),

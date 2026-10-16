@@ -1273,6 +1273,8 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `transcript.evidence_max_bytes` | `8388608` |  | bytes | Largest window `ah.transcript.evidence` reads from the end of a transcript, whatever the script asks for. |
 | `transcript.evidence_max_chars` | `16777216` |  |  | Most characters of text `ah.transcript.evidence` returns in all; a transcript whose evidence is larger is reported as unsure. |
 | `transcript.evidence_read_chunk_bytes` | `65536` |  | bytes | Bytes read at a time while looking for the newline that ends the cut first line of a window. |
+| `transcript.evidence_walk_idle_ms` | `30000` |  | ms | How long a kept evidence walk may sit unused before it is dropped (it is only asked about within the script run that made it). |
+| `transcript.evidence_walk_max_entries` | `16` |  | count | How many evidence walks (`ah.transcript.evidenceWalk`, the claim ledger's) are kept at once: one per script run in flight, replaced by the next walk of the same worker. The least recently used is dropped first, and a question about a dropped walk makes the check fail open. |
 | `transcript.final_statuses` | `completed failed stopped` |  |  | Task-notification statuses the DevSwarm idle gate treats as final (companion/lib/devswarm-idle.js FINAL_STATUS), case-insensitive. |
 | `transcript.fingerprint_bytes` | `256` |  | bytes | Leading bytes of the file hashed to notice a rewritten or rotated transcript. |
 | `transcript.idle_ttl_ms` | `21600000` |  | ms | How long the registry keeps an index nobody asked for; a dropped index is rebuilt from the file on the next request. |
@@ -1282,6 +1284,8 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `transcript.max_kinds` | `64` |  |  | Most distinct record kinds counted separately; further kinds are counted under the overflow kind. |
 | `transcript.max_update_bytes` | `8388608` |  | bytes | Most appended bytes one refresh reads; when more than this was appended since the last refresh the index skips ahead to the newest bytes and counts a gap instead of stalling the hook. |
 | `transcript.msg_io` | `Cannot read the transcript {path}: {err}.` |  |  | Printed when a transcript cannot be read; {path} and {err} are filled in. |
+| `transcript.msg_walk_lost` | `No evidence walk is kept for this check run.` |  |  | Thrown by `ah.transcript.walkHas` / `walkNumbers` when the thread has no kept evidence walk (it was never made, or the memory registry dropped it). |
+| `transcript.msg_walk_which` | `Unknown evidence walk text {which}; expected evidence or withLast.` |  |  | Thrown by `ah.transcript.walkHas` / `walkNumbers` for a text other than `evidence` or `withLast`; {which} is the name given. |
 | `transcript.non_prompt_prefixes` | `<task-notification, <command-, <local-command, <system-reminder` |  |  | Text starts that mark a user entry as injected, not typed (hooks/lib/inference-check.js lastUserPrompt). |
 | `transcript.notifications_kept` | `2048` |  |  | How many of the newest task-notification blocks the index keeps. |
 | `transcript.overflow_kind` | `other` |  |  | Kind name that collects records whose type is missing or not a string, and kinds beyond the limit. |
@@ -9953,6 +9957,9 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `mem.evidence_cache_hard_bytes` | `20971520` |  | bytes | Bytes of kept transcript evidence at which an insert is refused (the answer is returned, not kept) and the cache is recycled. |
 | `mem.evidence_cache_low_water_pct` | `80` |  |  | Percent of mem.evidence_cache_soft_bytes the kept transcript evidence is evicted down to when the soft limit is reached. |
 | `mem.evidence_cache_soft_bytes` | `10485760` |  | bytes | Bytes of kept transcript evidence held before the least recently used are dropped down to the low-water mark. |
+| `mem.evidence_walk_hard_bytes` | `25165824` |  | bytes | Bytes of kept evidence walks at which an insert is refused (the check defers) and the cache is recycled. |
+| `mem.evidence_walk_low_water_pct` | `80` |  |  | Percent of mem.evidence_walk_soft_bytes the kept evidence walks are evicted down to when the soft limit is reached. |
+| `mem.evidence_walk_soft_bytes` | `12582912` |  | bytes | Bytes of kept evidence walks (the claim ledger's joined evidence text) held before the least recently used are dropped down to the low-water mark. |
 | `mem.global_hard_bytes` | `125829120` |  | bytes | Process memory above which every holder is recycled and every cache insert is refused. If it is still above this `mem.global_restart_after_s` later, the daemon is asked to restart cleanly and the reason is recorded in the event log. |
 | `mem.global_log_min_interval_ms` | `60000` |  | ms | At most one soft or hard log line per holder per interval (the counters in `status --memory` still count every excursion), so a cache that cycles between its low-water mark and its soft limit cannot flood the event log. |
 | `mem.global_low_water_pct` | `90` |  |  | Percent of the global soft and hard limits that process memory must fall to before the global triggers re-arm (hysteresis, so a total hovering at a limit is one excursion, not many). |
@@ -10563,6 +10570,7 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `errors` | counter | requests |  | Requests answered ERR. |
 | `evidence_cache` | counter | lookups | result | Transcript evidence lookups (claim-ledger and other `ah.transcript.evidence` callers): hit (nothing appended), extend (only the appended bytes were read) or rebuild (the window was read afresh). |
 | `evidence_cache_rebuild` | counter | lookups | reason | Why a transcript evidence lookup read its window afresh: none (nothing kept: first call, daemon restart, eviction or idle expiry), file (another file or a shorter one), window (the window moved past the kept lines) or digest (the file was rewritten in place). |
+| `evidence_walk` | counter | walks | result | Evidence walks (the claim ledger's `ah.transcript.evidenceWalk`) the memory registry refused to keep, so the check deferred. |
 | `fail_open` | counter | events | reason, check | Engine-level fail-opens by reason and check: the request was answered without the check's verdict (missing_key, deadline_cut, script_timeout, jev_breaker_open, busy, internal_error, undelivered_verdict). |
 | `hook_calls` | counter | requests | event | Hook requests served, by hook event. |
 | `hook_latency_us` | histogram | us | event | Wall time to serve a hook request inside the daemon, by hook event. |
