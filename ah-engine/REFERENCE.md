@@ -9539,6 +9539,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `wake_watch.active_cache_file` | `hivecontrol-active.json` |  |  | The supervisor's cache of the hivecontrol active list, under the DevSwarm state directory. While it exists the engine does not decide the idle-skip for a worktree the app database has no opinion on: Node does. |
 | `wake_watch.archived_recheck_floor_ms` | `100` |  |  | Smallest accepted value of the archived re-check override. |
 | `wake_watch.archived_recheck_ms` | `120000` |  |  | How often a child watcher asks again whether its own workspace is archived (it reads the app database), in milliseconds. |
+| `wake_watch.cache_dir` | `cache` |  |  | The cache directory under the plugins directory (one directory per marketplace, plugin and version). |
 | `wake_watch.diag_lock_held` | `[wake-watch] another watcher already holds the lock for {role} {id} (holder p...` |  |  | Printed on stderr when a live watcher already holds the lock. {role} {id} {pid} {age} {session} {acquired} {version}. |
 | `wake_watch.diag_no_identity` | `[wake-watch] could not resolve a DevSwarm identity for cwd={cwd}; exiting qui...` |  |  | Printed on stderr when DevSwarm is active but no identity resolves. {cwd}. |
 | `wake_watch.diag_not_devswarm` | `[wake-watch] not a DevSwarm session; exiting quietly (not arming).\n` |  |  | Printed on stderr when the session shows no sign of DevSwarm. |
@@ -9548,6 +9549,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `wake_watch.dir_inbox` | `inbox` |  |  | The directory of the children's durable inboxes, under the DevSwarm state directory. |
 | `wake_watch.dir_summaries` | `summaries` |  |  | The directory of the projects' derived summaries, under the DevSwarm state directory. |
 | `wake_watch.dir_wake` | `wake` |  |  | The directory of the watchers' private cursors, under the DevSwarm state directory. |
+| `wake_watch.enabled_plugins_field` | `enabledPlugins` |  |  | The settings member that maps an install key to whether it is enabled. |
 | `wake_watch.env_archived_recheck` | `ANTIHALL_DEVSWARM_WAKE_WATCH_ARCHIVED_RECHECK_MS` |  |  | Test knob: overrides the archived re-check interval (milliseconds). |
 | `wake_watch.env_handoff` | `ANTIHALL_WAKE_WATCH_HANDED_OFF` |  |  | Set by a watcher that hands over to a newer build: the version it handed over to, so a chain of handoffs only ever moves forward. |
 | `wake_watch.env_source_branch` | `DEVSWARM_SOURCE_BRANCH` |  |  | The variable whose non-blank value marks a DevSwarm child workspace. |
@@ -9565,7 +9567,11 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `wake_watch.handoff_not_registered` | `the harness has not registered it` |  |  | Part of the cached-only note when the registry names no version. |
 | `wake_watch.handoff_still_registers` | `the harness still registers {version}` |  |  | Part of the cached-only note: the registry's version. {version}. |
 | `wake_watch.inbox_suffix` | `.ndjson` |  |  | End of an inbox file's name. |
+| `wake_watch.install_location_field` | `installLocation` |  |  | The member of a registered marketplace that names the directory it lives in. |
+| `wake_watch.installed_file` | `installed_plugins.json` |  |  | The harness registry of installed plugins, under the plugins directory. |
 | `wake_watch.json_suffix` | `.json` |  |  | End of a JSON state file's name. |
+| `wake_watch.key_sep` | `@` |  |  | Between plugin and marketplace in an install key (`plugin@marketplace`). |
+| `wake_watch.known_marketplaces_file` | `known_marketplaces.json` |  |  | The harness record of registered marketplaces, under the plugins directory. |
 | `wake_watch.label_broadcast` | `broadcast` |  |  | Label of the broadcast channel. |
 | `wake_watch.label_mesh_direct` | `mesh-direct` |  |  | Label of the child's mesh-direct channel. |
 | `wake_watch.label_ndjson` | `ndjson` |  |  | Label of the child's durable-inbox channel when two channels are watched. |
@@ -9590,14 +9596,17 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `wake_watch.lock_step_ms` | `5` |  |  | The pause between retries, in milliseconds. |
 | `wake_watch.lock_suffix` | `.lock` |  |  | End of the watcher lock's file name. |
 | `wake_watch.lock_wait_ms` | `0` |  |  | How long to keep retrying a lock another watcher holds, in milliseconds (0: refuse at once). |
+| `wake_watch.manifest_name_field` | `name` |  |  | The manifest member that names the plugin (the first half of the install key). |
 | `wake_watch.manifest_rel` | `.claude-plugin/plugin.json` |  |  | The plugin manifest that names the build the watcher runs, relative to the plugin root. |
-| `wake_watch.node_bin` | `node` |  |  | The interpreter that runs the newer build's watcher script on a handoff. |
+| `wake_watch.marketplace_plugin_rel` | `plugins/anti-hall` |  |  | Where a marketplace keeps the plugin, relative to the marketplace directory: the manifest of the newest source build is read there. |
+| `wake_watch.plugins_rel` | `.claude/plugins` |  |  | The harness's plugins directory, relative to the home: its cache, registry and marketplace records. |
 | `wake_watch.poll_max_ms` | `60000` |  |  | Ceiling of the tick in milliseconds. |
 | `wake_watch.poll_min_ms` | `250` |  |  | Floor of the tick in milliseconds. |
 | `wake_watch.reason_disabled` | `disabled-by-settings` |  |  | Refusal reason (closed vocabulary): switched off by devswarm.wakeWatch. |
 | `wake_watch.reason_identity` | `identity-unresolved` |  |  | Refusal reason (closed vocabulary): no DevSwarm identity could be resolved. |
 | `wake_watch.reason_lock_held` | `lock-held` |  |  | Refusal reason (closed vocabulary): another watcher holds the lock. |
 | `wake_watch.reason_not_devswarm` | `not-a-devswarm-session` |  |  | Refusal reason (closed vocabulary): the session is not a DevSwarm session. |
+| `wake_watch.registry_plugins_field` | `plugins` |  |  | The registry member that maps `<plugin>@<marketplace>` to its install records. |
 | `wake_watch.replacement_escape` | `�` |  |  | The JSON escape a lone surrogate escape is rewritten to before parsing (the strict parser refuses it, JavaScript reads it). |
 | `wake_watch.repos_root_re` | `[\\/]\.devswarm[\\/]repos[\\/]` |  |  | Regex source: a worktree under the DevSwarm repos root, the only kind the supervisor's active list can call archived. |
 | `wake_watch.role_child` | `child` |  |  | The role word of a child workspace in the lines. |
@@ -9609,8 +9618,9 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `wake_watch.set_enabled` | `5 entries` |  |  | The setting devswarm.wakeWatch: off refuses to arm (the cron wake fallback is unaffected). |
 | `wake_watch.set_idle_skip` | `6 entries` |  |  | The setting devswarm.wakeWatchIdleSkip: a Primary with no live child workspace need not arm (Node prints its one idle line). |
 | `wake_watch.set_poll_ms` | `7 entries` |  |  | The setting devswarm.wakeWatchPollMs: the tick of the watcher in milliseconds (lock heartbeat, parent check, stale-build check, reads). A change of a watched file wakes the tick early. |
-| `wake_watch.stale_script_rel` | `companion/lib/devswarm-wake-watch.js` |  |  | The watcher script of another build, relative to that build's cache directory: a newer build is handed over to only when this file exists. |
+| `wake_watch.stale_script_rel` | `companion/lib/devswarm-wake-watch.js` |  |  | The Node watcher script of another build, relative to that build's cache directory: named only in the re-arm line printed when a handoff is refused. A handoff itself needs only that build's manifest and never runs this script. |
 | `wake_watch.tmp_suffix` | `.tmp` |  |  | End of the temporary file a cursor is written to before the rename. |
+| `wake_watch.user_settings_rel` | `.claude/settings.json` |  |  | The user's harness settings file, relative to the home: it says which installs are enabled. |
 | `wake_watch.verb` | `wake-watch` |  |  | The `ah-engine devswarm` verb that runs the idle-wake Monitor. |
 | `wake_watch.word_unavailable` | `unavailable` |  |  | Said where the session of a lock holder is not recorded. |
 | `wake_watch.word_unknown` | `unknown` |  |  | Said where a role, id or version is not known. |
