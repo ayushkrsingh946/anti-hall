@@ -777,6 +777,12 @@ fn find_engine(home: Option<&PathBuf>, s: &Settings, knob_bin: Option<String>) -
         .map(|p| p.display().to_string())
 }
 
+/// One spelling per plugin directory (symlinks and `..` resolved; unchanged when it cannot be resolved): the hook client's
+/// defaults cache holds a single root, so two spellings of the same plugin would make every other call re-parse the files.
+fn canonical(p: PathBuf) -> PathBuf {
+    std::fs::canonicalize(&p).unwrap_or(p)
+}
+
 /// The plugin this launcher serves: `--plugin-root`, else the host's plugin-root variable, else the directory above the binary.
 fn plugin_root(args: &[String], env_names: &[String]) -> Option<PathBuf> {
     let flag = args
@@ -795,6 +801,7 @@ fn plugin_root(args: &[String], env_names: &[String]) -> Option<PathBuf> {
         .into_iter()
         .flatten()
         .find(|r| r.join(builtin::HOOKS_DIR).is_dir())
+        .map(canonical)
 }
 
 fn arg_after(args: &[String], flag: &str) -> Option<String> {
@@ -822,7 +829,7 @@ pub fn run() -> i32 {
     // the engine reads its settings from THIS plugin unless an operator override names another one
     let boot_plugin_env = builtin::text("env.plugin_root").unwrap_or_default();
     let cfg_root = match env_nonempty(boot_plugin_env) {
-        Some(r) => Some(PathBuf::from(r)),
+        Some(r) => Some(canonical(PathBuf::from(r))),
         None => root.clone().filter(|r| {
             r.join(builtin::CFG_REL_DIR)
                 .join(builtin::CFG_MARKER_FILE)
