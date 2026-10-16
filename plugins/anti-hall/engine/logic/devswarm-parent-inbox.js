@@ -868,7 +868,7 @@ function piDecide(p, opts) {
   var now = ah.clock.now();
   var every = ah.settings.num('verify_first.num_repeat_every');
   var repeat = isFinite(every) && every > 0 ? every : 0;
-  var orphansSeg = null, staleRegSeg = null, broadcastRows = null, parked = null, roster = null, key = null, health = null, banner = null, wakeLine = null, driftNotice = null, derived = null;
+  var ownUnread = 0, ownUrgency = null, orphansSeg = null, staleRegSeg = null, broadcastRows = null, parked = null, roster = null, key = null, health = null, banner = null, wakeLine = null, driftNotice = null, derived = null;
   if (top !== null) {
     var cli = piCli(opts, home);
     if (cli === null) return piDefer('cli');
@@ -895,8 +895,14 @@ function piDecide(p, opts) {
       // the Primary's own inbound mail, the questions it was asked, and what the summary lists beside the rows
       var own = summary.workspaces && summary.workspaces[primaryId] ? summary.workspaces[primaryId] : summary[primaryId];
       if (own && typeof own === 'object') {
-        if (piFinite(own.unread) && own.unread > 0) return piDefer('own-unread');
-        if (Array.isArray(own.pendingQuestions) && own.pendingQuestions.length) return piDefer('own-questions');
+        if (Array.isArray(own.pendingQuestions) && own.pendingQuestions.length) return piDefer('own-questions'); // the reply-state of each asker is Node's
+        if (piFinite(own.unread) && own.unread > 0) {
+          // the unread count is corrected by this reader's own cursor, found from the hook's process ancestry, which the daemon does not share
+          var rd = JSON.parse(ahHost.ctReaders(key, primaryId));
+          if (rd.unsure || rd.declared) return piDefer('own-reader');
+          ownUnread = own.unread;
+          ownUrgency = own.urgencyMax || null;
+        }
       }
       if (Array.isArray(summary.recent) && summary.recent.length && ahHost.piJev()) return piDefer('broadcast-jev'); // Jev may label the feed
       if (roster.rows.length) {
@@ -977,8 +983,12 @@ function piDecide(p, opts) {
   if (orphansSeg !== null) pending.push({ kind: 'dedupe', rank: 80, o: { sessionId: sid, key: ah.cfg('devswarm_parent.key_orphans'), content: orphansSeg, transcriptPath: tp, keepaliveTurns: ah.cfgNum('devswarm_parent.mesh_issue_keepalive') }, text: orphansSeg });
   if (staleRegSeg !== null) pending.push({ kind: 'dedupe', rank: 90, o: { sessionId: sid, key: ah.cfg('devswarm_parent.key_stale_registry'), content: staleRegSeg, transcriptPath: tp, keepaliveTurns: ah.cfgNum('devswarm_parent.mesh_issue_keepalive') }, text: staleRegSeg });
   if (broadcastRows !== null) pending.push({ kind: 'plain', rank: 100, text: piBroadcastSegment(broadcastRows.rows) });
-  if (parked !== null) pending.push({ kind: 'plain', rank: 120, text: parked });
   var cliPath = top !== null ? piCli(opts, home) : null;
+  if (ownUnread > 0) {
+    var ownPrefix = ah.cfg(piHigh(ownUrgency) ? 'devswarm_parent.own_prefix_urgent' : 'devswarm_parent.own_prefix');
+    pending.push({ kind: 'plain', rank: 110, text: text.render(ah.cfg('devswarm_parent.own_unread'), { prefix: ownPrefix, count: ownUnread, cli: cliPath, id: primaryId }) });
+  }
+  if (parked !== null) pending.push({ kind: 'plain', rank: 120, text: parked });
   if (urgentList.length) {
     var us = piUrgentSegment(urgentList, home, cliPath);
     pending.push({ kind: 'dedupe', rank: 130, o: { sessionId: sid, key: 'parent-inbox-urgent', content: us, transcriptPath: tp, keepaliveTurns: 10 }, text: us });

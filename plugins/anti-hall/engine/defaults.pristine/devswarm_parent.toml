@@ -454,3 +454,15 @@ value = "ANTIHALL_BROADCAST_MAX_AGE_MS"
 [devswarm_parent.broadcast_max_age_ms]
 doc = "How old a broadcast row may be and still be shown when the variable is not a non-negative number (24 hours)."
 value = 86400000
+
+[devswarm_parent.own_prefix]
+doc = "The start of the Primary's own-inbox segment."
+value = "⚠️ anti-hall · devswarm-own-inbox: priority — "
+
+[devswarm_parent.own_prefix_urgent]
+doc = "The start of the Primary's own-inbox segment when the newest mail is urgent or high priority."
+value = "⚠️ anti-hall · devswarm-own-inbox: urgent priority — "
+
+[devswarm_parent.own_unread]
+doc = "The Primary's own-inbox segment when unread mail is waiting. Placeholders: {prefix}, {count}, {cli}, {id}."
+value = "{prefix}you have {count} unread parent/peer message(s) addressed to YOU (the Primary). STOP and read your unread parent/peer message(s) FIRST before continuing. Read them via `node {cli} inbox read-primary {id}` (anti-hall devswarm CLI — read-only: after handling them run the `ackCommand` it returns, which advances YOUR OWN read cursor; to check WITHOUT a receipt instead, use `inbox peek-primary {id}`). Do NOT run `hivecontrol workspace read-messages` or `monitor` — those DESTRUCTIVELY drain the NATIVE queue (a completely separate channel from your own cursor above)."

@@ -629,12 +629,17 @@ fn scenes() -> Vec<Scene> {
         scene("rows-setting-renag-set", Defer).seed(rows_of(vec![("w1", json!({}))])).env(vec![("ANTIHALL_DEVSWARM_ARCHIVE_REQUEST_RENAG_HOURS", "2")]),
         scene("rows-not-draining-verdict", Defer).seed(both(rows_of(vec![("w1", json!({}))]), verdict("w1", json!({"notDraining": true})))),
         scene("rows-step-plan", Defer).seed(both(rows_of(vec![("w1", json!({}))]), |h| write(&ds(h).join("plans/w1.json"), r#"{"steps":[{"n":1,"text":"a","status":"doing"}]}"#))),
-        scene("rows-own-unread", Defer).seed(|h| {
+        scene("own-unread-declared-reader", Defer).seed(both(warm_child, |h| {
             let id = primary_id(h);
             let mut o = serde_json::Map::new();
-            o.insert(id, json!({"unread": 2}));
+            o.insert(id.clone(), json!({"unread": 2}));
             summary(Value::Object(o))(h);
-        }),
+            let key = project_key(h);
+            let c = rusqlite::Connection::open(ds(h).join("store").join(key).join("devswarm.db")).unwrap();
+            c.execute("INSERT INTO reader_cursors (partition, ns, reader, value, retired_line, updated_at) VALUES (?,?,?,?,NULL,?)", rusqlite::params![id, "store", "h:1:2", 0i64, 1i64]).unwrap();
+            // the daemon is healthy, so the summary above is the one the hook reads
+            healthy_daemon(h);
+        })),
         scene("rows-own-pending-questions", Defer).seed(|h| {
             let id = primary_id(h);
             let mut o = serde_json::Map::new();
@@ -826,6 +831,44 @@ fn scenes() -> Vec<Scene> {
         })),
         scene("broadcast-with-jev-enabled", Defer).seed(both(rows_with(vec![], json!({"recent": [{"from": "peer", "ts": now_ms() - 1000, "summary": "hello there"}]})), |h| write(&h.join(".anti-hall/settings.json"), r#"{"jev":{"enabled":true}}"#))),
         scene("broadcast-empty-list", Same).seed(rows_with(vec![("w1", json!({}))], json!({"recent": []}))),
+        // the Primary's own inbox
+        scene("own-unread", Same).seed(|h| {
+            let mut o = serde_json::Map::new();
+            o.insert(primary_id(h), json!({"unread": 2}));
+            summary(Value::Object(o))(h);
+        }),
+        scene("own-unread-urgent", Same).seed(|h| {
+            let mut o = serde_json::Map::new();
+            o.insert(primary_id(h), json!({"unread": 1, "urgencyMax": "urgent"}));
+            summary(Value::Object(o))(h);
+        }),
+        scene("own-unread-high-with-rows", Same).seed(|h| {
+            let mut o = serde_json::Map::new();
+            o.insert("w1".to_string(), row(h, "w1", json!({"directUnread": 1})));
+            o.insert(primary_id(h), json!({"unread": 5, "urgencyMax": "high", "pendingQuestions": []}));
+            summary(Value::Object(o))(h);
+        }),
+        scene("own-unread-flat-summary-shape", Same).seed(|h| {
+            let mut body = serde_json::Map::new();
+            body.insert("workspaces".to_string(), json!({}));
+            body.insert(primary_id(h), json!({"unread": 3}));
+            write(&ds(h).join(format!("summaries/{}.json", project_key(h))), &Value::Object(body).to_string());
+        }),
+        scene("own-unread-zero-and-negative", Same).seed(|h| {
+            let mut o = serde_json::Map::new();
+            o.insert(primary_id(h), json!({"unread": -3}));
+            summary(Value::Object(o))(h);
+        }),
+        scene("own-unread-codex", Same).codex().seed(|h| {
+            let mut o = serde_json::Map::new();
+            o.insert(primary_id(h), json!({"unread": 2}));
+            summary(Value::Object(o))(h);
+        }),
+        scene("own-unread-second-turn-repeats-the-segment", Same).prime().seed(|h| {
+            let mut o = serde_json::Map::new();
+            o.insert(primary_id(h), json!({"unread": 2}));
+            summary(Value::Object(o))(h);
+        }),
         // the cases that stay with Node, each decided before anything is written
         scene("summary-empty-file", Defer).seed(|h| write(&ds(h).join(format!("summaries/{}.json", project_key(h))), "")),
         scene("descriptor-present-not-claude", Same).seed(|h| write(&ds(h).join("workspaces/child-1.json"), r#"{"id":"child-1"}"#)),
@@ -970,6 +1013,8 @@ fn engine_and_node_agree_for_a_primary_in_a_checkout() {
         "devswarm-broadcast",
         "[URGENT] ",
         "(no summary)",
+        "devswarm-own-inbox: priority",
+        "devswarm-own-inbox: urgent priority",
     ] {
         assert!(answers.contains(text), "no native scene exercises {text:?}");
     }
