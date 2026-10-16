@@ -1046,7 +1046,9 @@ var parseHeredocAt = shellScan.parseHeredocAt;
 function tokenizeQuoted(segment) {
   return cmdMemo('tok:' + segment, function () { return tokenizeQuotedRaw(segment); });
 }
-function tokenizeQuotedRaw(segment) {
+// The native scanner (ahHost.shellTokenize) answers; the walk below is the reference it is tested against (scannersReference).
+function tokenizeQuotedRaw(segment) { return ahHost.shellTokenize(segment); }
+function tokenizeQuotedJs(segment) {
   const tokens = [];
   let cur = ''; let q = ''; let any = false;
   const str = segment.trim();
@@ -1068,7 +1070,8 @@ function dequoteSegment(segment) {
 function extractSubstitutions(s) {
   return cmdMemo('sub:' + s, function () { return extractSubstitutionsRaw(s); });
 }
-function extractSubstitutionsRaw(s) {
+function extractSubstitutionsRaw(s) { return ahHost.shellSubstitutions(s); }
+function extractSubstitutionsJs(s) {
   const found = [];
   let i = 0;
   const n = s.length;
@@ -1640,6 +1643,11 @@ function splitSegmentsDetailed(cmd) {
   return cmdMemo('split:' + cmd, function () { return splitSegmentsDetailedRaw(cmd); });
 }
 function splitSegmentsDetailedRaw(cmd) {
+  const r = ahHost.shellSplit(cmd);
+  return { segments: r[0], delims: r[1] };
+}
+// The reference walk: scannersReference runs it next to the native splitter on the same input.
+function splitSegmentsDetailedJs(cmd) {
   const segments = [];
   const delims = [];
   let cur = '';
@@ -1779,6 +1787,20 @@ function splitSegmentsDetailedRaw(cmd) {
 function splitSegments(cmd) {
   return splitSegmentsDetailed(cmd).segments;
 }
+
+// The differential entries of the native shell scanners (ah-engine/src/script/host_shell.rs): for each command, its split, the words
+// of every segment and the substitutions of the command and of every substitution found, once through the reference walks above
+// (scannersReference) and once through the host functions (scannersNative). The engine tests require the two to be identical.
+function scannersWith(cmds, fns) {
+  return cmds.map(function (cmd) {
+    const sp = fns.split(cmd);
+    const subs = []; const queue = [cmd];
+    for (let k = 0; k < queue.length && k < 64; k++) { const f = fns.subs(queue[k]); subs.push(f); for (const x of f) queue.push(x); }
+    return { segments: sp.segments, delims: sp.delims, tokens: sp.segments.map(fns.tok), subs: subs };
+  });
+}
+function scannersReference(args) { return scannersWith(args.cmds, { split: splitSegmentsDetailedJs, subs: extractSubstitutionsJs, tok: tokenizeQuotedJs }); }
+function scannersNative(args) { return scannersWith(args.cmds, { split: splitSegmentsDetailedRaw, subs: extractSubstitutionsRaw, tok: tokenizeQuotedRaw }); }
 
 // basename() is imported from ./lib/shell-scan.js (shared with git-guard.js).
 
@@ -2467,17 +2489,7 @@ function extractShellCPayloadRaw(segment) {
   const verb = effectiveVerb(segment);
   if (!verb || !T.shellVerbs.has(verb)) return '';
   // Tokenize respecting quotes so the payload (which contains spaces) stays whole.
-  const tokens = [];
-  let cur = ''; let q = ''; let any = false;
-  const str = segment.trim();
-  for (let i = 0; i < str.length; i++) {
-    const c = str[i];
-    if (q) { if (c === q) { q = ''; } else cur += c; any = true; continue; }
-    if (c === "'" || c === '"') { q = c; any = true; continue; }
-    if (cmdWs(c)) { if (any) { tokens.push(cur); cur = ''; any = false; } continue; }
-    cur += c; any = true;
-  }
-  if (any) tokens.push(cur);
+  const tokens = tokenizeQuoted(segment);
   // Find the -c flag; the NEXT token is the command payload.
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i];
@@ -2509,17 +2521,7 @@ function extractEvalPayloadRaw(segment) {
   const verb = effectiveVerb(segment);
   if (verb !== 'eval') return '';
   // Tokenize respecting quotes; strip quote delimiters so the payload is raw cmd.
-  const tokens = [];
-  let cur = ''; let q = ''; let any = false;
-  const str = segment.trim();
-  for (let i = 0; i < str.length; i++) {
-    const c = str[i];
-    if (q) { if (c === q) { q = ''; } else cur += c; any = true; continue; }
-    if (c === "'" || c === '"') { q = c; any = true; continue; }
-    if (cmdWs(c)) { if (any) { tokens.push(cur); cur = ''; any = false; } continue; }
-    cur += c; any = true;
-  }
-  if (any) tokens.push(cur);
+  const tokens = tokenizeQuoted(segment);
   // Drop everything up to and including the `eval` verb token (basename-aware:
   // a path like /usr/bin/eval still resolves to eval). Leading wrapper/assignment
   // prefixes are already accounted for because effectiveVerb confirmed `eval`.

@@ -44,6 +44,7 @@
 pub mod evidence_cache;
 pub mod host;
 pub mod host_b3;
+pub mod host_shell;
 pub mod host_d;
 mod host_io;
 pub mod host_childturn;
