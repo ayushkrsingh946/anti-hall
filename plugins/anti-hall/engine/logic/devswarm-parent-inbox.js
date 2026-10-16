@@ -410,14 +410,10 @@ function piForget(sid, key) {
 
 // ---- the roster of the project's summary ----------------------------------------------------------------------------------
 
-// The project's summary: {absent: true}, {summary} or a deferral cause (anything the hook would log, or shape it would read otherwise).
-function piReadSummary(home, key) {
-  var p = piDevswarmDir(home) + '/' + ah.cfg('devswarm_role.pg_dir_summaries') + '/' + key + '.json';
-  if (!piPresent(p)) return { absent: true };
-  var r = jx.read(p);
-  if (r.big) throw meshDefer;
-  if (r.text === undefined) return { cause: 'summary-unreadable' };
-  var t = r.text.trim();
+// A summary's text as the hook reads it: {absent: true}, {summary} or the cause of a deferral (anything the hook would log, or a shape it
+// would read otherwise).
+function piParseSummary(raw) {
+  var t = raw.trim();
   if (t === '') return { cause: 'summary-empty' };
   var j = jx.parse(t);
   if (j.unsure) throw meshDefer;
@@ -425,6 +421,16 @@ function piReadSummary(home, key) {
   if (j.v === null || typeof j.v !== 'object') return { absent: true }; // a scalar reads as no summary
   if (Array.isArray(j.v)) return { cause: 'summary-shape' }; // a list is an object of its own: Node's
   return { summary: j.v };
+}
+
+// The project's summary file.
+function piReadSummary(home, key) {
+  var p = piDevswarmDir(home) + '/' + ah.cfg('devswarm_role.pg_dir_summaries') + '/' + key + '.json';
+  if (!piPresent(p)) return { absent: true };
+  var r = jx.read(p);
+  if (r.big) throw meshDefer;
+  if (r.text === undefined) return { cause: 'summary-unreadable' };
+  return piParseSummary(r.text);
 }
 
 // What the Node hook would do with the summary's rows, decided without a write: the rows, the nudges and the archive recommendations,
@@ -811,7 +817,7 @@ function piDecide(p, opts) {
   var now = ah.clock.now();
   var every = ah.settings.num('verify_first.num_repeat_every');
   var repeat = isFinite(every) && every > 0 ? every : 0;
-  var parked = null, roster = null, key = null, health = null, banner = null, wakeLine = null, driftNotice = null;
+  var parked = null, roster = null, key = null, health = null, banner = null, wakeLine = null, driftNotice = null, derived = null;
   if (top !== null) {
     var cli = piCli(opts, home);
     if (cli === null) return piDefer('cli');
@@ -821,8 +827,13 @@ function piDecide(p, opts) {
     // the ingest daemon: when it is not healthy the hook refreshes the summary from the store (a write), which the engine leaves to Node
     health = JSON.parse(ahHost.ctIngest(key));
     if (health.unsure) return piDefer('ingest-health');
-    if (health.status !== 'healthy' && ah.fs.lstat(dev + '/' + ah.cfg('mesh_write.dir_store') + '/' + key) !== null) return piDefer('summary-refresh');
-    var sm = piReadSummary(home, key);
+    // when it is not healthy the hook refreshes the summary from the store first; the refresh is written once the turn is settled
+    if (health.status !== 'healthy') {
+      var dr = JSON.parse(ahHost.piDerive(key, now));
+      if (dr.unsure) return piDefer('summary-refresh');
+      derived = dr.text;
+    }
+    var sm = derived !== null ? piParseSummary(derived) : piReadSummary(home, key);
     if (sm.cause) return piDefer(sm.cause);
     var summary = sm.summary || null;
     if (summary !== null) {
@@ -915,6 +926,7 @@ function piDecide(p, opts) {
     if (pending[i].kind === 'dedupe' && dedupeOn && !dedupe.canDecide(pending[i].o)) return piDefer('dedupe-undecidable');
   }
   ah.commit();
+  if (derived !== null) ah.state.writeAtomic(piRel(ah.cfg('devswarm_role.pg_dir_summaries') + '/' + key + '.json'), derived);
   var emitted = [];
   pending.forEach(function (s) {
     if (s.kind === 'forget') { piForget(sid, s.key); return; }

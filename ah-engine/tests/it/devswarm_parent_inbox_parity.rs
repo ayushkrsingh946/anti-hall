@@ -342,6 +342,20 @@ fn faulty_daemon(extra: Value) -> impl Fn(&Path) {
 
 const MIN: i64 = 60_000;
 
+/// A turn of a child workspace on the scratch checkout, run by the real Node hook: it creates the project's store, a registry row, the
+/// child's descriptor and the summary.
+fn warm_child(h: &Path) {
+    let mut c = cmd("node", h, &[("DEVSWARM_SOURCE_BRANCH", "feat/x"), ("DEVSWARM_BUILDER_ID", "child-1")]);
+    c.arg(plugin().join("hooks/devswarm-child-turn.js"));
+    let (code, _, err) = run(c, &payload(&h.join("proj"), "warm", None, false));
+    assert_eq!(code, 0, "warm child turn failed: {err}");
+}
+
+/// Makes the summary on disk differ from what the store derives, so a refresh is visible.
+fn stale_summary(h: &Path) {
+    write(&ds(h).join(format!("summaries/{}.json", project_key(h))), r#"{"workspaces":{"stale-row":{"worktreePath":"/nowhere","sessionId":"x","directUnread":9}}}"#);
+}
+
 /// A session transcript of the checkout whose first record names `cwd`, last written `age_ms` ago.
 fn session_file(sid: &'static str, cwd_sub: &'static str, age_ms: u64) -> impl Fn(&Path) {
     move |h| {
@@ -771,11 +785,22 @@ fn scenes() -> Vec<Scene> {
             write(&ds(h).join(format!("maintainer-notice-cursor/{}.json", project_key(h))), r#"{"lastSeenId":"gone"}"#);
         })),
         scene("notices-show-setting-set", Defer).seed(both(notices(vec![json!({"id": "n1", "ts": 1, "text": "a"})]), |h| write(&h.join(".anti-hall/settings.json"), r#"{"devswarm":{"maintainerNotice":{"show":false}}}"#))),
+        // the summary refresh the hook makes while the ingest daemon is not running
+        scene("refresh-store-with-a-row", Same).seed(warm_child),
+        scene("refresh-replaces-a-stale-summary", Same).seed(both(warm_child, stale_summary)),
+        scene("refresh-skipped-while-the-daemon-is-healthy", Same).seed(all3(warm_child, stale_summary, healthy_daemon)),
+        scene("refresh-second-turn", Same).prime().seed(both(warm_child, stale_summary)),
+        scene("refresh-with-descriptor-of-the-child-claude", Same).env(CLAUDE.to_vec()).seed(both(warm_child, stale_summary)),
+        scene("refresh-journal-backend", Defer).seed(both(warm_child, |h| write(&ds(h).join("store").join(project_key(h)).join("BACKEND"), "journal\n"))),
+        scene("refresh-store-dir-without-a-database", Defer).seed(|h| {
+            std::fs::create_dir_all(ds(h).join("store").join(project_key(h))).unwrap();
+            write(&ds(h).join("store").join(project_key(h)).join("BACKEND"), "sqlite\n");
+        }),
         // the cases that stay with Node, each decided before anything is written
         scene("summary-empty-file", Defer).seed(|h| write(&ds(h).join(format!("summaries/{}.json", project_key(h))), "")),
         scene("descriptor-present-not-claude", Same).seed(|h| write(&ds(h).join("workspaces/child-1.json"), r#"{"id":"child-1"}"#)),
         scene("app-db-unreadable-without-rows", Same).seed(|h| write(&h.join("app.db"), "x")).env(vec![("ANTIHALL_DEVSWARM_APP_DB", "$HOME/app.db")]),
-        scene("unhealthy-daemon-with-store", Defer).seed(store_dir),
+        scene("unhealthy-daemon-with-an-empty-store-dir", Same).seed(store_dir),
         scene("seat-marker-shown-once", Defer).seed(seat_marker("{\"shown\":1}")),
         {
             let mut s = scene("relative-transcript-path", Defer);

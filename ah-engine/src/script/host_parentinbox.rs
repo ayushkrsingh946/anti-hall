@@ -15,6 +15,7 @@
 //! | `piIgnored(id)` | whether the row has an archive-ignore mark |
 //! | `piPid(pid)` | `pidIsAlive(pid)`: `true`, `false` or `null` (no opinion) |
 //! | `piAppChildren(worktree)` | the workspaces the app database lists as open children of the project around `worktree`: `{repo, children: [{id, worktreePath, sessionId}]}` (`appHasLiveChild` before the per-row eligibility) |
+//! | `piDerive(repoKey, now)` | `{text}`: the project's summary projection as the hook's refresh would write it when the ingest daemon is not healthy (`null` when the project has no store rows to derive from); nothing is written |
 //! | `piDrift(worktree, anchor, current, transcriptPath)` | `anchorSessionDrift(...)`: `{newest, anchor}` when a newer session of the worktree is active than the Primary's anchor, else `null` |
 //! | `piFold(id, presentJson, appBuilder)` | `{to}`: the canonical row a `primary-<hash>` label folds into (`rosterFoldTarget`) |
 use super::host::with_settings;
@@ -325,6 +326,32 @@ fn activity_of(inv: &Inv, id: &str, wt: Option<&str>, sid: Option<&str>, last_ou
 
 
 // ---------------------------------------------------------------------------------------------------------------------
+// the summary refresh
+// ---------------------------------------------------------------------------------------------------------------------
+
+/// The refresh the hook makes when the ingest daemon is not healthy: `deriveSummary` over a store that holds something. The text is
+/// what Node writes; the script writes it once nothing else can defer the turn.
+fn derive_text(inv: &Inv, key: &str) -> R<Value> {
+    let dir = crate::meshw::union::store_dir(&inv.home, key);
+    let db = dir.join(defaults::text("mesh_write.store_file"));
+    if !db.exists() {
+        // no store at all is Node's null; a journal store or a marker with no database is Node's to read
+        if dir.join(defaults::text("mesh.backend_marker")).exists() || std::fs::read_dir(dir.join(defaults::text("devswarm_role.pg_journal_dir"))).is_ok_and(|mut d| d.next().is_some()) {
+            return defer("store-backend");
+        }
+        return Ok(json!({"text": Value::Null}));
+    }
+    let store = crate::meshw::common::open_store(inv, key)?;
+    let reader = store.reader();
+    let has_rows = reader.roster().map_err(|e| ident::Defer(format!("registry:{e}")))?.len() > 0 || !reader.workspace_ids().is_empty();
+    if !has_rows {
+        return Ok(json!({"text": Value::Null}));
+    }
+    let sum = crate::meshw::summary::compute(&store, inv, None)?;
+    Ok(json!({"text": sum.stringify()}))
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
 // session drift
 // ---------------------------------------------------------------------------------------------------------------------
 
@@ -499,6 +526,10 @@ pub(super) fn install<'js>(c: &Ctx<'js>, h: &Object<'js>) -> rquickjs::Result<()
         Function::new(c.clone(), |wt: String, now: f64| -> rquickjs::Result<String> {
             with_settings(|st| answer(ensure_snap(&st.home, &st.env, now).and_then(|()| app_children(&wt))))
         })?,
+    )?;
+    h.set(
+        "piDerive",
+        Function::new(c.clone(), |key: String, now: f64| -> rquickjs::Result<String> { with_settings(|st| answer(derive_text(&inv_of(st, now), &key))) })?,
     )?;
     h.set(
         "piDrift",
