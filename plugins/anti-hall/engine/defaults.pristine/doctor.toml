@@ -2291,9 +2291,9 @@ doc = "Finding: Jev is enabled but no API key resolves for its transport, so the
 value = "Jev is enabled but has no API key for {transport}"
 
 [doctor_msg.fail_open_soft]
-doc = "Finding: the engine has failed open more often than the soft limit in the recent window. Placeholders: {n}, {window}, {top}."
-value = "the engine failed open {n} times in the last {window}s (most often {top}): checks are being skipped; see `ah-engine status` (fail_open) and the event log"
+doc = "Finding: the engine has failed open more often than the soft limit in the recent window. Placeholders: {n}, {window}, {top}, {effect}."
+value = "the engine failed open {n} times in the last {window}s (most often {top}: {effect}); see `ah-engine status` (fail_open) and the event log"
 
 [doctor_msg.fail_open_hard]
-doc = "Finding: the engine has failed open more often than the hard limit in the recent window. Placeholders: {n}, {window}, {top}."
-value = "the engine failed open {n} times in the last {window}s (most often {top}), past the hard limit: most checks are not running; see `ah-engine status` (fail_open) and the event log"
+doc = "Finding: the engine has failed open more often than the hard limit in the recent window. Placeholders: {n}, {window}, {top}, {effect}."
+value = "the engine failed open {n} times in the last {window}s (most often {top}: {effect}), past the hard limit; see `ah-engine status` (fail_open) and the event log"

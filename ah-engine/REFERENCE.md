@@ -4704,8 +4704,8 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `doctor_msg.explicit_retired` | `RE-RETIRED ` |  |  | The mark of a re-retired resurrected row. |
 | `doctor_msg.explicit_skipped` | `skipped ` |  |  | The mark of an explicit repair row that changed nothing. |
 | `doctor_msg.explicit_unloaded` | `UNLOADED ` |  |  | The mark of an unloaded orphan. |
-| `doctor_msg.fail_open_hard` | `the engine failed open {n} times in the last {window}s (most often {top}), pa...` |  |  | Finding: the engine has failed open more often than the hard limit in the recent window. Placeholders: {n}, {window}, {top}. |
-| `doctor_msg.fail_open_soft` | `the engine failed open {n} times in the last {window}s (most often {top}): ch...` |  |  | Finding: the engine has failed open more often than the soft limit in the recent window. Placeholders: {n}, {window}, {top}. |
+| `doctor_msg.fail_open_hard` | `the engine failed open {n} times in the last {window}s (most often {top}: {ef...` |  |  | Finding: the engine has failed open more often than the hard limit in the recent window. Placeholders: {n}, {window}, {top}, {effect}. |
+| `doctor_msg.fail_open_soft` | `the engine failed open {n} times in the last {window}s (most often {top}: {ef...` |  |  | Finding: the engine has failed open more often than the soft limit in the recent window. Placeholders: {n}, {window}, {top}, {effect}. |
 | `doctor_msg.failure_recorded` | `last recorded failure ({class}): {reason} {hint}` |  |  | DMN-11. Placeholders: {class}, {reason}, {hint}. |
 | `doctor_msg.fix_exec` | `made {path} executable` |  |  | Repair row. Placeholder: {path}. |
 | `doctor_msg.fix_heal_dry` | `would add the missing settings to {n} defaults file(s)` |  |  | Dry-run repair row. Placeholder: {n}. |
@@ -9996,10 +9996,12 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | Key | Default | Env override | Unit | What it is |
 |---|---|---|---|---|
 | `fail_open.check_none` | `-` |  |  | check label of a fail-open that is not tied to one check. |
+| `fail_open.effect_default` | `some requests got no verdict from the engine` |  |  | {effect} text for a fail_open reason that has no fail_open.effects entry (and for an empty window). |
+| `fail_open.effects` | `7 items` |  |  | What each fail_open reason means for the session, as reason=text entries; the text fills {effect} of the degraded notice and the doctor findings. A reason without an entry uses fail_open.effect_default. |
 | `fail_open.hard_per_window` | `20` |  |  | Hard limit: this many fail-opens inside the window and the doctor check fails. The engine keeps failing open, it never blocks a session. |
 | `fail_open.log_detail_max` | `200` |  | chars | Longest detail text a fail-open writes to the health log, in characters. |
 | `fail_open.msg_log` | `check={check} {detail}` |  |  | Health-log detail of one fail-open. Placeholders: {check}, {detail}. |
-| `fail_open.msg_notice` | `anti-hall: the engine failed open {n} times in the last {window}s (most often...` |  |  | One-line session notice while the engine is degraded by fail-opens. Placeholders: {n}, {window}, {top}. |
+| `fail_open.msg_notice` | `anti-hall: the engine failed open {n} times in the last {window}s (most often...` |  |  | One-line session notice while the engine is degraded by fail-opens. Only skipped-class reasons count toward it (see fail_open.reporting_reasons). Placeholders: {n}, {window}, {top}, {effect} (the fail_open.effects text of {top}). |
 | `fail_open.notice_file` | `fail-open-notice` |  |  | File in the state directory that holds the one-line session notice while the engine is degraded by fail-opens; the daemon writes it past the soft limit and removes it when the rate falls back, the hook client adds its text to one answer per session. |
 | `fail_open.notice_tag` | `fail-open` |  |  | Tag of the once-per-session stamp of the degraded notice (distinct from the other advisories'). |
 | `fail_open.pending_max` | `1024` |  |  | Most fail-opens held between two drains into the telemetry counters (the daemon drains after every request); past it the extra ones still reach the window and the log. |
@@ -10009,11 +10011,12 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `fail_open.reason_jev_breaker` | `jev_breaker_open` |  |  | fail_open reason: the Jev circuit breaker was open, so the judgement was skipped. |
 | `fail_open.reason_missing_key` | `missing_key` |  |  | fail_open reason: the shipped defaults were unavailable or missing a key, so the check could not run. |
 | `fail_open.reason_script_timeout` | `script_timeout` |  |  | fail_open reason: a scripted check ran out of time. |
+| `fail_open.reporting_reasons` | `undelivered_verdict` |  |  | Reporting-only fail_open reasons: the verdict WAS applied and only its delivery or telemetry failed (undelivered_verdict: the client's confirmation was late, missing or the write failed). They stay in the counters and in status (reporting_in_window) but do not count toward the soft/hard limits, the degraded state or the session notice. Every other reason is skipped-class: a check or verdict really did not apply. |
 | `fail_open.soft_per_window` | `5` |  |  | Soft limit: this many fail-opens inside the window and the engine reports itself degraded (status, a doctor WARN and a one-line session notice). Counting continues. |
 | `fail_open.state_hard` | `failing` |  |  | Degraded state name: at or past the hard limit. |
 | `fail_open.state_ok` | `ok` |  |  | Degraded state name: below the soft limit. |
 | `fail_open.state_soft` | `degraded` |  |  | Degraded state name: at or past the soft limit. |
-| `fail_open.window_s` | `60` |  | s | Length of the sliding window the engine counts its own fail-opens in (missing config, deadline cut, script timeout, Jev breaker open, busy, internal error, undelivered verdict). |
+| `fail_open.window_s` | `60` |  | s | Length of the sliding window the engine counts its own fail-opens in (missing config, deadline cut, script timeout, Jev breaker open, busy, internal error; reporting-only reasons such as undelivered_verdict are counted apart and do not count toward the limits). |
 
 ### wire.toml / wire
 

@@ -288,7 +288,8 @@ pub fn daemon_section(doc: &mut Doc) {
             if let Some(fo) = crate::client::ctl_json("status").and_then(|st| st.get("fail_open").cloned()).filter(|f| f.is_object()) {
                 let num = |k: &str| fo.get(k).and_then(serde_json::Value::as_u64).unwrap_or(0);
                 let (n, window, top) = (num("in_window"), num("window_s"), fo.get("top_reason").and_then(serde_json::Value::as_str).unwrap_or(""));
-                let args: [(&str, &dyn std::fmt::Display); 3] = [("n", &n), ("window", &window), ("top", &top)];
+                let effect = crate::failopen::effect(top);
+                let args: [(&str, &dyn std::fmt::Display); 4] = [("n", &n), ("window", &window), ("top", &top), ("effect", &effect)];
                 match fo.get("state").and_then(serde_json::Value::as_str) {
                     Some(s) if s == defaults::text("fail_open.state_hard") => doc.bad(defaults::render("doctor_msg.fail_open_hard", &args)),
                     Some(s) if s == defaults::text("fail_open.state_soft") => doc.warnl(defaults::render("doctor_msg.fail_open_soft", &args)),
