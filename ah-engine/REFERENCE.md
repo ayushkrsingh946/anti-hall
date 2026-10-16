@@ -241,12 +241,8 @@ Every `AH_ENGINE_*` variable the engine or its wrappers read. A variable that ov
 | `AH_ENGINE_SESSION_RPS` | `daemon.session_rps` | Sustained requests per second allowed per session; 0 = unlimited. |
 | `AH_ENGINE_SETTINGS` |  | Overrides the path of anti-hall's settings.json (default: settings.json in the base directory under the home directory). |
 | `AH_ENGINE_SHADOW_CHILD` | `ops.shadow_child_env` | Set in the shadow child so it never starts a shadow of its own. |
-| `AH_ENGINE_SHADOW_RATE_DEFECT` | `ops.shadow_rate_defect` | How many runs in a thousand of the defect command are also run by the Node version in the background and compared (0 turns the shadow off). The engine result is always the real one. |
-| `AH_ENGINE_SHADOW_RATE_INSTALL` | `ops.shadow_rate_install` | How many runs in a thousand of install-statusline are also run by the Node installer in the background, on a scratch copy of the settings (never a second real write), and compared (0 turns the shadow off). |
 | `AH_ENGINE_SHADOW_RATE_PHASE` | `ops.shadow_rate_phase` | How many runs in a thousand of the phase command are also run by the Node version in the background and compared (0 turns the shadow off). The engine result is always the real one. |
-| `AH_ENGINE_SHADOW_RATE_SETTINGS` | `ops.shadow_rate_settings` | How many runs in a thousand of the settings command are also run by the Node version in the background and compared (0 turns the shadow off). The engine result is always the real one. |
 | `AH_ENGINE_SHADOW_RATE_STATUSLINE` | `ops.shadow_rate_statusline` | How many runs in a thousand of the statusline command are also run by the Node version in the background and compared (0 turns the shadow off). The engine result is always the real one. |
-| `AH_ENGINE_SHADOW_RATE_UNINSTALL` | `ops.shadow_rate_uninstall` | How many runs in a thousand of uninstall-statusline are also run by the Node uninstaller in the background, on a scratch copy of the settings, and compared (0 turns the shadow off). |
 | `AH_ENGINE_SLOW_DOWN_N` | `client.slow_down_n` | Consecutive slow (late) daemon replies within client.slow_window_ms after which the daemon is treated as wedged and marked down. A single call that gets no reply in the window never marks it down: it fails open and the next client asks the daemon again. |
 | `AH_ENGINE_SLOW_FALLBACK_MAX_MS` | `client.slow_fallback_max_ms` | How long, measured from the engine start, a hook call keeps waiting for the daemon's own reply once client.deadline_ms has passed (a daemon that is alive answers late rather than never). The wrapper's watchdog waits the same bound (never past the hook's own timeout), so a delayed block still blocks. A reply that arrives in the window is used as is: the daemon's decision, no Node hook run (the daemon has already processed the request). Nothing by then fails the call open and counts toward client.slow_down_n; a late call never runs its Node hooks. A normal or unavailable daemon keeps the short fail-fast budget (client.deadline_ms + client.deadline_slack_ms + client.wrapper_extra_ms). 0 disables the extension. |
 | `AH_ENGINE_SLOW_WINDOW_MS` | `client.slow_window_ms` | Window in which consecutive slow daemon replies are counted toward client.slow_down_n; a streak older than this starts over. |
@@ -6470,8 +6466,6 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `ops.safety_turn` | `Turning {verb} {guard} means {note}. Ask the user to confirm, then re-run wit...` |  |  | Warning for turning a guard off or a bypass on. Placeholders: verb, guard, note. |
 | `ops.safety_verb_off` | `off` |  |  | The verb of a warning about turning a guard off. |
 | `ops.safety_verb_on` | `on` |  |  | The verb of a warning about turning a bypass on. |
-| `ops.script_defect` | `scripts/defect.js` |  |  | The Node defect script, relative to the plugin root. |
-| `ops.script_settings` | `scripts/settings.js` |  |  | The Node settings script, relative to the plugin root. |
 | `ops.script_statusline` | `statusline/statusline.js` |  |  | The Node status line dispatcher, relative to the plugin root. |
 | `ops.set_err_bool` | `expected a boolean (true/false/on/off/1/0), got {got}` |  |  | Why a value is not a boolean. Placeholder: got (JSON text). |
 | `ops.set_err_enum` | `must be one of: {values}` |  |  | A value outside the allowed words. Placeholder: values. |
@@ -6507,8 +6501,6 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `ops.shadow_masks` | `8 items` |  |  | Patterns replaced before comparing (`regex => replacement`): clock values and animation frames, and the engine-first status line command (the launcher form) read as the Node installer's own `node "<dispatcher>"`. |
 | `ops.shadow_node` | `node` |  |  | The Node program the shadow runs when AH_ENGINE_NODE is not set. |
 | `ops.shadow_per` | `1000` |  |  | The sampling denominator of the shadow rates. |
-| `ops.shadow_rate_defect` | `1000` | `AH_ENGINE_SHADOW_RATE_DEFECT` |  | How many runs in a thousand of the defect command are also run by the Node version in the background and compared (0 turns the shadow off). The engine result is always the real one. |
-| `ops.shadow_rate_settings` | `1000` | `AH_ENGINE_SHADOW_RATE_SETTINGS` |  | How many runs in a thousand of the settings command are also run by the Node version in the background and compared (0 turns the shadow off). The engine result is always the real one. |
 | `ops.shadow_rate_statusline` | `50` | `AH_ENGINE_SHADOW_RATE_STATUSLINE` |  | How many runs in a thousand of the statusline command are also run by the Node version in the background and compared (0 turns the shadow off). The engine result is always the real one. |
 | `ops.shadow_report` | `engine exit {want}, node exit {got}\n--- engine stdout\n{e_out}\n--- node std...` |  |  | The report a mismatching comparison leaves. Placeholders: want, got, e_out, n_out, e_err, n_err, e_state, n_state. |
 | `ops.shadow_report_file` | `mismatch.txt` |  |  | The report left by a mismatching comparison. |
@@ -6549,8 +6541,6 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `ops.tunable_value_max` | `60` |  |  | Longest default shown in a table cell, in characters (longer ones are cut; --json has them whole). |
 | `ops.tunable_verb` | `tunables` |  |  | The `settings` sub-verb that lists every key of the plugin's engine/defaults/*.toml (the keys the Node schema does not hold). |
 | `ops.undefined_word` | `undefined` |  |  | What the Node tool prints for a missing argument. |
-| `ops.verb_defect` | `defect` |  |  | The shadow name of the defect command. |
-| `ops.verb_settings` | `settings` |  |  | The shadow name of the settings command. |
 | `ops.verb_statusline` | `statusline` |  |  | The shadow name of the status line. |
 
 ### operator.toml / statusline
@@ -6688,20 +6678,8 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | Key | Default | Env override | Unit | What it is |
 |---|---|---|---|---|
 | `ops.script_phase` | `statusline/phase.js` |  |  | The Node phase script, relative to the plugin root. |
-| `ops.script_uninstall` | `statusline/uninstall-statusline.js` |  |  | The Node uninstaller, relative to the plugin root. |
-| `ops.shadow_cwd_dir` | `cwd` |  |  | The scratch working directory of an installer shadow, inside its scratch directory. |
-| `ops.shadow_cwd_word` | `CWD` |  |  | Replaces the real and the scratch working directory in compared text. |
-| `ops.shadow_inst_cwd` | `.claude/settings.json, .claude/settings.local.json, .claude/settings.json.bak...` |  |  | The files under the working directory the installer shadow copies into its scratch working directory and compares afterwards. |
-| `ops.shadow_inst_cwd_tag` | `c:` |  |  | Prefix of a working-directory-relative file in the installer shadow's state digest. |
-| `ops.shadow_inst_home` | `.claude/settings.json, .claude/settings.json.bak-antihall, .anti-hall/base-st...` |  |  | The files under the home directory the installer shadow copies into its scratch home and compares afterwards. |
-| `ops.shadow_inst_home_tag` | `h:` |  |  | Prefix of a home-relative file in the installer shadow's state digest. |
-| `ops.shadow_inst_link` | `.claude/plugins` |  |  | The home entries the installer shadow reads through links (the Node installer only checks that the marketplace dispatcher exists). |
-| `ops.shadow_rate_install` | `1000` | `AH_ENGINE_SHADOW_RATE_INSTALL` |  | How many runs in a thousand of install-statusline are also run by the Node installer in the background, on a scratch copy of the settings (never a second real write), and compared (0 turns the shadow off). |
 | `ops.shadow_rate_phase` | `1000` | `AH_ENGINE_SHADOW_RATE_PHASE` |  | How many runs in a thousand of the phase command are also run by the Node version in the background and compared (0 turns the shadow off). The engine result is always the real one. |
-| `ops.shadow_rate_uninstall` | `1000` | `AH_ENGINE_SHADOW_RATE_UNINSTALL` |  | How many runs in a thousand of uninstall-statusline are also run by the Node uninstaller in the background, on a scratch copy of the settings, and compared (0 turns the shadow off). |
-| `ops.verb_install` | `install-statusline` |  |  | The shadow name of the status line installer. |
 | `ops.verb_phase` | `phase` |  |  | The shadow name of the phase command. |
-| `ops.verb_uninstall` | `uninstall-statusline` |  |  | The shadow name of the status line uninstaller. |
 
 ### slcfg.toml / slcfg
 

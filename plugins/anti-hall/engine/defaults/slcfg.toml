@@ -616,21 +616,9 @@ value = "__proto__"
 doc = "The shadow name of the phase command."
 value = "phase"
 
-[ops.verb_install]
-doc = "The shadow name of the status line installer."
-value = "install-statusline"
-
-[ops.verb_uninstall]
-doc = "The shadow name of the status line uninstaller."
-value = "uninstall-statusline"
-
 [ops.script_phase]
 doc = "The Node phase script, relative to the plugin root."
 value = "statusline/phase.js"
-
-[ops.script_uninstall]
-doc = "The Node uninstaller, relative to the plugin root."
-value = "statusline/uninstall-statusline.js"
 
 [ops.shadow_rate_phase]
 doc = "How many runs in a thousand of the phase command are also run by the Node version in the background and compared (0 turns the shadow off). The engine result is always the real one."
@@ -638,48 +626,6 @@ value = 1000
 env = "AH_ENGINE_SHADOW_RATE_PHASE"
 min = 0
 max = 1000
-
-[ops.shadow_rate_install]
-doc = "How many runs in a thousand of install-statusline are also run by the Node installer in the background, on a scratch copy of the settings (never a second real write), and compared (0 turns the shadow off)."
-value = 1000
-env = "AH_ENGINE_SHADOW_RATE_INSTALL"
-min = 0
-max = 1000
-
-[ops.shadow_rate_uninstall]
-doc = "How many runs in a thousand of uninstall-statusline are also run by the Node uninstaller in the background, on a scratch copy of the settings, and compared (0 turns the shadow off)."
-value = 1000
-env = "AH_ENGINE_SHADOW_RATE_UNINSTALL"
-min = 0
-max = 1000
-
-[ops.shadow_inst_home]
-doc = "The files under the home directory the installer shadow copies into its scratch home and compares afterwards."
-value = [".claude/settings.json", ".claude/settings.json.bak-antihall", ".anti-hall/base-statusline.json", ".anti-hall/consolidated-base.json"]
-
-[ops.shadow_inst_link]
-doc = "The home entries the installer shadow reads through links (the Node installer only checks that the marketplace dispatcher exists)."
-value = [".claude/plugins"]
-
-[ops.shadow_inst_cwd]
-doc = "The files under the working directory the installer shadow copies into its scratch working directory and compares afterwards."
-value = [".claude/settings.json", ".claude/settings.local.json", ".claude/settings.json.bak-antihall", ".claude/settings.local.json.bak-antihall", ".gitignore"]
-
-[ops.shadow_cwd_dir]
-doc = "The scratch working directory of an installer shadow, inside its scratch directory."
-value = "cwd"
-
-[ops.shadow_cwd_word]
-doc = "Replaces the real and the scratch working directory in compared text."
-value = "CWD"
-
-[ops.shadow_inst_home_tag]
-doc = "Prefix of a home-relative file in the installer shadow's state digest."
-value = "h:"
-
-[ops.shadow_inst_cwd_tag]
-doc = "Prefix of a working-directory-relative file in the installer shadow's state digest."
-value = "c:"
 
 [env.statusline_node_only]
 doc = "Legacy env name from the retired installer; it no longer re-enables statusLine writes."

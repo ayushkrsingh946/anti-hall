@@ -219,7 +219,6 @@ fn engine(h: &Home, args: &[&str], extra: &[(&str, &str)]) -> Out {
         .env("HOME", &h.home)
         .env("TMPDIR", h.home.join("tmp"))
         .env("AH_ENGINE_PLUGIN_ROOT", plugin())
-        .env("AH_ENGINE_SHADOW_RATE_INSTALL", "0")
         .env("ANTIHALL_TEST_ISOLATION", "1")
         .current_dir(&h.cwd);
     for (k, v) in extra {

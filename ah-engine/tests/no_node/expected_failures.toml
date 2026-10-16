@@ -164,42 +164,6 @@ script = "fallback:companion/lib/devswarm-wake-watch.js"
 lane = "L08b"
 reason = "monitors.json runs the watcher through ah-run.sh with a Node fallback script"
 
-# --- run/defect
-[[node]]
-surface = "run/defect"
-script = "scripts/defect.js"
-lane = "L03"
-reason = "the defect verb starts the Node script (deferral or background witness)"
-
-# --- run/install-statusline
-[[node]]
-surface = "run/install-statusline"
-script = "statusline/install-statusline.js"
-optional = true
-lane = "L04"
-reason = "the status line installer/uninstaller starts its Node script"
-
-# --- run/settings
-[[node]]
-surface = "run/settings"
-script = "scripts/settings.js"
-lane = "L13"
-reason = "the settings verb starts the Node script (deferral or background witness)"
-
-# --- run/uninstall-statusline
-[[node]]
-surface = "run/uninstall-statusline"
-script = "statusline/uninstall-statusline.js"
-lane = "L04"
-reason = "the status line installer/uninstaller starts its Node script"
-
-[[node]]
-surface = "statusline/install"
-script = "statusline/install-statusline.js"
-optional = true
-lane = "L04"
-reason = "the status line installer/uninstaller starts its Node script"
-
 # --- statusline/render
 [[node]]
 surface = "statusline/render"
