@@ -278,6 +278,10 @@ test('doctor --dry-run: DevSwarm ACTIVE + git worktree -> gate OPENS (would inst
   const home = mkTmp('gate-open');
   const cwd = makeGitRepo('gate-open-cwd');
   try {
+    // Since 2026-10-16 a first install needs a registered project (workspace descriptor naming its repoKey).
+    const repoKey = require(path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'lib', 'devswarm-repokey.js')).repoKeyForWorktree(cwd);
+    fs.mkdirSync(path.join(home, '.anti-hall', 'devswarm', 'workspaces'), { recursive: true });
+    fs.writeFileSync(path.join(home, '.anti-hall', 'devswarm', 'workspaces', 'primary-reg.json'), JSON.stringify({ id: 'primary-reg', repoKey, worktreePath: cwd, sessionId: 's' }));
     seedUserSettings(home);
     const r = runDoctor({ cwd, args: ['--dry-run'], env: { HOME: home, USERPROFILE: home, ANTIHALL_DEVSWARM_SUPERVISOR: 'on', DEVSWARM_REPO_ID: 'repo-x' } });
     assert.match(r.out, /would \(re\)install the ingest daemon/, 'gate must OPEN (would-install) with active DevSwarm + worktree:\n' + r.out);

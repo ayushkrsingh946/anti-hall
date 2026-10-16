@@ -8,9 +8,14 @@
 //! * [`drain`] is one project's drain, [`wal`] its delivery write-ahead log (Node's format, so a WAL left open by either side is
 //!   replayed by the other), [`import`] the loss-free import into the store, [`monitor`] the bounded `hivecontrol workspace
 //!   monitor` call with Node's circuit breaker, and [`witness`] the non-acting Node comparison on a mirror.
-//! * Which projects: the explicit `devswarm_ingest.projects` setting (paths separated by `:`), the working directories of fresh
-//!   Node ingest heartbeats (so a project served today is served after the cutover), and what an earlier run remembered. A path
-//!   that is not a git repository is skipped. Nothing is deleted from the remembered list.
+//! * Which projects: the explicit `devswarm_ingest.projects` setting (paths separated by `:`), the worktrees of the registered
+//!   DevSwarm workspaces (so a new project is drained without a Node ingest unit), the working directories of fresh Node ingest
+//!   heartbeats (so a project served today is served after the cutover), and what an earlier run remembered. Unless
+//!   `devswarm_ingest.require_registered` is off, only an explicit path or a project a workspace descriptor names qualifies: a
+//!   scratch clone an agent worked in never does. A path that is not a git repository is skipped. Nothing is deleted from the
+//!   remembered list.
+//! * [`write_owner`] keeps the ownership marker (`devswarm/<devswarm_ingest.owner_file>`) the Node ingest installers read: while
+//!   it says engine, no Node path installs or heals an ingest unit.
 // Discard triage (E3): every `.ok()` / `unwrap_or_default()` in this module is a deliberate keep, for these reasons:
 // - a heartbeat or state file that is absent or unparsable is the absent value (discovery is additive)
 pub mod drain;
@@ -62,12 +67,42 @@ fn read_json(p: &Path) -> Option<Value> {
     serde_json::from_str(&std::fs::read_to_string(p).ok()?).ok()
 }
 
-/// The projects to drain: explicit, from fresh Node heartbeats, and remembered. Newly found paths are remembered in
-/// `<state dir>/devswarm_ingest.remembered`. One project per repo key.
+/// The repo keys the registered DevSwarm workspaces carry (descriptor `repoKey`), and one existing worktree per key.
+fn registered(home: &Path) -> (BTreeSet<String>, Vec<String>) {
+    let dir = devswarm_root(home).join(defaults::text("mesh_write.dir_workspaces"));
+    let (field_key, field_wt) = (defaults::text("mesh_write.field_repo_key"), defaults::text("mesh_write.field_worktree_path"));
+    let mut names: Vec<PathBuf> = std::fs::read_dir(&dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.to_string_lossy().ends_with(defaults::text("devswarm_ingest.json_suffix")))
+        .collect();
+    names.sort();
+    let (mut keys, mut worktrees) = (BTreeSet::new(), std::collections::BTreeMap::new());
+    for p in names {
+        let Some(v) = read_json(&p) else { continue };
+        let Some(key) = v.get(field_key).and_then(Value::as_str).filter(|k| !k.is_empty()) else { continue };
+        keys.insert(key.to_string());
+        if !worktrees.contains_key(key)
+            && let Some(wt) = v.get(field_wt).and_then(Value::as_str).filter(|w| Path::new(w).is_dir())
+        {
+            worktrees.insert(key.to_string(), wt.to_string());
+        }
+    }
+    (keys, worktrees.into_values().collect())
+}
+
+/// The projects to drain: explicit, the registered workspaces' projects, from fresh Node heartbeats, and remembered; all but the
+/// explicit ones only when a workspace descriptor names their repo key (`devswarm_ingest.require_registered`). Newly found
+/// qualifying paths are remembered in `<state dir>/devswarm_ingest.remembered`. One project per repo key.
 pub fn discover(home: &Path, state_dir: &Path, explicit: &str, now: i64) -> Vec<Project> {
     let mut paths: BTreeSet<String> = BTreeSet::new();
     let sep = defaults::text("devswarm_ingest.projects_separator");
-    paths.extend(explicit.split(sep).map(str::trim).filter(|p| !p.is_empty()).map(str::to_string));
+    let explicit: BTreeSet<String> = explicit.split(sep).map(str::trim).filter(|p| !p.is_empty()).map(str::to_string).collect();
+    let require = defaults::raw("devswarm_ingest.require_registered").as_bool().unwrap_or(true);
+    let (registered_keys, registered_worktrees) = registered(home);
+    paths.extend(registered_worktrees);
     let hb_dir = devswarm_root(home).join(defaults::text("devswarm_ingest.dir_heartbeats"));
     for e in std::fs::read_dir(&hb_dir).into_iter().flatten().flatten() {
         let name = e.file_name().to_string_lossy().into_owned();
@@ -88,19 +123,44 @@ pub fn discover(home: &Path, state_dir: &Path, explicit: &str, now: i64) -> Vec<
     let before: BTreeSet<String> = remembered.iter().cloned().collect();
     let mut seen: BTreeSet<String> = BTreeSet::new();
     let mut out = Vec::new();
-    for p in paths.iter().chain(remembered.iter()) {
-        if let Some(pr) = Project::resolve(p)
-            && seen.insert(pr.repo_key.clone())
-        {
+    let mut found: BTreeSet<String> = BTreeSet::new();
+    for p in explicit.iter().chain(paths.iter()).chain(remembered.iter()) {
+        let Some(pr) = Project::resolve(p) else { continue };
+        if require && !explicit.contains(p) && !registered_keys.contains(&pr.repo_key) {
+            continue;
+        }
+        if !before.contains(p) {
+            found.insert(p.clone());
+        }
+        if seen.insert(pr.repo_key.clone()) {
             out.push(pr);
         }
     }
-    let now_set: BTreeSet<String> = before.union(&paths.iter().cloned().collect()).cloned().collect();
+    let now_set: BTreeSet<String> = before.union(&found).cloned().collect();
     if now_set != before {
         crate::discard::harmless(std::fs::create_dir_all(state_dir)); // keep: remembering is an optimisation
         crate::discard::harmless(crate::atomic::write(&remembered_file, json!(now_set.into_iter().collect::<Vec<_>>()).to_string())); // keep: same
     }
     out
+}
+
+/// Write the ownership marker the Node ingest installers read (`devswarm/<devswarm_ingest.owner_file>`): `owner` is the mode word,
+/// `validForMs` how long it holds after `ts` (`devswarm_ingest.owner_valid_ms`). Best effort: a marker that cannot be written leaves
+/// Node's own health gates in charge, as before.
+pub fn write_owner(home: &Path, who: Owner, now: i64) {
+    let words = defaults::list("devswarm_ingest.mode_words");
+    let word = if who == Owner::Engine { words.get(1) } else { words.first() };
+    let body = json!({
+        "owner": word,
+        "pid": std::process::id(),
+        "ts": now,
+        "validForMs": defaults::num("devswarm_ingest.owner_valid_ms"),
+    });
+    let path = devswarm_root(home).join(defaults::text("devswarm_ingest.owner_file"));
+    if let Some(dir) = path.parent() {
+        crate::discard::harmless(std::fs::create_dir_all(dir)); // keep: the write below reports its own failure
+    }
+    crate::discard::logged("ingest_owner_marker", crate::atomic::write(&path, body.to_string()));
 }
 
 fn active_repo_keys(home: &Path, explicit: &str, now: i64) -> BTreeSet<String> {
@@ -609,8 +669,10 @@ pub fn join_all() -> bool {
 /// [`join_all`]). The manager runs supervised: a panic restarts it, and too many panics ask the daemon for a clean restart.
 pub fn start(home: &Path, state_dir: &Path, stop: Arc<dyn Fn() -> bool + Send + Sync>, restart: Arc<dyn Fn(&str) + Send + Sync>) {
     if owner() != Owner::Engine {
+        write_owner(home, Owner::Witness, now_ms());
         return;
     }
+    write_owner(home, Owner::Engine, now_ms());
     let (home, state_dir) = (home.to_path_buf(), state_dir.to_path_buf());
     let stop_for_run = stop.clone();
     let restart_for_run = restart.clone();
@@ -623,10 +685,15 @@ pub fn start(home: &Path, state_dir: &Path, stop: Arc<dyn Fn() -> bool + Send + 
         );
         let drain: DrainFn = Arc::new(|home, st, project, stop, draining| run_project(home, st, project, &System::configured(), stop, draining));
         let mut m = Manager::new(&home, stop_for_run.clone(), drain);
+        let mut owner_written = 0i64;
         while !stop_for_run() {
             let st = Settings::from_env(&crate::reqenv::RequestEnv::capture());
             let explicit = crate::dswire::effective_text("devswarm_ingest.projects");
             let now = now_ms();
+            if now - owner_written >= defaults::num("devswarm_ingest.owner_refresh_ms") as i64 {
+                write_owner(&home, Owner::Engine, now);
+                owner_written = now;
+            }
             let active = active_repo_keys(&home, &explicit, now);
             let projects = discover(&home, &state_dir, &explicit, now);
             let cap = Cap {
