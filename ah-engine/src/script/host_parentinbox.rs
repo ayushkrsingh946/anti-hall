@@ -15,6 +15,7 @@
 //! | `piIgnored(id)` | whether the row has an archive-ignore mark |
 //! | `piPid(pid)` | `pidIsAlive(pid)`: `true`, `false` or `null` (no opinion) |
 //! | `piAppChildren(worktree)` | the workspaces the app database lists as open children of the project around `worktree`: `{repo, children: [{id, worktreePath, sessionId}]}` (`appHasLiveChild` before the per-row eligibility) |
+//! | `piDrift(worktree, anchor, current, transcriptPath)` | `anchorSessionDrift(...)`: `{newest, anchor}` when a newer session of the worktree is active than the Primary's anchor, else `null` |
 //! | `piFold(id, presentJson, appBuilder)` | `{to}`: the canonical row a `primary-<hash>` label folds into (`rosterFoldTarget`) |
 use super::host::with_settings;
 use crate::checks::guardkit::ojson::OVal;
@@ -322,6 +323,116 @@ fn activity_of(inv: &Inv, id: &str, wt: Option<&str>, sid: Option<&str>, last_ou
     Ok(json!({"ts": ts, "dormant": dormant_act && !alive, "idleAlive": dormant_act && alive, "idleMs": w.idle_ms()}))
 }
 
+
+// ---------------------------------------------------------------------------------------------------------------------
+// session drift
+// ---------------------------------------------------------------------------------------------------------------------
+
+/// A session of the worktree: its id and the last time its transcript was written.
+struct Session {
+    id: String,
+    last_ms: f64,
+}
+
+/// `projectDirFor(worktree, home)`.
+fn project_dir(home: &Path, worktree: &str) -> std::path::PathBuf {
+    let from = defaults::text("devswarm_sup.lv_encode_chars");
+    let enc: String = worktree.chars().map(|c| if from.contains(c) { defaults::text("devswarm_sup.lv_encode_to").to_string() } else { c.to_string() }).collect();
+    home.join(defaults::text("mesh_write.claude_dir")).join(defaults::text("devswarm_sup.lv_projects_dir")).join(enc)
+}
+
+/// The `cwd` a transcript starts with: the first `"cwd"` of its head, read as a JSON string (`transcriptInfo`).
+fn head_cwd(file: &Path) -> R<Option<String>> {
+    use std::io::Read;
+    let Ok(mut f) = std::fs::File::open(file) else { return Ok(None) };
+    let mut buf = vec![0u8; defaults::num("devswarm_parent.drift_head_bytes") as usize];
+    let mut n = 0;
+    loop {
+        match f.read(&mut buf[n..]) {
+            Ok(0) | Err(_) => break,
+            Ok(k) => {
+                n += k;
+                if n == buf.len() {
+                    break;
+                }
+            }
+        }
+    }
+    let head = String::from_utf8_lossy(&buf[..n]).into_owned();
+    let re = regex::Regex::new(defaults::text("devswarm_parent.drift_cwd_re")).map_err(|_| ident::Defer("regex".into()))?;
+    let Some(m) = re.captures(&head) else { return Ok(None) };
+    match serde_json::from_str::<String>(&format!("\"{}\"", &m[1])) {
+        Ok(c) => Ok(Some(c)),
+        // JSON.parse reads a lone-surrogate escape that serde rejects
+        Err(_) if m[1].contains("\\u") => defer("drift-cwd-escape"),
+        Err(_) => Ok(None),
+    }
+}
+
+/// `sessionsForWorktree(worktree, { home })`, newest activity first.
+fn sessions_for(home: &Path, worktree: &str) -> R<Vec<Session>> {
+    let dir = project_dir(home, worktree);
+    let Ok(rd) = std::fs::read_dir(&dir) else { return Ok(Vec::new()) };
+    let mut names: Vec<String> = rd.flatten().filter_map(|e| e.file_name().into_string().ok()).collect();
+    names.sort();
+    let ext = defaults::text("devswarm_sup.lv_transcript_ext");
+    let sid_re = regex::Regex::new(defaults::text("devswarm_parent.drift_sid_re")).map_err(|_| ident::Defer("regex".into()))?;
+    let mut files: Vec<Session> = Vec::new();
+    for n in names {
+        let Some(id) = n.strip_suffix(ext) else { continue };
+        if !sid_re.is_match(id) {
+            continue;
+        }
+        let Ok(md) = std::fs::metadata(dir.join(&n)) else { continue };
+        files.push(Session { id: id.to_string(), last_ms: liveness::mtime_ms(&md) });
+    }
+    files.sort_by(|a, b| b.last_ms.partial_cmp(&a.last_ms).unwrap_or(std::cmp::Ordering::Equal));
+    let mut out: Vec<Session> = Vec::new();
+    for s in files.into_iter().take(defaults::num("devswarm_parent.drift_max_scan") as usize) {
+        let Some(cwd) = head_cwd(&dir.join(format!("{}{ext}", s.id)))? else { continue };
+        let sep_prefix = format!("{worktree}{}", std::path::MAIN_SEPARATOR);
+        if !(cwd == worktree || cwd.starts_with(&sep_prefix)) {
+            continue;
+        }
+        out.push(s);
+    }
+    out.sort_by(|a, b| b.last_ms.partial_cmp(&a.last_ms).unwrap_or(std::cmp::Ordering::Equal));
+    Ok(out)
+}
+
+/// `anchorSessionDrift({ anchorSessionId, worktree, home, currentSessionId, currentTranscriptPath })`.
+fn drift_of(home: &Path, worktree: &str, anchor: &str, current: &str, transcript: Option<&str>) -> R<Value> {
+    if anchor.is_empty() || anchor.starts_with(defaults::text("mesh_write.synthetic_session_prefix")) {
+        return Ok(Value::Null);
+    }
+    let list = sessions_for(home, worktree)?;
+    let Some(first) = list.first() else { return Ok(Value::Null) };
+    if first.id == anchor {
+        return Ok(Value::Null);
+    }
+    if !current.is_empty() {
+        // currentActivityMs(cur, list, o)
+        let cur_ms = if let Some(hit) = list.iter().find(|s| s.id == current) {
+            Some(hit.last_ms)
+        } else {
+            let mut cands: Vec<std::path::PathBuf> = Vec::new();
+            if let Some(t) = transcript.filter(|t| !t.is_empty()) {
+                cands.push(std::path::PathBuf::from(t));
+            }
+            if regex::Regex::new(defaults::text("devswarm_parent.drift_sid_re")).map_err(|_| ident::Defer("regex".into()))?.is_match(current) {
+                cands.push(project_dir(home, worktree).join(format!("{current}{}", defaults::text("devswarm_sup.lv_transcript_ext"))));
+            }
+            cands.iter().find_map(|p| std::fs::metadata(p).ok().map(|m| liveness::mtime_ms(&m)).filter(|m| m.is_finite()))
+        };
+        match cur_ms {
+            None => return Ok(Value::Null),
+            Some(c) if first.last_ms <= c => return Ok(Value::Null),
+            Some(_) => {}
+        }
+    }
+    Ok(json!({"newest": first.id, "anchor": anchor}))
+}
+
 // ---------------------------------------------------------------------------------------------------------------------
 
 fn fold_of(inv: &Inv, id: &str, present: &[String], app_builder: Option<&str>, repo_key: &str) -> R<Value> {
@@ -387,6 +498,12 @@ pub(super) fn install<'js>(c: &Ctx<'js>, h: &Object<'js>) -> rquickjs::Result<()
         "piAppChildren",
         Function::new(c.clone(), |wt: String, now: f64| -> rquickjs::Result<String> {
             with_settings(|st| answer(ensure_snap(&st.home, &st.env, now).and_then(|()| app_children(&wt))))
+        })?,
+    )?;
+    h.set(
+        "piDrift",
+        Function::new(c.clone(), |wt: String, anchor: String, current: String, tp: Option<String>| -> rquickjs::Result<String> {
+            with_settings(|st| answer(drift_of(Path::new(&st.home), &wt, &anchor, &current, tp.as_deref())))
         })?,
     )?;
     h.set(

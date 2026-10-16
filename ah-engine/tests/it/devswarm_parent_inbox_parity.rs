@@ -17,6 +17,8 @@ use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 static N: AtomicUsize = AtomicUsize::new(0);
+/// The Node answers of the scenes the engine answered natively: the corpus must exercise every text it claims to reproduce.
+static ANSWERS: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Want {
@@ -339,6 +341,27 @@ fn faulty_daemon(extra: Value) -> impl Fn(&Path) {
 }
 
 const MIN: i64 = 60_000;
+
+/// A session transcript of the checkout whose first record names `cwd`, last written `age_ms` ago.
+fn session_file(sid: &'static str, cwd_sub: &'static str, age_ms: u64) -> impl Fn(&Path) {
+    move |h| {
+        let wt = h.join("proj");
+        let enc: String = wt.to_string_lossy().chars().map(|c| if "/\\:.".contains(c) { '-' } else { c }).collect();
+        let f = h.join(".claude/projects").join(enc).join(format!("{sid}.jsonl"));
+        let cwd = if cwd_sub.is_empty() { wt.to_string_lossy().into_owned() } else if cwd_sub.starts_with('/') { cwd_sub.to_string() } else { wt.join(cwd_sub).to_string_lossy().into_owned() };
+        write(&f, &format!("{}\n", json!({"cwd": cwd, "timestamp": "2026-10-01T00:00:00.000Z"})));
+        let t = std::time::SystemTime::now() - std::time::Duration::from_millis(age_ms);
+        std::fs::File::options().write(true).open(&f).unwrap().set_modified(t).unwrap();
+    }
+}
+
+fn own_descriptor(anchor: &'static str) -> impl Fn(&Path) {
+    move |h| write(&ds(h).join(format!("workspaces/{}.json", primary_id(h))), &json!({"id": primary_id(h), "worktreePath": h.join("proj"), "sessionId": anchor}).to_string())
+}
+
+fn notices(rows: Vec<Value>) -> impl Fn(&Path) {
+    move |h| write(&ds(h).join("maintainer-notices.jsonl"), &rows.iter().map(|r| format!("{r}\n")).collect::<String>())
+}
 
 /// Adds a linked git worktree of the scratch checkout at `$HOME/<name>` (it shares the project key).
 fn linked_worktree(h: &Path, name: &str) -> PathBuf {
@@ -702,11 +725,55 @@ fn scenes() -> Vec<Scene> {
         scene("app-only-primary-builder-is-not-a-child", Same).env([&APP_ENV[..], &CLAUDE[..]].concat()).seed(|h| {
             app_db(vec![("p1", Some(h.join("proj")), "proj", 1, 0, 1, 0, "primary", None)], vec![])(h);
         }),
+        // the Primary's own anchor and the session drift
+        scene("drift-own-descriptor-same-session", Same).seed(own_descriptor("s1")),
+        scene("drift-newer-session-exists", Same).seed(all3(own_descriptor("s0"), session_file("s1", "", 600_000), session_file("s2", "", 60_000))),
+        scene("drift-newer-session-exists-codex", Same).codex().seed(all3(own_descriptor("s0"), session_file("s1", "", 600_000), session_file("s2", "", 60_000))),
+        scene("drift-newer-session-second-turn", Same).prime().seed(all3(own_descriptor("s0"), session_file("s1", "", 600_000), session_file("s2", "", 60_000))),
+        scene("drift-current-is-the-newest", Same).seed(all3(own_descriptor("s0"), session_file("s1", "", 60_000), session_file("s2", "", 600_000))),
+        scene("drift-anchor-is-the-newest", Same).seed(all3(own_descriptor("s2"), session_file("s1", "", 600_000), session_file("s2", "", 60_000))),
+        scene("drift-unclaimed-anchor", Same).seed(all3(own_descriptor("unclaimed:x"), session_file("s1", "", 600_000), session_file("s2", "", 60_000))),
+        scene("drift-no-transcript-for-the-current-session", Same).seed(both(own_descriptor("s0"), session_file("s2", "", 60_000))),
+        scene("drift-transcript-of-another-directory-ignored", Same).seed(all3(own_descriptor("s0"), session_file("s1", "", 600_000), session_file("s2", "/elsewhere", 60_000))),
+        scene("drift-transcript-of-a-subdirectory-counts", Same).seed(all3(own_descriptor("s0"), session_file("s1", "", 600_000), session_file("s2", "sub/deep", 60_000))),
+        scene("drift-transcript-without-a-cwd", Same).seed(all3(own_descriptor("s0"), session_file("s1", "", 600_000), |h| {
+            let wt = h.join("proj");
+            let enc: String = wt.to_string_lossy().chars().map(|c| if "/\\:.".contains(c) { '-' } else { c }).collect();
+            write(&h.join(".claude/projects").join(enc).join("s2.jsonl"), "{}\n");
+        })),
+        scene("drift-descriptor-without-a-session", Same).seed(all3(|h| write(&ds(h).join(format!("workspaces/{}.json", primary_id(h))), "{}"), session_file("s1", "", 600_000), session_file("s2", "", 60_000))),
+        scene("drift-descriptor-garbage", Same).seed(all3(|h| write(&ds(h).join(format!("workspaces/{}.json", primary_id(h))), "{torn"), session_file("s1", "", 600_000), session_file("s2", "", 60_000))),
+        scene("drift-descriptor-is-a-bare-zero", Same).seed(all3(|h| write(&ds(h).join(format!("workspaces/{}.json", primary_id(h))), "0"), session_file("s1", "", 600_000), session_file("s2", "", 60_000))),
+        scene("drift-with-the-current-transcript-path", Same).seed(all3(own_descriptor("s0"), session_file("s2", "", 60_000), |h| {
+            let t = h.join(".claude/projects/-p/t.jsonl");
+            write(&t, "");
+            let old = std::time::SystemTime::now() - std::time::Duration::from_millis(900_000);
+            std::fs::File::options().write(true).open(&t).unwrap().set_modified(old).unwrap();
+        })),
+        scene("drift-twenty-seven-sessions", Same).seed(all3(own_descriptor("s0"), |h| {
+            for i in 0..27u64 {
+                let name: &'static str = Box::leak(format!("x{i:02}").into_boxed_str());
+                session_file(name, "", 60_000 + i * 1000)(h);
+            }
+        }, session_file("s1", "", 7_200_000))),
+        // the maintainer-notice feed
+        scene("notices-feed-empty", Same).seed(notices(vec![])),
+        scene("notices-all-expired", Same).seed(notices(vec![json!({"id": "n1", "ts": 1, "expiresAt": 2, "text": "old"})])),
+        scene("notices-garbage-lines", Same).seed(|h| write(&ds(h).join("maintainer-notices.jsonl"), "{torn\n\n[1]\n{\"x\":1}\n")),
+        scene("notices-all-seen", Same).seed(both(notices(vec![json!({"id": "n1", "ts": 1, "text": "a"}), json!({"id": "n2", "ts": 2, "text": "b"})]), |h| {
+            write(&ds(h).join(format!("maintainer-notice-cursor/{}.json", project_key(h))), r#"{"lastSeenId":"n2"}"#);
+        })),
+        scene("notices-unseen-defers", Defer).seed(notices(vec![json!({"id": "n1", "ts": 1, "text": "a"})])),
+        scene("notices-partly-seen-defers", Defer).seed(both(notices(vec![json!({"id": "n1", "ts": 1, "text": "a"}), json!({"id": "n2", "ts": 2, "text": "b"})]), |h| {
+            write(&ds(h).join(format!("maintainer-notice-cursor/{}.json", project_key(h))), r#"{"lastSeenId":"n1"}"#);
+        })),
+        scene("notices-unseen-but-the-cursor-is-unknown", Defer).seed(both(notices(vec![json!({"id": "n1", "ts": 1, "text": "a"})]), |h| {
+            write(&ds(h).join(format!("maintainer-notice-cursor/{}.json", project_key(h))), r#"{"lastSeenId":"gone"}"#);
+        })),
+        scene("notices-show-setting-set", Defer).seed(both(notices(vec![json!({"id": "n1", "ts": 1, "text": "a"})]), |h| write(&h.join(".anti-hall/settings.json"), r#"{"devswarm":{"maintainerNotice":{"show":false}}}"#))),
         // the cases that stay with Node, each decided before anything is written
         scene("summary-empty-file", Defer).seed(|h| write(&ds(h).join(format!("summaries/{}.json", project_key(h))), "")),
         scene("descriptor-present-not-claude", Same).seed(|h| write(&ds(h).join("workspaces/child-1.json"), r#"{"id":"child-1"}"#)),
-        scene("primary-descriptor-present", Defer).seed(|h| write(&ds(h).join(format!("workspaces/{}.json", primary_id(h))), r#"{"sessionId":"s0"}"#)),
-        scene("maintainer-notices-present", Defer).seed(|h| write(&ds(h).join("maintainer-notices.jsonl"), "")),
         scene("app-db-unreadable-without-rows", Same).seed(|h| write(&h.join("app.db"), "x")).env(vec![("ANTIHALL_DEVSWARM_APP_DB", "$HOME/app.db")]),
         scene("unhealthy-daemon-with-store", Defer).seed(store_dir),
         scene("seat-marker-shown-once", Defer).seed(seat_marker("{\"shown\":1}")),
@@ -799,6 +866,7 @@ fn run_scene(s: &Scene) -> Result<bool, String> {
             if node_tree != eng_tree {
                 return Err(format!("{}: files differ\n{}", s.name, diff(&node_tree, &eng_tree, "node", "eng ")));
             }
+            ANSWERS.lock().unwrap().push_str(&n.1);
             Ok(true)
         }
     }
@@ -818,4 +886,31 @@ fn engine_and_node_agree_for_a_primary_in_a_checkout() {
     }
     eprintln!("scenes {}: native {native}, deferred {deferred}", all.len());
     assert!(problems.is_empty(), "{} problems:\n{}", problems.len(), problems.join("\n"));
+    let answers = ANSWERS.lock().unwrap().clone();
+    for text in [
+        "devswarm-comms",
+        "devswarm-escalations",
+        "devswarm-stale-data",
+        "devswarm-ingest-failing",
+        "devswarm-workspaces",
+        "[pinned, on screen]",
+        "brief not delivered",
+        "brief withheld",
+        "devswarm-parent-inbox:",
+        "devswarm-urgent-inbox",
+        "devswarm-archive-ready",
+        "NO MAILBOX WAKE PATH",
+        "NO MAILBOX TICK",
+        "devswarm-primary-session",
+        "(capped at 12)",
+        "archived (done",
+        "dormant = no recent",
+        "rising",
+        "falling",
+        "local only (not pushed)",
+        "idle (alive)",
+        "archived-superseded",
+    ] {
+        assert!(answers.contains(text), "no native scene exercises {text:?}");
+    }
 }

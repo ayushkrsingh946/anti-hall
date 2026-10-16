@@ -732,18 +732,59 @@ function piWatcherPath(opts, home) {
   return posix.normalize(nr + '/' + l.target);
 }
 
+// ---- the maintainer notices and the session drift -----------------------------------------------------------------------
+
+// `buildMaintainerNoticeSegment(home, repoKey, now)` for a feed with nothing unseen: no segment and nothing written. A notice this project has
+// not seen is shown once and marked seen (a write and a metrics line): Node's.
+function piNotices(home, key, now) {
+  var file = piDevswarmDir(home) + '/' + ah.cfg('devswarm_parent.notices_file');
+  if (!piPresent(file)) return;
+  if (ah.settings.touched('devswarm_parent.set_notice_show')) throw meshDefer;
+  var size = ah.fs.size(file);
+  if (size !== null && size > ah.cfgNum('script.read_max_bytes')) throw meshDefer;
+  var raw = size === null ? null : ah.fs.readText(file);
+  var rows = [];
+  if (raw !== null) raw.split('\n').forEach(function (line) {
+    var t = line.trim();
+    if (!t) return;
+    var row;
+    try { row = JSON.parse(t); } catch (e) { return; }
+    if (row && typeof row === 'object' && row.id) rows.push(row);
+  });
+  var live = rows.filter(function (r) { return !(piFinite(r.expiresAt) && r.expiresAt <= now); });
+  live.sort(function (a, b) { return (Number(a.ts) || 0) - (Number(b.ts) || 0); });
+  var shown = live.slice(Math.max(0, live.length - ah.cfgNum('devswarm_parent.notice_max_shown')));
+  if (!shown.length) return;
+  var cursor = null;
+  if (/^[A-Za-z0-9._-]+$/.test(key)) {
+    var cv = piJson(piDevswarmDir(home) + '/' + ah.cfg('devswarm_parent.dir_notice_cursor') + '/' + key + '.json');
+    cursor = cv && typeof cv.lastSeenId === 'string' ? cv.lastSeenId : null;
+  }
+  var unseen = shown;
+  if (cursor) {
+    var idx = -1;
+    for (var i = 0; i < shown.length; i++) if (shown[i].id === cursor) { idx = i; break; }
+    unseen = idx === -1 ? shown : shown.slice(idx + 1);
+  }
+  if (unseen.length) throw meshDefer;
+}
+
+// The session-drift notice (`driftNotice(anchorSessionDrift(...))`), or null: a newer session of this worktree is active than the Primary's anchor.
+function piDriftNotice(home, top, primaryId, sid, tp) {
+  var desc = piJson(piDevswarmDir(home) + '/' + ah.cfg('devswarm_role.pg_dir_workspaces') + '/' + primaryId + '.json');
+  var anchorRaw = desc && desc.sessionId;
+  var anchor = anchorRaw != null ? String(anchorRaw) : '';
+  var d = JSON.parse(ahHost.piDrift(top, anchor, sid != null ? String(sid) : '', tp));
+  if (d !== null && d.unsure) throw meshDefer;
+  if (d === null) return null;
+  if (sid && String(sid) === d.newest) return null;
+  return text.render(ah.cfg('devswarm_parent.drift_notice'), { newest: d.newest, anchor: d.anchor });
+}
+
 // ---- the project of a Primary in a checkout ---------------------------------------------------------------------------------
 
 // The cause of a deferral for everything the hook would show or do that the engine does not reproduce yet, or null. Everything it reads is
 // read before the first write of the turn.
-function piDeferrals(home, key, primaryId) {
-  var dev = piDevswarmDir(home);
-  // the Primary's own anchor descriptor: the session drift notice reads it
-  if (piPresent(dev + '/' + ah.cfg('devswarm_role.pg_dir_workspaces') + '/' + primaryId + '.json')) return 'primary-descriptor';
-  if (piPresent(dev + '/' + ah.cfg('devswarm_parent.notices_file'))) return 'maintainer-notice';
-  return null;
-}
-
 function piDecide(p, opts) {
   if (devswarmGate.silent(false, 'devswarm_prompt.parent_setting')) return 'allow';
   // An active Primary. With a working directory the hook resolves the checkout around it; with none it has no project identity either.
@@ -770,7 +811,7 @@ function piDecide(p, opts) {
   var now = ah.clock.now();
   var every = ah.settings.num('verify_first.num_repeat_every');
   var repeat = isFinite(every) && every > 0 ? every : 0;
-  var parked = null, roster = null, key = null, health = null, banner = null, wakeLine = null;
+  var parked = null, roster = null, key = null, health = null, banner = null, wakeLine = null, driftNotice = null;
   if (top !== null) {
     var cli = piCli(opts, home);
     if (cli === null) return piDefer('cli');
@@ -803,10 +844,10 @@ function piDecide(p, opts) {
         if (piPresent(dev + '/app-state.json')) return piDefer('app-state');
       }
     }
-    var why = piDeferrals(home, key, primaryId);
-    if (why !== null) return piDefer(why);
+    piNotices(home, key, now);
     if (roster !== null && roster.rows.length) banner = piIngest(health, key, now, sid, tp);
     wakeLine = piWakeLine({ home: home, primaryId: primaryId, now: now }, cwd, cli, opts);
+    driftNotice = piDriftNotice(home, top, primaryId, sid, tp);
     parked = piParked(home, primaryId, cli);
   }
   // The dedupe records are consulted in the order the hook does (the ingest banners come before the override reminder), and the answer
@@ -825,6 +866,7 @@ function piDecide(p, opts) {
   }
   pending.push({ kind: 'dedupe', rank: 0, o: overrideOpts, text: text0 });
   if (wakeLine !== null) pending.push({ kind: 'dedupe', rank: 20, o: { sessionId: sid, key: ah.cfg('devswarm_parent.key_wake'), content: wakeLine, transcriptPath: tp, keepaliveTurns: repeat }, text: wakeLine });
+  if (driftNotice !== null) pending.push({ kind: 'dedupe', rank: 50, o: { sessionId: sid, key: ah.cfg('devswarm_parent.key_drift'), content: driftNotice, transcriptPath: tp, keepaliveTurns: ah.cfgNum('devswarm_parent.drift_keepalive') }, text: driftNotice });
   var tableText = null, attention = [], archiveList = [], rows = [];
   if (roster !== null) {
     rows = roster.rows;

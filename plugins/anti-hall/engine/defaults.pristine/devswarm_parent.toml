@@ -334,3 +334,43 @@ value = "CronList, then CronCreate \"{cron}\" running `node {cli} inbox tick {id
 [devswarm_parent.key_wake]
 doc = "The emit-dedupe key of the wake-path line."
 value = "parent-inbox-no-wake-path"
+
+[devswarm_parent.drift_head_bytes]
+doc = "How much of the start of a session transcript the drift check reads to find its working directory (primary-session-drift.js HEAD_BYTES)."
+value = 65536
+
+[devswarm_parent.drift_max_scan]
+doc = "Most session transcripts of a worktree the drift check opens, newest first (MAX_SCAN)."
+value = 25
+
+[devswarm_parent.drift_cwd_re]
+doc = "The pattern that finds the working directory a session transcript records (capture 1: the JSON string body)."
+value = '"cwd"\s*:\s*"((?:[^"\\]|\\.)*)"'
+
+[devswarm_parent.drift_sid_re]
+doc = "The shape of a session id the drift check accepts (SID_RE)."
+value = "^[A-Za-z0-9._-]+$"
+
+[devswarm_parent.key_drift]
+doc = "The emit-dedupe key of the session-drift notice."
+value = "parent-inbox-session-drift"
+
+[devswarm_parent.drift_keepalive]
+doc = "Turns after which the session-drift notice is repeated."
+value = 20
+
+[devswarm_parent.drift_notice]
+doc = "The notice that a newer session of this worktree is active. Placeholders: {newest}, {anchor}."
+value = "💡 anti-hall · devswarm-primary-session: you are this project's only Primary; a newer session exists: {newest} — /resume it if it owns the live lanes. (The Primary anchor records session {anchor}. A `primary-<hash>` sender label is a worktree id, NOT proof of another Primary — never stand down on a label alone; check `devswarm.js roster`.)"
+
+[devswarm_parent.set_notice_show]
+doc = "Setting devswarm.maintainerNotice.show: whether unseen maintainer notices are shown. The engine answers only while it is unset, with this default."
+value = { section = "devswarm", key = "maintainerNotice.show", type = "boolean", option = "devswarm_maintainer_notice_show", default = true }
+
+[devswarm_parent.dir_notice_cursor]
+doc = "The per-project maintainer-notice cursors (maintainer-notice-cursor/<repoKey>.json), under the DevSwarm directory."
+value = "maintainer-notice-cursor"
+
+[devswarm_parent.notice_max_shown]
+doc = "Most unexpired maintainer notices considered (MAX_SHOWN)."
+value = 5
