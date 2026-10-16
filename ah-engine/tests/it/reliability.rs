@@ -101,13 +101,15 @@ exec "$REAL_AH_ENGINE_BIN" "$@"
             .and_then(|s| s.trim().parse::<u64>().ok())
             .is_some_and(|until| until > ah_engine::health::now_ms())
     }
-    /// Wait until the down marker has expired (bounded), then a little more: a fixed `down_marker_ttl_ms + 200` sleep is measured from
-    /// when the test starts sleeping, but the client can refresh the marker after its call returned, and on a loaded machine the next
-    /// call then met a still-fresh marker and failed open without probing (gate3 2026-10-16).
+    /// Wait until the down marker has expired (polled, bounded), then a little more: a fixed `down_marker_ttl_ms + 200` sleep is
+    /// measured from when the test starts sleeping, but the client can refresh the marker after its call returned, and on a loaded
+    /// machine the next call then met a still-fresh marker and failed open without probing (gate3 2026-10-16). A marker still fresh
+    /// at the deadline fails the test with the diagnostics instead of letting the next call fail open silently.
     fn wait_down_marker_expired(&self) {
-        let t = Instant::now();
-        while self.fresh_down_marker() && t.elapsed() < Duration::from_secs(15) {
-            std::thread::sleep(Duration::from_millis(50));
+        let deadline = Instant::now() + Duration::from_secs(15);
+        while self.fresh_down_marker() {
+            assert!(Instant::now() < deadline, "the daemon-down marker was still fresh after 15 s: {}", self.diag());
+            std::thread::sleep(Duration::from_millis(20));
         }
         std::thread::sleep(Duration::from_millis(200));
     }
@@ -1787,7 +1789,6 @@ fn a_stopped_daemon_costs_at_most_one_slow_call() {
     let old = e.pid().unwrap();
     signal(old, libc::SIGSTOP);
     let max_ms = clamped_num("client.slow_fallback_max_ms", 3000);
-    let ttl_ms = clamped_num("client.down_marker_ttl_ms", 3000);
     let (_, code, dt) = e.wrapper_hook(DENY_IN);
     println!("TIMING hung-daemon call 0 wall_ms={:.1} rc={code}", dt.as_secs_f64() * 1000.0);
     assert!(code == 0 || code == 2, "call 0 exited {code}");
@@ -1795,7 +1796,7 @@ fn a_stopped_daemon_costs_at_most_one_slow_call() {
     let mut times = Vec::new();
     for phase in 0..2 {
         if phase == 1 {
-            std::thread::sleep(Duration::from_millis(ttl_ms + 200)); // past the down marker: the hang must not cost again
+            e.wait_down_marker_expired(); // past the down marker: the hang must not cost again
         }
         for i in 0..5 {
             let (_, code, dt) = e.wrapper_hook(DENY_IN);

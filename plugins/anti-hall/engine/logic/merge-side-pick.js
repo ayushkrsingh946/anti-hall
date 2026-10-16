@@ -141,8 +141,7 @@ function pushLeavesPick(pick, segsBefore, s, cwd, cmdQuoted) {
 // A side-pick segment as stored and shown: white space collapsed, cut to the configured length in UTF-16 units, as Node cuts
 // it (a cut through a surrogate pair keeps the lone half; JSON.stringify escapes it the same way in both interpreters).
 function keep(s) {
-  var t = s.replace(/\s+/g, ' ').trim === undefined ? s : s.replace(/[\s᠎]+/g, ' ');
-  return t.slice(0, ah.cfgNum('merge_side_pick.cmd_keep'));
+  return s.replace(/\s+/g, ' ').slice(0, ah.cfgNum('merge_side_pick.cmd_keep'));
 }
 
 // One session's record, coerced as the Node guard coerces whatever the file holds.
