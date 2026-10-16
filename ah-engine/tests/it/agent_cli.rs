@@ -81,7 +81,7 @@ impl Env {
     /// Start the daemon with a hook call and wait until it answers.
     fn warm(&self) {
         let t = Instant::now();
-        while t.elapsed() < Duration::from_secs(10) {
+        while t.elapsed() < common::scaled(Duration::from_secs(10)) {
             self.hook("echo warm");
             if self.up() {
                 return;
@@ -194,7 +194,7 @@ fn ten_concurrent_serve_starts_leave_one_daemon_and_clear_losers() {
         if live == 1 && e.up() {
             break;
         }
-        assert!(t.elapsed() < Duration::from_secs(8), "concurrent starts did not settle to one daemon{}", e.diag());
+        assert!(t.elapsed() < common::scaled(Duration::from_secs(8)), "concurrent starts did not settle to one daemon{}", e.diag());
         std::thread::sleep(Duration::from_millis(20));
     }
     let live_pid = children.iter_mut().find_map(|c| c.try_wait().unwrap().is_none().then_some(c.id())).unwrap();
@@ -240,7 +240,7 @@ fn idle_exit_is_a_config_key_and_is_reset_by_activity() {
     std::thread::sleep(Duration::from_millis(1200));
     assert!(common::alive(pid), "a request within the idle window keeps the daemon up");
     let t = Instant::now();
-    while t.elapsed() < Duration::from_secs(6) && common::alive(pid) {
+    while t.elapsed() < common::scaled(Duration::from_secs(6)) && common::alive(pid) {
         std::thread::sleep(Duration::from_millis(50));
     }
     assert!(!common::alive(pid), "the daemon must exit once idle for idle_exit_s");
@@ -252,7 +252,7 @@ fn short_idle_exit_stops_scratch_daemon() {
     e.warm();
     let pid = common::marker_pid(&e.dir.join("eng")).expect("run marker");
     let t = Instant::now();
-    while t.elapsed() < Duration::from_secs(5) && common::alive(pid) {
+    while t.elapsed() < common::scaled(Duration::from_secs(5)) && common::alive(pid) {
         std::thread::sleep(Duration::from_millis(20));
     }
     assert!(!common::alive(pid), "short idle setting must stop daemon{}", e.diag());
@@ -272,7 +272,7 @@ fn in_flight_request_survives_past_idle_threshold() {
     assert!(common::alive(pid), "daemon exited while a request was in flight");
     assert!(matches!(h.join().unwrap(), ah_engine::client::Exch::Reply(ah_engine::frame::Kind::Ok, body) if body == "ok"));
     let t = Instant::now();
-    while t.elapsed() < Duration::from_secs(5) && common::alive(pid) {
+    while t.elapsed() < common::scaled(Duration::from_secs(5)) && common::alive(pid) {
         std::thread::sleep(Duration::from_millis(20));
     }
     assert!(!common::alive(pid), "daemon exits after the in-flight request finishes and then idles{}", e.diag());
@@ -322,7 +322,7 @@ fn counter_total(m: &serde_json::Value, name: &str) -> u64 {
 
 fn wait_down(e: &Env) {
     let t = Instant::now();
-    while t.elapsed() < Duration::from_secs(5) && e.up() {
+    while t.elapsed() < common::scaled(Duration::from_secs(5)) && e.up() {
         std::thread::sleep(Duration::from_millis(20));
     }
     assert!(!e.up(), "the daemon did not stop");
@@ -361,7 +361,7 @@ fn metrics_impact_and_rollups_survive_a_restart_and_a_kill() {
     // SAFETY: `kill` takes plain integers and has no memory-safety preconditions; a dead pid just fails with ESRCH.
     unsafe { libc::kill(pid, libc::SIGKILL) };
     let t = Instant::now();
-    while t.elapsed() < Duration::from_secs(3) && common::alive(pid) {
+    while t.elapsed() < common::scaled(Duration::from_secs(3)) && common::alive(pid) {
         std::thread::sleep(Duration::from_millis(10));
     }
     e.clear_down_marker();

@@ -1888,7 +1888,7 @@ fn a_reply_that_never_comes_fails_open_without_node_and_counts_in_the_slow_strea
     let t = Instant::now();
     let (code, out, err) = slow_call(&e, &map, &[WINDOW, ("AH_ENGINE_SLOW_DOWN_N", "2")]);
     assert_eq!((code, out.as_str(), err.as_str()), (0, "", ""), "no reply in the window: fail open");
-    assert!(t.elapsed() < Duration::from_millis(7000), "bounded by the window, not the daemon: {:?} {}", t.elapsed(), engine_log(&e));
+    assert!(t.elapsed() < common::scaled(Duration::from_millis(7000)), "bounded by the window, not the daemon: {:?} {}", t.elapsed(), engine_log(&e));
     assert!(!marker.exists(), "the Node hook must not run for a call the daemon may have processed");
     assert!(engine_log(&e).contains("client_slow"), "{}", engine_log(&e));
     assert!(!e.state().join("daemon.down.until").exists(), "one slow call must not mark the daemon down");

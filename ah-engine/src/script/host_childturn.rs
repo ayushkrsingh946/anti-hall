@@ -318,7 +318,7 @@ fn readers_declared(inv: &Inv, key: &str, id: &str) -> R<bool> {
     let Some(reader) = crate::meshw::tick::open_reader(inv, key)? else { return Ok(false) };
     let rows = reader.reader_cursors(id).map_err(|e| ident::Defer(format!("reader-cursors:{e}")))?;
     let floor = defaults::text("mesh_write.floor_reader");
-    Ok(rows.iter().any(|r| r["reader"].as_str() != Some(floor)))
+    Ok(rows.iter().any(|r| r.get("reader").and_then(Value::as_str) != Some(floor)))
 }
 
 fn find_plan(inv: &Inv, id: &str, root: &str) -> R<Value> {
