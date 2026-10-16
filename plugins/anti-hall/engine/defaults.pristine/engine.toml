@@ -654,7 +654,7 @@ env = "AH_ENGINE_FALLBACK_MS"
 unit = "ms"
 
 [client.cold_guard_wait_ms]
-doc = "How long a guard event (PreToolUse, PermissionRequest, Stop, SubagentStop) waits for a cold-starting daemon before it is let through with one notice per session; 0 turns the wait off. Prompts and advisories never wait. The wait never exceeds what the hook's own timeout leaves after the engine attempt. It is one absolute deadline: the kick, its kill grace and the socket poll all end within it, so a cold guard call takes at most this plus the normal engine attempt."
+doc = "How long a guard event (PreToolUse, PermissionRequest, Stop, SubagentStop) waits for a cold-starting daemon before it is let through with one notice per session; 0 turns the wait off. The engine client keeps the same bound: a guard-event call that still finds no daemon (it starts one, or finds another call starting it) waits for it within this budget and then sends its request once, so it is never answered with nothing while a daemon starts. Prompts and advisories never wait. The wait never exceeds what the hook's own timeout leaves after the engine attempt. It is one absolute deadline: the kick, its kill grace and the socket poll all end within it, so a cold guard call takes at most this plus the normal engine attempt."
 value = 2000
 unit = "ms"
 

@@ -94,6 +94,16 @@ fn ask_daemon(meta: &Meta, raw: &str, hold_wait: bool) -> Option<Vec<(String, An
     native::decode(&reply?)
 }
 
+/// [`ask_daemon`] for the event's own checks: a guard event's call waits for a daemon that is still starting instead of being
+/// answered with nothing (`client::set_guard_call`); the mark covers this one call, so a later request of the same process (an
+/// advisory injection) never inherits the wait.
+fn ask_daemon_for(meta: &Meta, raw: &str, guard: bool) -> Option<Vec<(String, Answer)>> {
+    crate::client::set_guard_call(guard);
+    let answers = ask_daemon(meta, raw, true);
+    crate::client::set_guard_call(false);
+    answers
+}
+
 /// True for an event whose hooks can block: a deferral there fails closed.
 fn guarded(event: &str) -> bool {
     defaults::list("dispatch.guard_events").contains(&event)
@@ -696,7 +706,7 @@ fn run_core(raw: &str, args: &Args, payload: Option<&File>, complete: bool, tele
         (_, false) | (None, _) => Vec::new(),
         (Some(_), _) if entries.iter().all(|e| e.check.is_none()) => Vec::new(),
         (Some(p), _) if defaults::num("dispatch.in_process") == 1 => native::evaluate(&meta, p, &|| false, &|_, _, _| {}),
-        (Some(_), _) => match ask_daemon(&meta, raw, true) {
+        (Some(_), _) => match ask_daemon_for(&meta, raw, guard) {
             Some(a) => a,
             None if crate::client::take_non_ok_reply() => Vec::new(),
             None if crate::client::take_unavailable() || crate::client::fail_open_unavailable() => {

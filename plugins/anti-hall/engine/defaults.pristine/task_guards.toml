@@ -795,7 +795,7 @@ value = 1000
 min = 0
 
 [tasklist_guard.plan_mode_text]
-doc = "The advisory printed instead of a decision while the session is in plan mode."
+doc = "The advisory printed on stderr instead of a decision while the session is in plan mode (stdout stays empty, so another Stop hook's JSON still merges)."
 value = "[tasklist-guard] PLAN MODE — Stop not blocked (progress-file writes are not possible in plan mode). Track this work as tasks and refresh the progress file once you leave plan mode.\n"
 
 [tasklist_guard.plan_mode_value]
@@ -963,7 +963,7 @@ doc = "How to append to the history file (Codex wording)."
 value = "append with a one-line `>>`, never overwrite it"
 
 [tasklist_guard.omc_text]
-doc = "Printed instead of the block while an oh-my-claudecode autonomous loop is active."
+doc = "Printed on stderr instead of the block while an oh-my-claudecode autonomous loop is active (stdout stays empty, so another Stop hook's JSON still merges)."
 value = "[tasklist-guard] OMC autonomous loop active — deferring Stop block to avoid deadlock.\n"
 
 [tasklist_guard.handovers_dir]
