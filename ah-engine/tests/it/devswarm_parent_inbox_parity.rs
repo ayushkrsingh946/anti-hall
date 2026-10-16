@@ -342,6 +342,25 @@ fn faulty_daemon(extra: Value) -> impl Fn(&Path) {
 
 const MIN: i64 = 60_000;
 
+const MP_ENV: [(&str, &str); 1] = [("ANTIHALL_MARKETPLACE_DIR", "$HOME/pr/marketplaces/anti-hall")];
+
+/// A plugin cache holding `versions` (each with the CLI script), a registry naming `installed` and a marketplace manifest naming `manifest`.
+fn plugin_versions(versions: Vec<&'static str>, installed: Option<Value>, manifest: Option<&'static str>) -> impl Fn(&Path) {
+    move |h| {
+        let root = h.join("pr");
+        std::fs::create_dir_all(root.join("marketplaces/anti-hall")).unwrap();
+        for v in &versions {
+            write(&root.join(format!("cache/anti-hall/anti-hall/{v}/scripts/devswarm.js")), "// cli\n");
+        }
+        if let Some(i) = &installed {
+            write(&root.join("installed_plugins.json"), &i.to_string());
+        }
+        if let Some(m) = manifest {
+            write(&root.join("marketplaces/anti-hall/plugins/anti-hall/.claude-plugin/plugin.json"), &json!({"name": "anti-hall", "version": m}).to_string());
+        }
+    }
+}
+
 /// A turn of a child workspace on the scratch checkout, run by the real Node hook: it creates the project's store, a registry row, the
 /// child's descriptor and the summary.
 fn warm_child(h: &Path) {
@@ -627,7 +646,6 @@ fn scenes() -> Vec<Scene> {
         // everything the engine leaves to Node, decided before any write
         scene("rows-setting-grace-set", Defer).seed(both(rows_of(vec![("w1", json!({}))]), |h| write(&h.join(".anti-hall/settings.json"), r#"{"devswarm":{"inboxGraceSec":30}}"#))),
         scene("rows-setting-renag-set", Defer).seed(rows_of(vec![("w1", json!({}))])).env(vec![("ANTIHALL_DEVSWARM_ARCHIVE_REQUEST_RENAG_HOURS", "2")]),
-        scene("rows-not-draining-verdict", Defer).seed(both(rows_of(vec![("w1", json!({}))]), verdict("w1", json!({"notDraining": true})))),
         scene("rows-step-plan", Defer).seed(both(rows_of(vec![("w1", json!({}))]), |h| write(&ds(h).join("plans/w1.json"), r#"{"steps":[{"n":1,"text":"a","status":"doing"}]}"#))),
         scene("own-unread-declared-reader", Defer).seed(both(warm_child, |h| {
             let id = primary_id(h);
@@ -869,6 +887,23 @@ fn scenes() -> Vec<Scene> {
             o.insert(primary_id(h), json!({"unread": 2}));
             summary(Value::Object(o))(h);
         }),
+        // a backlog that does not drain, and the build the child runs
+        scene("drain-not-draining-no-newest-known", Same).seed(both(rows_of(vec![("w1", json!({"directUnread": 2}))]), verdict("w1", json!({"notDraining": true})))),
+        scene("drain-not-draining-quiet-row", Same).seed(both(rows_of(vec![("w1", json!({}))]), verdict("w1", json!({"notDraining": true})))),
+        scene("drain-not-draining-same-build", Same).env(MP_ENV.to_vec()).seed(all3(rows_of(vec![("w1", json!({"directUnread": 2}))]), verdict("w1", json!({"notDraining": true})), both(plugin_versions(vec!["1.2.0"], None, None), heartbeat("w1", 10_000, json!({"version": "1.2.0"}))))),
+        scene("drain-stale-build", Same).env(MP_ENV.to_vec()).seed(all3(rows_of(vec![("w1", json!({"directUnread": 2}))]), verdict("w1", json!({"notDraining": true})), both(plugin_versions(vec!["1.0.0", "1.2.0", "abc123def456"], None, None), heartbeat("w1", 10_000, json!({"version": "1.0.0"}))))),
+        scene("drain-stale-build-without-unread", Same).env(MP_ENV.to_vec()).seed(all3(rows_of(vec![("w1", json!({}))]), verdict("w1", json!({"notDraining": true})), both(plugin_versions(vec!["1.2.0"], None, None), heartbeat("w1", 10_000, json!({"version": "1.0.0"}))))),
+        scene("drain-stale-build-cli-missing", Same).env(MP_ENV.to_vec()).seed(all3(rows_of(vec![("w1", json!({"directUnread": 2}))]), verdict("w1", json!({"notDraining": true})), both(|h| write(&h.join("pr/installed_plugins.json"), r#"{"plugins":{"anti-hall@anti-hall":[{"scope":"user","version":"2.0.0"}]}}"#), heartbeat("w1", 10_000, json!({"version": "1.0.0"}))))),
+        scene("drain-heartbeat-without-a-version", Same).env(MP_ENV.to_vec()).seed(all3(rows_of(vec![("w1", json!({"directUnread": 2}))]), verdict("w1", json!({"notDraining": true})), both(plugin_versions(vec!["1.2.0"], None, None), heartbeat("w1", 10_000, json!({}))))),
+        scene("drain-registry-shapes-array", Same).env(MP_ENV.to_vec()).seed(all3(rows_of(vec![("w1", json!({"directUnread": 1}))]), verdict("w1", json!({"notDraining": true})), both(plugin_versions(vec![], Some(json!({"plugins": {"anti-hall@anti-hall": [{"scope": "project", "version": "3.1.0"}, {"scope": "user", "version": "2.5.0"}, {"scope": "user", "version": "bad"}]}})), None), heartbeat("w1", 10_000, json!({"version": "2.0.0"}))))),
+        scene("drain-registry-shapes-string", Same).env(MP_ENV.to_vec()).seed(all3(rows_of(vec![("w1", json!({"directUnread": 1}))]), verdict("w1", json!({"notDraining": true})), both(plugin_versions(vec![], Some(json!({"anti-hall@anti-hall": "2.5.0"})), None), heartbeat("w1", 10_000, json!({"version": "2.0.0"}))))),
+        scene("drain-registry-shapes-object", Same).env(MP_ENV.to_vec()).seed(all3(rows_of(vec![("w1", json!({"directUnread": 1}))]), verdict("w1", json!({"notDraining": true})), both(plugin_versions(vec![], Some(json!({"plugins": {"anti-hall@anti-hall": {"version": "v2.5.0"}}})), None), heartbeat("w1", 10_000, json!({"version": "2.0.0"}))))),
+        scene("drain-manifest-version-is-newest", Same).env(MP_ENV.to_vec()).seed(all3(rows_of(vec![("w1", json!({"directUnread": 1}))]), verdict("w1", json!({"notDraining": true})), both(plugin_versions(vec!["1.0.0"], None, Some("4.0.0")), heartbeat("w1", 10_000, json!({"version": "1.0.0"}))))),
+        scene("drain-marketplace-override-not-a-directory", Same).env(vec![("ANTIHALL_MARKETPLACE_DIR", "relative/path")]).seed(both(rows_of(vec![("w1", json!({"directUnread": 2}))]), verdict("w1", json!({"notDraining": true})))),
+        scene("drain-not-draining-local-archive-keeps-the-label", Same).seed(all3(rows_of(vec![("w1", json!({}))]), verdict("w1", json!({"notDraining": true})), |h| write(&ds(h).join("archived/w1.json"), &json!({"worktreePath": h.join("w1-wt"), "sessionId": "sess-w1"}).to_string()))),
+        scene("drain-archive-ready-quiet-row-drops-the-label", Same).seed(both(rows_of(vec![("w1", json!({"archive_ready": true, "directUnread": 1, "archive_request_only_unread": true}))]), verdict("w1", json!({"notDraining": true})))),
+        scene("drain-not-draining-with-a-pending-archive-request", Same).seed(both(rows_of(vec![("w1", json!({"archive_ready": true, "directUnread": 1, "archive_request_only_unread": true, "oldestDirectUnreadTs": now_ms() - 20 * MIN}))]), verdict("w1", json!({"notDraining": true})))),
+        scene("drain-not-draining-urgent-unread", Same).seed(both(rows_of(vec![("w1", json!({"directUnread": 3, "urgencyMax": "urgent"})), ("w2", json!({"directUnread": 1}))]), both(verdict("w1", json!({"notDraining": true})), verdict("w2", json!({"notDraining": true}))))),
         // the cases that stay with Node, each decided before anything is written
         scene("summary-empty-file", Defer).seed(|h| write(&ds(h).join(format!("summaries/{}.json", project_key(h))), "")),
         scene("descriptor-present-not-claude", Same).seed(|h| write(&ds(h).join("workspaces/child-1.json"), r#"{"id":"child-1"}"#)),
@@ -1015,6 +1050,10 @@ fn engine_and_node_agree_for_a_primary_in_a_checkout() {
         "(no summary)",
         "devswarm-own-inbox: priority",
         "devswarm-own-inbox: urgent priority",
+        "NOT DRAINING >20m",
+        "not-draining = a union-unread",
+        "stale anti-hall 1.0.0",
+        "the newest anti-hall CLI",
     ] {
         assert!(answers.contains(text), "no native scene exercises {text:?}");
     }

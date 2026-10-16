@@ -507,7 +507,13 @@ function piRoster(ctx, summary) {
     var status = entry && typeof entry.status === 'string' ? entry.status : (verdict && typeof verdict.status === 'string' ? verdict.status : null);
     var stuck = status !== null && piStuck(status);
     var notDraining = !!(verdict && verdict.notDraining);
-    if (notDraining) { out.deferral = 'not-draining'; return out; } // the stale-build check of a backlog that does not drain is Node's
+    // a backlog that does not drain on a child running an older build is a build problem, not neglect
+    var staleBuild = null;
+    if (notDraining) {
+      if (!ctx.newest.known) { ctx.newest.value = piNewestVersion(home); ctx.newest.known = true; }
+      if (ctx.newest.value) staleBuild = piStaleBuild(home, id, ctx.newest.value);
+    }
+    var notDrainingForLabel = notDraining && staleBuild === null;
     var archiveReady = entry.archive_ready === true;
     var archiveReadyQuiet = false;
     if (archiveReady && unread > 0 && entry.archive_request_only_unread === true) {
@@ -541,7 +547,7 @@ function piRoster(ctx, summary) {
       var reportUnread = graced ? 0 : unread;
       out.attention.push({
         id: id, unread: reportUnread, cursor: cursor, total: total, status: status, urgencyMax: graced ? null : urgencyMax, wsName: wsName,
-        oldestUnreadTs: graced ? null : oldestForGate, notDraining: false, staleAntiHallMessage: null,
+        oldestUnreadTs: graced ? null : oldestForGate, notDraining: notDrainingForLabel, staleAntiHallMessage: staleBuild ? staleBuild.message : null,
       });
     }
     if (archiveReady && !appArchivedRow && !ownerFocused && !st.ignored && piArchiveCooldown(home, id, now) && !piAutoArchiveOwns(home, id, now)
@@ -563,9 +569,14 @@ function piRoster(ctx, summary) {
       dormant = act.dormant;
       idleAlive = act.idleAlive;
     }
-    var ds = archivedRow
-      ? (appArchivedRow ? piLabel('archived') : piLabel('archived'))
-      : archivedSuperseded ? piLabel('superseded') : piDisplayStatus(archiveReady, status, activityTs, now, dormant, false, idleAlive, idleMs);
+    var staleLabel = { label: text.render(ah.cfg('devswarm_parent.stale_build_label'), { version: staleBuild ? staleBuild.version : '' }), rank: piLabel('not_draining').rank };
+    var ds = (staleBuild && !appArchivedRow) ? staleLabel
+      : archivedRow ? (appArchivedRow ? piLabel('archived') : (notDrainingForLabel ? piLabel('not_draining') : piLabel('archived')))
+        : archivedSuperseded ? (notDrainingForLabel ? piLabel('not_draining') : piLabel('superseded'))
+          : piDisplayStatus(archiveReady, status, activityTs, now, dormant, notDrainingForLabel, idleAlive, idleMs);
+    if (archiveReadyQuiet && !archivedRow && !archivedSuperseded && ds.label === piLabel('not_draining').label) {
+      ds = piDisplayStatus(archiveReady, status, activityTs, now, dormant, false, idleAlive, idleMs);
+    }
     var finishCell = piDoneState(entry, heartbeat);
     if (/^working\b/.test(finishCell) && gates.setting('devswarm_prompt.plan_tracking_setting', true, ctx.pluginRoot) !== false) {
       var fp = JSON.parse(ahHost.ctFindPlan(id, wtPath || ''));
@@ -838,6 +849,61 @@ function piBroadcastSegment(rows) {
   return ah.cfg('devswarm_parent.broadcast_head') + shown.join('\n');
 }
 
+// ---- the newest anti-hall build on the machine ------------------------------------------------------------------------------
+
+function piSemver(v) { return typeof v === 'string' && jx.isSemver(v); }
+
+// `readJsonBounded(file)` of update.js: null for a file over the cap, unreadable or not JSON.
+function piJsonBounded(p) {
+  var size = ah.fs.size(p);
+  if (size === null || size > ah.cfgNum('devswarm_parent.version_read_max')) return null;
+  return piJson(p);
+}
+
+// `newestKnownAntiHallVersion({ env, home })`: the highest of the registered, the cached and the marketplace version, or null.
+function piNewestVersion(home) {
+  var marketplace = home + '/' + ah.cfg('devswarm_parent.marketplace_default');
+  var override = ah.env.get(ah.cfg('devswarm_parent.env_marketplace_dir'));
+  if (override && ah.path.isAbsolute(override) && ah.fs.isDir(override)) marketplace = override;
+  var root = ah.path.resolveAbs(marketplace + '/../..');
+  var installed = null;
+  var data = piJsonBounded(root + '/' + ah.cfg('devswarm_parent.installed_rel'));
+  if (data && typeof data === 'object') {
+    var reg = data.plugins && typeof data.plugins === 'object' ? data.plugins : data;
+    var entry = reg[ah.cfg('devswarm_parent.plugin_registry_key')];
+    if (Array.isArray(entry)) {
+      var valid = entry.filter(function (e) { return e && typeof e === 'object' && piSemver(e.version); });
+      var pick = null;
+      ['user', 'project'].forEach(function (scope) { if (pick === null) valid.forEach(function (e) { if (pick === null && e.scope === scope) pick = e; }); });
+      if (pick === null) pick = valid[0] || null;
+      installed = pick ? pick.version : null;
+    } else if (typeof entry === 'string') installed = piSemver(entry) ? entry : null;
+    else if (entry && typeof entry === 'object' && piSemver(entry.version)) installed = entry.version;
+  }
+  var cacheRoot = root + '/' + ah.cfg('devswarm_parent.cache_rel');
+  var cached = null;
+  var names = ah.fs.readdir(cacheRoot);
+  if (names !== null) {
+    var versions = names.filter(function (n) { return ah.fs.kind(cacheRoot + '/' + n) === 'dir' && piSemver(n); });
+    if (versions.length) cached = versions.sort(jx.cmpVersions).pop();
+  }
+  var manifest = piJsonBounded(marketplace + '/' + ah.cfg('devswarm_parent.plugin_json_rel'));
+  var fromMarketplace = manifest && piSemver(manifest.version) ? manifest.version : null;
+  var newest = null;
+  [installed, cached, fromMarketplace].forEach(function (v) { if (piSemver(v) && (!newest || jx.cmpVersions(v, newest) > 0)) newest = v; });
+  return newest === null ? null : { version: newest, cacheRoot: cacheRoot };
+}
+
+// `staleAntiHallMessage(recorded, newest, cliPath)` for a child whose heartbeat records an older build, else null.
+function piStaleBuild(home, id, newest) {
+  var hb = piJson(piDevswarmDir(home) + '/' + ah.cfg('mesh_write.dir_heartbeats') + '/' + id + '.json');
+  var rec = hb && typeof hb.version === 'string' ? hb.version : null;
+  if (!(piSemver(rec) && jx.cmpVersions(rec, newest.version) < 0)) return null;
+  var target = newest.cacheRoot + '/' + newest.version + '/' + ah.cfg('devswarm_parent.cli_rel');
+  var cmd = ah.fs.isFile(target) ? text.render(ah.cfg('devswarm_parent.stale_build_cmd'), { path: target }) : ah.cfg('devswarm_parent.stale_build_cmd_unknown');
+  return { version: rec, message: text.render(ah.cfg('devswarm_parent.stale_build_message'), { version: rec, cmd: cmd }) };
+}
+
 // ---- the project of a Primary in a checkout ---------------------------------------------------------------------------------
 
 // The cause of a deferral for everything the hook would show or do that the engine does not reproduce yet, or null. Everything it reads is
@@ -889,7 +955,7 @@ function piDecide(p, opts) {
     var summary = sm.summary || null;
     if (summary !== null) {
       if (Array.isArray(summary)) return piDefer('summary-shape');
-      var ctx = { home: home, key: key, top: top, primaryId: primaryId, now: now, sid: sid, pluginRoot: gates.pluginRoot(opts) };
+      var ctx = { home: home, key: key, top: top, primaryId: primaryId, now: now, sid: sid, pluginRoot: gates.pluginRoot(opts), newest: { known: false, value: null } };
       roster = piRoster(ctx, summary);
       if (roster.deferral !== null) return piDefer(roster.deferral);
       // the Primary's own inbound mail, the questions it was asked, and what the summary lists beside the rows

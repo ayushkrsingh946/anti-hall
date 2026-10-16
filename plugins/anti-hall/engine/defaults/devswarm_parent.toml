@@ -466,3 +466,55 @@ value = "⚠️ anti-hall · devswarm-own-inbox: urgent priority — "
 [devswarm_parent.own_unread]
 doc = "The Primary's own-inbox segment when unread mail is waiting. Placeholders: {prefix}, {count}, {cli}, {id}."
 value = "{prefix}you have {count} unread parent/peer message(s) addressed to YOU (the Primary). STOP and read your unread parent/peer message(s) FIRST before continuing. Read them via `node {cli} inbox read-primary {id}` (anti-hall devswarm CLI — read-only: after handling them run the `ackCommand` it returns, which advances YOUR OWN read cursor; to check WITHOUT a receipt instead, use `inbox peek-primary {id}`). Do NOT run `hivecontrol workspace read-messages` or `monitor` — those DESTRUCTIVELY drain the NATIVE queue (a completely separate channel from your own cursor above)."
+
+[devswarm_parent.env_marketplace_dir]
+doc = "Variable that points the version lookup at another marketplace clone (ANTIHALL_MARKETPLACE_DIR)."
+value = "ANTIHALL_MARKETPLACE_DIR"
+
+[devswarm_parent.marketplace_default]
+doc = "The marketplace clone, relative to the home directory, when the variable is unset or not an existing absolute directory."
+value = ".claude/plugins/marketplaces/anti-hall"
+
+[devswarm_parent.cache_rel]
+doc = "The plugin cache of installed versions, relative to the plugins root (the marketplace clone's grandparent)."
+value = "cache/anti-hall/anti-hall"
+
+[devswarm_parent.installed_rel]
+doc = "The harness registry of installed plugins, relative to the plugins root."
+value = "installed_plugins.json"
+
+[devswarm_parent.plugin_json_rel]
+doc = "The plugin manifest of the marketplace clone, relative to the clone."
+value = "plugins/anti-hall/.claude-plugin/plugin.json"
+
+[devswarm_parent.plugin_registry_key]
+doc = "The key of this plugin in the harness registry."
+value = "anti-hall@anti-hall"
+
+[devswarm_parent.version_read_max]
+doc = "Largest registry or manifest file the version lookup reads (update.js MAX_BYTES)."
+value = 4194304
+
+[devswarm_parent.cli_rel]
+doc = "The DevSwarm CLI of a cached version, relative to the version directory."
+value = "scripts/devswarm.js"
+
+[devswarm_parent.stale_build_message]
+doc = "The text for a child that runs an older anti-hall build than the machine's newest. Placeholders: {version}, {cmd}."
+value = "stale anti-hall {version}: run /reload-plugins (restart only if it persists) (or drain with `{cmd}`)"
+
+[devswarm_parent.stale_build_cmd]
+doc = "What the stale-build text names as the command: the newest CLI by path. Placeholder: {path}."
+value = "node {path}"
+
+[devswarm_parent.stale_build_cmd_unknown]
+doc = "What the stale-build text names when the newest CLI cannot be found."
+value = "the newest anti-hall CLI"
+
+[devswarm_parent.stale_build_unknown_version]
+doc = "What the stale-build text names for a child whose build is not recorded."
+value = "unknown"
+
+[devswarm_parent.dir_heartbeats_key]
+doc = "The version field of a heartbeat."
+value = "version"
