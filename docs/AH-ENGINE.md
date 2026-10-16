@@ -1659,6 +1659,33 @@ shasum -a 256 -c SHA256SUMS --ignore-missing
 gh attestation verify <asset> --repo talas9/anti-hall
 ```
 
+## Retiring the Node path
+
+The Node hooks and companions are replaced piece by piece. The policy:
+
+- Switch a Node piece off only once the Rust path covers it and a comparison shows the engine is never weaker (replay and live witness).
+- Switch off reversibly: move or unload, never delete. Files are removed only in the release that removes Node.
+- Record what was switched off, when, and the exact command to switch it back on.
+
+`ah-engine status --migration` lists every behaviour that is still on Node.
+
+**Node shadow witness.** The witness records Node's verdict beside the engine's so the two can be compared. Switch it off by moving its `root` directory aside (for example to `root.off-<date>`); the witness script exits 0 when `root` is missing. Switch it back on by moving the directory back to `root`.
+
+**Legacy DevSwarm ingest jobs.** Each project may still have a per-project launchd job (`com.anti-hall.devswarm-ingest.<project>`) running the Node ingest companion. The engine drains the same projects and takes the project's ingest lock once the Node job stops. To retire one:
+
+```
+cp ~/Library/LaunchAgents/<label>.plist <backup-dir>/<label>.plist.copy
+launchctl bootout gui/$(id -u)/<label>
+mv ~/Library/LaunchAgents/<label>.plist <backup-dir>/
+```
+
+Then confirm that the pid in the project's lock file under `~/.anti-hall/devswarm/locks/` (`ingest-project-<project>.lock`) is the engine's pid (`~/.anti-hall/ah-engine/daemon.run`) within a minute or two. If the engine does not take the lock, switch the job back on:
+
+```
+mv <backup-dir>/<label>.plist ~/Library/LaunchAgents/
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/<label>.plist
+```
+
 ## Troubleshooting
 
 | Symptom | What to do |
