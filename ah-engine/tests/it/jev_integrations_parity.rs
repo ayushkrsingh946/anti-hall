@@ -255,6 +255,13 @@ fn normalise_row(r: &Value, deviation: &[&str]) -> Value {
     r
 }
 
+/// Scenarios whose reply the rule layer does not flag, so the Stop-Jev gate (fix/stop-jev-gate 25832add) does not ask Jev: the one
+/// intended verdict difference from Node. Every flagged reply (a hedge, a framed hit) is still compared exactly, Jev block included.
+const GATE_DIVERGENCES: &[&str] = &["speculation: Jev confidently adds a block", "speculation: reply only in the transcript, Jev confidently adds a block"];
+
+/// Scenarios whose reply is not flagged and where Jev would only have allowed: the engine asks nothing, Node asks (same gate).
+const GATE_NO_ASK: &[&str] = &["speculation: the Stop after a block reports its outcome"];
+
 fn compare(sc: &Scenario) {
     // The asks nobody waits for are detached from the Node hook; on a CI runner loaded by the other sweeps one of them has
     // been seen not to arrive at all (6 of the 8 requests of the cap scenario, run 37863756223). A Node side that sent fewer
@@ -269,6 +276,28 @@ fn compare(sc: &Scenario) {
         eng = run_side(sc, true);
     }
     let who = sc.name;
+    if GATE_DIVERGENCES.contains(&who) {
+        // Intended difference, and only this one (owner decision of 2026-10-16, option B; fix/stop-jev-gate 25832add): a Stop waits for
+        // Jev only when the rule layer flagged a likely unverified claim. This reply is not flagged, so Node still asks Jev and
+        // blocks on its answer, while the engine answers from its rules (allow) and asks nothing this turn. Pinned exactly: Node's
+        // block must be Jev's, the engine's answer must be a plain allow, and the engine must not have written a decision row.
+        assert!(node.out.0 == 0 && node.out.1.contains("asserts a cause or outcome without citing evidence"), "{who}: node did not show Jev's block: {:?}", node.out);
+        assert_eq!(eng.out, (0, String::new(), String::new()), "{who}: the engine must allow an unflagged reply");
+        assert!(eng.requests.is_empty() && eng.rows.is_empty(), "{who}: the gate asks nothing for an unflagged reply ({} requests, {} rows)", eng.requests.len(), eng.rows.len());
+        return;
+    }
+    if GATE_NO_ASK.contains(&who) {
+        // Same gate, other face (fix/stop-jev-gate 25832add; owner decision of 2026-10-16): the reply is not flagged, so the engine does
+        // not ask Jev at all while Node does (and Jev would have allowed). The verdict, exit code, stdout and the hook's own state
+        // file still have to match exactly; only the ask (and the decision row it would have written) is absent.
+        assert_eq!((node.out.0, &node.out.1, &node.out.2), (eng.out.0, &eng.out.1, &eng.out.2), "{who}: hook output differs");
+        assert_eq!(node.requests.len(), sc.requests, "{who}: node sent {} requests, expected {}", node.requests.len(), sc.requests);
+        assert!(eng.requests.is_empty(), "{who}: the gate asks nothing for an unflagged reply ({} requests)", eng.requests.len());
+        // the Jev decision log (the row of the ask nobody made) is the one file allowed to differ
+        let state = |side: &Side| -> Vec<String> { sc.files.iter().zip(&side.files).filter(|(name, _)| !name.ends_with("jev-judge.ndjson")).map(|(_, c)| c.clone()).collect() };
+        assert_eq!(state(&node), state(&eng), "{who}: the hook's state files differ ({:?})", sc.files);
+        return;
+    }
     assert_eq!((node.out.0, &node.out.1, &node.out.2), (eng.out.0, &eng.out.1, &eng.out.2), "{who}: hook output differs");
     let sort = |v: &[Seen]| {
         let mut n: Vec<_> = v.iter().map(normalise_request).collect();
@@ -540,6 +569,11 @@ fn scenarios() -> Vec<Scenario> {
         spec("speculation: Jev confidently adds a block", "All done, it works.", 0.97, "", 1, 1, &[]),
         spec("speculation: Jev says grounded, the regex block stands", "It is probably the cache.", 0.03, "", 1, 1, &[]),
         spec("speculation: Jev says speculative on a hedge too", "It is probably the cache.", 0.97, "", 1, 1, &[]),
+        // The guarantee the Stop-Jev gate (option B) rests on: a reply the rules FLAG (a hedge) but accept on their own (it admits it
+        // is unchecked) is still sent to Jev, and when Jev confidently says speculative the engine blocks exactly as Node does. The
+        // twin with Jev saying grounded must allow on both sides, which shows the rules alone do not block this reply.
+        spec("speculation: a hedge the rules accept, flagged, Jev confidently blocks", "It is probably the cache, but I haven't checked.", 0.97, "", 1, 1, &[]),
+        spec("speculation: a hedge the rules accept, flagged, Jev says grounded", "It is probably the cache, but I haven't checked.", 0.03, "", 1, 1, &[]),
         spec("speculation: framed hit asks twice and shadow keeps the block", "Should be blocked: X probably fails", 0.03, "", 2, 2, &[]),
         spec(
             "speculation: framed hit relaxed in on mode",

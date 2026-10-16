@@ -74,7 +74,10 @@ name = "defaults_num"
 harness = false
 
 [profile.release]
-opt-level = "z"
+# opt-level 3, not "z": A/B on the same tree, scratch daemons, Stop/UserPromptSubmit replay (180 events of the frozen sample) and 5 min idle,
+# 2026-10-16: Stop wall p95 143 -> 73 ms and UserPromptSubmit p95 192 -> 105 ms, daemon CPU over the replay 5.74 -> 3.35 s, idle CPU equal
+# (0.33% both), RSS equal (about 61 MB). The price is binary size (10.1 -> 19.5 MB), not CPU or memory.
+opt-level = 3
 lto = true
 strip = true
 codegen-units = 1
