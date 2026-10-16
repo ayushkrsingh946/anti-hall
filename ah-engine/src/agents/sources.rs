@@ -155,17 +155,18 @@ fn devswarm(env: &Env, st: &mut State) {
         if !step.is_empty() {
             facts::set_step(a, &step);
         }
-        a.ws = Some(Ws { id: id.clone(), armed: Some(watcher_armed(env, &root, &id)), step, done });
+        a.ws = Some(Ws { id: id.clone(), armed: Some(watcher_armed(env, &id)), step, done });
     }
 }
 
-fn watcher_armed(env: &Env, root: &Path, id: &str) -> bool {
-    let lock = root.join(pth("locks")).join(format!("{}{id}{}", pth("lock_prefix"), pth("lock_ext")));
-    let f = defaults::raw("agent_tracker.devswarm_fields");
-    let Some(v) = json_of(&lock) else { return false };
-    let ts = v.get(f.str_field("lock_ts")).and_then(Value::as_u64).unwrap_or(0);
-    let alive = v.get(f.str_field("lock_pid")).and_then(Value::as_u64).is_none_or(|p| crate::health::pid_alive(p as u32));
-    ts != 0 && env.now_ms.saturating_sub(ts) <= lim("stale_lock_ms") && alive
+/// Whether a live wake-watch Monitor covers the workspace: the same check `inbox tick` makes (its own lock, or the live lock of another
+/// row on its checkout). A lock the check cannot read decides nothing, so it reads as not armed.
+fn watcher_armed(env: &Env, id: &str) -> bool {
+    let found = crate::meshw::watcher::live_for_workspace(&env.home, id, env.now_ms as i64);
+    if found.as_ref().is_ok_and(|f| f.by_checkout) {
+        crate::metrics::bump("mesh_watcher_matched_by_checkout", &[]);
+    }
+    found.is_ok_and(|f| f.armed)
 }
 
 // ---- the Claude Code CLI --------------------------------------------------------------------------------

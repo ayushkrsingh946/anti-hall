@@ -449,6 +449,21 @@ fn a_workspace_with_a_fresh_live_wake_watch_is_quiet() {
 }
 
 #[test]
+fn a_workspace_is_armed_by_a_live_lock_of_another_row_on_its_checkout() {
+    // #181: the Monitor armed under a sibling row id of the same checkout still covers ws1 (the check `inbox tick` makes)
+    let h = home("ws-armed-by-checkout");
+    let n = now0();
+    devswarm(&h, n, None);
+    let d = h.join(".anti-hall/devswarm");
+    std::fs::write(d.join("workspaces/ws2.json"), r#"{"id":"ws2","sessionId":"sessW2","worktreePath":"/wt/x"}"#).unwrap();
+    std::fs::write(d.join("locks/wake-watch-ws2.lock"), json!({"ts": n, "pid": std::process::id()}).to_string()).unwrap();
+    let mut st = State::default();
+    ticks(&h, &mut st, &[n, n + MIN]);
+    assert_eq!(agent(&st, "sessW").ws.as_ref().unwrap().armed, Some(true));
+    assert!(!agent(&st, "sessW").flags.contains_key("monitor_unarmed"));
+}
+
+#[test]
 fn without_devswarm_nothing_devswarm_happens() {
     let h = home("no-ds");
     let n = now0();

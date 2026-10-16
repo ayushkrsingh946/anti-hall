@@ -281,7 +281,7 @@ fn count_mail(inv: &Inv, id: &str, desc: &OVal, line_form: bool) -> R<Counted> {
 }
 
 /// `pidIsAlive(pid)` without a start-time check: `Some(false)` only when the process is gone.
-fn pid_alive(pid: f64) -> Option<bool> {
+pub(crate) fn pid_alive(pid: f64) -> Option<bool> {
     if !pid.is_finite() || pid.fract() != 0.0 || pid <= 0.0 || pid > f64::from(i32::MAX) {
         return None;
     }
@@ -298,7 +298,7 @@ fn pid_alive(pid: f64) -> Option<bool> {
 }
 
 /// `Number(v)` for the JSON values a lock's `ts` can hold; anything JavaScript would convert in its own way defers.
-fn js_number(v: Option<&OVal>) -> R<f64> {
+pub(crate) fn js_number(v: Option<&OVal>) -> R<f64> {
     match v {
         None => Ok(f64::NAN),
         Some(OVal::Num(x)) => Ok(*x),
@@ -309,23 +309,14 @@ fn js_number(v: Option<&OVal>) -> R<f64> {
     }
 }
 
-/// `watcherArmed` from the lock file alone: a fresh lock whose pid is not provably gone. An unreadable or malformed lock
-/// reads as not armed.
+/// `watcherArmed`: a live watcher covers the workspace (its own lock, or another row of its checkout); the file is the workspace's
+/// own lock, whose mere presence the cron-found-mail measurement counts.
 fn watcher_lock(inv: &Inv, id: &str) -> R<(PathBuf, bool)> {
-    let file = devswarm_root(&inv.home).join(defaults::text("mesh_write.dir_locks")).join(format!(
-        "{}{id}{}",
-        defaults::text("mesh_write.wake_lock_prefix"),
-        defaults::text("mesh_write.wake_lock_suffix")
-    ));
-    let Ok(bytes) = std::fs::read(&file) else { return Ok((file, false)) };
-    let Some(lock @ OVal::Obj(_)) = OVal::parse(&String::from_utf8_lossy(&bytes)) else { return Ok((file, false)) };
-    let ts = js_number(lock.get("ts"))?;
-    let fresh = ts.is_finite() && (inv.now as f64 - ts) <= defaults::num("mesh_write.wake_lock_stale_ms") as f64;
-    let alive = match lock.get("pid") {
-        Some(OVal::Num(p)) if p.is_finite() && p.fract() == 0.0 => pid_alive(*p),
-        _ => None,
-    };
-    Ok((file, fresh && alive != Some(false)))
+    let found = crate::meshw::watcher::live_for_workspace(&inv.home, id, inv.now)?;
+    if found.by_checkout {
+        crate::metrics::bump("mesh_watcher_matched_by_checkout", &[]);
+    }
+    Ok((crate::meshw::watcher::lock_file(&inv.home, id), found.armed))
 }
 
 /// `Number(JSON.parse(file).seq) || 0`.

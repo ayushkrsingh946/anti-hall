@@ -10694,6 +10694,7 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `jev_verdicts` | counter | decisions | id, verdict | What each Jev decision did, by integration and verdict: added or changed (an on-mode outcome moved), would-change (a shadow call that would have moved it), none (Jev agreed with the baseline) or no-answer (it failed or was skipped). |
 | `mesh_own_sends_excluded` | counter | counts |  | Counts that left out unread rows the recipient's own identity family sent (an own send is not inbound mail). |
 | `mesh_sender_fallback` | counter | messages | where | Messages whose sender came from a fallback instead of the message's own branch, by where: ingest (a child's queue: the Primary), read (the NDJSON line's own sender, or the Primary for a NULL store row). |
+| `mesh_watcher_matched_by_checkout` | counter | checks |  | Watcher-live checks answered by another row's lock on the same checkout because the workspace's own id had no live lock. |
 | `rt_edges` | counter | edges |  | Workspace state changes emitted. |
 | `rt_reconcile_repairs` | counter | edges |  | Changes a full reconcile found that the event path had not already applied: the health measure of the realtime event layer (close to 0 is healthy). |
 | `rt_shadow_mismatches` | counter | mismatches |  | Differences between the engine's workspace state and the Node witness's. |

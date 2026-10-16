@@ -2033,3 +2033,7 @@ value = "mesh sender fallback: where={where}, partition={id}, messages={n}"
 [metric.mesh_sender_fallback]
 doc = "Messages whose sender came from a fallback instead of the message's own branch, by where: ingest (a child's queue: the Primary), read (the NDJSON line's own sender, or the Primary for a NULL store row)."
 value = { kind = "counter", unit = "messages", labels = ["where"] }
+
+[metric.mesh_watcher_matched_by_checkout]
+doc = "Watcher-live checks answered by another row's lock on the same checkout because the workspace's own id had no live lock."
+value = { kind = "counter", unit = "checks", labels = [] }
