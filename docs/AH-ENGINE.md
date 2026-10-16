@@ -326,6 +326,15 @@ transcript file. When the resident-set cap trips (`diagnostics.mem_snapshot`) th
 allocator statistics, thread count, each worker's interpreter and regex cache, the transcript caches and the platform memory map.
 `ah-engine status --memory` prints the live figures, the latest snapshot and a summary of the log (top events and checks by total
 resident-set growth; a check's row counts every request it took part in, so rows overlap). Nothing here changes a decision.
+
+Per-call memory (`mem::measure`, `diagnostics.check_mem`, `diagnostics.check_mem_sample_every`). The counting allocator keeps three
+thread-local counters per thread (bytes allocated, bytes freed, high-water mark of the net), so one call can report the bytes it allocated,
+the most it grew the heap and what it kept. They are hand-written rather than read from jemalloc because they must give one unit (the requested
+`Layout` size, the unit of the counted heap) under jemalloc and under `AH_ENGINE_ALLOCATOR=system`: jemalloc's `thread.peak` is sampled every
+64 KiB of activity and does not exist in system mode, and `thread.allocatedp` counts usable sizes (the tests use it only as an oracle). The
+counters are const-initialised and have no destructor, so nothing allocates inside the allocator. Measured cost in a release build: about
+0.3 ns per allocation and free, 0.005 % of a core at the live rate of 190,000 allocations a second. `check_mem = false` stops the counting;
+`check_mem_sample_every = N` measures every Nth call. A `diag` build (dhat) reports nothing.
 `status --memory` also carries a live ledger under `memory.ledger`: the process tier in MB (footprint, jemalloc resident, the C-library
 zones' bytes in use, never the address space they reserve) and a heap tier in bytes (the counted Rust heap, `allocated`, against the named
 holders of the memory registry; `other` is what no holder names, `attributed_pct` the named share). `invariant.other_nonneg` is false, with

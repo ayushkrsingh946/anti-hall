@@ -166,3 +166,12 @@ unit = "MB"
 [files.debug_log]
 doc = "Debug log file name (state directory): one NDJSON line per debug event, written only in debug mode."
 value = "debug.ndjson"
+
+[diagnostics.check_mem]
+doc = "Measure the bytes each check allocates (total, peak growth, kept) from per-thread counters in the counting allocator. Off also stops the counting in the allocator. Cost is a few nanoseconds per allocation."
+value = true
+
+[diagnostics.check_mem_sample_every]
+doc = "Measure every Nth check call (1 = every call). Raise it only if the measured cost of the per-thread counters becomes a problem."
+value = 1
+min = 1
