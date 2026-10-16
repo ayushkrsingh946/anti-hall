@@ -748,14 +748,13 @@ fn uninstall(env: &BTreeMap<String, String>, args: &[String], log: &mut Log) -> 
 /// `Err` is a start-up failure (no working directory, no plugin root): said on stderr, exit 1, nothing written.
 fn finish(result: Result<i32, String>, log: Log) -> i32 {
     log.flush();
-    let code = match result {
+    match result {
         Ok(c) => c,
         Err(msg) => {
             super::err(&(fill("slcfg.start_failed", &[("msg", &msg)]) + "\n"));
             1
         }
-    };
-    code
+    }
 }
 
 /// `install-statusline [--user|--project] [--consolidate]`
