@@ -3900,11 +3900,11 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `tasklist_guard.omc_skip_token` | `persistent-mode` |  |  | The skipped hook that turns the loop detection off. |
 | `tasklist_guard.omc_state_dir` | `.omc, state` |  |  | The oh-my-claudecode state directory under the working directory, else the home directory, as path segments. |
 | `tasklist_guard.omc_state_files` | `8 items` |  |  | The oh-my-claudecode loop state files (omc-detect.js). |
-| `tasklist_guard.omc_text` | `[tasklist-guard] OMC autonomous loop active — deferring Stop block to avoid d...` |  |  | Printed instead of the block while an oh-my-claudecode autonomous loop is active. |
+| `tasklist_guard.omc_text` | `[tasklist-guard] OMC autonomous loop active — deferring Stop block to avoid d...` |  |  | Printed on stderr instead of the block while an oh-my-claudecode autonomous loop is active (stdout stays empty, so another Stop hook's JSON still merges). |
 | `tasklist_guard.omc_ts_keys` | `last_checked_at, updated_at, started_at` |  |  | Timestamp fields of a loop state, in order. |
 | `tasklist_guard.open_hash_len` | `16` |  |  | How many hex digits of the SHA-1 of the open task ids go into the dedupe signal. |
 | `tasklist_guard.open_ids_sep` | ` ` |  |  | Separator of the sorted open task ids that are hashed into the dedupe signal. |
-| `tasklist_guard.plan_mode_text` | `[tasklist-guard] PLAN MODE — Stop not blocked (progress-file writes are not p...` |  |  | The advisory printed instead of a decision while the session is in plan mode. |
+| `tasklist_guard.plan_mode_text` | `[tasklist-guard] PLAN MODE — Stop not blocked (progress-file writes are not p...` |  |  | The advisory printed on stderr instead of a decision while the session is in plan mode (stdout stays empty, so another Stop hook's JSON still merges). |
 | `tasklist_guard.plan_mode_value` | `plan` |  |  | The permission_mode value (compared in lowercase) that marks plan mode. |
 | `tasklist_guard.policy_dir` | `devswarm, stop-policy` |  |  | The stop-policy state directory under the anti-hall state directory, as path segments. |
 | `tasklist_guard.policy_prompt_kind` | `prompt` |  |  | Stop-policy bucket kind of the per-prompt budget. |
