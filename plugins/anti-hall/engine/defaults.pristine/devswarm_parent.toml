@@ -374,3 +374,83 @@ value = "maintainer-notice-cursor"
 [devswarm_parent.notice_max_shown]
 doc = "Most unexpired maintainer notices considered (MAX_SHOWN)."
 value = 5
+
+[devswarm_parent.max_mesh_issues]
+doc = "Most orphaned partitions or stale registry rows the mesh-issue lines name (MAX_MESH_ISSUES)."
+value = 5
+
+[devswarm_parent.orphans_head]
+doc = "The segment for partitions with unread mail and no workspace to read it. Placeholders: {count}, {shown}, {extra}."
+value = "⚠️ anti-hall · devswarm-orphaned-mesh: {count} partition(s) with unread but no live workspace to read them — {shown}{extra}. Investigate/re-address; nothing is currently watching this inbox."
+
+[devswarm_parent.stale_registry_head]
+doc = "The segment for registry rows whose worktree is gone but that still hold unread. Placeholders: {count}, {shown}, {extra}."
+value = "⚠️ anti-hall · devswarm-stale-workspaces: {count} workspace(s) whose worktree is gone but still hold unread — {shown}{extra}. Investigate or clean up the registry entry."
+
+[devswarm_parent.issue_part]
+doc = "One partition or row of a mesh-issue line. Placeholders: {id}, {unread}."
+value = "{id} ({unread} unread)"
+
+[devswarm_parent.issue_joiner]
+doc = "Between the partitions or rows of a mesh-issue line."
+value = ", "
+
+[devswarm_parent.issue_extra]
+doc = "The mesh-issue line's count past the named ones. Placeholder: {n}."
+value = " +{n} more"
+
+[devswarm_parent.key_orphans]
+doc = "The emit-dedupe key of the orphaned-mesh segment."
+value = "parent-inbox-orphans"
+
+[devswarm_parent.key_stale_registry]
+doc = "The emit-dedupe key of the stale-registry segment."
+value = "parent-inbox-stale-registry"
+
+[devswarm_parent.mesh_issue_keepalive]
+doc = "Turns after which a mesh-issue segment is repeated."
+value = 10
+
+[devswarm_parent.broadcast_head]
+doc = "The head of the broadcast feed segment."
+value = "💡 anti-hall · devswarm-broadcast: (advisory roster/FYI feed — react ONLY if you judge it relevant; NEVER blocks your turn, regardless of urgency):\n"
+
+[devswarm_parent.broadcast_line]
+doc = "One broadcast row. Placeholders: {urgent}, {kind}, {who}, {body}."
+value = "- {urgent}{kind}{who}: {body}"
+
+[devswarm_parent.broadcast_urgent_tag]
+doc = "The tag in front of an urgent broadcast row."
+value = "[URGENT] "
+
+[devswarm_parent.broadcast_no_summary]
+doc = "What a broadcast row without a summary shows."
+value = "(no summary)"
+
+[devswarm_parent.broadcast_no_sender]
+doc = "What a broadcast row without a sender shows."
+value = "?"
+
+[devswarm_parent.broadcast_body_max]
+doc = "Longest broadcast summary shown before it is cut with an ellipsis (MAX_BROADCAST_BODY_CHARS)."
+value = 200
+
+[devswarm_parent.broadcast_seen_max]
+doc = "Most broadcast keys remembered per session (MAX_BROADCAST_SEEN_KEYS)."
+value = 200
+
+[devswarm_parent.broadcast_no_session]
+doc = "The file name stem of the seen-state when the payload names no session."
+value = "nosession"
+
+[devswarm_parent.dir_broadcast_seen]
+doc = "The per-session broadcast seen-state (parent-inbox-broadcast-seen/<session>.json), under the DevSwarm directory."
+value = "parent-inbox-broadcast-seen"
+
+[devswarm_parent.env_broadcast_max_age]
+doc = "Variable that sets how old a broadcast row may be and still be shown, in milliseconds (ANTIHALL_BROADCAST_MAX_AGE_MS)."
+value = "ANTIHALL_BROADCAST_MAX_AGE_MS"
+
+[devswarm_parent.broadcast_max_age_ms]
+doc = "How old a broadcast row may be and still be shown when the variable is not a non-negative number (24 hours)."
+value = 86400000

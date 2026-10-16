@@ -641,9 +641,6 @@ fn scenes() -> Vec<Scene> {
             o.insert(id, json!({"pendingQuestions": [{"seq": 1}]}));
             summary(Value::Object(o))(h);
         }),
-        scene("rows-orphans", Defer).seed(rows_with(vec![("w1", json!({}))], json!({"orphans": [{"id": "o1", "unread": 2}]}))),
-        scene("rows-stale-registry", Defer).seed(rows_with(vec![("w1", json!({}))], json!({"staleRegistryPartitions": [{"id": "o1"}]}))),
-        scene("rows-broadcast-feed", Defer).seed(rows_with(vec![("w1", json!({}))], json!({"recent": [{"from": "x", "ts": 1, "summary": "s"}]}))),
         scene("rows-empty-orphans-list-is-nothing", Same).seed(rows_with(vec![("w1", json!({}))], json!({"orphans": [], "staleRegistryPartitions": [], "recent": []}))),
         scene("rows-app-state-file", Defer).seed(both(rows_of(vec![("w1", json!({}))]), |h| write(&ds(h).join("app-state.json"), "{}"))),
         scene("rows-app-db-unreadable", Defer).seed(both(rows_of(vec![("w1", json!({}))]), |h| write(&h.join("app.db"), "x"))).env(vec![("ANTIHALL_DEVSWARM_APP_DB", "$HOME/app.db")]),
@@ -796,6 +793,39 @@ fn scenes() -> Vec<Scene> {
             std::fs::create_dir_all(ds(h).join("store").join(project_key(h))).unwrap();
             write(&ds(h).join("store").join(project_key(h)).join("BACKEND"), "sqlite\n");
         }),
+        // orphaned partitions, stale registry rows and the broadcast feed
+        scene("orphans-one", Same).seed(rows_with(vec![("w1", json!({}))], json!({"orphans": [{"id": "o1", "unread": 2}]}))),
+        scene("orphans-sorted-and-capped", Same).seed(rows_with(vec![], json!({"orphans": [{"id": "o1", "unread": 2}, {"id": "o2", "unread": 7}, {"id": "o3"}, {"id": "o4", "unread": "x"}, {"id": "o5", "unread": 1}, {"id": "o6", "unread": 9}, {"id": "o7", "unread": 3}, {"id": "a b", "unread": 99}, {"unread": 5}]}))),
+        scene("orphans-all-unsafe-is-nothing", Same).seed(rows_with(vec![], json!({"orphans": [{"id": "a b"}, {"id": ".."}, null]}))),
+        scene("orphans-second-turn-suppressed", Same).prime().seed(rows_with(vec![], json!({"orphans": [{"id": "o1", "unread": 2}]}))),
+        scene("stale-registry-rows", Same).seed(rows_with(vec![], json!({"staleRegistryPartitions": [{"id": "s1", "unread": 4, "worktreePath": "/gone"}, {"id": "s2"}, {"unread": 2}]}))),
+        scene("stale-registry-row-without-id-is-kept-as-is", Same).seed(rows_with(vec![], json!({"staleRegistryPartitions": [{"unread": 2}]}))),
+        scene("stale-registry-worktree-not-a-string", Defer).seed(rows_with(vec![], json!({"staleRegistryPartitions": [{"id": "s1", "worktreePath": 5}]}))),
+        scene("stale-registry-hidden-when-the-app-archived-it", Same).env(APP_ENV.to_vec()).seed(both(rows_with(vec![], json!({"staleRegistryPartitions": [{"id": "s1", "unread": 4, "worktreePath": "/gone"}]})), |h| {
+            app_db(vec![("s1", Some(PathBuf::from("/gone")), "S", 1, 0, 0, 1, "standard", None)], vec![])(h);
+        })),
+        scene("broadcast-one-row", Same).seed(rows_with(vec![], json!({"recent": [{"from": "peer", "ts": now_ms() - 1000, "summary": "hello there"}]}))),
+        scene("broadcast-rows-shapes", Same).seed(rows_with(vec![], json!({"recent": [
+            {"from": "a", "ts": now_ms() - 1000, "summary": "x".repeat(250), "urgency": "urgent"},
+            {"ts": now_ms() - 2000, "summary": ""},
+            {"from": "c", "fromLabel": "label", "summary": "no timestamp"},
+            {"from": "d", "ts": now_ms() - 3000, "urgency": "high"},
+            {"from": "e", "ts": 5, "summary": "ancient"},
+            {"from": "f", "ts": now_ms() - 4000, "summary": "six"},
+            {"from": "g", "ts": now_ms() - 5000, "summary": "seven"},
+            {"from": "h", "ts": now_ms() - 6000, "summary": "eight"}]}))),
+        scene("broadcast-null-row-throws-in-node", Defer).seed(rows_with(vec![], json!({"recent": [{"from": "a", "ts": now_ms() - 1000, "summary": "x"}, null]}))),
+        scene("broadcast-second-turn-already-seen", Same).prime().seed(rows_with(vec![], json!({"recent": [{"from": "peer", "ts": now_ms() - 1000, "summary": "hello there"}]}))),
+        scene("broadcast-other-session-sees-it-again", Same).prime().seed(rows_with(vec![], json!({"recent": [{"from": "peer", "ts": now_ms() - 1000, "summary": "hello there"}]}))),
+        scene("broadcast-too-old-for-the-window", Same).seed(rows_with(vec![], json!({"recent": [{"from": "peer", "ts": now_ms() - 3 * 3_600_000, "summary": "old"}]}))).env(vec![("ANTIHALL_BROADCAST_MAX_AGE_MS", "60000")]),
+        scene("broadcast-window-env-garbage", Same).seed(rows_with(vec![], json!({"recent": [{"from": "peer", "ts": now_ms() - 3 * 3_600_000, "summary": "three hours"}]}))).env(vec![("ANTIHALL_BROADCAST_MAX_AGE_MS", "soon")]),
+        scene("broadcast-seen-state-garbage", Same).seed(both(rows_with(vec![], json!({"recent": [{"from": "peer", "ts": now_ms() - 1000, "summary": "hello there"}]})), |h| write(&ds(h).join("parent-inbox-broadcast-seen/s1.json"), "{torn"))),
+        scene("broadcast-seen-state-keeps-a-window", Same).seed(both(rows_with(vec![], json!({"recent": [{"from": "peer", "ts": now_ms() - 1000, "summary": "new"}]})), |h| {
+            let keys: Vec<String> = (0..205).map(|i| format!("k{i}")).collect();
+            write(&ds(h).join("parent-inbox-broadcast-seen/s1.json"), &json!({"keys": keys}).to_string());
+        })),
+        scene("broadcast-with-jev-enabled", Defer).seed(both(rows_with(vec![], json!({"recent": [{"from": "peer", "ts": now_ms() - 1000, "summary": "hello there"}]})), |h| write(&h.join(".anti-hall/settings.json"), r#"{"jev":{"enabled":true}}"#))),
+        scene("broadcast-empty-list", Same).seed(rows_with(vec![("w1", json!({}))], json!({"recent": []}))),
         // the cases that stay with Node, each decided before anything is written
         scene("summary-empty-file", Defer).seed(|h| write(&ds(h).join(format!("summaries/{}.json", project_key(h))), "")),
         scene("descriptor-present-not-claude", Same).seed(|h| write(&ds(h).join("workspaces/child-1.json"), r#"{"id":"child-1"}"#)),
@@ -935,6 +965,11 @@ fn engine_and_node_agree_for_a_primary_in_a_checkout() {
         "local only (not pushed)",
         "idle (alive)",
         "archived-superseded",
+        "devswarm-orphaned-mesh",
+        "devswarm-stale-workspaces",
+        "devswarm-broadcast",
+        "[URGENT] ",
+        "(no summary)",
     ] {
         assert!(answers.contains(text), "no native scene exercises {text:?}");
     }

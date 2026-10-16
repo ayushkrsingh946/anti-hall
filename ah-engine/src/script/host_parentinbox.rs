@@ -15,6 +15,7 @@
 //! | `piIgnored(id)` | whether the row has an archive-ignore mark |
 //! | `piPid(pid)` | `pidIsAlive(pid)`: `true`, `false` or `null` (no opinion) |
 //! | `piAppChildren(worktree)` | the workspaces the app database lists as open children of the project around `worktree`: `{repo, children: [{id, worktreePath, sessionId}]}` (`appHasLiveChild` before the per-row eligibility) |
+//! | `piJev()` | whether the Jev triage of arrivals may be switched on (then a broadcast feed is labelled by Jev, which the engine does not do)
 //! | `piDerive(repoKey, now)` | `{text}`: the project's summary projection as the hook's refresh would write it when the ingest daemon is not healthy (`null` when the project has no store rows to derive from); nothing is written |
 //! | `piDrift(worktree, anchor, current, transcriptPath)` | `anchorSessionDrift(...)`: `{newest, anchor}` when a newer session of the worktree is active than the Primary's anchor, else `null` |
 //! | `piFold(id, presentJson, appBuilder)` | `{to}`: the canonical row a `primary-<hash>` label folds into (`rosterFoldTarget`) |
@@ -527,6 +528,7 @@ pub(super) fn install<'js>(c: &Ctx<'js>, h: &Object<'js>) -> rquickjs::Result<()
             with_settings(|st| answer(ensure_snap(&st.home, &st.env, now).and_then(|()| app_children(&wt))))
         })?,
     )?;
+    h.set("piJev", Function::new(c.clone(), || -> rquickjs::Result<bool> { with_settings(|st| crate::meshw::common::jev_maybe_enabled(&inv_of(st, 0.0))) })?)?;
     h.set(
         "piDerive",
         Function::new(c.clone(), |key: String, now: f64| -> rquickjs::Result<String> { with_settings(|st| answer(derive_text(&inv_of(st, now), &key))) })?,

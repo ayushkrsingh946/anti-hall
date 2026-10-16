@@ -787,6 +787,57 @@ function piDriftNotice(home, top, primaryId, sid, tp) {
   return text.render(ah.cfg('devswarm_parent.drift_notice'), { newest: d.newest, anchor: d.anchor });
 }
 
+// ---- orphaned partitions, stale registry rows and the broadcast feed ---------------------------------------------------------
+
+// `buildOrphansSegment(list)` / `buildStaleRegistrySegment(list)`: partitions or rows named by id with their unread count, null for none.
+function piIssueSegment(list, headKey) {
+  var safe = list.filter(function (o) { return o && o.id != null && piSafeId(String(o.id)); });
+  if (!safe.length) return null;
+  safe.sort(function (a, b) { return (Number(b.unread) || 0) - (Number(a.unread) || 0); });
+  var max = ah.cfgNum('devswarm_parent.max_mesh_issues');
+  var shown = safe.slice(0, max).map(function (o) { return text.render(ah.cfg('devswarm_parent.issue_part'), { id: o.id, unread: piFinite(o.unread) ? o.unread : 0 }); });
+  var extra = safe.length > max ? text.render(ah.cfg('devswarm_parent.issue_extra'), { n: safe.length - max }) : '';
+  return text.render(ah.cfg(headKey), { count: safe.length, shown: shown.join(ah.cfg('devswarm_parent.issue_joiner')), extra: extra });
+}
+
+// `broadcastKey(r)`.
+function piBroadcastKey(r) {
+  var who = r && r.fromLabel != null ? r.fromLabel : (r && r.from != null ? r.from : '?');
+  return who + '\0' + (r && r.ts != null ? r.ts : '') + '\0' + (r && r.summary != null ? r.summary : '');
+}
+
+function piBroadcastSeenRel(sessionRaw) {
+  var safe = String(sessionRaw || ah.cfg('devswarm_parent.broadcast_no_session')).replace(/[^A-Za-z0-9_.-]/g, '_');
+  return piRel(ah.cfg('devswarm_parent.dir_broadcast_seen') + '/' + safe + '.json');
+}
+
+// `visibleBroadcastRows(rows, home, sessionId, now, env)` up to the write: {rows: the unseen ones, seen: the keys to remember (null for no write)}.
+function piBroadcastRows(rows, home, sessionRaw, now) {
+  var maxEnv = ah.env.get(ah.cfg('devswarm_parent.env_broadcast_max_age'));
+  var n = Number(maxEnv === null ? undefined : maxEnv);
+  var maxAge = isFinite(n) && n >= 0 ? n : ah.cfgNum('devswarm_parent.broadcast_max_age_ms');
+  var fresh = rows.filter(function (r) { return !isFinite(now) || !r || !piFinite(r.ts) || (now - r.ts) <= maxAge; });
+  var seen = [];
+  var raw = ah.state.readText(piBroadcastSeenRel(sessionRaw));
+  if (raw !== null) { try { var j = JSON.parse(raw); if (j && Array.isArray(j.keys)) seen = j.keys; } catch (e) { seen = []; } }
+  var seenSet = {};
+  seen.forEach(function (k) { seenSet[k] = true; });
+  var unseen = fresh.filter(function (r) { return !Object.prototype.hasOwnProperty.call(seenSet, piBroadcastKey(r)); });
+  return { rows: unseen, seen: unseen.length ? Array.from(new Set(seen)).concat(unseen.map(piBroadcastKey)) : null };
+}
+
+// `buildBroadcastSegment(rows, home)` with no Jev labels.
+function piBroadcastSegment(rows) {
+  var capped = rows.slice(-ah.cfgNum('devswarm_parent.max_listed'));
+  var shown = capped.map(function (r) {
+    var who = r.from != null ? r.from : ah.cfg('devswarm_parent.broadcast_no_sender');
+    var max = ah.cfgNum('devswarm_parent.broadcast_body_max');
+    var body = r.summary != null && r.summary !== '' ? (String(r.summary).length > max ? String(r.summary).slice(0, max) + '…' : String(r.summary)) : ah.cfg('devswarm_parent.broadcast_no_summary');
+    return text.render(ah.cfg('devswarm_parent.broadcast_line'), { urgent: piHigh(r.urgency) ? ah.cfg('devswarm_parent.broadcast_urgent_tag') : '', kind: '', who: who, body: body });
+  });
+  return ah.cfg('devswarm_parent.broadcast_head') + shown.join('\n');
+}
+
 // ---- the project of a Primary in a checkout ---------------------------------------------------------------------------------
 
 // The cause of a deferral for everything the hook would show or do that the engine does not reproduce yet, or null. Everything it reads is
@@ -817,7 +868,7 @@ function piDecide(p, opts) {
   var now = ah.clock.now();
   var every = ah.settings.num('verify_first.num_repeat_every');
   var repeat = isFinite(every) && every > 0 ? every : 0;
-  var parked = null, roster = null, key = null, health = null, banner = null, wakeLine = null, driftNotice = null, derived = null;
+  var orphansSeg = null, staleRegSeg = null, broadcastRows = null, parked = null, roster = null, key = null, health = null, banner = null, wakeLine = null, driftNotice = null, derived = null;
   if (top !== null) {
     var cli = piCli(opts, home);
     if (cli === null) return piDefer('cli');
@@ -847,15 +898,29 @@ function piDecide(p, opts) {
         if (piFinite(own.unread) && own.unread > 0) return piDefer('own-unread');
         if (Array.isArray(own.pendingQuestions) && own.pendingQuestions.length) return piDefer('own-questions');
       }
-      if (Array.isArray(summary.orphans) && summary.orphans.length) return piDefer('orphans');
-      if (Array.isArray(summary.staleRegistryPartitions) && summary.staleRegistryPartitions.length) return piDefer('stale-registry');
-      if (Array.isArray(summary.recent) && summary.recent.length) return piDefer('broadcast');
+      if (Array.isArray(summary.recent) && summary.recent.length && ahHost.piJev()) return piDefer('broadcast-jev'); // Jev may label the feed
       if (roster.rows.length) {
         if (roster.snapUnreadable) return piDefer('app-db-unreadable');
         if (piPresent(dev + '/app-state.json')) return piDefer('app-state');
       }
     }
     piNotices(home, key, now);
+    if (summary !== null) {
+      if (Array.isArray(summary.orphans) && summary.orphans.length) orphansSeg = piIssueSegment(summary.orphans, 'devswarm_parent.orphans_head');
+      if (Array.isArray(summary.staleRegistryPartitions) && summary.staleRegistryPartitions.length) {
+        var visible = summary.staleRegistryPartitions.filter(function (row) {
+          if (!row || row.id == null) return true;
+          var a = JSON.parse(ahHost.piApp(String(row.id), piStrField(row.worktreePath), key, now));
+          if (a.unsure) throw meshDefer;
+          return !a.archived;
+        });
+        if (visible.length) staleRegSeg = piIssueSegment(visible, 'devswarm_parent.stale_registry_head');
+      }
+      if (Array.isArray(summary.recent) && summary.recent.length) {
+        var br = piBroadcastRows(summary.recent, home, jx.isObj(p) ? p.session_id : undefined, now);
+        if (br.rows.length) broadcastRows = br;
+      }
+    }
     if (roster !== null && roster.rows.length) banner = piIngest(health, key, now, sid, tp);
     wakeLine = piWakeLine({ home: home, primaryId: primaryId, now: now }, cwd, cli, opts);
     driftNotice = piDriftNotice(home, top, primaryId, sid, tp);
@@ -909,6 +974,9 @@ function piDecide(p, opts) {
   }
   var urgentList = attention.filter(function (w) { return piTier(w) === 'urgent'; });
   var normalList = attention.filter(function (w) { return piTier(w) === 'normal'; });
+  if (orphansSeg !== null) pending.push({ kind: 'dedupe', rank: 80, o: { sessionId: sid, key: ah.cfg('devswarm_parent.key_orphans'), content: orphansSeg, transcriptPath: tp, keepaliveTurns: ah.cfgNum('devswarm_parent.mesh_issue_keepalive') }, text: orphansSeg });
+  if (staleRegSeg !== null) pending.push({ kind: 'dedupe', rank: 90, o: { sessionId: sid, key: ah.cfg('devswarm_parent.key_stale_registry'), content: staleRegSeg, transcriptPath: tp, keepaliveTurns: ah.cfgNum('devswarm_parent.mesh_issue_keepalive') }, text: staleRegSeg });
+  if (broadcastRows !== null) pending.push({ kind: 'plain', rank: 100, text: piBroadcastSegment(broadcastRows.rows) });
   if (parked !== null) pending.push({ kind: 'plain', rank: 120, text: parked });
   var cliPath = top !== null ? piCli(opts, home) : null;
   if (urgentList.length) {
@@ -926,6 +994,7 @@ function piDecide(p, opts) {
     if (pending[i].kind === 'dedupe' && dedupeOn && !dedupe.canDecide(pending[i].o)) return piDefer('dedupe-undecidable');
   }
   ah.commit();
+  if (broadcastRows !== null && broadcastRows.seen !== null) ah.state.writeAtomic(piBroadcastSeenRel(jx.isObj(p) ? p.session_id : undefined), JSON.stringify({ keys: broadcastRows.seen.slice(-ah.cfgNum('devswarm_parent.broadcast_seen_max')) }));
   if (derived !== null) ah.state.writeAtomic(piRel(ah.cfg('devswarm_role.pg_dir_summaries') + '/' + key + '.json'), derived);
   var emitted = [];
   pending.forEach(function (s) {
