@@ -1009,6 +1009,17 @@ value = ".anti-hall/logs/devswarm-retention.ndjson"
 doc = "When each store last had a comparison that held its tombstoning back (a JSON object store -> ms), relative to the home directory."
 value = ".anti-hall/logs/devswarm-retention-held.json"
 
+[devswarm_sup.rt_witnessed_file]
+doc = "The state of each store the last time Node's plan agreed with the engine's (a JSON object store -> database and log size and modification time, plan digest, ms), relative to the home directory. A store in the same state is not compared again before rt_witness_skip_max_ms."
+value = ".anti-hall/logs/devswarm-retention-witnessed.json"
+
+[devswarm_sup.rt_witness_skip_max_ms]
+doc = "How long an agreeing retention comparison of a store stays valid while the store (database and log size and modification time) and the engine's plan for it are unchanged. Past it the store is compared with Node again; the plan of an unchanged store can still change with time alone (rows get old enough), and then its digest differs and Node is asked at once."
+value = 604800000
+min = 60000
+max = 31536000000
+unit = "ms"
+
 [devswarm_sup.rt_backend_marker]
 doc = "The file in a store directory that names its backend."
 value = "BACKEND"

@@ -130,6 +130,9 @@ pub fn work() -> Value {
     m.insert("probe_files_read".into(), json!(crate::devswarm_rt::sources::PROBE_FILES_READ.load(Relaxed)));
     m.insert("probe_cache_hits".into(), json!(crate::devswarm_rt::sources::PROBE_CACHE_HITS.load(Relaxed)));
     m.insert("probe_bytes_read".into(), json!(crate::devswarm_rt::sources::PROBE_BYTES_READ.load(Relaxed)));
+    m.insert("git_runs".into(), json!(crate::dswire::facts::GIT_RUNS.load(Relaxed)));
+    m.insert("git_cache_hits".into(), json!(crate::dswire::facts::GIT_CACHE_HITS.load(Relaxed)));
+    m.insert("retention_witness_skips".into(), json!(crate::dssup::retention::WITNESS_SKIPS.load(Relaxed)));
     Value::Object(m)
 }
 

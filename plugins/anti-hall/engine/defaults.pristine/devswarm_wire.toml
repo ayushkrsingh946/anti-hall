@@ -113,6 +113,88 @@ unit = "ms"
 doc = "The git executable the fact readers run."
 value = "git"
 
+[devswarm_wire.git_commondir_file]
+doc = "The file in a linked worktree's git directory that names the repository's common directory (where the refs and packed-refs live)."
+value = "commondir"
+
+[devswarm_wire.git_cache_exit_codes]
+doc = "The exit statuses of `git status` and `git rev-parse HEAD` that are an answer worth remembering; any other (a locked index, a missing repository) is asked again at the next call."
+value = ["0"]
+
+[devswarm_wire.git_cache_proof_exit_codes]
+doc = "The exit statuses of the merge and pushed proofs that are an answer worth remembering: 0, and 1 (`git merge-base --is-ancestor` answers a proven 'not merged' with it); any other is asked again at the next call."
+value = ["0", "1"]
+
+[devswarm_wire.git_cache_max_entries]
+doc = "Most git answers remembered at once (workspace x call); past it the memory is cleared and refilled by the next reconcile."
+value = 4096
+min = 16
+max = 1000000
+
+[devswarm_wire.git_cache_status_wt]
+doc = "Paths in the worktree whose change makes a remembered `git status` stale ('.' is the top directory: a file added or removed there). Edits to tracked files are caught by the age limits below, since they move no git file until staged."
+value = ["."]
+
+[devswarm_wire.git_cache_status_gitdir]
+doc = "Files of the worktree's git directory whose change makes a remembered `git status` stale (staging writes the index; a commit or checkout moves HEAD and appends to its reflog)."
+value = ["index", "HEAD", "logs/HEAD"]
+
+[devswarm_wire.git_cache_status_common]
+doc = "Files of the repository's common directory whose change makes a remembered `git status` stale."
+value = []
+
+[devswarm_wire.git_cache_status_max_ms]
+doc = "The longest a remembered CLEAN `git status` is kept while its files are unchanged. A clean tree turns dirty by an edit that moves no git file, so this is the staleness bound of the clean answer."
+value = 120000
+min = 1000
+max = 86400000
+unit = "ms"
+
+[devswarm_wire.git_cache_status_dirty_max_ms]
+doc = "The longest a remembered DIRTY `git status` is kept while its files are unchanged. A dirty tree turns clean only by staging, a commit or a checkout, each of which moves a signature file, so this is a safety net and the answer errs towards 'not clean'."
+value = 600000
+min = 1000
+max = 86400000
+unit = "ms"
+
+[devswarm_wire.git_cache_ref_wt]
+doc = "Paths in the worktree whose change makes a remembered HEAD stale."
+value = []
+
+[devswarm_wire.git_cache_ref_gitdir]
+doc = "Files of the worktree's git directory whose change makes a remembered HEAD stale."
+value = ["HEAD", "logs/HEAD"]
+
+[devswarm_wire.git_cache_ref_common]
+doc = "Files of the repository's common directory whose change makes a remembered HEAD stale."
+value = []
+
+[devswarm_wire.git_cache_ref_max_ms]
+doc = "The longest a remembered HEAD is kept while its files are unchanged (a safety net for a repository that keeps no reflog)."
+value = 600000
+min = 1000
+max = 86400000
+unit = "ms"
+
+[devswarm_wire.git_cache_proof_wt]
+doc = "Paths in the worktree whose change makes a remembered merge or pushed proof stale."
+value = []
+
+[devswarm_wire.git_cache_proof_gitdir]
+doc = "Files of the worktree's git directory whose change makes a remembered merge or pushed proof stale."
+value = ["HEAD", "logs/HEAD"]
+
+[devswarm_wire.git_cache_proof_common]
+doc = "Files of the repository's common directory whose change makes a remembered merge or pushed proof stale (a fetch moves the remote branches; the top directory of a remote catches a ref written in it)."
+value = ["packed-refs", "refs/remotes/origin", "refs/remotes/origin/HEAD"]
+
+[devswarm_wire.git_cache_proof_max_ms]
+doc = "The longest a remembered merge or pushed proof is kept while its files are unchanged (a remote branch in a sub-directory moves no signature file; a later merge is then seen at most this late)."
+value = 300000
+min = 1000
+max = 86400000
+unit = "ms"
+
 [devswarm_wire.watch_state_dirs]
 doc = "Directories under the DevSwarm state directory whose changes are hints for a reconcile (each key is a mesh_write.* setting that names the directory)."
 value = ["mesh_write.dir_heartbeats", "mesh_write.dir_plans", "mesh_write.dir_workspaces", "mesh_write.dir_summaries", "mesh_write.dir_archived"]

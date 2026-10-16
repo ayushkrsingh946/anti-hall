@@ -70,6 +70,8 @@ pub(super) fn summary(ctx: &Ctx, runner: &dyn Runner, st: &OVal, s: &Settings, h
                 return Err(Defer(format!("{}: {why}", defaults::text("devswarm_sup.rt_msg_no_witness"))));
             }
         }
+        // `ask_node` never answers Skipped: only the armed sweep skips a comparison, the report phase always asks
+        Witness::Skipped => {}
         // no Node on this machine: the report phase writes only its report, from the engine's own plan
         Witness::Absent(why) => {
             witness_log(ctx, &json!({"ts": ctx.now, "duty": "retention", "store": hash, "match": Value::Null, "node": why, "phase": "dry-run"}));
