@@ -255,6 +255,63 @@ fn tasklist_guard_advisories_never_share_stdout_with_the_answer() {
     assert!(err.contains("[tasklist-guard] OMC autonomous loop active"), "the step-aside line is kept on stderr: {err:?}");
 }
 
+/// Hook calls that arrive while no daemon runs (the first event of a session, or any event during a daemon restart): the call
+/// that starts the daemon and every call that finds it being started must wait for its answer. Each used to answer nothing (an
+/// empty exit 0), so a block on a guard event was lost. N concurrent cold calls of a blocking Stop and a blocking PreToolUse,
+/// every Node hook mapped to a non-blocking `exit 99`: every one must block, which only the daemon's answer can do.
+#[test]
+fn concurrent_cold_calls_on_guard_events_all_block() {
+    let w = World::new("cold-race");
+    std::fs::create_dir_all(w.path("home/.anti-hall")).unwrap();
+    std::fs::create_dir_all(w.path("state")).unwrap();
+    // a debug daemon under a loaded test machine starts slower than the shipped wait (and this call has no launcher whose slow window
+    // it must fit in); the race itself does not depend on either bound
+    std::fs::write(w.path("state/config.toml"), "[client]\ncold_guard_wait_ms = 10000\n").unwrap();
+    std::fs::write(w.path("t.jsonl"), task_lines("pending")).unwrap();
+    // one session per Stop call: task-guard blocks a session's task set once, then stays quiet for the same set
+    let stop = |i: usize| serde_json::json!({"hook_event_name": "Stop", "session_id": format!("s{i}"), "cwd": w.path("proj"), "transcript_path": w.path("t.jsonl")}).to_string();
+    let push = serde_json::json!({"hook_event_name": "PreToolUse", "session_id": "p1", "cwd": w.path("proj"), "tool_name": "Bash",
+        "tool_input": {"command": "git push --force origin main"}, "transcript_path": w.path("t.jsonl")}).to_string();
+    let map = serde_json::json!({
+        "Stop": ids_for("Stop", "").into_iter().map(|id| (id, serde_json::Value::from("exit 99"))).collect::<serde_json::Map<_, _>>(),
+        "PreToolUse": ids_for("PreToolUse", "Bash").into_iter().map(|id| (id, serde_json::Value::from("exit 99"))).collect::<serde_json::Map<_, _>>(),
+    });
+    let map_path = w.path("cold-map.json");
+    std::fs::write(&map_path, map.to_string()).unwrap();
+    const N: usize = 4;
+    let mut kids = Vec::new();
+    for i in 0..2 * N {
+        let (event, tool, payload) = if i % 2 == 0 { ("Stop", None, stop(i)) } else { ("PreToolUse", Some("Bash"), push.clone()) };
+        let mut c = Command::new(env!("CARGO_BIN_EXE_ah-engine"));
+        c.args(["hook", "--event", event]);
+        if let Some(t) = tool {
+            c.args(["--tool", t]);
+        }
+        c.arg("--fallback-map")
+            .arg(&map_path)
+            .env_clear()
+            .env("PATH", std::env::var("PATH").unwrap_or_default())
+            .env("HOME", w.path("home"))
+            .env("AH_ENGINE_DIR", w.path("state"))
+            .env("AH_ENGINE_VERSION", "task-e2e")
+            .env("AH_ENGINE_SLOW_FALLBACK_MAX_MS", "15000")
+            .env("CLAUDE_PLUGIN_ROOT", &w.dir)
+            .current_dir(&w.dir)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let mut ch = c.spawn().unwrap();
+        ch.stdin.take().unwrap().write_all(payload.as_bytes()).unwrap();
+        kids.push((event, ch));
+    }
+    for (event, ch) in kids {
+        let o = ch.wait_with_output().unwrap();
+        let (code, out) = (o.status.code().unwrap_or(-1), String::from_utf8_lossy(&o.stdout).into_owned());
+        let blocked = code == 2 || out.contains("\"decision\":\"block\"") || out.contains("\"permissionDecision\":\"deny\"");
+        assert!(blocked, "{event}: a cold call must not lose the block: code {code}, stdout {out:?}, stderr {:?}", String::from_utf8_lossy(&o.stderr));
+    }
+}
+
 #[test]
 fn tasklist_guard_answers_a_quiet_stop_with_its_file_effects_and_answers_a_block() {
     let w = World::new("tasklist-guard");

@@ -86,6 +86,7 @@ const ALLOW: &[(&str, &str, &str)] = &[
     ("src/load.rs", "static REQUEST", "a thread-local slot initialised empty: state, not a tunable"),
     ("src/client.rs", "static LAST_NON_OK_REPLY", "a thread-local boolean marker initialised false: state, not a tunable"),
     ("src/client.rs", "static LAST_UNAVAILABLE", "a thread-local boolean marker initialised false: state, not a tunable"),
+    ("src/client.rs", "static GUARD_CALL", "a thread-local boolean marker initialised false: state, not a tunable"),
     ("src/crash.rs", "static BREADCRUMB", "a thread-local breadcrumb slot initialised empty: state, not a tunable"),
     (
         "src/checks/scripted.rs",
