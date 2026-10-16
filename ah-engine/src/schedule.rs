@@ -997,7 +997,11 @@ mod tests {
 
     #[test]
     fn a_job_outside_the_idle_gate_list_is_never_idle() {
-        let s = probe_scheduler("sched-gate", r#"{"jobs": {"probe": {"kind": "engine", "action": "noop", "every_ms": 1000, "persist": false}}}"#, Box::new(|_| Ok(String::new())));
+        let s = probe_scheduler(
+            "sched-gate",
+            r#"{"jobs": {"probe": {"kind": "engine", "action": "noop", "every_ms": 1000, "persist": false}}}"#,
+            Box::new(|_| Ok(String::new())),
+        );
         let spec = s.jobs().iter().find(|j| j.name == "probe").unwrap().clone();
         assert!(!s.idle(&spec), "noop is not in schedule.idle_gate_actions");
     }
