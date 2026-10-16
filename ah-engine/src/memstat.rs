@@ -139,6 +139,11 @@ pub fn configure_measure(enabled: bool, every: u64) {
     SAMPLE_CALLS.store(0, Relaxed);
 }
 
+/// Whether per-call measurement is switched on (`diagnostics.check_mem`, as last applied by [`configure_measure`]).
+pub fn measure_enabled() -> bool {
+    MEASURE_ON.load(Relaxed)
+}
+
 /// [`configure_measure`] from the shipped settings (`diagnostics.check_mem`, `diagnostics.check_mem_sample_every`).
 pub fn configure_measure_from_defaults() {
     let on = crate::defaults::raw("diagnostics.check_mem").as_bool().unwrap_or_default();

@@ -137,6 +137,17 @@ pub fn compiled_logic_checks_remaining() -> usize {
 /// [`Verdict::Defer`], so Node, which sees the real environment, decides. Evaluating with no home and default switches
 /// would read a gate that is on as off and allow what Node blocks.
 pub fn run_env_guarded(check: &dyn Check, subject: &Subject<'_>, payload: &Value, opts: &Value, env: &RequestEnv) -> Option<Verdict> {
+    // the bytes this check (or its script) allocates are measured here, the one place every caller (the dispatcher, the hook path,
+    // diagnostics) runs a check through; the observer reads the note when the check finishes
+    let (verdict, mem) = crate::mem::measure(|| run_env_unmeasured(check, subject, payload, opts, env));
+    crate::load::note_check_mem(mem);
+    if let Some(d) = mem {
+        crate::memdiag::note_check_mem(check.name(), d.peak, d.alloc);
+    }
+    verdict
+}
+
+fn run_env_unmeasured(check: &dyn Check, subject: &Subject<'_>, payload: &Value, opts: &Value, env: &RequestEnv) -> Option<Verdict> {
     if env.is_incomplete() {
         return Some(crate::script::failed(check.name(), subject.event, crate::defaults::text("script.msg_env_incomplete")));
     }

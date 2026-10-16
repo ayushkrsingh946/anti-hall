@@ -233,6 +233,7 @@ impl Shared {
     /// Re-read the config files (`ctl reload`, or the watcher once a change has settled) and apply new rate limits.
     fn reload_config(&self) -> crate::cfgstore::Reload {
         let r = self.config.reload();
+        crate::memstat::configure_measure_from_defaults(); // the per-call memory knobs follow the reloaded defaults
         if let crate::cfgstore::Reload::Invalid(code) = &r {
             // the shipped defaults were rejected (a missing key among the reasons): the previous snapshot keeps serving, checks that
             // need the new settings cannot run
@@ -497,7 +498,7 @@ impl Shared {
 /// The latency of each phase of a hook call by event: `{event: {phase: {count, p50_us, p95_us, max_us}}}` (the client's connect,
 /// request-to-ACK and ACK-to-response, the daemon's queue wait, judging and delivery, the launcher's startup), and the time of each
 /// check apart under `checks`. Quantiles are upper bucket bounds, as everywhere in the metrics.
-fn phases_json(t: &crate::telemetry::Telemetry) -> serde_json::Value {
+pub fn phases_json(t: &crate::telemetry::Telemetry) -> serde_json::Value {
     let snap = t.with_metrics(|m| m.snapshot(""));
     let mut out = serde_json::Map::new();
     let mut checks = serde_json::Map::new();
@@ -511,9 +512,29 @@ fn phases_json(t: &crate::telemetry::Telemetry) -> serde_json::Value {
                 out.entry(event).or_insert_with(|| serde_json::json!({})).as_object_mut().map(|o| o.insert(phase, row));
             }
             Some("check_latency_us") => {
-                checks.insert(label(h, "check"), row);
+                let c = checks.entry(label(h, "check")).or_insert_with(|| serde_json::json!({}));
+                if let (Some(o), Some(r)) = (c.as_object_mut(), row.as_object()) {
+                    o.extend(r.iter().map(|(k, v)| (k.clone(), v.clone())));
+                }
+            }
+            // the bytes one call of the check allocated / grew the heap by (`diagnostics.check_mem`), next to its latency
+            Some(n @ ("check_mem_peak_bytes" | "check_mem_alloc_bytes")) => {
+                let key = n.trim_start_matches("check_").trim_end_matches("_bytes");
+                let row =
+                    serde_json::json!({"count": field(h, "count"), "p50": field(h, "p50_bytes"), "p95": field(h, "p95_bytes"), "max": field(h, "max_bytes")});
+                let c = checks.entry(label(h, "check")).or_insert_with(|| serde_json::json!({}));
+                if let Some(o) = c.as_object_mut() {
+                    o.insert(key.to_string(), row);
+                }
             }
             _ => {}
+        }
+    }
+    for c in snap.get("counters").and_then(serde_json::Value::as_array).into_iter().flatten() {
+        if c.get("name").and_then(serde_json::Value::as_str) == Some("check_mem_retained_bytes")
+            && let Some(o) = checks.entry(label(c, "check")).or_insert_with(|| serde_json::json!({})).as_object_mut()
+        {
+            o.insert("mem_retained_bytes".to_string(), field(c, "value"));
         }
     }
     out.insert("checks".to_string(), serde_json::Value::Object(checks));
@@ -607,15 +628,23 @@ struct DaemonObserver<'a> {
 
 /// What a check that just finished read and noted (task #66 step 0): its transcript bytes and latency by transcript size class,
 /// and the counted events it noted (a kept-walk hit or the reason it missed).
-fn observe_check_cost(t: &Telemetry, check: &str, micros: u64) {
+pub fn observe_check_cost(t: &Telemetry, check: &str, micros: u64) {
     let bytes = crate::load::take_check_scan();
     let cpu = crate::load::take_check_cpu();
+    let mem = crate::load::take_check_mem();
     let notes = crate::load::take_counts();
     let size = crate::load::size_bucket(crate::load::transcript_size());
     t.with_metrics(|m| {
         let l = [("check", check), ("size", size.as_str())];
         m.add("check_bytes_read", &l, bytes);
         m.add("check_cpu_us", &[("check", check)], cpu);
+        if let Some(d) = mem {
+            m.observe_bytes("check_mem_peak_bytes", &[("check", check)], d.peak);
+            m.observe_bytes("check_mem_alloc_bytes", &[("check", check)], d.alloc);
+            if d.retained > 0 {
+                m.add("check_mem_retained_bytes", &[("check", check)], d.retained as u64);
+            }
+        }
         m.observe("check_latency_by_size_us", &l, micros);
         for (metric, label, value) in notes {
             m.inc(metric, &[(label, value)]);
@@ -1769,6 +1798,7 @@ pub fn serve() {
         }
     }
     drain_spool(&sh); // writes spooled while the engine was down, before any new one
+    crate::memstat::configure_measure_from_defaults(); // the per-call memory knobs, from the defaults the owner's files overlay
     let sh = Arc::new(sh);
     {
         let s = sh.clone();
@@ -2131,6 +2161,14 @@ mod tests {
     fn shared() -> Shared {
         let rs = RuleSet::parse(r#"{"version":1,"rules":[{"pattern":"BAD","action":"deny","message":"no"}]}"#).unwrap();
         Shared::new(Config::from_env(), "0.1.0", rs, "/nonexistent/rules.json".into())
+    }
+    /// `diagnostics.check_mem` follows a config reload: a knob switched off by hand comes back from the defaults.
+    #[test]
+    fn a_config_reload_re_applies_the_per_call_memory_knob() {
+        let sh = shared();
+        crate::memstat::configure_measure(false, 1);
+        sh.reload_config();
+        assert!(crate::memstat::measure_enabled(), "diagnostics.check_mem is true in the shipped defaults");
     }
     fn call(req: &str, own: &str) -> (Reply, After) {
         let mut sh = shared();

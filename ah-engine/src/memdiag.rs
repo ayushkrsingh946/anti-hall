@@ -307,6 +307,8 @@ fn probe() -> Probe {
 #[derive(Default)]
 struct Note {
     checks: Vec<String>,
+    /// Per check call: its name, the most it grew the heap and the bytes it allocated (`diagnostics.check_mem`).
+    check_mem: Vec<(String, u64, u64)>,
     transcript: Option<String>,
 }
 
@@ -329,6 +331,18 @@ pub fn note_check(id: &str) {
             let mut n = n.borrow_mut();
             if !n.checks.iter().any(|c| c == id) {
                 n.checks.push(id.to_string());
+            }
+        });
+    }
+}
+
+/// A check of the request in progress on this thread allocated `alloc` bytes and grew the heap by at most `peak`.
+pub fn note_check_mem(id: &str, peak: u64, alloc: u64) {
+    if ON.with(Cell::get) {
+        NOTE.with(|n| {
+            let mut n = n.borrow_mut();
+            if n.check_mem.len() < defaults::num("diagnostics.mem_log_checks_cap") as usize {
+                n.check_mem.push((id.to_string(), peak, alloc));
             }
         });
     }
@@ -371,16 +385,16 @@ static LOG_LOCK: Mutex<()> = Mutex::new(());
 
 /// Append the request's line to the log, rotating it past `diagnostics.mem_log_max_bytes`.
 pub fn finish(before: Before, d: &Done) {
-    let (checks, transcript) = NOTE.with(|n| {
+    let (checks, transcript, check_mem) = NOTE.with(|n| {
         let n = n.borrow();
-        (n.checks.clone(), n.transcript.clone())
+        (n.checks.clone(), n.transcript.clone(), n.check_mem.iter().map(|(c, peak, alloc)| json!([c, peak, alloc])).collect::<Vec<_>>())
     });
     let tsize = transcript.as_deref().and_then(|p| std::fs::metadata(p).ok()).map(|m| m.len());
     let (b, a) = (&before.0, &d.after.0);
     let al = |x: &Option<Alloc>, f: fn(&Alloc) -> u64| x.as_ref().map_or(Value::Null, |a| json!(f(a)));
     let sy = |x: &Option<Sys>, f: fn(&Sys) -> u64| x.as_ref().map_or(Value::Null, |a| json!(f(a)));
     let line = json!({
-        "ts": crate::health::now_ms(), "kind": d.kind, "event": d.event, "checks": checks,
+        "ts": crate::health::now_ms(), "kind": d.kind, "event": d.event, "checks": checks, "check_mem": check_mem,
         "allocator": crate::memstat::active_allocator().as_str(),
         "rss_kb_before": b.rss_kb, "rss_kb_after": a.rss_kb,
         "footprint_kb_before": b.footprint_kb, "footprint_kb_after": a.footprint_kb,
