@@ -245,6 +245,11 @@ fn fetch_val(
 }
 
 /// The follow-ups of past merges that are due: is the base branch red on the merge commit, did a commit revert it?
+/// True when a merge follow-up is due (the tick must run to carry it out).
+pub(super) fn followups_pending(cfg: &Cfg, now: u64) -> bool {
+    cfg.flag("github_rt.ready_enabled") && !actlog::followups_due(&cfg.state_dir(), &word(cfg, "feature"), now).is_empty()
+}
+
 pub(super) fn followups(ctx: &Ctx, st: &mut State, prev_used: &mut Option<(u64, u64)>) {
     let cfg = ctx.cfg;
     let (feature, merge) = (word(cfg, "feature"), word(cfg, "merge"));
