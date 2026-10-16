@@ -505,6 +505,8 @@ fn frozen_check_check_net_down() {
 fn check_update_available() {
     let out = parity("check_available", &Opt::default(), &["--check"]);
     assert!(out.contains("update available (0.1.0"), "{out}");
+    let head = out.lines().nth(1).unwrap_or_default();
+    assert!(!head.contains("already up to date") && head.contains("v0.2.0 available"), "headline must match the state: {head}");
 }
 
 #[test]

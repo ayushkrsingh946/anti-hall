@@ -6915,6 +6915,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 
 | Key | Default | Env override | Unit | What it is |
 |---|---|---|---|---|
+| `update.available_re` | `^update available \(` |  |  | The start of a `--check` status action that says a newer version exists; the human summary headline then reads as available, not up to date. |
 | `update.cache_rel` | `cache/anti-hall/anti-hall` |  |  | The version-pinned cache root, relative to the plugins root (two levels above the marketplace clone). |
 | `update.changelog_file` | `CHANGELOG.md` |  |  | The changelog at the top of the marketplace clone. |
 | `update.check_flag` | `--check` |  |  | The flag that only compares versions. |
@@ -6984,6 +6985,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `update_human.latest_none` | `?` |  |  | The version in the head line when none is known. |
 | `update_human.reconcile_item` | `    - {id}: {bits}` |  |  | One reconcile result. |
 | `update_human.stage_lines` | `20 items` |  |  | The stage lines of the summary, in order: the status key, the line prefix (with its padding), and which detail follows (`reconcile` and `heal` list more). |
+| `update_human.state_available` | `v{latest} available` |  |  | Head state: `--check` found a newer version. |
 | `update_human.state_failed` | `not updated` |  |  | Head state. |
 | `update_human.state_ok` | `already up to date` |  |  | Head state. |
 | `update_human.state_updated` | `updated to v{latest}` |  |  | Head state. |

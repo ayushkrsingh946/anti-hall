@@ -35,6 +35,7 @@ struct Rx {
     vprefix: Regex,
     confirm: Regex,
     failed: Regex,
+    available: Regex,
     offline: Regex,
     v_strip: Regex,
 }
@@ -52,6 +53,7 @@ impl Rx {
             vprefix: rx("update.version_prefix_re")?,
             confirm: rx("update.confirm_re")?,
             failed: rx("update.failed_re")?,
+            available: rx("update.available_re")?,
             offline: Regex::new(&offline).map_err(|e| format!("update.offline_patterns: {e}"))?,
             v_strip: rx("update.v_strip_re")?,
         })
@@ -690,6 +692,8 @@ fn render_human(rx: &Rx, status: &J, changelog: &str) -> String {
         (t("update_human.icon_failed"), t("update_human.state_failed").to_string())
     } else if updated {
         (t("update_human.icon_updated"), defaults::render("update_human.state_updated", &[("latest", &latest_head)]))
+    } else if rx.available.is_match(&action) {
+        (t("update_human.icon_updated"), defaults::render("update_human.state_available", &[("latest", &latest_head)]))
     } else {
         (t("update_human.icon_ok"), t("update_human.state_ok").to_string())
     };

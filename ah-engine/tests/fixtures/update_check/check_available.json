@@ -14,5 +14,5 @@
     ".claude/plugins/marketplaces/anti-hall/CHANGELOG.md": "644 # Changelog\n\npreamble\n\n## 0.1.0 - first\n\n- the first thing\n"
   },
   "stderr": "",
-  "stdout": "{\"installed\":\"0.1.0\",\"latest\":\"0.2.0\",\"updated\":false,\"cacheSynced\":false,\"action\":\"update available (0.1.0 → 0.2.0) — run without --check to apply\"}\n✅ anti-hall · update: already up to date\n  installed: 0.1.0\n  latest:    0.2.0\n  updated:   false\n  action:    update available (0.1.0 → 0.2.0) — run without --check to apply\n"
+  "stdout": "{\"installed\":\"0.1.0\",\"latest\":\"0.2.0\",\"updated\":false,\"cacheSynced\":false,\"action\":\"update available (0.1.0 → 0.2.0) — run without --check to apply\"}\n⬆️ anti-hall · update: v0.2.0 available\n  installed: 0.1.0\n  latest:    0.2.0\n  updated:   false\n  action:    update available (0.1.0 → 0.2.0) — run without --check to apply\n"
 }
