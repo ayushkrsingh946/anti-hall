@@ -316,7 +316,17 @@ fn cmd_status(p: &Parsed) -> i32 {
         emit(p, human(&v), v);
         return 0;
     }
-    let v = client::status_value();
+    // `--migration`: the Node-to-engine migration report, generated from the registries (no daemon needed)
+    if p.rest.iter().any(|a| a == defaults::text("opcli.migration_flag")) {
+        let v = crate::migration::report();
+        emit(p, crate::migration::human(&v), v);
+        return 0;
+    }
+    let mut v = client::status_value();
+    // the v1.0 gate of D88, from this binary's own registry (the daemon may be an older build)
+    if let Some(m) = v.as_object_mut() {
+        m.insert("compiled_logic_checks_remaining".to_string(), json!(crate::checks::compiled_logic_checks_remaining()));
+    }
     // `--memory`: just the memory breakdown (live heap against RSS, and the size of every long-lived in-memory structure)
     let v = if p.rest.iter().any(|a| a == "--memory") {
         json!({"running": v["running"], "rss_peak_kb": v["rss_peak_kb"], "rss_cap_kb": v["rss_cap_kb"], "memory": v["memory"],

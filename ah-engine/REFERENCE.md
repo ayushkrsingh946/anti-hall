@@ -49,7 +49,7 @@ Every command accepts `--json`. Read-only commands never change state.
 | `serve` | `` | no | implemented | Run the resident daemon in the foreground (the client starts it detached when needed). |
 | `settings` | `<show\|get\|set\|reset\|judge\|tunables\|trust-command-allow\|trust-edit-allow> [args] [--section <key>] [--all] [--confirmed] [--json]` | no | implemented | Show or change any anti-hall setting (L9a, the port of scripts/settings.js): `show [--section <key>] [--all]`, `get <section.key>`, `set <section.key> <value> [--confirmed]`, `reset <section.key> [--confirmed]`, `judge on\|off\|status`, `tunables [<category\|key prefix>] [--all]` (every key of the plugin's engine/defaults/*.toml with its default, env variable and description, grouped by file; read-only, edit the file to change one), and `trust-command-allow` / `trust-edit-allow [<repo>] [--confirmed]`; the settings.json file and the registry are the plugin's own. |
 | `shadow-compare` | `<scratch dir>` | no | implemented | Internal: the detached half of a Node shadow (L9a). Runs the Node version of a sampled operator command on a scratch home and logs a mismatch to telemetry; started by the engine, not by people. |
-| `status` | `[--memory] [--threads]` | yes | implemented | Show the daemon's state: version, uptime, memory, counters, breaker and crash-loop state, rules, and a headline summary of what it did. |
+| `status` | `[--memory] [--threads] [--migration]` | yes | implemented | Show the daemon's state: version, uptime, memory, counters, breaker and crash-loop state, rules, and a headline summary of what it did. |
 | `statusline` | `(session JSON on stdin)` | no | implemented | The two-line status line the host runs after each turn (L9a, the port of statusline/statusline.js and its renderers): reads the session JSON on stdin; line 1 is the configured base command or the rich line, line 2 the phase bar, swarm activity or context gauge. Fails open. |
 | `stop` | `` | no | implemented | Ask the daemon to drain and exit. |
 | `telemetry` | `[summary\|events\|rollup\|actions [feature]] [--window <7d>] [--kind <k>] [--limit <n>] [--mistake <feature> <action> <target> <kind>]` | no | implemented | Telemetry (D78): `summary` (invocations, outcomes, latency and injected bytes per hook and check), `events` (routing, spawn, Jev and spill events), `rollup` (move complete days into archive.db and apply the retention), `actions [feature]` (what the acting features did and got wrong: action counts, success rate, mistake signals and mistake rate; `--mistake <feature> <action> <target> <kind>` records one the engine cannot see, such as a dismissed escalation). Local only. |
@@ -109,6 +109,7 @@ Every flag in a command's arguments, with the commands that take it. A flag shar
 | `--list` | `devswarm` | List instead of acting (`devswarm notice --list`). |
 | `--max` | `devswarm` | Upper bound on how many items one run may act on (`devswarm reap-orphans`). |
 | `--memory` | `status` | Add the per-subsystem memory breakdown to the output (`status`). |
+| `--migration` | `status` | undocumented |
 | `--migrations-only` | `doctor` | With `--repair` or `--fix`, run only the migration pass and print its report as JSON (`doctor`). |
 | `--mistake` | `telemetry` | Record a mistake signal the engine cannot see itself: `--mistake <feature> <action> <target> <kind> [detail]` (`telemetry actions`). |
 | `--no-restart` | `engine-update` | Install without restarting the daemon; the next hook call starts the new one (`engine-update`). |
@@ -9446,6 +9447,30 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `opcli.fd_round_suffix` | `{id}@round{round}` |  |  | How a finding that shares its id with another round is named. Placeholders: {id}, {round}. |
 | `opcli.fd_state` | `Finding A: {a}\n\nFinding B: {b}` |  |  | The text Jev judges for a pair. Placeholders: {a}, {b} (each a finding described by fd_describe). |
 | `opcli.fd_unknown_file` | `unknown` |  |  | How the file of a finding without one is said in the text Jev judges. |
+| `opcli.migration_cmd_implemented` | `implemented` |  |  | Migration report: the command registry status word of a command the engine answers. |
+| `opcli.migration_cmd_planned` | `planned` |  |  | Migration report: the prefix of the command registry status of a command not yet in the engine (its Node script answers). |
+| `opcli.migration_defer_re` | `\breturn\s*\(?\s*['"]defer['"]` |  |  | Migration report: the pattern of a real deferral in a check script, matched after comments are removed. |
+| `opcli.migration_duty_prefix` | `devswarm_sup.duty.` |  |  | Migration report: the defaults key prefix of a supervisor duty's row (the duty name follows). |
+| `opcli.migration_flag` | `--migration` |  |  | The `ah-engine status` flag that prints the migration report: every hook check, supervisor duty, post-update stage, command and Node switch as native, partial or node (`status --migration [--json]`). |
+| `opcli.migration_heading` | `Node-to-engine migration: {native} native, {partial} partial, {node} node, {m...` |  |  | Migration report heading. Placeholders: {native}, {partial}, {node}, {missing}. |
+| `opcli.migration_kind_duty` | `duty` |  |  | Migration report kind of a DevSwarm supervisor duty (devswarm_sup.duties). |
+| `opcli.migration_kind_hook` | `hook` |  |  | Migration report kind of a registry check. |
+| `opcli.migration_kind_stage` | `stage` |  |  | Migration report kind of a post-update stage (update_post.stages). |
+| `opcli.migration_kind_switch` | `switch` |  |  | Migration report kind of a Node switch (opcli.migration_switches). |
+| `opcli.migration_kind_verb` | `verb` |  |  | Migration report kind of a command of the registry (cmd.*). |
+| `opcli.migration_line` | `  {status}  {kind}  {name}  {why}` |  |  | Migration report: one entry. Placeholders: {kind}, {name}, {status}, {why}. |
+| `opcli.migration_missing` | `missing` |  |  | Migration report: the count (and the human status) of entries whose source does not say where they stand. A test holds it at 0. |
+| `opcli.migration_status_native` | `native` |  |  | Migration status word: the path runs in the engine with no Node path left. |
+| `opcli.migration_status_node` | `node` |  |  | Migration status word: Node still answers (a check with a Node twin, a duty that runs as Node's function, a post-update stage that names a Node function, a planned command). Also the duty kind that names a Node function. |
+| `opcli.migration_status_partial` | `partial` |  |  | Migration status word: the engine answers, but a Node path remains (a real deferral, a Node witness, a Node key that still ships, a Node switch that is on). |
+| `opcli.migration_switches` | `1 entries` |  |  | Migration report: the Node switches, name to defaults key; native when the key is 0, partial otherwise. |
+| `opcli.migration_verb_node_keys` | `2 entries` |  |  | Migration report: per command, the defaults keys whose presence means a Node path of that command remains (the command is then partial). A lane that removes the Node path removes the key, and the report follows. |
+| `opcli.migration_why_defer` | `defer` |  |  | Migration reason: the check's script (or a script it includes) has a real deferral (opcli.migration_defer_re outside comments). |
+| `opcli.migration_why_fn` | `fn` |  |  | Migration reason prefix: the post-update stage names this Node function. |
+| `opcli.migration_why_key` | `node_key` |  |  | Migration reason prefix: this Node key of the command still ships. |
+| `opcli.migration_why_node_kind` | `node_kind` |  |  | Migration reason: the duty's kind is still node (it runs as Node's function, or natively with a Node witness or remainder). |
+| `opcli.migration_why_switch` | `switch` |  |  | Migration reason prefix: this Node switch is not 0. |
+| `opcli.migration_why_twin` | `node_twin` |  |  | Migration reason: the check has a Node twin (it is not in script.engine_only_checks), so a script failure defers to Node. |
 | `opcli.no_change_verbs` | `status, , test, review-due` |  |  | The `jev-setup` verbs that change nothing, so a successful run does not count as a change in the telemetry (an empty word is the bare command). |
 | `opcli.review_after_days_default` | `7` |  |  | jev.reviewAfterDays when the setting is zero or not a number (Node: `Number(x) \|\| 7`). |
 | `opcli.review_day_ms` | `86400000` |  |  | Milliseconds in a day (the review windows and the snooze are counted in whole days). |
