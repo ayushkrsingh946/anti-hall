@@ -436,19 +436,42 @@ pub fn clear_marker() {
     crate::discard::harmless(std::fs::remove_file(state_file("run_marker"))); // keep: cleanup that raced; an absent file is the goal state
 }
 
+/// True when the machine stopped under the previous daemon: the operating system booted after the last sign of life that daemon
+/// left (`last_alive_ms`), by more than `health.system_restart_slack_ms`. Without a boot time the answer is no (a crash stays a crash).
+pub(crate) fn stopped_by_system(boot_ms: Option<u64>, last_alive_ms: u64) -> bool {
+    boot_ms.is_some_and(|boot| last_alive_ms > 0 && boot > last_alive_ms.saturating_add(defaults::num("health.system_restart_slack_ms")))
+}
+
 /// If a previous daemon left its run marker and is gone (or the pid is no longer an engine), it died
-/// without a clean exit: claim the marker atomically (rename) and log one `crash` event.
+/// without a clean exit: claim the marker atomically (rename) and log one event. The event is a `crash` unless the machine
+/// stopped under it (the system booted after the daemon's last sign of life: a reboot, an OS update, a power loss), which is a
+/// `system_restart`: its own reason, not a crash, so it does not count toward the crash-loop threshold or mark the engine degraded.
 pub fn reap_marker() {
+    reap_marker_at(crate::limits::boot_time_ms());
+}
+
+pub(crate) fn reap_marker_at(boot_ms: Option<u64>) {
     let m = state_file("run_marker");
     let Ok(t) = std::fs::read_to_string(&m) else { return };
     let pid: u32 = t.trim().parse().unwrap_or(0);
     if pid != std::process::id() && pid_is_engine(pid) {
         return;
     }
+    // the daemon's last sign of life: its newest breadcrumb (written at every request boundary) or, failing that, when it started
+    let started_ms =
+        std::fs::metadata(&m).and_then(|md| md.modified()).ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_millis() as u64);
+    let breadcrumb = read_json("crash_breadcrumb");
+    let breadcrumb_ms = breadcrumb.as_ref().filter(|b| b["pid"].as_u64() == Some(u64::from(pid))).and_then(|b| b["ts"].as_u64()).unwrap_or(0);
+    let last_alive_ms = started_ms.max(breadcrumb_ms);
     let claim = file(&format!("{}{}", defaults::text("files.reaped_prefix"), std::process::id()));
     if std::fs::rename(&m, &claim).is_ok() {
         crate::discard::harmless(std::fs::remove_file(&claim)); // keep: cleanup that raced; an absent file is the goal state
-        let breadcrumb = read_json("crash_breadcrumb").unwrap_or_else(|| json!({"context": "unknown"}));
+        let breadcrumb = breadcrumb.unwrap_or_else(|| json!({"context": "unknown"}));
+        if stopped_by_system(boot_ms, last_alive_ms) {
+            let detail = defaults::render("msg.log_system_restart", &[("pid", &pid), ("last_alive_ms", &last_alive_ms), ("boot_ms", &boot_ms.unwrap_or(0))]);
+            log_event("system_restart", "boot", &detail);
+            return;
+        }
         let report = json!({"ts": now_ms(), "kind": "crash", "code": "unknown", "pid": pid, "breadcrumb": breadcrumb});
         write_crash_report(&report);
         let detail = defaults::render("msg.log_crash_context", &[("pid", &pid), ("context", &report)]);
@@ -590,6 +613,13 @@ pub fn fnv(s: &str) -> u64 {
     s.bytes().fold(0xcbf2_9ce4_8422_2325, |h, b| (h ^ b as u64).wrapping_mul(0x0100_0000_01b3))
 }
 
+/// The one "not at full strength" flag `status` reports at its top level and in `health.degraded`: the health summary says so
+/// (a restart in the window, a tripped breaker, a defaults fallback), or the fail-open window is not in its ok state. Both
+/// places read this, so they cannot disagree (live20.1: top-level `false` next to `health.degraded` `true`).
+pub fn overall_degraded(summary: &Value, fail_open_degraded: bool) -> bool {
+    summary["degraded"].as_bool().unwrap_or(false) || fail_open_degraded
+}
+
 /// The engine's health over the last `health.degraded_window_s`: self-restarts by reason, the crash-loop breaker and the client
 /// breaker with when they tripped, and how often a call fell back to Node and why. `degraded` is true when the engine is
 /// not at full strength (a restart in the window, the crash-loop breaker tripped, the client breaker open, or a defaults
@@ -612,6 +642,7 @@ pub fn summary() -> Value {
     let crashy = crashy();
     // a crash-loop trip is the consequence of the restarts, not one of them
     let restarts = tally(&|e| (crashy.contains(&e.kind.as_str()) && e.kind != "crashloop").then(|| format!("{}:{}", e.kind, e.code)));
+    let system_restarts = recent.iter().filter(|e| e.kind == "system_restart").count();
     let fallbacks = tally(&|e| matches!(e.kind.as_str(), "dispatch_defer" | "client_fail").then(|| format!("{}:{}", e.kind, e.code)));
     let total = |m: &serde_json::Map<String, Value>| m.values().filter_map(Value::as_u64).sum::<u64>();
     let last = |kind: &str| ev.iter().rev().find(|e| e.kind == kind).map(|e| json!({"ts": e.ts, "code": e.code, "detail": e.detail}));
@@ -628,6 +659,7 @@ pub fn summary() -> Value {
         "degraded": degraded,
         "window_s": window.as_secs(),
         "restarts": {"total": total(&restarts), "by_reason": restarts, "last_rss_trip": last("rss"), "last_memory_breakdown": last("memory")},
+        "system_restarts": {"total": system_restarts, "last": last("system_restart")},
         "crashloop": {"tripped": loop_left.is_some(), "remaining_s": loop_left.map(|d| d.as_secs() + 1), "last_trip": last("crashloop")},
         "breaker": {"open": breaker_left.is_some(), "remaining_s": breaker_left.map(|d| d.as_secs() + 1), "last_open": last("breaker_open")},
         "rollback": {"last": crate::binguard::last_rollback(), "last_request": last("rollback_request")},
@@ -735,6 +767,17 @@ pub fn merge_advisory(event: &str, existing: &str, text: &str) -> Option<String>
 
 #[cfg(test)]
 mod tests {
+    /// live20.1: `status` showed top-level `degraded: false` next to `health.degraded: true` because each was computed from its
+    /// own input. The one flag is true when either the health summary or the fail-open window says so.
+    #[test]
+    fn one_degraded_flag_covers_health_and_fail_open() {
+        let (sick, well) = (serde_json::json!({"degraded": true}), serde_json::json!({"degraded": false}));
+        assert!(overall_degraded(&sick, false), "a health reason alone degrades the engine");
+        assert!(overall_degraded(&well, true), "an unhealthy fail-open window alone degrades the engine");
+        assert!(!overall_degraded(&well, false));
+        assert!(!overall_degraded(&serde_json::json!({}), false), "a summary without the field is not degraded");
+    }
+
     use super::*;
 
     #[test]

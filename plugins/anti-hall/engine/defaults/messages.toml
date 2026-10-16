@@ -113,6 +113,10 @@ value = "anti-hall: the Node hook was killed by signal {signal}; no decision was
 doc = "Log detail for `reset`."
 value = "operator reset"
 
+[msg.log_system_restart]
+doc = "Log detail when a daemon is found gone without a clean exit AND the operating system booted after its last sign of life (a reboot, an OS update, a power loss): the machine stopped it, it did not crash. Placeholders: {pid}, {last_alive_ms}, {boot_ms}."
+value = "daemon pid {pid} was ended by the system stopping (its last sign of life {last_alive_ms} ms, the system booted at {boot_ms} ms): not a crash"
+
 [msg.log_crash_context]
 doc = "Log detail when a daemon is found dead without a clean exit, with the last breadcrumb. Placeholders: {pid}, {context}."
 value = "daemon pid {pid} died without a clean exit; last context {context}"
@@ -166,8 +170,12 @@ doc = "Log detail when a request used more thread CPU than its SOFT budget (a wa
 value = "request used {used_us} us of thread cpu, over the soft budget of {soft_us} us (hard budget {hard_us} us)"
 
 [msg.log_deadline_soft]
-doc = "Log detail when a request is still being evaluated after the client's fail-fast wait (its SOFT deadline); the checks keep running up to the hard deadline."
-value = "{check} ({event}): past the client's fail-fast wait, still evaluating"
+doc = "Log detail when the client's fail-fast wait (the request's SOFT deadline) ended while a check was running: the request is {elapsed_ms} ms old and that check ran {ran_ms} ms. Nothing is cut: the checks keep running up to the hard deadline and the client uses the late reply."
+value = "{check} ({event}): ran {ran_ms} ms, the client's fail-fast wait ended {elapsed_ms} ms after the request arrived; the request keeps running to its hard deadline"
+
+[msg.log_deadline_soft_queued]
+doc = "Log detail when the client's fail-fast wait (the request's SOFT deadline) had already ended before the first check of the request started, so the request waited {elapsed_ms} ms (queue, connection) before any check ran. {check} is the first check of the request. Nothing is cut."
+value = "{check} ({event}): the client's fail-fast wait had ended {elapsed_ms} ms after the request arrived, before the first check started; the request keeps running to its hard deadline"
 
 [msg.script_soft_overrun]
 doc = "Log detail (code script_soft, rate-limited) of a script call that used more thread CPU than its SOFT limit; it was not cut."

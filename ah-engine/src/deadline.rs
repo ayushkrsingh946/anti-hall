@@ -134,6 +134,11 @@ pub fn note_soft_overrun() -> bool {
     true
 }
 
+/// Milliseconds since the current request arrived; `None` outside a request.
+pub fn elapsed_ms() -> Option<u64> {
+    REQ.with(|r| r.get()).map(|req| req.arrived.elapsed().as_millis() as u64)
+}
+
 /// How many writes the current request has staged so far: [`discard_staged_since`] drops the ones staged after this mark.
 pub fn staged_mark() -> usize {
     STAGED.with(|s| s.borrow().len())
@@ -248,6 +253,21 @@ pub fn clamp(budget: Duration) -> Duration {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// live20.1: `deadline_soft` named the next check to start (ship-it-guard, 0.7 ms mean) for time earlier checks spent. The line now
+    /// names the check that was running when the wait ended, with how long it ran and how old the request was.
+    #[test]
+    fn the_soft_deadline_lines_say_who_ran_and_for_how_long() {
+        let ran = crate::defaults::render(
+            "msg.log_deadline_soft",
+            &[("check", &"git-guard"), ("event", &"PreToolUse"), ("elapsed_ms", &312u64), ("ran_ms", &290u128)],
+        );
+        assert!(ran.contains("git-guard") && ran.contains("ran 290 ms") && ran.contains("312 ms"), "{ran}");
+        let queued = crate::defaults::render("msg.log_deadline_soft_queued", &[("check", &"git-guard"), ("event", &"PreToolUse"), ("elapsed_ms", &312u64)]);
+        assert!(queued.contains("before the first check started") && queued.contains("312 ms"), "{queued}");
+        assert!(!ran.contains('{') && !queued.contains('{'), "unfilled placeholder: {ran} / {queued}");
+        assert_eq!(elapsed_ms(), None, "no request on this thread");
+    }
 
     /// Start a request now, with the defaults already loaded: the first read of a setting parses the shipped file (hundreds of
     /// milliseconds in a debug build), which would otherwise be spent inside the request window. The window is the fail-fast
