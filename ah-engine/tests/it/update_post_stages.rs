@@ -110,6 +110,33 @@ fn seed_import(home: &Path) {
     put(home, "nd-w1.cursor", "3");
 }
 
+/// A partition never imported and a live harness session whose `cwd` is empty and which has no legacy file: Node's
+/// `cwdInPartition` is `false` for an empty cwd, so no reader row is declared (only the floors).
+fn seed_import_no_cwd(home: &Path) {
+    let st = open_store(home, STORE);
+    for (i, h) in ["a1", "a2", "a3"].iter().enumerate() {
+        msg(&st, "w1", i as i64, h, None);
+    }
+    drop(st);
+    let pid = std::process::id();
+    put(home, &format!(".claude/sessions/{pid}.json"), &format!(r#"{{"pid":{pid},"startedAt":{FAR_FUTURE},"cwd":""}}"#));
+    put(home, ".anti-hall/devswarm/cursors/w1.json", "2");
+}
+
+/// Two partitions never imported; the second (`primary-...`, so it names a mesh id) meets a live session whose relative `cwd`
+/// only Node can classify. The first alone would import cleanly.
+fn seed_import_deferred(home: &Path) {
+    let st = open_store(home, STORE);
+    for p in ["a1", "primary-0123abcd"] {
+        for (i, h) in ["a1", "a2"].iter().enumerate() {
+            msg(&st, p, i as i64, &format!("{p}{h}"), None);
+        }
+    }
+    drop(st);
+    let pid = std::process::id();
+    put(home, &format!(".claude/sessions/{pid}.json"), &format!(r#"{{"pid":{pid},"startedAt":{FAR_FUTURE},"cwd":"relative/dir"}}"#));
+}
+
 /// Floors the v0.106.0 import pinned: readers whose process is gone, one whose session file names another session, one live
 /// but not local, one local that really read; an nd floor imported as 0 on a partition with a legacy nd cursor.
 fn seed_floors(home: &Path) {
@@ -420,6 +447,7 @@ macro_rules! case {
 }
 
 case!(import_repairs_a_partition_the_earlier_build_never_imported, "reader-cursors-import", "bad_state", "reader-cursors-import", "readerCursorsImport", "readerCursorsImportPostUpdate", seed_import, live: true, markers: false);
+case!(import_skips_a_session_with_an_empty_cwd_like_node, "reader-cursors-import", "empty_cwd", "reader-cursors-import", "readerCursorsImport", "readerCursorsImportPostUpdate", seed_import_no_cwd, live: true, markers: false);
 case!(import_preview_writes_nothing, "reader-cursors-import", "dry_run", "reader-cursors-import", "readerCursorsImport", "readerCursorsImportPostUpdate", seed_import, live: false, markers: false);
 case!(import_already_done_is_skipped, "reader-cursors-import", "already_done", "reader-cursors-import", "readerCursorsImport", "readerCursorsImportPostUpdate", seed_import, live: true, markers: true);
 case!(floor_repair_retires_pinning_readers_and_raises_the_floors, "reader-floor-repair", "bad_state", "reader-floor-repair", "readerFloorRepair", "readerFloorRepairPostUpdate", seed_floors, live: true, markers: false);
@@ -519,4 +547,22 @@ fn the_store_stages_delete_nothing() {
             assert!(after["files"].get(f).is_some(), "{row}: file {f} vanished");
         }
     }
+}
+
+/// A store with one session the engine cannot classify (relative cwd) is left byte-identical: the engine writes nothing for it,
+/// even for the partition that alone would import cleanly, and the Node function answers from the untouched state.
+#[test]
+fn a_store_needing_the_node_fallback_is_left_untouched_by_the_engine() {
+    let o = Opt { ds: true, no_upstream_move: true, live: true, no_node: true, stage_only: Some("reader-cursors-import"), ..Opt::default() };
+    let w = world(&o);
+    seed_import_deferred(&w.home);
+    let before = picture(&w, Value::Null, None);
+    let ans = engine_answer(&w, &o, "readerCursorsImport");
+    assert_eq!(ans["attempted"], json!(false), "{ans}");
+    let calls = stage_node_calls(&w);
+    assert_eq!(calls.len(), 1, "{calls:?}");
+    assert!(calls[0].contains("readerCursorsImportPostUpdate"), "{calls:?}");
+    let after = picture(&w, Value::Null, None);
+    assert_eq!(before["stores"], after["stores"], "the engine wrote rows for a store it handed to Node");
+    assert!(before["stores"][STORE]["reader_cursors"].as_array().unwrap().is_empty(), "seed must start without reader rows");
 }

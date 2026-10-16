@@ -82,6 +82,27 @@ fn swallowed(ctx: &Ctx, stage: &str, what: &str, e: &str) {
     ctx.note(defaults::render("update_post.note_store", &[("stage", &stage), ("what", &what), ("error", &e)]));
 }
 
+/// Plan (read-only) every partition of a store that still needs its import; true when any plan met a case only Node decides.
+fn import_needs_node(cx: &mut Cx, h: &rc::Handle, home: &Path) -> bool {
+    for id in h.rd().workspace_ids() {
+        if !is_safe_id(&id) {
+            continue;
+        }
+        if crate::meshw::cursors::rows_from_reader(h.rd(), &id).is_ok_and(|rows| !crate::meshw::cursors::needs_import(&rows)) {
+            continue;
+        }
+        let cursor_path = match ident::read_descriptor(home, &id).as_ref().and_then(|d| d.get("cursorPath")) {
+            Some(crate::checks::guardkit::ojson::OVal::Str(s)) if !s.is_empty() => Some(s.clone()),
+            _ => None,
+        };
+        rc::import_plan_dry(cx, h, &id, cursor_path.as_deref());
+        if cx.deferred {
+            return true;
+        }
+    }
+    false
+}
+
 /// `importReaderCursorsAllStores(home)`.
 fn reader_cursors_import(ctx: &Ctx, cx: &mut Cx, hashes: &[String], dry: bool) -> Option<Tally> {
     let home = Path::new(&ctx.home);
@@ -96,6 +117,11 @@ fn reader_cursors_import(ctx: &Ctx, cx: &mut Cx, hashes: &[String], dry: bool) -
             }
         };
         t.add("stores", 1.0);
+        if !dry && import_needs_node(cx, &h, home) {
+            // one session only Node can classify: write nothing for this store, the Node fallback starts from the untouched state
+            cx.deferred = true;
+            return Some(t);
+        }
         for id in h.rd().workspace_ids() {
             if !is_safe_id(&id) {
                 continue;

@@ -310,7 +310,8 @@ fn partition_mesh_ids(cx: &mut Cx, partition: &str, desc: Option<&OVal>) -> Hash
 
 /// `cwdInPartition(cwd, meshIds)`: tri-state; only a CONFIRMED `false` excludes a session.
 fn cwd_in_partition(cx: &mut Cx, cwd: Option<&str>, ids: &HashSet<String>) -> Option<bool> {
-    let cwd = cwd.filter(|c| !c.is_empty())?;
+    // Node: `!cwd` is a confident `false` (no working directory is local to nothing), never "uncertain".
+    let Some(cwd) = cwd.filter(|c| !c.is_empty()) else { return Some(false) };
     if ids.is_empty() {
         return Some(false);
     }
@@ -366,6 +367,11 @@ struct Plan {
     floors: Two<f64>,
     /// `(reader, ns, value)`.
     readers: Vec<(String, &'static str, f64)>,
+}
+
+/// `importPlan` for its side effect on [`Cx::deferred`] only: nothing is written.
+pub(crate) fn import_plan_dry(cx: &mut Cx, h: &Handle, partition: &str, cursor_path: Option<&str>) {
+    import_plan(cx, h, partition, cursor_path);
 }
 
 /// `importPlan(store, { partition, cursorPath, home })`.
