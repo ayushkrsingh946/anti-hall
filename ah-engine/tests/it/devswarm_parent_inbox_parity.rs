@@ -342,6 +342,27 @@ fn faulty_daemon(extra: Value) -> impl Fn(&Path) {
 
 const MIN: i64 = 60_000;
 
+/// A summary of the given child rows plus the Primary's own entry (`own`), and the extra top-level fields.
+fn with_own(children: Vec<(&'static str, Value)>, own: Value, extra: Value) -> impl Fn(&Path) {
+    move |h| {
+        let mut o = serde_json::Map::new();
+        for (id, e) in &children {
+            o.insert((*id).to_string(), row(h, id, e.clone()));
+        }
+        o.insert(primary_id(h), own.clone());
+        summary_with(Value::Object(o), extra.clone())(h);
+    }
+}
+
+fn question(from: &str, ts_age_min: i64, seq: i64) -> Value {
+    json!({"from": from, "ts": now_ms() - ts_age_min * MIN - 20_000, "seq": seq})
+}
+
+/// The project's reply log: one JSON record per line.
+fn replies(lines: Vec<Value>) -> impl Fn(&Path) {
+    move |h| write(&ds(h).join(format!("parent-gate/{}-replies.json", project_key(h))), &lines.iter().map(|l| format!("{l}\n")).collect::<String>())
+}
+
 fn plan_of(key: &'static str, plan: Value) -> impl Fn(&Path) {
     move |h| write(&ds(h).join(format!("plans/{key}.json")), &plan.to_string())
 }
@@ -661,12 +682,6 @@ fn scenes() -> Vec<Scene> {
             // the daemon is healthy, so the summary above is the one the hook reads
             healthy_daemon(h);
         })),
-        scene("rows-own-pending-questions", Defer).seed(|h| {
-            let id = primary_id(h);
-            let mut o = serde_json::Map::new();
-            o.insert(id, json!({"pendingQuestions": [{"seq": 1}]}));
-            summary(Value::Object(o))(h);
-        }),
         scene("rows-empty-orphans-list-is-nothing", Same).seed(rows_with(vec![("w1", json!({}))], json!({"orphans": [], "staleRegistryPartitions": [], "recent": []}))),
         scene("rows-app-db-unreadable-asks-for-a-screenshot", Same).seed(both(rows_of(vec![("w1", json!({}))]), |h| write(&h.join("app.db"), "x"))).env(vec![("ANTIHALL_DEVSWARM_APP_DB", "$HOME/app.db")]),
         scene("rows-descriptor-present-not-claude", Same).seed(both(rows_of(vec![("w1", json!({}))]), |h| write(&ds(h).join("workspaces/w1.json"), r#"{"id":"w1"}"#))),
@@ -929,12 +944,7 @@ fn scenes() -> Vec<Scene> {
         // the screenshot-sync ask and the app-still-open note
         scene("sync-app-db-unreadable-with-rows", Same).seed(both(rows_of(vec![("w1", json!({})), ("w2", json!({}))]), |h| write(&h.join("app.db"), "x"))).env(APP_ENV.to_vec()),
         scene("sync-asked-once-per-session", Same).prime().seed(both(rows_of(vec![("w1", json!({}))]), |h| write(&h.join("app.db"), "x"))).env(APP_ENV.to_vec()),
-        scene("sync-asked-again-for-another-set-of-rows", Same).seed(all3(rows_of(vec![("w1", json!({})), ("w3", json!({}))]), |h| write(&h.join("app.db"), "x"), |h| {
-            let ids = ["w1", "w2"];
-            let mut sorted = ids.to_vec();
-            sorted.sort();
-            let _ = sorted;
-        })).env(APP_ENV.to_vec()),
+        scene("sync-asked-again-for-another-set-of-rows", Same).seed(both(rows_of(vec![("w1", json!({})), ("w3", json!({}))]), |h| write(&h.join("app.db"), "x"))).env(APP_ENV.to_vec()),
         scene("sync-conflicts-with-an-unreadable-db", Same).seed(all3(rows_of(vec![("w1", json!({}))]), |h| write(&h.join("app.db"), "x"), |h| {
             write(&ds(h).join("app-state.json"), &json!({"openButMarkedArchived": [{"id": "c1", "label": "Gone one", "worktreePath": h.join("proj")}, {"id": "c2", "worktreePath": "/nowhere/else"}, null, {"id": "c3"}]}).to_string());
         })).env(APP_ENV.to_vec()),
@@ -953,6 +963,41 @@ fn scenes() -> Vec<Scene> {
         scene("sync-app-state-garbage", Same).seed(both(rows_of(vec![("w1", json!({}))]), |h| write(&ds(h).join("app-state.json"), "{torn"))),
         scene("sync-readable-db-needs-no-ask", Same).env(APP_ENV.to_vec()).seed(both(rows_of(vec![("w1", json!({}))]), |h| app_db(vec![("w1", Some(h.join("w1-wt")), "A", 1, 0, 1, 0, "standard", None)], vec![])(h))),
         scene("sync-no-rows-no-ask", Same).seed(both(summary(json!({})), |h| write(&h.join("app.db"), "x"))).env(APP_ENV.to_vec()),
+        // questions the Primary was asked
+        scene("ask-one-question-no-unread", Same).seed(with_own(vec![("w1", json!({}))], json!({"pendingQuestions": [question("w1", 12, 3)]}), json!({}))),
+        scene("ask-one-question-with-unread", Same).seed(with_own(vec![("w1", json!({}))], json!({"unread": 2, "pendingQuestions": [question("w1", 12, 3)]}), json!({}))),
+        scene("ask-more-questions-than-unread", Same).seed(with_own(vec![("w1", json!({})), ("w2", json!({}))], json!({"unread": 1, "urgencyMax": "urgent", "pendingQuestions": [question("w1", 12, 3), question("w2", 30, 4), question("w1", 5, 5)]}), json!({}))),
+        scene("ask-all-unread-are-questions", Same).seed(with_own(vec![("w1", json!({})), ("w2", json!({}))], json!({"unread": 2, "pendingQuestions": [question("w1", 12, 3), question("w2", 30, 4)]}), json!({}))),
+        scene("ask-eight-askers", Same).seed({
+            let qs: Vec<Value> = ["a1", "a2", "a3", "a4", "a5", "a6", "a7", "a8"].iter().enumerate().map(|(i, f)| question(f, 10 + i as i64, i as i64)).collect();
+            with_own(vec![("a1", json!({})), ("a2", json!({})), ("a3", json!({})), ("a4", json!({})), ("a5", json!({})), ("a6", json!({})), ("a7", json!({})), ("a8", json!({}))], json!({ "pendingQuestions": qs }), json!({}))
+        }),
+        scene("ask-answered-by-a-reply-record", Same).seed(both(with_own(vec![("w1", json!({}))], json!({"pendingQuestions": [question("w1", 12, 3)]}), json!({})), replies(vec![json!({"m": "w1", "t": now_ms() - 60_000})]))),
+        scene("ask-reply-older-than-the-question", Same).seed(both(with_own(vec![("w1", json!({}))], json!({"pendingQuestions": [question("w1", 1, 3)]}), json!({})), replies(vec![json!({"m": "w1", "t": now_ms() - 3_600_000})]))),
+        scene("ask-reply-log-snapshot-and-garbage", Same).seed(both(with_own(vec![("w1", json!({})), ("w2", json!({}))], json!({"pendingQuestions": [question("w1", 12, 3), question("w2", 12, 4)]}), json!({})), |h| {
+            write(&ds(h).join(format!("parent-gate/{}-replies.json", project_key(h))), &format!("{{torn\n{}\n[1]\n{}\n", json!({"w1": {"lastReplyTs": now_ms()}, "x": 5}), json!({"m": "w2", "t": "soon"})));
+        })),
+        scene("ask-answered-through-a-twin-row", Same).seed(all3(with_own(vec![("w1", json!({"worktreePath": "x"}))], json!({"pendingQuestions": [question("w1", 12, 3)]}), json!({})), |h| {
+            // w1 and its twin sit on one checkout: the twin's reply answers the question
+            let wt = linked_worktree(h, "shared-wt");
+            let body = json!({"workspaces": {"w1": {"worktreePath": wt, "sessionId": "s1"}, "w1-twin": {"worktreePath": wt, "sessionId": "s2"}, primary_id(h): {"pendingQuestions": [question("w1", 12, 3)]}}});
+            write(&ds(h).join(format!("summaries/{}.json", project_key(h))), &body.to_string());
+        }, replies(vec![json!({"m": "w1-twin", "t": now_ms() - 60_000})]))),
+        scene("ask-from-a-sender-with-no-id", Same).seed(with_own(vec![("w1", json!({}))], json!({"unread": 1, "pendingQuestions": [{"ts": now_ms() - 600_000, "seq": 1}, null, {"from": null}]}), json!({}))),
+        scene("ask-retired-sender-is-informational", Same).seed(with_own(vec![("w1", json!({}))], json!({"unread": 1, "pendingQuestions": [question("old-child", 12, 3), question("w1", 5, 4)]}), json!({"archivedRegistryRows": []}))),
+        scene("ask-retired-sender-only", Same).seed(with_own(vec![("w1", json!({}))], json!({"pendingQuestions": [question("old-child", 12, 3), question("older", 20, 4), {"ts": 1}]}), json!({"archivedRegistryRows": [{"id": "elsewhere"}]}))),
+        scene("ask-sender-unknown-while-archived-rows-are-unknown", Same).seed(with_own(vec![("w1", json!({}))], json!({"pendingQuestions": [question("old-child", 12, 3)]}), json!({}))),
+        scene("ask-sender-archived-and-gone-is-dropped", Same).seed(both(with_own(vec![("w1", json!({}))], json!({"pendingQuestions": [question("w1", 12, 3)]}), json!({})), |h| {
+            write(&ds(h).join("archived/w1.json"), &json!({"worktreePath": h.join("w1-wt"), "sessionId": "sess-w1"}).to_string());
+        })),
+        scene("ask-sender-archived-but-alive-is-kept", Same).seed(all3(with_own(vec![("w1", json!({}))], json!({"pendingQuestions": [question("w1", 12, 3)]}), json!({})), |h| {
+            write(&ds(h).join("archived/w1.json"), &json!({"worktreePath": h.join("w1-wt"), "sessionId": "sess-w1"}).to_string());
+        }, |h| write(&h.join(".claude/sessions/1.json"), &json!({"sessionId": "sess-w1", "pid": std::process::id()}).to_string()))),
+        scene("ask-sender-archive-ignored-is-dropped", Same).seed(both(with_own(vec![("w1", json!({}))], json!({"pendingQuestions": [question("w1", 12, 3)]}), json!({})), |h| write(&ds(h).join("archive-ignore/w1.json"), "{}"))),
+        scene("ask-with-a-preview", Same).seed(with_own(vec![("w1", json!({}))], json!({"pendingQuestions": [question("w1", 12, 3)], "pendingQuestionPreviews": {"3": "Should we ship the\u{1}   migration first?  api_key=sk-abcdefghijklmnopqrstuvwxyz0123456789"}}), json!({}))),
+        scene("ask-with-a-long-preview-and-a-title", Same).seed(both(with_own(vec![("w1", json!({"label": "Alpha"}))], json!({"pendingQuestions": [question("w1", 12, 3)], "pendingQuestionPreviews": {"3": "x".repeat(200)}}), json!({})), name_of("w1", "Fix the thing with a very long title that is longer than forty-eight chars"))),
+        scene("ask-preview-without-a-sender-title", Same).seed(with_own(vec![], json!({"pendingQuestions": [{"from": "nobody", "ts": now_ms() - 600_000, "seq": 9}], "pendingQuestionPreviews": {"9": 5}}), json!({}))),
+        scene("ask-second-turn-repeats-the-segment", Same).prime().seed(with_own(vec![("w1", json!({}))], json!({"pendingQuestions": [question("w1", 12, 3)]}), json!({}))),
         // the cases that stay with Node, each decided before anything is written
         scene("summary-empty-file", Defer).seed(|h| write(&ds(h).join(format!("summaries/{}.json", project_key(h))), "")),
         scene("descriptor-present-not-claude", Same).seed(|h| write(&ds(h).join("workspaces/child-1.json"), r#"{"id":"child-1"}"#)),
@@ -1100,6 +1145,11 @@ fn engine_and_node_agree_for_a_primary_in_a_checkout() {
         "devswarm-own-inbox: priority",
         "devswarm-own-inbox: urgent priority",
         "NOT DRAINING >20m",
+        "QUESTIONS AWAITING YOUR REPLY",
+        "INFORMATIONAL",
+        "remain UNANSWERED",
+        "of these are unanswered QUESTIONS",
+        "unanswered QUESTIONS remain",
         "devswarm-sync:",
         "DEVSWARM: app still shows",
         "The DevSwarm app shows",

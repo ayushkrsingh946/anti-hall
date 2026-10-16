@@ -16,6 +16,8 @@
 //! | `piPid(pid)` | `pidIsAlive(pid)`: `true`, `false` or `null` (no opinion) |
 //! | `piAppChildren(worktree)` | the workspaces the app database lists as open children of the project around `worktree`: `{repo, children: [{id, worktreePath, sessionId}]}` (`appHasLiveChild` before the per-row eligibility) |
 //! | `piFinish(id, worktree, now)` | `{label, key, extras}`: the step-plan label of a working row (`planLib.findPlan` then `finishLabel`), `label` null when the workspace has no plan |
+//! | `piMeshId(worktree)` | `{id}`: `resolveContext(worktree, { missingPath: 'ancestor' }).meshId`, `null` outside a checkout |
+//! | `piSessionPid(session)` | `sessionPidAlive(session)`: `true`, `false` (a record names it and every pid is dead) or `null` (no record) |
 //! | `piJev()` | whether the Jev triage of arrivals may be switched on (then a broadcast feed is labelled by Jev, which the engine does not do)
 //! | `piDerive(repoKey, now)` | `{text}`: the project's summary projection as the hook's refresh would write it when the ingest daemon is not healthy (`null` when the project has no store rows to derive from); nothing is written |
 //! | `piDrift(worktree, anchor, current, transcriptPath)` | `anchorSessionDrift(...)`: `{newest, anchor}` when a newer session of the worktree is active than the Primary's anchor, else `null` |
@@ -327,6 +329,11 @@ fn activity_of(inv: &Inv, id: &str, wt: Option<&str>, sid: Option<&str>, last_ou
 }
 
 
+fn mesh_id_of(wt: &str) -> R<Value> {
+    let c = ident::resolve_context(wt, true)?;
+    Ok(json!({"id": c.worktree_root.as_deref().map(ident::mesh_id_for_real_path)}))
+}
+
 // ---------------------------------------------------------------------------------------------------------------------
 // the step plan of a row
 // ---------------------------------------------------------------------------------------------------------------------
@@ -548,6 +555,16 @@ pub(super) fn install<'js>(c: &Ctx<'js>, h: &Object<'js>) -> rquickjs::Result<()
         "piFinish",
         Function::new(c.clone(), |id: String, wt: Option<String>, now: f64| -> rquickjs::Result<String> {
             with_settings(|st| answer(finish_of(&inv_of(st, now), &id, wt.as_deref())))
+        })?,
+    )?;
+    h.set(
+        "piMeshId",
+        Function::new(c.clone(), |wt: String| -> rquickjs::Result<String> { with_settings(|_| answer(mesh_id_of(&wt))) })?,
+    )?;
+    h.set(
+        "piSessionPid",
+        Function::new(c.clone(), |sid: String| -> rquickjs::Result<String> {
+            with_settings(|st| answer(liveness::session_state(Path::new(&st.home), &sid).map(|v| json!({"alive": v}))))
         })?,
     )?;
     h.set("piJev", Function::new(c.clone(), || -> rquickjs::Result<bool> { with_settings(|st| crate::meshw::common::jev_maybe_enabled(&inv_of(st, 0.0))) })?)?;

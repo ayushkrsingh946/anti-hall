@@ -211,11 +211,17 @@ pub(crate) fn pid_is_alive(pid: f64, since_ms: Option<f64>) -> Option<bool> {
 
 /// `isSessionAliveRow({ sessionId })`: a `~/.claude/sessions/*.json` record of this session names a live process.
 pub(crate) fn session_alive(home: &Path, session: &str) -> R<bool> {
+    Ok(session_state(home, session)? == Some(true))
+}
+
+/// `sessionPidAlive(sessionId, home)`: `Some(true)` a record names a live process, `Some(false)` records name it and all are dead,
+/// `None` no record (or no sessions directory) to go by.
+pub(crate) fn session_state(home: &Path, session: &str) -> R<Option<bool>> {
     if session.is_empty() {
-        return Ok(false);
+        return Ok(None);
     }
     let dir = home.join(defaults::text("mesh_write.claude_dir")).join(defaults::text("mesh_write.sessions_dir"));
-    let Ok(rd) = std::fs::read_dir(&dir) else { return Ok(false) };
+    let Ok(rd) = std::fs::read_dir(&dir) else { return Ok(None) };
     let mut names: Vec<String> =
         rd.flatten().filter_map(|e| e.file_name().into_string().ok()).filter(|n| n.ends_with(defaults::text("mesh_write.json_suffix"))).collect();
     names.sort();
@@ -238,12 +244,12 @@ pub(crate) fn session_alive(home: &Path, session: &str) -> R<bool> {
         }
         let since = std::fs::metadata(&file).ok().map(|m| mtime_ms(&m)).filter(|t| t.is_finite());
         match pid_is_alive(js_pid(rec.get(defaults::text("devswarm_sup.lv_field_pid")))?, since) {
-            Some(true) => return Ok(true),
+            Some(true) => return Ok(Some(true)),
             Some(false) => verdict = Some(false),
             None => {}
         }
     }
-    Ok(verdict == Some(true))
+    Ok(verdict)
 }
 
 /// The mailbox facts `unionPendingFor` reports.

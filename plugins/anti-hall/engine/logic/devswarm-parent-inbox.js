@@ -975,6 +975,248 @@ function piSyncNotes(ctx, rows, unreadable, sessionRaw) {
   return out;
 }
 
+// ---- the questions the Primary was asked ---------------------------------------------------------------------------------------
+
+// `readReplyState(repoKey, home)`: sender id -> {lastReplyTs}, folded from the project's reply log (a snapshot or appended records).
+function piReplyState(home, key) {
+  var out = Object.create(null);
+  var p = piDevswarmDir(home) + '/' + ah.cfg('devswarm_parent.dir_reply_state') + '/' + String(key).replace(/[^A-Za-z0-9_.-]/g, '_') + ah.cfg('devswarm_parent.reply_state_suffix');
+  var size = ah.fs.size(p);
+  if (size === null) return out;
+  if (size > ah.cfgNum('script.read_max_bytes')) throw meshDefer;
+  var raw = ah.fs.readText(p);
+  if (raw === null) return out;
+  var bump = function (meshId, ts) {
+    if (typeof meshId !== 'string' || !meshId || !piFinite(ts)) return;
+    var prior = out[meshId] && piFinite(out[meshId].lastReplyTs) ? out[meshId].lastReplyTs : -Infinity;
+    if (ts > prior) out[meshId] = { lastReplyTs: ts };
+    else if (!out[meshId]) out[meshId] = { lastReplyTs: ts };
+  };
+  raw.split('\n').forEach(function (line) {
+    var t = line.trim();
+    if (!t) return;
+    var o;
+    try { o = JSON.parse(t); } catch (e) { return; }
+    if (!o || typeof o !== 'object' || Array.isArray(o)) return;
+    if (typeof o.m === 'string' && piFinite(o.t)) bump(o.m, o.t);
+    else Object.keys(o).forEach(function (k) { var v = o[k]; if (v && typeof v === 'object' && piFinite(v.lastReplyTs)) bump(k, v.lastReplyTs); });
+  });
+  return out;
+}
+
+// `unansweredQuestions(pendingQuestions, replyState)`.
+function piUnanswered(pending, state) {
+  return pending.filter(function (q) {
+    try {
+      if (!q || typeof q !== 'object') return true;
+      var entry = state[q.from];
+      var last = entry && piFinite(entry.lastReplyTs) ? entry.lastReplyTs : 0;
+      var ts = piFinite(q.ts) ? q.ts : Infinity;
+      return ts > last;
+    } catch (e) { return true; }
+  });
+}
+
+// `crossLinkedIdentity(a, b)`.
+function piCrossLinked(a, b) {
+  if (!a || !b) return false;
+  var aId = a.id != null ? String(a.id) : '', bId = b.id != null ? String(b.id) : '';
+  if (!aId || !bId || aId === bId) return false;
+  var aSess = a.sessionId != null ? String(a.sessionId) : '', bSess = b.sessionId != null ? String(b.sessionId) : '';
+  if (aSess && aSess === bId) return true;
+  if (bSess && bSess === aId) return true;
+  return false;
+}
+
+// `recipientFamilyIds(recipientId, rows)`.
+function piRecipientFamily(recipientId, rows) {
+  var out = {};
+  if (recipientId == null || String(recipientId) === '') return out;
+  var rid = String(recipientId);
+  out[rid] = true;
+  var self = null;
+  rows.forEach(function (r) { if (self === null && r && r.id != null && String(r.id) === rid) self = r; });
+  var target = self || { id: rid };
+  rows.forEach(function (c) { if (c && c.id != null && piCrossLinked(target, c)) out[String(c.id)] = true; });
+  return out;
+}
+
+// `collapseFamilies(descriptors, { resolve })`.
+function piFamilies(rows, resolve) {
+  var cache = {}, groups = {}, order = [];
+  rows.forEach(function (d) {
+    if (!d) return;
+    var key = null, wt = d.worktreePath;
+    if (wt) {
+      if (!Object.prototype.hasOwnProperty.call(cache, wt)) cache[wt] = resolve(wt);
+      if (cache[wt]) key = cache[wt];
+    }
+    if (key === null) key = 'id:' + (d.id != null ? String(d.id) : '');
+    if (!Object.prototype.hasOwnProperty.call(groups, key)) { groups[key] = []; order.push(key); }
+    groups[key].push(d);
+  });
+  return order.map(function (key) { return { key: key, members: groups[key] }; });
+}
+
+// The unanswered questions of the Primary's own entry, split into the ones it can reply to and the ones from retired senders:
+// {blocking, informational}. `familyAwareUnanswered`, `partitionUnanswered` and `filterLiveAskers` over the summary, the descriptors and the app.
+function piQuestions(ctx, summary, pending) {
+  var home = ctx.home, key = ctx.key;
+  var replyState = piReplyState(home, key);
+  var descriptors = piDescriptors(home);
+  var meshIds = {};
+  var resolve = function (wt) {
+    if (!Object.prototype.hasOwnProperty.call(meshIds, wt)) {
+      var r = JSON.parse(ahHost.piMeshId(wt));
+      if (r.unsure) throw meshDefer;
+      meshIds[wt] = r.id;
+    }
+    return meshIds[wt];
+  };
+  var registryRows = [], archivedKnown = false;
+  var ws = (summary && summary.workspaces) || {};
+  Object.keys(ws).forEach(function (wid) { registryRows.push({ id: wid, worktreePath: (ws[wid] && ws[wid].worktreePath) || null, sessionId: (ws[wid] && ws[wid].sessionId) || null }); });
+  archivedKnown = Array.isArray(summary && summary.archivedRegistryRows);
+  if (archivedKnown) summary.archivedRegistryRows.forEach(function (r) { if (r && r.id != null) registryRows.push({ id: r.id, worktreePath: r.worktreePath || null, sessionId: r.sessionId || null }); });
+  // familyAwareUnanswered
+  var raw = piUnanswered(pending, replyState);
+  var seen = {}, rows = [];
+  descriptors.concat(registryRows).forEach(function (r) {
+    if (!r || r.id == null) return;
+    var id = String(r.id);
+    if (Object.prototype.hasOwnProperty.call(seen, id)) return;
+    seen[id] = true;
+    rows.push(r);
+  });
+  var unanswered = raw;
+  if (raw.length && rows.length) {
+    var families = piFamilies(rows, resolve);
+    var excluded = piRecipientFamily(ctx.primaryId || null, rows);
+    var familyByMember = {};
+    families.forEach(function (fam) { fam.members.forEach(function (m) { if (m && m.id != null) familyByMember[String(m.id)] = fam; }); });
+    unanswered = raw.filter(function (q) {
+      if (!q || q.from == null) return true;
+      var fam = Object.prototype.hasOwnProperty.call(familyByMember, String(q.from)) ? familyByMember[String(q.from)] : null;
+      if (!fam) return true;
+      var qTs = piFinite(q.ts) ? q.ts : Infinity;
+      for (var i = 0; i < fam.members.length; i++) {
+        var m = fam.members[i], mid = m && m.id != null ? String(m.id) : null;
+        if (!mid) continue;
+        if (Object.prototype.hasOwnProperty.call(excluded, mid)) continue;
+        var entry = replyState[mid];
+        var last = entry && piFinite(entry.lastReplyTs) ? entry.lastReplyTs : 0;
+        if (qTs <= last) return false;
+      }
+      return true;
+    });
+  }
+  // partitionUnanswered
+  var blocking = unanswered.slice(), informational = [];
+  if ((descriptors.length || registryRows.length) && archivedKnown) {
+    var known = {};
+    descriptors.forEach(function (r) { if (r && r.id != null) known[String(r.id).trim()] = true; });
+    registryRows.forEach(function (r) { if (r && r.id != null) known[String(r.id).trim()] = true; });
+    blocking = []; informational = [];
+    unanswered.forEach(function (q) {
+      if (!q || q.from == null) { blocking.push(q); return; }
+      if (Object.prototype.hasOwnProperty.call(known, String(q.from).trim())) blocking.push(q); else informational.push(q);
+    });
+  }
+  // filterLiveAskers
+  var byId = {};
+  var add = function (r) { if (r && r.id != null && !Object.prototype.hasOwnProperty.call(byId, String(r.id))) byId[String(r.id)] = { id: r.id, worktreePath: r.worktreePath || null, sessionId: r.sessionId || null }; };
+  registryRows.forEach(add);
+  descriptors.forEach(add);
+  var live = blocking.filter(function (q) {
+    if (!q || q.from == null) return true;
+    var from = String(q.from);
+    var row = Object.prototype.hasOwnProperty.call(byId, from) ? byId[from] : null;
+    if (!row) return !archivedKnown;
+    var wt = piStrField(row.worktreePath), sid = piStrField(row.sessionId);
+    if (ah.settings.touched('devswarm_parent.set_held')) throw meshDefer;
+    if (piSafeId(from) && ahHost.piIgnored(from)) return false;
+    var archived = false;
+    if (wt || true) {
+      var mk = JSON.parse(ahHost.piMarker(from, wt, sid));
+      if (mk.unsure) throw meshDefer;
+      archived = mk.archived === true;
+    }
+    if (!archived) {
+      var a = JSON.parse(ahHost.piApp(from, wt, key, ctx.now));
+      if (a.unsure) throw meshDefer;
+      archived = a.archived === true;
+    }
+    if (!archived) return true;
+    var st = sid ? JSON.parse(ahHost.piSessionPid(sid)) : { alive: null };
+    if (st.unsure) throw meshDefer;
+    return st.alive !== false;
+  });
+  return { blocking: live, informational: informational };
+}
+
+// `buildAwaitingLine(unanswered, titleFor, now, previews)`.
+function piAwaitingLine(list, titleFor, now, previews) {
+  if (!list.length) return '';
+  var oldest = null;
+  list.forEach(function (q) { if (q && piFinite(q.ts) && (oldest === null || q.ts < oldest.ts)) oldest = q; });
+  if (oldest === null) oldest = list[0];
+  var line = text.render(ah.cfg('devswarm_parent.awaiting_head'), { count: list.length });
+  if (oldest && piFinite(oldest.ts)) line += text.render(ah.cfg('devswarm_parent.awaiting_oldest'), { m: Math.max(0, Math.floor((now - oldest.ts) / 60000)) });
+  var who = '';
+  var from = oldest && oldest.from != null ? String(oldest.from) : '';
+  var t = titleFor(from);
+  who = (typeof t === 'string' && t.trim()) ? piTruncate(t.replace(/\s+/g, ' ').trim()) : (from ? piShortId(from) : '');
+  var preview = '';
+  var rawp = oldest && previews && piFinite(oldest.seq) ? previews[oldest.seq] : null;
+  if (typeof rawp === 'string') {
+    var clean = rawp.replace(/[\x00-\x1f\x7f-\x9f]+/g, ' ').replace(/\s+/g, ' ').trim();
+    if (jx.loneSurrogate(clean)) throw meshDefer;
+    preview = ahHost.scrubSecrets(clean).slice(0, ah.cfgNum('devswarm_parent.preview_max'));
+  }
+  if (who || preview) line += text.render(ah.cfg('devswarm_parent.awaiting_who'), { who: who, sep: preview ? (who ? ah.cfg('devswarm_parent.awaiting_sep') : '') : '', preview: preview });
+  return line + '\n';
+}
+
+// `buildInformationalNote(informational, cli)`.
+function piInfoNote(list, cli) {
+  if (!list.length) return '';
+  var unknown = ah.cfg('devswarm_parent.unknown_sender');
+  var ids = [];
+  list.forEach(function (q) {
+    var v = (q && q.from != null && String(q.from).trim() !== '') ? String(q.from) : unknown;
+    if (ids.indexOf(v) < 0) ids.push(v);
+  });
+  var runnable = ids.filter(function (x) { return x !== unknown; });
+  var tail = runnable.length ? text.render(ah.cfg('devswarm_parent.info_tail_runnable'), { cli: cli, id: runnable[0] }) : ah.cfg('devswarm_parent.info_tail_none');
+  return text.render(ah.cfg('devswarm_parent.info_note'), { ids: ids.join(', '), tail: tail });
+}
+
+// `buildOwnUnreadSegmentBody(...)` with the awaiting line in front.
+function piOwnSegment(count, id, urgency, unanswered, informational, titleFor, previews, cli, now) {
+  var prefix = ah.cfg(piHigh(urgency) ? 'devswarm_parent.own_prefix_urgent' : 'devswarm_parent.own_prefix');
+  var info = piInfoNote(informational, cli);
+  var max = ah.cfgNum('devswarm_parent.max_listed');
+  var askers = unanswered.slice(0, max).map(function (q) { return (q && q.from != null) ? String(q.from) : ah.cfg('devswarm_parent.asker_unknown'); }).join(', ');
+  var extra = unanswered.length > max ? text.render(ah.cfg('devswarm_parent.unread_extra'), { n: unanswered.length - max }) : '';
+  var body;
+  if (count > 0) {
+    body = text.render(ah.cfg('devswarm_parent.own_unread'), { prefix: prefix, count: count, cli: cli, id: id });
+    if (unanswered.length > 0) {
+      var n = unanswered.length;
+      var clause = n <= count
+        ? (n === 1 ? ah.cfg('devswarm_parent.q_of_these_one') : text.render(ah.cfg('devswarm_parent.q_of_these_many'), { n: n }))
+        : (n === 1 ? ah.cfg('devswarm_parent.q_remain_one') : text.render(ah.cfg('devswarm_parent.q_remain_many'), { n: n }));
+      body += text.render(ah.cfg('devswarm_parent.own_reply_clause'), { text: clause, askers: askers, extra: extra, cli: cli });
+    }
+    body += info;
+  } else if (unanswered.length > 0) {
+    body = text.render(ah.cfg('devswarm_parent.own_read_unanswered'), { prefix: prefix, n: unanswered.length, askers: askers, extra: extra, cli: cli }) + info;
+  } else {
+    body = text.render(ah.cfg('devswarm_parent.own_read_all'), { prefix: prefix }) + info;
+  }
+  return piAwaitingLine(unanswered, titleFor, now, previews) + body;
+}
+
 // ---- the project of a Primary in a checkout ---------------------------------------------------------------------------------
 
 // The cause of a deferral for everything the hook would show or do that the engine does not reproduce yet, or null. Everything it reads is
@@ -1005,7 +1247,7 @@ function piDecide(p, opts) {
   var now = ah.clock.now();
   var every = ah.settings.num('verify_first.num_repeat_every');
   var repeat = isFinite(every) && every > 0 ? every : 0;
-  var syncNotes = null, ownUnread = 0, ownUrgency = null, orphansSeg = null, staleRegSeg = null, broadcastRows = null, parked = null, roster = null, key = null, health = null, banner = null, wakeLine = null, driftNotice = null, derived = null;
+  var summaryForTitle = null, ownUnanswered = [], ownInfo = [], ownPreviews = {}, syncNotes = null, ownUnread = 0, ownUrgency = null, orphansSeg = null, staleRegSeg = null, broadcastRows = null, parked = null, roster = null, key = null, health = null, banner = null, wakeLine = null, driftNotice = null, derived = null;
   if (top !== null) {
     var cli = piCli(opts, home);
     if (cli === null) return piDefer('cli');
@@ -1024,6 +1266,7 @@ function piDecide(p, opts) {
     var sm = derived !== null ? piParseSummary(derived) : piReadSummary(home, key);
     if (sm.cause) return piDefer(sm.cause);
     var summary = sm.summary || null;
+    summaryForTitle = summary;
     if (summary !== null) {
       if (Array.isArray(summary)) return piDefer('summary-shape');
       var ctx = { home: home, key: key, top: top, primaryId: primaryId, now: now, sid: sid, pluginRoot: gates.pluginRoot(opts), newest: { known: false, value: null } };
@@ -1032,13 +1275,20 @@ function piDecide(p, opts) {
       // the Primary's own inbound mail, the questions it was asked, and what the summary lists beside the rows
       var own = summary.workspaces && summary.workspaces[primaryId] ? summary.workspaces[primaryId] : summary[primaryId];
       if (own && typeof own === 'object') {
-        if (Array.isArray(own.pendingQuestions) && own.pendingQuestions.length) return piDefer('own-questions'); // the reply-state of each asker is Node's
         if (piFinite(own.unread) && own.unread > 0) {
           // the unread count is corrected by this reader's own cursor, found from the hook's process ancestry, which the daemon does not share
           var rd = JSON.parse(ahHost.ctReaders(key, primaryId));
           if (rd.unsure || rd.declared) return piDefer('own-reader');
           ownUnread = own.unread;
           ownUrgency = own.urgencyMax || null;
+        }
+        if (Array.isArray(own.pendingQuestions)) {
+          ownPreviews = own.pendingQuestionPreviews && typeof own.pendingQuestionPreviews === 'object' ? own.pendingQuestionPreviews : {};
+          if (own.pendingQuestions.length) {
+            var qs = piQuestions({ home: home, key: key, primaryId: primaryId, now: now }, summary, own.pendingQuestions);
+            ownUnanswered = qs.blocking;
+            ownInfo = qs.informational;
+          }
         }
       }
       if (Array.isArray(summary.recent) && summary.recent.length && ahHost.piJev()) return piDefer('broadcast-jev'); // Jev may label the feed
@@ -1119,9 +1369,12 @@ function piDecide(p, opts) {
   if (staleRegSeg !== null) pending.push({ kind: 'dedupe', rank: 90, o: { sessionId: sid, key: ah.cfg('devswarm_parent.key_stale_registry'), content: staleRegSeg, transcriptPath: tp, keepaliveTurns: ah.cfgNum('devswarm_parent.mesh_issue_keepalive') }, text: staleRegSeg });
   if (broadcastRows !== null) pending.push({ kind: 'plain', rank: 100, text: piBroadcastSegment(broadcastRows.rows) });
   var cliPath = top !== null ? piCli(opts, home) : null;
-  if (ownUnread > 0) {
-    var ownPrefix = ah.cfg(piHigh(ownUrgency) ? 'devswarm_parent.own_prefix_urgent' : 'devswarm_parent.own_prefix');
-    pending.push({ kind: 'plain', rank: 110, text: text.render(ah.cfg('devswarm_parent.own_unread'), { prefix: ownPrefix, count: ownUnread, cli: cliPath, id: primaryId }) });
+  if ((ownUnread > 0 || ownUnanswered.length > 0 || ownInfo.length > 0) && primaryId) {
+    var titleFor = function (wid) {
+      var row = summaryForTitle && summaryForTitle.workspaces && summaryForTitle.workspaces[wid];
+      return (row && row.label) || piReadName(home, wid);
+    };
+    pending.push({ kind: 'plain', rank: 110, text: piOwnSegment(ownUnread, primaryId, ownUrgency, ownUnanswered, ownInfo, titleFor, ownPreviews, cliPath, ah.clock.now()) });
   }
   if (parked !== null) pending.push({ kind: 'plain', rank: 120, text: parked });
   if (urgentList.length) {

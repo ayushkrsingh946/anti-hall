@@ -582,3 +582,79 @@ value = "app-live:"
 [devswarm_parent.ask_hash_len]
 doc = "Length of the hash that names a sync-ask marker."
 value = 20
+
+[devswarm_parent.dir_reply_state]
+doc = "The per-project reply records (parent-gate/<repoKey>-replies.json), under the DevSwarm directory."
+value = "parent-gate"
+
+[devswarm_parent.reply_state_suffix]
+doc = "The file name suffix of a project's reply record."
+value = "-replies.json"
+
+[devswarm_parent.awaiting_head]
+doc = "The start of the awaiting-reply line. Placeholder: {count}."
+value = "QUESTIONS AWAITING YOUR REPLY: {count}"
+
+[devswarm_parent.awaiting_oldest]
+doc = "The age of the oldest unanswered question in the awaiting-reply line. Placeholder: {m}."
+value = " (oldest {m}m)"
+
+[devswarm_parent.awaiting_who]
+doc = "The asker (and preview) of the oldest question in the awaiting-reply line. Placeholders: {who}, {sep}, {preview}."
+value = " — {who}{sep}{preview}"
+
+[devswarm_parent.awaiting_sep]
+doc = "Between the asker and the preview in the awaiting-reply line."
+value = ": "
+
+[devswarm_parent.preview_max]
+doc = "Longest question preview shown (characters)."
+value = 80
+
+[devswarm_parent.unknown_sender]
+doc = "What the informational note names for a question without a sender."
+value = "unknown sender"
+
+[devswarm_parent.info_note]
+doc = "The note on questions from retired senders. Placeholders: {ids}, {tail}."
+value = " (INFORMATIONAL — question from retired sender {ids} — no repliable target{tail} Not counted in the unanswered count above.)"
+
+[devswarm_parent.info_tail_runnable]
+doc = "The tail of the informational note when a retired id is named. Placeholders: {cli}, {id}."
+value = "; inspect with `node {cli} inbox messages {id}`, ack with `node {cli} inbox ack {id} --ack-as-owner` after reading. Ack ONLY the retired id named here — never a live child id."
+
+[devswarm_parent.info_tail_none]
+doc = "The tail of the informational note when no retired id is named."
+value = " and no resolvable sender id, so no ack command is offered here."
+
+[devswarm_parent.own_reply_clause]
+doc = "The question clause of the own-inbox segment. Placeholders: {text}, {askers}, {extra}, {cli}."
+value = " READING IS NOT SUFFICIENT: {text} from {askers}{extra} — you must DECIDE from context and REPLY, not merely read, via `node {cli} send --to <id> --message-file <path>` (use the asker's id above as <id>)."
+
+[devswarm_parent.q_of_these_one]
+doc = "Question clause: one of the unread messages is a question."
+value = "1 of these is an unanswered QUESTION"
+
+[devswarm_parent.q_of_these_many]
+doc = "Question clause: several of the unread messages are questions. Placeholder: {n}."
+value = "{n} of these are unanswered QUESTIONS"
+
+[devswarm_parent.q_remain_one]
+doc = "Question clause: one question remains beyond the unread messages."
+value = "1 unanswered QUESTION remains (not necessarily among the unread above)"
+
+[devswarm_parent.q_remain_many]
+doc = "Question clause: several questions remain beyond the unread messages. Placeholder: {n}."
+value = "{n} unanswered QUESTIONS remain (not necessarily among the unread above)"
+
+[devswarm_parent.own_read_unanswered]
+doc = "The own-inbox segment when everything is read but questions remain. Placeholders: {prefix}, {n}, {askers}, {extra}, {cli}."
+value = "{prefix}you have already read your parent/peer messages, but {n} remain UNANSWERED — from {askers}{extra}. READING IS NOT SUFFICIENT: you must DECIDE from context and REPLY, not merely read/ack, via `node {cli} send --to <id> --message-file <path>` (use the asker's id above as <id>)."
+
+[devswarm_parent.own_read_all]
+doc = "The own-inbox segment when everything is read and nothing is unanswered. Placeholder: {prefix}."
+value = "{prefix}you have already read your parent/peer messages."
+
+[devswarm_parent.asker_unknown]
+doc = "What the own-inbox segment names for a question without a sender."
+value = "?"
