@@ -192,7 +192,7 @@ value = [
 
 [sibling_sweep.hedge_any_re]
 doc = "Regex source of words that make the whole sentence a guess, a plan or a question rather than a finding: it is then no cause statement."
-value = '\b(?:probably|possibly|presumably|perhaps|maybe|apparently|supposedly|seems?|appears?|i\s+(?:suspect|think|guess|believe|assume)|suspect(?:s|ed)?|hypothes\w+|guess(?:ing)?|not\s+sure|unclear|unknown|undetermined|unresolved|unproven|unverified|inferred|partly|not\s+(?:yet\s+)?(?:proven|confirmed|verified|known)|could\s+be|might\s+be|may\s+be|could\s+have\s+been|might\s+have\s+been|if\s+the\s+(?:root\s+)?cause|whether|(?:root[- ]causes?|cause)\s+(?:\w+\s+)?first|no\s+(?:single\s+)?(?:root\s+)?cause|not\s+the\s+(?:root\s+)?cause|isn.t\s+the\s+(?:root\s+)?cause|wasn.t\s+the\s+(?:root\s+)?cause)\b'
+value = '\b(?:probably|possibly|presumably|perhaps|maybe|apparently|supposedly|seems?|appears?|i\s+(?:suspect|think|guess|believe|assume)|suspect(?:s|ed)?|hypothes\w+|guess(?:ing)?|not\s+sure|unclear|unknown|undetermined|unresolved|unproven|unverified|inferred|partly|still\s+(?:open|undecided)|not\s+(?:yet\s+)?(?:proven|confirmed|verified|known|established|determined|identified|found)|could\s+be|might\s+be|may\s+be|could\s+have\s+been|might\s+have\s+been|if\s+the\s+(?:root\s+)?cause|whether|(?:root[- ]causes?|cause)\s+(?:\w+\s+)?first|no\s+(?:single\s+)?(?:root\s+)?cause|not\s+the\s+(?:root\s+)?cause|isn.t\s+the\s+(?:root\s+)?cause|wasn.t\s+the\s+(?:root\s+)?cause)\b'
 
 [sibling_sweep.hedge_before_re]
 doc = "Regex source tested on the few characters just before the cue: a negation, condition, intent or modal there voids the cue ('to find the root cause', 'if it was caused by', 'may be caused by', 'not caused by')."
