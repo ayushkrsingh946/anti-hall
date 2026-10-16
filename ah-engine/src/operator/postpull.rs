@@ -70,6 +70,21 @@ fn fill(mut v: J, args: &[(&str, &str)]) -> J {
     v
 }
 
+
+/// The `{name}` placeholders of a template, in order of first appearance.
+fn placeholders(template: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut rest = template;
+    while let Some((_, after)) = rest.split_once('{') {
+        let Some((name, tail)) = after.split_once('}') else { break };
+        if !name.is_empty() && !out.iter().any(|n| n == name) {
+            out.push(name.to_string());
+        }
+        rest = tail;
+    }
+    out
+}
+
 impl Run<'_> {
     fn plugin(&self, rel: &str) -> std::path::PathBuf {
         Path::new(&self.paths.plugin_src).join(rel)
@@ -362,6 +377,53 @@ impl Run<'_> {
         Some(parse_json(row.str_field(if self.dry_run() { "empty_dry_json" } else { "empty_json" })))
     }
 
+    /// A DevSwarm store stage the engine answers itself (`migrate::poststages`): the Node function's counts shaped exactly as its
+    /// wrapper in `update.js` shapes them, and its one-time marker stamped as `recordRun` stamps it (only with a known new version,
+    /// no error and nothing pending). `None`: Node answers (a store the engine cannot open the way Node does, a case only Node decides).
+    fn store_stage(&self, row: &'static defaults::V, which: &str) -> Option<J> {
+        let ctx = self.migrate_ctx();
+        let dry = self.dry_run();
+        let t = migrate::poststages::run(&ctx, which, dry);
+        Self::log_notes(&ctx);
+        let t = t?;
+        let errors = t.n.get("errors").copied().unwrap_or(0.0);
+        let latest = self.latest.filter(|v| !v.is_empty());
+        if let Some(key) = row.get("state").map(|f| f.strings()).unwrap_or_default().first()
+            && errors == 0.0
+            && t.pending_rows == 0.0
+        {
+            migrate::mark_applied(&ctx, key, latest);
+            Self::log_notes(&ctx);
+        }
+        let template = match row.str_field("detail_dry") {
+            d if dry && !d.is_empty() => d,
+            _ => row.str_field("detail"),
+        };
+        let done_keys = row.get("done").map(|d| d.strings()).unwrap_or_default();
+        let mut shown: Vec<(String, String)> = Vec::new();
+        for name in placeholders(template) {
+            let txt = match name.as_str() {
+                "done" => done_keys.get(usize::from(dry)).map_or_else(String::new, |k| js_string(&J::Num(t.n.get(k).copied().unwrap_or(0.0)))),
+                "errors" if errors > 0.0 => defaults::fill(row.str_field("errors_text"), &[("n", &js_string(&J::Num(errors)))]),
+                "errors" => String::new(),
+                "left_text" => {
+                    let left = t.n.get("left").copied().unwrap_or(0.0);
+                    if left > 0.0 { defaults::fill(row.str_field("left_text"), &[("left", &js_string(&J::Num(left)))]) } else { String::new() }
+                }
+                k => js_string(&J::Num(t.n.get(k).copied().unwrap_or(0.0))),
+            };
+            shown.push((name, txt));
+        }
+        let args: Vec<(&str, &dyn std::fmt::Display)> = shown.iter().map(|(k, v)| (k.as_str(), v as &dyn std::fmt::Display)).collect();
+        let mut out = vec![("attempted".to_string(), J::Bool(true))];
+        for k in row.get("out").map(|o| o.strings()).unwrap_or_default() {
+            let v = if k == "ok" { J::Bool(t.ok.unwrap_or(true)) } else { J::Num(t.n.get(k).copied().unwrap_or(0.0)) };
+            out.push((k.to_string(), v));
+        }
+        out.push(("detail".into(), J::Str(defaults::fill(template, &args))));
+        Some(J::Obj(out))
+    }
+
     fn stage(&self, row: &'static defaults::V, deadline: Option<u64>, hashes: &mut Option<Option<J>>) -> J {
         let name = row.str_field("name");
         let files: Vec<&str> = row.get("files").map(|f| f.strings()).unwrap_or_default();
@@ -376,21 +438,26 @@ impl Run<'_> {
                 return fill(parse_json(row.str_field("done_json")), &[("version", version)]);
             }
         }
+        if row.get("empty_when").is_some()
+            && !self.env.get(text("update_post.node_test_env")).is_some_and(|v| !v.is_empty())
+            && let Some(v) = self.empty_store_stage(row)
+        {
+            return v;
+        }
         match row.get("native").and_then(defaults::V::as_str) {
             Some("settings") => return self.settings_stage(),
             Some("codex_graphify") => return self.codex_graphify_stage(),
+            Some(which) if migrate::poststages::is_store_stage(which) => {
+                if let Some(v) = self.store_stage(row, which) {
+                    return v;
+                }
+            }
             Some(which) => {
                 if let Some(v) = self.counts_stage(row, which) {
                     return v;
                 }
             }
             None => {}
-        }
-        if row.get("empty_when").is_some()
-            && !self.env.get(text("update_post.node_test_env")).is_some_and(|v| !v.is_empty())
-            && let Some(v) = self.empty_store_stage(row)
-        {
-            return v;
         }
         let passes: Vec<&str> = row.get("passes").map(|f| f.strings()).unwrap_or_default();
         let mut o: Vec<(String, J)> = Vec::new();
@@ -407,7 +474,11 @@ impl Run<'_> {
         {
             o.push(("postPullDeadline".into(), J::Num(d as f64)));
         }
-        self.node_stage(name, row.str_field("fn"), J::Obj(o))
+        let func = match row.str_field("fn") {
+            "" => row.str_field("fallback"),
+            f => f,
+        };
+        self.node_stage(name, func, J::Obj(o))
     }
 }
 
@@ -420,6 +491,10 @@ pub(super) fn run(r: &Run) -> Vec<(String, J)> {
     let mut hashes: Option<Option<J>> = None;
     for row in rows {
         let name = row.str_field("name");
+        if row.get("enabled").and_then(defaults::V::as_bool) == Some(false) {
+            answers.push((row.str_field("key").to_string(), fill(parse_json(text("update_post.disabled_json")), &[("name", name)])));
+            continue;
+        }
         let budgeted = row.get("budget").and_then(defaults::V::as_bool).unwrap_or(false);
         if budgeted && deadline.is_some_and(|d| now_ms() >= d) {
             let budget = r.budget_ms.to_string();
