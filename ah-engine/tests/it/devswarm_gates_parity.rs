@@ -445,6 +445,9 @@ struct PgCase {
     steps: Vec<PgWant>,
     /// The seconds in "awaiting child pickup (Ns)" are masked before comparing: the engine and Node run a moment apart.
     fuzz_secs: bool,
+    /// Text the first step's answer (stdout + stderr) must carry (`!text`: must not carry): proves the case reaches the branch it is
+    /// named for.
+    expect: Option<&'static str>,
 }
 
 /// `YYYY-MM-DDTHH:MM:SS.mmmZ` of a time in ms.
@@ -481,6 +484,7 @@ fn pg(name: &'static str, steps: &[PgWant]) -> PgCase {
         payload: None,
         steps: steps.to_vec(),
         fuzz_secs: false,
+        expect: None,
     }
 }
 
@@ -518,6 +522,10 @@ impl PgCase {
     }
     fn fuzz(mut self) -> PgCase {
         self.fuzz_secs = true;
+        self
+    }
+    fn expect(mut self, t: &'static str) -> PgCase {
+        self.expect = Some(t);
         self
     }
     fn payload(mut self, v: Value) -> PgCase {
@@ -580,12 +588,17 @@ fn pg_git(dir: &Path) {
     assert!(ok.success());
 }
 
-/// The shown-at times of the straying warnings (stray-seen/*.json) are each side's own clock: masked before the homes are compared.
+/// The shown-at times of the straying warnings (stray-seen/*.json) and the `generatedAt` of a refreshed summary are each side's own
+/// clock: masked before the homes are compared. SQLite's `-wal` / `-shm` sidecars (Node's summary refresh leaves them) are not data.
 fn pg_mask_times(mut snap: BTreeMap<String, Vec<u8>>) -> BTreeMap<String, Vec<u8>> {
+    snap.retain(|k, _| !k.ends_with("-wal") && !k.ends_with("-shm"));
     let re = regex::Regex::new(r"\d{10,}").unwrap();
+    let stamp = regex::Regex::new(r#""generatedAt":\d+"#).unwrap();
     for (k, v) in snap.iter_mut() {
         if k.contains("stray-seen") {
             *v = re.replace_all(&String::from_utf8_lossy(v), "T").into_owned().into_bytes();
+        } else if k.contains("summaries/") {
+            *v = stamp.replace_all(&String::from_utf8_lossy(v), r#""generatedAt":T"#).into_owned().into_bytes();
         }
     }
     snap
@@ -710,6 +723,13 @@ fn pg_exec(case: &PgCase) -> PgTally {
         assert_eq!((ecode, norm(&eout), norm(&eerr)), (ncode, norm(&nout), norm(&nerr)), "{label}: engine and Node differ");
         assert_eq!(pg_mask_times(after_engine), pg_mask_times(snapshot(&home)), "{label}: the home differs after the engine and after Node");
         let text = String::from_utf8_lossy(&eout);
+        if let (0, Some(want)) = (i, case.expect) {
+            let all = format!("{text}{}", String::from_utf8_lossy(&eerr));
+            match want.strip_prefix('!') {
+                Some(no) => assert!(!all.contains(no), "{label}: the answer carries {no:?}: {all}"),
+                None => assert!(all.contains(want), "{label}: the answer does not carry {want:?}: {all}"),
+            }
+        }
         t.blocks += usize::from(text.contains("\"decision\":\"block\""));
         t.escalations += usize::from(text.contains("Escalation: this neglect signature"));
         t.answered += 1;
@@ -1119,15 +1139,63 @@ fn pg_cases() -> Vec<PgCase> {
         pg("own-jev-question-candidate-defers", &[D])
             .own()
             .seed(PG_SUMMARY, &pg_sum(r#"[],"jevQuestionCandidates":[{"from":"c-7","ts":1}]"#, PG_ROW_C7, Some("[]"))),
-        pg("own-unread-defers", &[D]).own().env("PG_SUMMARY", "unread"),
+        // the summary's own count, corrected by this reader's own position (devswarm-own-reader.js)
+        pg("own-unread-without-a-reader-blocks-cached", &[A, A]).own().env("PG_SUMMARY", "unread").expect("(you) (2 unread, cached)"),
+        pg("own-unread-reader-caught-up-refreshes-the-summary", &[A])
+            .own()
+            .expect("!unread")
+            .env("PG_SUMMARY", "unread")
+            .env("PG_READER", "self")
+            .seed(".claude/sessions/{pid}.json", r#"{"pid":{pid},"sessionId":"sess-own","startedAt":5}"#),
+        pg("own-unread-reader-behind-blocks-live-resolved", &[A, A])
+            .own()
+            .expect("(you) (1 unread, live-resolved)")
+            .env("PG_SUMMARY", "unread")
+            .env("PG_READER", "self")
+            .env("PG_READER_AT", "1")
+            .seed(".claude/sessions/{pid}.json", r#"{"pid":{pid},"sessionId":"sess-own","startedAt":5}"#),
+        pg("own-unread-urgency-high-is-urgent", &[A])
+            .own()
+            .expect("URGENT — YOU (the Primary) have 2 unread")
+            .env("PG_SUMMARY", "unread")
+            .env("PG_URGENCY", "high")
+            .env("PG_READER", "self")
+            .env("PG_READER_AT", "0")
+            .seed(".claude/sessions/{pid}.json", r#"{"pid":{pid},"sessionId":"sess-own","startedAt":5}"#),
+        pg("own-unread-urgency-normal-is-plain", &[A]).own().env("PG_SUMMARY", "unread").env("PG_URGENCY", "normal").expect("!URGENT"),
+        // a summary with a cursor whose store is gone: this reader's own position is unknowable
+        pg("own-unread-stale-cache-is-unknown", &[A, A])
+            .git()
+            .expect("the cached summary predates this reader")
+            .seed(PG_SUMMARY, r#"{"generatedAt":1,"workspaces":{"{own}":{"id":"{own}","worktreePath":"{cwd}","sessionId":"sess-own","unread":2,"cursor":0,"total":2,"pendingQuestions":[]}},"recent":[],"archivedRegistryRows":[]}"#)
+            .seed(".claude/sessions/{pid}.json", r#"{"pid":{pid},"sessionId":"sess-own","startedAt":5}"#),
         // per-session reader rows on the Primary's own partition: its own view (walked from the hook's process ancestry) is read
         pg("own-reader-view-past-the-mail-is-clean", &[A, A]).own().env("PG_READER", "self").seed(".claude/sessions/{pid}.json", r#"{"pid":{pid},"sessionId":"sess-own","startedAt":5}"#),
         pg("own-reader-view-of-a-stranger-is-the-floor", &[A, A]).own().env("PG_READER", "other").seed(".claude/sessions/{pid}.json", r#"{"pid":{pid},"sessionId":"sess-own","startedAt":5}"#),
         pg("own-reader-view-headless-is-the-floor", &[A, A]).own().env("PG_READER", "self"),
         pg("own-parked-escalation-defers", &[D]).own().seed(".anti-hall/devswarm/escalation-pending/e1.json", r#"{"parentId":"p","row":{}}"#),
-        pg("own-drain-marker-defers", &[D])
+        // the in-flight drain marker: fresh and of this session a notice (the loop state unchanged), of another session the block,
+        // stale removed and the block
+        pg("own-drain-marker-fresh-session-is-a-notice", &[A, A])
             .git()
+            .expect("not blocking (in-flight drain marker fresh for this session)")
             .seed(".anti-hall/devswarm/summaries/{key}.json", "{oops")
+            .seed(".anti-hall/devswarm/drain/{own}.json", r#"{"startedAt":{now},"sessionId":"s1","pid":1,"count":0}"#),
+        pg("own-drain-marker-other-session-blocks", &[A])
+            .git()
+            .expect("\"decision\":\"block\"")
+            .seed(".anti-hall/devswarm/summaries/{key}.json", "{oops")
+            .seed(".anti-hall/devswarm/drain/{own}.json", r#"{"startedAt":{now},"sessionId":"s2","pid":1,"count":0}"#),
+        pg("own-drain-marker-stale-is-removed", &[A])
+            .git()
+            .expect("\"decision\":\"block\"")
+            .seed(".anti-hall/devswarm/summaries/{key}.json", "{oops")
+            .seed(".anti-hall/devswarm/drain/{own}.json", r#"{"startedAt":{old},"sessionId":"s1","pid":1,"count":0}"#),
+        pg("own-drain-marker-of-own-unread-is-a-notice", &[A])
+            .own()
+            .expect("YOU (the Primary) have 2 unread parent/peer message(s)")
+            .env("PG_SUMMARY", "unread")
+            .seed(".anti-hall/devswarm/parent-gate/s1.json", r#"{"sig":"x","blocks":1,"escalated":false,"qSig":"","qBlocks":0,"qEscalated":false,"intents":{},"intentAcks":0}"#)
             .seed(".anti-hall/devswarm/drain/{own}.json", r#"{"startedAt":{now},"sessionId":"s1","pid":1,"count":0}"#),
     ]
 }

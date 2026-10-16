@@ -840,3 +840,35 @@ value = "wakepath"
 [devswarm_role.pg_own_unread]
 doc = "The reason segment for the Primary's own unread mail. Placeholders: {n}, {id}."
 value = "YOU (the Primary) have {n} unread parent/peer message(s) — STOP and read them FIRST via `devswarm.js inbox read-primary {id}` (read-only; after handling, run the `ackCommand` it returns). "
+
+[devswarm_role.pg_live_resolved]
+doc = "Marks an own count the gate re-read live from this reader's own position in the store."
+value = "live-resolved"
+
+[devswarm_role.pg_urgent_levels]
+doc = "The summary entry urgencies (`urgencyMax`) that put the urgent prefix on the Primary's own-unread segment."
+value = ["urgent", "high"]
+
+[devswarm_role.pg_urgent_prefix]
+doc = "Put before the Primary's own-unread segment when its urgency is one of pg_urgent_levels."
+value = "URGENT — "
+
+[devswarm_role.pg_own_stale]
+doc = "The own-summary segment when the cached summary predates this reader's live position and the live recheck could not settle it: {id}."
+value = "YOUR OWN inbound status could not be confirmed: the cached summary predates this reader's live read position (own cursor caught up to or past what the summary last recorded), and a live recheck did not resolve it — treat this as UNKNOWN, not \"no messages\". Check explicitly via `devswarm.js inbox count {id}` or `devswarm.js inbox read-primary {id}` (then its `ackCommand`) before assuming there is nothing pending. "
+
+[devswarm_role.pg_set_drain_ttl]
+doc = "Setting devswarm.drainTtlMs: milliseconds an in-flight drain marker stays fresh (devswarm-drain-marker.js). The engine answers only while it is unset, with this default."
+value = { section = "devswarm", key = "drainTtlMs", env = "ANTIHALL_DEVSWARM_DRAIN_TTL_MS", option = "", default = 600000 }
+
+[devswarm_role.pg_drain_tag]
+doc = "A first reason line that already carries this tag gets no drain-notice prefix."
+value = " anti-hall · "
+
+[devswarm_role.pg_drain_prefix]
+doc = "Put before the first reason line of the drain notice (stderr) unless it carries pg_drain_tag."
+value = "⚠️ anti-hall · devswarm-parent-gate: "
+
+[devswarm_role.pg_drain_suffix]
+doc = "Ends the drain notice: the Stop is not blocked while this session's drain marker is fresh."
+value = " — not blocking (in-flight drain marker fresh for this session)\n"
