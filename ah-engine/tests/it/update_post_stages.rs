@@ -307,6 +307,22 @@ fn seed_hygiene(home: &Path) {
     }
 }
 
+/// Two sqlite stores and a `journal/` directory beside one of them that holds no `.ndjson` file: no store is split.
+fn seed_not_split(home: &Path) {
+    let st = open_store(home, STORE);
+    msg(&st, "w1", 0, "m1", None);
+    registry(&st, "w1", None, None);
+    drop(st);
+    registry(&open_store(home, "proj-d4e5f6"), "w9", None, None);
+    put(home, &format!(".anti-hall/devswarm/store/{STORE}/journal/README.txt"), "not a journal segment");
+}
+
+/// A store whose sqlite side and `journal/*.ndjson` side both hold data: the split the merge repairs (Node's to do).
+fn seed_split(home: &Path) {
+    seed_not_split(home);
+    put(home, &format!(".anti-hall/devswarm/store/{STORE}/journal/w1.ndjson"), "{\"workspaceId\":\"w1\",\"ts\":1,\"hash\":\"zz\",\"body\":\"only in the journal\"}\n");
+}
+
 // ---- the picture of a world ----------------------------------------------------------------------------------------------
 
 fn near_now(v: i64) -> bool {
@@ -546,6 +562,10 @@ case!(hygiene_is_the_same_under_the_ingest_dry_run_switch, "cursor-hygiene", "dr
 case!(hygiene_already_done_is_skipped, "cursor-hygiene", "already_done", "cursor-hygiene", "cursorHygiene", "cursorHygienePostUpdate", seed_hygiene, live: true, markers: true);
 case!(hygiene_with_no_cursors_directory_counts_nothing, "cursor-hygiene", "no_dir", "cursor-hygiene", "cursorHygiene", "cursorHygienePostUpdate", seed_nothing, live: true, markers: false);
 
+case!(split_merge_on_stores_that_are_not_split_reports_zero, "merge-split-backend-stores", "bad_state", "merge-split-backend-stores", "mergeSplitBackendStores", "mergeSplitBackendStoresPostUpdate", seed_not_split, live: true, markers: false);
+case!(split_merge_ignores_the_ingest_dry_run_switch_like_node, "merge-split-backend-stores", "dry_run", "merge-split-backend-stores", "mergeSplitBackendStores", "mergeSplitBackendStoresPostUpdate", seed_not_split, live: false, markers: false);
+case!(split_merge_already_done_is_skipped, "merge-split-backend-stores", "already_done", "merge-split-backend-stores", "mergeSplitBackendStores", "mergeSplitBackendStoresPostUpdate", seed_not_split, live: true, markers: true);
+
 case!(promote_turns_a_marker_into_the_heartbeat_session, "promote-unclaimed", "bad_state", "promote-unclaimed", "promoteUnclaimed", "promoteUnclaimedPostUpdate", seed_promote, live: true, markers: false);
 case!(promote_ignores_the_ingest_dry_run_switch_like_node, "promote-unclaimed", "dry_run_switch", "promote-unclaimed", "promoteUnclaimed", "promoteUnclaimedPostUpdate", seed_promote, live: false, markers: false);
 
@@ -580,7 +600,7 @@ fn a_stage_switched_off_reports_itself_skipped_and_touches_nothing() {
     let out = run_engine(&w, &o, &["--post-pull-only"]);
     let status: Value = serde_json::from_str(out.stdout.lines().next().unwrap()).unwrap();
     let status = &status["status"];
-    for (key, name) in [("readerCursorsImport", "reader-cursors-import"), ("readerFloorRepair", "reader-floor-repair"), ("dualPartitionAcks", "dual-partition-acks"), ("promoteUnclaimed", "promote-unclaimed"), ("cursorHygiene", "cursor-hygiene")] {
+    for (key, name) in [("readerCursorsImport", "reader-cursors-import"), ("readerFloorRepair", "reader-floor-repair"), ("dualPartitionAcks", "dual-partition-acks"), ("promoteUnclaimed", "promote-unclaimed"), ("cursorHygiene", "cursor-hygiene"), ("mergeSplitBackendStores", "merge-split-backend-stores")] {
         let a = &status[key];
         assert_eq!(a["attempted"], json!(false), "{key}: {a}");
         assert_eq!(a["disabled"], json!(true), "{key}: {a}");
@@ -698,4 +718,21 @@ fn hygiene_removes_and_rewrites_nothing() {
         }
         assert_eq!(after["files"].get(f), Some(body), "cursor-hygiene: file {f} changed or vanished");
     }
+}
+
+/// A split store is Node's to merge (the engine does not read the journal backend): the engine leaves every byte of it alone and the
+/// stage's Node function answers.
+#[test]
+fn a_split_store_is_left_to_the_node_function_untouched() {
+    let o = Opt { ds: true, no_upstream_move: true, live: true, no_node: true, stage_only: Some("merge-split-backend-stores"), ..Opt::default() };
+    let w = world(&o);
+    seed_split(&w.home);
+    let before = picture(&w, Value::Null, None);
+    let ans = engine_answer(&w, &o, "mergeSplitBackendStores");
+    assert_eq!(ans["attempted"], json!(false), "{ans}");
+    let calls = stage_node_calls(&w);
+    assert_eq!(calls.len(), 1, "{calls:?}");
+    assert!(calls[0].contains("mergeSplitBackendStoresPostUpdate"), "{calls:?}");
+    let after = picture(&w, Value::Null, None);
+    assert_eq!(before, after, "the engine changed a split store it handed to Node");
 }

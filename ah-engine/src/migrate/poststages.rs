@@ -50,6 +50,7 @@ pub(crate) fn run(ctx: &Ctx, which: &str, dry: bool) -> Option<Tally> {
     let t = match which {
         "promote_unclaimed" => super::promote::promote_unclaimed(ctx),
         "cursor_hygiene" => Some(super::cursorhyg::run(ctx)),
+        "merge_split_backend_stores" => merge_split(ctx),
         _ => {
             let hashes = stores(ctx)?;
             let mut cx = Cx::new(&ctx.home);
@@ -77,6 +78,26 @@ fn stores(ctx: &Ctx) -> Option<Vec<String>> {
     }
     let hashes = list_store_hashes(ctx);
     hashes.iter().all(|h| rc::sqlite_store(Path::new(&ctx.home), h)).then_some(hashes)
+}
+
+/// `mergeSplitBackendStoresAllStores(home)`: a sqlite-backed store is SPLIT when its `journal/` directory also holds a `.ndjson` segment.
+/// Merging the two sides (the journal backend's reader, the dedupe, the registry union, the rewrite of the summary) is Node's, so a split
+/// store hands the whole run to Node before anything is written; with no split store Node writes nothing and counts nothing.
+fn merge_split(ctx: &Ctx) -> Option<Tally> {
+    let hashes = stores(ctx)?;
+    for hash in &hashes {
+        let dir = rc::store_dir(Path::new(&ctx.home), hash).join(defaults::text("update_post.journal_dir"));
+        let segments = std::fs::read_dir(dir).is_ok_and(|rd| rd.flatten().any(|e| e.file_name().to_string_lossy().ends_with(defaults::text("mesh_write.ndjson_suffix"))));
+        if segments {
+            return None;
+        }
+    }
+    let mut t = Tally::default();
+    for k in ["splitStores", "messagesMerged", "registryMerged", "errors", "reDeliveredUnread"] {
+        t.n.insert(k, 0.0);
+    }
+    t.add("stores", hashes.len() as f64);
+    Some(t)
 }
 
 fn swallowed(ctx: &Ctx, stage: &str, what: &str, e: &str) {
