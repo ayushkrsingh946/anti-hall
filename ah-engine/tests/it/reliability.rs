@@ -101,6 +101,16 @@ exec "$REAL_AH_ENGINE_BIN" "$@"
             .and_then(|s| s.trim().parse::<u64>().ok())
             .is_some_and(|until| until > ah_engine::health::now_ms())
     }
+    /// Wait until the down marker has expired (bounded), then a little more: a fixed `down_marker_ttl_ms + 200` sleep is measured from
+    /// when the test starts sleeping, but the client can refresh the marker after its call returned, and on a loaded machine the next
+    /// call then met a still-fresh marker and failed open without probing (gate3 2026-10-16).
+    fn wait_down_marker_expired(&self) {
+        let t = Instant::now();
+        while self.fresh_down_marker() && t.elapsed() < Duration::from_secs(15) {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
     fn spawn_attempt_count(&self) -> usize {
         self.health_log().lines().filter(|line| line.contains("\tclient_spawn_attempt\t")).count()
     }
@@ -1882,7 +1892,7 @@ fn a_stale_heartbeat_fails_fast_and_never_kills_a_process_that_is_not_the_daemon
     println!("TIMING stale-heartbeat wall_ms={:.1} rc={code}", dt.as_secs_f64() * 1000.0);
     let marked = e.fresh_down_marker();
     // past the down marker, the same unchanged heartbeat confirms the hang: the replacement path runs and must spare it
-    std::thread::sleep(Duration::from_millis(clamped_num("client.down_marker_ttl_ms", 3000) + 200));
+    e.wait_down_marker_expired();
     let (_, code2, dt2) = e.wrapper_hook(DENY_IN);
     println!("TIMING stale-heartbeat confirming call wall_ms={:.1} rc={code2}", dt2.as_secs_f64() * 1000.0);
     let survived = stand_in.try_wait().unwrap().is_none();
@@ -1939,7 +1949,7 @@ fn a_stopped_daemon_that_resumes_before_confirmation_is_not_killed() {
     let (_, code, dt) = e.wrapper_hook(DENY_IN);
     println!("TIMING resumed-daemon suspect call wall_ms={:.1} rc={code}", dt.as_secs_f64() * 1000.0);
     signal(old, libc::SIGCONT);
-    std::thread::sleep(Duration::from_millis(clamped_num("client.down_marker_ttl_ms", 3000) + 200));
+    e.wait_down_marker_expired();
     let (_, after, _) = e.wrapper_hook(DENY_IN);
     let (survived, same) = (alive(old), e.pid() == Some(old));
     let log = e.health_log();
@@ -1976,7 +1986,7 @@ fn a_heartbeat_that_reads_old_but_keeps_moving_is_never_killed() {
     for i in 0..3 {
         let (_, code, dt) = e.wrapper_hook(DENY_IN);
         println!("TIMING moving-old-heartbeat call {i} wall_ms={:.1} rc={code}", dt.as_secs_f64() * 1000.0);
-        std::thread::sleep(Duration::from_millis(clamped_num("client.down_marker_ttl_ms", 3000) + 200));
+        e.wait_down_marker_expired();
     }
     stop.store(true, Ordering::SeqCst);
     ah_engine::discard::harmless(toucher.join());
@@ -2009,7 +2019,7 @@ fn stale_planted_heartbeat_two_calls(e: &Env, pid: u32, content: &str) {
     });
     for i in 0..2 {
         if i == 1 {
-            std::thread::sleep(Duration::from_millis(clamped_num("client.down_marker_ttl_ms", 3000) + 200));
+            e.wait_down_marker_expired();
         }
         let (_, code, dt) = e.wrapper_hook(DENY_IN);
         println!("TIMING planted-heartbeat call {i} wall_ms={:.1} rc={code}", dt.as_secs_f64() * 1000.0);
