@@ -120,6 +120,34 @@ value = { type = "number", section = "devswarm", key = "supervisorSweepBudgetMs"
 doc = "Most kill-and-resume recoveries of one workspace. Node: devswarm.maxRecoveries."
 value = { type = "number", section = "devswarm", key = "maxRecoveries", env = "ANTIHALL_DEVSWARM_MAX_RECOVERIES", min = 1, max = 20, default = 3 }
 
+# ---- input gates ---------------------------------------------------------------------------------------------------------------
+# A gated duty is not run while the stat data of its inputs is unchanged since its last run, for at most gate_max_unchanged_ms.
+# The gate only delays a duty by that bound; a tick that runs recomputes from fresh inputs.
+
+[devswarm_sup.gate_duties]
+doc = "The duties the input gate applies to (each needs entries in gate_inputs and gate_max_unchanged_ms). An empty list runs every duty on every tick."
+value = ["verdicts", "app_sync", "retention"]
+
+[devswarm_sup.gate_max_unchanged_ms]
+doc = "Per gated duty, the longest it goes unrun while its inputs are unchanged (0 = never skipped). Past it the duty runs again whatever the stat data says; it bounds what an input the gate cannot see (a transcript being written, a process, the clock) can delay."
+value = { verdicts = 120000, app_sync = 300000, retention = 600000 }
+
+[devswarm_sup.gate_inputs]
+doc = "Per gated duty, what its signature covers: appdb (the app database and its -wal), ds-dir:<dir> / ds-tree:<dir> (a directory under the DevSwarm state directory, tree = one level of subdirectories too), home-dir:<dir> / home-tree:<dir> / home-file:<file> (under the home directory). Outputs of the duties are not listed. A duty is only armed by a quiet run: the liveness sweep with a stale workspace, a forced notice or a parked notice keeps running every tick (nudge windows and retries are not file changes). verdicts leaves the heartbeats out on purpose (every working child rewrites its beat every few seconds, so the gate would never skip); a beat is picked up within gate_max_unchanged_ms."
+value = { verdicts = ["ds-dir:workspaces", "ds-dir:plans", "ds-dir:escalation-pending", "ds-tree:store", "home-dir:.claude/sessions", "home-file:.anti-hall/state/jev-triage-pending.json"], app_sync = ["appdb", "ds-dir:workspaces"], retention = ["ds-tree:store"] }
+
+[devswarm_sup.gate_subdir_depth]
+doc = "The gate_inputs kinds that also list one level of subdirectories."
+value = ["ds-tree", "home-tree"]
+
+[devswarm_sup.gate_ignore_suffixes]
+doc = "File-name suffixes the gate ignores in a listing: a SQLite -shm index changes whenever any process opens the database, even a reader, and holds no data."
+value = ["-shm"]
+
+[devswarm_sup.msg_gate_unchanged]
+doc = "The reason recorded for a gated duty that was not run. {age} seconds since its last run, {max} the bound."
+value = "inputs unchanged for {age} s (bound {max} s)"
+
 # ---- the duties ------------------------------------------------------------------------------------------------------------
 # One table per duty, run in this order by the tick. kind `native` is done by the engine itself; kind `node` runs the Node
 # supervisor's own function for the duty in a bounded `node` subprocess (the engine owns the schedule, the cool-down gate, the

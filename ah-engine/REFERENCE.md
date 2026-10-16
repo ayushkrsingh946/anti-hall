@@ -1142,11 +1142,13 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `telemetry.link_window_s` | `7200` |  | s | How long before a spawn result a routing decision with the same spawn key still belongs to it (D77). |
 | `telemetry.max_event_rows` | `200000` |  |  | Most events kept in hot.db; the oldest beyond this are removed when `telemetry rollup` runs. |
 | `telemetry.max_events` | `5000` | `AH_ENGINE_MAX_EVENTS` |  | Most impact events kept in memory (oldest dropped first); counts per kind are kept exactly in separate counters. |
-| `telemetry.max_series` | `128` |  |  | Most distinct label combinations kept per metric; further combinations are counted under one overflow series. |
+| `telemetry.max_series` | `128` |  |  | Most distinct label combinations kept per metric; further combinations keep the labels named in overflow_keep_labels (up to max_series_kept) and collapse the rest into one overflow value. |
+| `telemetry.max_series_kept` | `1024` |  |  | Most series per metric that keep an overflow_keep_labels value past max_series; beyond it every label collapses into the overflow label. |
 | `telemetry.metrics_persisted_note` | `counters and histograms are snapshotted to hot.db every telemetry.snapshot_ms...` |  |  | Printed with metrics output when counters and histograms are snapshotted to hot.db. |
 | `telemetry.net_method` | `estimate: routing saved minus routing spent up, minus the estimated cost of i...` |  |  | How the NET figure of `impact` is computed, shown next to it. |
 | `telemetry.no_event_label` | `-` |  |  | The `e` label used when the hook event is unknown. |
 | `telemetry.not_persisted_note` | `kept in memory by the running daemon and reset when it exits` |  |  | Printed with metrics, and with impact output when storage could not open, while they live in memory only. |
+| `telemetry.overflow_keep_labels` | `check` |  |  | Label names that keep their own value once a metric has more than max_series label combinations: the other labels of the series collapse into the overflow label, so the cost per check stays readable (the pre-fix cap folded every label into `other` and hid 1.8 GB of transcript reads). The series that keep a value are bounded by max_series_kept. |
 | `telemetry.overflow_label` | `other` |  |  | Label value used for series beyond max_series. |
 | `telemetry.project_key_len` | `12` |  |  | Hex digits of the hashed project key shown in impact events (the project path itself is never stored). |
 | `telemetry.recent_default` | `20` |  |  | How many of the most recent impact events `impact` shows unless asked for more. |
@@ -1363,6 +1365,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `schedule.detail_max` | `2000` |  | chars | Longest result detail kept with a run in the history (longer text is cut). |
 | `schedule.handovers_ms` | `600000` | `AH_ENGINE_HANDOVERS_MS` | ms | Interval of the handovers job; 0 turns it off. |
 | `schedule.history_default` | `50` |  |  | Runs `schedule history` lists unless asked for more. |
+| `schedule.idle_gate_actions` | `spool_drain` |  |  | In-process actions the ticker runs only when they have work: it makes one cheap check (for spool_drain, a stat of the spool file) and, with nothing to do, lets the window pass without starting a thread or writing a record. Without this the once-a-second spool drain spawned two threads a second with the spool empty (~0.4 % CPU). |
 | `schedule.maintain_ms` | `86400000` | `AH_ENGINE_MAINTAIN_MS` | ms | Interval of the maintain job (D26); 0 turns it off. |
 | `schedule.procwatch_ms` | `30000` | `AH_ENGINE_PROCWATCH_MS` | ms | Interval of the process watch job (resource sampling; orphan scans run every procwatch.scan_every_s); 0 turns it off. |
 | `schedule.run_wait_ms` | `5000` |  | ms | How long `schedule run <job>` waits for the run it asked for before answering that it is still running; below daemon.stuck_ms. |
@@ -7525,6 +7528,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_wire.advisory_prune_ms` | `604800000` |  | ms | A session's seen-generation file untouched for this long is removed when the next advisory is written. |
 | `devswarm_wire.advisory_session_max` | `128` |  |  | Longest session id (characters) used as a file name; a longer or unsafe id gets no advisory. |
 | `devswarm_wire.archive_log_name` | `.anti-hall/logs/devswarm-auto-archive.ndjson` |  |  | Node's auto-archive log under the home directory's logs directory; the newest ok line for a workspace dates its archive. |
+| `devswarm_wire.beat_dir_key` | `mesh_write.dir_heartbeats` |  |  | The mesh_write.* setting that names the heartbeats directory, whose files are workspace heartbeats: the beat of a workspace the state calls working is not a hint to reconcile (see devswarm_rt.stall_ms: the deadline check re-reads it when the silence clock runs out); every other beat is. |
 | `devswarm_wire.check_event` | `UserPromptSubmit` |  |  | The hook event the devswarm-rt-advisory check answers. |
 | `devswarm_wire.check_script` | `devswarm-rt-advisory` |  |  | The name of the plugin script (engine/logic/<name>.js) that decides the advisory. |
 | `devswarm_wire.check_summary` | `Tells the main session which DevSwarm workspace changes (stuck, CI, PR, lifec...` |  |  | The one-line description of the devswarm-rt-advisory hook check in the generated reference. |
@@ -7577,6 +7581,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_wire.role_words` | `main, child, subagent, codex` |  |  | The roles a caller can have, in this order: main (the interactive main session), child (a DevSwarm workspace child), subagent (a spawned agent or any automated caller), codex (a Codex session). |
 | `devswarm_wire.session_flag` | `--session` |  |  | The flag that names the session an advisory is for. |
 | `devswarm_wire.sql_last_selected` | `SELECT {col} FROM {table} WHERE {id} = ?1` |  |  | The statement that reads when a workspace was last selected in the app. {col} {table} {id} are the column, table and id column names. |
+| `devswarm_wire.state_ignore_contains` | `mesh_write.tmp_suffix` |  |  | Name fragments in the watched state directories that are not hints for a reconcile (each key is a setting that names the fragment). A writer stages a file as `<name>.json.tmp.<pid>` and renames it; the rename is the event, the staged name is noise (Node's heartbeat and plan writers made several hints per write). |
 | `devswarm_wire.state_ignore_prefixes` | `mesh_write.ingest_beat_prefix` |  |  | File-name prefixes in the watched state directories that are not hints for a reconcile (each key is a setting that names the prefix). The ingest daemons' heartbeats (ingest-*.json, written every ~2 s) are never a reconcile input; without this they drove most reconciles. |
 | `devswarm_wire.store_poll_ms` | `500` |  | ms | How often the held connection of each active mesh store, and of the app database, is asked `PRAGMA data_version` (it changes when another process commits). This replaces watching the SQLite files, which a reader's own open touches. |
 | `devswarm_wire.transcript_dir` | `.claude/projects` |  |  | Where Claude Code keeps session transcripts, relative to the home directory; a worktree's directory is its path with the characters in transcript_encode replaced by '-'. |
@@ -7746,6 +7751,11 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_sup.esc_why_no_worktree` | `no-worktree` |  |  | Why no notice is sent: the workspace has no worktree to name its parent from. |
 | `devswarm_sup.esc_why_self` | `self` |  |  | Why no notice is sent: the parent is the workspace itself (never notify self). |
 | `devswarm_sup.esc_why_unsafe_parent` | `unsafe-parent-id` |  |  | Why no notice is sent: the parent id is not a safe file name. |
+| `devswarm_sup.gate_duties` | `verdicts, app_sync, retention` |  |  | The duties the input gate applies to (each needs entries in gate_inputs and gate_max_unchanged_ms). An empty list runs every duty on every tick. |
+| `devswarm_sup.gate_ignore_suffixes` | `-shm` |  |  | File-name suffixes the gate ignores in a listing: a SQLite -shm index changes whenever any process opens the database, even a reader, and holds no data. |
+| `devswarm_sup.gate_inputs` | `3 entries` |  |  | Per gated duty, what its signature covers: appdb (the app database and its -wal), ds-dir:<dir> / ds-tree:<dir> (a directory under the DevSwarm state directory, tree = one level of subdirectories too), home-dir:<dir> / home-tree:<dir> / home-file:<file> (under the home directory). Outputs of the duties are not listed. A duty is only armed by a quiet run: the liveness sweep with a stale workspace, a forced notice or a parked notice keeps running every tick (nudge windows and retries are not file changes). verdicts leaves the heartbeats out on purpose (every working child rewrites its beat every few seconds, so the gate would never skip); a beat is picked up within gate_max_unchanged_ms. |
+| `devswarm_sup.gate_max_unchanged_ms` | `3 entries` |  |  | Per gated duty, the longest it goes unrun while its inputs are unchanged (0 = never skipped). Past it the duty runs again whatever the stat data says; it bounds what an input the gate cannot see (a transcript being written, a process, the clock) can delay. |
+| `devswarm_sup.gate_subdir_depth` | `ds-tree, home-tree` |  |  | The gate_inputs kinds that also list one level of subdirectories. |
 | `devswarm_sup.guard_ms` | `360000` |  | ms | The Node supervisor counts as running when its log (or the rotated copy) was written within this long. While it runs, the engine's supervisor duties AND the engine's poke / escalate stand down, so two actors never run one duty. Node writes one line per sweep and sweeps at least every 120 s. |
 | `devswarm_sup.hk_day_ms` | `86400000` |  |  | Milliseconds in the retention sweep's day. |
 | `devswarm_sup.hk_max_depth` | `1` |  |  | How many directory levels below the swept directory the age sweep looks (one: a date-partitioned directory). Bounds the walk against a link loop. |
@@ -7828,6 +7838,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_sup.msg_budget` | `tick budget spent` |  |  | The reason a duty was not started because the tick's time was spent. |
 | `devswarm_sup.msg_cooldown` | `cooldown` |  |  | The reason a cool-down duty was not started. |
 | `devswarm_sup.msg_disabled` | `disabled` |  |  | The reason a duty was not started because its switch is off. |
+| `devswarm_sup.msg_gate_unchanged` | `inputs unchanged for {age} s (bound {max} s)` |  |  | The reason recorded for a gated duty that was not run. {age} seconds since its last run, {max} the bound. |
 | `devswarm_sup.msg_guard` | `the Node supervisor is still running (its log was written {age} s ago); the e...` |  |  | The tick's answer while the Node supervisor is still running. {age} is how long ago its log was written, in seconds. |
 | `devswarm_sup.msg_inert` | `DevSwarm is not installed or the realtime layer is off` |  |  | The tick's answer where DevSwarm is absent. |
 | `devswarm_sup.msg_locked` | `another sweep holds the sweep lock; this tick is skipped` |  |  | The tick's answer when another sweep holds the sweep lock. |
@@ -9964,7 +9975,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `wire.reason_undelivered` | `undelivered_verdict` |  |  | fail_open reason for a verdict the client never confirmed with ACK(res). |
 | `wire.req_word` | `REQ` |  |  | Second word of ACK(req): the daemon has read and parsed the request and will judge it. |
 | `wire.res_max_bytes` | `1024` |  | bytes | Longest ACK(res) line the daemon reads (the client's phase timings and the launcher counters ride in it). |
-| `wire.res_wait_ms` | `250` |  | ms | How long the daemon waits, after writing a reply, for the client's ACK(res). A reply whose ACK(res) is missing, late or malformed is counted and logged as an undelivered_verdict fail-open (a client that died closes its end, so that case is answered at once). |
+| `wire.res_wait_ms` | `250` |  | ms | How long the daemon waits, after writing a reply, for the client's ACK(res), sent once the reply is handed over (printed by a hook call, taken in by the dispatcher, before any work of its own). A reply whose ACK(res) is missing, late or malformed is counted and logged as an undelivered_verdict fail-open (a client that died closes its end, so that case is answered at once). |
 | `wire.res_word` | `RES` |  |  | Second word of ACK(res): the client has the verdict and handed it to the host. |
 | `wire.retry_min_ms` | `150` |  | ms | The client retries a request that was not acked only when at least this much of its deadline is left. |
 | `wire.why_closed` | `closed` |  |  | Why text: the client closed the connection without ACK(res). |
@@ -10320,6 +10331,7 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `requests` | counter | requests |  | Requests the daemon handled, any type. |
 | `rss_kb` | gauge | KB |  | Resident set of the daemon, sampled when status or metrics is read. |
 | `rule_hits` | counter | matches | action | Regex rule matches, by action (deny, warn, context). |
+| `schedule_cpu_us` | counter | us | job | CPU time (microseconds) the threads that ran a scheduled job used, by job; a subprocess job's own CPU is not in it. Divide by schedule_runs for the mean per run. |
 | `schedule_missed` | counter | runs | job | Runs that caught up a missed window or skipped it, by job (D33). |
 | `schedule_runs` | counter | runs | job, status | Scheduled runs that finished, by job and status (ok, failed, timeout, planned, skipped) (D33). |
 | `script_soft` | counter | calls |  | Script calls that used more thread CPU than their SOFT limit (script.time_limit_ms); only warned about, the call was not cut. |

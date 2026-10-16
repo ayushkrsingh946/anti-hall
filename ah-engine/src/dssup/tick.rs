@@ -178,10 +178,21 @@ fn run_node_duty(name: &str, d: &V, ctx: &Ctx, runner: &dyn Runner) -> Value {
     }
 }
 
-/// [`run_duty_w`] with the duty's wall time and this thread's CPU time (ms) added to its record as `ms` and `cpuMs`.
+/// [`run_duty_w`] with the duty's wall time and this thread's CPU time (ms) added to its record as `ms` and `cpuMs`. A gated duty
+/// whose inputs did not change since its last run is not run (see [`super::gate`]): its record says so.
 fn timed_duty(name: &str, ctx: &Ctx, runner: &dyn Runner) -> (Value, Option<super::witness::Job>) {
     let (t, cpu) = (std::time::Instant::now(), crate::limits::thread_cpu_us());
-    let (mut rec, job) = run_duty_w(name, ctx, runner);
+    let sig = super::gate::signature(name, ctx);
+    let (mut rec, job) = match super::gate::skip(ctx.home, name, sig, ctx.now) {
+        Some(why) => (json!({"duty": name, "outcome": "skipped", "reason": why, "gate": "inputs-unchanged"}), None),
+        None => {
+            let (rec, job) = run_duty_w(name, ctx, runner);
+            if super::gate::quiet(name, &rec) {
+                super::gate::remember(ctx.home, name, sig, ctx.now);
+            }
+            (rec, job)
+        }
+    };
     if let Some(o) = rec.as_object_mut() {
         o.insert("ms".into(), json!(t.elapsed().as_millis() as u64));
         o.insert("cpuMs".into(), json!(crate::limits::thread_cpu_us().saturating_sub(cpu) / 1000));
