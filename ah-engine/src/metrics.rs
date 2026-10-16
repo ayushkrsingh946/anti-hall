@@ -57,6 +57,8 @@ pub struct Metrics {
     gauges: BTreeMap<String, f64>,
     hists: BTreeMap<String, Hist>,
     series_per_metric: BTreeMap<String, usize>,
+    /// Per metric, the series past `telemetry.max_series` that kept their `telemetry.overflow_keep_labels` value.
+    kept_per_metric: BTreeMap<String, usize>,
 }
 
 /// Series key: `name` then `|label=value` pairs in label order.
@@ -91,6 +93,21 @@ impl Metrics {
         let n = self.series_per_metric.entry(name.to_string()).or_insert(0);
         if *n >= defaults::num("telemetry.max_series") as usize {
             let over = defaults::text("telemetry.overflow_label");
+            // past the cap the labels that name WHO (`telemetry.overflow_keep_labels`, e.g. the check) stay and the others collapse, so
+            // a per-check cost stays visible; those series are bounded in turn by `telemetry.max_series_kept`
+            let keep = defaults::list("telemetry.overflow_keep_labels");
+            if labels.iter().any(|(l, _)| keep.contains(l)) {
+                let partial: Vec<(&str, &str)> = labels.iter().map(|(l, v)| (*l, if keep.contains(l) { *v } else { over })).collect();
+                let pk = series(name, &partial);
+                if self.counters.contains_key(&pk) || self.hists.contains_key(&pk) {
+                    return pk;
+                }
+                let kept = self.kept_per_metric.entry(name.to_string()).or_insert(0);
+                if *kept < defaults::num("telemetry.max_series_kept") as usize {
+                    *kept += 1;
+                    return pk;
+                }
+            }
             let collapsed: Vec<(&str, &str)> = labels.iter().map(|(l, _)| (*l, over)).collect();
             return series(name, &collapsed);
         }
@@ -247,9 +264,38 @@ mod tests {
         for i in 0..10_000 {
             m.inc("check_calls", &[("check", &format!("c{i}"))]);
         }
-        let cap = defaults::num("telemetry.max_series") as usize;
+        let cap = defaults::num("telemetry.max_series") as usize + defaults::num("telemetry.max_series_kept") as usize;
         assert!(m.counters.len() <= cap + 1, "{} series", m.counters.len());
         assert_eq!(m.counter_total("check_calls"), 10_000, "overflow is still counted");
+    }
+
+    #[test]
+    fn past_the_cap_the_check_name_stays_and_only_the_other_labels_collapse() {
+        let mut m = Metrics::default();
+        let cap = defaults::num("telemetry.max_series") as usize;
+        let sizes = ["lt64k", "lt1m", "lt16m", "ge16m", "unknown"];
+        let checks = cap + 60; // more distinct checks than the cap: the pre-fix code folded the overflow into one `other`
+        for i in 0..checks {
+            for (j, sz) in sizes.iter().enumerate() {
+                m.add("check_bytes_read", &[("check", &format!("c{i}")), ("size", sz)], 1000 + j as u64);
+            }
+        }
+        let last = format!("c{}", checks - 1);
+        assert!(
+            m.counters.keys().any(|k| k.contains(&format!("check={last}|"))),
+            "the last check (past the cap) still has its own series: {:?}",
+            m.counters.keys().filter(|k| k.contains("other")).take(3).collect::<Vec<_>>()
+        );
+        let total: u64 = (0..sizes.len() as u64).map(|j| 1000 + j).sum::<u64>() * checks as u64;
+        assert_eq!(m.counter_total("check_bytes_read"), total, "nothing is lost, only coarser");
+        assert!(m.counters.len() <= cap + defaults::num("telemetry.max_series_kept") as usize + 1, "{} series", m.counters.len());
+        // a label that is not a check name (a path-like value) is still folded at the cap
+        let mut n = Metrics::default();
+        for i in 0..10_000 {
+            n.inc("check_calls", &[("check", &format!("c{i}"))]);
+        }
+        assert!(n.counters.len() <= cap + defaults::num("telemetry.max_series_kept") as usize + 1, "the kept series are bounded too: {}", n.counters.len());
+        assert_eq!(n.counter_total("check_calls"), 10_000);
     }
 
     #[test]
