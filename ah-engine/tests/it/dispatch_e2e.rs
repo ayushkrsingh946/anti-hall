@@ -1738,6 +1738,60 @@ fn the_dispatcher_makes_the_speculation_judge_call_itself_after_the_daemon_defer
     assert!(tel.lines().all(|l| l.contains("\"integration\":\"speculation\"") && l.contains("\"decision\":\"block\"")) && tel.lines().count() >= 2, "{tel}");
 }
 
+/// The daemon's ACK(res) wait (`wire.res_wait_ms`) covers the hand-over of its answers, not the dispatcher's own work after them
+/// (a model call it makes itself, Node hooks, combining). Live20: every Stop whose deferred speculation-judge call outlasted the
+/// wait was logged as an `undelivered_verdict` fail-open (and flipped the engine to degraded) although the block reached stdout;
+/// the late ACK(res) then hit the socket the daemon had already closed (`client_ack_res write_failed: Invalid argument`, macOS).
+#[test]
+fn a_dispatcher_that_works_on_after_the_reply_still_confirms_the_daemon_verdict() {
+    let e = Env::new("resafter");
+    let home = e.dir.join("home");
+    std::fs::create_dir_all(home.join(".anti-hall")).unwrap();
+    std::fs::write(home.join(".anti-hall/settings.json"), r#"{"jev":{"semanticJudge":true,"judgeBackend":"cli"}}"#).unwrap();
+    let bin = e.dir.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let claude = bin.join("claude");
+    // the model call outlasts the daemon's ACK(res) wait by a wide margin
+    let slow = ah_engine::defaults::millis("wire.res_wait_ms") * 3;
+    std::fs::write(&claude, format!("#!/bin/sh\ncat >/dev/null\nsleep {:.3}\ncat \"$FAKE_CLAUDE_REPLY\"\n", slow.as_secs_f64())).unwrap();
+    std::fs::set_permissions(&claude, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let reply = e.dir.join("reply.txt");
+    let answer = serde_json::json!({"is_error": false, "result": r#"{"decision":"block","claim":"the cache is stale"}"#}).to_string();
+    std::fs::write(&reply, answer).unwrap();
+    let transcript = e.dir.join("t.jsonl");
+    std::fs::write(&transcript, format!("{}\n", serde_json::json!({"type": "user", "message": {"role": "user", "content": "why is it slow?"}}))).unwrap();
+    let ids: Vec<String> = ah_engine::dispatch::table::entries("claude", "Stop").into_iter().map(|x| x.id).collect();
+    let m: serde_json::Map<String, serde_json::Value> = ids.iter().map(|id| (id.clone(), "true".into())).collect();
+    let map = e.dir.join("stop-map.json");
+    std::fs::write(&map, serde_json::json!({ "Stop": m }).to_string()).unwrap();
+    let args = ["hook", "--event", "Stop", "--fallback-map", map.to_str().unwrap()];
+    let path = format!("{}:{}", bin.display(), path_without_codex());
+    let env = [("PATH", path.as_str()), ("FAKE_CLAUDE_REPLY", reply.to_str().unwrap())];
+    let payload = |session: &str| {
+        serde_json::json!({"session_id": session, "cwd": e.dir, "hook_event_name": "Stop", "transcript_path": transcript, "last_assistant_message": "The cause is the stale cache."})
+            .to_string()
+    };
+    let log = || std::fs::read_to_string(e.state().join("ah-engine.log")).unwrap_or_default();
+    let caps = e.state().join(ah_engine::defaults::text("wire.caps_file"));
+    // the first calls may fail open while the daemon starts; a call made once it announced the ack protocol is the one under test
+    let mut last = (0, String::new(), String::new());
+    for i in 0..50 {
+        let ack_mode = caps.exists();
+        last = e.run_with(&args, false, &payload(&format!("ra-{i}")), true, &env);
+        if ack_mode && last.1.contains("\"decision\":\"block\"") {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    // the daemon decides about the ACK(res) within its wait; give it that and a margin before reading its log
+    std::thread::sleep(ah_engine::defaults::millis("wire.res_wait_ms") * 2);
+    let health = log();
+    e.stop();
+    assert!(last.1.contains("\"decision\":\"block\"") && last.1.contains("the cache is stale"), "{last:?}");
+    assert!(!health.contains("\tundelivered_verdict\t"), "a verdict that reached stdout is not undelivered:\n{health}");
+    assert!(!health.contains("\tclient_ack_res\t"), "the ACK(res) reaches the daemon:\n{health}");
+}
+
 // ---- a slow daemon reply is late, not down (R0 P0: guards failed open for 3 s after one reply past the deadline) ---------
 
 /// A stub daemon that answers connection `i` after `script[i].0` ms with `script[i].1` (the last step repeats); every

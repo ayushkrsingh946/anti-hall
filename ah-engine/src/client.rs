@@ -153,8 +153,10 @@ struct Pending {
 
 static PENDING: std::sync::Mutex<Option<Pending>> = std::sync::Mutex::new(None);
 
-/// ACK(res): the verdict has been written to the host. A no-op when the call did not use the ack protocol. Best effort and
-/// bounded (`wire.res_wait_ms`): a daemon that cannot take it counts the verdict undelivered, nothing else changes.
+/// ACK(res): the daemon's verdict has been handed over: written to the host (a hook call), or taken into the dispatcher, whose
+/// own work after it is not the daemon's to wait for (`dispatch::ask_daemon`). A no-op when the call did not use the ack protocol
+/// or was already confirmed. Best effort and bounded (`wire.res_wait_ms`): a daemon that cannot take it counts the verdict
+/// undelivered, nothing else changes.
 pub fn finish_ack() {
     let Some(Pending { mut stream, phases }) = PENDING.lock().unwrap_or_else(|e| e.into_inner()).take() else { return };
     if let Err(e) = stream.set_write_timeout(Some(defaults::millis("wire.res_wait_ms"))).and_then(|_| stream.write_all(&crate::wire::ack_res(&phases))) {

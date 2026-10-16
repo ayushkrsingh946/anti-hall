@@ -48,7 +48,7 @@ value = 1
 max = 5
 
 [wire.res_wait_ms]
-doc = "How long the daemon waits, after writing a reply, for the client's ACK(res). A reply whose ACK(res) is missing, late or malformed is counted and logged as an undelivered_verdict fail-open (a client that died closes its end, so that case is answered at once)."
+doc = "How long the daemon waits, after writing a reply, for the client's ACK(res), sent once the reply is handed over (printed by a hook call, taken in by the dispatcher, before any work of its own). A reply whose ACK(res) is missing, late or malformed is counted and logged as an undelivered_verdict fail-open (a client that died closes its end, so that case is answered at once)."
 value = 250
 unit = "ms"
 min = 5
