@@ -743,7 +743,14 @@ fn the_loop_drains_stops_on_request_and_leaves_no_lock_behind() {
     let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let (s2, home, stn, project) = (stop.clone(), x.home.clone(), st(&x), x.project.clone());
     let h = std::thread::spawn(move || {
-        ah_engine::dssup::ingest::run_project(&home, &stn, project, &System::configured(), &|| s2.load(std::sync::atomic::Ordering::SeqCst))
+        ah_engine::dssup::ingest::run_project(
+            &home,
+            &stn,
+            project,
+            &System::configured(),
+            &|| s2.load(std::sync::atomic::Ordering::SeqCst),
+            &std::sync::atomic::AtomicBool::new(false),
+        )
     });
     let t0 = std::time::Instant::now();
     while rows(&x).is_empty() && t0.elapsed().as_secs() < 20 {

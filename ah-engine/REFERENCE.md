@@ -8806,9 +8806,12 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_ingest.msg_refused_prefix` | `ingest drain not started: ` |  |  | The start of the log line when a drain does not start. |
 | `devswarm_ingest.msg_register_failed` | `WARN: self-registration failed (workspaceId={ws}): {err}` |  |  | The log line when the Primary's registry row could not be written. {ws} {err}. |
 | `devswarm_ingest.msg_replay_deferred` | `WARN: delivery WAL replay deferred ({why}) - batch kept pending` |  |  | The log line when a WAL replay could not import a batch. {why}. |
+| `devswarm_ingest.msg_slots_short` | `WARN: {n} project(s) wait for an ingest drain slot, all {slots} slots are dra...` |  |  | Logged when the set changes: projects no other consumer holds wait for a drain slot because every slot is draining (a draining project is never stopped to make room). {n} {slots} {projects}. |
 | `devswarm_ingest.msg_spawn_failed` | `spawn {bin} {code}` |  |  | The error of a monitor child that could not be started. {bin} {code}. |
 | `devswarm_ingest.msg_spill_no_id` | `spill file has no entry id` |  |  | The error of a spill file without an entry id. |
 | `devswarm_ingest.msg_started` | `ingest drain started (engine), worktree={worktree}, workspaceId={ws}, hivecon...` |  |  | The log line of a started drain. {worktree} {ws} {bin} {src}. |
+| `devswarm_ingest.msg_stop_requested` | `ingest drain stop requested (engine), project={key}, reason={why}` |  |  | The log line when the manager stops a drain that holds its project's lock. {key} (repo key) {why}. |
+| `devswarm_ingest.msg_stopped` | `ingest drain stopped (engine), worktree={worktree}, reason={why}, iterations={n}` |  |  | The log line when a drain that held its project's lock ends. {worktree} {why} {n} (monitor calls of this run). |
 | `devswarm_ingest.msg_store_unavailable` | `the project's store is not available to the engine ({why})` |  |  | Why a drain did not start: the store cannot be written by the engine. {why}. |
 | `devswarm_ingest.msg_summary_deferred` | `summary refresh deferred ({why}); the next refresh by any writer updates it` |  |  | The log line when the engine could not refresh the summary after an import. {why}. |
 | `devswarm_ingest.msg_timeout` | `monitor {bin} ETIMEDOUT after {ms}ms` |  |  | The error of a monitor child killed at its hard limit. {bin} {ms}. |
@@ -8832,6 +8835,11 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_ingest.quarantine_prefix` | `lost-batch-` |  |  | The start of a quarantine file name. |
 | `devswarm_ingest.quarantine_rate_ms` | `30000` |  | ms | At most one quarantine write and log line per this long; the rest are counted into the next. |
 | `devswarm_ingest.quarantine_suffix` | `.raw` |  |  | The suffix of a quarantine file. |
+| `devswarm_ingest.reason_idle` | `idle (no fresh heartbeat or setting names the project)` |  |  | The reason of msg_stop_requested when no fresh heartbeat or setting has named the project for mem.devswarm_ingest_idle_ttl_ms. |
+| `devswarm_ingest.reason_lock_lost` | `lock lost` |  |  | The reason of msg_stopped when the project's lock was lost. |
+| `devswarm_ingest.reason_over_cap` | `over the drain thread cap (mem.devswarm_ingest_max_threads was lowered)` |  |  | The reason of msg_stop_requested when mem.devswarm_ingest_max_threads was lowered below the drains running. |
+| `devswarm_ingest.reason_shutdown` | `daemon shutdown` |  |  | The reason of msg_stop_requested when the daemon stops. |
+| `devswarm_ingest.reason_stop_requested` | `stop requested` |  |  | The reason of msg_stopped when the manager or the daemon asked the drain to stop (the manager logs why in msg_stop_requested). |
 | `devswarm_ingest.reason_unparseable` | `unparseable` |  |  | The WAL closing reason of a batch of no known shape. |
 | `devswarm_ingest.remembered` | `devswarm-ingest-projects.json` |  |  | The projects the engine has drained or found, a JSON list of paths, in the engine state directory. Nothing is ever removed from it. |
 | `devswarm_ingest.rollup_ms` | `900000` |  | ms | Once the configuration-failure ladder is capped, one 'still failing' line at most this often. |
@@ -9911,7 +9919,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `mem.devswarm_ingest_hard_bytes` | `1048576` |  | bytes | Estimated bytes held by DevSwarm ingest project scheduling state at which new idle project entries are refused and recoverable state is recycled. |
 | `mem.devswarm_ingest_idle_ttl_ms` | `600000` |  | ms | How long a DevSwarm ingest project may be idle before its resident drain worker is stopped and its slot becomes available. |
 | `mem.devswarm_ingest_low_water_pct` | `80` |  |  | Percent of mem.devswarm_ingest_soft_bytes the DevSwarm ingest project state is evicted down to when the soft limit is reached. |
-| `mem.devswarm_ingest_max_threads` | `4` |  |  | Maximum total DevSwarm ingest threads resident in the daemon, counting the manager thread plus project drain workers; value 1 permits only the manager and no project workers. |
+| `mem.devswarm_ingest_max_threads` | `9` |  |  | Maximum total DevSwarm ingest threads resident in the daemon, counting the manager thread plus project drain workers; value 1 permits only the manager and no project workers. Each project needs its own worker to be drained without gaps (a drain that holds its lock is never stopped to make room), so keep this above the number of projects; the ingest log warns when projects wait for a slot. |
 | `mem.devswarm_ingest_soft_bytes` | `524288` |  | bytes | Estimated bytes held by DevSwarm ingest project scheduling state before idle project entries are evicted down to the low-water mark. |
 | `mem.devswarm_rt_hard_bytes` | `8388608` |  | bytes | Estimated bytes of DevSwarm realtime snapshots and retained edges at which edge inserts are refused and recoverable state is recycled. |
 | `mem.devswarm_rt_low_water_pct` | `80` |  |  | Percent of mem.devswarm_rt_soft_bytes the DevSwarm realtime edge buffer is evicted down to when the soft limit is reached. |

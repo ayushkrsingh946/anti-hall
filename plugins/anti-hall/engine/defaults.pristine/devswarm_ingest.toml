@@ -498,6 +498,38 @@ value = "WARN: configured hivecontrol binary is not a readable file: {bin} (sour
 doc = "The log line when the project's lock was found taken by another consumer."
 value = "ingest drain stopping: the lock was reclaimed by another consumer (lost heartbeat)"
 
+[devswarm_ingest.msg_stopped]
+doc = "The log line when a drain that held its project's lock ends. {worktree} {why} {n} (monitor calls of this run)."
+value = "ingest drain stopped (engine), worktree={worktree}, reason={why}, iterations={n}"
+
+[devswarm_ingest.reason_lock_lost]
+doc = "The reason of msg_stopped when the project's lock was lost."
+value = "lock lost"
+
+[devswarm_ingest.reason_stop_requested]
+doc = "The reason of msg_stopped when the manager or the daemon asked the drain to stop (the manager logs why in msg_stop_requested)."
+value = "stop requested"
+
+[devswarm_ingest.msg_stop_requested]
+doc = "The log line when the manager stops a drain that holds its project's lock. {key} (repo key) {why}."
+value = "ingest drain stop requested (engine), project={key}, reason={why}"
+
+[devswarm_ingest.reason_idle]
+doc = "The reason of msg_stop_requested when no fresh heartbeat or setting has named the project for mem.devswarm_ingest_idle_ttl_ms."
+value = "idle (no fresh heartbeat or setting names the project)"
+
+[devswarm_ingest.reason_over_cap]
+doc = "The reason of msg_stop_requested when mem.devswarm_ingest_max_threads was lowered below the drains running."
+value = "over the drain thread cap (mem.devswarm_ingest_max_threads was lowered)"
+
+[devswarm_ingest.reason_shutdown]
+doc = "The reason of msg_stop_requested when the daemon stops."
+value = "daemon shutdown"
+
+[devswarm_ingest.msg_slots_short]
+doc = "Logged when the set changes: projects no other consumer holds wait for a drain slot because every slot is draining (a draining project is never stopped to make room). {n} {slots} {projects}."
+value = "WARN: {n} project(s) wait for an ingest drain slot, all {slots} slots are draining: {projects}; raise mem.devswarm_ingest_max_threads"
+
 [devswarm_ingest.msg_hb_transient]
 doc = "Logged once when re-stamping the lock failed for a reason that is not loss."
 value = "WARN: ingest lock heartbeat failed transiently (not lock loss) - will keep retrying, logged once"

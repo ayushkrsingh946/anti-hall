@@ -20,6 +20,7 @@ pub mod wal;
 pub mod witness;
 
 use crate::checks::git::util::Settings;
+use crate::checks::guardkit::nodelock;
 use crate::defaults;
 use crate::dsact::runner::{Runner, System};
 use crate::mem::{Owner as MemOwner, Spec};
@@ -125,6 +126,8 @@ fn active_repo_keys(home: &Path, explicit: &str, now: i64) -> BTreeSet<String> {
 
 struct Assignment {
     stop: Arc<AtomicBool>,
+    /// Set by the drain while it holds the project's lock (it waits for a Node holder with this off).
+    draining: Arc<AtomicBool>,
     last_seen_ms: i64,
 }
 
@@ -182,13 +185,15 @@ struct PoolWorker {
     stop: Arc<AtomicBool>,
 }
 
-/// What a worker runs for one job: the drain loop of its project until the stop test turns true.
-type DrainFn = Arc<dyn Fn(&Path, &Settings, Project, &dyn Fn() -> bool) + Send + Sync>;
+/// What a worker runs for one job: the drain loop of its project until the stop test turns true. The flag is on while the drain
+/// holds the project's lock.
+type DrainFn = Arc<dyn Fn(&Path, &Settings, Project, &dyn Fn() -> bool, &AtomicBool) + Send + Sync>;
 
 struct Job {
     project: Project,
     st: Settings,
     stop: Arc<AtomicBool>,
+    draining: Arc<AtomicBool>,
     run: DrainFn,
 }
 
@@ -212,7 +217,7 @@ fn spawn_pool_worker(home: PathBuf, stop: Arc<dyn Fn() -> bool + Send + Sync>, r
                     // The worker's own flag too: a lowered cap retires this worker while its job runs.
                     let should_stop = || stop() || worker_stop2.load(Ordering::Relaxed) || job.stop.load(Ordering::Relaxed);
                     let _boundary = crate::crash::enter("thread", "", "", "", "devswarm_ingest_project");
-                    (job.run)(&home, &job.st, job.project, &should_stop);
+                    (job.run)(&home, &job.st, job.project, &should_stop, &job.draining);
                     let _sent = done.send(key); // keep: the manager may already be stopping
                 }
                 Ok(Msg::Stop) => {
@@ -327,7 +332,7 @@ fn worker_threads_for_cap(max_threads: usize) -> usize {
 }
 
 fn startable_projects(projects: &[Project], running: &HashMap<String, Assignment>, max_threads: usize) -> Vec<Project> {
-    let mut left = max_threads.saturating_sub(running.len());
+    let mut left = max_threads.saturating_sub(live_count(running));
     let mut out = Vec::new();
     for p in projects {
         if left == 0 {
@@ -355,28 +360,47 @@ fn desired_project_keys(projects: &[Project], max_threads: usize, cursor: usize)
     rotated_projects(projects, cursor).into_iter().take(max_threads).map(|p| p.repo_key).collect()
 }
 
-fn stop_idle_workers(running: &mut HashMap<String, Assignment>, active: &BTreeSet<String>, now: i64, idle_ttl: i64) {
+/// Ask the job of `key` to stop. A drain that holds its lock is logged with `why`; a job that only waits for a Node holder is not
+/// a drain, and its stop is not logged.
+fn request_stop(home: &Path, key: &str, w: &Assignment, why: &str) {
+    if w.stop.swap(true, Ordering::Relaxed) {
+        return;
+    }
+    if w.draining.load(Ordering::Relaxed) {
+        drain::log_line(home, &defaults::render("devswarm_ingest.msg_stop_requested", &[("key", &key), ("why", &defaults::text(why))]));
+    }
+}
+
+fn stop_idle_workers(home: &Path, running: &mut HashMap<String, Assignment>, active: &BTreeSet<String>, now: i64, idle_ttl: i64) {
     for key in active {
         if let Some(w) = running.get_mut(key) {
             w.last_seen_ms = now;
         }
     }
-    for (key, w) in running {
+    for (key, w) in running.iter() {
         if !active.contains(key) && now.saturating_sub(w.last_seen_ms) >= idle_ttl {
-            w.stop.store(true, Ordering::Relaxed);
+            request_stop(home, key, w, "devswarm_ingest.reason_idle");
         }
     }
 }
 
+/// With more projects than slots, free the slots of jobs outside this tick's window that only WAIT for a Node holder, so every
+/// project gets a turn at the lock. A drain that holds its lock is never stopped here: stopping it would leave its project
+/// undrained until its next turn (addendum P: a drain taken over from Node stopped one tick later and stayed down for minutes).
 fn stop_workers_outside_cap(running: &HashMap<String, Assignment>, desired: &BTreeSet<String>, project_count: usize, max_threads: usize) {
     if project_count <= max_threads {
         return;
     }
     for (key, w) in running {
-        if !desired.contains(key) {
+        if !desired.contains(key) && !w.draining.load(Ordering::Relaxed) {
             w.stop.store(true, Ordering::Relaxed);
         }
     }
+}
+
+/// The jobs not yet asked to stop (a stopped job still holds its worker until it returns, which the pool's queue absorbs).
+fn live_count(running: &HashMap<String, Assignment>) -> usize {
+    running.values().filter(|w| !w.stop.load(Ordering::Relaxed)).count()
 }
 
 /// A sleep that wakes at once when `stop` turns true, and re-stamps the lock and heartbeat while it waits. False: the lock was lost.
@@ -400,7 +424,7 @@ fn wait(d: &mut Drainer, ms: u64, stop: &dyn Fn() -> bool) -> bool {
 }
 
 /// The drain loop of one project, until `stop`. Lock refused: wait and try again (a Node consumer holds it). Lock lost: start over.
-pub fn run_project(home: &Path, st: &Settings, project: Project, runner: &dyn Runner, stop: &dyn Fn() -> bool) {
+pub fn run_project(home: &Path, st: &Settings, project: Project, runner: &dyn Runner, stop: &dyn Fn() -> bool, draining: &AtomicBool) {
     let mut d = Drainer::new(home, st, project);
     while !stop() {
         match d.start(runner) {
@@ -415,20 +439,153 @@ pub fn run_project(home: &Path, st: &Settings, project: Project, runner: &dyn Ru
             }
             Start::Started => {}
         }
+        draining.store(true, Ordering::Relaxed);
         d.write_heartbeat();
+        let mut why = "devswarm_ingest.reason_stop_requested";
         while !stop() {
             let step = d.step(runner);
             if step.stop {
+                why = "devswarm_ingest.reason_lock_lost";
                 break;
             }
             d.maybe_witness(runner);
             if !wait(&mut d, step.wait_ms, stop) {
+                why = "devswarm_ingest.reason_lock_lost";
                 break;
             }
         }
         d.stop();
+        draining.store(false, Ordering::Relaxed);
+        drain::log_line(
+            home,
+            &defaults::render("devswarm_ingest.msg_stopped", &[("worktree", &d.project.worktree), ("why", &defaults::text(why)), ("n", &d.stats.iterations)]),
+        );
     }
     d.stop();
+}
+
+/// The caps one manager tick runs under (read from the settings each tick).
+#[derive(Debug, Clone, Copy)]
+struct Cap {
+    /// `mem.devswarm_ingest_max_threads`: the manager plus the drain workers.
+    max_threads: usize,
+    /// `mem.devswarm_ingest_idle_ttl_ms`.
+    idle_ttl: i64,
+}
+
+/// The drain manager: the worker pool and which project each worker drains. One [`Manager::tick`] per discovery.
+struct Manager {
+    home: PathBuf,
+    stop: Arc<dyn Fn() -> bool + Send + Sync>,
+    drain: DrainFn,
+    tx: mpsc::Sender<Msg>,
+    rx: Arc<Mutex<mpsc::Receiver<Msg>>>,
+    done_tx: mpsc::Sender<String>,
+    done_rx: mpsc::Receiver<String>,
+    workers: Vec<PoolWorker>,
+    retiring: Vec<PoolWorker>,
+    running: HashMap<String, Assignment>,
+    cursor: usize,
+    panics: u64,
+    /// The projects last reported waiting for a slot (logged when this changes).
+    short: BTreeSet<String>,
+}
+
+impl Manager {
+    fn new(home: &Path, stop: Arc<dyn Fn() -> bool + Send + Sync>, drain: DrainFn) -> Manager {
+        let (tx, rx) = mpsc::channel();
+        let (done_tx, done_rx) = mpsc::channel();
+        Manager {
+            home: home.to_path_buf(),
+            stop,
+            drain,
+            tx,
+            rx: Arc::new(Mutex::new(rx)),
+            done_tx,
+            done_rx,
+            workers: Vec::new(),
+            retiring: Vec::new(),
+            running: HashMap::new(),
+            cursor: 0,
+            panics: 0,
+            short: BTreeSet::new(),
+        }
+    }
+
+    /// One pass: collect ended jobs, stop idle and out-of-window drains, size the pool, hand out the projects. True: the
+    /// workers panicked too often and the daemon must restart.
+    fn tick(&mut self, projects: &[Project], active: &BTreeSet<String>, st: &Settings, now: i64, cap: Cap) -> bool {
+        for key in self.done_rx.try_iter() {
+            self.running.remove(&key);
+        }
+        if note_worker_panics(&mut self.workers, &mut self.panics) {
+            return true;
+        }
+        stop_idle_workers(&self.home, &mut self.running, active, now, cap.idle_ttl);
+        let max_worker_threads = worker_threads_for_cap(cap.max_threads);
+        let ordered = rotated_projects(projects, self.cursor);
+        let desired = desired_project_keys(projects, max_worker_threads, self.cursor);
+        stop_workers_outside_cap(&self.running, &desired, projects.len(), max_worker_threads);
+        if live_count(&self.running) > max_worker_threads {
+            for (key, w) in &self.running {
+                request_stop(&self.home, key, w, "devswarm_ingest.reason_over_cap");
+            }
+        }
+        join_finished_workers(&mut self.retiring);
+        let _joined = enforce_worker_cap_drop(&mut self.workers, max_worker_threads, &self.tx, &mut self.retiring);
+        let _signaled = reconcile_worker_count(&mut self.workers, max_worker_threads, &self.home, self.stop.clone(), &self.rx, &self.tx, &self.done_tx);
+        for p in startable_projects(&ordered, &self.running, max_worker_threads) {
+            let key = p.repo_key.clone();
+            let (local_stop, draining) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)));
+            let job = Job { project: p, st: st.clone(), stop: local_stop.clone(), draining: draining.clone(), run: self.drain.clone() };
+            if self.tx.send(Msg::Run(job)).is_ok() {
+                self.running.insert(key, Assignment { stop: local_stop, draining, last_seen_ms: now });
+            }
+        }
+        if !projects.is_empty() && max_worker_threads > 0 {
+            self.cursor = (self.cursor + max_worker_threads) % projects.len();
+        }
+        self.note_short(projects, max_worker_threads);
+        false
+    }
+
+    /// Log (once per change) the projects no other consumer holds that get no drain because every slot is draining.
+    fn note_short(&mut self, projects: &[Project], max_worker_threads: usize) {
+        let live: Vec<&Assignment> = self.running.values().filter(|w| !w.stop.load(Ordering::Relaxed)).collect();
+        let full = live.len() >= max_worker_threads && live.iter().all(|w| w.draining.load(Ordering::Relaxed));
+        let short: BTreeSet<String> = if full {
+            projects
+                .iter()
+                .filter(|p| !self.running.contains_key(&p.repo_key))
+                .filter(|p| !nodelock::held_respecting_live(&drain::lock_path_of(&self.home, &p.repo_key).to_string_lossy(), drain::lock_params()))
+                .map(|p| p.repo_key.clone())
+                .collect()
+        } else {
+            BTreeSet::new()
+        };
+        if short != self.short && !short.is_empty() {
+            let names = short.iter().cloned().collect::<Vec<_>>().join(", ");
+            drain::log_line(
+                &self.home,
+                &defaults::render("devswarm_ingest.msg_slots_short", &[("n", &short.len()), ("slots", &max_worker_threads), ("projects", &names)]),
+            );
+        }
+        self.short = short;
+    }
+
+    /// Stop every drain and join every worker.
+    fn shutdown(self) {
+        for (key, w) in &self.running {
+            request_stop(&self.home, key, w, "devswarm_ingest.reason_shutdown");
+        }
+        for w in &self.workers {
+            w.stop.store(true, Ordering::Relaxed);
+            let _sent = self.tx.send(Msg::Stop); // keep: workers also see the global stop
+        }
+        for w in self.workers.into_iter().chain(self.retiring) {
+            crate::discard::logged("ingest_worker_join", w.handle.join().map_err(|_| "panic"));
+        }
+    }
 }
 
 static MANAGER: std::sync::Mutex<Option<std::thread::JoinHandle<()>>> = std::sync::Mutex::new(None);
@@ -464,54 +621,23 @@ pub fn start(home: &Path, state_dir: &Path, stop: Arc<dyn Fn() -> bool + Send + 
             Spec::new("devswarm_ingest", "mem.devswarm_ingest_soft_bytes", "mem.devswarm_ingest_hard_bytes", "mem.devswarm_ingest_low_water_pct"),
             Arc::downgrade(&owner),
         );
-        let (tx, rx) = mpsc::channel();
-        let rx = Arc::new(Mutex::new(rx));
-        let (done_tx, done_rx) = mpsc::channel();
-        let mut workers: Vec<PoolWorker> = Vec::new();
-        let mut retiring: Vec<PoolWorker> = Vec::new();
-        let mut running: HashMap<String, Assignment> = HashMap::new();
-        let mut cursor = 0usize;
-        let mut panics = 0u64;
-        let drain: DrainFn = Arc::new(|home, st, project, stop| run_project(home, st, project, &System::configured(), stop));
+        let drain: DrainFn = Arc::new(|home, st, project, stop, draining| run_project(home, st, project, &System::configured(), stop, draining));
+        let mut m = Manager::new(&home, stop_for_run.clone(), drain);
         while !stop_for_run() {
-            for key in done_rx.try_iter() {
-                running.remove(&key);
-            }
-            if note_worker_panics(&mut workers, &mut panics) {
-                restart_for_run("devswarm_ingest_project");
-                return;
-            }
             let st = Settings::from_env(&crate::reqenv::RequestEnv::capture());
             let explicit = crate::dswire::effective_text("devswarm_ingest.projects");
             let now = now_ms();
             let active = active_repo_keys(&home, &explicit, now);
-            let idle_ttl = defaults::num("mem.devswarm_ingest_idle_ttl_ms") as i64;
-            stop_idle_workers(&mut running, &active, now, idle_ttl);
-            let max_threads = defaults::num("mem.devswarm_ingest_max_threads") as usize;
-            let max_worker_threads = worker_threads_for_cap(max_threads);
             let projects = discover(&home, &state_dir, &explicit, now);
-            let ordered = rotated_projects(&projects, cursor);
-            let desired = desired_project_keys(&projects, max_worker_threads, cursor);
-            stop_workers_outside_cap(&running, &desired, projects.len(), max_worker_threads);
-            if running.len() > max_worker_threads {
-                for w in running.values() {
-                    w.stop.store(true, Ordering::Relaxed);
-                }
+            let cap = Cap {
+                max_threads: defaults::num("mem.devswarm_ingest_max_threads") as usize,
+                idle_ttl: defaults::num("mem.devswarm_ingest_idle_ttl_ms") as i64,
+            };
+            if m.tick(&projects, &active, &st, now, cap) {
+                restart_for_run("devswarm_ingest_project");
+                return;
             }
-            join_finished_workers(&mut retiring);
-            let _joined = enforce_worker_cap_drop(&mut workers, max_worker_threads, &tx, &mut retiring);
-            let _signaled = reconcile_worker_count(&mut workers, max_worker_threads, &home, stop_for_run.clone(), &rx, &tx, &done_tx);
-            for p in startable_projects(&ordered, &running, max_worker_threads) {
-                let key = p.repo_key.clone();
-                let local_stop = Arc::new(AtomicBool::new(false));
-                if tx.send(Msg::Run(Job { project: p, st: st.clone(), stop: local_stop.clone(), run: drain.clone() })).is_ok() {
-                    running.insert(key, Assignment { stop: local_stop, last_seen_ms: now });
-                }
-            }
-            if !projects.is_empty() && max_worker_threads > 0 {
-                cursor = (cursor + max_worker_threads) % projects.len();
-            }
-            ledger.sync(&running);
+            ledger.sync(&m.running);
             budget.observe();
             let mut left = defaults::num("devswarm_ingest.discover_ms");
             while left > 0 && !stop_for_run() {
@@ -520,16 +646,7 @@ pub fn start(home: &Path, state_dir: &Path, stop: Arc<dyn Fn() -> bool + Send + 
                 left -= nap;
             }
         }
-        for w in running.values() {
-            w.stop.store(true, Ordering::Relaxed);
-        }
-        for w in &workers {
-            w.stop.store(true, Ordering::Relaxed);
-            let _sent = tx.send(Msg::Stop); // keep: workers also see the global stop
-        }
-        for w in workers.into_iter().chain(retiring) {
-            crate::discard::logged("ingest_worker_join", w.handle.join().map_err(|_| "panic"));
-        }
+        m.shutdown();
     });
     let handle = crate::crash::spawn_supervised("devswarm_ingest", stop, restart, run);
     if let Ok(mut m) = MANAGER.lock() {
@@ -581,7 +698,133 @@ mod tests {
     }
 
     fn worker() -> Assignment {
-        Assignment { stop: Arc::new(AtomicBool::new(false)), last_seen_ms: 10 }
+        Assignment { stop: Arc::new(AtomicBool::new(false)), draining: Arc::new(AtomicBool::new(false)), last_seen_ms: 10 }
+    }
+
+    /// A stand-in drain: a project in `lockable` holds its lock and counts drain cycles; any other waits as for a live Node holder
+    /// (the refusal loop of [`run_project`]). A count in `end_after` ends that project's drain once, after that many cycles.
+    #[derive(Default)]
+    struct Fake {
+        lockable: Mutex<BTreeSet<String>>,
+        starts: Mutex<HashMap<String, u32>>,
+        cycles: Mutex<HashMap<String, u64>>,
+        end_after: Mutex<HashMap<String, u64>>,
+    }
+
+    impl Fake {
+        fn starts(&self, k: &str) -> u32 {
+            self.starts.lock().unwrap().get(k).copied().unwrap_or(0)
+        }
+        fn cycles(&self, k: &str) -> u64 {
+            self.cycles.lock().unwrap().get(k).copied().unwrap_or(0)
+        }
+    }
+
+    fn fake_drain(f: Arc<Fake>) -> DrainFn {
+        Arc::new(move |_, _, p, should_stop, draining| {
+            let key = p.repo_key;
+            *f.starts.lock().unwrap().entry(key.clone()).or_default() += 1;
+            while !should_stop() {
+                if f.lockable.lock().unwrap().contains(&key) {
+                    draining.store(true, Ordering::Relaxed);
+                    let n = {
+                        let mut c = f.cycles.lock().unwrap();
+                        let e = c.entry(key.clone()).or_default();
+                        *e += 1;
+                        *e
+                    };
+                    let mut ends = f.end_after.lock().unwrap();
+                    if ends.get(&key) == Some(&n) {
+                        ends.remove(&key);
+                        break;
+                    }
+                }
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            }
+            draining.store(false, Ordering::Relaxed);
+        })
+    }
+
+    /// A manager over seven projects (`p0`..`p6`, all active) with `lockable` free of any Node holder, ticked `ticks` times; `between`
+    /// runs after each tick with its number.
+    fn run_manager(home: &Path, f: &Arc<Fake>, max_threads: usize, ticks: usize, mut between: impl FnMut(usize)) {
+        let projects: Vec<Project> = (0..7).map(|i| project(&format!("p{i}"))).collect();
+        let active: BTreeSet<String> = projects.iter().map(|p| p.repo_key.clone()).collect();
+        let st = Settings::from_env(&crate::reqenv::RequestEnv::capture());
+        let mut m = Manager::new(home, Arc::new(|| false), fake_drain(f.clone()));
+        for t in 0..ticks {
+            assert!(!m.tick(&projects, &active, &st, 1_000 + t as i64, Cap { max_threads, idle_ttl: i64::MAX / 2 }));
+            std::thread::sleep(std::time::Duration::from_millis(60));
+            between(t);
+        }
+        m.shutdown();
+    }
+
+    fn scratch_home(tag: &str) -> crate::db::TempDir {
+        defaults::init().unwrap();
+        crate::db::TempDir::new(tag)
+    }
+
+    #[test]
+    fn a_draining_project_is_never_preempted_while_node_holders_fill_the_other_projects() {
+        // the live shape of addendum P: seven projects, five held by live Node daemons, three drain slots
+        let home = scratch_home("ingest-mgr-keep");
+        let f = Arc::new(Fake::default());
+        f.lockable.lock().unwrap().extend(["p0".to_string(), "p1".to_string()]);
+        let mut mid = (0, 0);
+        run_manager(&home.0, &f, 4, 14, |t| {
+            if t == 6 {
+                mid = (f.cycles("p0"), f.cycles("p1"));
+            }
+        });
+        assert_eq!((f.starts("p0"), f.starts("p1")), (1, 1), "each free project was started once and never stopped");
+        assert!(f.cycles("p0") > mid.0 && f.cycles("p1") > mid.1, "both kept draining in the second half: {mid:?}");
+    }
+
+    #[test]
+    fn a_drain_that_ends_is_rearmed_on_the_next_tick() {
+        let home = scratch_home("ingest-mgr-rearm");
+        let f = Arc::new(Fake::default());
+        f.lockable.lock().unwrap().insert("p0".to_string());
+        f.end_after.lock().unwrap().insert("p0".to_string(), 3); // the drain ends (a lost lock) after three cycles
+        let mut after_end = 0;
+        run_manager(&home.0, &f, 4, 10, |t| {
+            if t == 4 {
+                after_end = f.cycles("p0");
+            }
+        });
+        assert_eq!(f.starts("p0"), 2, "started, ended once, started again");
+        assert!(f.cycles("p0") > after_end && after_end > 3, "it drains again after the re-arm");
+    }
+
+    #[test]
+    fn a_project_whose_node_holder_goes_away_is_taken_over_and_kept() {
+        let home = scratch_home("ingest-mgr-handover");
+        let f = Arc::new(Fake::default());
+        f.lockable.lock().unwrap().insert("p0".to_string());
+        let mut at = (0, 0);
+        run_manager(&home.0, &f, 4, 24, |t| {
+            if t == 3 {
+                f.lockable.lock().unwrap().insert("p4".to_string()); // its Node daemon is booted out
+            }
+            if t == 14 {
+                at = (f.starts("p4"), f.cycles("p4"));
+            }
+        });
+        assert!(at.1 > 0, "the engine drains p4 within ten ticks of the handover");
+        assert_eq!(f.starts("p4"), at.0, "and is not stopped again after that");
+        assert!(f.cycles("p4") > at.1, "p4 kept draining");
+        assert_eq!(f.starts("p0"), 1, "p0 was never stopped");
+    }
+
+    #[test]
+    fn projects_left_without_a_drain_slot_are_logged() {
+        let home = scratch_home("ingest-mgr-short");
+        let f = Arc::new(Fake::default());
+        f.lockable.lock().unwrap().extend(["p0", "p1", "p2"].map(str::to_string));
+        run_manager(&home.0, &f, 3, 8, |_| {});
+        let log = std::fs::read_to_string(home.0.join(defaults::text("devswarm_ingest.log_file"))).unwrap_or_default();
+        assert!(log.contains("mem.devswarm_ingest_max_threads"), "the short slot count is named: {log}");
     }
 
     #[test]
@@ -695,13 +938,19 @@ mod tests {
         let mut workers = Vec::new();
         let _signaled = reconcile_worker_count(&mut workers, 1, &std::env::temp_dir(), stop.clone(), &rx, &tx, &done_tx);
         let (entered_tx, entered_rx) = mpsc::channel();
-        let run: DrainFn = Arc::new(move |_, _, _, should_stop| {
+        let run: DrainFn = Arc::new(move |_, _, _, should_stop, _| {
             let _sent = entered_tx.send(());
             while !should_stop() {
                 std::thread::yield_now();
             }
         });
-        let job = Job { project: project("a"), st: Settings::from_env(&crate::reqenv::RequestEnv::capture()), stop: Arc::new(AtomicBool::new(false)), run };
+        let job = Job {
+            project: project("a"),
+            st: Settings::from_env(&crate::reqenv::RequestEnv::capture()),
+            stop: Arc::new(AtomicBool::new(false)),
+            draining: Arc::new(AtomicBool::new(false)),
+            run,
+        };
         assert!(tx.send(Msg::Run(job)).is_ok());
         assert!(entered_rx.recv().is_ok(), "the worker is inside the active job"); // the job's own stop flag stays off
         let (joined_tx, joined_rx) = mpsc::channel();
@@ -742,9 +991,10 @@ mod tests {
     #[test]
     fn idle_projects_are_stopped_after_the_configured_ttl() {
         let mut running = HashMap::new();
-        running.insert("active".to_string(), Assignment { stop: Arc::new(AtomicBool::new(false)), last_seen_ms: 5 });
-        running.insert("idle".to_string(), Assignment { stop: Arc::new(AtomicBool::new(false)), last_seen_ms: 5 });
-        stop_idle_workers(&mut running, &BTreeSet::from(["active".to_string()]), 15, 10);
+        running
+            .insert("active".to_string(), Assignment { stop: Arc::new(AtomicBool::new(false)), draining: Arc::new(AtomicBool::new(false)), last_seen_ms: 5 });
+        running.insert("idle".to_string(), Assignment { stop: Arc::new(AtomicBool::new(false)), draining: Arc::new(AtomicBool::new(false)), last_seen_ms: 5 });
+        stop_idle_workers(&std::env::temp_dir(), &mut running, &BTreeSet::from(["active".to_string()]), 15, 10);
         assert_eq!(running["active"].last_seen_ms, 15);
         assert!(!running["active"].stop.load(Ordering::Relaxed));
         assert!(running["idle"].stop.load(Ordering::Relaxed));

@@ -225,8 +225,8 @@ min = 1
 max = 100
 
 [mem.devswarm_ingest_max_threads]
-doc = "Maximum total DevSwarm ingest threads resident in the daemon, counting the manager thread plus project drain workers; value 1 permits only the manager and no project workers."
-value = 4
+doc = "Maximum total DevSwarm ingest threads resident in the daemon, counting the manager thread plus project drain workers; value 1 permits only the manager and no project workers. Each project needs its own worker to be drained without gaps (a drain that holds its lock is never stopped to make room), so keep this above the number of projects; the ingest log warns when projects wait for a slot."
+value = 9
 min = 1
 
 [mem.devswarm_ingest_idle_ttl_ms]
