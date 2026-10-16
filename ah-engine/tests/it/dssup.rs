@@ -241,6 +241,29 @@ fn a_tick_runs_the_duties_in_nodes_order_with_the_poke_owner_and_the_shared_lock
     assert!(f.home.join(".anti-hall/logs/devswarm-supervisor-engine.ndjson").exists(), "the engine's own tick log");
 }
 
+#[test]
+fn a_gated_duty_is_not_run_again_while_its_inputs_are_unchanged() {
+    let f = fx("gate", true);
+    let (st, rec) = (settings(&f, &[]), Rec::default());
+    let duty = |out: &Value, name: &str| out["duties"].as_array().unwrap().iter().find(|d| d["duty"] == name).cloned().unwrap();
+    let first = tick::run(&ctx(&f, &st, true), Owner::Engine, &rec);
+    assert_eq!(duty(&first, "verdicts")["outcome"], "ran", "{first}");
+    assert!(duty(&first, "verdicts")["cpuMs"].is_number(), "every duty record carries its CPU");
+    let second = tick::run(&ctx(&f, &st, true), Owner::Engine, &rec);
+    let v = duty(&second, "verdicts");
+    assert_eq!((v["outcome"].as_str(), v["gate"].as_str()), (Some("skipped"), Some("inputs-unchanged")), "nothing it reads moved: {second}");
+    for name in ["app_sync", "retention"] {
+        assert_eq!(duty(&second, name)["gate"], "inputs-unchanged", "{name}: {second}");
+    }
+    assert_eq!(duty(&second, "log_rotate")["outcome"], "ran", "an ungated duty runs every tick");
+    // a descriptor that changes is an input that moved: the next tick runs the duty at once
+    let wt = f.home.join("wt-2");
+    std::fs::create_dir_all(&wt).unwrap();
+    put(&dev(&f).join("workspaces/ws-2.json"), &json!({"id": "ws-2", "worktreePath": wt, "sessionId": "11111111-2222-3333-4444-666666666666"}));
+    let third = tick::run(&ctx(&f, &st, true), Owner::Engine, &rec);
+    assert_eq!(duty(&third, "verdicts")["outcome"], "ran", "a new workspace is run at once: {third}");
+}
+
 /// A runner that looks at the lock while a duty runs.
 struct LockProbe {
     seen: Mutex<Vec<Value>>,

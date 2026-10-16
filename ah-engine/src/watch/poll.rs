@@ -18,13 +18,16 @@ pub enum Filter {
     /// Every entry except the names that end with one of these suffixes (files that change without any data changing, such as
     /// a SQLite shared-memory index, which every reader's open touches: watching one makes a reader wake itself).
     Except(Vec<String>),
-    /// Every entry except the names that start with one of `prefixes` or end with one of `suffixes` (a writer whose files are
-    /// never an input of the reader, such as a sibling daemon's heartbeat, would otherwise wake it on every beat).
+    /// Every entry except the names that start with one of `prefixes`, end with one of `suffixes` or contain one of `containing`
+    /// (a writer whose files are never an input of the reader, such as a sibling daemon's heartbeat, would otherwise wake it on
+    /// every beat; a writer's staged temp file, `x.json.tmp.<pid>`, is renamed to its real name, which is the event that counts).
     Ignoring {
         /// Name prefixes never reported.
         prefixes: Vec<String>,
         /// Name suffixes never reported.
         suffixes: Vec<String>,
+        /// Name fragments never reported.
+        containing: Vec<String>,
     },
 }
 
@@ -47,9 +50,11 @@ impl Filter {
                 let n = name.to_string_lossy();
                 !sfx.iter().any(|s| n.ends_with(s.as_str()))
             }
-            Filter::Ignoring { prefixes, suffixes } => {
+            Filter::Ignoring { prefixes, suffixes, containing } => {
                 let n = name.to_string_lossy();
-                !prefixes.iter().any(|p| n.starts_with(p.as_str())) && !suffixes.iter().any(|s| n.ends_with(s.as_str()))
+                !prefixes.iter().any(|p| n.starts_with(p.as_str()))
+                    && !suffixes.iter().any(|s| n.ends_with(s.as_str()))
+                    && !containing.iter().any(|c| n.contains(c.as_str()))
             }
         }
     }

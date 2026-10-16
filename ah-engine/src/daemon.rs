@@ -1892,6 +1892,12 @@ fn start_scheduler(sh: &Arc<Shared>) {
     let weak = Arc::downgrade(sh);
     let setting: Setting = Box::new(move |key| weak.upgrade().map(|sh| sh.cfg().effective.num(key)).unwrap_or_else(|| defaults::num(key)));
     let sched = Arc::new(Scheduler::new(&FileSource::standard(sh.cfg().test_hooks), sh.db.clone(), inproc, Box::new(PlannedDelivery), observe, setting));
+    let weak = Arc::downgrade(sh);
+    sched.set_cpu_observer(Box::new(move |job, us| {
+        if let Some(sh) = weak.upgrade() {
+            sh.telemetry.with_metrics(|m| m.add("schedule_cpu_us", &[("job", job)], us));
+        }
+    }));
     crate::discard::harmless(sh.sched.set(sched.clone())); // keep: best effort, fail-open
     let s = sh.clone();
     spawn_service(sh, "scheduler", Arc::new(move || sched.run_ticker(&|| s.draining.load(SeqCst))));

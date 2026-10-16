@@ -121,6 +121,14 @@ value = ["mesh_write.dir_heartbeats", "mesh_write.dir_plans", "mesh_write.dir_wo
 doc = "File-name prefixes in the watched state directories that are not hints for a reconcile (each key is a setting that names the prefix). The ingest daemons' heartbeats (ingest-*.json, written every ~2 s) are never a reconcile input; without this they drove most reconciles."
 value = ["mesh_write.ingest_beat_prefix"]
 
+[devswarm_wire.state_ignore_contains]
+doc = "Name fragments in the watched state directories that are not hints for a reconcile (each key is a setting that names the fragment). A writer stages a file as `<name>.json.tmp.<pid>` and renames it; the rename is the event, the staged name is noise (Node's heartbeat and plan writers made several hints per write)."
+value = ["mesh_write.tmp_suffix"]
+
+[devswarm_wire.beat_dir_key]
+doc = "The mesh_write.* setting that names the heartbeats directory, whose files are workspace heartbeats: the beat of a workspace the state calls working is not a hint to reconcile (see devswarm_rt.stall_ms: the deadline check re-reads it when the silence clock runs out); every other beat is."
+value = "mesh_write.dir_heartbeats"
+
 [devswarm_wire.watch_git_names]
 doc = "Files of a worktree's git directory whose change means a commit or a checkout happened (a Jev hint for that workspace)."
 value = ["HEAD", "index", "ORIG_HEAD", "FETCH_HEAD"]

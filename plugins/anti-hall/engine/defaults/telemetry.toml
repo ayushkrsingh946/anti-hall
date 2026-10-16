@@ -10,8 +10,17 @@ value = [100, 250, 500, 1000, 2500, 5000, 10000, 25000, 100000, 1000000]
 unit = "us"
 
 [telemetry.max_series]
-doc = "Most distinct label combinations kept per metric; further combinations are counted under one overflow series."
+doc = "Most distinct label combinations kept per metric; further combinations keep the labels named in overflow_keep_labels (up to max_series_kept) and collapse the rest into one overflow value."
 value = 128
+
+[telemetry.overflow_keep_labels]
+doc = "Label names that keep their own value once a metric has more than max_series label combinations: the other labels of the series collapse into the overflow label, so the cost per check stays readable (the pre-fix cap folded every label into `other` and hid 1.8 GB of transcript reads). The series that keep a value are bounded by max_series_kept."
+value = ["check"]
+
+[telemetry.max_series_kept]
+doc = "Most series per metric that keep an overflow_keep_labels value past max_series; beyond it every label collapses into the overflow label."
+value = 1024
+min = 1
 
 [telemetry.recent_default]
 doc = "How many of the most recent impact events `impact` shows unless asked for more."
@@ -415,6 +424,10 @@ value = { kind = "gauge", unit = "ms", labels = [] }
 [metric.schedule_runs]
 doc = "Scheduled runs that finished, by job and status (ok, failed, timeout, planned, skipped) (D33)."
 value = { kind = "counter", unit = "runs", labels = ["job", "status"] }
+
+[metric.schedule_cpu_us]
+doc = "CPU time (microseconds) the threads that ran a scheduled job used, by job; a subprocess job's own CPU is not in it. Divide by schedule_runs for the mean per run."
+value = { kind = "counter", unit = "us", labels = ["job"] }
 
 [metric.schedule_missed]
 doc = "Runs that caught up a missed window or skipped it, by job (D33)."

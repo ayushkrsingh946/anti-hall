@@ -30,6 +30,7 @@
 pub mod appsync;
 pub mod cli;
 pub mod deferred;
+pub mod gate;
 pub mod housekeep;
 pub mod ingest;
 pub mod kill;

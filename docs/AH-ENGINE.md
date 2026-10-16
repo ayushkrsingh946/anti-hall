@@ -1034,9 +1034,11 @@ so setting it in `config.toml`, `settings.json` or the environment takes effect 
 | `maintain` | size control (D26) | daily (`schedule.maintain_ms`) | a subprocess, killed with its process group at its timeout |
 | `backup` | a scrubbed backup (D27) | off (`schedule.backup_ms` = 0) | a subprocess |
 | `metrics_snapshot` | metrics snapshot and rollups (D51) | a minute (`telemetry.snapshot_ms`) | in the daemon |
-| `spool_drain` | applies spooled writes (D24) | a second (`spool.drain_ms`) | in the daemon |
+| `spool_drain` | applies spooled writes (D24) | a second (`spool.drain_ms`), started only when the spool file is non-empty (`schedule.idle_gate_actions`: an empty spool starts no thread and leaves no record) | in the daemon |
 | `procwatch` | process watch: orphans, resource use, report (see Process watch) | 30 s (`schedule.procwatch_ms`) | in the daemon |
 | `agent_tick` | one agent-tracker tick (see The agent tracker) | a minute (`schedule.agent_tick_ms`) | a subprocess |
+
+Every finished run records the CPU time of the threads that ran it (`cpu_us`, `cpu_ms` in `schedule list`, and the `schedule_cpu_us{job}` counter; a subprocess job's own CPU is not in it), so each job's cost is measurable without a profiler.
 
 - **Timing.** The ticker sleeps until the next job is due (at most `schedule.tick_ms`). Each next run is one interval
   after the current one starts, plus up to `jitter_ms`, so jobs do not run in step.
