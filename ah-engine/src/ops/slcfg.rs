@@ -746,7 +746,7 @@ fn uninstall(env: &BTreeMap<String, String>, args: &[String], log: &mut Log) -> 
 // ---- the commands -----------------------------------------------------------------------------------------------------
 
 /// `Err` is a start-up failure (no working directory, no plugin root): said on stderr, exit 1, nothing written.
-fn finish(plan: Option<super::shadow::Plan>, result: Result<i32, String>, log: Log) -> i32 {
+fn finish(result: Result<i32, String>, log: Log) -> i32 {
     log.flush();
     let code = match result {
         Ok(c) => c,
@@ -755,7 +755,6 @@ fn finish(plan: Option<super::shadow::Plan>, result: Result<i32, String>, log: L
             1
         }
     };
-    super::shadow::end(plan, code);
     code
 }
 
@@ -763,13 +762,12 @@ fn finish(plan: Option<super::shadow::Plan>, result: Result<i32, String>, log: L
 pub fn run_install(p: &Parsed) -> i32 {
     let mut log = Log::default();
     let result = install(&env_snapshot(), &p.raw, &mut log);
-    finish(None, result, log)
+    finish(result, log)
 }
 
 /// `uninstall-statusline [--user|--project] [--purge-base]`
 pub fn run_uninstall(p: &Parsed) -> i32 {
-    let plan = super::shadow::begin_install(t("ops.verb_uninstall"), t("ops.script_uninstall"), &p.raw);
     let mut log = Log::default();
     let result = uninstall(&env_snapshot(), &p.raw, &mut log);
-    finish(plan, result, log)
+    finish(result, log)
 }

@@ -417,13 +417,96 @@ fn parity(name: &str, o: &Opt, args: &[&str]) -> String {
         fs::read(b.home.join(".claude/plugins/installed_plugins.json")).ok(),
         "{name}: registry"
     );
+    if args == ["--check"] && std::env::var_os("AH_RECORD_UPDATE_FIXTURES").is_some() && !name.starts_with("nn_") {
+        record_fixture(name, &node, &a);
+    }
     ns
+}
+
+// ---- frozen `--check` fixtures (roadmap #61): the Node oracle's recorded answer, replayed against the engine alone ----------
+
+/// The plugin copy inside the marketplace clone is the repo's live plugin tree (it changes with every commit), so a frozen
+/// snapshot leaves it out; the clone's other files (CHANGELOG.md) and everything else under the home are kept.
+const VOLATILE_PREFIX: &str = ".claude/plugins/marketplaces/anti-hall/plugins/";
+
+fn fixture_path(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/update_check").join(format!("{name}.json"))
+}
+
+/// exit, stdout, stderr (without the `[update]` progress lines) and every file under the home, all through the parity
+/// comparison's own normalisers (`norm`, `clock`, `no_progress`), minus `VOLATILE_PREFIX`.
+fn snapshot(out: &Out, w: &World) -> serde_json::Value {
+    let files: BTreeMap<String, String> =
+        tree(&w.home).into_iter().filter(|(k, _)| !k.starts_with(VOLATILE_PREFIX)).map(|(k, v)| (k, norm(&v, w))).collect();
+    serde_json::json!({
+        "exit": out.code,
+        "stdout": norm(&out.stdout, w),
+        "stderr": norm(&no_progress(&out.stderr), w),
+        "files": files,
+    })
+}
+
+fn record_fixture(name: &str, node: &Out, w: &World) {
+    let p = fixture_path(name);
+    fs::create_dir_all(p.parent().unwrap()).unwrap();
+    fs::write(p, format!("{}\n", serde_json::to_string_pretty(&snapshot(node, w)).unwrap())).unwrap();
+}
+
+/// Engine only, with no usable Node on the PATH, on the same seeded home; must equal the recorded Node answer.
+fn frozen(name: &str, o: &Opt) {
+    let o = Opt { no_node: true, ..o.clone() };
+    let want: serde_json::Value = serde_json::from_str(&fs::read_to_string(fixture_path(name)).unwrap_or_else(|e| panic!("{name}: no fixture ({e}); record with AH_RECORD_UPDATE_FIXTURES=1"))).unwrap();
+    let w = world(&o);
+    let out = run_engine(&w, &o, &["--check"]);
+    assert_eq!(node_calls(&w), "", "{name}: the engine tried to run Node");
+    let got = snapshot(&out, &w);
+    for k in ["exit", "stdout", "stderr"] {
+        assert_eq!(want[k], got[k], "{name}: {k} differs from the frozen Node answer");
+    }
+    assert_eq!(want["files"], got["files"], "{name}: files differ from the frozen Node answer");
+}
+
+#[test]
+fn frozen_check_check_available() {
+    frozen("check_available", &Opt::default());
+}
+
+#[test]
+fn frozen_check_check_current() {
+    frozen("check_current", &Opt { no_upstream_move: true, ..Opt::default() });
+}
+
+#[test]
+fn frozen_check_check_lag() {
+    frozen("check_lag", &Opt { registry: Some("0.0.9"), no_upstream_move: true, ..Opt::default() });
+}
+
+#[test]
+fn frozen_check_check_offline() {
+    frozen("check_offline", &Opt { offline: true, ..Opt::default() });
+}
+
+#[test]
+fn frozen_check_check_unknown() {
+    frozen("check_unknown", &Opt { unknown_installed: true, ..Opt::default() });
+}
+
+#[test]
+fn frozen_check_bad_override() {
+    frozen("bad_override", &Opt { bad_override: true, ..Opt::default() });
+}
+
+#[test]
+fn frozen_check_check_net_down() {
+    frozen("check_net_down", &Opt { net_down: true, ..Opt::default() });
 }
 
 #[test]
 fn check_update_available() {
     let out = parity("check_available", &Opt::default(), &["--check"]);
     assert!(out.contains("update available (0.1.0"), "{out}");
+    let head = out.lines().nth(1).unwrap_or_default();
+    assert!(!head.contains("already up to date") && head.contains("v0.2.0 available"), "headline must match the state: {head}");
 }
 
 #[test]

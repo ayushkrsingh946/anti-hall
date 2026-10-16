@@ -489,6 +489,16 @@ test('renderHuman: includes installed/latest/action and changelog block', () => 
   assert.match(out, /New skill\./);
 });
 
+test('renderHuman: --check with an update available does not claim "already up to date" in the headline', () => {
+  const out = U.renderHuman(
+    { installed: '0.1.0', latest: '0.2.0', updated: false, cacheSynced: false, action: 'update available (0.1.0 \u2192 0.2.0) \u2014 run without --check to apply' },
+    ''
+  );
+  const head = out.split('\n')[0];
+  assert.doesNotMatch(head, /already up to date/);
+  assert.match(head, /v0\.2\.0 available/);
+});
+
 // ===========================================================================
 // REGRESSION (live E2E 2026-06-10): the REAL installed_plugins.json is the v2
 // schema — { version: 2, plugins: { "<name>@<marketplace>": [ { scope,

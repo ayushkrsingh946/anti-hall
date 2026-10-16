@@ -1156,25 +1156,9 @@ value = "\\x1b\\[[0-9;]*[a-zA-Z]"
 doc = "A control character."
 value = "[\\x00-\\x1f\\x7f]"
 
-[ops.verb_settings]
-doc = "The shadow name of the settings command."
-value = "settings"
-
-[ops.verb_defect]
-doc = "The shadow name of the defect command."
-value = "defect"
-
 [ops.verb_statusline]
 doc = "The shadow name of the status line."
 value = "statusline"
-
-[ops.script_settings]
-doc = "The Node settings script, relative to the plugin root."
-value = "scripts/settings.js"
-
-[ops.script_defect]
-doc = "The Node defect script, relative to the plugin root."
-value = "scripts/defect.js"
 
 [ops.script_statusline]
 doc = "The Node status line dispatcher, relative to the plugin root."
@@ -1184,20 +1168,6 @@ value = "statusline/statusline.js"
 doc = "How many runs in a thousand of the statusline command are also run by the Node version in the background and compared (0 turns the shadow off). The engine result is always the real one."
 value = 50
 env = "AH_ENGINE_SHADOW_RATE_STATUSLINE"
-min = 0
-max = 1000
-
-[ops.shadow_rate_settings]
-doc = "How many runs in a thousand of the settings command are also run by the Node version in the background and compared (0 turns the shadow off). The engine result is always the real one."
-value = 1000
-env = "AH_ENGINE_SHADOW_RATE_SETTINGS"
-min = 0
-max = 1000
-
-[ops.shadow_rate_defect]
-doc = "How many runs in a thousand of the defect command are also run by the Node version in the background and compared (0 turns the shadow off). The engine result is always the real one."
-value = 1000
-env = "AH_ENGINE_SHADOW_RATE_DEFECT"
 min = 0
 max = 1000
 

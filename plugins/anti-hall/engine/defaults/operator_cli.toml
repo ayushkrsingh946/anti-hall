@@ -493,3 +493,102 @@ value = "coordinator work baseline: calls {calls} · work {work} · share {share
 [opcli.cwb_unclassified]
 doc = "stderr note when some commands could not be classified by the engine and were counted as not work. Placeholder: {count}."
 value = "coordinator-work-baseline: {count} command(s) depend on something only the hook process can see (a relative path, an unreadable file) and were counted as not work"
+
+# ---- status --migration (#43) --------------------------------------------------------------------------------------------
+# The Node-to-engine migration report, generated from the engine's registries (src/migration.rs).
+
+[opcli.migration_flag]
+doc = "The `ah-engine status` flag that prints the migration report: every hook check, supervisor duty, post-update stage, command and Node switch as native, partial or node (`status --migration [--json]`)."
+value = "--migration"
+
+[opcli.migration_status_native]
+doc = "Migration status word: the path runs in the engine with no Node path left."
+value = "native"
+
+[opcli.migration_status_partial]
+doc = "Migration status word: the engine answers, but a Node path remains (a real deferral, a Node witness, a Node key that still ships, a Node switch that is on)."
+value = "partial"
+
+[opcli.migration_status_node]
+doc = "Migration status word: Node still answers (a check with a Node twin, a duty that runs as Node's function, a post-update stage that names a Node function, a planned command). Also the duty kind that names a Node function."
+value = "node"
+
+[opcli.migration_missing]
+doc = "Migration report: the count (and the human status) of entries whose source does not say where they stand. A test holds it at 0."
+value = "missing"
+
+[opcli.migration_kind_hook]
+doc = "Migration report kind of a registry check."
+value = "hook"
+
+[opcli.migration_kind_duty]
+doc = "Migration report kind of a DevSwarm supervisor duty (devswarm_sup.duties)."
+value = "duty"
+
+[opcli.migration_kind_stage]
+doc = "Migration report kind of a post-update stage (update_post.stages)."
+value = "stage"
+
+[opcli.migration_kind_verb]
+doc = "Migration report kind of a command of the registry (cmd.*)."
+value = "verb"
+
+[opcli.migration_kind_switch]
+doc = "Migration report kind of a Node switch (opcli.migration_switches)."
+value = "switch"
+
+[opcli.migration_why_twin]
+doc = "Migration reason: the check has a Node twin (it is not in script.engine_only_checks), so a script failure defers to Node."
+value = "node_twin"
+
+[opcli.migration_why_defer]
+doc = "Migration reason: the check's script (or a script it includes) has a real deferral (opcli.migration_defer_re outside comments)."
+value = "defer"
+
+[opcli.migration_why_node_kind]
+doc = "Migration reason: the duty's kind is still node (it runs as Node's function, or natively with a Node witness or remainder)."
+value = "node_kind"
+
+[opcli.migration_why_fn]
+doc = "Migration reason prefix: the post-update stage names this Node function."
+value = "fn"
+
+[opcli.migration_why_key]
+doc = "Migration reason prefix: this Node key of the command still ships."
+value = "node_key"
+
+[opcli.migration_why_switch]
+doc = "Migration reason prefix: this Node switch is not 0."
+value = "switch"
+
+[opcli.migration_defer_re]
+doc = "Migration report: the pattern of a real deferral in a check script, matched after comments are removed."
+value = '''\breturn\s*\(?\s*['"]defer['"]'''
+
+[opcli.migration_duty_prefix]
+doc = "Migration report: the defaults key prefix of a supervisor duty's row (the duty name follows)."
+value = "devswarm_sup.duty."
+
+[opcli.migration_cmd_implemented]
+doc = "Migration report: the command registry status word of a command the engine answers."
+value = "implemented"
+
+[opcli.migration_cmd_planned]
+doc = "Migration report: the prefix of the command registry status of a command not yet in the engine (its Node script answers)."
+value = "planned"
+
+[opcli.migration_verb_node_keys]
+doc = "Migration report: per command, the defaults keys whose presence means a Node path of that command remains (the command is then partial). A lane that removes the Node path removes the key, and the report follows."
+value = { update = ["update.node_script_rel"] }
+
+[opcli.migration_switches]
+doc = "Migration report: the Node switches, name to defaults key; native when the key is 0, partial otherwise."
+value = { dispatch = "dispatch.defer_to_node" }
+
+[opcli.migration_heading]
+doc = "Migration report heading. Placeholders: {native}, {partial}, {node}, {missing}."
+value = "Node-to-engine migration: {native} native, {partial} partial, {node} node, {missing} missing"
+
+[opcli.migration_line]
+doc = "Migration report: one entry. Placeholders: {kind}, {name}, {status}, {why}."
+value = "  {status}  {kind}  {name}  {why}"
