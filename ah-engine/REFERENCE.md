@@ -4022,6 +4022,11 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_role.msg_wake_other_parent` | ` MAILBOX WAKE: this workspace runs `{agent}`, which has NO idle-wake primitiv...` |  |  | The mailbox-wake text of a Primary whose agent is not claude (placeholders {cli}, {id}, {agent}). |
 | `devswarm_role.out_prefix` | `{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":` |  |  | The SessionStart hook output up to the directive text (host protocol; the text follows as a JSON string). |
 | `devswarm_role.out_suffix` | `}}` |  |  | The SessionStart hook output after the directive text. |
+| `devswarm_role.pg_age_day` | `{n}d ago` |  |  | The age of an older question: {n} days (approxAge). |
+| `devswarm_role.pg_age_hour` | `{n}h ago` |  |  | The age of a question under a day old: {n} hours (approxAge). |
+| `devswarm_role.pg_age_min` | `{n}m ago` |  |  | The age of a question under an hour old: {n} minutes (approxAge). |
+| `devswarm_role.pg_age_under_min` | `<1m ago` |  |  | The age of a question under a minute old (approxAge). |
+| `devswarm_role.pg_age_unknown` | `unknown age` |  |  | The age of a question whose time is not a finite past time (approxAge). |
 | `devswarm_role.pg_and_more` | ` (and {n} more)` |  |  | More rows than shown: {n}. |
 | `devswarm_role.pg_attr_drain` | ` — clear via `devswarm.js inbox ack {id} --ack-as-owner`` |  |  | How a contributor is drained: {id}. |
 | `devswarm_role.pg_attribution` | `ATTRIBUTION for {id} ({n} total): {parts}. ` |  |  | Attribution of a family's count: {id}, {n}, {parts}. |
@@ -4064,6 +4069,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_role.pg_frame_why` | `Why: ` |  |  | Label of the why line. |
 | `devswarm_role.pg_gone` | `NOTE — {ids} {verb} a GONE worktree at its recorded path — this cannot be cle...` |  |  | The gone-worktree note: {ids}, {verb}. |
 | `devswarm_role.pg_headline` | `Primary turn held: DevSwarm workspaces or messages need attention first.` |  |  | Headline of the block. |
+| `devswarm_role.pg_hour_per_day` | `24` |  |  | Hours in a day (approxAge). |
 | `devswarm_role.pg_id_key_prefix` | `id:` |  |  | The family key of a row whose worktree resolves to no mesh id (familyKeyOf). |
 | `devswarm_role.pg_ignore_file` | `ignore.json` |  |  | The nag-ignore list (devswarm-ignore.js), under the DevSwarm directory. |
 | `devswarm_role.pg_inbox_unreadable` | `inbox unreadable` |  |  | Label of an unknown row without members. |
@@ -4076,6 +4082,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_role.pg_kind_wakepath` | `wakepath` |  |  | The block kind of the clean pass's mailbox-wake block (its loop-state signature is the hashed prefix and this kind). |
 | `devswarm_role.pg_max_shown` | `5` |  |  | Rows, twins and ids named in the reason before the rest is counted. |
 | `devswarm_role.pg_max_unknown_shown` | `3` |  |  | Unknown members named per row (MAX_UNKNOWN_MEMBERS_SHOWN). |
+| `devswarm_role.pg_min_per_hour` | `60` |  |  | Minutes in an hour (approxAge). |
 | `devswarm_role.pg_more_unknown` | ` (+{n} more)` |  |  | More unknown members than shown: {n}. |
 | `devswarm_role.pg_ms_per_min` | `60000` |  |  | Milliseconds in a minute (the gate's minute settings and its age lines). |
 | `devswarm_role.pg_neglect` | `Neglect: {n} workspace(s) still need attention before this Primary turn ends:...` |  |  | The neglect line: {n}, {shown}, {more}. |
@@ -4084,6 +4091,21 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_role.pg_own_unread` | `YOU (the Primary) have {n} unread parent/peer message(s) — STOP and read them...` |  |  | The reason segment for the Primary's own unread mail. Placeholders: {n}, {id}. |
 | `devswarm_role.pg_plural_s` | `s` |  |  | Plural suffix. |
 | `devswarm_role.pg_poke_prefix` | `[Primary poke]` |  |  | The text prefix of a system poke row, never real unread (devswarm-noise.js POKE_PREFIX). |
+| `devswarm_role.pg_q_escalation` | `Escalation: {what} has forced-blocked this Stop {times} times with no reply s...` |  |  | The question-ceiling escalation text (buildReason with qEscalateTimes): {what}, {times}. |
+| `devswarm_role.pg_q_escalation_from` | `unanswered question(s) from {who}{more}` |  |  | What the question escalation names otherwise: {who} (the askers), {more}. |
+| `devswarm_role.pg_q_escalation_truncated` | `a truncated set of unanswered questions` |  |  | What the question escalation names when the question list is truncated. |
+| `devswarm_role.pg_q_informational` | `INFORMATIONAL — question from retired sender {ids} — no repliable target; ins...` |  |  | The retired-sender segment of the reason (buildInformationalSegment): {ids}, the distinct senders. |
+| `devswarm_role.pg_q_informational_sep` | `, ` |  |  | The separator between the retired senders named in the informational segment. |
+| `devswarm_role.pg_q_item` | `{from} ({age})` |  |  | One unanswered question in the reason: {from} (the asker), {age} (its approximate age). |
+| `devswarm_role.pg_q_max_shown` | `5` |  |  | Unanswered questions named (asker and age) in the reason and its question escalation before the rest is counted (buildUnansweredSegment). |
+| `devswarm_role.pg_q_plural` | `S` |  |  | The plural mark of the unanswered-questions segment when more than one question is unanswered. |
+| `devswarm_role.pg_q_sep` | `; ` |  |  | The separator between the questions named in the reason and in the question escalation. |
+| `devswarm_role.pg_q_sig_field_sep` | `0` |  |  | The character code of the separator between a question's sender and time in the question-set signature (qSig): NUL. |
+| `devswarm_role.pg_q_sig_row_sep` | `31` |  |  | The character code of the separator between the questions of the question-set signature (qSig): the unit separator. |
+| `devswarm_role.pg_q_truncated` | `PENDING QUESTIONS LIST TRUNCATED — {kept} sender(s) shown, {dropped} more sen...` |  |  | The truncated-question-list segment of the reason (buildTruncatedSegment): {kept}, {dropped}, {cap} from the summary's pendingQuestionsTruncated. |
+| `devswarm_role.pg_q_truncated_unknown` | `?` |  |  | The figure shown in the truncated segment for a count the summary does not carry as a finite number. |
+| `devswarm_role.pg_q_unanswered` | `UNANSWERED QUESTION{s} — {items}{more}: reading it via `inbox read-primary` (...` |  |  | The unanswered-questions segment of the reason (buildUnansweredSegment): {s} (the plural mark), {items}, {more}. |
+| `devswarm_role.pg_q_unknown_sender` | `unknown sender` |  |  | The asker named for a question that carries no sender. |
 | `devswarm_role.pg_reason_default` | `inbox status could not be confirmed` |  |  | Label of an unknown-inbox reason not in reason_labels. |
 | `devswarm_role.pg_reason_labels` | `13 entries` |  |  | The label of each unknown-inbox reason (reasonLabel). |
 | `devswarm_role.pg_repos_root_marker` | `/.devswarm/repos/` |  |  | A worktree under this path segment is a DevSwarm-app workspace the supervisor active-list cache can archive (DEVSWARM_REPOS_ROOT_RE). |

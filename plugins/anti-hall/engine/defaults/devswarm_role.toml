@@ -595,6 +595,94 @@ value = "INSPECT the unread backlog via `devswarm.js inbox peek-primary <id>` (r
 doc = "The closing sentence of the reason."
 value = "If this is intentional, say so explicitly. Escape hatch: the user may direct a skip via ~/.anti-hall/skip.json (\"devswarm-parent-gate\")."
 
+[devswarm_role.pg_q_max_shown]
+doc = "Unanswered questions named (asker and age) in the reason and its question escalation before the rest is counted (buildUnansweredSegment)."
+value = 5
+
+[devswarm_role.pg_q_sep]
+doc = "The separator between the questions named in the reason and in the question escalation."
+value = "; "
+
+[devswarm_role.pg_q_item]
+doc = "One unanswered question in the reason: {from} (the asker), {age} (its approximate age)."
+value = "{from} ({age})"
+
+[devswarm_role.pg_q_unanswered]
+doc = "The unanswered-questions segment of the reason (buildUnansweredSegment): {s} (the plural mark), {items}, {more}."
+value = "UNANSWERED QUESTION{s} — {items}{more}: reading it via `inbox read-primary` (and running its `ackCommand`) is NOT sufficient to clear this. You must DECIDE from context and REPLY: `send --to <id> --message-file <path>` (or --message-stdin). "
+
+[devswarm_role.pg_q_plural]
+doc = "The plural mark of the unanswered-questions segment when more than one question is unanswered."
+value = "S"
+
+[devswarm_role.pg_q_unknown_sender]
+doc = "The asker named for a question that carries no sender."
+value = "unknown sender"
+
+[devswarm_role.pg_q_truncated]
+doc = "The truncated-question-list segment of the reason (buildTruncatedSegment): {kept}, {dropped}, {cap} from the summary's pendingQuestionsTruncated."
+value = "PENDING QUESTIONS LIST TRUNCATED — {kept} sender(s) shown, {dropped} more sender(s) with an unanswered question are NOT shown (cap {cap}). The true unanswered count is HIGHER than what this message can list. This is not resolvable by replying to only the senders named below — check `devswarm.js inbox read-primary` (read-only; its `ackCommand` acks) / registry state directly. "
+
+[devswarm_role.pg_q_truncated_unknown]
+doc = "The figure shown in the truncated segment for a count the summary does not carry as a finite number."
+value = "?"
+
+[devswarm_role.pg_q_informational]
+doc = "The retired-sender segment of the reason (buildInformationalSegment): {ids}, the distinct senders."
+value = "INFORMATIONAL — question from retired sender {ids} — no repliable target; inspect with `inbox messages <id>`, ack with `inbox ack <id> --ack-as-owner` after reading (use the sender id above as <id>). This is NOT counted in the unanswered figures above and never blocks on its own. "
+
+[devswarm_role.pg_q_informational_sep]
+doc = "The separator between the retired senders named in the informational segment."
+value = ", "
+
+[devswarm_role.pg_q_escalation]
+doc = "The question-ceiling escalation text (buildReason with qEscalateTimes): {what}, {times}."
+value = "Escalation: {what} has forced-blocked this Stop {times} times with no reply sent — a human should look. This will not repeat automatically after this message (the question itself is still tracked and unresolved). Escape hatch: the user may direct a skip via ~/.anti-hall/skip.json (\"devswarm-parent-gate\")."
+
+[devswarm_role.pg_q_escalation_truncated]
+doc = "What the question escalation names when the question list is truncated."
+value = "a truncated set of unanswered questions"
+
+[devswarm_role.pg_q_escalation_from]
+doc = "What the question escalation names otherwise: {who} (the askers), {more}."
+value = "unanswered question(s) from {who}{more}"
+
+[devswarm_role.pg_q_sig_field_sep]
+doc = "The character code of the separator between a question's sender and time in the question-set signature (qSig): NUL."
+value = 0
+
+[devswarm_role.pg_q_sig_row_sep]
+doc = "The character code of the separator between the questions of the question-set signature (qSig): the unit separator."
+value = 31
+
+[devswarm_role.pg_age_unknown]
+doc = "The age of a question whose time is not a finite past time (approxAge)."
+value = "unknown age"
+
+[devswarm_role.pg_age_under_min]
+doc = "The age of a question under a minute old (approxAge)."
+value = "<1m ago"
+
+[devswarm_role.pg_age_min]
+doc = "The age of a question under an hour old: {n} minutes (approxAge)."
+value = "{n}m ago"
+
+[devswarm_role.pg_age_hour]
+doc = "The age of a question under a day old: {n} hours (approxAge)."
+value = "{n}h ago"
+
+[devswarm_role.pg_age_day]
+doc = "The age of an older question: {n} days (approxAge)."
+value = "{n}d ago"
+
+[devswarm_role.pg_min_per_hour]
+doc = "Minutes in an hour (approxAge)."
+value = 60
+
+[devswarm_role.pg_hour_per_day]
+doc = "Hours in a day (approxAge)."
+value = 24
+
 [devswarm_role.pg_reason_labels]
 doc = "The label of each unknown-inbox reason (reasonLabel)."
 value = { "no-inbox-path" = "descriptor has no inboxPath", "no-cursor-path" = "descriptor has no cursorPath", "inbox-missing" = "inbox file missing", "inbox-unreadable" = "inbox file unreadable", "cursor-missing" = "cursor file missing", "cursor-unreadable" = "cursor unreadable/corrupt", "cursor-invalid" = "cursor value invalid", "own-summary-unreadable" = "own-summary unreadable/corrupt", "own-cache-stale" = "own-summary cache predates this reader's live position (live recheck unresolved)", "read-threw" = "inbox read raised an error", "store-read-error" = "mesh store unreadable (unread count UNKNOWN)", "reader-cursors-unreadable" = "read positions (reader_cursors) unreadable (unread count UNKNOWN)", "store-read-threw" = "mesh store read raised an error (unread count UNKNOWN)" }

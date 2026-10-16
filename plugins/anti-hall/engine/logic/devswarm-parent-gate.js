@@ -4,8 +4,10 @@
 // descriptors, the durable inboxes and the mesh store (ah.mesh), classifies the live children (busy, waiting on a human, fresh mail), and
 // answers what Node answers: the inert and clean passes (the loop state removed), the busy and grace advisories, and the neglect block with
 // its loop state, forced-acknowledgement counter, the one escalation and the quiet tail after it, the stated intent's larger budget, the
-// waiting-on-human lines, the mailbox-wake line and the stale-build downgrade. Whatever it cannot settle exactly defers to the Node gate
-// before anything is written: own unread in the summary, any pending question, a truncated question list, a parked escalation, a stale or
+// waiting-on-human lines, the mailbox-wake line and the stale-build downgrade, and the questions asked of the Primary (its summary entry's
+// pending questions cross-checked against the reply records, retired senders named only, put-away askers dropped, a truncated list, the
+// question ceiling and its one escalation). Whatever it cannot settle exactly defers to the Node gate before anything is written: own
+// unread in the summary, a Jev question candidate (jev-assist's trust math and log), a parked escalation, a stale or
 // escalated verdict, a workspace the app database has no opinion on under the DevSwarm repos root, a straying-plan advisory, a live child
 // on the clean pass (the wake-coverage line), an in-flight drain marker, the conservation hold, a non-sqlite store, and any setting of the
 // gate that is set anywhere. Mirrors hooks/devswarm-parent-gate.js (`main`, `readOwnUnread`, `buildReason` and helpers), the companion's
@@ -63,7 +65,8 @@ function pgDq(s) { return '"' + s.replace(/["\\$`]/g, function (c) { return '\\'
 // ---- the Primary's own unread (readOwnUnread) ------------------------------------------------------------------------
 
 function pgReadOwn(home, idn, selfKey) {
-  var own = { id: null, unknown: false, parsed: false, registryIds: [] };
+  // `pending`, `truncated`, `registryRows` and `archivedKnown` are the entry's question fields and the registry projection Node returns
+  var own = { id: null, unknown: false, parsed: false, registryIds: [], pending: [], truncated: null, registryRows: [], archivedKnown: false };
   if (idn.top === null) return own;
   var id = idn.own, prefix = ah.cfg('mesh_write.primary_prefix');
   var hash;
@@ -89,16 +92,161 @@ function pgReadOwn(home, idn, selfKey) {
   var e = ws[id];
   if (jx.isObj(e)) {
     if (typeof e.unread === 'number' && isFinite(e.unread) && e.unread > 0) throw meshDefer; // the live own-reader recheck
-    if (Array.isArray(e.pendingQuestions) && e.pendingQuestions.length > 0) throw meshDefer;
-    if (e.pendingQuestionsTruncated) throw meshDefer;
+    // a Jev-confirmed question candidate is folded in through jev-assist's trust math and its log: Node's
     if (Array.isArray(e.jevQuestionCandidates) && e.jevQuestionCandidates.length > 0) throw meshDefer;
   }
+  if (e && Array.isArray(e.pendingQuestions)) own.pending = e.pendingQuestions;
+  own.truncated = e && e.pendingQuestionsTruncated ? e.pendingQuestionsTruncated : null;
   own.registryIds = Object.keys(ws);
-  if (Array.isArray(summary.archivedRegistryRows)) {
-    summary.archivedRegistryRows.forEach(function (row) { if (jx.isObj(row) && typeof row.id === 'string') own.registryIds.push(row.id); });
+  own.registryRows = own.registryIds.map(function (wid) {
+    return { id: wid, worktreePath: (ws[wid] && ws[wid].worktreePath) || null, sessionId: (ws[wid] && ws[wid].sessionId) || null };
+  });
+  own.archivedKnown = Array.isArray(summary.archivedRegistryRows);
+  if (own.archivedKnown) {
+    summary.archivedRegistryRows.forEach(function (row) {
+      if (jx.isObj(row) && typeof row.id === 'string') own.registryIds.push(row.id);
+      if (!row || row.id === null || row.id === undefined) return;
+      own.registryRows.push({ id: row.id, worktreePath: row.worktreePath || null, sessionId: row.sessionId || null });
+    });
   }
   own.parsed = true;
   return own;
+}
+
+// ---- the questions the Primary was asked ---------------------------------------------------------------------------------
+
+// The unanswered questions of the Primary's own entry, as the gate derives them: `familyAwareUnanswered` (the project's reply records,
+// the descriptors and the summary's registry rows, families keyed by `canonicalMeshId`, the Primary's own family excluded), then
+// `partitionUnanswered` (a sender no row names is informational only) and `filterLiveAskers` with the gate's eligibility context
+// (the cross-invocation app cache on, the project key of this Primary). {blocking, informational}.
+function pgQuestions(home, own, descriptors, selfKey, fx) {
+  var has = function (o, k) { return Object.prototype.hasOwnProperty.call(o, k); };
+  if (own.pending.length === 0) return { blocking: [], informational: [] };
+  var replyState = selfKey ? piReplyState(home, selfKey) : Object.create(null);
+  var raw = piUnanswered(own.pending, replyState);
+  var descRows = descriptors.map(function (d) { return d.raw; }), regRows = own.registryRows;
+  // familyAwareUnanswered
+  var seen = Object.create(null), rows = [];
+  descRows.concat(regRows).forEach(function (r) {
+    if (!r || r.id === null || r.id === undefined) return;
+    var id = String(r.id);
+    if (has(seen, id)) return;
+    seen[id] = true;
+    rows.push(r);
+  });
+  var unanswered = raw;
+  if (raw.length && rows.length) {
+    var meshIds = Object.create(null);
+    var resolve = function (wt) {
+      if (typeof wt !== 'string') throw meshDefer;
+      if (!has(meshIds, wt)) meshIds[wt] = ah.mesh.canonicalId(wt);
+      return meshIds[wt];
+    };
+    var families = piFamilies(rows, resolve);
+    var excluded = piRecipientFamily(own.id, rows);
+    var byMember = Object.create(null);
+    families.forEach(function (fam) { fam.members.forEach(function (m) { if (m && m.id !== null && m.id !== undefined) byMember[String(m.id)] = fam; }); });
+    unanswered = raw.filter(function (q) {
+      if (!q || q.from === null || q.from === undefined) return true;
+      var fam = has(byMember, String(q.from)) ? byMember[String(q.from)] : null;
+      if (fam === null) return true;
+      var qTs = piFinite(q.ts) ? q.ts : Infinity;
+      for (var i = 0; i < fam.members.length; i++) {
+        var m = fam.members[i], mid = m && m.id !== null && m.id !== undefined ? String(m.id) : null;
+        if (!mid || has(excluded, mid)) continue;
+        var entry = replyState[mid];
+        var last = entry && piFinite(entry.lastReplyTs) ? entry.lastReplyTs : 0;
+        if (qTs <= last) return false;
+      }
+      return true;
+    });
+  }
+  // partitionUnanswered
+  var blocking = unanswered.slice(), informational = [];
+  if ((descRows.length || regRows.length) && own.archivedKnown) {
+    var known = Object.create(null);
+    descRows.concat(regRows).forEach(function (r) { if (r && r.id !== null && r.id !== undefined) known[String(r.id).trim()] = true; });
+    blocking = [];
+    unanswered.forEach(function (q) {
+      if (!q || q.from === null || q.from === undefined) blocking.push(q);
+      else if (has(known, String(q.from).trim())) blocking.push(q);
+      else informational.push(q);
+    });
+  }
+  // filterLiveAskers over `rowEligibilityLib.createContext({home, env, now, xcache: true, cache: readActiveCache}).of`
+  var byId = Object.create(null);
+  var add = function (r) { if (r && r.id !== null && r.id !== undefined && !has(byId, String(r.id))) byId[String(r.id)] = { id: r.id, worktreePath: r.worktreePath || null, sessionId: r.sessionId || null }; };
+  regRows.forEach(add);
+  descRows.forEach(add);
+  var live = blocking.filter(function (q) {
+    if (!q || q.from === null || q.from === undefined) return true;
+    var from = String(q.from);
+    var row = has(byId, from) ? byId[from] : null;
+    if (row === null) return !own.archivedKnown;
+    var wt = piStrField(row.worktreePath), sid = piStrField(row.sessionId);
+    var mk = JSON.parse(ahHost.piMarker(from, wt, sid));
+    if (mk.unsure) throw meshDefer;
+    var app = ah.mesh.appArchived(from, wt === null ? '' : wt, true);
+    if (app.cache !== null) fx.cacheOwed = true;
+    var appArchived = false;
+    if (app.verdict !== null) appArchived = app.verdict;
+    else if (selfKey && from !== '' && wt !== null) {
+      // the supervisor's active-list cache, for a worktree the DevSwarm app could own
+      if (wt.charAt(0) !== '/') throw meshDefer;
+      var rp = ah.fs.realpath(wt), marker = ah.cfg('devswarm_role.pg_repos_root_marker');
+      if (ah.path.resolveAbs(rp === null ? wt : rp).indexOf(marker) >= 0 || wt.indexOf(marker) >= 0) throw meshDefer;
+    }
+    if (ah.settings.touched('devswarm_role.pg_set_held')) throw meshDefer; // the owner's held partitions
+    if (!pgSafeId(from)) throw meshDefer;
+    if (pgExists(pgDir(home) + '/' + ah.cfg('devswarm_role.pg_dir_archive_ignore') + '/' + from + '.json')) return false;
+    if (!(mk.archived === true || appArchived === true)) return true;
+    var st = sid ? JSON.parse(ahHost.piSessionPid(sid)) : { alive: null };
+    if (st.unsure) throw meshDefer;
+    return st.alive !== false;
+  });
+  return { blocking: live, informational: informational };
+}
+
+// `approxAge(ms)`.
+function pgApproxAge(ms) {
+  if (!(typeof ms === 'number' && isFinite(ms)) || ms < 0) return ah.cfg('devswarm_role.pg_age_unknown');
+  var mins = Math.floor(ms / pgMin()), perHour = ah.cfgNum('devswarm_role.pg_min_per_hour'), perDay = ah.cfgNum('devswarm_role.pg_hour_per_day');
+  if (mins < 1) return ah.cfg('devswarm_role.pg_age_under_min');
+  if (mins < perHour) return text.render(ah.cfg('devswarm_role.pg_age_min'), { n: String(mins) });
+  var hours = Math.floor(mins / perHour);
+  if (hours < perDay) return text.render(ah.cfg('devswarm_role.pg_age_hour'), { n: String(hours) });
+  return text.render(ah.cfg('devswarm_role.pg_age_day'), { n: String(Math.floor(hours / perDay)) });
+}
+
+function pgSender(q) { return q && q.from !== null && q.from !== undefined ? String(q.from) : ah.cfg('devswarm_role.pg_q_unknown_sender'); }
+
+function pgQMore(list) {
+  var max = ah.cfgNum('devswarm_role.pg_q_max_shown');
+  return list.length > max ? text.render(ah.cfg('devswarm_role.pg_and_more'), { n: String(list.length - max) }) : '';
+}
+
+// `buildUnansweredSegment(unanswered)`.
+function pgUnansweredSeg(list) {
+  var now = ah.clock.now();
+  var items = list.slice(0, ah.cfgNum('devswarm_role.pg_q_max_shown')).map(function (q) {
+    var ts = q && piFinite(q.ts) ? q.ts : NaN;
+    return text.render(ah.cfg('devswarm_role.pg_q_item'), { from: pgSender(q), age: pgApproxAge(now - ts) });
+  }).join(ah.cfg('devswarm_role.pg_q_sep'));
+  return text.render(ah.cfg('devswarm_role.pg_q_unanswered'), { s: list.length > 1 ? ah.cfg('devswarm_role.pg_q_plural') : '', items: items, more: pgQMore(list) });
+}
+
+// `buildTruncatedSegment(truncated)`.
+function pgTruncatedSeg(t) {
+  var fig = function (k) { var v = t && t[k]; return piFinite(v) ? String(v) : ah.cfg('devswarm_role.pg_q_truncated_unknown'); };
+  return text.render(ah.cfg('devswarm_role.pg_q_truncated'), { kept: fig('kept'), dropped: fig('dropped'), cap: fig('cap') });
+}
+
+// `buildInformationalSegment(informational)`: each retired sender once, in first-seen order.
+function pgInformationalSeg(list) {
+  if (!list.length) return '';
+  var ids = [];
+  list.forEach(function (q) { var s = pgSender(q); if (ids.indexOf(s) < 0) ids.push(s); });
+  return text.render(ah.cfg('devswarm_role.pg_q_informational'), { ids: ids.join(ah.cfg('devswarm_role.pg_q_informational_sep')) });
 }
 
 // ---- descriptors -------------------------------------------------------------------------------------------------------
@@ -198,7 +346,7 @@ function pgArchiveReady(home, id, repoKey, memo) {
 
 function pgIgnoreIds(home) {
   var v = pgJson(pgDir(home) + '/' + ah.cfg('devswarm_role.pg_ignore_file'));
-  var out = {};
+  var out = Object.create(null);
   if (jx.isObj(v) && Array.isArray(v.ids)) v.ids.forEach(function (x) { if (typeof x === 'string' && x !== '') out[x] = true; });
   return out;
 }
@@ -240,7 +388,7 @@ function pgCrossLinked(a, b) {
 }
 
 function pgCollapse(entries) {
-  var cache = {}, order = [], groups = {};
+  var cache = Object.create(null), order = [], groups = Object.create(null);
   entries.forEach(function (e, i) {
     var key = null;
     if (e.worktree !== '') {
@@ -278,10 +426,12 @@ function pgGate(p, root, l) {
   var idn = ah.mesh.ident(cwd), selfKey = idn.key;
   var own = pgReadOwn(home, idn, selfKey);
   var descriptors = pgDescriptors(home);
+  var qs = pgQuestions(home, own, descriptors, selfKey, fx);
+  var unanswered = qs.blocking, informational = qs.informational, truncated = own.truncated;
   if (own.id !== null && pgHasJson(pgDir(home) + '/' + ah.cfg('devswarm_role.pg_dir_escalation'))) throw meshDefer; // a parked escalation notice
   var stateRel = ah.cfg('devswarm_role.pg_devswarm_dir') + '/' + ah.cfg('devswarm_role.pg_dir_gate') + '/' + sid.replace(/[^A-Za-z0-9_.-]/g, '_') + '.json';
   var stateFile = home + '/' + stateRel;
-  if (descriptors.length === 0 && !own.unknown) { fx.unlink = stateRel; return fx; }
+  if (descriptors.length === 0 && !own.unknown && unanswered.length === 0 && !truncated) { fx.unlink = stateRel; return fx; }
 
   var entries = [];
   if (own.id !== null) {
@@ -292,7 +442,7 @@ function pgGate(p, root, l) {
   }
   var now = ah.clock.now();
   if (ah.settings.touched('devswarm_role.pg_set_held')) throw meshDefer; // the owner's held partitions
-  var ignore = pgIgnoreIds(home), keyMemo = {}, readyMemo = {}, goneMemo = {};
+  var ignore = pgIgnoreIds(home), keyMemo = Object.create(null), readyMemo = Object.create(null), goneMemo = Object.create(null);
   keyMemo[cwd] = selfKey;
   function keyOf(wt) {
     if (!Object.prototype.hasOwnProperty.call(keyMemo, wt)) keyMemo[wt] = ah.mesh.repoKey(wt);
@@ -477,7 +627,7 @@ function pgGate(p, root, l) {
   if (archivedUnreadFamilies > 0) fx.err += text.render(ah.cfg('devswarm_role.pg_err_archived_unread'), { n: String(archivedUnreadFamilies) });
   pgStray(home, sidRaw, selfKey, keyOf, now, fx);
 
-  if (blocking.length === 0) {
+  if (blocking.length === 0 && unanswered.length === 0 && !truncated) {
     // a pass that only deferred unread mail keeps the loop state and skips the wake-coverage line; only a clean pass clears the state,
     // after the wake-coverage line (which needs a live child of this project) is known to be silent
     if (!busyAdvisoryHeld) {
@@ -490,7 +640,11 @@ function pgGate(p, root, l) {
   // ---- the block: loop state, cap, escalation -----------------------------------------------------------------------
   var kinds = blocking.map(function (b) { return own.id === b.id ? ah.cfg('devswarm_role.pg_kind_mailbox') : ah.cfg('devswarm_role.pg_kind_children'); }).sort();
   kinds = kinds.filter(function (k, i) { return i === 0 || k !== kinds[i - 1]; });
-  var sig = ah.sha1(ah.cfg('devswarm_role.pg_sig_prefix') + kinds.join(',')), qSig = ah.sha1('');
+  var sig = ah.sha1(ah.cfg('devswarm_role.pg_sig_prefix') + kinds.join(','));
+  var qField = String.fromCharCode(ah.cfgNum('devswarm_role.pg_q_sig_field_sep')), qRow = String.fromCharCode(ah.cfgNum('devswarm_role.pg_q_sig_row_sep'));
+  var qSig = ah.sha1(unanswered.map(function (q) {
+    return (q && q.from !== null && q.from !== undefined ? String(q.from) : '') + qField + (q && piFinite(q.ts) ? q.ts : '');
+  }).sort().join(qRow));
   var prev = pgJson(stateFile);
   var has = function (k) { return prev !== null && typeof prev === 'object' ? prev[k] : undefined; };
   var lastSig = typeof has('sig') === 'string' ? has('sig') : '';
@@ -504,24 +658,44 @@ function pgGate(p, root, l) {
   var effBlocks = same ? blocks : 0, effEscalated = same && escalated, effAcks = same ? intentAcks : 0;
   // the drain marker of this Primary
   if (own.id !== null && pgExists(pgDir(home) + '/' + ah.cfg('devswarm_role.pg_dir_drain') + '/' + own.id + '.json')) throw meshDefer;
-  if (effEscalated) return fx; // already escalated once: quiet
+  // an unanswered question or a truncated question list bypasses the neglect cap; the question set has its own ceiling
+  var bypassCap = unanswered.length > 0 || !!truncated;
+  if (!bypassCap && effEscalated) return fx; // already escalated once: quiet
   if (ah.settings.touched('devswarm_role.pg_set_cap')) throw meshDefer;
   var cap = ah.cfg('devswarm_role.pg_set_cap').default;
-  var nextBlocks = effBlocks + 1;
-  var effCap = hasIntent ? cap * ah.cfgNum('devswarm_role.pg_intent_multiplier') : cap;
-  var nextAcks = hasIntent ? effAcks + 1 : effAcks;
-  var escalateTimes = null;
-  if (effBlocks >= effCap) {
-    if (own.id !== null && blocking.every(function (b) { return own.id === b.id; })) throw meshDefer; // the conservation hold
-    escalateTimes = nextBlocks;
-  }
-  var nextQBlocks = qSig === lastQSig ? qBlocks : 0, nextQEscalated = qSig === lastQSig && qEscalated;
+  var nextBlocks = effBlocks + 1, nextEscalated = effEscalated, nextAcks = effAcks;
+  var effQBlocks = qSig === lastQSig ? qBlocks : 0, effQEscalated = qSig === lastQSig && qEscalated;
+  var nextQBlocks = effQBlocks, nextQEscalated = effQEscalated;
+  var escalateTimes = null, qEscalateTimes = null;
   var nextIntents = {};
   if (hasIntent) nextIntents[sig] = intents[sig];
-  fx.write = { rel: stateRel, body: JSON.stringify({ sig: sig, blocks: nextBlocks, escalated: escalateTimes !== null, qSig: qSig, qBlocks: nextQBlocks, qEscalated: nextQEscalated, intents: nextIntents, intentAcks: nextAcks }) };
+  var stateBody = function (qb, qe) {
+    return JSON.stringify({ sig: sig, blocks: nextBlocks, escalated: nextEscalated, qSig: qSig, qBlocks: qb, qEscalated: qe, intents: nextIntents, intentAcks: nextAcks });
+  };
+  if (!bypassCap) {
+    var effCap = hasIntent ? cap * ah.cfgNum('devswarm_role.pg_intent_multiplier') : cap;
+    if (hasIntent) nextAcks = effAcks + 1;
+    if (effBlocks >= effCap) {
+      if (own.id !== null && blocking.every(function (b) { return own.id === b.id; })) throw meshDefer; // the conservation hold
+      escalateTimes = nextBlocks;
+      nextEscalated = true;
+    }
+  } else if (!truncated && unanswered.length > 0) {
+    if (effQEscalated) {
+      // the question set already escalated once: quiet, the state kept
+      fx.write = { rel: stateRel, body: stateBody(effQBlocks, true) };
+      return fx;
+    }
+    nextQBlocks = effQBlocks + 1;
+    if (effQBlocks >= cap) {
+      qEscalateTimes = nextQBlocks;
+      nextQEscalated = true;
+    }
+  }
+  fx.write = { rel: stateRel, body: stateBody(nextQBlocks, nextQEscalated) };
 
   // the stale-build downgrade: a plain neglect block is dropped while the host registered a newer version
-  if (escalateTimes === null && pgVersionStale(root)) return fx;
+  if (blocking.length > 0 && !bypassCap && escalateTimes === null && qEscalateTimes === null && pgVersionStale(root)) return fx;
   var wake = pgWakeLine(own.id, l);
   var waitingSeg = '';
   blocking.forEach(function (b) {
@@ -534,7 +708,8 @@ function pgGate(p, root, l) {
     }
     if (b.busyStaleAgeMin !== null) waitingSeg += text.render(ah.cfg('devswarm_role.pg_busy_stale_line'), { title: pgTitle(home, b.id), m: String(b.busyStaleAgeMin) });
   });
-  var base = waitingSeg + pgReason(blocking, own.id, escalateTimes, hasIntent, own.unknown, own.parsed);
+  var base = pgReason(blocking, own.id, escalateTimes, hasIntent, own.unknown, own.parsed,
+    { unanswered: unanswered, informational: informational, truncated: truncated, qEscalate: qEscalateTimes, waiting: waitingSeg });
   var cli = root + '/' + ah.cfg('devswarm_role.launcher_cli').target;
   var skip = text.render(ah.cfg('devswarm_role.pg_skip_cmd'), { cli: pgShQuote(ah.path.resolveAbs(cli)), guard: ah.cfg('devswarm_role.gate_guard') });
   fx.out = JSON.stringify({ decision: ah.cfg('devswarm_role.pg_decision_block'), reason: pgFrame(base + wake, skip) }) + '\n';
@@ -585,7 +760,8 @@ function pgStray(home, sidRaw, selfKey, keyOf, now, fx) {
   fx.err += ah.cfg('devswarm_role.pg_stray_head') + parts.join(ah.cfg('devswarm_role.pg_stray_join')) + more + ah.cfg('devswarm_role.pg_stray_tail') + '\n';
   // Node assigns into the parsed value in strict mode: a JSON primitive throws there, after the line, and nothing is written
   if (typeof seen !== 'object') return;
-  fresh.forEach(function (e) { seen[e.seenKey] = now; });
+  var shownAt = ah.clock.now(); // Node reads the clock after printing the line
+  fresh.forEach(function (e) { seen[e.seenKey] = shownAt; });
   var keys = Object.keys(seen), keep = ah.cfgNum('devswarm_role.pg_stray_seen_max');
   if (keys.length > keep) {
     keys.sort(function (a, b) { return seen[a] - seen[b]; });
@@ -685,8 +861,15 @@ function pgListMore(ids, max) {
   return s;
 }
 
-// `buildReason` for the shapes the gate answers (no question, no truncation, no stale verdict).
-function pgReason(blocking, ownId, escalate, hasIntent, ownUnknown, ownParsed) {
+// `buildReason` for the shapes the gate answers (no stale verdict). `q`: the unanswered and informational questions, the truncation
+// record, the question escalation count (or null) and the waiting-on-input lines, placed as buildReason places them.
+function pgReason(blocking, ownId, escalate, hasIntent, ownUnknown, ownParsed, q) {
+  if (q.qEscalate !== null) {
+    var who = q.unanswered.slice(0, ah.cfgNum('devswarm_role.pg_q_max_shown')).map(pgSender).join(ah.cfg('devswarm_role.pg_q_sep'));
+    var what = q.truncated ? ah.cfg('devswarm_role.pg_q_escalation_truncated') : text.render(ah.cfg('devswarm_role.pg_q_escalation_from'), { who: who, more: pgQMore(q.unanswered) });
+    return text.render(ah.cfg('devswarm_role.pg_q_escalation'), { what: what, times: String(q.qEscalate) });
+  }
+  var lead = (q.truncated ? pgTruncatedSeg(q.truncated) : '') + (q.unanswered.length > 0 ? pgUnansweredSeg(q.unanswered) : '') + pgInformationalSeg(q.informational) + q.waiting;
   var isOwn = function (id) { return ownId === id; };
   var max = ah.cfgNum('devswarm_role.pg_max_shown'), maxUnknown = ah.cfgNum('devswarm_role.pg_max_unknown_shown'), you = ah.cfg('devswarm_role.pg_you');
   var shown = blocking.slice(0, max).map(function (b) {
@@ -708,7 +891,7 @@ function pgReason(blocking, ownId, escalate, hasIntent, ownUnknown, ownParsed) {
   var stable = blocking.slice(0, max).map(function (b) { return b.id + (isOwn(b.id) ? you : ''); }).join('; ');
   var flagged = blocking.filter(function (b) { return !isOwn(b.id) && !b.foreign; });
   if (escalate !== null) {
-    return text.render(ah.cfg('devswarm_role.pg_escalation'), {
+    return lead + text.render(ah.cfg('devswarm_role.pg_escalation'), {
       shown: stable + more, times: String(escalate), intent: hasIntent ? ah.cfg('devswarm_role.pg_escalation_intent') : '',
       archive: flagged.length > 0 && flagged.every(function (b) { return b.doneOrIdle; }) ? ah.cfg('devswarm_role.pg_escalation_archive') : '',
     });
@@ -716,7 +899,7 @@ function pgReason(blocking, ownId, escalate, hasIntent, ownUnknown, ownParsed) {
   var ownEntry = null;
   for (var i = 0; i < blocking.length; i++) if (isOwn(blocking[i].id) && (blocking[i].unread > 0 || blocking[i].unknown)) { ownEntry = blocking[i]; break; }
   var anyChild = blocking.some(function (b) { return (b.unread > 0 || b.unknown) && !isOwn(b.id) && !b.foreign; });
-  var body = text.render(ah.cfg('devswarm_role.pg_neglect'), { n: String(blocking.length), shown: shown, more: more });
+  var body = lead + (blocking.length > 0 ? text.render(ah.cfg('devswarm_role.pg_neglect'), { n: String(blocking.length), shown: shown, more: more }) : '');
   blocking.forEach(function (b) {
     if (b.contributors.length <= 1) return;
     var parts = b.contributors.map(function (c) {
