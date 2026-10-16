@@ -164,7 +164,7 @@ fn now_ms() -> i64 {
     crate::health::now_ms() as i64
 }
 
-fn lock_params() -> nodelock::Params {
+pub(super) fn lock_params() -> nodelock::Params {
     nodelock::Params {
         stale_ms: defaults::num("devswarm_ingest.lock_stale_ms"),
         wait_ms: 0,
@@ -175,6 +175,16 @@ fn lock_params() -> nodelock::Params {
         boot_slop_s: defaults::num("mesh_write.id_lock_boot_slop_s"),
         steal_dead: true,
     }
+}
+
+/// The lock file of the project with `repo_key`.
+pub fn lock_path_of(home: &Path, repo_key: &str) -> PathBuf {
+    devswarm_root(home).join(defaults::text("mesh_write.dir_locks")).join(format!(
+        "{}{}{}",
+        defaults::text("devswarm_ingest.lock_prefix"),
+        repo_key,
+        defaults::text("mesh_write.lock_suffix")
+    ))
 }
 
 /// Append a `[ISO] line` to the ingest log (the file the Node daemon's unit writes), best effort.
@@ -226,12 +236,7 @@ impl Drainer {
 
     /// The lock file of this project.
     pub fn lock_path(&self) -> PathBuf {
-        devswarm_root(&self.home).join(defaults::text("mesh_write.dir_locks")).join(format!(
-            "{}{}{}",
-            defaults::text("devswarm_ingest.lock_prefix"),
-            self.project.repo_key,
-            defaults::text("mesh_write.lock_suffix")
-        ))
+        lock_path_of(&self.home, &self.project.repo_key)
     }
 
     fn inv(&self) -> Inv {
