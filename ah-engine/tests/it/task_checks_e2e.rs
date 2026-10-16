@@ -231,6 +231,31 @@ fn task_guard_advisories_never_share_stdout_with_the_answer() {
 }
 
 #[test]
+fn tasklist_guard_advisories_never_share_stdout_with_the_answer() {
+    let w = World::new("tasklist-guard-advisory");
+    let cwd = std::fs::canonicalize(w.path("proj")).unwrap();
+    let edit = |n: u32| serde_json::json!({"type": "assistant", "timestamp": "2026-10-06T08:00:00.000Z", "message": {"id": format!("m{n}"), "role": "assistant", "content": [{"type": "tool_use", "id": format!("t{n}"), "name": "Edit", "input": {"file_path": format!("/p/f{n}.js")}}]}});
+    std::fs::write(w.path("t.jsonl"), format!("{}\n{}\n{}\n", edit(1), edit(2), edit(3))).unwrap();
+    // plan mode: the advisory goes to stderr, stdout stays empty
+    let payload = serde_json::json!({"hook_event_name": "Stop", "session_id": "s1", "cwd": cwd, "transcript_path": w.path("t.jsonl"), "permission_mode": "plan"}).to_string();
+    let (code, out, err) = stop_run_env(&w, "tasklist-guard", &payload, &[]);
+    assert_eq!(code, 0, "answered by the engine");
+    assert_stdout_is_json_or_empty(&out, "plan mode");
+    assert!(err.contains("[tasklist-guard] PLAN MODE"), "the advisory is kept on stderr: {err:?}");
+    // an OMC autonomous loop in place of a block: the step-aside line goes to stderr, stdout stays empty
+    std::fs::create_dir_all(w.path("proj/.claude")).unwrap();
+    std::fs::write(w.path("proj/.claude/settings.local.json"), r#"{"enabledPlugins": {"oh-my-claudecode@omc": true}}"#).unwrap();
+    std::fs::create_dir_all(w.path("proj/.omc/state")).unwrap();
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64;
+    std::fs::write(w.path("proj/.omc/state/team-state.json"), format!("{{\"active\": true, \"started_at\": {}}}", now - 1000)).unwrap();
+    let payload = serde_json::json!({"hook_event_name": "Stop", "session_id": "s1", "cwd": cwd, "transcript_path": w.path("t.jsonl")}).to_string();
+    let (code, out, err) = stop_run_env(&w, "tasklist-guard", &payload, &[]);
+    assert_eq!(code, 0, "answered by the engine");
+    assert_stdout_is_json_or_empty(&out, "OMC loop");
+    assert!(err.contains("[tasklist-guard] OMC autonomous loop active"), "the step-aside line is kept on stderr: {err:?}");
+}
+
+#[test]
 fn tasklist_guard_answers_a_quiet_stop_with_its_file_effects_and_answers_a_block() {
     let w = World::new("tasklist-guard");
     let cwd = std::fs::canonicalize(w.path("proj")).unwrap();

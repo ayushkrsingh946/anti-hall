@@ -489,7 +489,8 @@ function tlFire(f) {
   // effects, in Node order
   var relaxed = tlJev(f, jevState);
   if (relaxed || versionStale || acked) return 'allow';
-  if (omc) return { exact: { code: 0, out: tlT('omc_text'), err: '' } };
+  // the advisories go to stderr: stdout stays empty or ONE JSON object, which the dispatcher can merge with another Stop hook's JSON
+  if (omc) return { exact: { code: 0, out: '', err: tlT('omc_text') } };
   if (advisory) { try { tlStamp(home, advisory.marker, advisory.body); } catch (e) { /* best-effort cap */ } }
   if (policy !== null && policy.rel !== null) {
     var now = ah.clock.now(), bk = function (kind) { return safe + '|' + tlT('guard_name') + '|' + kind; };
@@ -522,7 +523,7 @@ function decide(p, opts) {
   if (!ah.settings.bool('tasklist_guard.setting') || ah.settings.skipped(tlT('guard_name'))) return 'allow';
   if (p === null || typeof p !== 'object') p = {};
   if (typeof p.permission_mode === 'string' && p.permission_mode.toLowerCase() === tlT('plan_mode_value')) {
-    return { exact: { code: 0, out: tlT('plan_mode_text'), err: '' } };
+    return { exact: { code: 0, out: '', err: tlT('plan_mode_text') } };
   }
   var transcript = p.transcript_path;
   if (!transcript || typeof transcript !== 'string') return 'allow';
