@@ -377,6 +377,14 @@ impl Shared {
         if let Some(c) = m["components"].as_object() {
             parts.extend(c.iter().map(|(k, v)| format!("{k}={v}")));
         }
+        // registered holders that hold anything now (a transient scan included), so the line names more than the components
+        if let Some(h) = m["budgets"]["holders"].as_array() {
+            parts.extend(
+                h.iter()
+                    .filter(|h| h["bytes"].as_u64().is_some_and(|b| b > 0))
+                    .map(|h| format!("mem_{}={}", h["name"].as_str().unwrap_or_default(), h["bytes"])),
+            );
+        }
         parts.join(" ")
     }
 

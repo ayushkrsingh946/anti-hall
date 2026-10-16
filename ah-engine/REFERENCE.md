@@ -9460,6 +9460,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `opcli.review_none` | `jev review-due: nothing due (reviewAfterDays={after}, reviewMinDecisions={min})` |  |  | `review-due` when nothing is due. Placeholders: {after}, {min}. |
 | `opcli.review_rollup_midnight` | `T00:00:00Z` |  |  | The suffix that turns a rollup's day into its UTC midnight. |
 | `opcli.review_row` | `  {id} ({days}d, {decisions} decisions)` |  |  | `review-due` line of one due integration. Placeholders: {id}, {days}, {decisions}. |
+| `opcli.review_scan_over_limit` | `review state: the Jev decision log {file} holds a line longer than the scan's...` |  |  | The Jev decision-log scan stopped at its memory hard limit (mem.jev_review_scan_hard_bytes); the review state counts as unusable. Placeholders: {file}, {limit}. |
 | `opcli.review_shown_type` | `reminder-shown` |  |  | The `type` of the review metrics row that records a SessionStart reminder. |
 | `opcli.review_state_bad` | `review state: the entry of {id} is not an object; fix or remove ~/.anti-hall/...` |  |  | The review state holds an entry that is not an object, which the verb cannot update (nothing is written). Placeholder: {id}. |
 | `opcli.review_state_file` | `jev-review-state.json` |  |  | The durable shadow-review state, relative to the anti-hall home directory. |
@@ -9971,6 +9972,9 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `mem.jev_queue_low_water_pct` | `80` |  |  | Percent of mem.jev_queue_soft_bytes the resident Jev async queue holder must fall to before soft and hard trips re-arm. |
 | `mem.jev_queue_max_bytes` | `1048576` |  | bytes | Estimated bytes of detached Jev ask payloads a resident lane queue may hold before further queued asks are answered busy. |
 | `mem.jev_queue_soft_bytes` | `524288` |  | bytes | Estimated bytes of resident Jev async request payloads queued across lanes before the holder reports a soft memory trip. |
+| `mem.jev_review_scan_hard_bytes` | `1048576` |  | bytes | Bytes one scan of the Jev decision log may hold; a line or total past it stops the scan and the review state counts as unusable (no reminder this time), so a corrupt or runaway log never costs the daemon more than this. |
+| `mem.jev_review_scan_low_water_pct` | `80` |  |  | Percent of mem.jev_review_scan_soft_bytes at which a scan's soft trip re-arms. |
+| `mem.jev_review_scan_soft_bytes` | `262144` |  | bytes | Bytes one scan of the Jev decision log (the SessionStart review reminder, `jev-setup review-due`) may hold before the soft trip is logged: the line being read plus the per-integration totals. The scan streams the log, so a decision row (under 1 KB) and a few integrations stay far below this. |
 | `mem.key_cache_hard_bytes` | `1048576` |  | bytes | Estimated bytes of cached cwd-to-project keys at which new cache entries are refused and recoverable keys are recycled. |
 | `mem.key_cache_low_water_pct` | `80` |  |  | Percent of mem.key_cache_soft_bytes cwd-to-project keys are evicted down to when the soft limit is reached. |
 | `mem.key_cache_max_entries` | `4096` |  |  | Cwd-to-project cache entries kept at most; past it the least recently used cwd is dropped first. |

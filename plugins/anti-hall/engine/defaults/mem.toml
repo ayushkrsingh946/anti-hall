@@ -155,6 +155,24 @@ doc = "Transcript-tail answers the cache keeps at most; past it the least recent
 value = 256
 min = 1
 
+[mem.jev_review_scan_soft_bytes]
+doc = "Bytes one scan of the Jev decision log (the SessionStart review reminder, `jev-setup review-due`) may hold before the soft trip is logged: the line being read plus the per-integration totals. The scan streams the log, so a decision row (under 1 KB) and a few integrations stay far below this."
+value = 262144
+min = 4096
+unit = "bytes"
+
+[mem.jev_review_scan_hard_bytes]
+doc = "Bytes one scan of the Jev decision log may hold; a line or total past it stops the scan and the review state counts as unusable (no reminder this time), so a corrupt or runaway log never costs the daemon more than this."
+value = 1048576
+min = 4096
+unit = "bytes"
+
+[mem.jev_review_scan_low_water_pct]
+doc = "Percent of mem.jev_review_scan_soft_bytes at which a scan's soft trip re-arms."
+value = 80
+min = 1
+max = 100
+
 [mem.spawn_probe_soft_bytes]
 doc = "Bytes of kept spawn-probe answers (`spawnProbeCached`) held before the least recently used are dropped down to the low-water mark."
 value = 65536
