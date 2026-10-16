@@ -12,8 +12,11 @@ use std::path::PathBuf;
 pub struct Stale {
     /// The newest version known.
     pub newest: String,
-    /// Its watcher script when it exists on disk (a handoff target).
-    pub script: Option<PathBuf>,
+    /// Its plugin root when the build is complete on disk (its manifest exists): the handoff target. The engine itself runs
+    /// again with this root, so no interpreter is involved.
+    pub root: Option<PathBuf>,
+    /// Its Node watcher script path, only for the re-arm instruction the refused-handoff line prints.
+    pub script: PathBuf,
     /// The harness registry itself names it.
     pub registered: bool,
     /// The version the registry names.
@@ -37,8 +40,10 @@ pub fn check(p: &Proc, own: Option<&str>) -> Option<Stale> {
     }
     let newest = newest.filter(|n| compare_versions(own, n) < 0)?;
     let registered = k.registry.as_deref().is_some_and(|j| semver_ok(j) && compare_versions(j, &newest) >= 0);
-    let script = PathBuf::from(&k.cache_root).join(&newest).join(defaults::text("wake_watch.stale_script_rel"));
-    Some(Stale { script: script.is_file().then_some(script), registered, registered_version: k.registry.filter(|j| semver_ok(j)), newest })
+    let build = PathBuf::from(&k.cache_root).join(&newest);
+    let script = build.join(defaults::text("wake_watch.stale_script_rel"));
+    let root = build.join(defaults::text("wake_watch.manifest_rel")).is_file().then_some(build);
+    Some(Stale { root, script, registered, registered_version: k.registry.filter(|j| semver_ok(j)), newest })
 }
 
 /// `canHandoff(ownVersion, newestVersion, env)`: strictly newer than this build, and strictly newer than the previous handoff's

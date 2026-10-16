@@ -9555,7 +9555,6 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `wake_watch.lock_suffix` | `.lock` |  |  | End of the watcher lock's file name. |
 | `wake_watch.lock_wait_ms` | `0` |  |  | How long to keep retrying a lock another watcher holds, in milliseconds (0: refuse at once). |
 | `wake_watch.manifest_rel` | `.claude-plugin/plugin.json` |  |  | The plugin manifest that names the build the watcher runs, relative to the plugin root. |
-| `wake_watch.node_bin` | `node` |  |  | The interpreter that runs the newer build's watcher script on a handoff. |
 | `wake_watch.poll_max_ms` | `60000` |  |  | Ceiling of the tick in milliseconds. |
 | `wake_watch.poll_min_ms` | `250` |  |  | Floor of the tick in milliseconds. |
 | `wake_watch.reason_disabled` | `disabled-by-settings` |  |  | Refusal reason (closed vocabulary): switched off by devswarm.wakeWatch. |
@@ -9573,7 +9572,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `wake_watch.set_enabled` | `5 entries` |  |  | The setting devswarm.wakeWatch: off refuses to arm (the cron wake fallback is unaffected). |
 | `wake_watch.set_idle_skip` | `6 entries` |  |  | The setting devswarm.wakeWatchIdleSkip: a Primary with no live child workspace need not arm (Node prints its one idle line). |
 | `wake_watch.set_poll_ms` | `7 entries` |  |  | The setting devswarm.wakeWatchPollMs: the tick of the watcher in milliseconds (lock heartbeat, parent check, stale-build check, reads). A change of a watched file wakes the tick early. |
-| `wake_watch.stale_script_rel` | `companion/lib/devswarm-wake-watch.js` |  |  | The watcher script of another build, relative to that build's cache directory: a newer build is handed over to only when this file exists. |
+| `wake_watch.stale_script_rel` | `companion/lib/devswarm-wake-watch.js` |  |  | The Node watcher script of another build, relative to that build's cache directory: named only in the re-arm line printed when a handoff is refused. A handoff itself needs only that build's manifest and never runs this script. |
 | `wake_watch.tmp_suffix` | `.tmp` |  |  | End of the temporary file a cursor is written to before the rename. |
 | `wake_watch.verb` | `wake-watch` |  |  | The `ah-engine devswarm` verb that runs the idle-wake Monitor. |
 | `wake_watch.word_unavailable` | `unavailable` |  |  | Said where the session of a lock holder is not recorded. |
