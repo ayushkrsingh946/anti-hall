@@ -273,6 +273,40 @@ fn seed_dual(home: &Path) {
     }
 }
 
+/// A DevSwarm home with no cursors directory at all.
+fn seed_nothing(home: &Path) {
+    put(home, ".anti-hall/devswarm/workspaces/w1.json", r#"{"id":"w1"}"#);
+}
+
+/// Put a file's mtime `days` days in the past (a cursor file the staleness window covers).
+fn age(home: &Path, rel: &str, days: u64) {
+    let f = fs::OpenOptions::new().write(true).open(home.join(rel)).unwrap();
+    f.set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(days * 86_400)).unwrap();
+}
+
+/// The per-instance cursor files an older build left: two stale instance files of `w1` (the lagging one pins the floor, so both would be
+/// evicted), one fresh one (a live reader), a lone stale nd file (a plain delete), a stale instance file at the shared position (a plain
+/// delete), a name that is not ours (never touched).
+fn seed_hygiene(home: &Path) {
+    let c = ".anti-hall/devswarm/cursors";
+    for (name, body, days) in [
+        ("w1.json", "5", 0),
+        ("w1#base.json", "2", 0),
+        ("w1#inst-aaaaaa.json", "3", 10),
+        ("w1#inst-bbbbbb.json", "7", 10),
+        ("w1#inst-cccccc.json", "9", 0),
+        ("w2#nd-dddddd.json", "1", 10),
+        ("w3.json", "4", 0),
+        ("w3#inst-eeeeee.json", r#"{"line":4}"#, 10),
+        ("junk#inst-ZZZZZZ.json", "1", 10),
+    ] {
+        put(home, &format!("{c}/{name}"), body);
+        if days > 0 {
+            age(home, &format!("{c}/{name}"), days);
+        }
+    }
+}
+
 // ---- the picture of a world ----------------------------------------------------------------------------------------------
 
 fn near_now(v: i64) -> bool {
@@ -409,6 +443,9 @@ impl Case {
             "reader-cursors-import" => "readerCursorsImport",
             "reader-floor-repair" => "repairReaderFloors",
             "dual-partition-acks" => "reconcileDualPartitionAcks",
+            "cursor-hygiene" => "cursorHygiene",
+            "merge-split-backend-stores" => "mergeSplitBackendStores",
+            "child-sender-labels" => "repairChildSenderLabels",
             _ => "none",
         }
     }
@@ -504,6 +541,11 @@ case!(dual_acks_raise_the_twin_partition_through_what_was_already_read, "dual-pa
 case!(dual_acks_preview_writes_nothing, "dual-partition-acks", "dry_run", "dual-partition-acks", "dualPartitionAcks", "dualPartitionAcksPostUpdate", seed_dual, live: false, markers: false);
 case!(dual_acks_already_done_is_skipped, "dual-partition-acks", "already_done", "dual-partition-acks", "dualPartitionAcks", "dualPartitionAcksPostUpdate", seed_dual, live: true, markers: true);
 
+case!(hygiene_counts_what_the_old_pass_would_have_removed, "cursor-hygiene", "bad_state", "cursor-hygiene", "cursorHygiene", "cursorHygienePostUpdate", seed_hygiene, live: true, markers: false);
+case!(hygiene_is_the_same_under_the_ingest_dry_run_switch, "cursor-hygiene", "dry_run", "cursor-hygiene", "cursorHygiene", "cursorHygienePostUpdate", seed_hygiene, live: false, markers: false);
+case!(hygiene_already_done_is_skipped, "cursor-hygiene", "already_done", "cursor-hygiene", "cursorHygiene", "cursorHygienePostUpdate", seed_hygiene, live: true, markers: true);
+case!(hygiene_with_no_cursors_directory_counts_nothing, "cursor-hygiene", "no_dir", "cursor-hygiene", "cursorHygiene", "cursorHygienePostUpdate", seed_nothing, live: true, markers: false);
+
 case!(promote_turns_a_marker_into_the_heartbeat_session, "promote-unclaimed", "bad_state", "promote-unclaimed", "promoteUnclaimed", "promoteUnclaimedPostUpdate", seed_promote, live: true, markers: false);
 case!(promote_ignores_the_ingest_dry_run_switch_like_node, "promote-unclaimed", "dry_run_switch", "promote-unclaimed", "promoteUnclaimed", "promoteUnclaimedPostUpdate", seed_promote, live: false, markers: false);
 
@@ -538,7 +580,7 @@ fn a_stage_switched_off_reports_itself_skipped_and_touches_nothing() {
     let out = run_engine(&w, &o, &["--post-pull-only"]);
     let status: Value = serde_json::from_str(out.stdout.lines().next().unwrap()).unwrap();
     let status = &status["status"];
-    for (key, name) in [("readerCursorsImport", "reader-cursors-import"), ("readerFloorRepair", "reader-floor-repair"), ("dualPartitionAcks", "dual-partition-acks"), ("promoteUnclaimed", "promote-unclaimed")] {
+    for (key, name) in [("readerCursorsImport", "reader-cursors-import"), ("readerFloorRepair", "reader-floor-repair"), ("dualPartitionAcks", "dual-partition-acks"), ("promoteUnclaimed", "promote-unclaimed"), ("cursorHygiene", "cursor-hygiene")] {
         let a = &status[key];
         assert_eq!(a["attempted"], json!(false), "{key}: {a}");
         assert_eq!(a["disabled"], json!(true), "{key}: {a}");
@@ -636,5 +678,24 @@ fn the_repairs_leave_a_store_needing_the_node_fallback_untouched() {
         assert!(calls[0].contains(func), "{row}: {calls:?}");
         let after = picture(&w, Value::Null, None);
         assert_eq!(before["stores"], after["stores"], "{row}: the engine wrote to a store it handed to Node");
+    }
+}
+
+/// The hygiene pass is report-only (as in Node since the mesh redesign): every cursor file is still there, byte for byte.
+#[test]
+fn hygiene_removes_and_rewrites_nothing() {
+    let o = Opt { ds: true, no_upstream_move: true, live: true, no_node: true, stage_only: Some("cursor-hygiene"), ..Opt::default() };
+    let w = world(&o);
+    seed_hygiene(&w.home);
+    let before = picture(&w, Value::Null, None);
+    let ans = engine_answer(&w, &o, "cursorHygiene");
+    assert_eq!(ans["evicted"], json!(2), "{ans}");
+    assert_eq!(ans["deleted"], json!(2), "{ans}");
+    let after = picture(&w, Value::Null, None);
+    for (f, body) in before["files"].as_object().unwrap() {
+        if f.contains("update-sweep-state") || f.contains("cursor-log") {
+            continue;
+        }
+        assert_eq!(after["files"].get(f), Some(body), "cursor-hygiene: file {f} changed or vanished");
     }
 }

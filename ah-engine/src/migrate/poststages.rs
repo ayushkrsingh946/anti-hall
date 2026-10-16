@@ -49,6 +49,7 @@ pub(crate) fn run(ctx: &Ctx, which: &str, dry: bool) -> Option<Tally> {
     let home = Path::new(&ctx.home);
     let t = match which {
         "promote_unclaimed" => super::promote::promote_unclaimed(ctx),
+        "cursor_hygiene" => Some(super::cursorhyg::run(ctx)),
         _ => {
             let hashes = stores(ctx)?;
             let mut cx = Cx::new(&ctx.home);
