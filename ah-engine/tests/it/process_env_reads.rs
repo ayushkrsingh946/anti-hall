@@ -13,6 +13,7 @@ const ALLOW: &[(&str, &str)] = &[
         "src/daemonenv.rs",
         "the daemon's start-up sanitising (`sanitize`): it lists the process environment once, before any thread exists, only to REMOVE every variable that is not on `daemon.spawn_env_allow`, so no request is ever answered from the starting session's values",
     ),
+    ("src/memdiag.rs", "the daemon's own environment, once at start: whether the allocator already got its tuning from the variables a starter set"),
     ("src/client.rs", "the hook client process: its environment IS the host's; reads the Node path and the fallback command"),
     (
         "src/checks/mcp_reaper/sys.rs",

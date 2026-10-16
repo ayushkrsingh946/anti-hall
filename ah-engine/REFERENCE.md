@@ -454,6 +454,11 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `daemon.lock_wait_ms` | `1500` |  | ms | How long a starting daemon waits for an outgoing (version-handoff) daemon to release the singleton lock. |
 | `daemon.malloc_conf` | `narenas:1,dirty_decay_ms:0,muzzy_decay_ms:0` |  |  | Allocator purge tuning handed to the daemon at start (jemalloc `malloc_conf` syntax): one arena for the four worker threads (less fragmentation) and decay 0 (freed pages go back to the OS at once; the system allocators keep them, which left RSS at 2.5x the live heap). Measured on 1000 mixed calls, this Mac: system allocator 45-48 MB RSS, jemalloc with only decay 0 37 MB, with narenas:1 as well 32 MB (live heap 16 MB), adding tcache:false 27 MB but p50 call latency 10 ms against 6.5-7 ms, so tcache stays on. empty = the allocator's own defaults. A variable the caller already set is not overridden. |
 | `daemon.malloc_conf_vars` | `_RJEM_MALLOC_CONF, MALLOC_CONF` |  |  | Environment variables the allocator reads its tuning from (the crate's prefixed name and the plain one). |
+| `daemon.malloc_decay_keys` | `dirty_decay_ms, muzzy_decay_ms` |  |  | The decay settings of `daemon.malloc_conf` that a daemon started without the tuning in its environment (a launchd or systemd unit, a replay or test driver) applies to the running allocator; each is also the name of the allocator control under `arenas.` and `arena.<all>.`. `narenas` is not among them: it cannot change once the allocator runs. |
+| `daemon.malloc_decay_kind` | `malloc_decay` |  |  | Event-log kind of the line written when the daemon applies (or cannot apply) the allocator decay settings at start. |
+| `daemon.malloc_decay_why_error` | `the allocator refused {key} (error {rc})` |  |  | Reason logged when the allocator refused a decay setting. Placeholders: {key}, {rc} (the allocator's error number). |
+| `daemon.malloc_decay_why_none` | `daemon.malloc_conf holds no decay setting` |  |  | Reason logged when `daemon.malloc_conf` holds none of `daemon.malloc_decay_keys`. |
+| `daemon.malloc_decay_why_system` | `the system allocator is active` |  |  | Reason logged when the decay settings are not applied because the system allocator is active. |
 | `daemon.max_request` | `1048576` | `AH_ENGINE_MAX_REQUEST` | bytes | Largest request the daemon reads; the client sends nothing larger (it falls back instead). |
 | `daemon.mem_mb` | `512` | `AH_ENGINE_MEM_MB` | MB | Data-segment limit applied with setrlimit; 0 = none. It is a ceiling against runaway allocation, not a budget (the RSS cap is the budget), and Linux enforces it on thread stacks, so it must exceed daemon.workers times git.stack_mb plus headroom or a check thread cannot start. macOS does not support RLIMIT_DATA here, so the daemon reports unsupported and relies on the RSS/footprint cap. |
 | `daemon.mem_metric` | `footprint` |  |  | Which figure `daemon.rss_cap_kb` is compared with: `footprint` (the process's own memory: macOS physical footprint, Linux RssAnon + RssShmem; shared and reclaimable file pages are not counted) or `rss` (the kernel's resident set, which also counts shared code pages touched over time and made the daemon restart without a real leak). Falls back to the resident set where the platform has no footprint. |
@@ -9847,14 +9852,17 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `units.out_present` | `present` |  |  | Status outcome: the file is there. |
 | `units.out_refused` | `refused` |  |  | Outcome: a service-manager command refused under a test or a temporary home. |
 | `units.plist_arg` | `    <string>{arg}</string>` |  |  | One ProgramArguments entry of the LaunchAgent. {arg}. |
+| `units.plist_env` | `  <key>EnvironmentVariables</key>\n  <dict>\n{entries}\n  </dict>\n` |  |  | The EnvironmentVariables block of the LaunchAgent, written when the engine has allocator tuning to hand its daemon (`daemon.malloc_conf`; the daemon reads it before its first allocation, and a unit is a starter that otherwise gives it none). {entries} is one units.plist_env_entry per variable. |
+| `units.plist_env_entry` | `    <key>{name}</key>\n    <string>{value}</string>` |  |  | One variable of the LaunchAgent's EnvironmentVariables. {name} {value}, both XML-escaped. |
 | `units.plist_log` | `/dev/null` |  |  | Where launchd sends the unit's stdout and stderr (the daemon writes its own log). |
 | `units.plist_suffix` | `.plist` |  |  | The file name suffix of a launchd unit. |
-| `units.plist_template` | `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD...` |  |  | The LaunchAgent of the engine unit. {label} {args} (one units.plist_arg per argument) {interval} {log}; every value is XML-escaped. |
+| `units.plist_template` | `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD...` |  |  | The LaunchAgent of the engine unit. {label} {args} (one units.plist_arg per argument) {env} (the units.plist_env block, or nothing) {interval} {log}; every value is XML-escaped. |
 | `units.reason_sep` | ` - ` |  |  | Between the outcome and the reason in a report line. |
 | `units.retired_subdir` | `retired` |  |  | Where moved-aside unit files go, inside the units directory: `<file name>.<epoch ms>`. |
 | `units.serve_args` | `serve` |  |  | The arguments the unit gives the engine binary. |
+| `units.service_env` | `Environment="{name}={value}"` |  |  | One Environment line of the systemd service: the allocator tuning (`daemon.malloc_conf`) for the daemon the unit starts, double-quoted with the systemd escapes applied. {name} {value}. |
 | `units.service_suffix` | `.service` |  |  | The file name suffix of a systemd service. |
-| `units.service_template` | `[Unit]\nDescription=anti-hall engine daemon (starts it when none is running)\...` |  |  | The systemd user service of the engine unit. {exec} is the quoted command line. |
+| `units.service_template` | `[Unit]\nDescription=anti-hall engine daemon (starts it when none is running)\...` |  |  | The systemd user service of the engine unit. {exec} is the quoted command line; {env} is one units.service_env line per variable, or nothing. |
 | `units.stage_name` | `units-heal` |  |  | The progress name of update's units heal stage. |
 | `units.state_subdir` | `units` |  |  | The units directory inside the engine state directory (ledger, lock, retired files). The reaper opt-in marker is mcp_reaper.job_optin_rel. |
 | `units.sub_heal` | `heal` |  |  | The subcommand that installs the engine unit and retires the Node units whose duty the engine runs (what update and doctor --repair call). |
@@ -9951,6 +9959,8 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `diagnostics.budget_cpu_pct` | `2` |  | % | CPU budget of the daemon, percent of one core. A breach is reported when the CPU over diagnostics.budget_cpu_windows consecutive daemon.cpu_check_ms windows stays at or above it; 0 turns the CPU budget off. |
 | `diagnostics.budget_cpu_windows` | `2` |  |  | Consecutive daemon.cpu_check_ms windows over the CPU budget that make a breach (one busy window is a burst, not a breach). |
 | `diagnostics.budget_mem_mb` | `100` |  | MB | Memory budget of the daemon in MB, measured with the figure daemon.mem_metric selects. A breach is reported while the daemon is over it; 0 turns the memory budget off. |
+| `diagnostics.check_mem` | `true` |  |  | Measure the bytes each check allocates (total, peak growth, kept) from per-thread counters in the counting allocator. Off also stops the counting in the allocator. Cost is a few nanoseconds per allocation. |
+| `diagnostics.check_mem_sample_every` | `1` |  |  | Measure every Nth check call (1 = every call). Raise it only if the measured cost of the per-thread counters becomes a problem. |
 | `diagnostics.debug_flag` | `--debug` |  |  | The command-line flag that turns debug mode on for one `serve` or `hook` process. |
 | `diagnostics.debug_log_max_bytes` | `8388608` |  | bytes | Size at which the debug log is rotated (the old file is kept once, as <name>.1, replacing the previous one), so it never holds more than twice this. |
 | `diagnostics.debug_mem_snapshot_ms` | `30000` |  | ms | In debug mode, how often the watchdog writes a memory line (resident set, footprint, allocator and component sizes) to the debug log; in normal mode memory is only snapshotted when the resident-set cap trips. |
@@ -10011,7 +10021,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `mem.evidence_cache_hard_bytes` | `20971520` |  | bytes | Bytes of kept transcript evidence at which an insert is refused (the answer is returned, not kept) and the cache is recycled. |
 | `mem.evidence_cache_low_water_pct` | `80` |  |  | Percent of mem.evidence_cache_soft_bytes the kept transcript evidence is evicted down to when the soft limit is reached. |
 | `mem.evidence_cache_soft_bytes` | `10485760` |  | bytes | Bytes of kept transcript evidence held before the least recently used are dropped down to the low-water mark. |
-| `mem.evidence_walk_hard_bytes` | `25165824` |  | bytes | Bytes of kept evidence walks at which an insert is refused (the check defers) and the cache is recycled. |
+| `mem.evidence_walk_hard_bytes` | `25165824` |  | bytes | Bytes of kept evidence walks at which an insert is refused and the cache is recycled; the worker thread still keeps its one walk, so the check never defers for it. |
 | `mem.evidence_walk_low_water_pct` | `80` |  |  | Percent of mem.evidence_walk_soft_bytes the kept evidence walks are evicted down to when the soft limit is reached. |
 | `mem.evidence_walk_soft_bytes` | `12582912` |  | bytes | Bytes of kept evidence walks (the claim ledger's joined evidence text) held before the least recently used are dropped down to the low-water mark. |
 | `mem.global_hard_bytes` | `125829120` |  | bytes | Process memory above which every holder is recycled and every cache insert is refused. If it is still above this `mem.global_restart_after_s` later, the daemon is asked to restart cleanly and the reason is recorded in the event log. |
@@ -10039,6 +10049,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `mem.key_cache_low_water_pct` | `80` |  |  | Percent of mem.key_cache_soft_bytes cwd-to-project keys are evicted down to when the soft limit is reached. |
 | `mem.key_cache_max_entries` | `4096` |  |  | Cwd-to-project cache entries kept at most; past it the least recently used cwd is dropped first. |
 | `mem.key_cache_soft_bytes` | `262144` |  | bytes | Estimated bytes of cached cwd-to-project keys held before least recently used paths are evicted down to the low-water mark. |
+| `mem.ledger_skew_bytes` | `262144` |  | bytes | Slack in the memory ledger's invariant (the named holders must fit inside the counted Rust heap): the holders and the heap are read a few microseconds apart while other threads allocate, so a holder total up to this much over the heap is not reported as an overcount. |
 | `mem.msg_exit_reason` | `memory: {holder} over its hard limit ({usage} over {limit} bytes) for {secs} ...` |  |  | Exit reason recorded when the daemon restarts because memory stayed over a hard limit. Placeholders: holder, usage, limit, secs. |
 | `mem.msg_hard` | `{holder} crossed its hard memory limit ({usage} over {limit} bytes): inserts ...` |  |  | Event-log line when a holder crosses its hard limit (the insert is refused and the holder recycled). Placeholders: holder, usage, limit. |
 | `mem.msg_restart` | `{holder} stayed over its hard memory limit ({usage} over {limit} bytes) after...` |  |  | Event-log line when a clean restart is requested because memory stayed over a hard limit. Placeholders: holder, usage, limit. |
@@ -10447,6 +10458,8 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `msg.log_hung_spared` | Log detail when a client declines to end a daemon it found hung, because the heartbeat moved, or the process generation (pid, start time, executable, state dir) could not be confirmed. {pid} = the pid the heartbeat names, {why} = the stale-heartbeat detail. |
 | `msg.log_lock_fail` | Start-failure detail when the lock file cannot be opened. Placeholders: {path}, {err}. |
 | `msg.log_lock_no_daemon` | Log detail when a starting daemon gives up on the singleton lock while no daemon answers on the socket. Placeholders: {path}, {pid} (the pid the lock file names, may be empty), {live_engine}. |
+| `msg.log_malloc_decay_applied` | Event-log detail (kind malloc_decay) when the daemon, started without the allocator tuning in its environment, applied the decay settings of daemon.malloc_conf at runtime. Placeholder: {settings} (key=value list). |
+| `msg.log_malloc_decay_skipped` | Event-log detail (kind malloc_decay) when the allocator decay settings could not be applied at start; the daemon runs with the allocator's own defaults. Placeholder: {reason}. |
 | `msg.log_not_socket` | Start-failure detail when something other than a socket sits at the socket path. Placeholder: {path}. |
 | `msg.log_operator_reset` | Log detail for `reset`. |
 | `msg.log_panic` | Log and failure detail when a request handler panicked. |
