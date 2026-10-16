@@ -84,3 +84,13 @@ fn the_stop_checks_ask_the_host_for_the_lines_they_parse() {
         assert!(!get(f).contains("tail.split("), "{f} splits a transcript tail in the interpreter");
     }
 }
+
+/// The claim ledger (Stop, every turn) asks the host to walk the evidence window (`ah.transcript.evidenceWalk`) and to query the
+/// result; it never materialises the window's items in the interpreter (QuickJS parsing and walking them was ~80% of its 6.6 ms).
+#[test]
+fn the_claim_ledger_walks_the_evidence_in_the_host_not_in_the_interpreter() {
+    let all = scripts();
+    let src = all.iter().find(|(r, _)| r == "claim-ledger.js").map(|(_, s)| s.as_str()).unwrap();
+    assert!(!src.contains("ah.transcript.evidence("), "claim-ledger.js pulls the evidence window into QuickJS; use ah.transcript.evidenceWalk");
+    assert!(src.contains("ah.transcript.evidenceWalk("), "claim-ledger.js must walk the evidence with ah.transcript.evidenceWalk");
+}

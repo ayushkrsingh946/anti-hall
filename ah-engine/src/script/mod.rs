@@ -42,6 +42,7 @@
 // A failure that must be seen goes through `crate::discard` instead.
 
 pub mod evidence_cache;
+pub mod evidence_walk;
 pub mod host;
 pub mod host_b3;
 pub mod host_shell;

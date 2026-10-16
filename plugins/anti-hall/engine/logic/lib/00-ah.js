@@ -182,6 +182,16 @@ var ah = {
     // The text evidence of the last windowBytes of a transcript: null (unreadable), {unsure: true}, or {truncated, items: [[kind, text, id?]]}
     // with kind p (a user prompt), r (a tool result), a (an attachment), i (a tool call's input), t (assistant text, with the message id).
     evidence: function (p, windowBytes) { var r = ahHost.transcriptEvidence(p, windowBytes || 0); return r === null || r === undefined ? null : JSON.parse(r); },
+    // The engine walks the evidence of the last windowBytes (what `evidence` lists, merged and joined as a reply check needs) and keeps
+    // the two big texts: null (unreadable), {unsure: true}, {truncated, walked: false} (no reply and no payloadText), or
+    // {truncated, walked: true, lastText, toolsThisTurn, toolsAtEnd, evidenceChars, withLastChars} (lengths in UTF-16 units).
+    // payloadText (a string or null): replies it already holds (NFC, white space collapsed) are left out of the evidence, and a window
+    // with no reply still walks. The next two questions are about the walk this call made.
+    evidenceWalk: function (p, windowBytes, payloadText) { var r = ahHost.transcriptEvidenceWalk(p, windowBytes || 0, payloadText === undefined ? null : payloadText); return r === null || r === undefined ? null : JSON.parse(r); },
+    // `which` is 'evidence' or 'withLast' (the evidence and the last reply): is `needle` in that text (indexOf >= 0)?
+    walkHas: function (which, needle) { return ahHost.transcriptWalkHas(which, needle); },
+    // The same sorted array `ah.re.numbers(src, flags, text, strip)` gives on that text.
+    walkNumbers: function (which, src, flags, strip) { return JSON.parse(ahHost.transcriptWalkNumbers(which, src, flags || '', strip || '')); },
     // Finished-but-not-stopped named teammates of a Claude transcript tail: null, {unsure: true} or {teammates: [{name, idleSinceMs}]}.
     teammates: function (p, tailBytes) { var r = ahHost.transcriptTeammates(p, tailBytes || 0); return r === null || r === undefined ? null : JSON.parse(r); },
     // Finished-but-not-closed agents of a Codex rollout tail: null, {unsure: true} or {agents: [{id, label, idleSinceMs}]}.

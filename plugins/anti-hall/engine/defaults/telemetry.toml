@@ -293,6 +293,10 @@ value = { kind = "histogram", unit = "us", labels = ["event"] }
 doc = "Transcript evidence lookups (claim-ledger and other `ah.transcript.evidence` callers): hit (nothing appended), extend (only the appended bytes were read) or rebuild (the window was read afresh)."
 value = { kind = "counter", unit = "lookups", labels = ["result"] }
 
+[metric.evidence_walk]
+doc = "Evidence walks (the claim ledger's `ah.transcript.evidenceWalk`) the memory registry refused to keep, so the check deferred."
+value = { kind = "counter", unit = "walks", labels = ["result"] }
+
 [metric.evidence_cache_rebuild]
 doc = "Why a transcript evidence lookup read its window afresh: none (nothing kept: first call, daemon restart, eviction or idle expiry), file (another file or a shorter one), window (the window moved past the kept lines) or digest (the file was rewritten in place)."
 value = { kind = "counter", unit = "lookups", labels = ["reason"] }
