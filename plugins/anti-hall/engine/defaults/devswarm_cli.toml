@@ -2887,6 +2887,18 @@ value = "send --to {to} is not a registered mesh workspace"
 doc = "The reason word of that refusal."
 value = "unregistered-recipient"
 
+[devswarm_cli.msg_send_prefix_ambiguous]
+doc = "The refusal of a send whose `--to` is a prefix of several registered workspace ids: `{to}` is the recipient, quoted; `{candidates}` the full ids."
+value = "send --to {to} is a prefix of more than one registered workspace id ({candidates}) \u2014 nothing sent; address one full id"
+
+[devswarm_cli.reason_ambiguous_recipient]
+doc = "The reason word of that refusal."
+value = "ambiguous-recipient"
+
+[devswarm_cli.send_prefix_candidates_sep]
+doc = "The separator between the candidate ids in that refusal."
+value = ", "
+
 [devswarm_cli.msg_send_primary_unregistered]
 doc = "The refusal of `send --to-primary` when the project has no registered Primary."
 value = "send --to-primary: no registered Primary workspace for this project (run `register-primary` first)"

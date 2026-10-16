@@ -65,12 +65,28 @@ pub fn resolve_mesh_target(rows: &[Row], mesh_id: Option<&str>) -> R<Option<Row>
     }
 }
 
+/// What `--to` named.
+enum Resolved {
+    /// The recipient's registry row.
+    Row(Row),
+    /// No row by mesh id, id or id prefix.
+    Unregistered,
+    /// Several rows share the id prefix: the full ids, sorted.
+    AmbiguousPrefix(Vec<String>),
+}
+
+impl Resolved {
+    fn from_row(r: Option<Row>) -> Self {
+        r.map_or(Resolved::Unregistered, Resolved::Row)
+    }
+}
+
 /// `resolveSendTarget(store, arg, home, { rerouteStaleTwin: true })` where it needs no liveness and no redirect: `None` is the
 /// unregistered recipient (no row by mesh id or by id, and no retired-redirect to follow).
-fn resolve_send_target(inv: &Inv, rows: &[Row], arg: &str) -> R<Option<Row>> {
+fn resolve_send_target(inv: &Inv, rows: &[Row], arg: &str) -> R<Resolved> {
     let by_mesh = resolve_mesh_target(rows, Some(arg))?;
     if arg.is_empty() {
-        return Ok(by_mesh);
+        return Ok(Resolved::from_row(by_mesh));
     }
     let id_matches: Vec<&Row> = rows.iter().filter(|d| !d.id.is_empty() && d.id == arg).collect();
     match id_matches.len() {
@@ -87,13 +103,13 @@ fn resolve_send_target(inv: &Inv, rows: &[Row], arg: &str) -> R<Option<Row>> {
                     return defer("ambiguous-recipient");
                 }
                 if same_group && !same_row {
-                    return Ok(Some(b.clone()));
+                    return Ok(Resolved::Row(b.clone()));
                 }
             }
             // staleTwinSuccessor: proven inert only when the row has no session, a synthetic one, or its own id as session
             let sid = row.session_id.as_deref().unwrap_or("");
             if sid.is_empty() || sid.starts_with(defaults::text("mesh_write.synthetic_session_prefix")) || sid == row.id {
-                return Ok(Some(row.clone()));
+                return Ok(Resolved::Row(row.clone()));
             }
             defer("stale-twin")
         }
@@ -101,7 +117,19 @@ fn resolve_send_target(inv: &Inv, rows: &[Row], arg: &str) -> R<Option<Row>> {
             if by_mesh.is_none() && retired_redirect_exists(inv, arg) {
                 return defer("retired-redirect"); // one hop through a fold-time redirect is Node's
             }
-            Ok(by_mesh)
+            if by_mesh.is_some() {
+                return Ok(Resolved::from_row(by_mesh));
+            }
+            // GH #203: the roster shows only a short id, so a unique id prefix is the recipient
+            let mut hits: Vec<&Row> = rows.iter().filter(|d| !d.id.is_empty() && d.id.starts_with(arg)).collect();
+            match hits.len() {
+                0 => Ok(Resolved::Unregistered),
+                1 => resolve_send_target(inv, rows, &hits[0].id.clone()),
+                _ => {
+                    hits.sort_by(|a, b| a.id.cmp(&b.id));
+                    Ok(Resolved::AmbiguousPrefix(hits.iter().map(|d| d.id.clone()).collect()))
+                }
+            }
         }
         _ => defer("ambiguous-recipient"),
     }
@@ -565,8 +593,13 @@ pub(crate) fn cmd_send_mode(inv: &Inv, a: &Args, plan: bool) -> R<Obj> {
         }
     } else {
         match resolve_send_target(inv, &rows, to_flag.unwrap_or_default())? {
-            Some(t) => Some(t),
-            None => {
+            Resolved::Row(t) => Some(t),
+            Resolved::AmbiguousPrefix(ids) => {
+                let list = ids.join(defaults::text("devswarm_cli.send_prefix_candidates_sep"));
+                let msg = defaults::render("devswarm_cli.msg_send_prefix_ambiguous", &[("to", &quote(to_flag.unwrap_or_default())), ("candidates", &list)]);
+                return Ok(refused(&[("reason", s(defaults::text("devswarm_cli.reason_ambiguous_recipient"))), ("error", s(&msg))]));
+            }
+            Resolved::Unregistered => {
                 let msg = defaults::render("devswarm_cli.msg_send_unregistered", &[("to", &quote(to_flag.unwrap_or_default()))]);
                 return Ok(refused(&[("reason", s(defaults::text("devswarm_cli.reason_unregistered_recipient"))), ("error", s(&msg))]));
             }

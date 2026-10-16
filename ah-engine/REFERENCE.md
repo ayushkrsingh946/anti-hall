@@ -8326,6 +8326,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_cli.msg_send_multi_failed` | `{failed} of {total} recipient(s) failed` |  |  | The summary error of a multi-recipient send where some failed: `{failed}` of `{total}`. |
 | `devswarm_cli.msg_send_multi_row_failed` | `send failed` |  |  | The error of a multi-recipient row whose result names neither an error nor a reason. |
 | `devswarm_cli.msg_send_no_project` | `send must run from inside a git worktree of a DevSwarm project (the mesh stor...` |  |  | send's refusal outside a project. |
+| `devswarm_cli.msg_send_prefix_ambiguous` | `send --to {to} is a prefix of more than one registered workspace id ({candida...` |  |  | The refusal of a send whose `--to` is a prefix of several registered workspace ids: `{to}` is the recipient, quoted; `{candidates}` the full ids. |
 | `devswarm_cli.msg_send_primary_unregistered` | `send --to-primary: no registered Primary workspace for this project (run `reg...` |  |  | The refusal of `send --to-primary` when the project has no registered Primary. |
 | `devswarm_cli.msg_send_question_broadcast` | `send --question is only valid for a direct message (--to/--to-primary), not -...` |  |  | send's refusal of --question on a broadcast. |
 | `devswarm_cli.msg_send_self` | `send --to{suffix} cannot address the sender itself` |  |  | send's refusal of a message to the sender itself. {suffix} is `-primary` for --to-primary. |
@@ -8410,6 +8411,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_cli.reap_skip_activity` | `recent-activity` |  |  | The reason reap-stale spares a workspace with a recent commit. |
 | `devswarm_cli.reap_skip_heartbeat` | `fresh-heartbeat` |  |  | The reason reap-stale spares a workspace with a fresh heartbeat. |
 | `devswarm_cli.reap_stale_states` | `stale, escalated` |  |  | The persisted verdict statuses that nominate a workspace for reaping. |
+| `devswarm_cli.reason_ambiguous_recipient` | `ambiguous-recipient` |  |  | The reason word of that refusal. |
 | `devswarm_cli.reason_ctx_mismatch` | `project-context-mismatch` |  |  | The `reason` of a verb that names a workspace registered under another project. |
 | `devswarm_cli.reason_done_no_identity` | `no-identity` |  |  | The reason of `done` that could not resolve the caller's id. |
 | `devswarm_cli.reason_done_not_own` | `not-own-workspace` |  |  | The reason of `done` naming a workspace that is not the caller's. |
@@ -8536,6 +8538,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_cli.send_cc_target` | `primary` |  |  | The log target id of the copy to the Primary. |
 | `devswarm_cli.send_fs_errors` | `4 entries` |  |  | The message JavaScript gives for a failed read of the message file, by operating system error number; `{path}` is the path in single quotes. An error not listed here is left to Node. |
 | `devswarm_cli.send_multi_type` | `multi` |  |  | The `type` of the result of a send to several recipients. |
+| `devswarm_cli.send_prefix_candidates_sep` | `, ` |  |  | The separator between the candidate ids in that refusal. |
 | `devswarm_cli.send_self_primary_suffix` | `-primary` |  |  | What --to-primary adds to `--to` in that refusal. |
 | `devswarm_cli.set_spawn_strict` | `6 entries` |  |  | Whether spawn refuses a create option with no value or an option-shaped value. Node: devswarm.spawnStrictFlagValues. |
 | `devswarm_cli.short_max` | `100` |  |  | Longest line of the short index, in UTF-16 units; a longer synopsis is cut and ends with the ellipsis. |
