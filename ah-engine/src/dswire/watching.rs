@@ -20,6 +20,9 @@ use std::time::{Duration, Instant};
 pub enum Role {
     /// A source of the workspace state: a change is a hint to reconcile.
     State,
+    /// The workspace heartbeats: a hint to reconcile, except the beat of a workspace the state calls working (see
+    /// [`plan_with`]), which cannot change anything the reconcile derives.
+    Beat,
     /// A workspace's transcript directory: a change dirties that workspace for Jev.
     Transcript(String),
     /// A workspace's git directory: a commit or checkout dirties that workspace for Jev.
@@ -34,8 +37,11 @@ pub fn wanted(w: &Wire, cfg: &Config) -> Vec<(PathBuf, Filter, Role)> {
     // files a sibling daemon writes into the state directories that no reconcile reads (its heartbeat every ~2 s was 76 % of
     // all hints in the live19 profile): not hints
     let ignore: Vec<String> = defaults::list("devswarm_wire.state_ignore_prefixes").into_iter().map(|k| defaults::text(k).to_string()).collect();
+    // a writer's staged temp file (`x.json.tmp.<pid>`) is never the event: its rename to the real name is
+    let temp: Vec<String> = defaults::list("devswarm_wire.state_ignore_contains").into_iter().map(|k| defaults::text(k).to_string()).collect();
     for k in defaults::list("devswarm_wire.watch_state_dirs") {
-        out.push((root.join(defaults::text(k)), cfg.all_but_prefixed(ignore.clone()), Role::State));
+        let role = if k == defaults::text("devswarm_wire.beat_dir_key") { Role::Beat } else { Role::State };
+        out.push((root.join(defaults::text(k)), cfg.all_but(ignore.clone(), temp.clone()), role));
     }
     let snap = w.rt.current();
     let descs = facts::descriptors_with(&w.home, Some(w.rt.read_cache())); // read once for every workspace
@@ -102,16 +108,34 @@ pub struct Plan {
     pub dirty: Vec<String>,
     /// The transcript files that changed, by workspace (the transcript gate decides whether they count).
     pub transcripts: Vec<(String, PathBuf)>,
+    /// Heartbeats in the batch that were not a hint (their workspace is working and a beat cannot change that).
+    pub quiet_beats: usize,
 }
 
 /// Classify a batch against the watched directories.
 pub fn plan(have: &HashMap<PathBuf, Role>, rescan: bool, paths: &[PathBuf]) -> Plan {
+    plan_with(have, rescan, paths, &|_| false)
+}
+
+/// [`plan`], where `quiet(id)` says that a heartbeat of workspace `id` cannot change the state (the state calls the workspace
+/// working: a newer beat leaves it working, and the silence deadline check re-reads the beat when the clock runs out). Any other
+/// beat (a stuck or unknown workspace, one the state does not know yet) is a hint, so a real change is never missed.
+pub fn plan_with(have: &HashMap<PathBuf, Role>, rescan: bool, paths: &[PathBuf], quiet: &dyn Fn(&str) -> bool) -> Plan {
     let mut p = Plan::default();
     if rescan {
         p.reconcile = Some(Cause::Overflow);
     }
     for path in paths {
         match path.parent().and_then(|d| have.get(d)) {
+            Some(Role::Beat) => {
+                let name = path.file_name().map(|n| n.to_string_lossy()).unwrap_or_default();
+                let id = name.strip_suffix(defaults::text("mesh_write.json_suffix"));
+                if id.is_some_and(quiet) {
+                    p.quiet_beats += 1;
+                } else if p.reconcile.is_none() {
+                    p.reconcile = Some(Cause::Event);
+                }
+            }
             Some(Role::State) if p.reconcile.is_none() => p.reconcile = Some(Cause::Event),
             Some(Role::Transcript(id)) => {
                 p.transcripts.push((id.clone(), path.clone()));
@@ -142,6 +166,8 @@ pub mod work {
     pub static STORE_COMMITS: AtomicU64 = AtomicU64::new(0);
     /// Transcript events the gate did not act on (no growth, or inside the interval).
     pub static TRANSCRIPT_SKIPPED: AtomicU64 = AtomicU64::new(0);
+    /// Heartbeats of working workspaces that were not a hint to reconcile.
+    pub static QUIET_BEATS: AtomicU64 = AtomicU64::new(0);
     pub(crate) fn add(c: &AtomicU64, n: u64) {
         c.fetch_add(n, Ordering::Relaxed);
     }
@@ -155,6 +181,7 @@ pub mod work {
             ("reconciles_deferred", g(&DEFERRED)),
             ("store_commits", g(&STORE_COMMITS)),
             ("transcript_skipped", g(&TRANSCRIPT_SKIPPED)),
+            ("quiet_beats", g(&QUIET_BEATS)),
         ]
     }
 }
@@ -302,7 +329,8 @@ pub fn run(w: &Wire, stop: &dyn Fn() -> bool) {
         if let Some(batch) = l.watcher.next(sleep.max(tun.min_sleep)) {
             work::add(&work::BATCHES, 1);
             work::add(&work::PATHS, batch.paths.len() as u64);
-            let p = plan(&l.have, batch.rescan, &batch.paths);
+            let p = plan_with(&l.have, batch.rescan, &batch.paths, &|id| w.beat_is_quiet(id));
+            work::add(&work::QUIET_BEATS, p.quiet_beats as u64);
             // a transcript is gated (it only matters when it grew, and not more than once per interval); a commit is not
             let mut dirty: Vec<String> = Vec::new();
             for id in &p.dirty {

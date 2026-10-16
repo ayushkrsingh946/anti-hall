@@ -63,6 +63,15 @@ impl Wire {
         ids.iter().any(|id| snap.workspaces.get(id).is_some_and(|w| w.activity.value == Activity::Stuck))
     }
 
+    /// Whether a heartbeat of workspace `id` cannot change what a reconcile derives: the state has the workspace active and working.
+    /// A newer beat leaves it working (silence needs the beat to be OLDER than `stall_ms`), and the deadline check in
+    /// [`Wire::stall_tick`] reads the beat again when the working workspace's clock runs out, so the clock cannot be missed. A stuck
+    /// or unknown workspace, one that is not active, and one the state has never seen are not quiet: their beat is a real change.
+    pub fn beat_is_quiet(&self, id: &str) -> bool {
+        self.rt.mode() == Mode::On
+            && self.rt.current().workspaces.get(id).is_some_and(|w| w.lifecycle.value == Lifecycle::Active && w.activity.value == Activity::Working)
+    }
+
     /// One cheap pass of the stall trigger, run by the watcher loop: the deadline check and the due follow-ups.
     pub fn stall_tick(&self) {
         if self.rt.mode() != Mode::On {

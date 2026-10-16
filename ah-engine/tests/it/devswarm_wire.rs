@@ -596,6 +596,85 @@ fn an_ingest_daemon_heartbeat_is_not_a_reconcile_hint() {
     assert!(!filter.matches(std::ffi::OsStr::new("ingest-some-project-123.json")), "an ingest daemon heartbeat is not");
 }
 
+#[test]
+fn a_writers_staged_temp_name_is_not_a_reconcile_hint() {
+    let w = world("tmp-name");
+    let wire = wire(&w, &Arc::new(Stub::default()), Executor::Engine);
+    wire.reconcile(Cause::Startup);
+    let want = watching::wanted(&wire, &ah_engine::watch::Config::load());
+    for sub in ["heartbeats", "plans", "workspaces", "summaries", "archived"] {
+        let dir = w.home.join(".anti-hall/devswarm").join(sub);
+        let Some((_, filter, _)) = want.iter().find(|(d, _, _)| *d == dir) else { continue };
+        for staged in [".fb-ws-1.json.tmp.4242", "ws-1.json.tmp.17", "ws-1.tmp"] {
+            assert!(!filter.matches(std::ffi::OsStr::new(staged)), "{sub}/{staged} is a staged file, not the event");
+        }
+        assert!(filter.matches(std::ffi::OsStr::new("ws-1.json")), "{sub}: the renamed real file is");
+    }
+}
+
+#[test]
+fn only_the_beat_of_a_working_workspace_is_not_a_hint() {
+    let w = world("quiet-beat");
+    let wire = wire(&w, &Arc::new(Stub::default()), Executor::Off);
+    wire.reconcile(Cause::Startup);
+    assert!(!wire.beat_is_quiet("ws-1"), "ws-1 starts stuck (a two-hour-old beat): its next beat IS the real change");
+    assert!(!wire.beat_is_quiet("never-seen"), "a workspace the state has never seen is not quiet");
+    let want = watching::wanted(&wire, &ah_engine::watch::Config::load());
+    let have: HashMap<PathBuf, watching::Role> = want.into_iter().map(|(d, _, r)| (d, r)).collect();
+    let beat = w.home.join(".anti-hall/devswarm/heartbeats/ws-1.json");
+    let quiet = |id: &str| wire.beat_is_quiet(id);
+    assert_eq!(watching::plan_with(&have, false, std::slice::from_ref(&beat), &quiet).reconcile, Some(Cause::Event), "stuck: a hint");
+    // the workspace beats and the state follows it: working
+    write(&beat, &json!({"ts": now() - 1_000}));
+    wire.reconcile(Cause::Event);
+    assert!(wire.beat_is_quiet("ws-1"), "a working workspace's next beat cannot change the state");
+    let p = watching::plan_with(&have, false, std::slice::from_ref(&beat), &quiet);
+    assert_eq!((p.reconcile, p.quiet_beats), (None, 1), "so it is counted, not a hint");
+    // a batch with a quiet beat AND a real change still reconciles for the real change
+    let plan = w.home.join(".anti-hall/devswarm/plans/ws-1.json");
+    let p = watching::plan_with(&have, false, &[beat.clone(), plan], &quiet);
+    assert_eq!(p.reconcile, Some(Cause::Event), "a plan change in the same batch is a hint");
+    // a beat file that is not a workspace's `<id>.json` is not quiet either
+    let odd = w.home.join(".anti-hall/devswarm/heartbeats/ws-1.txt");
+    assert_eq!(watching::plan_with(&have, false, &[odd], &quiet).reconcile, Some(Cause::Event));
+    // the unchanged plan() keeps its meaning: every beat is a hint
+    assert_eq!(watching::plan(&have, false, &[beat]).reconcile, Some(Cause::Event));
+}
+
+#[test]
+fn a_working_workspaces_heartbeats_cost_no_reconciles_but_its_going_quiet_is_still_seen() {
+    let w = world("quiet-e2e");
+    let beat = w.home.join(".anti-hall/devswarm/heartbeats/ws-1.json");
+    write(&beat, &json!({"ts": now() - 1_000}));
+    let wire = Arc::new(wire(&w, &Arc::new(Stub::default()), Executor::Off));
+    let stop = Arc::new(AtomicBool::new(false));
+    let (wr, st) = (wire.clone(), stop.clone());
+    let h = std::thread::spawn(move || watching::run(&wr, &|| st.load(Ordering::SeqCst)));
+    std::thread::sleep(Duration::from_millis(1500)); // the watcher is up and the start-up run is done
+    assert!(wire.beat_is_quiet("ws-1"), "working after the start-up reconcile");
+    std::thread::sleep(Duration::from_millis(1500));
+    let before = wire.reconciles();
+    for _ in 0..20 {
+        write(&beat, &json!({"ts": now()})); // the heartbeat of a working workspace, as a temp file renamed over it
+        std::fs::write(beat.with_file_name(".fb-ws-1.json.tmp.99"), "{}").unwrap();
+        std::fs::rename(beat.with_file_name(".fb-ws-1.json.tmp.99"), beat.with_file_name("ws-1.json")).unwrap();
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    std::thread::sleep(Duration::from_millis(ah_engine::defaults::num("devswarm_wire.reconcile_min_gap_ms") + 1000));
+    let ran = wire.reconciles() - before;
+    // a real change in the same directory still reconciles: another workspace's first beat
+    write(&w.home.join(".anti-hall/devswarm/heartbeats/ws-9.json"), &json!({"ts": now()}));
+    let t0 = Instant::now();
+    while wire.reconciles() - before == ran && t0.elapsed() < Duration::from_secs(10) {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let real = wire.reconciles() - before > ran;
+    stop.store(true, Ordering::SeqCst);
+    h.join().unwrap();
+    assert_eq!(ran, 0, "twenty beats of a working workspace caused {ran} reconciles");
+    assert!(real, "a beat of a workspace the state does not know is still a hint");
+}
+
 /// Measurement, not a gate: CPU of one periodic reconcile split into the read/derive part and the action sweeps, at live weight.
 #[test]
 #[ignore = "measurement: cargo test --release --test it -- --ignored --nocapture where_a_periodic_reconcile_spends_its_cpu"]
