@@ -166,7 +166,8 @@ fn ndjson_msg(line: &str) -> R<Msg> {
         Some(v) => js_string_of(v)?,
         None => String::new(),
     };
-    let sender = match field(defaults::text("mesh_write.ndjson_from_field")) {
+    // the line's own resolved sender (pull stamps it), else its branch (a legacy line carries no sender)
+    let sender = match field(defaults::text("mesh_write.ndjson_sender_field")).or_else(|| field(defaults::text("mesh_write.ndjson_from_field"))) {
         Some(v) => Some(js_string_of(v)?),
         None => None,
     };
@@ -718,8 +719,16 @@ fn plan(inv: &Inv, a: &Args, promoted: Option<bool>) -> R<Planned> {
     let mut body_bytes = 0.0;
     let registry: std::cell::OnceCell<Vec<(String, String)>> = std::cell::OnceCell::new();
     let legacy_from = |body: &str| -> Option<String> {
-        let branch = crate::dssup::ingest::import::done_branch(body)?;
-        crate::dssup::ingest::import::branch_sender(registry.get_or_init(|| crate::dssup::ingest::import::registry_pairs(&o.reader)), &branch)
+        let reg = registry.get_or_init(|| crate::dssup::ingest::import::registry_pairs(&o.reader));
+        let named = crate::dssup::ingest::import::done_branch(body).and_then(|branch| crate::dssup::ingest::import::branch_sender(reg, &branch));
+        // #181: a stored row with no sender in a child's partition is the Primary's outbound (as ingest now stamps it)
+        named.or_else(|| {
+            let fallback = crate::dssup::ingest::import::fallback_sender(reg, id);
+            if fallback.is_some() {
+                crate::metrics::bump("mesh_sender_fallback", &[("where", defaults::text("mesh_write.sender_fallback_read"))]);
+            }
+            fallback
+        })
     };
     for m in msgs {
         let (row, len) = finish(m, &legacy_from)?;
@@ -830,5 +839,20 @@ mod tests {
         assert_eq!(base36(35), "z");
         assert_eq!(base36(36), "10");
         assert_eq!(base36(1_795_000_000_000), "mwm0nk74");
+    }
+
+    fn sender_of(m: &Msg) -> Option<String> {
+        m.fields.0.iter().find(|(k, _)| k == "sender").and_then(|(_, v)| if let OVal::Str(t) = v { Some(t.clone()) } else { None })
+    }
+
+    #[test]
+    fn an_ndjson_line_names_its_own_sender() {
+        // #181: pull stamps the resolved sender; `fromBranch` is only a branch ("main" is not an addressable id)
+        let m = ndjson_msg(r#"{"_h":"h","fromBranch":"main","message":"poke","createdAt":1,"sender":"P"}"#).unwrap();
+        assert_eq!(sender_of(&m).as_deref(), Some("P"));
+        let legacy = ndjson_msg(r#"{"_h":"h","fromBranch":"fix/x","message":"m","createdAt":1}"#).unwrap();
+        assert_eq!(sender_of(&legacy).as_deref(), Some("fix/x"), "a line with no sender keeps its branch, as before");
+        let none = ndjson_msg(r#"{"_h":"h","message":"m","createdAt":1}"#).unwrap();
+        assert_eq!(sender_of(&none), None);
     }
 }

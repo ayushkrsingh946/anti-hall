@@ -1245,7 +1245,8 @@ function cmdInboxMessagesInner(id, flags, ctx, opts) {
           ts: Number.isFinite(p.createdAt) ? p.createdAt : null,
           hash: p._h != null ? String(p._h) : null,
           body: p.message != null ? String(p.message) : '',
-          sender: p.fromBranch != null ? String(p.fromBranch) : null,
+          // the line's own resolved sender (pull stamps it), else its branch (legacy lines carry no sender)
+          sender: p.sender != null ? String(p.sender) : (p.fromBranch != null ? String(p.fromBranch) : null),
           status: p.status != null ? p.status : null,
         };
       });
@@ -1811,16 +1812,16 @@ function cmdInboxMessagesInner(id, flags, ctx, opts) {
     let legacyFrom = null;
     if (out2 && out2.sender == null && typeof out2.body === 'string') {
       const br = branchSenderLib.branchOfDoneBody(out2.body);
-      if (br) {
-        if (legacyRegistry === null) {
-          legacyRegistry = [];
-          try {
-            const rs = store.openStore({ home, workspaceId: id, hash: repoKeyForCwd(ctx) || undefined, backend: ctx.backend, env: ctx.env, readOnly: true });
-            try { legacyRegistry = rs.listRegistry() || []; } finally { rs.close(); }
-          } catch (_) { legacyRegistry = []; }
-        }
-        legacyFrom = branchSenderLib.resolveBranchSender(legacyRegistry, br);
+      if (legacyRegistry === null) {
+        legacyRegistry = [];
+        try {
+          const rs = store.openStore({ home, workspaceId: id, hash: repoKeyForCwd(ctx) || undefined, backend: ctx.backend, env: ctx.env, readOnly: true });
+          try { legacyRegistry = rs.listRegistry() || []; } finally { rs.close(); }
+        } catch (_) { legacyRegistry = []; }
       }
+      if (br) legacyFrom = branchSenderLib.resolveBranchSender(legacyRegistry, br);
+      // #181: a stored row with no sender in a child's partition is the Primary's outbound (as ingest now stamps it)
+      if (legacyFrom == null) legacyFrom = branchSenderLib.fallbackSender(legacyRegistry, id);
     }
     out2 = Object.assign({}, out2, {
       from: out2 && out2.sender != null ? out2.sender : legacyFrom,

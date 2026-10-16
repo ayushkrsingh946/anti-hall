@@ -2017,3 +2017,19 @@ max = 65536
 [metric.mesh_own_sends_excluded]
 doc = "Counts that left out unread rows the recipient's own identity family sent (an own send is not inbound mail)."
 value = { kind = "counter", unit = "counts", labels = [] }
+
+[mesh_write.sender_fallback_ingest]
+doc = "The `where` label and log word of a sender taken from the Primary because the message's branch named no registered workspace (ingest)."
+value = "ingest"
+
+[mesh_write.sender_fallback_read]
+doc = "The `where` label and log word of a sender taken from a fallback at read time (the NDJSON line's own sender, or the Primary for a NULL store row)."
+value = "read"
+
+[mesh_write.msg_sender_fallback]
+doc = "The log line when a message got its sender from a fallback instead of its own branch. {where} {id} (the partition) {n} (messages)."
+value = "mesh sender fallback: where={where}, partition={id}, messages={n}"
+
+[metric.mesh_sender_fallback]
+doc = "Messages whose sender came from a fallback instead of the message's own branch, by where: ingest (a child's queue: the Primary), read (the NDJSON line's own sender, or the Primary for a NULL store row)."
+value = { kind = "counter", unit = "messages", labels = ["where"] }
