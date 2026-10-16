@@ -47,7 +47,19 @@ struct Scene {
 }
 
 fn scene(name: &'static str, want: Want) -> Scene {
-    Scene { name, want, seed: Box::new(|_| {}), env: vec![], session: "s1", prime: false, repeat: 1, transcript: false, sub: None, codex: false, relative_transcript: false }
+    Scene {
+        name,
+        want,
+        seed: Box::new(|_| {}),
+        env: vec![],
+        session: "s1",
+        prime: false,
+        repeat: 1,
+        transcript: false,
+        sub: None,
+        codex: false,
+        relative_transcript: false,
+    }
 }
 
 impl Scene {
@@ -227,7 +239,6 @@ fn seat_marker(body: &'static str) -> impl Fn(&Path) {
     move |h| write(&ds(h).join("primary-seat/s1.json"), body)
 }
 
-
 /// Writes the project's summary: the workspaces object under `workspaces`, plus the extra top-level fields.
 fn summary_with(rows: Value, extra: Value) -> impl Fn(&Path) {
     move |h| {
@@ -397,7 +408,10 @@ fn warm_child(h: &Path) {
 
 /// Makes the summary on disk differ from what the store derives, so a refresh is visible.
 fn stale_summary(h: &Path) {
-    write(&ds(h).join(format!("summaries/{}.json", project_key(h))), r#"{"workspaces":{"stale-row":{"worktreePath":"/nowhere","sessionId":"x","directUnread":9}}}"#);
+    write(
+        &ds(h).join(format!("summaries/{}.json", project_key(h))),
+        r#"{"workspaces":{"stale-row":{"worktreePath":"/nowhere","sessionId":"x","directUnread":9}}}"#,
+    );
 }
 
 /// A session transcript of the checkout whose first record names `cwd`, last written `age_ms` ago.
@@ -406,7 +420,13 @@ fn session_file(sid: &'static str, cwd_sub: &'static str, age_ms: u64) -> impl F
         let wt = h.join("proj");
         let enc: String = wt.to_string_lossy().chars().map(|c| if "/\\:.".contains(c) { '-' } else { c }).collect();
         let f = h.join(".claude/projects").join(enc).join(format!("{sid}.jsonl"));
-        let cwd = if cwd_sub.is_empty() { wt.to_string_lossy().into_owned() } else if cwd_sub.starts_with('/') { cwd_sub.to_string() } else { wt.join(cwd_sub).to_string_lossy().into_owned() };
+        let cwd = if cwd_sub.is_empty() {
+            wt.to_string_lossy().into_owned()
+        } else if cwd_sub.starts_with('/') {
+            cwd_sub.to_string()
+        } else {
+            wt.join(cwd_sub).to_string_lossy().into_owned()
+        };
         write(&f, &format!("{}\n", json!({"cwd": cwd, "timestamp": "2026-10-01T00:00:00.000Z"})));
         let t = std::time::SystemTime::now() - std::time::Duration::from_millis(age_ms);
         std::fs::File::options().write(true).open(&f).unwrap().set_modified(t).unwrap();
@@ -414,7 +434,12 @@ fn session_file(sid: &'static str, cwd_sub: &'static str, age_ms: u64) -> impl F
 }
 
 fn own_descriptor(anchor: &'static str) -> impl Fn(&Path) {
-    move |h| write(&ds(h).join(format!("workspaces/{}.json", primary_id(h))), &json!({"id": primary_id(h), "worktreePath": h.join("proj"), "sessionId": anchor}).to_string())
+    move |h| {
+        write(
+            &ds(h).join(format!("workspaces/{}.json", primary_id(h))),
+            &json!({"id": primary_id(h), "worktreePath": h.join("proj"), "sessionId": anchor}).to_string(),
+        )
+    }
 }
 
 fn notices(rows: Vec<Value>) -> impl Fn(&Path) {
@@ -447,8 +472,7 @@ fn watcher_lock(pid: u32, age_ms: i64) -> impl Fn(&Path) {
 
 /// A fixture of the DevSwarm app's database: `(id, worktree, label, rank, pinned, active, hidden, builderType, lastSelectedAt)`.
 type AppRow = (&'static str, Option<PathBuf>, &'static str, i64, i64, i64, i64, &'static str, Option<i64>);
-/// A terminal: `(builder, created ms, delivered ms, withheld ms)`.
-
+/// `terminals`: `(builder, created ms, delivered ms, withheld ms)`.
 fn app_db(rows: Vec<AppRow>, terminals: Vec<(&'static str, i64, Option<i64>, Option<i64>)>) -> impl Fn(&Path) {
     move |h| {
         let f = h.join("app.db");
@@ -472,7 +496,15 @@ fn app_db(rows: Vec<AppRow>, terminals: Vec<(&'static str, i64, Option<i64>, Opt
         for (builder, created, delivered, withheld) in &terminals {
             c.execute(
                 "INSERT INTO builder_terminals VALUES (?1,?2,?3,'ai','claude',?4,1,'idle',?5,?5,'do the thing',?6,?7)",
-                rusqlite::params![format!("t-{builder}-{created}"), builder, format!("term.{builder}"), format!("{{\"sessionId\":\"sess-{builder}\"}}"), iso(*created), delivered.map(iso), withheld.map(iso)],
+                rusqlite::params![
+                    format!("t-{builder}-{created}"),
+                    builder,
+                    format!("term.{builder}"),
+                    format!("{{\"sessionId\":\"sess-{builder}\"}}"),
+                    iso(*created),
+                    delivered.map(iso),
+                    withheld.map(iso)
+                ],
             )
             .unwrap();
         }
@@ -663,7 +695,7 @@ fn scenes() -> Vec<Scene> {
             write(&ds(h).join(format!("heartbeats/ingest-{key}.json")), &json!({"ts": now_ms() - 240_000, "pid": 999_998}).to_string());
             write(&ds(h).join(format!("locks/ingest-project-{key}.lock")), &json!({"pid": std::process::id()}).to_string());
         })),
-        scene("rows-ingest-healthy", Same).seed(both(rows_of(vec![("w1", json!({}))]), |h| healthy_daemon(h))),
+        scene("rows-ingest-healthy", Same).seed(both(rows_of(vec![("w1", json!({}))]), healthy_daemon)),
         scene("rows-ingest-fault", Same).seed(both(rows_of(vec![("w1", json!({}))]), faulty_daemon(json!({"consecutiveMonitorFailures": 5, "lastMonitorErrorCode": "ENOENT", "lastMonitorError": "spawn hivecontrol ENOENT"})))),
         scene("rows-ingest-fault-suppressed-second-turn", Same).prime().seed(both(rows_of(vec![("w1", json!({}))]), faulty_daemon(json!({"consecutiveMonitorFailures": 3})))),
         scene("rows-ingest-stale-second-turn", Same).prime().seed(both(rows_of(vec![("w1", json!({}))]), stale_daemon(2 * 3_600_000))),
@@ -703,7 +735,7 @@ fn scenes() -> Vec<Scene> {
         scene("wake-claude-live-child-no-tick-live-watcher", Same).env(CLAUDE.to_vec()).seed(both(|h| child_descriptor(h, "w1", "sess-w1"), watcher_lock(std::process::id(), 10_000))),
         scene("wake-claude-live-child-watcher-lock-stale", Same).env(CLAUDE.to_vec()).seed(both(|h| child_descriptor(h, "w1", "sess-w1"), watcher_lock(std::process::id(), 600_000))),
         scene("wake-claude-live-child-watcher-dead", Same).env(CLAUDE.to_vec()).seed(both(|h| child_descriptor(h, "w1", "sess-w1"), watcher_lock(999_999, 10_000))),
-        scene("wake-claude-watcher-of-a-twin-row", Same).env(CLAUDE.to_vec()).seed(all3(|h| child_descriptor(h, "w1", "sess-w1"), |h| write(&ds(h).join(format!("workspaces/twin.json")), &json!({"id": "twin", "worktreePath": h.join("proj"), "sessionId": "t"}).to_string()), |h| write(&ds(h).join("locks/wake-watch-twin.lock"), &json!({"ts": now_ms() - 1000, "pid": std::process::id()}).to_string()))),
+        scene("wake-claude-watcher-of-a-twin-row", Same).env(CLAUDE.to_vec()).seed(all3(|h| child_descriptor(h, "w1", "sess-w1"), |h| write(&ds(h).join("workspaces/twin.json"), &json!({"id": "twin", "worktreePath": h.join("proj"), "sessionId": "t"}).to_string()), |h| write(&ds(h).join("locks/wake-watch-twin.lock"), &json!({"ts": now_ms() - 1000, "pid": std::process::id()}).to_string()))),
         scene("wake-claude-child-archived-by-marker", Same).env(CLAUDE.to_vec()).seed(both(|h| child_descriptor(h, "w1", "sess-w1"), |h| write(&ds(h).join("archived/w1.json"), &json!({"worktreePath": h.join("w1-wt"), "sessionId": "sess-w1"}).to_string()))),
         scene("wake-claude-child-archive-ignored", Same).env(CLAUDE.to_vec()).seed(both(|h| child_descriptor(h, "w1", "sess-w1"), |h| write(&ds(h).join("archive-ignore/w1.json"), "{}"))),
         scene("wake-claude-child-of-another-project", Same).env(CLAUDE.to_vec()).seed(|h| {
@@ -739,12 +771,28 @@ fn scenes() -> Vec<Scene> {
         scene("app-rows-brief-withheld", Same).env(APP_ENV.to_vec()).seed(both(rows_of(vec![("w1", json!({}))]), |h| {
             app_db(vec![("w1", Some(h.join("w1-wt")), "Alpha", 1, 0, 1, 0, "standard", None)], vec![("w1", now_ms() - 3_600_000, None, Some(now_ms() - 3_000_000))])(h);
         })),
-        scene("app-rows-primary-builder-of-this-checkout", Defer).env(APP_ENV.to_vec()).seed(both(summary_with(json!({"p-app": {"worktreePath": "x", "sessionId": "s", "directUnread": 1}}), json!({})), |h| {
-            // the summary row sits on the Primary's own checkout
-            let body = json!({"workspaces": {"p-app": {"worktreePath": h.join("proj"), "sessionId": "s", "directUnread": 1}}});
-            write(&ds(h).join(format!("summaries/{}.json", project_key(h))), &body.to_string());
+        scene("app-rows-primary-builder-of-this-checkout", Same).env(APP_ENV.to_vec()).seed(|h| {
+            // the summary row sits on the Primary's own checkout and the app calls it the primary builder: its mail is the Primary's own
+            let mut o = serde_json::Map::new();
+            o.insert("p-app".to_string(), json!({"worktreePath": h.join("proj"), "sessionId": "s", "directUnread": 4, "urgencyMax": "high"}));
+            o.insert("w1".to_string(), row(h, "w1", json!({})));
+            summary(Value::Object(o))(h);
+            app_db(vec![("p-app", Some(h.join("proj")), "proj", 1, 0, 1, 0, "primary", None), ("w1", Some(h.join("w1-wt")), "A", 2, 0, 1, 0, "standard", None)], vec![])(h);
+        }),
+        scene("app-rows-primary-builder-adds-to-the-own-entry", Same).env(APP_ENV.to_vec()).seed(|h| {
+            let mut o = serde_json::Map::new();
+            o.insert("p-app".to_string(), json!({"worktreePath": h.join("proj"), "sessionId": "s", "unread": 2}));
+            o.insert(primary_id(h), json!({"unread": 3, "urgencyMax": null}));
+            summary(Value::Object(o))(h);
             app_db(vec![("p-app", Some(h.join("proj")), "proj", 1, 0, 1, 0, "primary", None)], vec![])(h);
-        })),
+        }),
+        scene("app-rows-primary-builder-with-a-folded-ghost", Same).env(APP_ENV.to_vec()).seed(|h| {
+            let mut o = serde_json::Map::new();
+            o.insert("p-app".to_string(), json!({"worktreePath": h.join("proj"), "sessionId": "s", "directUnread": 1}));
+            o.insert("primary-abcdef12".to_string(), json!({"worktreePath": h.join("proj"), "sessionId": "g", "directUnread": 2}));
+            summary(Value::Object(o))(h);
+            app_db(vec![("p-app", Some(h.join("proj")), "proj", 1, 0, 1, 0, "primary", None)], vec![])(h);
+        }),
         scene("app-rows-ghost-folds-into-its-canonical-row", Same).env(APP_ENV.to_vec()).seed(both(|h| {
             let mut o = serde_json::Map::new();
             o.insert("w1".to_string(), row(h, "w1", json!({"directUnread": 1})));

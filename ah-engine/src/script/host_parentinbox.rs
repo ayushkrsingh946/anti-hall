@@ -243,7 +243,11 @@ fn gate_superseded(w: &Windows, home: &Path, id: &str, desc_wt: Option<&str>, de
     }
     // isSiblingPartitionLive({ id, sessionId, worktreePath }, home, { now })
     let live = {
-        let fresh = liveness::is_fresh(is_safe_id(id).then(|| liveness::heartbeat_ts(home, id)).flatten(), now, defaults::num("devswarm_sup.lv_heartbeat_fresh_ms") as f64);
+        let fresh = liveness::is_fresh(
+            is_safe_id(id).then(|| liveness::heartbeat_ts(home, id)).flatten(),
+            now,
+            defaults::num("devswarm_sup.lv_heartbeat_fresh_ms") as f64,
+        );
         if fresh {
             true
         } else {
@@ -289,7 +293,9 @@ fn app_children(wt: &str) -> R<Value> {
         let Some(norm) = crate::meshw::appdb::norm_path(wt)? else { return Ok(json!({"repo": false, "children": []})) };
         let repo_id: Option<Option<String>> = match snap.repositories.iter().find(|r| r.path.as_deref() == Some(norm.as_str())) {
             Some(r) => Some(Some(r.id.clone())),
-            None => snap.workspaces.iter().find(|w| w.worktree_path.as_deref() == Some(norm.as_str()) && w.repository_id.is_some()).map(|w| w.repository_id.clone()),
+            None => {
+                snap.workspaces.iter().find(|w| w.worktree_path.as_deref() == Some(norm.as_str()) && w.repository_id.is_some()).map(|w| w.repository_id.clone())
+            }
         };
         let Some(Some(repo_id)) = repo_id else { return Ok(json!({"repo": false, "children": []})) };
         let self_id = snap.workspace_for(None, Some(wt))?.map(|w| w.id.clone());
@@ -328,7 +334,6 @@ fn activity_of(inv: &Inv, id: &str, wt: Option<&str>, sid: Option<&str>, last_ou
     Ok(json!({"ts": ts, "dormant": dormant_act && !alive, "idleAlive": dormant_act && alive, "idleMs": w.idle_ms()}))
 }
 
-
 fn mesh_id_of(wt: &str) -> R<Value> {
     let c = ident::resolve_context(wt, true)?;
     Ok(json!({"id": c.worktree_root.as_deref().map(ident::mesh_id_for_real_path)}))
@@ -360,14 +365,16 @@ fn derive_text(inv: &Inv, key: &str) -> R<Value> {
     let db = dir.join(defaults::text("mesh_write.store_file"));
     if !db.exists() {
         // no store at all is Node's null; a journal store or a marker with no database is Node's to read
-        if dir.join(defaults::text("mesh.backend_marker")).exists() || std::fs::read_dir(dir.join(defaults::text("devswarm_role.pg_journal_dir"))).is_ok_and(|mut d| d.next().is_some()) {
+        if dir.join(defaults::text("mesh.backend_marker")).exists()
+            || std::fs::read_dir(dir.join(defaults::text("devswarm_role.pg_journal_dir"))).is_ok_and(|mut d| d.next().is_some())
+        {
             return defer("store-backend");
         }
         return Ok(json!({"text": Value::Null}));
     }
     let store = crate::meshw::common::open_store(inv, key)?;
     let reader = store.reader();
-    let has_rows = reader.roster().map_err(|e| ident::Defer(format!("registry:{e}")))?.len() > 0 || !reader.workspace_ids().is_empty();
+    let has_rows = !reader.roster().map_err(|e| ident::Defer(format!("registry:{e}")))?.is_empty() || !reader.workspace_ids().is_empty();
     if !has_rows {
         return Ok(json!({"text": Value::Null}));
     }
@@ -388,7 +395,8 @@ struct Session {
 /// `projectDirFor(worktree, home)`.
 fn project_dir(home: &Path, worktree: &str) -> std::path::PathBuf {
     let from = defaults::text("devswarm_sup.lv_encode_chars");
-    let enc: String = worktree.chars().map(|c| if from.contains(c) { defaults::text("devswarm_sup.lv_encode_to").to_string() } else { c.to_string() }).collect();
+    let enc: String =
+        worktree.chars().map(|c| if from.contains(c) { defaults::text("devswarm_sup.lv_encode_to").to_string() } else { c.to_string() }).collect();
     home.join(defaults::text("mesh_write.claude_dir")).join(defaults::text("devswarm_sup.lv_projects_dir")).join(enc)
 }
 
@@ -497,7 +505,9 @@ pub(super) fn install<'js>(c: &Ctx<'js>, h: &Object<'js>) -> rquickjs::Result<()
     h.set("piAppDb", Function::new(c.clone(), || -> rquickjs::Result<bool> { with_settings(|st| app_db_present(&st.home, &st.env)) })?)?;
     h.set(
         "piSnap",
-        Function::new(c.clone(), |window_ms: f64, now: f64| -> rquickjs::Result<String> { with_settings(|st| answer(load_snap(&st.home, &st.env, window_ms, now))) })?,
+        Function::new(c.clone(), |window_ms: f64, now: f64| -> rquickjs::Result<String> {
+            with_settings(|st| answer(load_snap(&st.home, &st.env, window_ms, now)))
+        })?,
     )?;
     h.set(
         "piWs",
@@ -523,7 +533,9 @@ pub(super) fn install<'js>(c: &Ctx<'js>, h: &Object<'js>) -> rquickjs::Result<()
     h.set(
         "piMarker",
         Function::new(c.clone(), |id: String, wt: Option<String>, sid: Option<String>| -> rquickjs::Result<String> {
-            with_settings(|st| answer(marker_archived(Path::new(&st.home), &id, wt.as_deref().filter(|s| !s.is_empty()), sid.as_deref()).map(|b| json!({"archived": b}))))
+            with_settings(|st| {
+                answer(marker_archived(Path::new(&st.home), &id, wt.as_deref().filter(|s| !s.is_empty()), sid.as_deref()).map(|b| json!({"archived": b})))
+            })
         })?,
     )?;
     h.set(
@@ -537,14 +549,9 @@ pub(super) fn install<'js>(c: &Ctx<'js>, h: &Object<'js>) -> rquickjs::Result<()
     )?;
     h.set(
         "piIgnored",
-        Function::new(c.clone(), |id: String| -> rquickjs::Result<bool> {
-            with_settings(|st| is_safe_id(&id) && archive_ignored(Path::new(&st.home), &id))
-        })?,
+        Function::new(c.clone(), |id: String| -> rquickjs::Result<bool> { with_settings(|st| is_safe_id(&id) && archive_ignored(Path::new(&st.home), &id)) })?,
     )?;
-    h.set(
-        "piPid",
-        Function::new(c.clone(), |pid: f64| -> rquickjs::Result<Option<bool>> { Ok(liveness::pid_is_alive(pid, None)) })?,
-    )?;
+    h.set("piPid", Function::new(c.clone(), |pid: f64| -> rquickjs::Result<Option<bool>> { Ok(liveness::pid_is_alive(pid, None)) })?)?;
     h.set(
         "piAppChildren",
         Function::new(c.clone(), |wt: String, now: f64| -> rquickjs::Result<String> {
@@ -557,10 +564,7 @@ pub(super) fn install<'js>(c: &Ctx<'js>, h: &Object<'js>) -> rquickjs::Result<()
             with_settings(|st| answer(finish_of(&inv_of(st, now), &id, wt.as_deref())))
         })?,
     )?;
-    h.set(
-        "piMeshId",
-        Function::new(c.clone(), |wt: String| -> rquickjs::Result<String> { with_settings(|_| answer(mesh_id_of(&wt))) })?,
-    )?;
+    h.set("piMeshId", Function::new(c.clone(), |wt: String| -> rquickjs::Result<String> { with_settings(|_| answer(mesh_id_of(&wt))) })?)?;
     h.set(
         "piSessionPid",
         Function::new(c.clone(), |sid: String| -> rquickjs::Result<String> {

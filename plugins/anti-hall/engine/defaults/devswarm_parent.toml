@@ -511,13 +511,7 @@ value = "node {path}"
 doc = "What the stale-build text names when the newest CLI cannot be found."
 value = "the newest anti-hall CLI"
 
-[devswarm_parent.stale_build_unknown_version]
-doc = "What the stale-build text names for a child whose build is not recorded."
-value = "unknown"
 
-[devswarm_parent.dir_heartbeats_key]
-doc = "The version field of a heartbeat."
-value = "version"
 
 [devswarm_parent.dir_token_usage]
 doc = "The per-plan token burn records (token-usage/<key>.json), under the DevSwarm directory."
@@ -658,3 +652,19 @@ value = "{prefix}you have already read your parent/peer messages."
 [devswarm_parent.asker_unknown]
 doc = "What the own-inbox segment names for a question without a sender."
 value = "?"
+
+[devswarm_parent.auto_archive_window_ms]
+doc = "How long the supervisor's auto-archive record counts as current (devswarm-lifecycle.js autoArchiveOwns: one hour)."
+value = 3600000
+
+[devswarm_parent.registry_scopes]
+doc = "The scopes of a registry entry in the order the version lookup prefers them."
+value = ["user", "project"]
+
+[devswarm_parent.tokens_million_at]
+doc = "The token count from which the figure is written in millions."
+value = 1000000
+
+[devswarm_parent.tokens_thousand_at]
+doc = "The token count from which the figure is written in thousands."
+value = 1000

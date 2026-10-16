@@ -244,11 +244,6 @@ lane = "L09"
 reason = "the engine doctor starts Node (probes the Node hooks and companions)"
 [[node]]
 surface = "run/doctor"
-script = "hooks/devswarm-parent-inbox.js"
-lane = "L09"
-reason = "the engine doctor starts Node (probes the Node hooks and companions)"
-[[node]]
-surface = "run/doctor"
 script = "hooks/edit-guard.js"
 lane = "L09"
 reason = "the engine doctor starts Node (probes the Node hooks and companions)"

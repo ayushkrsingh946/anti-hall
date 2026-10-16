@@ -1,10 +1,18 @@
 // check = "devswarm-parent-inbox" (UserPromptSubmit). Mirrors hooks/devswarm-parent-inbox.js. It answers every case where Node prints and
 // writes nothing (a Jev judge child, a child workspace, the integration killed or switched off, DevSwarm inactive) and, for an active
-// Primary, the turns whose answer it can reproduce exactly: the communication-override reminder through the emit-dedupe store, the
-// ingest-daemon banners, the live workspace table of the project's summary with the rows' labels (archive, liveness, app database), the
-// nudges for unread backlogs (urgent and normal) and the archive recommendation with their cooldown, trend and acceptance-log state, and
-// the supervisor escalations parked for this Primary. What stays with Node is decided before anything is written and logged with its
-// cause (devswarm_parent.defer_log_kind): see piDeferrals. Keys and texts: small_guards.toml (devswarm_prompt.*), devswarm_parent.toml.
+// Primary with or without a git checkout, the turn the hook would make: the communication-override reminder through the emit-dedupe store;
+// the ingest-daemon fault and stale banners; the summary refresh while that daemon is not running; the mailbox-wake line over the
+// workspace descriptors and the DevSwarm app database; the session-drift notice and the maintainer-notice feed; the live workspace table
+// of the project's summary (archive markers and the archive gate, the app's verdict, heartbeat/transcript/verdict activity, dormant and
+// idle-alive, the finish cell with the step plan, token burn and straying, the app's title, rank, pin, focus and brief markers); the
+// urgent and normal unread nudges with grace, trend and the not-draining / stale-build labels; the archive recommendation with its
+// cooldown and the supervisor's auto-archive record; the orphaned-mesh, stale-registry and broadcast segments; the Primary's own inbox
+// with the questions it was asked (reply records, identity families, retired senders, live askers); the screenshot-sync ask and the
+// app-still-open note; and the supervisor escalations parked for this Primary. What stays with Node is decided before anything is written
+// and logged with its cause (devswarm_parent.defer_log_kind): a seat conflict still owed its repeat, a setting of the hook set anywhere, an
+// unseen maintainer notice, a row the supervisor's auto-archive owns, a store the hook would read through another backend, Jev switched on
+// for the broadcast feed, a path or a payload shape only JavaScript reads, and the dedupe state when it cannot be decided. Keys and texts:
+// small_guards.toml (devswarm_prompt.*), devswarm_parent.toml, mesh_write.toml (the plan labels).
 'use strict';
 
 // ---- shared small readers ----------------------------------------------------------------------------------------------
@@ -441,7 +449,7 @@ function piRoster(ctx, summary) {
   if (Array.isArray(ws)) throw meshDefer;
   var summaryWorkspaces = ws !== null && typeof ws === 'object' ? ws : {};
   var ids = Object.keys(summaryWorkspaces);
-  var out = { rows: [], attention: [], archiveList: [], ownUnread: false, deferral: null, snapUnreadable: false };
+  var out = { rows: [], attention: [], archiveList: [], ownExtra: 0, ownExtraUrgency: null, deferral: null, snapUnreadable: false };
   // the DevSwarm app's database, read once
   var focusEnv = ah.env.get(ah.cfg('devswarm_parent.env_focus_ms'));
   var focusRaw = Number(focusEnv === null ? undefined : focusEnv); // Number(undefined) is NaN, Number(null) would be 0
@@ -465,12 +473,12 @@ function piRoster(ctx, summary) {
   // the ghost rows: a `primary-<hash>` label whose canonical row is also in the summary is that workspace, shown once under it
   var ghostFoldTo = {}, foldedUnread = {};
   ids.forEach(function (id) {
-    if (!piSafeId(id) || id === ctx.primaryId || !/^primary-[0-9a-f]{8}$/.test(id)) return;
+    if (!piSafeId(id) || id === ctx.primaryId || !jx.re('devswarm_cli.rr_ghost_label_re').test(id)) return;
     var entry = summaryWorkspaces[id];
     if (!entry || typeof entry !== 'object') return;
     var wt = entry.worktreePath ? piStrField(entry.worktreePath) : null;
     var w = wt ? appWs(null, wt) : null;
-    var appBuilderId = w && w.builderType !== 'primary' ? w.id : null;
+    var appBuilderId = w && w.builderType !== ah.cfg('devswarm_sup.as_primary_type') ? w.id : null;
     var f = JSON.parse(ahHost.piFold(id, JSON.stringify(present), appBuilderId, key, now));
     if (f.unsure) throw meshDefer;
     if (!f.to) return;
@@ -490,10 +498,16 @@ function piRoster(ctx, summary) {
     // a row on this very checkout that the app calls its primary builder is the Primary's own inbox, not a child
     if (wtPath) {
       var bw = appWs(id, null);
-      if (bw && bw.builderType === 'primary') {
+      if (bw && bw.builderType === ah.cfg('devswarm_sup.as_primary_type')) {
         var wc = ah.repo.context(wtPath);
         if (wc.unsure) throw meshDefer;
-        if (wc.root === ctx.top) { out.deferral = 'own-checkout-row'; return out; }
+        if (wc.root === ctx.top) {
+          // the app's own builder row of this checkout is the Primary's inbound mail, shown through the own-inbox segment
+          var rowUnread = piFinite(entry.directUnread) ? entry.directUnread : (piFinite(entry.unread) ? entry.unread : 0);
+          out.ownExtra += rowUnread + (foldedUnread[id] || 0);
+          if (!out.ownExtraUrgency) out.ownExtraUrgency = entry.urgencyMax || null;
+          continue;
+        }
       }
     }
     var dKey = wtPath ? ah.mesh.repoKey(wtPath) : null;
@@ -609,7 +623,7 @@ function piArchiveCooldown(home, id, now) {
 function piAutoArchiveOwns(home, id, now) {
   if (ah.settings.touched('devswarm_parent.set_auto_archive')) throw meshDefer;
   var st = piJson(piDevswarmDir(home) + '/' + ah.cfg('devswarm_parent.file_auto_archive'));
-  if (!st || !Array.isArray(st.owned) || !(now - Number(st.at) < 3600000)) return false;
+  if (!st || !Array.isArray(st.owned) || !(now - Number(st.at) < ah.cfgNum('devswarm_parent.auto_archive_window_ms'))) return false;
   if (st.owned.indexOf(String(id)) < 0) return false;
   throw meshDefer;
 }
@@ -874,7 +888,7 @@ function piNewestVersion(home) {
     if (Array.isArray(entry)) {
       var valid = entry.filter(function (e) { return e && typeof e === 'object' && piSemver(e.version); });
       var pick = null;
-      ['user', 'project'].forEach(function (scope) { if (pick === null) valid.forEach(function (e) { if (pick === null && e.scope === scope) pick = e; }); });
+      ah.cfg('devswarm_parent.registry_scopes').forEach(function (scope) { if (pick === null) valid.forEach(function (e) { if (pick === null && e.scope === scope) pick = e; }); });
       if (pick === null) pick = valid[0] || null;
       installed = pick ? pick.version : null;
     } else if (typeof entry === 'string') installed = piSemver(entry) ? entry : null;
@@ -907,8 +921,8 @@ function piStaleBuild(home, id, newest) {
 // `tokenUsage.fmt(n)`.
 function piTokens(n) {
   var v = Number(n) || 0;
-  if (v >= 1e6) return text.render(ah.cfg('devswarm_parent.tokens_million'), { v: Math.round(v / 1e5) / 10 });
-  if (v >= 1e3) return text.render(ah.cfg('devswarm_parent.tokens_thousand'), { v: Math.round(v / 1e3) });
+  if (v >= ah.cfgNum('devswarm_parent.tokens_million_at')) return text.render(ah.cfg('devswarm_parent.tokens_million'), { v: Math.round(v / (ah.cfgNum('devswarm_parent.tokens_million_at') / 10)) / 10 });
+  if (v >= ah.cfgNum('devswarm_parent.tokens_thousand_at')) return text.render(ah.cfg('devswarm_parent.tokens_thousand'), { v: Math.round(v / ah.cfgNum('devswarm_parent.tokens_thousand_at')) });
   return String(Math.round(v));
 }
 
@@ -1161,7 +1175,7 @@ function piAwaitingLine(list, titleFor, now, previews) {
   list.forEach(function (q) { if (q && piFinite(q.ts) && (oldest === null || q.ts < oldest.ts)) oldest = q; });
   if (oldest === null) oldest = list[0];
   var line = text.render(ah.cfg('devswarm_parent.awaiting_head'), { count: list.length });
-  if (oldest && piFinite(oldest.ts)) line += text.render(ah.cfg('devswarm_parent.awaiting_oldest'), { m: Math.max(0, Math.floor((now - oldest.ts) / 60000)) });
+  if (oldest && piFinite(oldest.ts)) line += text.render(ah.cfg('devswarm_parent.awaiting_oldest'), { m: Math.max(0, Math.floor((now - oldest.ts) / ah.cfgNum('devswarm_prompt.ms_per_minute'))) });
   var who = '';
   var from = oldest && oldest.from != null ? String(oldest.from) : '';
   var t = titleFor(from);
@@ -1291,6 +1305,7 @@ function piDecide(p, opts) {
           }
         }
       }
+      if (roster.ownExtra > 0) { ownUnread += roster.ownExtra; if (!ownUrgency) ownUrgency = roster.ownExtraUrgency; }
       if (Array.isArray(summary.recent) && summary.recent.length && ahHost.piJev()) return piDefer('broadcast-jev'); // Jev may label the feed
       if (roster.rows.length) syncNotes = piSyncNotes({ home: home, key: key }, roster.rows, roster.snapUnreadable, jx.isObj(p) ? p.session_id : undefined);
     }

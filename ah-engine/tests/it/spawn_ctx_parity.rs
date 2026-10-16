@@ -1223,7 +1223,6 @@ fn devswarm_parent_inbox_without_a_checkout_matches_node() {
 // ------------------------------------------------------------------------------------------------------------------
 
 fn child_turn_cases() -> Vec<Case> {
-    let repo_dir = repo().to_string_lossy().into_owned();
     let child = |c: Case| {
         c.env("DEVSWARM_REPO_ID", "r")
             .env("DEVSWARM_SOURCE_BRANCH", "feat/x")

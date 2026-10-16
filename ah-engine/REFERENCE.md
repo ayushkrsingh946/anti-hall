@@ -360,7 +360,7 @@ Rule fields (JSON): `id`, `events`, `tools`, `field`, `pattern` (regex), `check`
 | `dispatch-tier` | Asks Jev (dispatchTier, detached) how a new or changed task should be dispatched, once per task text, and keeps the request marker in dispatch-tier-state.json; does nothing while the integration is off (port of dispatch-tier.js). |
 | `task-guard` | Stop gate: blocks a Stop while tasks are open (the idle-neglect block when dispatchable work has no running agent, else the generic block), with the loop state, the per-prompt budget and the OMC and live-agent steps aside of the Node hook; hands a Stop whose answer needs the DevSwarm app database to Node (port of task-guard.js). |
 | `tasklist-guard` | Stop gate: blocks a Stop after untracked work, tasks stalled in progress or a missing or stale progress file, with the Node hook's loop state, dedupe, cap, handover advisories, stop-policy budget and acknowledgement; answers the quiet Stops, plan mode and the resume-verification nudge with the same file effects (port of tasklist-guard.js). |
-| `devswarm-parent-inbox` | DevSwarm Primary prompt hook: answers the silent cases (not a Primary, DevSwarm inactive, switch off, judge child) and an active Primary with no git checkout around its working directory (its communication-override reminder through the emit-dedupe store) in the engine; a Primary in a checkout is answered the same way while its project has no summary, workspace descriptor, maintainer notice or app database (plus the parked supervisor escalations); a Primary with a roster, mailbox or any of those defers to the Node hook, which owns them (port of devswarm-parent-inbox.js). |
+| `devswarm-parent-inbox` | DevSwarm Primary prompt hook: answers the silent cases (not a Primary, DevSwarm inactive, switch off, judge child) and every active Primary turn, in a git checkout or not, in the engine: the communication-override reminder through emit-dedupe, the ingest-daemon banners and summary refresh, the mailbox-wake line, the session-drift and maintainer-notice feeds, the live workspace table of the project's summary with its nudges, archive recommendation and not-draining / stale-build labels, the orphaned-mesh, stale-registry and broadcast segments, the Primary's own inbox with the questions it was asked, the screenshot-sync ask and the parked supervisor escalations. A seat conflict still owed its repeat, a setting of the hook set anywhere, an unseen maintainer notice, a row the supervisor's auto-archive owns and the other rare states defer to the Node hook, each cause logged as parent-inbox-defer (port of devswarm-parent-inbox.js). |
 | `devswarm-child-turn` | DevSwarm child prompt hook: answers the silent cases (not a child workspace, DevSwarm inactive, switch off, judge child) and every active child turn in the engine: the heartbeat (with the git push state in a checkout), the descriptor and registry row under the workspace lock, the fixed reminder block through emit-dedupe, the step plan, unread parent mail and the archive request. An archived workspace, an ingest daemon that is not healthy, mesh-direct unread mail, a store Node would first create and the other rare states defer to the Node hook (port of devswarm-child-turn.js). |
 | `devswarm-child-role` | SessionStart: injects the DevSwarm mesh-only messaging directive for a child workspace or a Primary with no seat to settle (port of devswarm-child-role.js); a Primary in a git checkout (seat adoption writes the mesh store), a stale stable launcher or anything else it cannot prove byte-identical defers to Node. |
 | `devswarm-parent-gate` | Stop: the DevSwarm Primary gate (port of devswarm-parent-gate.js, decided in engine/logic/devswarm-parent-gate.js): the early exits, the inert and clean passes (loop state removed), the busy and grace advisories, and the neglect block with its loop state, cap, escalation, waiting-on-human lines and wake line; own unread, pending questions, stale verdicts, a parked escalation and every case it cannot reproduce byte for byte defer to the Node gate before anything is written. |
@@ -5799,7 +5799,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `script.tail_max_bytes` | `16777216` |  | bytes | Largest window `ah.transcript.tailLines` reads from the end of a file, whatever the script asks for. |
 | `script.time_hard_cap_ms` | `5000` |  | ms | Ceiling of the HARD CPU limit of a script call that has a normal soft limit; a soft limit already above it (a batch job's, in script.time_limit_by_check) is its own hard limit. |
 | `script.time_hard_factor` | `10` |  |  | The HARD CPU limit of a script call as a multiple of its SOFT limit (script.time_limit_ms, or the per-check entry of script.time_limit_by_check). Past the soft limit a call is only logged and counted; the interpreter is interrupted at the hard one. |
-| `script.time_limit_by_check` | `22 entries` |  |  | Per-check limit of one script call (ms; the interpreter thread's CPU time, and the wall-clock backstop is script.wall_limit_factor times it), replacing script.time_limit_ms. A key is the check name, or `<check>:<event>` for one event, which wins. handover-hygiene reads and writes a whole directory tree, so its command-line and scheduled-job runs (event Cli) get seconds; `command` (command-guard) resolves repositories and runs `git` for its edit parity and carve-outs (a child process wait is credited back, but a loaded machine stretches the interpreter's own time as well); `git` (git-guard) tokenizes the whole command and its heredoc bodies (the frozen replay of 2026-10-09 interrupted it at 50 ms on 3 long heredoc commands, each answered the same with the time); api-guard and ship-it-guard parse Bash writes with command-guard's parsers (script.includes) and compact-declaration-guard parses the current turn of a 1.5 MB transcript tail, so they get command-guard's order of time and more; `precompact-snapshot` reads the transcript tail of a PreCompact (a real 1.5 MB tail takes about 190 ms in the interpreter, so 50 ms would defer it to Node every time); `claim-ledger` walks up to 2 MB of transcript evidence; the Stop-time and prompt-time checks that scan the transcript tail or state (tasklist-guard, task-guard, silent-agent-nudge, stale-agent-stop-note, auto-handover, auto-handover-pause-nag, compact-advice-guard, limit-conserve-inject, idle-agent-sweep) get 500 ms because, measured 2026-10-09 on the frozen replay (2113 calls), the 50 ms default interrupted tasklist-guard on 2 and silent-agent-nudge on 6 of 61 Stop calls (and stale-agent-stop-note on a 156 MB transcript), each deferring a decision the script makes identically when given the time; its SessionStart advisory only lists and stats files. |
+| `script.time_limit_by_check` | `23 entries` |  |  | Per-check limit of one script call (ms; the interpreter thread's CPU time, and the wall-clock backstop is script.wall_limit_factor times it), replacing script.time_limit_ms. A key is the check name, or `<check>:<event>` for one event, which wins. handover-hygiene reads and writes a whole directory tree, so its command-line and scheduled-job runs (event Cli) get seconds; `command` (command-guard) resolves repositories and runs `git` for its edit parity and carve-outs (a child process wait is credited back, but a loaded machine stretches the interpreter's own time as well); `git` (git-guard) tokenizes the whole command and its heredoc bodies (the frozen replay of 2026-10-09 interrupted it at 50 ms on 3 long heredoc commands, each answered the same with the time); api-guard and ship-it-guard parse Bash writes with command-guard's parsers (script.includes) and compact-declaration-guard parses the current turn of a 1.5 MB transcript tail, so they get command-guard's order of time and more; `precompact-snapshot` reads the transcript tail of a PreCompact (a real 1.5 MB tail takes about 190 ms in the interpreter, so 50 ms would defer it to Node every time); `claim-ledger` walks up to 2 MB of transcript evidence; the Stop-time and prompt-time checks that scan the transcript tail or state (tasklist-guard, task-guard, silent-agent-nudge, stale-agent-stop-note, auto-handover, auto-handover-pause-nag, compact-advice-guard, limit-conserve-inject, idle-agent-sweep) get 500 ms because, measured 2026-10-09 on the frozen replay (2113 calls), the 50 ms default interrupted tasklist-guard on 2 and silent-agent-nudge on 6 of 61 Stop calls (and stale-agent-stop-note on a 156 MB transcript), each deferring a decision the script makes identically when given the time; its SessionStart advisory only lists and stats files. |
 | `script.time_limit_ms` | `50` | `AH_ENGINE_SCRIPT_TIME_MS` | ms | SOFT CPU-time limit of one script call (the interpreter thread's own CPU time): a call that used more is logged (script_soft) and counted, and keeps running. The HARD limit that interrupts it is this value times script.time_hard_factor (the call then defers to Node, never a silent allow); script.wall_limit_factor sets the wall-clock backstop from the hard limit. |
 | `script.unload_batch` | `4` |  |  | Checks unloaded per collection while an interpreter is above mem.quickjs.soft_bytes. |
 | `script.wall_limit_factor` | `4` |  |  | The wall-clock backstop of a script call, as a multiple of its HARD CPU limit (script.time_limit_ms times script.time_hard_factor). The limit itself counts the interpreter thread's CPU time, so a thread kept waiting for a core by a loaded machine is not interrupted; the backstop ends a script that waits without using CPU. Time a host function spends blocked (a child process, a lock) is credited back to the backstop. |
@@ -9833,10 +9833,172 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 
 | Key | Default | Env override | Unit | What it is |
 |---|---|---|---|---|
+| `devswarm_parent.app_live_joiner` | ` ; ` |  |  | Between the commands of the app-still-open note. |
+| `devswarm_parent.app_live_text` | `DEVSWARM: app still shows {n} workspace(s) you archived — run: {cmds} (revers...` |  |  | The note that the app still shows workspaces anti-hall archived. Placeholders: {n}, {cmds}. |
+| `devswarm_parent.app_state_file` | `app-state.json` |  |  | The app-state record the sync verbs write (app-state.json), under the DevSwarm directory. |
+| `devswarm_parent.archive_cooldown_ms` | `600000` |  |  | How long an archive recommendation for one workspace stays silent before it repeats (liveness.js DEFAULT_COOLDOWN_MS). |
+| `devswarm_parent.archive_extra` | ` (+{n} more)` |  |  | The archive recommendation's count past the inline list. Placeholder: {n}. |
+| `devswarm_parent.archive_head` | `💡 anti-hall · devswarm-archive-ready: workspace(s) {shown}{extra} are complet...` |  |  | The archive-ready recommendation. Placeholders: {shown}, {extra}, {cli}. |
+| `devswarm_parent.archive_ids_joiner` | `, ` |  |  | Between the ids the archive recommendation names. |
+| `devswarm_parent.archive_ignore_dir` | `archive-ignore` |  |  | The directory of the per-workspace archive-ignore marks (companion/lib/row-eligibility.js archiveIgnored), under the DevSwarm directory: a workspace with a mark is still tracked but never recommended for archiving. |
+| `devswarm_parent.archived_hidden` | `+{n} archived (done; set ANTIHALL_ROSTER_HIDE_ARCHIVED=0 to show)` |  |  | The table line for archived rows left out of the roster. Placeholder: {n}. |
+| `devswarm_parent.ask_conflict` | `The DevSwarm app shows {labels} as open, but anti-hall has it archived. I can...` |  |  | Why the sync ask is made when anti-hall has archived workspaces the app shows open. Placeholder: {labels}. |
+| `devswarm_parent.ask_hash_len` | `20` |  |  | Length of the hash that names a sync-ask marker. |
+| `devswarm_parent.ask_label` | `'{label}'` |  |  | One workspace of the sync ask's conflict list. Placeholder: {label}. |
+| `devswarm_parent.ask_prefix_live` | `app-live:` |  |  | The prefix of the session in the marker name of the app-still-open note. |
+| `devswarm_parent.ask_text` | `💡 anti-hall · devswarm-sync: {why} Ask the owner (once) for a screenshot of t...` |  |  | The sync ask. Placeholder: {why}. |
+| `devswarm_parent.ask_unreadable` | `I can't read the DevSwarm app database, so I can't confirm which workspaces a...` |  |  | Why the sync ask is made when the app database cannot be read. |
+| `devswarm_parent.asker_unknown` | `?` |  |  | What the own-inbox segment names for a question without a sender. |
+| `devswarm_parent.auto_archive_window_ms` | `3600000` |  |  | How long the supervisor's auto-archive record counts as current (devswarm-lifecycle.js autoArchiveOwns: one hour). |
+| `devswarm_parent.awaiting_head` | `QUESTIONS AWAITING YOUR REPLY: {count}` |  |  | The start of the awaiting-reply line. Placeholder: {count}. |
+| `devswarm_parent.awaiting_oldest` | ` (oldest {m}m)` |  |  | The age of the oldest unanswered question in the awaiting-reply line. Placeholder: {m}. |
+| `devswarm_parent.awaiting_sep` | `: ` |  |  | Between the asker and the preview in the awaiting-reply line. |
+| `devswarm_parent.awaiting_who` | ` — {who}{sep}{preview}` |  |  | The asker (and preview) of the oldest question in the awaiting-reply line. Placeholders: {who}, {sep}, {preview}. |
+| `devswarm_parent.brief_not_delivered` | `not-delivered` |  |  | The app database word for a brief that was not delivered. |
+| `devswarm_parent.brief_withheld` | `withheld` |  |  | The app database word for a brief that was withheld. |
+| `devswarm_parent.broadcast_body_max` | `200` |  |  | Longest broadcast summary shown before it is cut with an ellipsis (MAX_BROADCAST_BODY_CHARS). |
+| `devswarm_parent.broadcast_head` | `💡 anti-hall · devswarm-broadcast: (advisory roster/FYI feed — react ONLY if y...` |  |  | The head of the broadcast feed segment. |
+| `devswarm_parent.broadcast_line` | `- {urgent}{kind}{who}: {body}` |  |  | One broadcast row. Placeholders: {urgent}, {kind}, {who}, {body}. |
+| `devswarm_parent.broadcast_max_age_ms` | `86400000` |  |  | How old a broadcast row may be and still be shown when the variable is not a non-negative number (24 hours). |
+| `devswarm_parent.broadcast_no_sender` | `?` |  |  | What a broadcast row without a sender shows. |
+| `devswarm_parent.broadcast_no_session` | `nosession` |  |  | The file name stem of the seen-state when the payload names no session. |
+| `devswarm_parent.broadcast_no_summary` | `(no summary)` |  |  | What a broadcast row without a summary shows. |
+| `devswarm_parent.broadcast_seen_max` | `200` |  |  | Most broadcast keys remembered per session (MAX_BROADCAST_SEEN_KEYS). |
+| `devswarm_parent.broadcast_urgent_tag` | `[URGENT] ` |  |  | The tag in front of an urgent broadcast row. |
+| `devswarm_parent.cache_rel` | `cache/anti-hall/anti-hall` |  |  | The plugin cache of installed versions, relative to the plugins root (the marketplace clone's grandparent). |
+| `devswarm_parent.cli_rel` | `scripts/devswarm.js` |  |  | The DevSwarm CLI of a cached version, relative to the version directory. |
 | `devswarm_parent.defer_log_kind` | `parent-inbox-defer` |  |  | The kind of the engine event-log line a deferral of the Primary prompt hook to its Node hook writes (the line's text names the cause, so every deferral is countable). |
+| `devswarm_parent.dir_archive_nudges` | `archive-nudges` |  |  | The per-workspace archive-recommendation records (archive-nudges/<id>.json), under the DevSwarm directory. |
+| `devswarm_parent.dir_broadcast_seen` | `parent-inbox-broadcast-seen` |  |  | The per-session broadcast seen-state (parent-inbox-broadcast-seen/<session>.json), under the DevSwarm directory. |
+| `devswarm_parent.dir_locks` | `locks` |  |  | The lock files directory, under the DevSwarm directory. |
+| `devswarm_parent.dir_notice_cursor` | `maintainer-notice-cursor` |  |  | The per-project maintainer-notice cursors (maintainer-notice-cursor/<repoKey>.json), under the DevSwarm directory. |
+| `devswarm_parent.dir_reply_state` | `parent-gate` |  |  | The per-project reply records (parent-gate/<repoKey>-replies.json), under the DevSwarm directory. |
+| `devswarm_parent.dir_stray` | `stray` |  |  | The per-plan straying records (stray/<key>.json), under the DevSwarm directory. |
+| `devswarm_parent.dir_token_usage` | `token-usage` |  |  | The per-plan token burn records (token-usage/<key>.json), under the DevSwarm directory. |
+| `devswarm_parent.dir_ui_sync` | `ui-sync-asks` |  |  | The once-per-session ask markers (ui-sync-asks), under the DevSwarm directory. |
+| `devswarm_parent.dir_wake_tick` | `wake-tick` |  |  | The per-workspace inbox-tick markers (wake-tick/<id>.json), under the DevSwarm directory. |
+| `devswarm_parent.done_merged` | `done ✓ merged` |  |  | Finish cell: done and the merge is proven. |
+| `devswarm_parent.done_not_merged` | `done, not merged` |  |  | Finish cell: done and the merge was checked and is false. |
+| `devswarm_parent.done_unverified` | `done, merge unverified` |  |  | Finish cell: done, merge never checked. |
+| `devswarm_parent.drift_cwd_re` | `"cwd"\s*:\s*"((?:[^"\\]\|\\.)*)"` |  |  | The pattern that finds the working directory a session transcript records (capture 1: the JSON string body). |
+| `devswarm_parent.drift_head_bytes` | `65536` |  |  | How much of the start of a session transcript the drift check reads to find its working directory (primary-session-drift.js HEAD_BYTES). |
+| `devswarm_parent.drift_keepalive` | `20` |  |  | Turns after which the session-drift notice is repeated. |
+| `devswarm_parent.drift_max_scan` | `25` |  |  | Most session transcripts of a worktree the drift check opens, newest first (MAX_SCAN). |
+| `devswarm_parent.drift_notice` | `💡 anti-hall · devswarm-primary-session: you are this project's only Primary; ...` |  |  | The notice that a newer session of this worktree is active. Placeholders: {newest}, {anchor}. |
+| `devswarm_parent.drift_sid_re` | `^[A-Za-z0-9._-]+$` |  |  | The shape of a session id the drift check accepts (SID_RE). |
+| `devswarm_parent.env_broadcast_max_age` | `ANTIHALL_BROADCAST_MAX_AGE_MS` |  |  | Variable that sets how old a broadcast row may be and still be shown, in milliseconds (ANTIHALL_BROADCAST_MAX_AGE_MS). |
+| `devswarm_parent.env_focus_ms` | `ANTIHALL_DEVSWARM_FOCUS_MS` |  |  | Variable that sets how long a selection in the DevSwarm app counts as the owner looking at it (ANTIHALL_DEVSWARM_FOCUS_MS; 0 disables). |
+| `devswarm_parent.env_marketplace_dir` | `ANTIHALL_MARKETPLACE_DIR` |  |  | Variable that points the version lookup at another marketplace clone (ANTIHALL_MARKETPLACE_DIR). |
+| `devswarm_parent.env_roster_hide` | `ANTIHALL_ROSTER_HIDE_ARCHIVED` |  |  | Variable that turns the "+N archived" collapse of the table off when it is "0" (ANTIHALL_ROSTER_HIDE_ARCHIVED). |
+| `devswarm_parent.env_roster_max` | `ANTIHALL_ROSTER_MAX_ROWS` |  |  | Variable that sets the most rows of the table (ANTIHALL_ROSTER_MAX_ROWS). |
 | `devswarm_parent.escalation_banner` | `⚠️ anti-hall · devswarm-escalations: not delivered ({count}): the supervisor ...` |  |  | The segment that names supervisor escalations parked because this Primary is not registered in the mesh store (companion/lib/recovery.js parkedEscalationSegment). Placeholders: {count}, {kids} (the child ids, JSON-quoted and comma-separated), {parent}, {cli}. |
+| `devswarm_parent.falling` | `falling` |  |  | The unread trend word when the backlog shrank. |
+| `devswarm_parent.file_auto_archive` | `auto-archive-state.json` |  |  | The supervisor's auto-archive sweep record (auto-archive-state.json), under the DevSwarm directory. |
+| `devswarm_parent.file_log` | `parent-inbox.log` |  |  | The parent-inbox acceptance log (parent-inbox.log), under the DevSwarm directory. |
+| `devswarm_parent.flat` | `flat` |  |  | The unread trend word when the backlog is unchanged. |
+| `devswarm_parent.focus_default_ms` | `120000` |  |  | How long a selection in the DevSwarm app counts as the owner looking at it when the variable is not a number (devswarm-app-db.js FOCUS_WINDOW_MS). |
+| `devswarm_parent.high_urgencies` | `urgent, high` |  |  | Message urgencies that make an unread backlog an urgent one (isHighUrgency). |
+| `devswarm_parent.info_note` | ` (INFORMATIONAL — question from retired sender {ids} — no repliable target{ta...` |  |  | The note on questions from retired senders. Placeholders: {ids}, {tail}. |
+| `devswarm_parent.info_tail_none` | ` and no resolvable sender id, so no ack command is offered here.` |  |  | The tail of the informational note when no retired id is named. |
+| `devswarm_parent.info_tail_runnable` | `; inspect with `node {cli} inbox messages {id}`, ack with `node {cli} inbox a...` |  |  | The tail of the informational note when a retired id is named. Placeholders: {cli}, {id}. |
+| `devswarm_parent.installed_rel` | `installed_plugins.json` |  |  | The harness registry of installed plugins, relative to the plugins root. |
+| `devswarm_parent.issue_extra` | ` +{n} more` |  |  | The mesh-issue line's count past the named ones. Placeholder: {n}. |
+| `devswarm_parent.issue_joiner` | `, ` |  |  | Between the partitions or rows of a mesh-issue line. |
+| `devswarm_parent.issue_part` | `{id} ({unread} unread)` |  |  | One partition or row of a mesh-issue line. Placeholders: {id}, {unread}. |
+| `devswarm_parent.key_drift` | `parent-inbox-session-drift` |  |  | The emit-dedupe key of the session-drift notice. |
+| `devswarm_parent.key_orphans` | `parent-inbox-orphans` |  |  | The emit-dedupe key of the orphaned-mesh segment. |
+| `devswarm_parent.key_stale_registry` | `parent-inbox-stale-registry` |  |  | The emit-dedupe key of the stale-registry segment. |
+| `devswarm_parent.key_wake` | `parent-inbox-no-wake-path` |  |  | The emit-dedupe key of the wake-path line. |
+| `devswarm_parent.labels` | `10 entries` |  |  | Row labels of the live workspace table with their sort rank in tenths (displayStatus and the label assignment of the roster loop: the Node ranks 0, 1, 1.5, 2, 3, 4, 5, 5.5 and 6, times ten, because a defaults file holds integers only). |
+| `devswarm_parent.legend_dormant` | `dormant = no recent activity signal; often a workspace already CLOSED in the ...` |  |  | The line under the table that explains a dormant row, shown only when one is listed. |
+| `devswarm_parent.legend_not_draining` | `not-draining = a union-unread backlog has sat undrained >20m — a coordination...` |  |  | The line under the table that explains a not-draining row, shown only when one is listed. |
+| `devswarm_parent.low_urgency` | `low` |  |  | The urgency that keeps an unread backlog out of the normal nudge tier (tierOf). |
+| `devswarm_parent.mark_brief_not_delivered` | `⚠ brief not delivered` |  |  | Title-cell marker: the brief was never delivered. |
+| `devswarm_parent.mark_brief_withheld` | `⚠ brief withheld` |  |  | Title-cell marker: the brief was withheld. |
+| `devswarm_parent.mark_on_screen` | `on screen` |  |  | Title-cell marker: the owner has the workspace on screen. |
+| `devswarm_parent.mark_pinned` | `pinned` |  |  | Title-cell marker: pinned in the DevSwarm app. |
+| `devswarm_parent.marketplace_default` | `.claude/plugins/marketplaces/anti-hall` |  |  | The marketplace clone, relative to the home directory, when the variable is unset or not an existing absolute directory. |
+| `devswarm_parent.max_listed` | `6` |  |  | Most workspaces the nudge segments name inline (hooks/devswarm-parent-inbox.js MAX_LISTED); the rest are counted. |
+| `devswarm_parent.max_mesh_issues` | `5` |  |  | Most orphaned partitions or stale registry rows the mesh-issue lines name (MAX_MESH_ISSUES). |
+| `devswarm_parent.max_table_rows` | `12` |  |  | Most rows of the live workspace table (MAX_TABLE_ROWS; ANTIHALL_ROSTER_MAX_ROWS overrides); the rest are folded into a "+N more" line. |
+| `devswarm_parent.mesh_issue_keepalive` | `10` |  |  | Turns after which a mesh-issue segment is repeated. |
+| `devswarm_parent.ms_per_hour` | `3600000` |  |  | Milliseconds in an hour (the renag setting is in hours). |
+| `devswarm_parent.notice_max_shown` | `5` |  |  | Most unexpired maintainer notices considered (MAX_SHOWN). |
 | `devswarm_parent.notices_file` | `maintainer-notices.jsonl` |  |  | The maintainer-notice feed (companion/lib/devswarm-maintainer-notice.js noticesPath), under the DevSwarm directory. While it exists the hook's notice segment may speak, which the engine leaves to Node. |
+| `devswarm_parent.orphans_head` | `⚠️ anti-hall · devswarm-orphaned-mesh: {count} partition(s) with unread but n...` |  |  | The segment for partitions with unread mail and no workspace to read it. Placeholders: {count}, {shown}, {extra}. |
+| `devswarm_parent.overflow` | `+{hidden} more (capped at {max})` |  |  | The table line for rows past the cap. Placeholders: {hidden}, {max}. |
+| `devswarm_parent.overflow_ids` | `: {ids}` |  |  | What follows the overflow line when the hidden rows are named. Placeholder: {ids}. |
+| `devswarm_parent.overflow_ids_more` | `, …` |  |  | What ends the named hidden rows when there are more than eight. |
+| `devswarm_parent.overflow_named_max` | `8` |  |  | Most hidden rows the overflow line names. |
+| `devswarm_parent.own_prefix` | `⚠️ anti-hall · devswarm-own-inbox: priority — ` |  |  | The start of the Primary's own-inbox segment. |
+| `devswarm_parent.own_prefix_urgent` | `⚠️ anti-hall · devswarm-own-inbox: urgent priority — ` |  |  | The start of the Primary's own-inbox segment when the newest mail is urgent or high priority. |
+| `devswarm_parent.own_read_all` | `{prefix}you have already read your parent/peer messages.` |  |  | The own-inbox segment when everything is read and nothing is unanswered. Placeholder: {prefix}. |
+| `devswarm_parent.own_read_unanswered` | `{prefix}you have already read your parent/peer messages, but {n} remain UNANS...` |  |  | The own-inbox segment when everything is read but questions remain. Placeholders: {prefix}, {n}, {askers}, {extra}, {cli}. |
+| `devswarm_parent.own_reply_clause` | ` READING IS NOT SUFFICIENT: {text} from {askers}{extra} — you must DECIDE fro...` |  |  | The question clause of the own-inbox segment. Placeholders: {text}, {askers}, {extra}, {cli}. |
+| `devswarm_parent.own_unread` | `{prefix}you have {count} unread parent/peer message(s) addressed to YOU (the ...` |  |  | The Primary's own-inbox segment when unread mail is waiting. Placeholders: {prefix}, {count}, {cli}, {id}. |
+| `devswarm_parent.part_joiner` | `, ` |  |  | Between the parts of a listed workspace. |
+| `devswarm_parent.part_not_draining` | `NOT DRAINING >20m` |  |  | A workspace part: its backlog has not drained. |
+| `devswarm_parent.part_oldest` | `oldest {age}` |  |  | A workspace part: the age of its oldest unread. Placeholder: {age}. |
+| `devswarm_parent.part_unread` | `{n} unread` |  |  | A workspace part: its unread count. Placeholder: {n}. |
+| `devswarm_parent.plan_extras` | ` · +{n} extra{s}` |  |  | What follows a plan label when the child tagged extras. Placeholders: {n}, {s} (the plural s). |
+| `devswarm_parent.plan_straying` | ` · STRAYING: {signals}` |  |  | What follows a plan label while a straying warning is active. Placeholder: {signals}. |
+| `devswarm_parent.plan_tokens` | ` · {tokens} tok` |  |  | What follows a plan label when the child's token burn is known. Placeholder: {tokens}. |
+| `devswarm_parent.plugin_json_rel` | `plugins/anti-hall/.claude-plugin/plugin.json` |  |  | The plugin manifest of the marketplace clone, relative to the clone. |
+| `devswarm_parent.plugin_registry_key` | `anti-hall@anti-hall` |  |  | The key of this plugin in the harness registry. |
+| `devswarm_parent.preview_max` | `80` |  |  | Longest question preview shown (characters). |
+| `devswarm_parent.q_of_these_many` | `{n} of these are unanswered QUESTIONS` |  |  | Question clause: several of the unread messages are questions. Placeholder: {n}. |
+| `devswarm_parent.q_of_these_one` | `1 of these is an unanswered QUESTION` |  |  | Question clause: one of the unread messages is a question. |
+| `devswarm_parent.q_remain_many` | `{n} unanswered QUESTIONS remain (not necessarily among the unread above)` |  |  | Question clause: several questions remain beyond the unread messages. Placeholder: {n}. |
+| `devswarm_parent.q_remain_one` | `1 unanswered QUESTION remains (not necessarily among the unread above)` |  |  | Question clause: one question remains beyond the unread messages. |
+| `devswarm_parent.registry_scopes` | `user, project` |  |  | The scopes of a registry entry in the order the version lookup prefers them. |
+| `devswarm_parent.relative_none` | `—` |  |  | What a relative age shows when the time is unknown. |
+| `devswarm_parent.reply_state_suffix` | `-replies.json` |  |  | The file name suffix of a project's reply record. |
+| `devswarm_parent.rising` | `rising` |  |  | The unread trend word when the backlog grew since the last injection. |
+| `devswarm_parent.risk_local_only` | `local only (not pushed)` |  |  | The title-cell marker of a branch with no upstream. |
+| `devswarm_parent.risk_merged_unverified` | `merged (unverified)` |  |  | The title-cell marker of an archive-ready row whose merge was never proven. |
+| `devswarm_parent.risk_unpushed` | `⚠ {n} unpushed` |  |  | The title-cell marker of unpushed commits. Placeholder: {n}. |
+| `devswarm_parent.roster_hide_off` | `0` |  |  | The value of the roster-hide variable that shows archived rows. |
 | `devswarm_parent.segment_joiner` | `\n\n` |  |  | Between the segments of the Primary prompt hook's answer (additionalContext). |
+| `devswarm_parent.set_auto_archive` | `5 entries` |  |  | Setting devswarm.autoArchive.mode: with the supervisor archiving a finished workspace itself the hook does not recommend archiving it. The engine answers only while it is unset (the shipped mode is on, which it checks against the supervisor's last sweep). |
+| `devswarm_parent.set_cron_warn` | `5 entries` |  |  | Setting devswarm.cronMissingWarnMin: minutes without a fresh inbox-tick marker before the cron counts as missing. The engine answers only while it is unset, with this default. |
+| `devswarm_parent.set_grace` | `5 entries` |  |  | Setting devswarm.inboxGraceSec: seconds a fresh unread message to a live child is not yet neglect. The engine answers only while it is unset, with this default. |
+| `devswarm_parent.set_held` | `5 entries` |  |  | Setting devswarm.heldPartitions: owner-held partition ids. The engine answers only while it is unset (an empty set). |
+| `devswarm_parent.set_notice_show` | `5 entries` |  |  | Setting devswarm.maintainerNotice.show: whether unseen maintainer notices are shown. The engine answers only while it is unset, with this default. |
+| `devswarm_parent.set_renag` | `5 entries` |  |  | Setting devswarm.archiveRequestRenagHours: hours a pending archive-request suppresses the nag before it repeats. The engine answers only while it is unset, with this default. |
+| `devswarm_parent.shown_joiner` | `; ` |  |  | Between the listed workspaces. |
+| `devswarm_parent.stale_build_cmd` | `node {path}` |  |  | What the stale-build text names as the command: the newest CLI by path. Placeholder: {path}. |
+| `devswarm_parent.stale_build_cmd_unknown` | `the newest anti-hall CLI` |  |  | What the stale-build text names when the newest CLI cannot be found. |
+| `devswarm_parent.stale_build_label` | `stale anti-hall {version}` |  |  | The label of a row whose child runs an older anti-hall build than the machine's newest; {version} is the recorded version. Its rank is the not-draining rank. |
+| `devswarm_parent.stale_build_message` | `stale anti-hall {version}: run /reload-plugins (restart only if it persists) ...` |  |  | The text for a child that runs an older anti-hall build than the machine's newest. Placeholders: {version}, {cmd}. |
+| `devswarm_parent.stale_registry_head` | `⚠️ anti-hall · devswarm-stale-workspaces: {count} workspace(s) whose worktree...` |  |  | The segment for registry rows whose worktree is gone but that still hold unread. Placeholders: {count}, {shown}, {extra}. |
+| `devswarm_parent.stuck_statuses` | `stale, nudged, escalated` |  |  | Supervisor verdicts that mean a child is wedged (STUCK_STATUSES). |
+| `devswarm_parent.table_head` | `💡 anti-hall · devswarm-workspaces: (re-sent on change, else every 10 turns):\...` |  |  | The head of the live workspace table: the title line and the column header. |
+| `devswarm_parent.table_row` | `\| {workspace} \| {label} \| {finish} \| {unread} \| {last} \|` |  |  | One table row. Placeholders: {workspace}, {label}, {finish}, {unread}, {last}. |
+| `devswarm_parent.title_instruction` | `When mentioning a workspace to the human, use its TITLE from the table above ...` |  |  | The reminder that follows a newly sent table: name a workspace by its title. |
+| `devswarm_parent.title_max` | `48` |  |  | Longest workspace title the nudge segments show before it is cut with an ellipsis (truncateTitle). |
+| `devswarm_parent.tokens_million` | `{v}M` |  |  | The token figure at a million or more. Placeholder: {v}. |
+| `devswarm_parent.tokens_million_at` | `1000000` |  |  | The token count from which the figure is written in millions. |
+| `devswarm_parent.tokens_thousand` | `{v}k` |  |  | The token figure at a thousand or more. Placeholder: {v}. |
+| `devswarm_parent.tokens_thousand_at` | `1000` |  |  | The token count from which the figure is written in thousands. |
+| `devswarm_parent.trend_log_max_bytes` | `2097152` |  |  | Largest parent-inbox.log the unread trend reads (MAX_TREND_LOG_BYTES); past it no trend is shown. |
+| `devswarm_parent.unknown_sender` | `unknown sender` |  |  | What the informational note names for a question without a sender. |
+| `devswarm_parent.unread_body_drain` | `CHILD NOT DRAINING: these are message(s) YOU sent that the child has NOT yet ...` |  |  | The nudge text when some listed workspace holds unread. Placeholder: {cli}. |
+| `devswarm_parent.unread_body_read` | `Read/ack each workspace inbox (or reassign/archive it) so it does not sit unn...` |  |  | The nudge text when none of the listed workspaces holds unread. |
+| `devswarm_parent.unread_extra` | ` +{n} more` |  |  | The nudge segment's count of workspaces past the inline list. Placeholder: {n}. |
+| `devswarm_parent.unread_head` | `⚠️ anti-hall · devswarm-parent-inbox: {count} active workspace(s) need attent...` |  |  | The nudge segment for workspaces that need attention. Placeholders: {count}, {shown}, {extra}. |
+| `devswarm_parent.unread_tail` | `A workspace flagged stale/escalated has a wedged child — check on it.` |  |  | The last sentence of the nudge segment. |
+| `devswarm_parent.unread_title_parts` | `{title} ({parts})` |  |  | A listed workspace's parts. Placeholders: {title}, {parts}. |
+| `devswarm_parent.urgent_head` | `⚠️ anti-hall · devswarm-urgent-inbox: {count} workspace(s) have an URGENT/HIG...` |  |  | The nudge segment for an urgent unread message. Placeholders: {count}, {shown}, {extra}, {cli}. |
+| `devswarm_parent.urgent_part` | `{id} ({parts})` |  |  | A workspace of the urgent segment. Placeholders: {id}, {parts}. |
+| `devswarm_parent.version_read_max` | `4194304` |  |  | Largest registry or manifest file the version lookup reads (update.js MAX_BYTES). |
+| `devswarm_parent.wake_both` | `NO MAILBOX WAKE PATH: you have live workspaces but no watcher and no recent m...` |  |  | The wake-path line when neither the watcher nor the cron tick is alive. Placeholders: {mon}, {cron}. |
+| `devswarm_parent.wake_cron_part` | `CronList, then CronCreate "{cron}" running `node {cli} inbox tick {id} --quie...` |  |  | The cron part of the wake-path line. Placeholders: {cron}, {cli}, {id}. |
+| `devswarm_parent.wake_monitor` | `Monitor: node {watcher}` |  |  | The watcher part of the wake-path line. Placeholder: {watcher}. |
+| `devswarm_parent.wake_tick` | `NO MAILBOX TICK: you have live workspaces but no recent mailbox tick (session...` |  |  | The wake-path line when only the cron tick is missing. Placeholder: {cron}. |
+| `devswarm_parent.watch_lock_prefix` | `wake-watch-` |  |  | The file name prefix of a mailbox watcher lock (locks/wake-watch-<id>.lock). |
+| `devswarm_parent.watch_lock_suffix` | `.lock` |  |  | The file name suffix of a mailbox watcher lock. |
+| `devswarm_parent.working` | `working` |  |  | Finish cell: no done report yet. |
+| `devswarm_parent.working_pct` | `working ({pct}%)` |  |  | Finish cell: no done report yet, with the heartbeat progress. Placeholder: {pct}. |
 
 ## Messages
 
