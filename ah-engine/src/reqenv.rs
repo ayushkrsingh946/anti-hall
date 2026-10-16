@@ -32,6 +32,8 @@ pub fn presence_only(name: &str) -> bool {
 pub struct RequestEnv {
     vars: BTreeMap<String, String>,
     incomplete: bool,
+    /// The process that sent the request (the daemon's peer on the socket), never anything the client wrote.
+    peer_pid: Option<u32>,
 }
 
 impl Serialize for RequestEnv {
@@ -61,9 +63,9 @@ impl From<BTreeMap<String, String>> for RequestEnv {
             .collect();
         let size: usize = kept.iter().map(|(k, v)| k.len() + v.len()).sum();
         if size as u64 > defaults::num("request_env.max_bytes") {
-            return RequestEnv { vars: BTreeMap::new(), incomplete: true };
+            return RequestEnv { vars: BTreeMap::new(), incomplete: true, peer_pid: None };
         }
-        RequestEnv { vars: kept, incomplete: flagged }
+        RequestEnv { vars: kept, incomplete: flagged, peer_pid: None }
     }
 }
 
@@ -85,7 +87,7 @@ impl RequestEnv {
 
     /// An environment the checks must not evaluate with (see the type's docs): they defer to Node instead.
     pub fn incomplete() -> RequestEnv {
-        RequestEnv { vars: BTreeMap::new(), incomplete: true }
+        RequestEnv { vars: BTreeMap::new(), incomplete: true, peer_pid: None }
     }
 
     /// True when the checks that read the environment must defer to Node.
@@ -96,6 +98,17 @@ impl RequestEnv {
     /// An environment from explicit pairs (tests, `ah-engine check`); filtered like any other.
     pub fn from_pairs<K: Into<String>, V: Into<String>>(pairs: impl IntoIterator<Item = (K, V)>) -> RequestEnv {
         RequestEnv::from(pairs.into_iter().map(|(k, v)| (k.into(), v.into())).collect::<BTreeMap<_, _>>())
+    }
+
+    /// This environment as sent by the process `pid` (the daemon's socket peer).
+    pub fn with_peer_pid(mut self, pid: Option<u32>) -> RequestEnv {
+        self.peer_pid = pid;
+        self
+    }
+
+    /// The process that sent the request, when the daemon could tell.
+    pub fn peer_pid(&self) -> Option<u32> {
+        self.peer_pid
     }
 
     /// The value of `name`.
@@ -126,6 +139,18 @@ pub fn split_request(body: &str) -> (RequestEnv, &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_sender_pid_comes_from_the_daemon_never_from_the_client() {
+        let key = defaults::text("request_env.peer_pid_key");
+        // a client that writes the name itself is dropped by the allowlist
+        let sent = RequestEnv::from_pairs([("HOME", "/h"), (key, "4242")]);
+        assert_eq!(sent.get(key), None);
+        assert!(!crate::checks::git::util::Settings::from_env(&sent).env.contains_key(key), "no sender: a one-shot check starts at itself");
+        // the daemon's socket peer reaches the checks under it
+        let st = crate::checks::git::util::Settings::from_env(&sent.with_peer_pid(Some(77)));
+        assert_eq!(st.env.get(key).map(String::as_str), Some("77"));
+    }
 
     #[test]
     fn only_allowlisted_names_survive() {

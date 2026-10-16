@@ -60,6 +60,7 @@ pub mod mesh;
 pub mod meshw;
 pub mod metrics;
 pub mod migrate;
+pub mod migration;
 pub mod operator;
 pub mod ops;
 pub mod paths;

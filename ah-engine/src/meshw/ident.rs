@@ -7,7 +7,8 @@
 //! `companion/lib/reader-identity.js` `deriveReaderNonce`.
 //!
 //! Node answers some of these by running git (`rev-parse --show-superproject-working-tree` for a checkout nested in
-//! another one). The engine never runs git here: where Node would, the answer is [`Defer`] and the verb goes to Node.
+//! another one). The engine asks git the same one question, bounded and cached the same way (`git_superproject`); where git
+//! does not answer, or Node would run anything else, the answer is [`Defer`] and the verb goes to Node.
 // Discard triage (E3): every `.ok()` / `unwrap_or_default()` in this file is a deliberate keep, for these reasons:
 // - an unreadable optional file is the same as an absent one (fail-open, as Node's try/catch)
 // - text that does not parse or decode is the absent value (Node Number()/JSON.parse catch parity)
@@ -206,6 +207,53 @@ fn has_core_worktree(gitdir: &str) -> bool {
     false
 }
 
+/// The superproject answers git gave, per nested checkout (identity.js `superCache`): `(answer, when)`. Only an answer git gave
+/// is kept; a failed call is asked again next time.
+type SuperCache = HashMap<String, (Option<String>, std::time::Instant)>;
+static SUPER_CACHE: std::sync::Mutex<Option<SuperCache>> = std::sync::Mutex::new(None);
+
+/// `gitSuperproject(dir)`: the real path of the superproject checkout git names for the nested checkout `root` (a `.git`
+/// directory, or a `.git` file layout the disk does not classify, below another repository), `None` for none. A git call that
+/// fails or times out, or an answer whose path does not resolve, is [`Defer`]: Node reads both as "uncertain".
+fn git_superproject(root: &str) -> R<Option<String>> {
+    let ttl = defaults::millis("mesh_write.super_cache_ttl_ms");
+    if let Ok(g) = SUPER_CACHE.lock()
+        && let Some((ans, at)) = g.as_ref().and_then(|m| m.get(root))
+        && at.elapsed() < ttl
+    {
+        return Ok(ans.clone());
+    }
+    let argv: Vec<String> = defaults::list("codex_handover.argv_super").iter().map(|a| a.replace("{root}", root)).collect();
+    let out = crate::checks::jsport::gitrun::git_scrubbed(
+        root,
+        &argv.iter().map(String::as_str).collect::<Vec<_>>(),
+        defaults::millis("codex_handover.identity_git_timeout_ms"),
+        &crate::reqenv::RequestEnv::default(),
+        &defaults::list("codex_handover.git_scrub_env"),
+    );
+    let Some(out) = out else { return defer("git-superproject") };
+    let s = crate::checks::guardkit::text::js_trim(&out);
+    let ans = if s.is_empty() {
+        None
+    } else {
+        match realpath(s) {
+            Some(r) => Some(r),
+            None => return defer("git-superproject"),
+        }
+    };
+    if let Ok(mut g) = SUPER_CACHE.lock() {
+        let m = g.get_or_insert_with(HashMap::new);
+        if m.len() as u64 >= defaults::num("mesh_write.super_cache_max") {
+            m.retain(|_, (_, at)| at.elapsed() < ttl);
+            if m.len() as u64 >= defaults::num("mesh_write.super_cache_max") {
+                m.clear();
+            }
+        }
+        m.insert(root.to_string(), (ans.clone(), std::time::Instant::now()));
+    }
+    Ok(ans)
+}
+
 fn under(child: &str, parent: &str) -> bool {
     child == parent || child.starts_with(&format!("{parent}/"))
 }
@@ -277,7 +325,7 @@ pub fn resolve_context(cwd: &str, ancestor: bool) -> R<Ctx> {
                 return Ok(None);
             }
         }
-        defer("git-superproject")
+        git_superproject(root)
     };
     let mut root = t.clone();
     let t = t.clone();
@@ -710,9 +758,15 @@ fn pid_alive_raw(pid: i64) -> Option<bool> {
 /// `deriveReaderNonce({ home })`: `h:<pid>:<startMs>` of the nearest live harness ancestor (a `~/.claude/sessions/<pid>.json`
 /// record), else None. Starts at this process.
 pub fn reader_nonce(home: &Path) -> Option<String> {
+    reader_nonce_from(home, i64::from(std::process::id()))
+}
+
+/// [`reader_nonce`] starting at `start` instead of this process: the daemon starts at the hook client that sent the request
+/// (its peer on the socket), which is where the Node hook would have started, one process below the host.
+pub fn reader_nonce_from(home: &Path, start: i64) -> Option<String> {
     let sess = home.join(defaults::text("mesh_write.claude_dir")).join(defaults::text("mesh_write.sessions_dir"));
     let mut table: Option<Option<HashMap<i64, i64>>> = None;
-    let mut pid = i64::from(std::process::id());
+    let mut pid = start;
     let mut seen = std::collections::HashSet::new();
     for _ in 0..=defaults::num("mesh_write.max_ppid_hops") {
         if pid <= 1 || !seen.insert(pid) {

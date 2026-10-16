@@ -8,7 +8,7 @@
 //!
 //! What it checks: the platform and versions, that the hook scripts the registry names are on disk, the live behaviour of the
 //! guards (each built-in check is run in-process on a crafted payload and must block or allow as the Node guard does; a payload
-//! the engine defers to its Node hook is reported as such, never as a pass), the statusline configuration and its render, the
+//! the engine does not decide is reported as a deferral, never as a pass), the statusline configuration and its render, the
 //! saved Workflow templates, oh-my-claudecode and the Codex port when present, other plugins' competing hooks and skills, the
 //! DevSwarm supervisor section (its files, the four mechanical hooks, the installed unit), orphaned ingest registrations and
 //! leaked test-fixture stores, and the repair pass. The explicit `--repair-ingest-orphans`, `--repair-test-stores` and
@@ -16,9 +16,7 @@
 //!
 //! `--logs` lists the recent warn/error entries of the central log (see [`logs`]).
 //!
-//! Node is not a requirement: Node on PATH is reported as optional, and the doctor starts Node only when the `doctor.node_twins`
-//! setting lets it run a check's Node twin where the engine defers; with it off or no Node, a deferral is reported as a warning,
-//! never a pass.
+//! The doctor never starts Node: a check the engine does not decide is reported as a warning (a deferral), never a pass.
 //!
 //! What it does not do yet: the context-footprint measurement, the DevSwarm runtime checks of an active session (liveness
 //! verdicts, app-database view, delivery log, wake monitor; the report says so), the default repair rows that install or reap
@@ -207,9 +205,17 @@ fn flags(p: &Parsed) -> Flags {
     }
 }
 
-/// Whether the doctor may start Node to run a check's Node twin where the engine defers (`doctor.node_twins`).
-fn node_twins() -> bool {
-    defaults::raw("doctor.node_twins").as_bool().unwrap_or(false)
+/// The engine the hook wrapper falls back to: `ah-engine` on PATH, used only when the home install is not executable
+/// (`ah-hook.sh`). True (and an info line naming it) when that engine exists, so a PATH-installed engine is not "no engine".
+fn path_engine(doc: &mut Doc, ctx: &migrate::Ctx) -> bool {
+    let name = defaults::text("doctor.bin_name");
+    let home_bin = install::engine_dir(&ctx.home).join(defaults::text("doctor.bin_dir")).join(name);
+    if system::which(name, home_bin.parent().map(|p| p.to_string_lossy().into_owned()).as_deref().unwrap_or("")).is_some() {
+        return false; // the wrapper runs the home install, executable but unusable: nothing else is tried
+    }
+    let Some(found) = system::which(name, ctx.env.get("PATH").map(String::as_str).unwrap_or("")) else { return false };
+    doc.infol(defaults::render("doctor_msg.engine_on_path", &[("path", &found.display())]));
+    true
 }
 
 /// `process.platform` and `process.arch` as Node names them.
@@ -475,7 +481,7 @@ pub fn run_doctor(p: &Parsed) -> i32 {
         doc.warnl(defaults::text("doctor_msg.no_plugin_root").to_string());
     }
     runtime::daemon_section(&mut doc);
-    let engine_usable = install::section(&mut doc, &mut fixes, &ctx, root_path, &host);
+    let engine_usable = install::section(&mut doc, &mut fixes, &ctx, root_path, &host) || path_engine(&mut doc, &ctx);
     runtime::state_section(&mut doc, &mut fixes, uid);
     plugin::config_section(&mut doc, &mut fixes, &ctx);
     plugin::registry_section(&mut doc, &ctx, root_path, &version);

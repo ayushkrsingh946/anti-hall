@@ -395,6 +395,31 @@ pub fn peer_uid(s: &UnixStream) -> Option<u32> {
     }
 }
 
+/// pid of the process on the other end of `s`, when the platform can tell.
+pub fn peer_pid(s: &UnixStream) -> Option<u32> {
+    #[cfg(target_os = "linux")]
+    {
+        let mut cred = libc::ucred { pid: 0, uid: 0, gid: 0 };
+        let mut len = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+        // SAFETY: `cred` and `len` describe a writable ucred buffer of exactly `len` bytes; the fd is live for the call.
+        let rc = unsafe { libc::getsockopt(s.as_raw_fd(), libc::SOL_SOCKET, libc::SO_PEERCRED, &mut cred as *mut _ as *mut libc::c_void, &mut len) };
+        (rc == 0 && cred.pid > 0).then_some(cred.pid as u32)
+    }
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    {
+        let mut pid: libc::pid_t = 0;
+        let mut len = std::mem::size_of::<libc::pid_t>() as libc::socklen_t;
+        // SAFETY: `pid` and `len` describe a writable pid_t of exactly `len` bytes; the fd is live for the call.
+        let rc = unsafe { libc::getsockopt(s.as_raw_fd(), libc::SOL_LOCAL, libc::LOCAL_PEERPID, &mut pid as *mut _ as *mut libc::c_void, &mut len) };
+        (rc == 0 && pid > 0).then_some(pid as u32)
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "ios")))]
+    {
+        let _ = s;
+        None
+    }
+}
+
 /// A peer is allowed only when its uid is known and equals `expect`.
 pub fn peer_allowed(s: &UnixStream, expect: u32) -> bool {
     peer_uid(s) == Some(expect)
@@ -532,6 +557,12 @@ mod tests {
         assert_eq!(peer_uid(&a), Some(uid()));
         assert!(peer_allowed(&a, uid()));
         assert!(!peer_allowed(&a, uid().wrapping_add(1)), "any other uid must be rejected");
+    }
+
+    #[test]
+    fn peer_pid_names_the_process_on_the_other_end() {
+        let (a, _b) = UnixStream::pair().unwrap();
+        assert_eq!(peer_pid(&a), Some(std::process::id()));
     }
 
     #[test]

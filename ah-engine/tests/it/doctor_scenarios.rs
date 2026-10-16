@@ -316,7 +316,8 @@ fn bin_01_missing() {
     sc.own_plugin();
     let d = sc.doctor(&[]);
     d.has("warn", &["engine binary not installed at", "bin/ah-engine", "- Fix: sh", "ah-engine-bootstrap.sh -v"]);
-    assert_eq!(d.code, 0, "a missing installed engine is a warning, the Node hooks still work\n{}", d.text);
+    d.has("bad", &["no working engine: the anti-hall hooks do not run"]);
+    assert_eq!(d.code, 1, "Node is no fallback: a missing installed engine is a failure\n{}", d.text);
 }
 
 #[test]
@@ -699,6 +700,7 @@ fn dmn_03_hung_daemon_holds_the_lock_and_never_answers() {
 fn dmn_04_stale_socket_and_dmn_05_not_a_socket() {
     let mut sc = Sc::new();
     sc.own_plugin();
+    sc.stub_engine("0.1.0"); // Node is no fallback: without a working engine the doctor fails
     let state = sc.state();
     fs::create_dir_all(&state).unwrap();
     let sock = ah_engine::paths::socket_in(&state);
@@ -745,6 +747,7 @@ fn dmn_06_07_stale_pid_files() {
 fn dmn_08_09_crash_loop_and_breaker_with_the_recorded_failure() {
     let mut sc = Sc::new();
     sc.own_plugin();
+    sc.stub_engine("0.1.0"); // Node is no fallback: without a working engine the doctor fails
     let state = sc.state();
     fs::create_dir_all(&state).unwrap();
     fs::write(state.join("crashloop.until"), (now_ms() + 60_000).to_string()).unwrap();
@@ -824,7 +827,7 @@ fn st_01_missing_is_created_by_the_repair_and_a_second_run_finds_nothing() {
     sc.shell().has("info", &["does not exist yet; it is created on first use"]);
     let d = sc.doctor(&[]);
     d.has("info", &["does not exist yet; it is created on first use"]);
-    assert_eq!(d.code, 0);
+    assert_eq!(d.code, 1, "no installed engine (a stub would create the state directory): the one failure is no working engine");
 
     let dry = sc.doctor_raw(&["--dry-run"]);
     dry.has("info", &["state-dir-create", "would have created the private state directory"]);
@@ -894,6 +897,7 @@ fn st_03_read_only_state_directory() {
 fn st_04_disk_nearly_full_by_the_plugins_threshold() {
     let mut sc = Sc::new();
     sc.own_plugin();
+    sc.stub_engine("0.1.0"); // Node is no fallback: without a working engine the doctor fails
     fs::create_dir_all(sc.state()).unwrap();
     fs::set_permissions(sc.state(), fs::Permissions::from_mode(0o700)).unwrap();
     // the limit is a plugin setting: raise it above any disk and the volume counts as nearly full
@@ -966,6 +970,7 @@ fn cf_01_healthy_configuration() {
 fn cf_02_a_broken_edit_falls_back_to_the_pristine_copy() {
     let mut sc = Sc::new();
     sc.own_plugin();
+    sc.stub_engine("0.1.0"); // Node is no fallback: without a working engine the doctor fails
     let f = sc.plugin.join("engine/defaults/limits.toml");
     let mut text = fs::read_to_string(&f).unwrap();
     text.push_str("\n[[[ this is not toml\n");
@@ -1007,6 +1012,7 @@ fn cf_04_pristine_copy_missing() {
 fn cf_05_unknown_settings_are_reported_not_failed() {
     let mut sc = Sc::new();
     sc.own_plugin();
+    sc.stub_engine("0.1.0"); // Node is no fallback: without a working engine the doctor fails
     let f = sc.plugin.join("engine/defaults/doctor.toml");
     let mut text = fs::read_to_string(&f).unwrap();
     text.push_str("\n[doctor.not_a_real_key]\ndoc = \"a typo\"\nvalue = 1\n");
@@ -1020,6 +1026,7 @@ fn cf_05_unknown_settings_are_reported_not_failed() {
 fn cf_06_07_the_users_own_config_and_settings_files() {
     let mut sc = Sc::new();
     sc.own_plugin();
+    sc.stub_engine("0.1.0"); // Node is no fallback: without a working engine the doctor fails
     fs::create_dir_all(sc.state()).unwrap();
     fs::set_permissions(sc.state(), fs::Permissions::from_mode(0o700)).unwrap();
     fs::write(sc.state().join("config.toml"), "[daemon\nworkers = ").unwrap();
@@ -1155,6 +1162,7 @@ fn pl_06_registry_and_session_versions_differ() {
 fn pl_09_registry_or_settings_not_json() {
     let mut sc = Sc::new();
     sc.own_plugin();
+    sc.stub_engine("0.1.0"); // Node is no fallback: without a working engine the doctor fails
     sc.put(".claude/plugins/installed_plugins.json", b"{ nope");
     sc.put(".claude/settings.json", b"also nope");
     let d = sc.doctor(&[]);
@@ -1199,67 +1207,57 @@ fn hk_02_03_hooks_json_missing_or_broken_and_wrapper_missing() {
 // ---- ND / EV: Node, tools, HOME, PATH -------------------------------------------------------------------------------------------
 
 #[test]
-fn nd_node_missing_old_broken_and_fine() {
+fn nd_node_is_never_probed_and_no_engine_is_the_failure() {
     let mut sc = Sc::new();
     sc.own_plugin();
     sc.programs(&[], &["node"]);
     let d = sc.doctor(&[]);
-    d.has("warn", &["node is not on PATH", "Node is optional", "none needed"]);
-    d.has("bad", &["no working engine", "Node is not needed"]);
+    d.has("bad", &["no working engine: the anti-hall hooks do not run"]);
+    d.lacks("Node is not needed");
     assert_eq!(d.code, 1);
-    // the engine works: no node is only a warning, Node is not a requirement
+    // the engine works: no node is no finding at all
     sc.stub_engine("0.1.0");
     let d = sc.doctor(&[]);
-    d.has("warn", &["node is not on PATH"]);
     d.lacks("no working engine");
+    d.lacks("node is not on PATH");
     assert_eq!(d.code, 0);
     let shell = sc.shell();
-    shell.has("warn", &["node is not on PATH", "Node is optional"]);
     shell.lacks("no working engine");
-    // too old, broken, fine: warnings and a note, never a failure while the engine works
-    // a stand-in node answers every start with its version, so the Node twins are off for these stages
-    twins_off(&sc);
-    sc.programs(&[("node", "echo v18.19.0")], &[]);
-    let d = sc.doctor(&[]);
-    d.has("warn", &["Node v18.19.0 is < 22; Node is optional"]);
-    assert_eq!(d.code, 0, "{}", d.text);
-    sc.shell().has("warn", &["Node v18.19.0 is < 22; Node is optional"]);
-    sc.programs(&[("node", "echo oops >&2; exit 4")], &[]);
-    let d = sc.doctor(&[]);
-    d.has("warn", &["node does not run: exit 4 oops"]);
-    assert_eq!(d.code, 0);
-    sc.programs(&[("node", "echo v22.3.0")], &[]);
-    sc.doctor(&[]).has("info", &["Node v22.3.0 (>= 22) found; optional"]);
-    sc.shell().has("info", &["Node v22.3.0 (>= 22) found; optional"]);
-}
-
-/// Turn `doctor.node_twins` off in the scenario's plugin copy (defaults and pristine twin).
-fn twins_off(sc: &Sc) {
-    for dir in ["engine/defaults", "engine/defaults.pristine"] {
-        let f = sc.plugin.join(dir).join("doctor.toml");
-        let t = fs::read_to_string(&f).unwrap();
-        let at = t.find("[doctor.node_twins]").unwrap();
-        let v = at + t[at..].find("value = true").unwrap();
-        fs::write(&f, format!("{}value = false{}", &t[..v], &t[v + "value = true".len()..])).unwrap();
-    }
+    shell.lacks("node is not on PATH");
 }
 
 #[test]
-fn nd_with_node_twins_off_the_doctor_never_starts_node() {
-    // a node on PATH that records every start: with doctor.node_twins off, the engine doctor (live self-tests, statusline
-    // render, supervisor and renderer syntax checks) must not run it beyond the optional version probe, and every self-test the
-    // engine defers is a warning, never a pass
+fn nd_an_engine_on_path_is_a_working_engine_when_the_home_install_is_not_executable() {
+    // the hook wrapper runs ah-engine from PATH when the home install is not executable (ah-hook.sh): both doctors count it
+    let mut sc = Sc::new();
+    sc.own_plugin();
+    sc.programs(&[("ah-engine", "[ \"$1\" = version ] && echo 0.1.0\nexit 0")], &[]);
+    let d = sc.doctor(&[]);
+    d.lacks("no working engine");
+    d.has("info", &["the hooks run ah-engine from PATH (", "bin/ah-engine) because the home install is not executable"]);
+    let shell = sc.shell();
+    shell.lacks("no working engine");
+    shell.has("info", &["the hooks run ah-engine from PATH (", "bin/ah-engine) because the home install is not executable"]);
+    // an executable home install that does not run is what the wrapper runs: the PATH engine is never tried
+    sc.install_bin(b"#!/bin/sh\nexit 3\n", 0o755);
+    let d = sc.doctor(&[]);
+    d.lacks("from PATH");
+    d.has("bad", &["no working engine: the anti-hall hooks do not run"]);
+}
+
+#[test]
+fn nd_the_doctor_never_starts_node() {
+    // a node on PATH that records every start: the engine doctor (live self-tests, statusline render, the DevSwarm hook tests)
+    // must not run it at all, not even for a version probe
     let mut sc = Sc::new();
     sc.own_plugin();
     sc.stub_engine("0.1.0");
-    twins_off(&sc);
     let log = sc.root.join("node-starts.log");
     sc.programs(&[("node", &format!("echo \"$*\" >> '{}'\necho v22.3.0", log.display()))], &[]);
     let d = sc.doctor(&[]);
     let starts = fs::read_to_string(&log).unwrap_or_default();
-    let real: Vec<&str> = starts.lines().filter(|l| l.trim() != "--version").collect();
-    assert!(real.is_empty(), "the doctor started node: {real:?}\n{}", d.text);
-    d.has("warn", &["the engine defers this self-test to its Node hook, so it was not exercised here"]);
+    assert!(starts.trim().is_empty(), "the doctor started node: {starts:?}\n{}", d.text);
+    d.lacks("Node v22");
 }
 
 #[test]
@@ -1520,9 +1518,9 @@ fn shadow_the_node_doctor_agrees_on_a_missing_hook_script_and_on_node_itself() {
     assert!(bad(&engine), "engine: {}", engine.text);
     assert_ne!(node.code, 0);
     assert_ne!(engine.code, 0);
-    // and both see this Node (the engine doctor as an optional one)
+    // the Node doctor sees this Node; the engine doctor never probes it
     node.has("ok", &["Node v", "hooks can run"]);
-    engine.has("info", &["Node v", "found; optional"]);
+    engine.lacks("Node v");
 }
 
 // ---- the optional `claude doctor` sub-check ---------------------------------------------------------------------------------------
@@ -1531,6 +1529,7 @@ fn shadow_the_node_doctor_agrees_on_a_missing_hook_script_and_on_node_itself() {
 fn claude_doctor_missing_clean_problems_unsupported_and_hung() {
     let mut sc = Sc::new();
     sc.own_plugin();
+    sc.stub_engine("0.1.0"); // Node is no fallback: without a working engine the doctor fails
     sc.doctor(&[]).has("info", &["the claude CLI is not on PATH", "skipped"]);
     let script = |body: &str| format!("if [ \"$1\" = --version ]; then echo '9.9.9 (Claude Code)'; exit 0; fi\n{body}");
     sc.programs(&[("claude", &script("echo 'Claude Code doctor'; echo; echo 'No installation issues found.'"))], &[]);
@@ -1588,7 +1587,7 @@ fn doctor_check_leaves_the_state_directory_alone() {
     let mut sc = Sc::new();
     sc.own_plugin();
     let d = sc.doctor(&[]);
-    assert_eq!(d.code, 0, "{}", d.text);
+    assert_eq!(d.code, 1, "no installed engine (a stub would create the state directory): the one failure is no working engine\n{}", d.text);
     assert!(!sc.home.join(".anti-hall").exists(), "a check created {}", sc.home.join(".anti-hall").display());
     // the repair, which does write, still may
     sc.doctor_raw(&["--repair"]);
@@ -1596,21 +1595,17 @@ fn doctor_check_leaves_the_state_directory_alone() {
 }
 
 #[test]
-fn ds_the_supervisor_files_must_parse_and_the_hook_tests_must_pass() {
+fn ds_the_hook_tests_must_pass_and_no_syntax_check_starts_node() {
     let mut sc = Sc::new();
     sc.own_plugin();
+    sc.stub_engine("0.1.0");
     sc.programs(&[], &[]);
     // the hooks the self-tests run need the companion libraries and the scripts beside them
     fs::remove_file(sc.plugin.join("companion")).unwrap();
     copy_dir(&real_plugin().join("companion"), &sc.plugin.join("companion"));
-    // a supervisor script that does not parse is a failure, even with DevSwarm dormant
+    // the engine doctor starts no Node, so it does not syntax-check the supervisor scripts
     let live = sc.plugin.join("companion/lib/liveness.js");
-    let good = fs::read(&live).unwrap();
     fs::write(&live, "function (((\n").unwrap();
-    let d = sc.doctor(&[]);
-    d.has("bad", &["supervisor lib SYNTAX ERROR: liveness.js"]);
-    assert_eq!(d.code, 1);
-    fs::write(&live, good).unwrap();
     let d = sc.doctor(&[]);
     d.lacks("DevSwarm liveness supervisor");
     assert_eq!(d.code, 0);

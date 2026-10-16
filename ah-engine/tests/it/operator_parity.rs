@@ -67,11 +67,7 @@ fn run(mut cmd: Command, home: &Path, cwd: &Path, extra: &[(&str, &str)], stdin:
         .env("CLAUDE_PLUGIN_ROOT", plugin_src())
         .env("ANTIHALL_INGEST_DRY_RUN", "1")
         .env("AH_ENGINE_SHADOW_RATE_STATUSLINE", "0")
-        .env("AH_ENGINE_SHADOW_RATE_SETTINGS", "0")
-        .env("AH_ENGINE_SHADOW_RATE_DEFECT", "0")
         .env("AH_ENGINE_SHADOW_RATE_PHASE", "0")
-        .env("AH_ENGINE_SHADOW_RATE_INSTALL", "0")
-        .env("AH_ENGINE_SHADOW_RATE_UNINSTALL", "0")
         // the Node installer writes the Node-only command; the engine's installer writes its own command unless told otherwise
         .env("ANTIHALL_STATUSLINE_NODE_ONLY", "1")
         .current_dir(cwd)
@@ -1251,23 +1247,6 @@ fn the_installers_refuse_user_config_outside_a_temp_dir_under_a_test() -> R {
 
 // ---- the Node shadow --------------------------------------------------------------------------------------------------
 
-fn engine_with_shadow(home: &Path, rate: &str, node: Option<&Path>, args: &[&str]) -> R {
-    let mut c = Command::new(BIN);
-    c.args(args)
-        .env_clear()
-        .env("PATH", std::env::var("PATH")?)
-        .env("HOME", home)
-        .env("CLAUDE_PLUGIN_ROOT", plugin_src())
-        .env("AH_ENGINE_SHADOW_RATE_SETTINGS", rate)
-        .env("AH_ENGINE_DIR", home.join("state"))
-        .stdout(Stdio::null());
-    if let Some(n) = node {
-        c.env("AH_ENGINE_NODE", n);
-    }
-    assert!(c.status()?.success());
-    Ok(())
-}
-
 fn wait_shadow_done(state: &Path) -> bool {
     let d = state.join("shadow");
     for _ in 0..200 {
@@ -1283,27 +1262,24 @@ fn wait_shadow_done(state: &Path) -> bool {
 }
 
 #[test]
-fn a_sampled_run_leaves_no_trace_when_node_agrees_and_a_report_when_it_does_not() -> R {
+fn settings_and_defect_runs_never_start_node() -> R {
     let seed = Scratch::new("seed")?;
     settings_seed(seed.path())?;
-    let home = Scratch::new("shadow")?;
+    let home = Scratch::new("no-shadow")?;
     copy_dir(seed.path(), home.path())?;
     let state = home.path().join("state");
-    engine_with_shadow(home.path(), "1000", None, &["settings", "show", "--json"])?;
-    assert!(wait_shadow_done(&state), "the comparison finished");
-    let left: Vec<_> = fs::read_dir(state.join("shadow")).map(|rd| rd.flatten().collect()).unwrap_or_default();
-    assert!(left.is_empty(), "a matching shadow removes its scratch directory: {left:?}");
-    // a Node that answers differently is a mismatch with the report kept
+    let log = home.path().join("fake-node.log");
     let fake = home.path().join("fake-node.sh");
-    fs::write(&fake, "#!/bin/sh\necho different\n")?;
+    fs::write(&fake, "#!/bin/sh\necho started >> \"$AH_FAKE_LOG\"\necho different\n")?;
     fs::set_permissions(&fake, fs::Permissions::from_mode(0o755))?;
-    engine_with_shadow(home.path(), "1000", Some(&fake), &["settings", "show", "--json"])?;
-    assert!(wait_shadow_done(&state), "the second comparison finished");
-    let reports: Vec<_> = fs::read_dir(state.join("shadow"))?.flatten().filter(|e| e.path().join("mismatch.txt").exists()).collect();
-    assert_eq!(reports.len(), 1, "one mismatch report");
-    let text = fs::read_to_string(reports[0].path().join("mismatch.txt"))?;
-    assert!(text.contains("different"), "the report holds Node's output");
-    // the shadow never changed the real state: settings.json is as seeded
+    for args in [vec!["settings", "show", "--json"], vec!["settings", "get", "jev.enabled"], vec!["defect", "list", "--json"]] {
+        let o = engine_shadowed(home.path(), home.path(), Some(&fake), &[("AH_FAKE_LOG", &log)], &args)?;
+        assert_eq!(o.code, 0, "{args:?}: {}", o.stderr);
+    }
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    assert!(shadow_dirs(&state).is_empty(), "no scratch directory for a Node comparison");
+    assert!(!log.exists(), "Node was never started");
+    // the real state is as seeded
     assert_eq!(fs::read_to_string(home.path().join(".anti-hall/settings.json"))?, fs::read_to_string(seed.path().join(".anti-hall/settings.json"))?);
     eprintln!("operator parity cases: {}", CASES.load(Ordering::SeqCst));
     Ok(())
@@ -1317,8 +1293,6 @@ fn engine_shadowed(home: &Path, cwd: &Path, node: Option<&Path>, extra: &[(&str,
         .env("HOME", home)
         .env("CLAUDE_PLUGIN_ROOT", plugin_src())
         .env("AH_ENGINE_SHADOW_RATE_PHASE", "1000")
-        .env("AH_ENGINE_SHADOW_RATE_INSTALL", "1000")
-        .env("AH_ENGINE_SHADOW_RATE_UNINSTALL", "1000")
         // the Node installer writes the Node-only command; the engine's installer writes its own command unless told otherwise
         .env("ANTIHALL_STATUSLINE_NODE_ONLY", "1")
         .env("AH_ENGINE_DIR", home.join("state"))
@@ -1362,60 +1336,33 @@ fn a_sampled_phase_run_is_replayed_by_node_and_agrees() -> R {
 }
 
 #[test]
-fn a_sampled_installer_run_is_replayed_on_a_scratch_copy_and_never_writes_twice() -> R {
+fn installer_and_uninstaller_runs_never_start_node() -> R {
     let home = home_with(Some(r#"{"keep":1,"statusLine":{"type":"command","command":"echo mine"}}"#), &[])?;
     let cwd = project_cwd(&[(".claude/settings.json", r#"{"statusLine":{"type":"command","command":"echo committed"}}"#), (".gitignore", "x\n")], None)?;
     let state = home.path().join("state");
     let log = home.path().join("fake-node.log");
-    // The retired installer does not start a shadow; uninstall still replays Node on the scratch copy.
-    for args in [vec!["install-statusline"], vec!["install-statusline", "--project"], vec!["install-statusline", "--consolidate"]] {
-        let o = engine_shadowed(home.path(), cwd.path(), None, &[], &args)?;
-        assert!(o.code == 0, "{args:?}: {} {}", o.stdout, o.stderr);
-        assert!(o.stdout.contains("statusline installation has been retired"), "{args:?}: {}", o.stdout);
-        assert!(shadow_dirs(&state).is_empty(), "{args:?}: retired installer starts no shadow");
-    }
-    for args in [vec!["uninstall-statusline"], vec!["uninstall-statusline", "--project", "--purge-base"]] {
-        let o = engine_shadowed(home.path(), cwd.path(), None, &[], &args)?;
-        assert!(o.code == 0, "{args:?}: {} {}", o.stdout, o.stderr);
-        assert!(wait_shadow_done(&state), "the comparison finished: {args:?}");
-        let left = shadow_dirs(&state);
-        assert!(left.is_empty(), "{args:?}: Node agreed, so nothing is kept: {left:?}");
-    }
-    // a Node that answers differently leaves a report; it ran in the scratch home and the scratch working directory
     let fake = home.path().join("fake-node.sh");
-    fs::write(&fake, "#!/bin/sh\necho \"$HOME|$(pwd)\" >> \"$AH_FAKE_LOG\"\necho different\n")?;
+    fs::write(&fake, "#!/bin/sh\necho started >> \"$AH_FAKE_LOG\"\necho different\n")?;
     fs::set_permissions(&fake, fs::Permissions::from_mode(0o755))?;
-    let before_cwd = snapshot(cwd.path())?;
-    let before_home = snapshot(home.path())?;
-    let o = engine_shadowed(home.path(), cwd.path(), Some(&fake), &[("AH_FAKE_LOG", &log)], &["install-statusline", "--project"])?;
-    assert_eq!(o.code, 0);
-    assert!(o.stdout.contains("statusline installation has been retired"), "{}", o.stdout);
-    assert!(shadow_dirs(&state).is_empty(), "retired installer starts no shadow even with fake Node");
-    assert!(!log.exists(), "retired installer never calls Node");
-    assert_eq!(before_home, snapshot(home.path())?, "retired installer leaves user settings untouched");
-    assert_eq!(before_cwd, snapshot(cwd.path())?, "retired installer leaves project settings untouched");
-
-    let o = engine_shadowed(home.path(), cwd.path(), Some(&fake), &[("AH_FAKE_LOG", &log)], &["uninstall-statusline", "--project"])?;
-    assert_eq!(o.code, 0);
-    assert!(wait_shadow_done(&state), "the second comparison finished");
-    let reports: Vec<_> = shadow_dirs(&state).into_iter().filter(|d| d.join("mismatch.txt").exists()).collect();
-    assert_eq!(reports.len(), 1, "one mismatch report");
-    assert!(fs::read_to_string(reports[0].join("mismatch.txt"))?.contains("different"), "the report holds Node's output");
-    let seen = fs::read_to_string(&log)?;
-    let (h, d) = seen.trim().split_once('|').ok_or("no log line")?;
-    assert!(h.contains("/shadow/") && d.contains("/shadow/"), "Node ran in scratch directories: {seen}");
-    assert_ne!(Path::new(h), home.path());
-    assert_ne!(Path::new(d), cwd.path());
-    // Contract (retired statusline): the REAL `uninstall-statusline --project` is the run that writes (it restores from the one-time
-    // backup, so the project settings legitimately differ from before it); the shadow only replays Node on the scratch copy. So the
-    // old "nothing changed" equality is replaced by what must still hold: the backup is never overwritten and nothing else moves.
+    for args in [
+        vec!["install-statusline"],
+        vec!["install-statusline", "--project"],
+        vec!["install-statusline", "--consolidate"],
+        vec!["uninstall-statusline"],
+        vec!["uninstall-statusline", "--project", "--purge-base"],
+    ] {
+        let o = engine_shadowed(home.path(), cwd.path(), Some(&fake), &[("AH_FAKE_LOG", &log)], &args)?;
+        assert_eq!(o.code, 0, "{args:?}: {} {}", o.stdout, o.stderr);
+    }
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    assert!(shadow_dirs(&state).is_empty(), "no scratch directory for a Node comparison");
+    assert!(!log.exists(), "Node was never started");
+    // the one-time backup of the first real uninstall is never overwritten
     assert_eq!(
         fs::read_to_string(cwd.path().join(".claude/settings.json.bak-antihall"))?,
         r#"{"statusLine":{"type":"command","command":"echo committed"}}"#,
         "the one-time backup is never overwritten"
     );
-    assert_eq!(fs::read_to_string(cwd.path().join(".gitignore"))?, "x\n", "the shadow touched nothing else");
-    assert_eq!(fs::read_to_string(cwd.path().join(".gitignore"))?.matches(".claude/settings.local.json").count(), 0);
     Ok(())
 }
 

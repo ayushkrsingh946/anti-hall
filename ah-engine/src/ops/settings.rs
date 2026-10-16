@@ -714,12 +714,7 @@ pub(crate) fn effective_bool(section: &str, key: &str) -> bool {
 
 /// `settings <verb> [args] [--json]`
 pub fn run(p: &Parsed) -> i32 {
-    // `tunables` and a `get` of an engine key have no Node twin (settings.js knows only its own schema): nothing to compare
-    let engine_only = p.raw.first().map(String::as_str) == Some(defaults::text("ops.tunable_verb"));
-    let plan = if engine_only { None } else { super::shadow::begin(defaults::text("ops.verb_settings"), defaults::text("ops.script_settings"), &p.raw, None) };
-    let code = run_inner(p);
-    super::shadow::end(plan, code);
-    code
+    run_inner(p)
 }
 
 fn run_inner(p: &Parsed) -> i32 {

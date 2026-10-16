@@ -3596,8 +3596,9 @@ function main() {
 function renderHuman(status, changelog) {
   const lines = [];
   const failed = /\bSTOP\b|dirty|diverged|failed|error/i.test(String(status.action || ''));
-  lines.push((failed ? '\u274C' : status.updated ? '\u2B06\uFE0F' : '\u2705') + ' anti-hall \u00B7 update: ' +
-    (failed ? 'not updated' : status.updated ? 'updated to v' + (status.latest || '?') : 'already up to date'));
+  const available = !failed && !status.updated && /^update available \(/.test(String(status.action || ''));
+  lines.push((failed ? '\u274C' : available || status.updated ? '\u2B06\uFE0F' : '\u2705') + ' anti-hall \u00B7 update: ' +
+    (failed ? 'not updated' : status.updated ? 'updated to v' + (status.latest || '?') : available ? 'v' + (status.latest || '?') + ' available' : 'already up to date'));
   lines.push('  installed: ' + (status.installed || '(unknown)'));
   lines.push('  latest:    ' + (status.latest || '(unknown)'));
   lines.push('  updated:   ' + status.updated + (status.cacheSynced ? ' (cache synced)' : ''));
