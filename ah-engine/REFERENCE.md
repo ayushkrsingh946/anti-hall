@@ -8160,6 +8160,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_cli.app_reason_unreadable` | `app DB unreadable — cannot confirm the builder` |  |  | Why nothing is archived in the app when its database cannot be read. |
 | `devswarm_cli.app_row` | `\| {rank} \| {title} \| {type} \| {finish} \| {brief} \| {session} \|` |  |  | One workspace row of the app-state table. |
 | `devswarm_cli.app_short_id` | `8` |  |  | How many characters of an id the app-state table shows (UTF-16 units). |
+| `devswarm_cli.app_short_id_mesh_prefix` | `primary-` |  |  | An id starting with this (a Primary's mesh id) shows this prefix plus app_short_id characters, so its short form keeps the hash. |
 | `devswarm_cli.app_side_effect` | `hivecontrol changed OTHER app builders while archiving {id} — NOT undone, che...` |  |  | The message when archiving changed other builders. |
 | `devswarm_cli.app_state_archived` | `archived` |  |  | A builder's state when it is archived. |
 | `devswarm_cli.app_state_closed` | `closed` |  |  | A builder's state when it is closed but not archived. |
