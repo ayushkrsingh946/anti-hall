@@ -168,7 +168,7 @@ fn walk_lines(lines: &[&Line], payload: Option<&str>) -> Option<Walked> {
 }
 
 /// `evidence_walk(path, window, payload)`: JSON text. `null` when the transcript cannot be read; `{"unsure":true}` as
-/// [`super::host_ts::evidence`] (and when the memory registry refused to keep the walk); `{"truncated":b,"walked":false}` when the
+/// [`super::host_ts::evidence`]; `{"truncated":b,"walked":false}` when the
 /// window holds no reply and there is no payload; else `{"truncated","walked":true,"lastText","toolsThisTurn","toolsAtEnd",
 /// "evidenceChars","withLastChars"}` (the two lengths in UTF-16 units) and the walk is kept for `walk_has` / `walk_numbers`.
 pub fn evidence_walk(path: &str, window: f64, payload: Option<&str>) -> String {
@@ -198,9 +198,10 @@ pub fn evidence_walk(path: &str, window: f64, payload: Option<&str>) -> String {
     let ttl = defaults::num("transcript.evidence_walk_idle_ms");
     let exp = (ttl > 0).then(|| crate::health::now_ms().saturating_add(ttl));
     let walk = Arc::new(walk);
+    // A refusal (this holder or the process over its hard limit) only means the bytes are not accounted for: the thread still
+    // holds its one walk (released on its next walk), so the check answers instead of deferring the whole Stop to Node.
     if !cache().insert_with_ttl(h, Arc::clone(&walk), weight, exp) {
         crate::load::note_count("evidence_walk", "result", "refused");
-        return unsure();
     }
     MINE.with(|m| *m.borrow_mut() = Some((h, walk)));
     json!({
@@ -437,6 +438,18 @@ mod tests {
         let text = with_text("withLast", |t| Ok(t.to_string())).unwrap();
         assert_eq!(walk_numbers("withLast", r"\d[\d,]*(?:\.\d+)?", "", ",").unwrap(), super::super::host_ts::re_numbers(r"\d[\d,]*(?:\.\d+)?", "", &text, ",").unwrap());
         assert!(walk_has("nope", "x").is_err(), "an unknown text throws");
+    }
+
+    #[test]
+    fn a_walk_the_memory_registry_refuses_still_answers_instead_of_deferring() {
+        // replay l227: with the process over the global hard limit every insert is refused; claim-ledger deferred 22 of 61 Stops
+        // to Node (evidence_walk|result=refused 22). The thread keeps its walk, so the answer is a walk, never {"unsure":true}.
+        let _ = crate::mem::global().tick(u64::MAX / 2, crate::health::now_ms());
+        let p = write("refused", &[user("go"), assistant("m1", "sha abc1234 here", 0)]);
+        let out: Value = serde_json::from_str(&evidence_walk(&p, 1e9, Some("other"))).unwrap();
+        assert_eq!(out["walked"], json!(true), "a refused insert must not defer: {out}");
+        assert_eq!(walk_has("withLast", "abc1234").ok(), Some(true));
+        std::fs::remove_file(&p).ok();
     }
 
     #[test]

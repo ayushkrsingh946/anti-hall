@@ -9957,7 +9957,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `mem.evidence_cache_hard_bytes` | `20971520` |  | bytes | Bytes of kept transcript evidence at which an insert is refused (the answer is returned, not kept) and the cache is recycled. |
 | `mem.evidence_cache_low_water_pct` | `80` |  |  | Percent of mem.evidence_cache_soft_bytes the kept transcript evidence is evicted down to when the soft limit is reached. |
 | `mem.evidence_cache_soft_bytes` | `10485760` |  | bytes | Bytes of kept transcript evidence held before the least recently used are dropped down to the low-water mark. |
-| `mem.evidence_walk_hard_bytes` | `25165824` |  | bytes | Bytes of kept evidence walks at which an insert is refused (the check defers) and the cache is recycled. |
+| `mem.evidence_walk_hard_bytes` | `25165824` |  | bytes | Bytes of kept evidence walks at which an insert is refused and the cache is recycled; the worker thread still keeps its one walk, so the check never defers for it. |
 | `mem.evidence_walk_low_water_pct` | `80` |  |  | Percent of mem.evidence_walk_soft_bytes the kept evidence walks are evicted down to when the soft limit is reached. |
 | `mem.evidence_walk_soft_bytes` | `12582912` |  | bytes | Bytes of kept evidence walks (the claim ledger's joined evidence text) held before the least recently used are dropped down to the low-water mark. |
 | `mem.global_hard_bytes` | `125829120` |  | bytes | Process memory above which every holder is recycled and every cache insert is refused. If it is still above this `mem.global_restart_after_s` later, the daemon is asked to restart cleanly and the reason is recorded in the event log. |

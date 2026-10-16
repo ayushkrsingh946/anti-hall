@@ -121,7 +121,7 @@ min = 4096
 unit = "bytes"
 
 [mem.evidence_walk_hard_bytes]
-doc = "Bytes of kept evidence walks at which an insert is refused (the check defers) and the cache is recycled."
+doc = "Bytes of kept evidence walks at which an insert is refused and the cache is recycled; the worker thread still keeps its one walk, so the check never defers for it."
 value = 25165824
 min = 4096
 unit = "bytes"
