@@ -309,6 +309,8 @@ pub struct Scheduler {
     backoff_until_ms: AtomicU64,
     cpu: std::sync::OnceLock<CpuObserver>,
     work: std::sync::OnceLock<WorkProbe>,
+    /// Jobs `schedule run` asked for: their next window runs even when the idle gate finds no work.
+    forced: Mutex<std::collections::HashSet<String>>,
 }
 
 fn lk<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -376,6 +378,7 @@ impl Scheduler {
             backoff_until_ms: AtomicU64::new(0),
             cpu: std::sync::OnceLock::new(),
             work: std::sync::OnceLock::new(),
+            forced: Mutex::new(Default::default()),
         };
         for j in &fresh_ones {
             let st = lk(&s.state).get(&j.name).cloned().unwrap_or_default();
@@ -398,6 +401,9 @@ impl Scheduler {
     fn idle(&self, spec: &JobSpec) -> bool {
         if !defaults::list("schedule.idle_gate_actions").contains(&spec.action.as_str()) {
             return false;
+        }
+        if lk(&self.forced).remove(&spec.name) {
+            return false; // asked for by name (`schedule run`): it runs whatever the gate would say
         }
         match self.work.get() {
             Some(probe) => !probe(&spec.action),
@@ -661,6 +667,7 @@ impl Scheduler {
             st.next_ms = now_ms();
             st.cooldown_until_ms = 0;
         }
+        lk(&self.forced).insert(spec.name.clone());
         let before = lk(&self.last).get(job).map(|l| l.finished).unwrap_or(0);
         self.poke();
         let t = Instant::now();
@@ -993,5 +1000,32 @@ mod tests {
         let s = probe_scheduler("sched-gate", r#"{"jobs": {"probe": {"kind": "engine", "action": "noop", "every_ms": 1000, "persist": false}}}"#, Box::new(|_| Ok(String::new())));
         let spec = s.jobs().iter().find(|j| j.name == "probe").unwrap().clone();
         assert!(!s.idle(&spec), "noop is not in schedule.idle_gate_actions");
+    }
+
+    #[test]
+    fn schedule_run_runs_an_idle_gated_job_once_even_without_work() {
+        let runs = Arc::new(AtomicU64::new(0));
+        let r = runs.clone();
+        let s = probe_scheduler(
+            "sched-forced",
+            r#"{"jobs": {"metrics_snapshot": {"every_ms": 0}, "spool_drain": {"every_ms": 3600000, "timeout_ms": 2000, "catch_up": "skip", "persist": false}}}"#,
+            Box::new(move |action| {
+                if action == "spool_drain" {
+                    r.fetch_add(1, SeqCst);
+                }
+                Ok(String::new())
+            }),
+        );
+        s.set_work_probe(Box::new(|_| false));
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (s2, stop2) = (s.clone(), stop.clone());
+        let h = std::thread::spawn(move || s2.run_ticker(&|| stop2.load(SeqCst)));
+        let res = s.run_now("spool_drain");
+        assert_eq!(res["status"], "ok", "the asked-for run happened and reported: {res}");
+        assert_eq!(runs.load(SeqCst), 1);
+        assert!(res["cpu_us"].is_u64(), "and carries its CPU: {res}");
+        stop.store(true, SeqCst);
+        s.poke();
+        h.join().unwrap();
     }
 }
