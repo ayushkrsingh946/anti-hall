@@ -405,6 +405,7 @@ fn rows(db: &Path, table: &str, cols: &str, order: &str) -> Value {
     let mut q = st.query([]).unwrap();
     while let Some(r) = q.next().unwrap() {
         let mut o = serde_json::Map::new();
+        #[allow(clippy::needless_range_loop)] // `i` indexes both the row and the column names
         for i in 0..n {
             let v = match r.get_ref(i).unwrap() {
                 rusqlite::types::ValueRef::Null => Value::Null,
@@ -815,7 +816,8 @@ fn a_split_store_is_left_to_the_node_function_untouched() {
 /// nothing, and the stage's Node function answers from the untouched state (also for the preview of a registry label row).
 #[test]
 fn child_label_repairs_are_left_to_the_node_function_untouched() {
-    let cases: [(fn(&Path), bool); 3] = [(seed_labels_sender, true), (seed_labels_row, true), (seed_labels_row, false)];
+    type Seed = fn(&Path);
+    let cases: [(Seed, bool); 3] = [(seed_labels_sender, true), (seed_labels_row, true), (seed_labels_row, false)];
     for (seed, live) in cases {
         let o = Opt { ds: true, no_upstream_move: true, live, no_node: true, stage_only: Some("child-sender-labels"), ..Opt::default() };
         let w = world(&o);

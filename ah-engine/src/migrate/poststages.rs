@@ -357,7 +357,7 @@ fn reconcile(cx: &mut Cx, h: &Handle, dry: bool, probe: bool, t: &mut Tally) -> 
             }
             let acked_elsewhere = |m: &Msg| others.iter().any(|o| keys(m).iter().any(|k| o.consumed.contains(*k)));
             let mut to = me.floor.max(0) as usize;
-            while me.rows.get(to).is_some_and(&acked_elsewhere) {
+            while me.rows.get(to).is_some_and(acked_elsewhere) {
                 to += 1;
             }
             if (to as i64) <= me.floor {
