@@ -144,7 +144,7 @@ fn walk(ctx: &Ctx, h: &rc::Handle, dry: bool, env: &Env, t: &mut Tally) -> R<Wal
         by_label.entry(key).or_default().push(d);
     }
     for label in order {
-        let rows = &by_label[&label];
+        let Some(rows) = by_label.get(&label) else { continue };
         let Some(first) = rows.first().and_then(|d| wt_of(d)) else { continue };
         let Some(wt) = ident::canonical_worktree_real_path(&first)? else { continue }; // unprovable: never guessed
         if primary_checkout(&wt, home, env)? {
@@ -175,9 +175,6 @@ pub(crate) fn run(ctx: &Ctx, hashes: &[String], dry: bool) -> Option<Tally> {
     let home = Path::new(&ctx.home);
     let env: Env = ctx.env.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
     let mut t = Tally::default();
-    for k in ["stores", "labels", "pending", "aliased", "retired", "forwarded", "left", "errors"] {
-        t.n.insert(k, 0.0);
-    }
     for hash in hashes {
         let h = match rc::open(home, hash, dry) {
             Ok(h) => h,

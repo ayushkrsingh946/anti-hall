@@ -34,7 +34,7 @@ impl Tally {
         *self.n.entry(k).or_insert(0.0) += by;
     }
 
-    fn get(&self, k: &str) -> f64 {
+    pub(super) fn get(&self, k: &str) -> f64 {
         self.n.get(k).copied().unwrap_or(0.0)
     }
 }
@@ -94,9 +94,6 @@ fn merge_split(ctx: &Ctx) -> Option<Tally> {
         }
     }
     let mut t = Tally::default();
-    for k in ["splitStores", "messagesMerged", "registryMerged", "errors", "reDeliveredUnread"] {
-        t.n.insert(k, 0.0);
-    }
     t.add("stores", hashes.len() as f64);
     Some(t)
 }

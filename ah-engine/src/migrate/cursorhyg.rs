@@ -30,7 +30,7 @@ fn mtime_ms(p: &Path) -> f64 {
 fn parse_name(name: &str, sep: &str) -> Option<String> {
     let base = name.strip_suffix(defaults::text("mesh_write.json_suffix"))?;
     let i = base.rfind(sep).filter(|i| *i > 0)?;
-    let (id, nonce) = (&base[..i], &base[i + sep.len()..]);
+    let (id, nonce) = (base.get(..i)?, base.get(i + sep.len()..)?);
     let short_len = defaults::num("mesh_write.legacy_cursor_short_len") as usize;
     if nonce.len() != short_len || !nonce.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) || !cursors::legacy_safe(id) {
         return None;
@@ -42,9 +42,6 @@ fn parse_name(name: &str, sep: &str) -> Option<String> {
 pub(crate) fn run(ctx: &Ctx) -> Tally {
     let home = Path::new(&ctx.home);
     let mut t = Tally::default();
-    for k in ["scanned", "deleted", "evicted", "kept", "errors"] {
-        t.n.insert(k, 0.0);
-    }
     let dir = devswarm_root(home).join(defaults::text("mesh_write.dir_cursors"));
     let Ok(rd) = std::fs::read_dir(&dir) else { return t }; // no cursors dir yet
     // libuv's scandir sorts the names; so does Node's readdirSync
@@ -58,7 +55,7 @@ pub(crate) fn run(ctx: &Ctx) -> Tally {
     let mut order: Vec<(bool, String)> = Vec::new();
     let mut groups: HashMap<(bool, String), Vec<Inst>> = HashMap::new();
     for n in &names {
-        if t.n["scanned"] >= budget {
+        if t.get("scanned") >= budget {
             break;
         }
         let (is_inst, id) = match parse_name(n, inst_sep) {
@@ -78,7 +75,7 @@ pub(crate) fn run(ctx: &Ctx) -> Tally {
     }
     for key in order {
         let (is_inst, id) = &key;
-        let files = &groups[&key];
+        let Some(files) = groups.get(&key) else { continue };
         // the baseline is read without the seeding side effect; the descriptor-cursor namespace has none
         let baseline = if *is_inst {
             let bp = dir.join(format!("{id}{}", defaults::text("update_post.legacy_base_suffix")));
