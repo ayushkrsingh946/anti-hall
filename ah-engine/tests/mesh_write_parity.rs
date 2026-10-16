@@ -193,6 +193,23 @@ fn engine_verbs_match_node_byte_for_byte() {
             extra: vec![],
             native: true,
         },
+        // GH #203: the roster shows a short id; a unique id prefix addresses the row, an ambiguous one refuses and lists the ids
+        Case {
+            name: "send-by-id-prefix",
+            cwd: "child",
+            argv: vec![s("send"), s("--to"), s("primary-"), s("--message"), s("via short id")],
+            stdin: None,
+            extra: as_child.clone(),
+            native: false, // the Primary row carries a live session, so the engine hands a stale-twin check to Node (as for its exact id)
+        },
+        Case {
+            name: "send-ambiguous-id-prefix",
+            cwd: "main",
+            argv: vec![s("send"), s("--to"), s("child-"), s("--message"), s("x")],
+            stdin: None,
+            extra: vec![],
+            native: true,
+        },
         Case { name: "send-no-target", cwd: "main", argv: vec![s("send"), s("--message"), s("x")], stdin: None, extra: vec![], native: true },
         Case {
             name: "send-two-targets",

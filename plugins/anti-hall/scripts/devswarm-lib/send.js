@@ -431,6 +431,18 @@ function resolveSendTarget(storeHandle, arg, home, opts) {
       }
     }
   }
+  // GH #203: the roster and the broadcast feed show only the first 8 chars of a row's id
+  // (names.shortId), so a copied short id matched nothing above. Last resort: a unique id
+  // PREFIX resolves to that row (same stale-twin handling as an exact id, by re-resolving
+  // the full id); several rows sharing the prefix is ambiguous — refuse, never pick one.
+  if (arg) {
+    const byPrefix = [];
+    for (const d of storeHandle.listRegistry()) {
+      if (d && d.id != null && String(d.id).startsWith(String(arg))) byPrefix.push(d);
+    }
+    if (byPrefix.length === 1) return resolveSendTarget(storeHandle, String(byPrefix[0].id), home, opts);
+    if (byPrefix.length > 1) return { target: null, ambiguous: true, prefix: true, candidates: byPrefix.map((d) => String(d.id)).sort() };
+  }
   return { target: null, ambiguous: false, candidates: null };
 }
 
@@ -805,6 +817,13 @@ function cmdSend(flags, ctx) {
         // `id` — the value `roster` now prints alongside meshId, so a copied
         // roster id addresses correctly instead of failing closed.
         const resolved = resolveSendTarget(s, toFlag, home, { rerouteStaleTwin: true });
+        if (resolved.ambiguous && resolved.prefix) {
+          return {
+            ok: false, reason: 'ambiguous-recipient',
+            error: 'send --to ' + JSON.stringify(toFlag) + ' is a prefix of more than one registered workspace id ('
+              + resolved.candidates.join(', ') + ') — nothing sent; address one full id',
+          };
+        }
         if (resolved.ambiguous) {
           return {
             ok: false, reason: 'ambiguous-recipient',
