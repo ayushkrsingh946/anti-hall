@@ -437,7 +437,8 @@ function piRoster(ctx, summary) {
   var ids = Object.keys(summaryWorkspaces);
   var out = { rows: [], attention: [], archiveList: [], ownUnread: false, deferral: null, snapUnreadable: false };
   // the DevSwarm app's database, read once
-  var focusRaw = Number(ah.env.get(ah.cfg('devswarm_parent.env_focus_ms')));
+  var focusEnv = ah.env.get(ah.cfg('devswarm_parent.env_focus_ms'));
+  var focusRaw = Number(focusEnv === null ? undefined : focusEnv); // Number(undefined) is NaN, Number(null) would be 0
   var windowMs = isFinite(focusRaw) && focusRaw >= 0 ? focusRaw : ah.cfgNum('devswarm_parent.focus_default_ms');
   var snapInfo = JSON.parse(ahHost.piSnap(windowMs, now));
   if (snapInfo.unsure) throw meshDefer;
@@ -596,15 +597,149 @@ function piAutoArchiveOwns(home, id, now) {
   throw meshDefer;
 }
 
+// ---- wake coverage --------------------------------------------------------------------------------------------------------
+
+// `readDescriptors(home)` of the supervisor: the workspace descriptors that name a worktree and a session and a safe id.
+function piDescriptors(home) {
+  var dir = piDevswarmDir(home) + '/' + ah.cfg('devswarm_role.pg_dir_workspaces'), out = [];
+  (piNames(dir) || []).forEach(function (n) {
+    if (!/\.json$/.test(n)) return;
+    var d = piJson(dir + '/' + n);
+    if (!d || !d.worktreePath || !d.sessionId || !piSafeId(d.id)) return;
+    if (typeof d.worktreePath !== 'string' || typeof d.sessionId !== 'string') throw meshDefer;
+    out.push(d);
+  });
+  return out;
+}
+
+// The part of `rowEligibility(row, { liveness: true })` the live-child test reads: is the row put away, held, ignored or waiting on a human?
+// `marker` and `app` are the archive verdicts the caller asks for; the liveness is read only when nothing else already skips the row.
+function piSkipped(ctx, id, wt, sid, marker, appKey) {
+  if (marker && JSON.parse(ahHost.piMarker(id, wt, sid)).archived === true) return true;
+  if (appKey !== undefined) {
+    var a = JSON.parse(ahHost.piApp(id, wt, appKey, ctx.now));
+    if (a.unsure) throw meshDefer;
+    if (a.archived) return true;
+  }
+  if (ah.settings.touched('devswarm_parent.set_held')) throw meshDefer; // the owner's held partitions
+  if (ahHost.piIgnored(id)) return true;
+  var live = sid ? ah.mesh.sessionAlive(sid) : false;
+  if (id !== '' && sid && wt) {
+    var b = ah.mesh.childBusy(id, wt, sid, ctx.now, ah.cfg('devswarm_role.pg_set_busy_fresh').default * ah.cfgNum('devswarm_role.pg_ms_per_min'));
+    if (b.none !== true && b.waiting && live) return true;
+  }
+  return false;
+}
+
+// `liveChildState(home, cwd, { excludeHeldIgnored: true, excludeWaitingOnUser: true })`: {known, live}.
+function piLiveChildren(ctx, cwd) {
+  var d = { live: false, known: true };
+  var descriptors = piDescriptors(ctx.home);
+  if (descriptors.length) {
+    var selfKey = ah.mesh.repoKey(cwd);
+    if (selfKey === null) d = { live: false, known: false };
+    else {
+      var selfReal = ah.fs.realpath(cwd);
+      if (selfReal === null) selfReal = cwd;
+      for (var i = 0; i < descriptors.length; i++) {
+        var x = descriptors[i];
+        if (!x.worktreePath || !x.id) continue;
+        var real = ah.fs.realpath(x.worktreePath);
+        if ((real === null ? x.worktreePath : real) === selfReal) continue; // this Primary's own row
+        var dKey = ah.mesh.repoKey(x.worktreePath);
+        if (dKey !== selfKey) continue;
+        if (!piSkipped(ctx, x.id, x.worktreePath, x.sessionId, true, dKey)) { d = { live: true, known: true }; break; }
+      }
+    }
+  }
+  if (d.known && d.live) return d;
+  // a live child no descriptor names, found in the app database
+  var ac = JSON.parse(ahHost.piAppChildren(cwd, ctx.now));
+  if (ac.unsure) throw meshDefer;
+  for (var j = 0; j < ac.children.length; j++) {
+    var w = ac.children[j];
+    if (!piSkipped(ctx, w.id, w.worktreePath, w.sessionId, true, undefined)) return { live: true, known: true };
+  }
+  return d;
+}
+
+// `watcherLockLive(home, id, now)`: a live Monitor wake-watch holds the lock of `id`.
+function piWatcherLock(home, id, now) {
+  var lock = piJson(piDevswarmDir(home) + '/' + ah.cfg('devswarm_parent.dir_locks') + '/' + ah.cfg('devswarm_parent.watch_lock_prefix') + id + ah.cfg('devswarm_parent.watch_lock_suffix'));
+  if (lock === null) return false;
+  var ts = lock && Number(lock.ts);
+  var fresh = piFinite(ts) && (now - ts) <= ah.cfgNum('wake_watch.lock_stale_ms');
+  var pid = lock && typeof lock.pid === 'number' && isFinite(lock.pid) && Math.floor(lock.pid) === lock.pid ? lock.pid : null;
+  var alive = pid !== null ? ahHost.piPid(pid) : null;
+  return !!(fresh && alive !== false);
+}
+
+// `watcherLiveForWorkspace(home, id, now)`: the id's own lock, or the lock of another row on the same checkout.
+function piWatcherLive(home, id, now) {
+  if (piWatcherLock(home, id, now)) return true;
+  var descriptors = piDescriptors(home), own = null;
+  descriptors.forEach(function (d) { if (own === null && String(d.id) === String(id)) own = d; });
+  if (!own || !own.worktreePath) return false;
+  var forms = function (p) {
+    var f = {}, resolved = ah.path.resolveAbs(p);
+    f[resolved] = true;
+    var r = ah.fs.realpath(resolved);
+    if (r !== null) f[r] = true;
+    return Object.keys(f);
+  };
+  var ownForms = forms(own.worktreePath);
+  for (var i = 0; i < descriptors.length; i++) {
+    var d = descriptors[i];
+    if (!d.id || !d.worktreePath || String(d.id) === String(id)) continue;
+    if (forms(d.worktreePath).some(function (f) { return ownForms.indexOf(f) >= 0; }) && piWatcherLock(home, d.id, now)) return true;
+  }
+  return false;
+}
+
+// The mailbox-wake line of this turn (`noWakePathLine(wakeCoverage(...))`), or null: only a Claude Primary with a live child and no recent tick is told.
+function piWakeLine(ctx, cwd, cli, opts) {
+  var raw = ah.env.get(ah.cfg('devswarm_role.agent_env'));
+  var agent = raw === null ? '' : raw.trim().toLowerCase();
+  if (agent !== ah.cfg('devswarm_role.claude_agent')) return null;
+  var lc = piLiveChildren(ctx, cwd);
+  if (!lc.known || !lc.live) return null;
+  var tick = piJson(piDevswarmDir(ctx.home) + '/' + ah.cfg('devswarm_parent.dir_wake_tick') + '/' + ctx.primaryId + '.json');
+  var ageMin = tick && piFinite(tick.ts) ? Math.max(0, Math.floor((ctx.now - tick.ts) / ah.cfgNum('devswarm_prompt.ms_per_minute'))) : null;
+  var warn = piSetDefault('devswarm_parent.set_cron_warn');
+  if (!(ageMin === null || ageMin > warn)) return null;
+  var wanted = ah.settings.bool('wake_watch.set_enabled') !== false;
+  var noWatcher = wanted && !piWatcherLive(ctx.home, ctx.primaryId, ctx.now);
+  var cron = text.render(ah.cfg('devswarm_parent.wake_cron_part'), { cron: dwWakeCron(), cli: cli, id: ctx.primaryId });
+  if (noWatcher) {
+    var watcher = piWatcherPath(opts, ctx.home);
+    if (watcher === null) throw meshDefer;
+    return text.render(ah.cfg('devswarm_parent.wake_both'), { mon: text.render(ah.cfg('devswarm_parent.wake_monitor'), { watcher: watcher }), cron: cron });
+  }
+  return text.render(ah.cfg('devswarm_parent.wake_tick'), { cron: cron });
+}
+
+// The mailbox watcher path the line names (`preferStableLauncher('wakeWatch', RAW_WATCHER)`).
+function piWatcherPath(opts, home) {
+  var root = jx.isObj(opts) && typeof opts.plugin_root === 'string' ? opts.plugin_root : ah.env.get(ah.cfg('env.plugin_root'));
+  if (root === null || root === undefined || root === '') return null;
+  var nr = dwNodeRoot(root);
+  if (nr === null) return null;
+  var l = ah.cfg('devswarm_role.launcher_watcher');
+  if (ah.settings.bool('devswarm_role.sw_stable_launcher')) {
+    var stable = posix.normalize(home + '/' + ah.cfg('devswarm_role.bin_dir') + '/' + l.name);
+    if (ah.fs.isFile(stable)) return stable;
+  }
+  return posix.normalize(nr + '/' + l.target);
+}
+
 // ---- the project of a Primary in a checkout ---------------------------------------------------------------------------------
 
 // The cause of a deferral for everything the hook would show or do that the engine does not reproduce yet, or null. Everything it reads is
 // read before the first write of the turn.
 function piDeferrals(home, key, primaryId) {
   var dev = piDevswarmDir(home);
-  // workspace descriptors: wake coverage and the session drift of the Primary's own anchor
-  var names = piNames(dev + '/' + ah.cfg('devswarm_role.pg_dir_workspaces'));
-  if (names !== null && names.some(function (n) { return /\.json$/.test(n); })) return 'descriptors';
+  // the Primary's own anchor descriptor: the session drift notice reads it
+  if (piPresent(dev + '/' + ah.cfg('devswarm_role.pg_dir_workspaces') + '/' + primaryId + '.json')) return 'primary-descriptor';
   if (piPresent(dev + '/' + ah.cfg('devswarm_parent.notices_file'))) return 'maintainer-notice';
   return null;
 }
@@ -635,7 +770,7 @@ function piDecide(p, opts) {
   var now = ah.clock.now();
   var every = ah.settings.num('verify_first.num_repeat_every');
   var repeat = isFinite(every) && every > 0 ? every : 0;
-  var parked = null, roster = null, key = null, health = null, banner = null;
+  var parked = null, roster = null, key = null, health = null, banner = null, wakeLine = null;
   if (top !== null) {
     var cli = piCli(opts, home);
     if (cli === null) return piDefer('cli');
@@ -670,9 +805,8 @@ function piDecide(p, opts) {
     }
     var why = piDeferrals(home, key, primaryId);
     if (why !== null) return piDefer(why);
-    // the wake-coverage line looks for a live child in the app database as well as in the descriptors
-    if (ahHost.piAppDb()) return piDefer('app-db');
     if (roster !== null && roster.rows.length) banner = piIngest(health, key, now, sid, tp);
+    wakeLine = piWakeLine({ home: home, primaryId: primaryId, now: now }, cwd, cli, opts);
     parked = piParked(home, primaryId, cli);
   }
   // The dedupe records are consulted in the order the hook does (the ingest banners come before the override reminder), and the answer
@@ -682,14 +816,15 @@ function piDecide(p, opts) {
   var pending = []; // {kind, rank, o?, text}
   if (banner !== null) {
     if (banner.fault) {
-      pending.push({ kind: 'dedupe', rank: 1, o: banner.fault, text: banner.fault.content, onSuppress: function () { piForget(sid, ah.cfg('devswarm_prompt.stale_key')); } });
+      pending.push({ kind: 'dedupe', rank: 10, o: banner.fault, text: banner.fault.content, onSuppress: function () { piForget(sid, ah.cfg('devswarm_prompt.stale_key')); } });
     } else {
       pending.push({ kind: 'forget', key: ah.cfg('devswarm_prompt.fault_key') });
-      if (banner.stale) pending.push({ kind: 'dedupe', rank: 1, o: banner.stale, text: banner.stale.content });
+      if (banner.stale) pending.push({ kind: 'dedupe', rank: 10, o: banner.stale, text: banner.stale.content });
       else pending.push({ kind: 'forget', key: ah.cfg('devswarm_prompt.stale_key') });
     }
   }
   pending.push({ kind: 'dedupe', rank: 0, o: overrideOpts, text: text0 });
+  if (wakeLine !== null) pending.push({ kind: 'dedupe', rank: 20, o: { sessionId: sid, key: ah.cfg('devswarm_parent.key_wake'), content: wakeLine, transcriptPath: tp, keepaliveTurns: repeat }, text: wakeLine });
   var tableText = null, attention = [], archiveList = [], rows = [];
   if (roster !== null) {
     rows = roster.rows;
@@ -707,7 +842,8 @@ function piDecide(p, opts) {
     var hide = String(ah.env.get(ah.cfg('devswarm_parent.env_roster_hide')) || '') !== ah.cfg('devswarm_parent.roster_hide_off');
     var archivedWord = piLabel('archived').label;
     var activeRows = hide ? rows.filter(function (r) { if (r.label === archivedWord) { archivedHidden += 1; return false; } return true; }) : rows;
-    var capRaw = Number(ah.env.get(ah.cfg('devswarm_parent.env_roster_max')));
+    var capEnv = ah.env.get(ah.cfg('devswarm_parent.env_roster_max'));
+    var capRaw = Number(capEnv === null ? undefined : capEnv);
     var cap = isFinite(capRaw) && capRaw > 0 ? Math.floor(capRaw) : maxRows;
     var capped = activeRows.length > cap;
     var shownRows = capped ? activeRows.slice(0, cap) : activeRows;
@@ -715,22 +851,22 @@ function piDecide(p, opts) {
     if (capped) tableWrites.push({ event: 'table-cap', total: activeRows.length, shown: shownRows.length, hidden: activeRows.length - shownRows.length });
     if (shownRows.length || archivedHidden) {
       tableText = piTable(shownRows, now, capped, activeRows.length - shownRows.length, evicted, archivedHidden, maxRows); // the text names the default cap, as Node's does
-      pending.push({ kind: 'dedupe', rank: 2, o: { sessionId: sid, key: 'parent-inbox-table', content: tableText, transcriptPath: tp, keepaliveTurns: repeat, normalize: piNormTable }, text: tableText, after: ah.cfg('devswarm_parent.title_instruction') });
+      pending.push({ kind: 'dedupe', rank: 60, o: { sessionId: sid, key: 'parent-inbox-table', content: tableText, transcriptPath: tp, keepaliveTurns: repeat, normalize: piNormTable }, text: tableText, after: ah.cfg('devswarm_parent.title_instruction') });
     }
   }
   var urgentList = attention.filter(function (w) { return piTier(w) === 'urgent'; });
   var normalList = attention.filter(function (w) { return piTier(w) === 'normal'; });
-  if (parked !== null) pending.push({ kind: 'plain', rank: 3, text: parked });
+  if (parked !== null) pending.push({ kind: 'plain', rank: 120, text: parked });
   var cliPath = top !== null ? piCli(opts, home) : null;
   if (urgentList.length) {
     var us = piUrgentSegment(urgentList, home, cliPath);
-    pending.push({ kind: 'dedupe', rank: 4, o: { sessionId: sid, key: 'parent-inbox-urgent', content: us, transcriptPath: tp, keepaliveTurns: 10 }, text: us });
+    pending.push({ kind: 'dedupe', rank: 130, o: { sessionId: sid, key: 'parent-inbox-urgent', content: us, transcriptPath: tp, keepaliveTurns: 10 }, text: us });
   }
   if (normalList.length) {
     var ns = piUnreadSegment(normalList, home, cliPath, now);
-    pending.push({ kind: 'dedupe', rank: 5, o: { sessionId: sid, key: 'parent-inbox-nudge', content: ns, transcriptPath: tp, normalize: piNormInbox, keepaliveTurns: 2 }, text: ns, suppressedLog: normalList.some(function (w) { return w.notDraining; }) });
+    pending.push({ kind: 'dedupe', rank: 140, o: { sessionId: sid, key: 'parent-inbox-nudge', content: ns, transcriptPath: tp, normalize: piNormInbox, keepaliveTurns: 2 }, text: ns, suppressedLog: normalList.some(function (w) { return w.notDraining; }) });
   }
-  if (archiveList.length) pending.push({ kind: 'plain', rank: 6, text: piArchiveSegment(archiveList, cliPath) });
+  if (archiveList.length) pending.push({ kind: 'plain', rank: 150, text: piArchiveSegment(archiveList, cliPath) });
   // every dedupe record must be decidable before the first write
   var dedupeOn = sid !== null && !dedupe.disabled();
   for (var i = 0; i < pending.length; i++) {

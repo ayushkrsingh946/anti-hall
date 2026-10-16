@@ -290,3 +290,47 @@ value = "flat"
 [devswarm_parent.falling]
 doc = "The unread trend word when the backlog shrank."
 value = "falling"
+
+[devswarm_parent.set_cron_warn]
+doc = "Setting devswarm.cronMissingWarnMin: minutes without a fresh inbox-tick marker before the cron counts as missing. The engine answers only while it is unset, with this default."
+value = { section = "devswarm", key = "cronMissingWarnMin", env = "ANTIHALL_DEVSWARM_CRON_MISSING_WARN_MIN", option = "", default = 60 }
+
+[devswarm_parent.set_held]
+doc = "Setting devswarm.heldPartitions: owner-held partition ids. The engine answers only while it is unset (an empty set)."
+value = { section = "devswarm", key = "heldPartitions", env = "ANTIHALL_DEVSWARM_HELD_PARTITIONS", option = "", default = "" }
+
+[devswarm_parent.dir_wake_tick]
+doc = "The per-workspace inbox-tick markers (wake-tick/<id>.json), under the DevSwarm directory."
+value = "wake-tick"
+
+[devswarm_parent.dir_locks]
+doc = "The lock files directory, under the DevSwarm directory."
+value = "locks"
+
+[devswarm_parent.watch_lock_prefix]
+doc = "The file name prefix of a mailbox watcher lock (locks/wake-watch-<id>.lock)."
+value = "wake-watch-"
+
+[devswarm_parent.watch_lock_suffix]
+doc = "The file name suffix of a mailbox watcher lock."
+value = ".lock"
+
+[devswarm_parent.wake_both]
+doc = "The wake-path line when neither the watcher nor the cron tick is alive. Placeholders: {mon}, {cron}."
+value = "NO MAILBOX WAKE PATH: you have live workspaces but no watcher and no recent mailbox tick. Do both now: (1) {mon} (2) {cron}."
+
+[devswarm_parent.wake_tick]
+doc = "The wake-path line when only the cron tick is missing. Placeholder: {cron}."
+value = "NO MAILBOX TICK: you have live workspaces but no recent mailbox tick (session crons do not survive a restart). {cron}."
+
+[devswarm_parent.wake_monitor]
+doc = "The watcher part of the wake-path line. Placeholder: {watcher}."
+value = "Monitor: node {watcher}"
+
+[devswarm_parent.wake_cron_part]
+doc = "The cron part of the wake-path line. Placeholders: {cron}, {cli}, {id}."
+value = "CronList, then CronCreate \"{cron}\" running `node {cli} inbox tick {id} --quiet` if absent"
+
+[devswarm_parent.key_wake]
+doc = "The emit-dedupe key of the wake-path line."
+value = "parent-inbox-no-wake-path"

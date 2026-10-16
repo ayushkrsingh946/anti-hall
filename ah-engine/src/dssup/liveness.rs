@@ -187,7 +187,7 @@ fn js_pid(v: Option<&OVal>) -> R<f64> {
 }
 
 /// `pidIsAlive(pid, kill, { sinceMs })`: `Some(true)` alive, `Some(false)` gone or reused, `None` unknown.
-fn pid_is_alive(pid: f64, since_ms: Option<f64>) -> Option<bool> {
+pub(crate) fn pid_is_alive(pid: f64, since_ms: Option<f64>) -> Option<bool> {
     if !pid.is_finite() || pid.fract() != 0.0 || pid <= 0.0 || pid > f64::from(i32::MAX) {
         return None;
     }

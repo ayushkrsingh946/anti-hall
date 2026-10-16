@@ -10,6 +10,11 @@
 //! | `piWs(id, worktree, now)` | `workspaceFor(snap, { id, worktreePath })` with the fields the table reads: `{id, label, rank, isPinned, builderType, active, archived, finish, brief}`, or `null` |
 //! | `piRow(id, worktree, session, repoKey, now)` | the row's archive state: `{marker, app, superseded, ignored}` (`rowEligibility` without a session id, then `resolveArchiveGate` with the row's) |
 //! | `piActivity(id, worktree, session, lastOutbound, now)` | `{ts, dormant, idleAlive, idleMs}`: the widest activity signal and the liveness state of `rowLivenessState` |
+//! | `piMarker(id, worktree, session)` | `isArchivedWorkspace(home, id, worktree, { sessionId })`: anti-hall's own archive marker names the row archived |
+//! | `piApp(id, worktree, repoKey, now)` | the app side of "archived" for a row (`appArchivedVerdict`, then the supervisor's active-list cache) |
+//! | `piIgnored(id)` | whether the row has an archive-ignore mark |
+//! | `piPid(pid)` | `pidIsAlive(pid)`: `true`, `false` or `null` (no opinion) |
+//! | `piAppChildren(worktree)` | the workspaces the app database lists as open children of the project around `worktree`: `{repo, children: [{id, worktreePath, sessionId}]}` (`appHasLiveChild` before the per-row eligibility) |
 //! | `piFold(id, presentJson, appBuilder)` | `{to}`: the canonical row a `primary-<hash>` label folds into (`rosterFoldTarget`) |
 use super::host::with_settings;
 use crate::checks::guardkit::ojson::OVal;
@@ -84,6 +89,14 @@ fn load_snap(home: &str, env: &ident::Env, window_ms: f64, now: f64) -> R<Value>
     let out = json!({"file": exists, "readable": snap.is_some(), "focused": focused});
     SNAP.with(|s| *s.borrow_mut() = Some(snap));
     Ok(out)
+}
+
+/// The snapshot of this call, read now when no `piSnap` has read it yet.
+fn ensure_snap(home: &str, env: &ident::Env, now: f64) -> R<()> {
+    if SNAP.with(|s| s.borrow().is_none()) {
+        load_snap(home, env, 0.0, now)?;
+    }
+    Ok(())
 }
 
 fn ws_of(id: Option<&str>, wt: Option<&str>, now: f64) -> R<Value> {
@@ -246,6 +259,10 @@ fn gate_superseded(w: &Windows, home: &Path, id: &str, desc_wt: Option<&str>, de
     Ok(!(newer && live))
 }
 
+fn archive_ignored(home: &Path, id: &str) -> bool {
+    std::fs::metadata(devswarm_root(home).join(defaults::text("devswarm_parent.archive_ignore_dir")).join(format!("{id}{}", json_suffix()))).is_ok()
+}
+
 fn row_state(inv: &Inv, id: &str, wt: Option<&str>, sid: Option<&str>, repo_key: &str) -> R<Value> {
     let w = Windows::new(inv, repo_key);
     let wt = wt.filter(|s| !s.is_empty());
@@ -253,8 +270,33 @@ fn row_state(inv: &Inv, id: &str, wt: Option<&str>, sid: Option<&str>, repo_key:
     let marker = marker_archived(&inv.home, id, wt, None)?;
     let app = w.app_archived(id, wt)?;
     let superseded = if marker { false } else { gate_superseded(&w, &inv.home, id, wt, sid, inv.now as f64)? };
-    let ignored = is_safe_id(id) && std::fs::metadata(devswarm_root(&inv.home).join(defaults::text("devswarm_parent.archive_ignore_dir")).join(format!("{id}{}", json_suffix()))).is_ok();
+    let ignored = is_safe_id(id) && archive_ignored(&inv.home, id);
     Ok(json!({"marker": marker, "app": app, "superseded": superseded, "ignored": ignored}))
+}
+
+/// `appHasLiveChild` up to the per-row eligibility: the open, unarchived, non-primary workspaces of the project the working directory
+/// belongs to, other than the workspace on that directory.
+fn app_children(wt: &str) -> R<Value> {
+    SNAP.with(|s| {
+        let held = s.borrow();
+        let Some(Some(snap)) = held.as_ref() else { return Ok(json!({"repo": false, "children": []})) };
+        let Some(norm) = crate::meshw::appdb::norm_path(wt)? else { return Ok(json!({"repo": false, "children": []})) };
+        let repo_id: Option<Option<String>> = match snap.repositories.iter().find(|r| r.path.as_deref() == Some(norm.as_str())) {
+            Some(r) => Some(Some(r.id.clone())),
+            None => snap.workspaces.iter().find(|w| w.worktree_path.as_deref() == Some(norm.as_str()) && w.repository_id.is_some()).map(|w| w.repository_id.clone()),
+        };
+        let Some(Some(repo_id)) = repo_id else { return Ok(json!({"repo": false, "children": []})) };
+        let self_id = snap.workspace_for(None, Some(wt))?.map(|w| w.id.clone());
+        let children: Vec<Value> = snap
+            .workspaces
+            .iter()
+            .filter(|w| w.active && !w.archived && w.builder_type.as_deref() != Some(defaults::text("devswarm_sup.as_primary_type")))
+            .filter(|w| w.repository_id.as_deref() == Some(repo_id.as_str()))
+            .filter(|w| self_id.as_deref() != Some(w.id.as_str()))
+            .map(|w| json!({"id": w.id, "worktreePath": w.worktree_path, "sessionId": w.session_id}))
+            .collect();
+        Ok(json!({"repo": true, "children": children}))
+    })
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -315,6 +357,37 @@ pub(super) fn install<'js>(c: &Ctx<'js>, h: &Object<'js>) -> rquickjs::Result<()
                 with_settings(|st| answer(activity_of(&inv_of(st, now), &id, wt.as_deref(), sid.as_deref(), last_out.filter(|x| x.is_finite()), &key)))
             },
         )?,
+    )?;
+    h.set(
+        "piMarker",
+        Function::new(c.clone(), |id: String, wt: Option<String>, sid: Option<String>| -> rquickjs::Result<String> {
+            with_settings(|st| answer(marker_archived(Path::new(&st.home), &id, wt.as_deref().filter(|s| !s.is_empty()), sid.as_deref()).map(|b| json!({"archived": b}))))
+        })?,
+    )?;
+    h.set(
+        "piApp",
+        Function::new(c.clone(), |id: String, wt: Option<String>, key: String, now: f64| -> rquickjs::Result<String> {
+            with_settings(|st| {
+                let inv = inv_of(st, now);
+                answer(Windows::new(&inv, &key).app_archived(&id, wt.as_deref().filter(|s| !s.is_empty())).map(|b| json!({"archived": b})))
+            })
+        })?,
+    )?;
+    h.set(
+        "piIgnored",
+        Function::new(c.clone(), |id: String| -> rquickjs::Result<bool> {
+            with_settings(|st| is_safe_id(&id) && archive_ignored(Path::new(&st.home), &id))
+        })?,
+    )?;
+    h.set(
+        "piPid",
+        Function::new(c.clone(), |pid: f64| -> rquickjs::Result<Option<bool>> { Ok(liveness::pid_is_alive(pid, None)) })?,
+    )?;
+    h.set(
+        "piAppChildren",
+        Function::new(c.clone(), |wt: String, now: f64| -> rquickjs::Result<String> {
+            with_settings(|st| answer(ensure_snap(&st.home, &st.env, now).and_then(|()| app_children(&wt))))
+        })?,
     )?;
     h.set(
         "piFold",
