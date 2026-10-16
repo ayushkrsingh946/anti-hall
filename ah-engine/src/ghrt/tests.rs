@@ -3,7 +3,7 @@
 use super::api::{Fail, GhRunner, Resp, Runner};
 use super::cfg::Cfg;
 use super::poll::{self, State};
-use super::{repos, segment, status_json};
+use super::{repos, segment, status_json, tick_needed};
 use serde_json::{Value, json};
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, VecDeque};
@@ -1070,4 +1070,40 @@ fn only_a_workspace_pull_request_is_auto_merged() {
     s.set("pulls", 200, "\"pdr\"", json!([{"number": 7, "state": "open", "draft": true, "base": {"ref": "main"}, "title": "t"}]));
     fx.tick(&s, T0 + 100_000);
     assert!(s.merges.borrow().is_empty());
+}
+
+#[test]
+fn a_tick_is_needed_only_when_something_could_change() {
+    let fx = Fx::new("needed");
+    let r = fx.repo("r1", Some(ACME));
+    let s = Stub::new();
+    open_pr(&s);
+    let needed = |now: u64| tick_needed(&fx.cfg, now);
+    assert!(needed(T0 + 500), "a directory nobody has resolved yet");
+    fx.tick(&s, T0 + 1000);
+    assert!(!needed(T0 + 2000), "resolved, signature unchanged, nothing due: the job is skipped");
+    git(&r, &["commit", "-q", "--allow-empty", "-m", "second"]);
+    assert!(needed(T0 + 3000), "HEAD moved: look at the repo");
+    fx.tick(&s, T0 + 3000);
+    assert!(!needed(T0 + 3500), "and once looked at, quiet again");
+    let due = fx.repo_state("r1").next_poll_ms;
+    assert!(!needed(due - 1) && needed(due), "a repo whose poll time has come");
+    let ttl = fx.cfg.int("github_rt.cwd_ttl_ms");
+    assert!(!needed(T0 + 1000 + ttl + 5), "no recent session: nothing to follow");
+}
+
+#[test]
+fn a_root_git_cannot_read_is_looked_at_again_on_the_done_cadence_not_at_every_tick() {
+    let fx = Fx::new("unreadable");
+    let plain = fx.dir.join("plain");
+    std::fs::create_dir_all(&plain).unwrap();
+    git(&plain, &["init", "-q", "-b", "main"]); // no commit: the root resolves, the branch and head do not
+    fx.note(&plain, T0);
+    let s = Stub::new();
+    fx.tick(&s, T0 + 1000);
+    let done = fx.cfg.int("github_rt.poll_done_ms");
+    let repo = fx.repo_state("plain");
+    assert_eq!(repo.next_poll_ms, T0 + 1000 + done, "retry time is the done cadence");
+    assert!(!tick_needed(&fx.cfg, T0 + 2000), "the 20 s tick does not run git on it again");
+    assert!(tick_needed(&fx.cfg, T0 + 1000 + done + 1));
 }

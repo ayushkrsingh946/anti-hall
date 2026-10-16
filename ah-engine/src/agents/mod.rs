@@ -320,6 +320,12 @@ pub struct State {
     pub cli_ok: Option<bool>,
     /// When the CLI source was last probed.
     pub cli_checked: u64,
+    /// When the host's session listing was last taken, and the main and workspace agents it named.
+    #[serde(default)]
+    pub cli_listed: u64,
+    /// The ids of the main and workspace agents the last listing was taken for.
+    #[serde(default)]
+    pub cli_seen: Vec<String>,
 }
 
 impl State {

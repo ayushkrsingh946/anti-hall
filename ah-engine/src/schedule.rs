@@ -720,7 +720,7 @@ fn has_work(action: &str) -> bool {
     match action {
         "gh_poll" => {
             let cfg = crate::ghrt::cfg::Cfg::load();
-            crate::ghrt::has_recent_sessions(&cfg, crate::health::now_ms())
+            crate::ghrt::tick_needed(&cfg, crate::health::now_ms())
         }
         "refresh" => defaults::env_var("home").is_some_and(|h| crate::refresh::has_pending(std::path::Path::new(&h))),
         // the spool file: absent or empty means no client spooled a write (clients append under the lock and fsync)

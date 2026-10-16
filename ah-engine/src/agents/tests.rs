@@ -704,8 +704,9 @@ fn the_cli_listing_settles_busy_waiting_and_gone_and_a_broken_cli_falls_back_to_
     let var = defaults::env_name("claude_bin");
     let good = fake_claude(
         &h,
-        "case \"$1\" in --version) echo '2.1.295 (Claude Code)';; agents) echo '[{\"sessionId\":\"s1\",\"kind\":\"interactive\",\"status\":\"waiting\"}]';; esac",
+        "case \"$1\" in --version) echo '2.1.295 (Claude Code)';; agents) echo x >> \"$0.count\"; echo '[{\"sessionId\":\"s1\",\"kind\":\"interactive\",\"status\":\"waiting\"}]';; esac",
     );
+    let listings = || std::fs::read_to_string(format!("{}.count", good.display())).map_or(0, |t| t.lines().count());
     // SAFETY: only this test sets the variable; the other tests run with the CLI source off and never read it.
     unsafe { std::env::set_var(var, &good) };
     let mut e = env(&h, n);
@@ -716,6 +717,24 @@ fn the_cli_listing_settles_busy_waiting_and_gone_and_a_broken_cli_falls_back_to_
     assert!(agent(&st, "s1").flags.is_empty(), "the host says s1 waits for input: silent is not hung");
     assert_eq!(state::of(agent(&st, "s1")), state_name("waiting"));
     assert!(agent(&st, "s2").gone && agent(&st, "s2").flags.is_empty(), "a session the host no longer lists has no process");
+    // between listings the host's answer is kept, not asked for again at every tick (one heavy process a minute otherwise)
+    let base = listings(); // the first tick asks twice: once to probe the capability, once to list
+    let ttl = lim("cli_list_ttl_ms");
+    let mut e2 = env(&h, n + ttl / 5);
+    e2.use_cli = true;
+    let l = tick(&e2, &mut st);
+    assert_eq!(listings(), base, "inside the listing ttl the CLI is not asked");
+    assert!(l.cli_used, "the kept listing still counts as used");
+    assert!(agent(&st, "s2").gone && agent(&st, "s1").host == "waiting", "gone and the host state are kept, not cleared");
+    let mut e3 = env(&h, n + ttl + 1);
+    e3.use_cli = true;
+    tick(&e3, &mut st);
+    assert_eq!(listings(), base + 1, "past the ttl it is asked again");
+    write(&sess(&h, "s3"), &[prompt(n + ttl, "/w"), asst(n + ttl, "m3", 5, 5, json!([{"type": "text", "text": "x"}]), None)]);
+    let mut e4 = env(&h, n + ttl + 2);
+    e4.use_cli = true;
+    tick(&e4, &mut st);
+    assert_eq!(listings(), base + 2, "a session the last listing did not cover is listed at once");
     let bad = fake_claude(&h, "exit 1");
     // SAFETY: as above; this test is the only one that touches the variable.
     unsafe { std::env::set_var(var, &bad) };
@@ -725,4 +744,14 @@ fn the_cli_listing_settles_busy_waiting_and_gone_and_a_broken_cli_falls_back_to_
     assert!(agent(&st2, "s1").flags.contains_key("hung"), "without the CLI the transcript decides");
     // SAFETY: as above.
     unsafe { std::env::remove_var(var) };
+}
+
+#[test]
+fn a_state_file_written_before_the_listing_cache_still_loads() {
+    // the seeded old shape: a state of the previous version has neither cli_listed nor cli_seen
+    let mut v = serde_json::to_value(State::default()).unwrap();
+    let o = v.as_object_mut().unwrap();
+    assert!(o.remove("cli_listed").is_some() && o.remove("cli_seen").is_some());
+    let st: State = serde_json::from_value(v).unwrap();
+    assert_eq!((st.cli_listed, st.cli_seen.len()), (0, 0), "defaults: the first tick lists");
 }

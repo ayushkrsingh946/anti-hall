@@ -189,7 +189,17 @@ fn cli_rows(out: &str) -> Option<Vec<Value>> {
     rows.iter().all(|r| r.get(id).is_some()).then(|| rows.clone())
 }
 
-fn cli(env: &Env, st: &mut State) -> Listing {
+/// Whether the host's listing is due by age (or has never been taken). Without the CLI nothing is cached, so it is always due.
+fn listing_due(env: &Env, st: &State) -> bool {
+    !env.use_cli || st.cli_ok == Some(false) || st.cli_listed == 0 || env.now_ms.saturating_sub(st.cli_listed) >= lim("cli_list_ttl_ms")
+}
+
+/// Whether the host's session listing must be taken now: it is due by age, or an agent the last listing did not cover has appeared.
+fn relist(env: &Env, st: &State, due: bool) -> bool {
+    due || st.agents.values().any(|a| (a.kind == kind_name("main") || a.kind == kind_name("workspace")) && !st.cli_seen.contains(&a.id)) && env.use_cli
+}
+
+fn cli(env: &Env, st: &mut State, relist: bool) -> Listing {
     let mut l = Listing { cli_version: st.cli_version.clone(), cli_used: false };
     if !env.use_cli {
         return l;
@@ -207,6 +217,13 @@ fn cli(env: &Env, st: &mut State) -> Listing {
     if st.cli_ok != Some(true) {
         return l;
     }
+    if !relist {
+        l.cli_used = true; // the listing of a moment ago still stands
+        return l;
+    }
+    // stamped on the attempt, so a listing that fails is not retried at every tick either
+    st.cli_listed = env.now_ms;
+    st.cli_seen = st.agents.values().filter(|a| a.kind == kind_name("main") || a.kind == kind_name("workspace")).map(|a| a.id.clone()).collect();
     let Some(rows) = cli_run(&cli_cfg("agents_args").strings()).and_then(|o| cli_rows(&o)) else { return l };
     l.cli_used = true;
     let field = |r: &Value, k: &str| r.get(cli_cfg(k).as_str().unwrap_or("")).and_then(Value::as_str).unwrap_or("").to_string();
@@ -251,6 +268,7 @@ fn stopped_subagents(env: &Env, st: &mut State) {
 /// Discover and ingest every source; drop agents that disappeared.
 pub(crate) fn refresh(env: &Env, st: &mut State) -> Listing {
     let now = env.now_ms;
+    let due = listing_due(env, st);
     for f in discover(env) {
         let a = st.agents.entry(f.id.clone()).or_insert_with(|| Agent {
             id: f.id.clone(),
@@ -263,8 +281,10 @@ pub(crate) fn refresh(env: &Env, st: &mut State) -> Listing {
         });
         a.seen = now;
         a.path = f.path;
-        a.host.clear();
-        a.gone = false;
+        if due {
+            a.host.clear();
+            a.gone = false;
+        }
         if !f.name.is_empty() {
             a.name = f.name;
         }
@@ -276,7 +296,8 @@ pub(crate) fn refresh(env: &Env, st: &mut State) -> Listing {
     stopped_subagents(env, st);
     heartbeats(env, st);
     devswarm(env, st);
-    let l = cli(env, st);
+    let again = relist(env, st, due);
+    let l = cli(env, st, again);
     let keep = lim("active_window_ms");
     st.agents.retain(|_, a| now.saturating_sub(a.seen) <= keep);
     l
