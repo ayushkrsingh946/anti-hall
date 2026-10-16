@@ -456,6 +456,11 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `daemon.lock_wait_ms` | `1500` |  | ms | How long a starting daemon waits for an outgoing (version-handoff) daemon to release the singleton lock. |
 | `daemon.malloc_conf` | `narenas:1,dirty_decay_ms:0,muzzy_decay_ms:0` |  |  | Allocator purge tuning handed to the daemon at start (jemalloc `malloc_conf` syntax): one arena for the four worker threads (less fragmentation) and decay 0 (freed pages go back to the OS at once; the system allocators keep them, which left RSS at 2.5x the live heap). Measured on 1000 mixed calls, this Mac: system allocator 45-48 MB RSS, jemalloc with only decay 0 37 MB, with narenas:1 as well 32 MB (live heap 16 MB), adding tcache:false 27 MB but p50 call latency 10 ms against 6.5-7 ms, so tcache stays on. empty = the allocator's own defaults. A variable the caller already set is not overridden. |
 | `daemon.malloc_conf_vars` | `_RJEM_MALLOC_CONF, MALLOC_CONF` |  |  | Environment variables the allocator reads its tuning from (the crate's prefixed name and the plain one). |
+| `daemon.malloc_decay_keys` | `dirty_decay_ms, muzzy_decay_ms` |  |  | The decay settings of `daemon.malloc_conf` that a daemon started without the tuning in its environment (a launchd or systemd unit, a replay or test driver) applies to the running allocator; each is also the name of the allocator control under `arenas.` and `arena.<all>.`. `narenas` is not among them: it cannot change once the allocator runs. |
+| `daemon.malloc_decay_kind` | `malloc_decay` |  |  | Event-log kind of the line written when the daemon applies (or cannot apply) the allocator decay settings at start. |
+| `daemon.malloc_decay_why_error` | `the allocator refused {key} (error {rc})` |  |  | Reason logged when the allocator refused a decay setting. Placeholders: {key}, {rc} (the allocator's error number). |
+| `daemon.malloc_decay_why_none` | `daemon.malloc_conf holds no decay setting` |  |  | Reason logged when `daemon.malloc_conf` holds none of `daemon.malloc_decay_keys`. |
+| `daemon.malloc_decay_why_system` | `the system allocator is active` |  |  | Reason logged when the decay settings are not applied because the system allocator is active. |
 | `daemon.max_request` | `1048576` | `AH_ENGINE_MAX_REQUEST` | bytes | Largest request the daemon reads; the client sends nothing larger (it falls back instead). |
 | `daemon.mem_mb` | `512` | `AH_ENGINE_MEM_MB` | MB | Data-segment limit applied with setrlimit; 0 = none. It is a ceiling against runaway allocation, not a budget (the RSS cap is the budget), and Linux enforces it on thread stacks, so it must exceed daemon.workers times git.stack_mb plus headroom or a check thread cannot start. macOS does not support RLIMIT_DATA here, so the daemon reports unsupported and relies on the RSS/footprint cap. |
 | `daemon.mem_metric` | `footprint` |  |  | Which figure `daemon.rss_cap_kb` is compared with: `footprint` (the process's own memory: macOS physical footprint, Linux RssAnon + RssShmem; shared and reclaimable file pages are not counted) or `rss` (the kernel's resident set, which also counts shared code pages touched over time and made the daemon restart without a real leak). Falls back to the resident set where the platform has no footprint. |
@@ -9793,14 +9798,17 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `units.out_present` | `present` |  |  | Status outcome: the file is there. |
 | `units.out_refused` | `refused` |  |  | Outcome: a service-manager command refused under a test or a temporary home. |
 | `units.plist_arg` | `    <string>{arg}</string>` |  |  | One ProgramArguments entry of the LaunchAgent. {arg}. |
+| `units.plist_env` | `  <key>EnvironmentVariables</key>\n  <dict>\n{entries}\n  </dict>\n` |  |  | The EnvironmentVariables block of the LaunchAgent, written when the engine has allocator tuning to hand its daemon (`daemon.malloc_conf`; the daemon reads it before its first allocation, and a unit is a starter that otherwise gives it none). {entries} is one units.plist_env_entry per variable. |
+| `units.plist_env_entry` | `    <key>{name}</key>\n    <string>{value}</string>` |  |  | One variable of the LaunchAgent's EnvironmentVariables. {name} {value}, both XML-escaped. |
 | `units.plist_log` | `/dev/null` |  |  | Where launchd sends the unit's stdout and stderr (the daemon writes its own log). |
 | `units.plist_suffix` | `.plist` |  |  | The file name suffix of a launchd unit. |
-| `units.plist_template` | `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD...` |  |  | The LaunchAgent of the engine unit. {label} {args} (one units.plist_arg per argument) {interval} {log}; every value is XML-escaped. |
+| `units.plist_template` | `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD...` |  |  | The LaunchAgent of the engine unit. {label} {args} (one units.plist_arg per argument) {env} (the units.plist_env block, or nothing) {interval} {log}; every value is XML-escaped. |
 | `units.reason_sep` | ` - ` |  |  | Between the outcome and the reason in a report line. |
 | `units.retired_subdir` | `retired` |  |  | Where moved-aside unit files go, inside the units directory: `<file name>.<epoch ms>`. |
 | `units.serve_args` | `serve` |  |  | The arguments the unit gives the engine binary. |
+| `units.service_env` | `Environment="{name}={value}"` |  |  | One Environment line of the systemd service: the allocator tuning (`daemon.malloc_conf`) for the daemon the unit starts, double-quoted with the systemd escapes applied. {name} {value}. |
 | `units.service_suffix` | `.service` |  |  | The file name suffix of a systemd service. |
-| `units.service_template` | `[Unit]\nDescription=anti-hall engine daemon (starts it when none is running)\...` |  |  | The systemd user service of the engine unit. {exec} is the quoted command line. |
+| `units.service_template` | `[Unit]\nDescription=anti-hall engine daemon (starts it when none is running)\...` |  |  | The systemd user service of the engine unit. {exec} is the quoted command line; {env} is one units.service_env line per variable, or nothing. |
 | `units.stage_name` | `units-heal` |  |  | The progress name of update's units heal stage. |
 | `units.state_subdir` | `units` |  |  | The units directory inside the engine state directory (ledger, lock, retired files). The reaper opt-in marker is mcp_reaper.job_optin_rel. |
 | `units.sub_heal` | `heal` |  |  | The subcommand that installs the engine unit and retires the Node units whose duty the engine runs (what update and doctor --repair call). |
@@ -10390,6 +10398,8 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `msg.log_hung_spared` | Log detail when a client declines to end a daemon it found hung, because the heartbeat moved, or the process generation (pid, start time, executable, state dir) could not be confirmed. {pid} = the pid the heartbeat names, {why} = the stale-heartbeat detail. |
 | `msg.log_lock_fail` | Start-failure detail when the lock file cannot be opened. Placeholders: {path}, {err}. |
 | `msg.log_lock_no_daemon` | Log detail when a starting daemon gives up on the singleton lock while no daemon answers on the socket. Placeholders: {path}, {pid} (the pid the lock file names, may be empty), {live_engine}. |
+| `msg.log_malloc_decay_applied` | Event-log detail (kind malloc_decay) when the daemon, started without the allocator tuning in its environment, applied the decay settings of daemon.malloc_conf at runtime. Placeholder: {settings} (key=value list). |
+| `msg.log_malloc_decay_skipped` | Event-log detail (kind malloc_decay) when the allocator decay settings could not be applied at start; the daemon runs with the allocator's own defaults. Placeholder: {reason}. |
 | `msg.log_not_socket` | Start-failure detail when something other than a socket sits at the socket path. Placeholder: {path}. |
 | `msg.log_operator_reset` | Log detail for `reset`. |
 | `msg.log_panic` | Log and failure detail when a request handler panicked. |

@@ -344,6 +344,26 @@ value = "narenas:1,dirty_decay_ms:0,muzzy_decay_ms:0"
 doc = "Environment variables the allocator reads its tuning from (the crate's prefixed name and the plain one)."
 value = ["_RJEM_MALLOC_CONF", "MALLOC_CONF"]
 
+[daemon.malloc_decay_keys]
+doc = "The decay settings of `daemon.malloc_conf` that a daemon started without the tuning in its environment (a launchd or systemd unit, a replay or test driver) applies to the running allocator; each is also the name of the allocator control under `arenas.` and `arena.<all>.`. `narenas` is not among them: it cannot change once the allocator runs."
+value = ["dirty_decay_ms", "muzzy_decay_ms"]
+
+[daemon.malloc_decay_kind]
+doc = "Event-log kind of the line written when the daemon applies (or cannot apply) the allocator decay settings at start."
+value = "malloc_decay"
+
+[daemon.malloc_decay_why_system]
+doc = "Reason logged when the decay settings are not applied because the system allocator is active."
+value = "the system allocator is active"
+
+[daemon.malloc_decay_why_none]
+doc = "Reason logged when `daemon.malloc_conf` holds none of `daemon.malloc_decay_keys`."
+value = "daemon.malloc_conf holds no decay setting"
+
+[daemon.malloc_decay_why_error]
+doc = "Reason logged when the allocator refused a decay setting. Placeholders: {key}, {rc} (the allocator's error number)."
+value = "the allocator refused {key} (error {rc})"
+
 [daemon.rss_check_ms]
 doc = "How often the watchdog samples resident memory."
 value = 10000

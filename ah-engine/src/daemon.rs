@@ -1703,6 +1703,7 @@ pub fn serve() {
     if prev != 0 && prev != std::process::id() && health::pid_is_engine(prev) && crate::client::ping(&sock).is_some() {
         return;
     }
+    crate::memdiag::apply_decay_if_untuned();
     crate::jev::shared::set_resident();
     health::reap_marker();
     crate::discard::harmless(lock.set_len(0)); // keep: best effort, fail-open

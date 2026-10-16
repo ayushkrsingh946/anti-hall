@@ -49,6 +49,49 @@ mod je {
         unsafe { mallctl(key.as_ptr(), (&mut old as *mut u64).cast(), &mut len, (&mut new as *mut u64).cast(), std::mem::size_of::<u64>()) };
     }
 
+    /// `arenas.<key>` / `arena.<ALL>.<key>` hold a signed size (`ssize_t`).
+    fn read_signed(name: &str) -> Option<i64> {
+        let key = std::ffi::CString::new(name).ok()?;
+        let mut v: isize = 0;
+        let mut len = std::mem::size_of::<isize>();
+        // SAFETY: `key` is NUL-terminated, `v` is a writable `isize` of `len` bytes, and no value is written (null, 0).
+        let rc = unsafe { mallctl(key.as_ptr(), (&mut v as *mut isize).cast(), &mut len, std::ptr::null_mut(), 0) };
+        (rc == 0).then_some(v as i64)
+    }
+
+    fn write_signed(name: &str, value: i64) -> Result<(), i32> {
+        let key = std::ffi::CString::new(name).map_err(|_| -1)?;
+        let mut v = value as isize;
+        // SAFETY: `key` is NUL-terminated; `v` is an `isize` of the size passed, as these controls expect; nothing is read back.
+        let rc = unsafe { mallctl(key.as_ptr(), std::ptr::null_mut(), std::ptr::null_mut(), (&mut v as *mut isize).cast(), std::mem::size_of::<isize>()) };
+        if rc == 0 { Ok(()) } else { Err(rc) }
+    }
+
+    /// `arenas.narenas`, an `unsigned`.
+    fn narenas() -> u32 {
+        let mut v: u32 = 0;
+        let mut len = std::mem::size_of::<u32>();
+        // SAFETY: the key is NUL-terminated, `v` is a writable `u32` of `len` bytes, and no value is written (null, 0).
+        let rc = unsafe { mallctl(c"arenas.narenas".as_ptr(), (&mut v as *mut u32).cast(), &mut len, std::ptr::null_mut(), 0) };
+        if rc == 0 { v } else { 0 }
+    }
+
+    /// The default decay of new arenas for `key`, if the control exists.
+    pub fn default_decay(key: &str) -> Option<i64> {
+        read_signed(&format!("arenas.{key}"))
+    }
+
+    /// Set decay `key` for the defaults of new arenas and for every arena that exists. `arena.<i>.<key>` does not accept the
+    /// all-arenas index (it indexes past the arena table), so each index below `arenas.narenas` is written; one the allocator has
+    /// not created yet refuses (`EFAULT`) and picks up the new default when it is created.
+    pub fn set_decay(key: &str, ms: i64) -> Result<(), i32> {
+        write_signed(&format!("arenas.{key}"), ms)?;
+        for i in 0..narenas() {
+            crate::discard::harmless(write_signed(&format!("arena.{i}.{key}"), ms)); // keep: an arena not created yet refuses and takes the default
+        }
+        Ok(())
+    }
+
     pub fn alloc() -> Option<super::Alloc> {
         if crate::memstat::active_allocator() == crate::memstat::Allocator::System {
             return None;
@@ -66,12 +109,21 @@ mod je {
         for k in ["allocated", "active", "metadata", "resident", "mapped", "retained"] {
             m.insert(k.into(), read(&format!("stats.{k}")).map_or(serde_json::Value::Null, Into::into));
         }
+        for k in crate::defaults::list("daemon.malloc_decay_keys") {
+            m.insert(k.into(), default_decay(k).map_or(serde_json::Value::Null, Into::into));
+        }
         serde_json::json!({"active": crate::memstat::active_allocator().as_str(), "jemalloc": serde_json::Value::Object(m)})
     }
 }
 
 #[cfg(not(any(all(target_os = "macos", target_arch = "aarch64"), all(target_os = "linux", target_env = "gnu"))))]
 mod je {
+    pub fn default_decay(_: &str) -> Option<i64> {
+        None
+    }
+    pub fn set_decay(_: &str, _: i64) -> Result<(), i32> {
+        Err(-1)
+    }
     pub fn alloc() -> Option<super::Alloc> {
         None
     }
@@ -167,6 +219,50 @@ mod sysm {
 fn sqlite_bytes() -> (i64, i64) {
     // SAFETY: both calls take plain values and read process-wide counters; they are thread-safe.
     unsafe { (rusqlite::ffi::sqlite3_memory_used(), rusqlite::ffi::sqlite3_memory_highwater(0)) }
+}
+
+/// The value of `key` in a jemalloc `malloc_conf` string (`a:1,b:2`); `None` when absent or not an integer.
+pub fn conf_value(conf: &str, key: &str) -> Option<i64> {
+    conf.split(',').find_map(|kv| {
+        let (k, v) = kv.split_once(':')?;
+        (k.trim() == key).then(|| v.trim().parse().ok()).flatten()
+    })
+}
+
+/// A daemon started without the allocator tuning in its environment (a launchd or systemd unit from before the tuning, a test
+/// or replay driver running `serve` directly) gets the decay part of `daemon.malloc_conf` applied through the allocator's
+/// control interface, so its freed pages go back to the OS as they do in a daemon the client started. `narenas` cannot change
+/// once the allocator runs and is skipped. Never fails the daemon: the outcome is one event-log line.
+pub fn apply_decay_if_untuned() {
+    let kind = defaults::text("daemon.malloc_decay_kind");
+    let log = |key: &str, args: &[(&str, &dyn std::fmt::Display)]| crate::health::log_event(kind, "-", &defaults::render(key, args));
+    let conf = defaults::text("daemon.malloc_conf");
+    if conf.is_empty() {
+        return;
+    }
+    if crate::memstat::active_allocator() == crate::memstat::Allocator::System {
+        log("msg.log_malloc_decay_skipped", &[("reason", &defaults::text("daemon.malloc_decay_why_system"))]);
+        return;
+    }
+    if defaults::list("daemon.malloc_conf_vars").into_iter().any(|v| std::env::var_os(v).is_some()) {
+        return; // the allocator read its tuning from the environment at its first allocation
+    }
+    let mut done = Vec::new();
+    for key in defaults::list("daemon.malloc_decay_keys") {
+        let Some(ms) = conf_value(conf, key) else { continue };
+        match je::set_decay(key, ms) {
+            Ok(()) => done.push(format!("{key}={ms}")),
+            Err(rc) => {
+                log("msg.log_malloc_decay_skipped", &[("reason", &defaults::render("daemon.malloc_decay_why_error", &[("key", &key), ("rc", &rc)]))]);
+                return;
+            }
+        }
+    }
+    if done.is_empty() {
+        log("msg.log_malloc_decay_skipped", &[("reason", &defaults::text("daemon.malloc_decay_why_none"))]);
+    } else {
+        log("msg.log_malloc_decay_applied", &[("settings", &done.join(","))]);
+    }
 }
 
 /// `sqlite3_status64` current value of one counter (`SQLITE_STATUS_*`), -1 when the call fails.
@@ -545,6 +641,19 @@ fn summary_of(text: &str) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn conf_value_reads_an_integer_setting_and_nothing_else() {
+        let conf = "narenas:1,dirty_decay_ms:0,muzzy_decay_ms: 250 ,bad:x,neg:-1";
+        assert_eq!(conf_value(conf, "dirty_decay_ms"), Some(0));
+        assert_eq!(conf_value(conf, "muzzy_decay_ms"), Some(250));
+        assert_eq!(conf_value(conf, "neg"), Some(-1));
+        assert_eq!(conf_value(conf, "bad"), None, "not an integer");
+        assert_eq!(conf_value(conf, "absent"), None);
+        assert_eq!(conf_value(conf, "decay"), None, "a key is matched whole, not as a suffix");
+        assert_eq!(conf_value("garbage,,:,a:", "a"), None);
+        assert_eq!(conf_value("", "dirty_decay_ms"), None);
+    }
 
     #[test]
     fn the_summary_ranks_events_and_checks_by_total_growth() {
