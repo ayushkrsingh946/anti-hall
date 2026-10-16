@@ -929,6 +929,52 @@ function piPlanCell(home, pf, dormant, plain) {
   return label;
 }
 
+// ---- the screenshot-sync ask and the app-still-open note -------------------------------------------------------------------
+
+// `uiSyncAskPath` relative to the home: the once-per-session-per-set marker.
+function piAskRel(sessionRaw, ids) {
+  var h = ah.sha1(String(sessionRaw || '') + '\u0000' + ids.slice().sort().join(',')).slice(0, ah.cfgNum('devswarm_parent.ask_hash_len'));
+  return piRel(ah.cfg('devswarm_parent.dir_ui_sync') + '/' + h + '.json');
+}
+
+// `uiSyncAsk(...)` and `appLiveArchivedNote(...)`: {texts: [...], writes: [{rel, ids}]} for a turn with rows. A marker that exists says it was asked.
+function piSyncNotes(ctx, rows, unreadable, sessionRaw) {
+  var out = { texts: [], writes: [] };
+  var conflicts = [];
+  var as = piJson(piDevswarmDir(ctx.home) + '/' + ah.cfg('devswarm_parent.app_state_file'));
+  if (as && Array.isArray(as.openButMarkedArchived)) {
+    conflicts = as.openButMarkedArchived.filter(function (c) {
+      if (!(c && c.worktreePath)) return false;
+      return ah.mesh.repoKey(String(c.worktreePath)) === ctx.key;
+    });
+  }
+  var ids = [], why = '';
+  if (unreadable && conflicts.length) {
+    ids = conflicts.map(function (c) { return String(c.id); });
+    why = text.render(ah.cfg('devswarm_parent.ask_conflict'), { labels: conflicts.map(function (c) { return text.render(ah.cfg('devswarm_parent.ask_label'), { label: c.label || c.id }); }).join(', ') });
+  } else if (unreadable && rows.length) {
+    ids = rows.map(function (r) { return String(r.id); });
+    why = ah.cfg('devswarm_parent.ask_unreadable');
+  }
+  if (ids.length) {
+    var rel = piAskRel(sessionRaw, ids);
+    if (!piPresent(ctx.home + '/' + rel)) {
+      out.texts.push({ rank: 70, text: text.render(ah.cfg('devswarm_parent.ask_text'), { why: why }) });
+      out.writes.push({ rel: rel, ids: ids });
+    }
+  }
+  var live = conflicts.filter(function (c) { return c && c.localArchive === true && c.cmd; });
+  if (live.length) {
+    var lids = live.map(function (c) { return String(c.id); });
+    var lrel = piAskRel(ah.cfg('devswarm_parent.ask_prefix_live') + String(sessionRaw || ''), lids);
+    if (!piPresent(ctx.home + '/' + lrel)) {
+      out.texts.push({ rank: 71, text: text.render(ah.cfg('devswarm_parent.app_live_text'), { n: live.length, cmds: live.map(function (c) { return c.cmd; }).join(ah.cfg('devswarm_parent.app_live_joiner')) }) });
+      out.writes.push({ rel: lrel, ids: lids });
+    }
+  }
+  return out;
+}
+
 // ---- the project of a Primary in a checkout ---------------------------------------------------------------------------------
 
 // The cause of a deferral for everything the hook would show or do that the engine does not reproduce yet, or null. Everything it reads is
@@ -959,7 +1005,7 @@ function piDecide(p, opts) {
   var now = ah.clock.now();
   var every = ah.settings.num('verify_first.num_repeat_every');
   var repeat = isFinite(every) && every > 0 ? every : 0;
-  var ownUnread = 0, ownUrgency = null, orphansSeg = null, staleRegSeg = null, broadcastRows = null, parked = null, roster = null, key = null, health = null, banner = null, wakeLine = null, driftNotice = null, derived = null;
+  var syncNotes = null, ownUnread = 0, ownUrgency = null, orphansSeg = null, staleRegSeg = null, broadcastRows = null, parked = null, roster = null, key = null, health = null, banner = null, wakeLine = null, driftNotice = null, derived = null;
   if (top !== null) {
     var cli = piCli(opts, home);
     if (cli === null) return piDefer('cli');
@@ -996,10 +1042,7 @@ function piDecide(p, opts) {
         }
       }
       if (Array.isArray(summary.recent) && summary.recent.length && ahHost.piJev()) return piDefer('broadcast-jev'); // Jev may label the feed
-      if (roster.rows.length) {
-        if (roster.snapUnreadable) return piDefer('app-db-unreadable');
-        if (piPresent(dev + '/app-state.json')) return piDefer('app-state');
-      }
+      if (roster.rows.length) syncNotes = piSyncNotes({ home: home, key: key }, roster.rows, roster.snapUnreadable, jx.isObj(p) ? p.session_id : undefined);
     }
     piNotices(home, key, now);
     if (summary !== null) {
@@ -1069,6 +1112,7 @@ function piDecide(p, opts) {
       pending.push({ kind: 'dedupe', rank: 60, o: { sessionId: sid, key: 'parent-inbox-table', content: tableText, transcriptPath: tp, keepaliveTurns: repeat, normalize: piNormTable }, text: tableText, after: ah.cfg('devswarm_parent.title_instruction') });
     }
   }
+  if (syncNotes !== null) syncNotes.texts.forEach(function (n) { pending.push({ kind: 'plain', rank: n.rank, text: n.text }); });
   var urgentList = attention.filter(function (w) { return piTier(w) === 'urgent'; });
   var normalList = attention.filter(function (w) { return piTier(w) === 'normal'; });
   if (orphansSeg !== null) pending.push({ kind: 'dedupe', rank: 80, o: { sessionId: sid, key: ah.cfg('devswarm_parent.key_orphans'), content: orphansSeg, transcriptPath: tp, keepaliveTurns: ah.cfgNum('devswarm_parent.mesh_issue_keepalive') }, text: orphansSeg });
@@ -1095,6 +1139,7 @@ function piDecide(p, opts) {
     if (pending[i].kind === 'dedupe' && dedupeOn && !dedupe.canDecide(pending[i].o)) return piDefer('dedupe-undecidable');
   }
   ah.commit();
+  if (syncNotes !== null) syncNotes.writes.forEach(function (w) { ah.state.writeAtomic(w.rel, JSON.stringify({ at: now, ids: w.ids })); });
   if (broadcastRows !== null && broadcastRows.seen !== null) ah.state.writeAtomic(piBroadcastSeenRel(jx.isObj(p) ? p.session_id : undefined), JSON.stringify({ keys: broadcastRows.seen.slice(-ah.cfgNum('devswarm_parent.broadcast_seen_max')) }));
   if (derived !== null) ah.state.writeAtomic(piRel(ah.cfg('devswarm_role.pg_dir_summaries') + '/' + key + '.json'), derived);
   var emitted = [];

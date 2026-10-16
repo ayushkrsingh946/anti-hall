@@ -546,3 +546,39 @@ value = "{v}M"
 [devswarm_parent.tokens_thousand]
 doc = "The token figure at a thousand or more. Placeholder: {v}."
 value = "{v}k"
+
+[devswarm_parent.app_state_file]
+doc = "The app-state record the sync verbs write (app-state.json), under the DevSwarm directory."
+value = "app-state.json"
+
+[devswarm_parent.ask_conflict]
+doc = "Why the sync ask is made when anti-hall has archived workspaces the app shows open. Placeholder: {labels}."
+value = "The DevSwarm app shows {labels} as open, but anti-hall has it archived. I can't tell which is right."
+
+[devswarm_parent.ask_label]
+doc = "One workspace of the sync ask's conflict list. Placeholder: {label}."
+value = "'{label}'"
+
+[devswarm_parent.ask_unreadable]
+doc = "Why the sync ask is made when the app database cannot be read."
+value = "I can't read the DevSwarm app database, so I can't confirm which workspaces are archived."
+
+[devswarm_parent.ask_text]
+doc = "The sync ask. Placeholder: {why}."
+value = "💡 anti-hall · devswarm-sync: {why} Ask the owner (once) for a screenshot of the DevSwarm workspace list (left sidebar), then follow the devswarm skill's \"screenshot sync\" steps (`devswarm.js sync-ui`)."
+
+[devswarm_parent.app_live_text]
+doc = "The note that the app still shows workspaces anti-hall archived. Placeholders: {n}, {cmds}."
+value = "DEVSWARM: app still shows {n} workspace(s) you archived — run: {cmds} (reversible in the app; anti-hall `doctor --repair` runs the verified app archive)"
+
+[devswarm_parent.app_live_joiner]
+doc = "Between the commands of the app-still-open note."
+value = " ; "
+
+[devswarm_parent.ask_prefix_live]
+doc = "The prefix of the session in the marker name of the app-still-open note."
+value = "app-live:"
+
+[devswarm_parent.ask_hash_len]
+doc = "Length of the hash that names a sync-ask marker."
+value = 20

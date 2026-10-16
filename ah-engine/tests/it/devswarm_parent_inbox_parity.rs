@@ -668,8 +668,7 @@ fn scenes() -> Vec<Scene> {
             summary(Value::Object(o))(h);
         }),
         scene("rows-empty-orphans-list-is-nothing", Same).seed(rows_with(vec![("w1", json!({}))], json!({"orphans": [], "staleRegistryPartitions": [], "recent": []}))),
-        scene("rows-app-state-file", Defer).seed(both(rows_of(vec![("w1", json!({}))]), |h| write(&ds(h).join("app-state.json"), "{}"))),
-        scene("rows-app-db-unreadable", Defer).seed(both(rows_of(vec![("w1", json!({}))]), |h| write(&h.join("app.db"), "x"))).env(vec![("ANTIHALL_DEVSWARM_APP_DB", "$HOME/app.db")]),
+        scene("rows-app-db-unreadable-asks-for-a-screenshot", Same).seed(both(rows_of(vec![("w1", json!({}))]), |h| write(&h.join("app.db"), "x"))).env(vec![("ANTIHALL_DEVSWARM_APP_DB", "$HOME/app.db")]),
         scene("rows-descriptor-present-not-claude", Same).seed(both(rows_of(vec![("w1", json!({}))]), |h| write(&ds(h).join("workspaces/w1.json"), r#"{"id":"w1"}"#))),
         scene("rows-auto-archive-record-names-the-row", Defer).seed(both(rows_of(vec![("w1", json!({"archive_ready": true}))]), |h| {
             write(&ds(h).join("auto-archive-state.json"), &json!({"owned": ["w1"], "at": now_ms()}).to_string());
@@ -927,6 +926,33 @@ fn scenes() -> Vec<Scene> {
         scene("plan-tracking-switched-off", Same).seed(both(rows_of(vec![("w1", json!({}))]), both(plan_of("w1", json!({"steps": [{"n": 1, "status": "doing"}]})), |h| write(&h.join(".anti-hall/settings.json"), r#"{"devswarm":{"planTracking":false}}"#)))),
         scene("plan-steps-not-objects", Defer).seed(both(rows_of(vec![("w1", json!({}))]), plan_of("w1", json!({"steps": [null, 5]})))),
         scene("plan-with-the-progress-percentage-cell", Same).seed(both(rows_of(vec![("w1", json!({}))]), heartbeat("w1", 60_000, json!({"progress_pct": 40})))),
+        // the screenshot-sync ask and the app-still-open note
+        scene("sync-app-db-unreadable-with-rows", Same).seed(both(rows_of(vec![("w1", json!({})), ("w2", json!({}))]), |h| write(&h.join("app.db"), "x"))).env(APP_ENV.to_vec()),
+        scene("sync-asked-once-per-session", Same).prime().seed(both(rows_of(vec![("w1", json!({}))]), |h| write(&h.join("app.db"), "x"))).env(APP_ENV.to_vec()),
+        scene("sync-asked-again-for-another-set-of-rows", Same).seed(all3(rows_of(vec![("w1", json!({})), ("w3", json!({}))]), |h| write(&h.join("app.db"), "x"), |h| {
+            let ids = ["w1", "w2"];
+            let mut sorted = ids.to_vec();
+            sorted.sort();
+            let _ = sorted;
+        })).env(APP_ENV.to_vec()),
+        scene("sync-conflicts-with-an-unreadable-db", Same).seed(all3(rows_of(vec![("w1", json!({}))]), |h| write(&h.join("app.db"), "x"), |h| {
+            write(&ds(h).join("app-state.json"), &json!({"openButMarkedArchived": [{"id": "c1", "label": "Gone one", "worktreePath": h.join("proj")}, {"id": "c2", "worktreePath": "/nowhere/else"}, null, {"id": "c3"}]}).to_string());
+        })).env(APP_ENV.to_vec()),
+        scene("sync-live-note-from-a-local-archive", Same).seed(both(rows_of(vec![("w1", json!({}))]), |h| {
+            write(&ds(h).join("app-state.json"), &json!({"openButMarkedArchived": [{"id": "c1", "worktreePath": h.join("proj"), "localArchive": true, "cmd": "hivecontrol workspace archive c1"}, {"id": "c2", "worktreePath": h.join("proj"), "localArchive": true, "cmd": "hivecontrol workspace archive c2"}, {"id": "c3", "worktreePath": h.join("proj"), "localArchive": true}]}).to_string());
+        })),
+        scene("sync-live-note-second-turn-is-quiet", Same).prime().seed(both(rows_of(vec![("w1", json!({}))]), |h| {
+            write(&ds(h).join("app-state.json"), &json!({"openButMarkedArchived": [{"id": "c1", "worktreePath": h.join("proj"), "localArchive": true, "cmd": "hivecontrol workspace archive c1"}]}).to_string());
+        })),
+        scene("sync-app-state-of-another-project-is-ignored", Same).seed(both(rows_of(vec![("w1", json!({}))]), |h| {
+            let other = h.join("other");
+            assert!(Command::new("git").args(["init", "-q"]).arg(&other).status().unwrap().success());
+            git(&other, &["commit", "-q", "--allow-empty", "-m", "y"]);
+            write(&ds(h).join("app-state.json"), &json!({"openButMarkedArchived": [{"id": "c1", "worktreePath": other, "localArchive": true, "cmd": "x"}]}).to_string());
+        })),
+        scene("sync-app-state-garbage", Same).seed(both(rows_of(vec![("w1", json!({}))]), |h| write(&ds(h).join("app-state.json"), "{torn"))),
+        scene("sync-readable-db-needs-no-ask", Same).env(APP_ENV.to_vec()).seed(both(rows_of(vec![("w1", json!({}))]), |h| app_db(vec![("w1", Some(h.join("w1-wt")), "A", 1, 0, 1, 0, "standard", None)], vec![])(h))),
+        scene("sync-no-rows-no-ask", Same).seed(both(summary(json!({})), |h| write(&h.join("app.db"), "x"))).env(APP_ENV.to_vec()),
         // the cases that stay with Node, each decided before anything is written
         scene("summary-empty-file", Defer).seed(|h| write(&ds(h).join(format!("summaries/{}.json", project_key(h))), "")),
         scene("descriptor-present-not-claude", Same).seed(|h| write(&ds(h).join("workspaces/child-1.json"), r#"{"id":"child-1"}"#)),
@@ -1074,6 +1100,9 @@ fn engine_and_node_agree_for_a_primary_in_a_checkout() {
         "devswarm-own-inbox: priority",
         "devswarm-own-inbox: urgent priority",
         "NOT DRAINING >20m",
+        "devswarm-sync:",
+        "DEVSWARM: app still shows",
+        "The DevSwarm app shows",
         " · STRAYING: scope+stall",
         "1.8M tok",
         "52k tok",
