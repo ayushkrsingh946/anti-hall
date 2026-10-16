@@ -21,6 +21,9 @@ ah.mesh = {
   messageCount: function (key, id) { return meshNeed(ahHost.meshMessageCount(key, id)); },
   // {state: 'none'} or {state: 'ok', storeOnly: [row], age}: the store rows no inbox line covers, the age in ms of the oldest unread row (null: none).
   union: function (key, id, inbox, cursor, own, now) { return meshNeed(ahHost.meshUnion(key, id, inbox, cursor, !!own, now)); },
+  // This hook's own reader on a partition: {reader: false} (no reader key), {reader: true, state: 'none'} (no store) or
+  // {reader: true, state: 'ok', own} (own: its store row's value, null when it has none); with `count` and a row, also unread, total.
+  ownReader: function (key, id, inbox, cursor, count, now) { return meshNeed(ahHost.meshOwnReader(key, id, inbox, cursor, !!count, now)); },
   // {verdict: true | false | null, cache}: the app database's archive verdict; with `cache` a cache write is owed (performCache).
   appArchived: function (id, wt, cache) { return meshNeed(ahHost.meshAppArchived(id, wt, !!cache)); },
   // Perform every cache write this call's lookups owe.

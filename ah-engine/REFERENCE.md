@@ -4050,6 +4050,9 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_role.pg_dir_stray_seen` | `stray-seen` |  |  | The straying warnings each Primary session was already shown (stray-seen/<sha1(session)>.json), under the DevSwarm directory. |
 | `devswarm_role.pg_dir_summaries` | `summaries` |  |  | The per-project summary projections, under the DevSwarm directory. |
 | `devswarm_role.pg_dir_workspaces` | `workspaces` |  |  | The workspace descriptors, under the DevSwarm directory. |
+| `devswarm_role.pg_drain_prefix` | `⚠️ anti-hall · devswarm-parent-gate: ` |  |  | Put before the first reason line of the drain notice (stderr) unless it carries pg_drain_tag. |
+| `devswarm_role.pg_drain_suffix` | ` — not blocking (in-flight drain marker fresh for this session)\n` |  |  | Ends the drain notice: the Stop is not blocked while this session's drain marker is fresh. |
+| `devswarm_role.pg_drain_tag` | ` anti-hall · ` |  |  | A first reason line that already carries this tag gets no drain-notice prefix. |
 | `devswarm_role.pg_err_archived_unread` | `💡 anti-hall · devswarm-parent-gate: {n} archived workspace(s) still have unre...` |  |  | Stderr line counting archived families that still hold unread mail: {n}. |
 | `devswarm_role.pg_err_busy` | `⚠️ anti-hall · devswarm-parent-gate: {id}: busy, {n} queued{age}\n` |  |  | Stderr line for a busy child with queued mail: {id}, {n} messages, {age} (the age phrase, or empty). |
 | `devswarm_role.pg_err_busy_age` | ` (oldest {m}m)` |  |  | The age phrase of that line: {m} minutes. |
@@ -4080,6 +4083,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_role.pg_kind_children` | `children` |  |  | The block kind of a child family. |
 | `devswarm_role.pg_kind_mailbox` | `mailbox` |  |  | The block kind of the Primary's own family. |
 | `devswarm_role.pg_kind_wakepath` | `wakepath` |  |  | The block kind of the clean pass's mailbox-wake block (its loop-state signature is the hashed prefix and this kind). |
+| `devswarm_role.pg_live_resolved` | `live-resolved` |  |  | Marks an own count the gate re-read live from this reader's own position in the store. |
 | `devswarm_role.pg_max_shown` | `5` |  |  | Rows, twins and ids named in the reason before the rest is counted. |
 | `devswarm_role.pg_max_unknown_shown` | `3` |  |  | Unknown members named per row (MAX_UNKNOWN_MEMBERS_SHOWN). |
 | `devswarm_role.pg_min_per_hour` | `60` |  |  | Minutes in an hour (approxAge). |
@@ -4087,6 +4091,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_role.pg_ms_per_min` | `60000` |  |  | Milliseconds in a minute (the gate's minute settings and its age lines). |
 | `devswarm_role.pg_neglect` | `Neglect: {n} workspace(s) still need attention before this Primary turn ends:...` |  |  | The neglect line: {n}, {shown}, {more}. |
 | `devswarm_role.pg_no_session` | `nosession` |  |  | The state-file name used when the payload has no session id (stateFileFor). |
+| `devswarm_role.pg_own_stale` | `YOUR OWN inbound status could not be confirmed: the cached summary predates t...` |  |  | The own-summary segment when the cached summary predates this reader's live position and the live recheck could not settle it: {id}. |
 | `devswarm_role.pg_own_unknown` | `YOUR OWN inbound status could not be confirmed (own-summary unreadable or cor...` |  |  | The own-summary-unreadable segment: {id}. |
 | `devswarm_role.pg_own_unread` | `YOU (the Primary) have {n} unread parent/peer message(s) — STOP and read them...` |  |  | The reason segment for the Primary's own unread mail. Placeholders: {n}, {id}. |
 | `devswarm_role.pg_plural_s` | `s` |  |  | Plural suffix. |
@@ -4112,6 +4117,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_role.pg_set_busy_fresh` | `5 entries` |  |  | Setting devswarm.parentGateBusyFreshMin: minutes a child's transcript counts as fresh for the busy test. The engine answers only while it is unset, with this default. |
 | `devswarm_role.pg_set_busy_max_age` | `5 entries` |  |  | Setting devswarm.parentGateBusyMaxAgeMin: minutes of the oldest unread past which even a busy child blocks. The engine answers only while it is unset, with this default. |
 | `devswarm_role.pg_set_cap` | `5 entries` |  |  | Setting devswarm.parentGateCap: forced acknowledgements per blocking signature before the one escalation (Node clamps it to 2..5). The engine answers only while it is unset, with this default. |
+| `devswarm_role.pg_set_drain_ttl` | `5 entries` |  |  | Setting devswarm.drainTtlMs: milliseconds an in-flight drain marker stays fresh (devswarm-drain-marker.js). The engine answers only while it is unset, with this default. |
 | `devswarm_role.pg_set_grace` | `5 entries` |  |  | Setting devswarm.parentGateNeglectGraceMin: minutes a fresh unread message is still in flight and not neglect. The engine answers only while it is unset, with this default. |
 | `devswarm_role.pg_set_held` | `5 entries` |  |  | Setting devswarm.heldPartitions: owner-held partition ids. The engine answers only while it is unset everywhere (an empty set). |
 | `devswarm_role.pg_set_neglect_min` | `5 entries` |  |  | Setting devswarm.parentGateNeglectMinUnread: unread messages a not-busy child may hold without a block. The engine answers only while it is unset, with this default. |
@@ -4139,6 +4145,8 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_role.pg_title_fmt` | `{name} ({short})` |  |  | A workspace's display name: {name}, {short} (the id's first characters). |
 | `devswarm_role.pg_twin_more` | ` and {n} more` |  |  | More twins than shown: {n}. |
 | `devswarm_role.pg_twins` | `NOTE — the unread count above includes {n} same-worktree twin descriptor{s} r...` |  |  | The merged-twin note: {n}, {s}, {list}. |
+| `devswarm_role.pg_urgent_levels` | `urgent, high` |  |  | The summary entry urgencies (`urgencyMax`) that put the urgent prefix on the Primary's own-unread segment. |
+| `devswarm_role.pg_urgent_prefix` | `URGENT — ` |  |  | Put before the Primary's own-unread segment when its urgency is one of pg_urgent_levels. |
 | `devswarm_role.pg_verb_are` | `are` |  |  | Plural verb. |
 | `devswarm_role.pg_verb_has` | `has` |  |  | Singular verb. |
 | `devswarm_role.pg_verb_have` | `have` |  |  | Plural verb. |
