@@ -216,7 +216,7 @@ impl RtLive<'_> {
         if merged["merged"] != json!(true) {
             blockers.push(format!("not-merged({})", merged["via"].as_str().unwrap_or_default()));
         }
-        let (clean, why) = git.clean(&wt);
+        let (clean, why) = git.clean_now(&wt);
         if clean != Some(true) {
             blockers.push(why.unwrap_or("unclean").to_string());
         }
