@@ -518,3 +518,31 @@ value = "unknown"
 [devswarm_parent.dir_heartbeats_key]
 doc = "The version field of a heartbeat."
 value = "version"
+
+[devswarm_parent.dir_token_usage]
+doc = "The per-plan token burn records (token-usage/<key>.json), under the DevSwarm directory."
+value = "token-usage"
+
+[devswarm_parent.dir_stray]
+doc = "The per-plan straying records (stray/<key>.json), under the DevSwarm directory."
+value = "stray"
+
+[devswarm_parent.plan_tokens]
+doc = "What follows a plan label when the child's token burn is known. Placeholder: {tokens}."
+value = " · {tokens} tok"
+
+[devswarm_parent.plan_extras]
+doc = "What follows a plan label when the child tagged extras. Placeholders: {n}, {s} (the plural s)."
+value = " · +{n} extra{s}"
+
+[devswarm_parent.plan_straying]
+doc = "What follows a plan label while a straying warning is active. Placeholder: {signals}."
+value = " · STRAYING: {signals}"
+
+[devswarm_parent.tokens_million]
+doc = "The token figure at a million or more. Placeholder: {v}."
+value = "{v}M"
+
+[devswarm_parent.tokens_thousand]
+doc = "The token figure at a thousand or more. Placeholder: {v}."
+value = "{v}k"

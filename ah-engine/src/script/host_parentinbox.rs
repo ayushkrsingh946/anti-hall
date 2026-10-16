@@ -15,6 +15,7 @@
 //! | `piIgnored(id)` | whether the row has an archive-ignore mark |
 //! | `piPid(pid)` | `pidIsAlive(pid)`: `true`, `false` or `null` (no opinion) |
 //! | `piAppChildren(worktree)` | the workspaces the app database lists as open children of the project around `worktree`: `{repo, children: [{id, worktreePath, sessionId}]}` (`appHasLiveChild` before the per-row eligibility) |
+//! | `piFinish(id, worktree, now)` | `{label, key, extras}`: the step-plan label of a working row (`planLib.findPlan` then `finishLabel`), `label` null when the workspace has no plan |
 //! | `piJev()` | whether the Jev triage of arrivals may be switched on (then a broadcast feed is labelled by Jev, which the engine does not do)
 //! | `piDerive(repoKey, now)` | `{text}`: the project's summary projection as the hook's refresh would write it when the ingest daemon is not healthy (`null` when the project has no store rows to derive from); nothing is written |
 //! | `piDrift(worktree, anchor, current, transcriptPath)` | `anchorSessionDrift(...)`: `{newest, anchor}` when a newer session of the worktree is active than the Primary's anchor, else `null` |
@@ -327,6 +328,21 @@ fn activity_of(inv: &Inv, id: &str, wt: Option<&str>, sid: Option<&str>, last_ou
 
 
 // ---------------------------------------------------------------------------------------------------------------------
+// the step plan of a row
+// ---------------------------------------------------------------------------------------------------------------------
+
+fn finish_of(inv: &Inv, id: &str, wt: Option<&str>) -> R<Value> {
+    let Some(found) = crate::meshw::plan::find_for(inv, id, wt.filter(|s| !s.is_empty()))? else { return Ok(json!({"label": Value::Null})) };
+    let label = crate::meshw::plan::finish_label(&found.plan, inv.now as f64)?;
+    let OVal::Str(label) = label else { return Ok(json!({"label": Value::Null})) };
+    let extras = match found.plan.get("extras") {
+        Some(OVal::Arr(a)) => a.len(),
+        _ => 0,
+    };
+    Ok(json!({"label": label, "key": found.key, "extras": extras}))
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
 // the summary refresh
 // ---------------------------------------------------------------------------------------------------------------------
 
@@ -526,6 +542,12 @@ pub(super) fn install<'js>(c: &Ctx<'js>, h: &Object<'js>) -> rquickjs::Result<()
         "piAppChildren",
         Function::new(c.clone(), |wt: String, now: f64| -> rquickjs::Result<String> {
             with_settings(|st| answer(ensure_snap(&st.home, &st.env, now).and_then(|()| app_children(&wt))))
+        })?,
+    )?;
+    h.set(
+        "piFinish",
+        Function::new(c.clone(), |id: String, wt: Option<String>, now: f64| -> rquickjs::Result<String> {
+            with_settings(|st| answer(finish_of(&inv_of(st, now), &id, wt.as_deref())))
         })?,
     )?;
     h.set("piJev", Function::new(c.clone(), || -> rquickjs::Result<bool> { with_settings(|st| crate::meshw::common::jev_maybe_enabled(&inv_of(st, 0.0))) })?)?;

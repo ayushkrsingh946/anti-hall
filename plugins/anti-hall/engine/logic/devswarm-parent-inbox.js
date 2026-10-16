@@ -579,9 +579,9 @@ function piRoster(ctx, summary) {
     }
     var finishCell = piDoneState(entry, heartbeat);
     if (/^working\b/.test(finishCell) && gates.setting('devswarm_prompt.plan_tracking_setting', true, ctx.pluginRoot) !== false) {
-      var fp = JSON.parse(ahHost.ctFindPlan(id, wtPath || ''));
-      if (fp.unsure) throw meshDefer;
-      if (fp.plan !== null) { out.deferral = 'plan-row'; return out; }
+      var pf = JSON.parse(ahHost.piFinish(id, wtPath, now));
+      if (pf.unsure) throw meshDefer;
+      if (pf.label !== null) finishCell = piPlanCell(home, pf, dormant, finishCell);
     }
     var appMarks = '';
     if (rowWs) {
@@ -902,6 +902,31 @@ function piStaleBuild(home, id, newest) {
   var target = newest.cacheRoot + '/' + newest.version + '/' + ah.cfg('devswarm_parent.cli_rel');
   var cmd = ah.fs.isFile(target) ? text.render(ah.cfg('devswarm_parent.stale_build_cmd'), { path: target }) : ah.cfg('devswarm_parent.stale_build_cmd_unknown');
   return { version: rec, message: text.render(ah.cfg('devswarm_parent.stale_build_message'), { version: rec, cmd: cmd }) };
+}
+
+// `tokenUsage.fmt(n)`.
+function piTokens(n) {
+  var v = Number(n) || 0;
+  if (v >= 1e6) return text.render(ah.cfg('devswarm_parent.tokens_million'), { v: Math.round(v / 1e5) / 10 });
+  if (v >= 1e3) return text.render(ah.cfg('devswarm_parent.tokens_thousand'), { v: Math.round(v / 1e3) });
+  return String(Math.round(v));
+}
+
+// The finish cell of a working row whose workspace has a step plan: the label with the token burn, the tagged extras and a straying warning.
+// An error in the add-ons leaves the plain cell, as Node's try/catch does.
+function piPlanCell(home, pf, dormant, plain) {
+  var label = pf.label;
+  if (piSafeId(pf.key)) {
+    var tok = piJson(piDevswarmDir(home) + '/' + ah.cfg('devswarm_parent.dir_token_usage') + '/' + pf.key + '.json');
+    if (tok && typeof tok === 'object' && piFinite(tok.total) && tok.total > 0) label += text.render(ah.cfg('devswarm_parent.plan_tokens'), { tokens: piTokens(tok.total) });
+  }
+  if (pf.extras) label += text.render(ah.cfg('devswarm_parent.plan_extras'), { n: pf.extras, s: pf.extras === 1 ? '' : 's' });
+  var stray = piJson(piDevswarmDir(home) + '/' + ah.cfg('devswarm_parent.dir_stray') + '/' + pf.key + '.json');
+  var active = stray && Array.isArray(stray.active) ? stray.active : [];
+  if (active.length && !dormant) {
+    try { label += text.render(ah.cfg('devswarm_parent.plan_straying'), { signals: Array.from(new Set(active.map(function (a) { return a.signal; }))).join('+') }); } catch (e) { return plain; }
+  }
+  return label;
 }
 
 // ---- the project of a Primary in a checkout ---------------------------------------------------------------------------------

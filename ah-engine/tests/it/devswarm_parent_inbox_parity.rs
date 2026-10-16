@@ -342,6 +342,10 @@ fn faulty_daemon(extra: Value) -> impl Fn(&Path) {
 
 const MIN: i64 = 60_000;
 
+fn plan_of(key: &'static str, plan: Value) -> impl Fn(&Path) {
+    move |h| write(&ds(h).join(format!("plans/{key}.json")), &plan.to_string())
+}
+
 const MP_ENV: [(&str, &str); 1] = [("ANTIHALL_MARKETPLACE_DIR", "$HOME/pr/marketplaces/anti-hall")];
 
 /// A plugin cache holding `versions` (each with the CLI script), a registry naming `installed` and a marketplace manifest naming `manifest`.
@@ -646,7 +650,6 @@ fn scenes() -> Vec<Scene> {
         // everything the engine leaves to Node, decided before any write
         scene("rows-setting-grace-set", Defer).seed(both(rows_of(vec![("w1", json!({}))]), |h| write(&h.join(".anti-hall/settings.json"), r#"{"devswarm":{"inboxGraceSec":30}}"#))),
         scene("rows-setting-renag-set", Defer).seed(rows_of(vec![("w1", json!({}))])).env(vec![("ANTIHALL_DEVSWARM_ARCHIVE_REQUEST_RENAG_HOURS", "2")]),
-        scene("rows-step-plan", Defer).seed(both(rows_of(vec![("w1", json!({}))]), |h| write(&ds(h).join("plans/w1.json"), r#"{"steps":[{"n":1,"text":"a","status":"doing"}]}"#))),
         scene("own-unread-declared-reader", Defer).seed(both(warm_child, |h| {
             let id = primary_id(h);
             let mut o = serde_json::Map::new();
@@ -904,6 +907,26 @@ fn scenes() -> Vec<Scene> {
         scene("drain-archive-ready-quiet-row-drops-the-label", Same).seed(both(rows_of(vec![("w1", json!({"archive_ready": true, "directUnread": 1, "archive_request_only_unread": true}))]), verdict("w1", json!({"notDraining": true})))),
         scene("drain-not-draining-with-a-pending-archive-request", Same).seed(both(rows_of(vec![("w1", json!({"archive_ready": true, "directUnread": 1, "archive_request_only_unread": true, "oldestDirectUnreadTs": now_ms() - 20 * MIN}))]), verdict("w1", json!({"notDraining": true})))),
         scene("drain-not-draining-urgent-unread", Same).seed(both(rows_of(vec![("w1", json!({"directUnread": 3, "urgencyMax": "urgent"})), ("w2", json!({"directUnread": 1}))]), both(verdict("w1", json!({"notDraining": true})), verdict("w2", json!({"notDraining": true}))))),
+        // the step plan of a working row
+        scene("plan-doing-a-step", Same).seed(both(rows_of(vec![("w1", json!({}))]), plan_of("w1", json!({"steps": [{"n": 1, "text": "a", "status": "done"}, {"n": 2, "text": "b", "status": "doing", "started_at": now_ms() - 25 * MIN}, {"n": 3, "text": "c", "status": "todo"}], "created_at": now_ms() - 3_600_000, "step_ts": now_ms() - 12 * MIN})))),
+        scene("plan-all-done", Same).seed(both(rows_of(vec![("w1", json!({}))]), plan_of("w1", json!({"steps": [{"n": 1, "status": "done"}, {"n": 2, "status": "done"}], "step_ts": now_ms() - 5 * MIN})))),
+        scene("plan-all-done-reported", Same).seed(both(rows_of(vec![("w1", json!({}))]), plan_of("w1", json!({"steps": [{"n": 1, "status": "done"}], "done_reported_at": now_ms() - 5 * MIN})))),
+        scene("plan-blocked-and-doing", Same).seed(both(rows_of(vec![("w1", json!({})), ("w2", json!({}))]), both(plan_of("w1", json!({"steps": [{"n": 1, "status": "doing"}, {"n": 2, "status": "doing"}, {"n": 3, "status": "blocked"}], "created_at": now_ms() - 7_200_000})), plan_of("w2", json!({"steps": [{"n": 1, "status": "blocked", "started_at": now_ms() - 3 * 3_600_000}, {"n": 2, "status": "blocked"}], "created_at": now_ms() - 200_000_000, "regressed_from": 3, "inferred_step": 1}))))),
+        scene("plan-done-reported-with-steps-left", Same).seed(both(rows_of(vec![("w1", json!({}))]), plan_of("w1", json!({"steps": [{"n": 1, "status": "doing"}], "done_reported_at": now_ms() - 40 * MIN, "created_at": now_ms() - 3_600_000})))),
+        scene("plan-with-tokens-and-extras", Same).seed(all3(rows_of(vec![("w1", json!({})), ("w2", json!({})), ("w3", json!({}))]), both(plan_of("w1", json!({"steps": [{"n": 1, "status": "doing"}], "extras": [{"glob": "x"}], "created_at": now_ms() - 3_600_000})), both(plan_of("w2", json!({"steps": [{"n": 1, "status": "doing"}], "extras": [1, 2], "created_at": now_ms() - 3_600_000})), plan_of("w3", json!({"steps": [{"n": 1, "status": "doing"}], "created_at": now_ms() - 3_600_000})))), |h| {
+            write(&ds(h).join("token-usage/w1.json"), &json!({"total": 1_840_000}).to_string());
+            write(&ds(h).join("token-usage/w2.json"), &json!({"total": 52_300}).to_string());
+            write(&ds(h).join("token-usage/w3.json"), &json!({"total": 740}).to_string());
+        })),
+        scene("plan-straying", Same).seed(all3(rows_of(vec![("w1", json!({}))]), plan_of("w1", json!({"steps": [{"n": 1, "status": "doing"}], "created_at": now_ms() - 3_600_000})), |h| write(&ds(h).join("stray/w1.json"), &json!({"active": [{"signal": "scope"}, {"signal": "stall"}, {"signal": "scope"}]}).to_string()))),
+        scene("plan-straying-hidden-on-a-dormant-row", Same).seed(all3(rows_of(vec![("w1", json!({}))]), both(plan_of("w1", json!({"steps": [{"n": 1, "status": "doing"}], "created_at": now_ms() - 3_600_000})), transcript_aged("w1", 45 * 60_000)), |h| write(&ds(h).join("stray/w1.json"), &json!({"active": [{"signal": "scope"}]}).to_string()))),
+        scene("plan-straying-with-a-null-entry-keeps-the-plain-cell", Same).seed(all3(rows_of(vec![("w1", json!({}))]), plan_of("w1", json!({"steps": [{"n": 1, "status": "doing"}], "created_at": now_ms() - 3_600_000})), |h| write(&ds(h).join("stray/w1.json"), r#"{"active":[null]}"#))),
+        scene("plan-for-a-finished-row-is-not-shown", Same).seed(both(rows_of(vec![("w1", json!({"gates": {"done": true}}))]), plan_of("w1", json!({"steps": [{"n": 1, "status": "doing"}], "created_at": now_ms() - 3_600_000})))),
+        scene("plan-without-steps", Same).seed(both(rows_of(vec![("w1", json!({}))]), plan_of("w1", json!({"steps": []})))),
+        scene("plan-not-a-plan", Same).seed(both(rows_of(vec![("w1", json!({}))]), plan_of("w1", json!({"nope": 1})))),
+        scene("plan-tracking-switched-off", Same).seed(both(rows_of(vec![("w1", json!({}))]), both(plan_of("w1", json!({"steps": [{"n": 1, "status": "doing"}]})), |h| write(&h.join(".anti-hall/settings.json"), r#"{"devswarm":{"planTracking":false}}"#)))),
+        scene("plan-steps-not-objects", Defer).seed(both(rows_of(vec![("w1", json!({}))]), plan_of("w1", json!({"steps": [null, 5]})))),
+        scene("plan-with-the-progress-percentage-cell", Same).seed(both(rows_of(vec![("w1", json!({}))]), heartbeat("w1", 60_000, json!({"progress_pct": 40})))),
         // the cases that stay with Node, each decided before anything is written
         scene("summary-empty-file", Defer).seed(|h| write(&ds(h).join(format!("summaries/{}.json", project_key(h))), "")),
         scene("descriptor-present-not-claude", Same).seed(|h| write(&ds(h).join("workspaces/child-1.json"), r#"{"id":"child-1"}"#)),
@@ -1051,6 +1074,11 @@ fn engine_and_node_agree_for_a_primary_in_a_checkout() {
         "devswarm-own-inbox: priority",
         "devswarm-own-inbox: urgent priority",
         "NOT DRAINING >20m",
+        " · STRAYING: scope+stall",
+        "1.8M tok",
+        "52k tok",
+        "+2 extras",
+        "done-reported",
         "not-draining = a union-unread",
         "stale anti-hall 1.0.0",
         "the newest anti-hall CLI",
