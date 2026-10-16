@@ -212,7 +212,7 @@ pub fn status(t: &Telemetry) -> serde_json::Value {
         .into_iter()
         .filter(|c| c["name"] == "fail_open")
         .map(|c| {
-            let reporting = c["labels"]["reason"].as_str().is_some_and(is_reporting);
+            let reporting = c.pointer("/labels/reason").and_then(serde_json::Value::as_str).is_some_and(is_reporting);
             serde_json::json!({"reason": c["labels"]["reason"], "check": c["labels"]["check"], "count": c["value"], "reporting_only": reporting})
         })
         .collect();

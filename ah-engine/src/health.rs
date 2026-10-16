@@ -461,7 +461,7 @@ pub(crate) fn reap_marker_at(boot_ms: Option<u64>) {
     let started_ms =
         std::fs::metadata(&m).and_then(|md| md.modified()).ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_millis() as u64);
     let breadcrumb = read_json("crash_breadcrumb");
-    let breadcrumb_ms = breadcrumb.as_ref().filter(|b| b["pid"].as_u64() == Some(u64::from(pid))).and_then(|b| b["ts"].as_u64()).unwrap_or(0);
+    let breadcrumb_ms = breadcrumb.as_ref().filter(|b| b.get("pid").and_then(serde_json::Value::as_u64) == Some(u64::from(pid))).and_then(|b| b.get("ts").and_then(serde_json::Value::as_u64)).unwrap_or(0);
     let last_alive_ms = started_ms.max(breadcrumb_ms);
     let claim = file(&format!("{}{}", defaults::text("files.reaped_prefix"), std::process::id()));
     if std::fs::rename(&m, &claim).is_ok() {
@@ -617,7 +617,7 @@ pub fn fnv(s: &str) -> u64 {
 /// (a restart in the window, a tripped breaker, a defaults fallback), or the fail-open window is not in its ok state. Both
 /// places read this, so they cannot disagree (live20.1: top-level `false` next to `health.degraded` `true`).
 pub fn overall_degraded(summary: &Value, fail_open_degraded: bool) -> bool {
-    summary["degraded"].as_bool().unwrap_or(false) || fail_open_degraded
+    summary.get("degraded").and_then(serde_json::Value::as_bool).unwrap_or(false) || fail_open_degraded
 }
 
 /// The engine's health over the last `health.degraded_window_s`: self-restarts by reason, the crash-loop breaker and the client

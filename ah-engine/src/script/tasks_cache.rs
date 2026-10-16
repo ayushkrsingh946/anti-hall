@@ -371,7 +371,7 @@ pub fn wide_activity(path: &str, wide: u64) -> Option<R<bool>> {
     } else {
         let mut b = [0u8; 1];
         f.read_exact_at(&mut b, s1 - 1).ok()?;
-        if b[0] == b'\n' {
+        if b == *b"\n" {
             Some(s1)
         } else {
             let (piece, next) = rest_of_line(&f, s1, size)?;
