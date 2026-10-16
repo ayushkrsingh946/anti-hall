@@ -17,6 +17,11 @@ use crate::checks::git::tokenize::{ArithScan, js_trim, parse_heredoc_at};
 use crate::checks::guardkit::text::is_js_space;
 use rquickjs::{Ctx, Function, Object};
 
+/// The character at `i`, as JavaScript's `s[i]` (nothing past the end).
+fn at(v: &[char], i: usize) -> Option<char> {
+    v.get(i).copied()
+}
+
 /// `tokenizeQuotedRaw`: words split on whitespace outside quotes, the quote characters removed.
 pub fn tokenize(segment: &str) -> Vec<String> {
     let mut tokens = Vec::new();
@@ -60,15 +65,15 @@ pub fn substitutions(text: &str) -> Vec<String> {
     let mut found = Vec::new();
     let (mut i, mut in_single, mut in_double) = (0usize, false, false);
     while i < n {
-        let c = s[i];
-        let c2 = s.get(i + 1).copied();
+        let Some(c) = at(&s, i) else { break };
+        let c2 = at(&s, i + 1);
         if !in_single && !in_double && c == '<' && c2 == Some('<') {
             if let Some(h) = parse_heredoc_at(&s, i, &mut st) {
                 if h.quoted {
                     i = h.end;
                 } else {
                     i += h.opener_len;
-                    if i < n && s[i] == '\n' {
+                    if at(&s, i) == Some('\n') {
                         i += 1;
                     }
                 }
@@ -84,8 +89,8 @@ pub fn substitutions(text: &str) -> Vec<String> {
         }
         if !in_double && c == '$' && c2 == Some('\'') {
             i += 2;
-            while i < n && s[i] != '\'' {
-                i += if s[i] == '\\' { 2 } else { 1 };
+            while at(&s, i).is_some_and(|x| x != '\'') {
+                i += if at(&s, i) == Some('\\') { 2 } else { 1 };
             }
             i += 1;
             continue;
@@ -104,7 +109,7 @@ pub fn substitutions(text: &str) -> Vec<String> {
             let (mut depth, mut j) = (1usize, i + 2);
             let mut inner = String::new();
             while j < n && depth > 0 {
-                let cj = s[j];
+                let Some(cj) = at(&s, j) else { break };
                 if cj == '(' {
                     depth += 1;
                 } else if cj == ')' {
@@ -125,8 +130,8 @@ pub fn substitutions(text: &str) -> Vec<String> {
         if c == '`' {
             let mut j = i + 1;
             let mut inner = String::new();
-            while j < n && s[j] != '`' {
-                inner.push(s[j]);
+            while let Some(x) = at(&s, j).filter(|&x| x != '`') {
+                inner.push(x);
                 j += 1;
             }
             if !js_trim(&inner).is_empty() {
@@ -183,8 +188,8 @@ pub fn split_detailed(text: &str) -> (Vec<String>, Vec<&'static str>) {
             in_double = false;
             continue;
         }
-        let c = cmd[i];
-        let c2 = cmd.get(i + 1).copied();
+        let Some(c) = at(&cmd, i) else { break };
+        let c2 = at(&cmd, i + 1);
         if in_single {
             sp.cur.push(c);
             if c == '\'' {
@@ -211,11 +216,11 @@ pub fn split_detailed(text: &str) -> (Vec<String>, Vec<&'static str>) {
         }
         if c == '$' && c2 == Some('\'') {
             let mut j = i + 2;
-            while j < n && cmd[j] != '\'' {
-                j += if cmd[j] == '\\' { 2 } else { 1 };
+            while at(&cmd, j).is_some_and(|x| x != '\'') {
+                j += if at(&cmd, j) == Some('\\') { 2 } else { 1 };
             }
             j = (j + 1).min(n);
-            sp.cur.extend(&cmd[i..j]);
+            sp.cur.extend(cmd.get(i..j).unwrap_or_default());
             i = j;
             continue;
         }
@@ -246,8 +251,8 @@ pub fn split_detailed(text: &str) -> (Vec<String>, Vec<&'static str>) {
             esc_end = i as i64;
             continue;
         }
-        if c == '#' && nest.is_empty() && !in_tick && esc_end != i as i64 && (i == 0 || word_start(cmd[i - 1])) {
-            i = cmd[i..].iter().position(|&x| x == '\n').map_or(n, |p| p + i);
+        if c == '#' && nest.is_empty() && !in_tick && esc_end != i as i64 && (i == 0 || at(&cmd, i - 1).is_some_and(word_start)) {
+            i = cmd.get(i..).unwrap_or_default().iter().position(|&x| x == '\n').map_or(n, |p| p + i);
             continue;
         }
         if c == '<'
@@ -255,7 +260,7 @@ pub fn split_detailed(text: &str) -> (Vec<String>, Vec<&'static str>) {
             && heredoc.is_none()
             && let Some(h) = parse_heredoc_at(&cmd, i, &mut st)
         {
-            sp.cur.extend(&cmd[i..h.opener_end]);
+            sp.cur.extend(cmd.get(i..h.opener_end).unwrap_or_default());
             i = h.opener_end;
             if let Some(le) = h.line_end {
                 heredoc = Some((le, h.end));
@@ -282,7 +287,7 @@ pub fn split_detailed(text: &str) -> (Vec<String>, Vec<&'static str>) {
             i += 1;
             continue;
         }
-        if c == '&' && ((esc_end != i as i64 && i > 0 && (cmd[i - 1] == '>' || cmd[i - 1] == '<')) || c2 == Some('>')) {
+        if c == '&' && ((esc_end != i as i64 && i > 0 && matches!(at(&cmd, i - 1), Some('>' | '<'))) || c2 == Some('>')) {
             sp.cur.push(c);
             i += 1;
             continue;
