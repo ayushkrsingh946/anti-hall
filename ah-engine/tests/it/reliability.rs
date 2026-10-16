@@ -77,6 +77,18 @@ exec "$REAL_AH_ENGINE_BIN" "$@"
         let mut perms = std::fs::metadata(&bin_wrap).unwrap().permissions();
         perms.set_mode(0o700);
         std::fs::set_permissions(&bin_wrap, perms).unwrap();
+        // The first exec of a freshly written executable costs ~260 ms on macOS (measured, 4 of 4 new scripts: 252-268 ms first, 4 ms
+        // second), and every wrapper-driven call runs the engine through this script. That is the OS scanning a new file, not the
+        // wrapper, so it is paid here, before any timed call; the real engine binary is never a new file per call. The engine dir is
+        // a throwaway one so the invocation log the tests read stays empty.
+        let warm = Command::new(&bin_wrap)
+            .env("AH_ENGINE_DIR", dir.join("warm"))
+            .env("REAL_AH_ENGINE_BIN", "/usr/bin/true")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+        assert!(warm.is_ok_and(|s| s.success()), "the engine stand-in script did not run");
         let e = Env { dir, extra: extra.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect() };
         if prime {
             e.prime_defaults_cache();
@@ -1359,6 +1371,7 @@ fn wrapper_restart_loop_fails_open_under_one_second() {
     // every later one, identical before and after the slow-wait change); that is the OS, not the call, so it is paid before the timing
     let _ = e.ctl("ping");
     let (out, code, dt) = e.wrapper_hook(DENY_IN);
+    println!("TIMING wrapper restart-loop wall_ms={:.1}", dt.as_secs_f64() * 1000.0);
     assert_eq!((out.as_str(), code), ("", 0));
     assert!(dt < Duration::from_secs(1), "wrapper took {dt:?}");
 }
