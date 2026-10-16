@@ -268,6 +268,8 @@ impl Outcome {
     }
     fn detail(&self) -> String {
         let d = match self {
+            // a failure always says something: an empty reason left the history and the log with "job X failed: "
+            Outcome::Failed(d) if d.trim().is_empty() => defaults::text("msg.schedule_failed_no_detail").to_string(),
             Outcome::Ok(d) | Outcome::Failed(d) | Outcome::Planned(d) | Outcome::Skipped(d) => d.clone(),
             Outcome::Timeout => defaults::text("msg.schedule_timeout").to_string(),
         };
@@ -704,15 +706,50 @@ impl Scheduler {
 
 /// Run `argv` in its own process group; past `timeout` the whole group is killed. Both pipes are drained while it runs
 /// (review finding 12: reading them only after exit deadlocked a job that wrote more than a pipe buffer).
-fn subprocess(argv: &[String], timeout: Duration) -> Outcome {
-    let Some((prog, args)) = argv.split_first() else { return Outcome::Failed(String::new()) };
+/// The command of a subprocess job. A job is the engine's own work, not the session's whose hook happened to start the daemon,
+/// so the variables the role detection reads are removed: a daemon inherits its spawner's environment, and from a workspace child
+/// or a subagent every main-only job was refused by the role gate (exit 77, live 2026-10-16).
+fn job_command(argv: &[String]) -> Option<Command> {
+    let (prog, args) = argv.split_first()?;
     let mut cmd = Command::new(prog);
     cmd.args(args);
+    for key in ["roles.declared_env", "roles.branch_env"] {
+        cmd.env_remove(defaults::text(key));
+    }
+    Some(cmd)
+}
+
+fn subprocess(argv: &[String], timeout: Duration) -> Outcome {
+    let (Some(cmd), Some(prog)) = (job_command(argv), argv.first()) else {
+        return Outcome::Failed(defaults::text("msg.schedule_no_command").to_string());
+    };
     match crate::proc::run(cmd, prog, timeout, Duration::from_millis(defaults::num("client.fallback_poll_ms"))) {
         Ok(o) if o.status.success() => Outcome::Ok(String::from_utf8_lossy(&o.stdout).trim().to_string()),
-        Ok(o) => Outcome::Failed(String::from_utf8_lossy(&o.stderr).trim().to_string()),
+        Ok(o) => Outcome::Failed(exit_detail(&o)),
         Err(crate::proc::Error::Timeout) => Outcome::Timeout,
-        Err(e) => Outcome::Failed(e.into_io().to_string()),
+        Err(e) => Outcome::Failed(defaults::render("msg.schedule_spawn_failed", &[("program", prog), ("err", &e.into_io())])),
+    }
+}
+
+/// Why a subprocess job failed: its exit status (or signal) and the tail of what it said, stderr first, else stdout (a `--json`
+/// command reports its error there).
+fn exit_detail(o: &crate::proc::Output) -> String {
+    use std::os::unix::process::ExitStatusExt;
+    let status = match (o.status.code(), o.status.signal()) {
+        (Some(code), _) => defaults::render("msg.schedule_exit_code", &[("code", &code)]),
+        (None, Some(signal)) => defaults::render("msg.schedule_exit_signal", &[("signal", &signal)]),
+        (None, None) => o.status.to_string(),
+    };
+    let (stderr, stdout) = (String::from_utf8_lossy(&o.stderr), String::from_utf8_lossy(&o.stdout));
+    match [stderr.trim(), stdout.trim()].into_iter().find(|s| !s.is_empty()) {
+        Some(said) => {
+            // keep the end (where the error is), so the whole detail still fits `schedule.detail_max` after the status
+            let frame = defaults::render("msg.schedule_exit_output", &[("status", &status), ("output", &"")]).chars().count();
+            let room = (defaults::num("schedule.detail_max") as usize).saturating_sub(frame);
+            let tail: String = said.chars().rev().take(room).collect::<Vec<_>>().into_iter().rev().collect();
+            defaults::render("msg.schedule_exit_output", &[("status", &status), ("output", &tail)])
+        }
+        None => defaults::render("msg.schedule_exit_silent", &[("status", &status)]),
     }
 }
 
@@ -751,6 +788,56 @@ mod tests {
         match super::subprocess(&argv, std::time::Duration::from_secs(10)) {
             super::Outcome::Ok(out) => assert_eq!(out.len(), 300_000),
             other => panic!("{other:?}"),
+        }
+    }
+
+    fn sh(script: &str) -> Vec<String> {
+        ["/bin/sh", "-c", script].iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn a_failed_run_that_wrote_nothing_to_stderr_still_says_why() {
+        // live 2026-10-16: the role gate refused every main-only job with exit 77 and its reason on stdout (--json), so the
+        // history and the log said only "job mcp_reaper failed: "
+        match super::subprocess(&sh(r#"echo '{"error":"refused for this role"}'; exit 77"#), std::time::Duration::from_secs(10)) {
+            super::Outcome::Failed(d) => {
+                assert!(d.contains("77"), "exit status in the detail: {d}");
+                assert!(d.contains("refused for this role"), "stdout tail in the detail: {d}");
+            }
+            other => panic!("{other:?}"),
+        }
+        match super::subprocess(&sh("echo out; echo 'the real cause' >&2; exit 3"), std::time::Duration::from_secs(10)) {
+            super::Outcome::Failed(d) => assert!(d.contains('3') && d.contains("the real cause"), "{d}"),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_run_killed_by_a_signal_names_the_signal() {
+        match super::subprocess(&sh("kill -9 $$"), std::time::Duration::from_secs(10)) {
+            super::Outcome::Failed(d) => assert!(d.contains('9') && !d.trim().is_empty(), "{d}"),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_failure_detail_is_never_empty() {
+        for o in [super::Outcome::Failed(String::new()), super::Outcome::Failed("  \n".into())] {
+            assert!(!o.detail().trim().is_empty(), "{o:?}");
+        }
+        assert!(!super::subprocess(&[], std::time::Duration::from_secs(1)).detail().trim().is_empty());
+    }
+
+    #[test]
+    fn a_job_subprocess_does_not_inherit_the_spawning_sessions_role() {
+        // the daemon inherits the environment of whichever hook started it; a job is the engine's own work, so the variables
+        // the role detection reads are removed from its command (else a workspace child or subagent start refuses them all)
+        let cmd = super::job_command(&sh("true")).unwrap();
+        let removed: Vec<String> =
+            cmd.get_envs().filter(|(_, v)| v.is_none()).map(|(k, _)| k.to_string_lossy().to_string()).collect();
+        for key in ["roles.declared_env", "roles.branch_env"] {
+            let name = defaults::text(key);
+            assert!(removed.iter().any(|r| r == name), "{name} removed: {removed:?}");
         }
     }
 

@@ -10420,11 +10420,18 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `msg.restore_no_hot` | A snapshot directory has no hot.db. Placeholder: {path}. |
 | `msg.schedule_agent_planned` | Result of an agent-targeted job until mailbox delivery exists (D45). |
 | `msg.schedule_daemon_gone` | An in-process job found the daemon gone (it was exiting). |
+| `msg.schedule_exit_code` | How a subprocess job's exit is named in its failure detail. Placeholder: {code}. |
+| `msg.schedule_exit_output` | Failure detail of a subprocess job: its exit and the end of what it wrote (stderr, else stdout, where a --json command reports its error). Placeholders: {status}, {output}. |
+| `msg.schedule_exit_signal` | How a subprocess job killed by a signal is named in its failure detail. Placeholder: {signal}. |
+| `msg.schedule_exit_silent` | Failure detail of a subprocess job that wrote nothing on stderr or stdout. Placeholder: {status}. |
 | `msg.schedule_failed` | Event-log detail of a failed run. Placeholders: {job}, {detail}. |
+| `msg.schedule_failed_no_detail` | Detail of a failed run that gave no reason at all (never left empty in the history or the log). |
+| `msg.schedule_no_command` | Detail of a subprocess job with no command line to run. |
 | `msg.schedule_no_work` | Reason text when a scheduled job has no recent sessions or pending requests to handle. |
 | `msg.schedule_panic` | Detail of a scheduled run panic caught at the job boundary. |
 | `msg.schedule_skipped` | Event-log detail when a scheduled job skipped itself because there was no work. Placeholders: {job}, {detail}. |
 | `msg.schedule_snapshot_failed` | The metrics snapshot job could not keep its snapshot. |
+| `msg.schedule_spawn_failed` | Detail of a subprocess job that could not be started or read. Placeholders: {program}, {err}. |
 | `msg.schedule_timeout` | Detail of a run that passed its timeout. |
 | `msg.schedule_unknown_action` | A job names an action the scheduler does not know; the job is ignored. Placeholders: {job}, {action}. |
 | `msg.schedule_unknown_job` | `schedule run` named a job that is not configured. Placeholder: {job}. |
