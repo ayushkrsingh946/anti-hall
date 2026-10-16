@@ -2723,6 +2723,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `ctxbudget.ca_recent_one` | `a compact happened {n} turn ago` |  |  | The reason when a compact happened one turn ago ({n}). |
 | `ctxbudget.ca_state_dir` | `compact-advice` |  |  | The directory under the state root that holds the once-per-declaration records of the compact-advice guard. |
 | `ctxbudget.ca_tokens_vias` | `tokens, stop-tokens` |  |  | The firedVia words of a token-ceiling fire, whose SAFE declaration is allowed even at a low percent. |
+| `ctxbudget.ca_unsure_log_kind` | `compact_advice_unsure` |  |  | Engine log kind of a compact-advice-guard Stop allowed without Node's exact reading: home (no absolute HOME, so the block cannot be recorded and an unrecorded block never blocks), transcript_line (a line the interpreter cannot parse as V8 does), compact_timestamp (the latch comparison needs a compact boundary time that neither jx.isoMs nor jx.dateParse reads). |
 | `ctxbudget.ca_what` | `your reply recommends compacting ("{phrase}") but {why}.` |  |  | The block's first line; {phrase} is the recommendation, {why} the reasons. |
 | `ctxbudget.ca_why` | `"No background agents running" is necessary, not sufficient; only the auto-ha...` |  |  | The block's Why line. |
 | `ctxbudget.ca_why_join` | `, and ` |  |  | What joins the reasons. |
@@ -3221,6 +3222,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `silent_nudge.heartbeat_ext` | `.json` |  |  | Extension of a heartbeat file. |
 | `silent_nudge.heartbeat_skip_name` | `recent-spawn.json` |  |  | Name of the orchestration-live marker that shares the heartbeat directory and is never a heartbeat. |
 | `silent_nudge.heartbeat_skip_prefix` | `devswarm-` |  |  | Prefix of the DevSwarm tooling files that share the heartbeat directory and are never heartbeats. |
+| `silent_nudge.home_fallback_env` | `USERPROFILE` |  |  | Variable read for the home directory when HOME is unset or empty (Node's `HOME \|\| USERPROFILE`); with neither the check says nothing. |
 | `silent_nudge.judge_child_env` | `ANTIHALL_JUDGE_CHILD` |  |  | Environment variable that, set to its marker value, makes every hook a no-op (the judge child's hooks must never run). |
 | `silent_nudge.judge_child_value` | `1` |  |  | Value of the judge-child variable that disables the hook. |
 | `silent_nudge.key_heartbeat` | `h:` |  |  | Prefix of a heartbeat-sourced nudge key. |
@@ -3255,6 +3257,8 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `silent_nudge.state_file` | `.anti-hall/silent-agent-nudge-state.json` |  |  | Nudge state file, relative to the home directory. |
 | `silent_nudge.summary` | `Stop: nudges once per silent background agent (the block text, the nudge stat...` |  |  | One-line description of the silent-agent-nudge check in the generated reference. |
 | `silent_nudge.tasks_dir` | `tasks` |  |  | The directory name that holds a session's task output files (<session id>/tasks/<id>.output). |
+| `silent_nudge.unsure_log_kind` | `silent_nudge_unsure` |  |  | Engine log kind of a silent-agent-nudge decision taken without Node's exact reading: transcript, heartbeat, state_big, state_parse, ack_big, ack_parse (silent_nudge.unsure_quiet decides), relative_home (nothing said: the directory is the hook process's), no_plugin_root and plugin_versions (the stale-build gate passes: no newer build is known), label_surrogate (a name cut through a surrogate pair drops the lone half Node would keep). |
+| `silent_nudge.unsure_quiet` | `true` |  |  | What a Stop does when an input cannot be read exactly as V8 reads it (a transcript line or heartbeat file too deep for the interpreter, the nudge state or the ack file over script.read_max_bytes or too deep): true says nothing for that Stop and writes nothing (no nudge = allow: a nudge whose dedupe or ack record is unknown could repeat), false counts that input as absent (the transcript or heartbeat source skipped, an empty state, no ack) and decides on the rest. Each case is logged under silent_nudge.unsure_log_kind. |
 | `silent_nudge.version_gate_setting` | `6 entries` |  |  | Where the stale-build downgrade switch is read from (guards.stopHookVersionDowngrade, default on; hooks/lib/stop-version-gate.js). |
 
 ### agent_controls.toml / stale_note

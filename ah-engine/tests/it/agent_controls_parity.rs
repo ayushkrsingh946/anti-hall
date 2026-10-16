@@ -45,6 +45,9 @@ enum Expect {
     Defer,
     /// Either: a deferral is allowed only where Node itself would block, an answer must equal Node's.
     Auto,
+    /// The engine decides natively and says nothing (exit 0, no output, no deferral) where Node's reading is one the engine cannot
+    /// reproduce (a line only V8 reads): the policy answer of the check, pinned (the reason is part of the scenario's name).
+    Quiet,
 }
 
 #[derive(Clone)]
@@ -88,6 +91,10 @@ impl Sc {
     }
     fn defers(mut self) -> Sc {
         self.expect = Expect::Defer;
+        self
+    }
+    fn quiet(mut self) -> Sc {
+        self.expect = Expect::Quiet;
         self
     }
     fn raw(mut self, s: &str) -> Sc {
@@ -297,6 +304,24 @@ fn materialize(root: &Path, tag: &str, s: &Sc) -> PathBuf {
     home
 }
 
+/// Every run of 10 or more digits as one `#`.
+fn mask_clock(t: &str) -> String {
+    let mut out = String::new();
+    let mut digits = String::new();
+    for c in t.chars().chain(std::iter::once('\0')) {
+        if c.is_ascii_digit() {
+            digits.push(c);
+            continue;
+        }
+        if digits.len() >= 10 { out.push('#') } else { out.push_str(&digits) }
+        digits.clear();
+        if c != '\0' {
+            out.push(c);
+        }
+    }
+    out
+}
+
 fn snapshot(home: &Path) -> BTreeMap<String, String> {
     fn walk(base: &Path, dir: &Path, out: &mut BTreeMap<String, String>) {
         let Ok(rd) = std::fs::read_dir(dir) else { return };
@@ -393,7 +418,12 @@ fn check_one(root: &Path, idx: usize, s: &Sc, mismatches: &mut Vec<String>) -> O
     }
     let nr = run(n, &body(&nh));
     let er = run(e, &body(&eh));
-    let norm = |t: &str, h: &Path| t.replace(&h.to_string_lossy().to_string(), "$HOME").trim_end().to_string();
+    // The nudge's ack hint names the run clock, which differs between the two runs by construction: a clock reading (10 or more
+    // digits) is masked for that check, as its state file is.
+    let norm = |t: &str, h: &Path| {
+        let t = t.replace(&h.to_string_lossy().to_string(), "$HOME").trim_end().to_string();
+        if s.hook == "silent-agent-nudge" { mask_clock(&t) } else { t }
+    };
     let (nout, nerr) = (norm(&nr.out, &nh), norm(&nr.err, &nh));
     let kind = if nr.code == 2 {
         "block"
@@ -438,6 +468,12 @@ fn check_one(root: &Path, idx: usize, s: &Sc, mismatches: &mut Vec<String>) -> O
             }
         }
         (Expect::Defer, true) => {}
+        (Expect::Quiet, true) => mismatches.push(tag("engine deferred where it should decide natively")),
+        (Expect::Quiet, false) => {
+            if er.code != 0 || !er.out.trim_end().is_empty() {
+                mismatches.push(tag(&format!("expected a quiet native answer, engine answered code={} out={:?}", er.code, er.out)));
+            }
+        }
     }
     Outcome { deferred, node_kind: kind }
 }
@@ -876,19 +912,17 @@ fn silent_corpus() -> Vec<Sc> {
     add(sc("no-agents-at-all", h, stop_payload_for(json!("s1"))).transcript(&noise()));
     add(sc("no-transcript-path", h, json!({"hook_event_name": "Stop", "session_id": "s1"})));
     add(sc("transcript-missing", h, json!({"hook_event_name": "Stop", "session_id": "s1", "transcript_path": "$HOME/nope.jsonl"})));
-    add(sc("transcript-relative-path-defers", h, json!({"hook_event_name": "Stop", "session_id": "s1", "transcript_path": "t/session.jsonl"}))
-        .transcript(&noise())
-        .defers());
+    add(sc("transcript-relative-path", h, json!({"hook_event_name": "Stop", "session_id": "s1", "transcript_path": "t/session.jsonl"}))
+        .transcript(&noise()));
     add(sc("transcript-empty", h, stop_payload_for(json!("s1"))).file("t/session.jsonl", ""));
     add(sc("finished-agent", h, stop_payload_for(json!("s1")))
         .transcript(&[stale_run("01"), vec![notif_user("a1b2c3d4e5f601", "completed", &ago(10.0))]].concat()));
-    // Node would nudge: the engine defers (before touching any state)
-    add(old(sc("silent-agent-first-time-defers", h, stop_payload_for(json!("s1"))).transcript(&stale_run("01")), "01").defers());
-    add(sc("output-file-missing-defers", h, stop_payload_for(json!("s1"))).transcript(&stale_run("01")).defers());
-    add(old(sc("silent-agent-no-session-defers", h, stop_payload_for(json!(null))).transcript(&stale_run("01")), "01").defers());
-    add(old(sc("two-silent-agents-defer", h, stop_payload_for(json!("s1"))).transcript(&[stale_run("01"), stale_run("02")].concat()), "01")
-        .aged("out-02.txt", "{}\n", 70.0)
-        .defers());
+    // Node nudges: so does the engine (C1 #68: no deferral left in this check)
+    add(old(sc("silent-agent-first-time", h, stop_payload_for(json!("s1"))).transcript(&stale_run("01")), "01"));
+    add(sc("output-file-missing", h, stop_payload_for(json!("s1"))).transcript(&stale_run("01")));
+    add(old(sc("silent-agent-no-session", h, stop_payload_for(json!(null))).transcript(&stale_run("01")), "01"));
+    add(old(sc("two-silent-agents", h, stop_payload_for(json!("s1"))).transcript(&[stale_run("01"), stale_run("02")].concat()), "01")
+        .aged("out-02.txt", "{}\n", 70.0));
     // already nudged: state is rewritten exactly as Node does, nothing is said
     add(sc("missing-output-already-nudged", h, stop_payload_for(json!("s1")))
         .transcript(&stale_run("01"))
@@ -898,44 +932,60 @@ fn silent_corpus() -> Vec<Sc> {
         .file(".anti-hall/silent-agent-nudge-state.json", &state_json(json!({}), json!({"s1::a1b2c3d4e5f601": (NOW.with(|n| *n) - 1000.0).floor()}))));
     add(sc("ever-cap-other-session-does-not-cap", h, stop_payload_for(json!("s1")))
         .transcript(&stale_run("01"))
-        .file(".anti-hall/silent-agent-nudge-state.json", &state_json(json!({}), json!({"s2::a1b2c3d4e5f601": (NOW.with(|n| *n) - 1000.0).floor()})))
-        .defers());
-    add(sc("ever-cap-expired-defers", h, stop_payload_for(json!("s1")))
+        .file(".anti-hall/silent-agent-nudge-state.json", &state_json(json!({}), json!({"s2::a1b2c3d4e5f601": (NOW.with(|n| *n) - 1000.0).floor()}))));
+    add(sc("ever-cap-expired", h, stop_payload_for(json!("s1")))
         .transcript(&stale_run("01"))
         .file(
             ".anti-hall/silent-agent-nudge-state.json",
             &state_json(json!({}), json!({"s1::a1b2c3d4e5f601": (NOW.with(|n| *n) - 40.0 * 86_400_000.0).floor()})),
-        )
-        .defers());
+        ));
     add(sc("state-prunes-dead-keys", h, stop_payload_for(json!("s1"))).transcript(&stale_run("01"))
         .file(".anti-hall/silent-agent-nudge-state.json", &state_json(json!({"t:gone": "x", "t:a1b2c3d4e5f601": "missing", "h:old": "5"}), json!({"s1::gone": (NOW.with(|n| *n) - 1000.0).floor(), "s1::a1b2c3d4e5f601": (NOW.with(|n| *n) - 2000.0).floor(), "s0::x": (NOW.with(|n| *n) - 50.0 * 86_400_000.0).floor()}))));
     add(sc("ever-values-coerced-by-number", h, stop_payload_for(json!("s1"))).transcript(&stale_run("01"))
         .file(".anti-hall/silent-agent-nudge-state.json", &format!("{{\"nudged\":{{\"t:a1b2c3d4e5f601\":\"missing\"}},\"everNudged\":{{\"a\":\"{}\",\"b\":null,\"c\":true,\"d\":[{}],\"e\":{{}},\"f\":\"\",\"g\":\"0x10\"}}}}", (NOW.with(|n| *n) - 5000.0).floor(), (NOW.with(|n| *n) - 6000.0).floor())));
-    add(sc("state-corrupt-json-defers-for-first-nudge", h, stop_payload_for(json!("s1")))
+    add(sc("state-corrupt-json-first-nudge", h, stop_payload_for(json!("s1")))
         .transcript(&stale_run("01"))
-        .file(".anti-hall/silent-agent-nudge-state.json", "{oops")
-        .defers());
+        .file(".anti-hall/silent-agent-nudge-state.json", "{oops"));
     add(sc("state-not-an-object", h, stop_payload_for(json!("s1")))
         .transcript(&stale_run("01"))
-        .file(".anti-hall/silent-agent-nudge-state.json", "[1,2]")
-        .defers());
+        .file(".anti-hall/silent-agent-nudge-state.json", "[1,2]"));
     add(sc("state-extra-keys-dropped", h, stop_payload_for(json!("s1")))
         .transcript(&stale_run("01"))
         .file(".anti-hall/silent-agent-nudge-state.json", &json!({"nudged": {"t:a1b2c3d4e5f601": "missing"}, "everNudged": {}, "extra": 1}).to_string()));
-    add(sc("state-nudged-is-list-defers", h, stop_payload_for(json!("s1")))
+    add(sc("state-nudged-is-list", h, stop_payload_for(json!("s1")))
         .transcript(&stale_run("01"))
-        .file(".anti-hall/silent-agent-nudge-state.json", &json!({"nudged": [1], "everNudged": {}}).to_string())
-        .defers());
-    add(sc("state-index-like-key-defers", h, stop_payload_for(json!("s1")))
+        .file(".anti-hall/silent-agent-nudge-state.json", &json!({"nudged": [1], "everNudged": {}}).to_string()));
+    add(sc("state-index-like-key", h, stop_payload_for(json!("s1")))
         .transcript(&stale_run("01"))
-        .file(".anti-hall/silent-agent-nudge-state.json", "{\"nudged\":{\"t:a1b2c3d4e5f601\":\"missing\",\"7\":\"x\"},\"everNudged\":{}}")
-        .defers());
+        .file(".anti-hall/silent-agent-nudge-state.json", "{\"nudged\":{\"t:a1b2c3d4e5f601\":\"missing\",\"7\":\"x\"},\"everNudged\":{}}"));
     add(sc("state-nudged-null-members", h, stop_payload_for(json!("s1")))
         .transcript(&stale_run("01"))
-        .file(".anti-hall/silent-agent-nudge-state.json", "{\"nudged\":null,\"everNudged\":5}")
-        .defers());
+        .file(".anti-hall/silent-agent-nudge-state.json", "{\"nudged\":null,\"everNudged\":5}"));
+    // C1 (#68): inputs the interpreter cannot read as V8 does take silent_nudge.unsure_quiet (default on): nothing said, nothing
+    // written. Node reads them and nudges; the engine's policy answer is pinned here.
+    let deep = |d: usize| format!("{}{}", "[".repeat(d), "]".repeat(d));
+    add(sc("state-too-deep-native-quiet", h, stop_payload_for(json!("s1")))
+        .transcript(&stale_run("01"))
+        .file(".anti-hall/silent-agent-nudge-state.json", &format!("{{\"nudged\":{},\"everNudged\":{{}}}}", deep(100_000)))
+        .quiet());
+    add(sc("state-over-read-cap-native-quiet", h, stop_payload_for(json!("s1")))
+        .transcript(&stale_run("01"))
+        .file(".anti-hall/silent-agent-nudge-state.json", &json!({"nudged": {}, "everNudged": {}, "pad": "x".repeat(4_300_000)}).to_string())
+        .quiet());
+    add(sc("heartbeat-too-deep-native-quiet", h, stop_payload_for(json!("s1")))
+        .transcript(&stale_run("01"))
+        .file(".anti-hall/agents/deep.json", &deep(100_000))
+        .quiet());
+    add(sc("ack-too-deep-native-quiet", h, stop_payload_for(json!("s1")))
+        .transcript(&stale_run("01"))
+        .file(".anti-hall/stop-ack/stop-ack-s1.json", &deep(100_000))
+        .quiet());
+    add(sc("ack-over-read-cap-native-quiet", h, stop_payload_for(json!("s1")))
+        .transcript(&stale_run("01"))
+        .file(".anti-hall/stop-ack/stop-ack-s1.json", &json!({"pad": "x".repeat(4_300_000)}).to_string())
+        .quiet());
     // heartbeat source
-    add(sc("heartbeat-stale-defers", h, stop_payload_for(json!("s1"))).file(".anti-hall/agents/hb1.json", &hb("hb1", "s1", "running", 90.0)).defers());
+    add(sc("heartbeat-stale", h, stop_payload_for(json!("s1"))).file(".anti-hall/agents/hb1.json", &hb("hb1", "s1", "running", 90.0)));
     add(sc("heartbeat-fresh", h, stop_payload_for(json!("s1"))).file(".anti-hall/agents/hb1.json", &hb("hb1", "s1", "running", 2.0)));
     add(sc("heartbeat-finished-status", h, stop_payload_for(json!("s1"))).file(".anti-hall/agents/hb1.json", &hb("hb1", "s1", " Done ", 90.0)));
     add(sc("heartbeat-other-session", h, stop_payload_for(json!("s1"))).file(".anti-hall/agents/hb1.json", &hb("hb1", "s2", "running", 90.0)));
@@ -968,9 +1018,8 @@ fn silent_corpus() -> Vec<Sc> {
             &state_json(json!({}), json!({"s1::z-last": recent, "s1::a-first": recent, "s1::M-upper": recent})),
         ));
     }
-    add(sc("heartbeat-ts-float-defers", h, stop_payload_for(json!("s1")))
-        .file(".anti-hall/agents/a.json", &json!({"id": "a", "session": "s1", "status": "running", "ts": 1.5}).to_string())
-        .defers());
+    add(sc("heartbeat-ts-float", h, stop_payload_for(json!("s1")))
+        .file(".anti-hall/agents/a.json", &json!({"id": "a", "session": "s1", "status": "running", "ts": 1.5}).to_string()));
     // settings, skip, judge child
     add(old(sc("disabled-by-env", h, stop_payload_for(json!("s1"))).transcript(&stale_run("01")).env("ANTIHALL_SILENT_AGENT_NUDGE", "off"), "01"));
     add(old(
@@ -988,8 +1037,7 @@ fn silent_corpus() -> Vec<Sc> {
             .transcript(&stale_run("01"))
             .env("CLAUDE_PLUGIN_OPTION_GUARDS_SILENT_AGENT_NUDGE", "true"),
         "01",
-    )
-    .defers());
+    ));
     add(old(
         sc("skipped", h, stop_payload_for(json!("s1")))
             .transcript(&stale_run("01"))
@@ -1003,19 +1051,17 @@ fn silent_corpus() -> Vec<Sc> {
         "01",
     ));
     add(old(sc("judge-child-is-silent", h, stop_payload_for(json!("s1"))).transcript(&stale_run("01")).env("ANTIHALL_JUDGE_CHILD", "1"), "01"));
-    add(old(sc("judge-child-other-value", h, stop_payload_for(json!("s1"))).transcript(&stale_run("01")).env("ANTIHALL_JUDGE_CHILD", "0"), "01").defers());
+    add(old(sc("judge-child-other-value", h, stop_payload_for(json!("s1"))).transcript(&stale_run("01")).env("ANTIHALL_JUDGE_CHILD", "0"), "01"));
     // threshold
     add(old(
         sc("threshold-env-huge-keeps-quiet", h, stop_payload_for(json!("s1"))).transcript(&stale_run("01")).env("ANTIHALL_SILENT_AGENT_NUDGE_MIN", "500"),
         "01",
     ));
-    add(old(sc("threshold-env-small-defers", h, stop_payload_for(json!("s1"))).transcript(&stale_run("01")).env("ANTIHALL_SILENT_AGENT_NUDGE_MIN", "5"), "01")
-        .defers());
+    add(old(sc("threshold-env-small", h, stop_payload_for(json!("s1"))).transcript(&stale_run("01")).env("ANTIHALL_SILENT_AGENT_NUDGE_MIN", "5"), "01"));
     add(old(
         sc("threshold-zero-clamped-to-one", h, stop_payload_for(json!("s1"))).transcript(&stale_run("01")).env("ANTIHALL_SILENT_AGENT_NUDGE_MIN", "0"),
         "01",
-    )
-    .defers());
+    ));
     add(old(
         sc("threshold-garbage-uses-default", h, stop_payload_for(json!("s1")))
             .transcript(&stale_run("01"))
@@ -1043,9 +1089,8 @@ fn silent_corpus() -> Vec<Sc> {
         json!({"type": "attachment", "attachment": {"type": "task_status", "taskId": "0123456789abcdef", "status": "running", "outputFilePath": "$HOME/nope"}})
             .to_string(),
     ]));
-    add(sc("adopted-with-timestamp-missing-output-defers", h, stop_payload_for(json!("s1")))
-        .transcript(&[task_status("0123456789abcdef", "running", "$HOME/nope", "adopted", &ago(90.0))])
-        .defers());
+    add(sc("adopted-with-timestamp-missing-output", h, stop_payload_for(json!("s1")))
+        .transcript(&[task_status("0123456789abcdef", "running", "$HOME/nope", "adopted", &ago(90.0))]));
     add(sc("adopted-then-terminal", h, stop_payload_for(json!("s1"))).transcript(&[
         task_status("0123456789abcdef", "running", "$HOME/nope", "adopted", &ago(90.0)),
         task_status("0123456789abcdef", "completed", "", "", &ago(10.0)),
@@ -1087,14 +1132,13 @@ fn silent_corpus() -> Vec<Sc> {
             .concat(),
         ),
         "01",
-    )
-    .defers());
-    add(sc("lone-surrogate-line-defers", h, stop_payload_for(json!("s1")))
+    ));
+    add(sc("lone-surrogate-line-native-quiet", h, stop_payload_for(json!("s1")))
         .transcript(
             &[stale_run("01"), vec![format!("{{\"type\":\"user\",\"message\":{{\"content\":\"tool_result \\ud800\"}},\"timestamp\":\"{}\"}}", ago(1.0))]]
                 .concat(),
         )
-        .defers());
+        .quiet());
     add(old(sc("payload-array-still-evaluated", h, json!([])), "01"));
     add(sc("payload-string", h, json!("x")));
     add(sc("malformed-stdin-defers-to-node", h, json!({})).raw("{nope").defers());
@@ -1103,8 +1147,7 @@ fn silent_corpus() -> Vec<Sc> {
         sc("session-id-number", h, json!({"hook_event_name": "Stop", "session_id": 5, "transcript_path": "$HOME/t/session.jsonl"}))
             .transcript(&stale_run("01")),
         "01",
-    )
-    .defers());
+    ));
     add(old(
         sc("huge-transcript-with-stale-agent", h, stop_payload_for(json!("s1"))).transcript(
             &[
@@ -1114,8 +1157,7 @@ fn silent_corpus() -> Vec<Sc> {
             .concat(),
         ),
         "01",
-    )
-    .defers());
+    ));
     v
 }
 

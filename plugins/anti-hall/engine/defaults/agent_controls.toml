@@ -509,6 +509,18 @@ min = 1
 doc = "Rust regex source of the control characters turned into spaces in a name the nudge shows."
 value = '[\x00-\x1f\x7f-\u{9f}]'
 
+[silent_nudge.unsure_quiet]
+doc = "What a Stop does when an input cannot be read exactly as V8 reads it (a transcript line or heartbeat file too deep for the interpreter, the nudge state or the ack file over script.read_max_bytes or too deep): true says nothing for that Stop and writes nothing (no nudge = allow: a nudge whose dedupe or ack record is unknown could repeat), false counts that input as absent (the transcript or heartbeat source skipped, an empty state, no ack) and decides on the rest. Each case is logged under silent_nudge.unsure_log_kind."
+value = true
+
+[silent_nudge.unsure_log_kind]
+doc = "Engine log kind of a silent-agent-nudge decision taken without Node's exact reading: transcript, heartbeat, state_big, state_parse, ack_big, ack_parse (silent_nudge.unsure_quiet decides), relative_home (nothing said: the directory is the hook process's), no_plugin_root and plugin_versions (the stale-build gate passes: no newer build is known), label_surrogate (a name cut through a surrogate pair drops the lone half Node would keep)."
+value = "silent_nudge_unsure"
+
+[silent_nudge.home_fallback_env]
+doc = "Variable read for the home directory when HOME is unset or empty (Node's `HOME || USERPROFILE`); with neither the check says nothing."
+value = "USERPROFILE"
+
 [silent_nudge.ellipsis]
 doc = "Text appended to a name that was cut."
 value = "…"

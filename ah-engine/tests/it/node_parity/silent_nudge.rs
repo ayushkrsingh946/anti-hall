@@ -32,6 +32,8 @@ pub(crate) struct Sc {
     retouch: Option<(String, i64)>,
     /// Leave the engine without the plugin root (Node always knows its own).
     no_root: bool,
+    /// A native answer that differs from Node's by design: this text is removed from Node's stdout before the comparison.
+    node_drop: Option<String>,
 }
 
 fn sc(id: &str, session: Value) -> Sc {
@@ -44,6 +46,7 @@ fn sc(id: &str, session: Value) -> Sc {
         warm: false,
         retouch: None,
         no_root: false,
+        node_drop: None,
     }
 }
 
@@ -80,8 +83,8 @@ impl Sc {
     fn ack(self, session: &str, body: &str) -> Sc {
         self.file(&format!(".anti-hall/stop-ack/stop-ack-{session}.json"), body)
     }
-    fn defers(mut self) -> Sc {
-        self.defers = true;
+    fn node_drop(mut self, t: &str) -> Sc {
+        self.node_drop = Some(t.into());
         self
     }
     fn warm(mut self) -> Sc {
@@ -179,10 +182,11 @@ pub(crate) fn scenarios() -> Vec<Sc> {
     v.push(sc("description-control-chars", s1.clone()).lines(&agent("01", "a\u{1}b\tc\n\nd\u{85}e  ")).aged("out-01.txt", "{}\n", OLD));
     v.push(sc("description-unicode", s1.clone()).lines(&agent("01", "réparer — ü 😀 done")).aged("out-01.txt", "{}\n", OLD));
     v.push(
-        sc("description-cut-through-pair-defers", s1.clone())
+        // C1 (#68): Node keeps the lone high half of the cut pair (JSON-escaped); it cannot cross into the engine, which drops it
+        sc("description-cut-through-pair-native", s1.clone())
             .lines(&agent("01", &format!("{}😀tail", "x".repeat(59))))
             .aged("out-01.txt", "{}\n", OLD)
-            .defers(),
+            .node_drop("\\ud83d"),
     );
     let other = "11111111-2222-3333-4444-555555555555";
     v.push(sc("previous-session-agent-is-skipped", s1.clone()).lines(&[task_status_typed(
@@ -279,10 +283,7 @@ pub(crate) fn scenarios() -> Vec<Sc> {
     ));
     v.push(sc("state-corrupt-nudges", s1.clone()).lines(&one()).file(".anti-hall/silent-agent-nudge-state.json", "{oops"));
     v.push(
-        sc("state-index-key-defers", s1.clone())
-            .lines(&one())
-            .file(".anti-hall/silent-agent-nudge-state.json", "{\"nudged\":{\"7\":\"x\"},\"everNudged\":{}}")
-            .defers(),
+        sc("state-index-key", s1.clone()).lines(&one()).file(".anti-hall/silent-agent-nudge-state.json", "{\"nudged\":{\"7\":\"x\"},\"everNudged\":{}}"),
     );
 
     // ---- the stale-build downgrade (stop-version-gate.js)
@@ -308,7 +309,8 @@ pub(crate) fn scenarios() -> Vec<Sc> {
         v.push(s.env("ANTIHALL_MARKETPLACE_DIR", "$HOME/mk/plugins/marketplaces/anti-hall"));
     }
     {
-        let mut s = sc("no-plugin-root-defers", s1.clone()).lines(&one()).defers();
+        // C1 (#68): no root, no newer build known: the gate passes and the nudge is Node's (no registry here)
+        let mut s = sc("no-plugin-root", s1.clone()).lines(&one());
         s.no_root = true;
         v.push(s);
     }
@@ -327,7 +329,7 @@ pub(crate) fn scenarios() -> Vec<Sc> {
     v.push(sc("ack-string-nudges", s1.clone()).lines(&one()).ack("s1", &json!({format!("silent-agent-nudge:{sig1}"): "5"}).to_string()));
     v.push(sc("ack-corrupt-nudges", s1.clone()).lines(&one()).ack("s1", "{nope"));
     v.push(sc("ack-list-nudges", s1.clone()).lines(&one()).ack("s1", "[5]"));
-    v.push(sc("ack-lone-surrogate-defers", s1.clone()).lines(&one()).ack("s1", "{\"k\":\"\\ud800\"}").defers());
+    v.push(sc("ack-lone-surrogate", s1.clone()).lines(&one()).ack("s1", "{\"k\":\"\\ud800\"}"));
     {
         let sig2 = sha1_hex(&format!("{},{}", id("01"), id("02")))[..16].to_string();
         v.push(
@@ -443,6 +445,9 @@ pub(crate) fn run_lane(hooks: &Path, scenarios: &[Sc], mutate: bool) -> Report {
         let e = run_side(hooks, &root, sc, &lab, true);
         wipe(&root);
         let mut nout = norm(&n.out.out, &root);
+        if let Some(d) = &sc.node_drop {
+            nout = nout.replace(d.as_str(), "");
+        }
         if mutate {
             nout.push_str("~mutant");
         }

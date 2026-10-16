@@ -577,6 +577,10 @@ value = { section = "guards", key = "compactAdviceMarginPct", kind = "num", env 
 doc = "The guards.compactAdviceRecentTurns setting: a compact boundary within this many turns makes a /compact recommendation a block (0: off)."
 value = { section = "guards", key = "compactAdviceRecentTurns", kind = "num", env = "", aliases = [], option = "guards_compact_advice_recent_turns", manifest_default = "10", default = 10, min = 0, max = 100 }
 
+[ctxbudget.ca_unsure_log_kind]
+doc = "Engine log kind of a compact-advice-guard Stop allowed without Node's exact reading: home (no absolute HOME, so the block cannot be recorded and an unrecorded block never blocks), transcript_line (a line the interpreter cannot parse as V8 does), compact_timestamp (the latch comparison needs a compact boundary time that neither jx.isoMs nor jx.dateParse reads)."
+value = "compact_advice_unsure"
+
 [ctxbudget.ca_guard]
 doc = "The guard name of the compact-advice block."
 value = "compact-advice-guard"
