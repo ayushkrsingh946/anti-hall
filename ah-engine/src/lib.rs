@@ -20,6 +20,7 @@ pub mod client;
 pub mod config;
 pub mod crash;
 pub mod daemon;
+pub mod daemonenv;
 pub mod db;
 pub mod deadline;
 pub mod debug;

@@ -292,6 +292,7 @@ fn run_recorded(p: &Parsed, h: Handler) -> i32 {
 }
 
 fn cmd_serve(_: &Parsed) -> i32 {
+    crate::daemonenv::sanitize(); // before any thread: the daemon serves every session, so it keeps nothing of the one that started it
     daemon::serve();
     0
 }

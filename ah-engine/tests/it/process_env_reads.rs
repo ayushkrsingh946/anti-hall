@@ -9,6 +9,10 @@ use std::path::{Path, PathBuf};
 /// (file suffix, why the process environment is the right one there).
 const ALLOW: &[(&str, &str)] = &[
     ("src/hcguard.rs", "the test-build guard: the scratch-stub roots and HOME of the process it guards (read only while the guard is active, a test build)"),
+    (
+        "src/daemonenv.rs",
+        "the daemon's start-up sanitising (`sanitize`): it lists the process environment once, before any thread exists, only to REMOVE every variable that is not on `daemon.spawn_env_allow`, so no request is ever answered from the starting session's values",
+    ),
     ("src/client.rs", "the hook client process: its environment IS the host's; reads the Node path and the fallback command"),
     (
         "src/checks/mcp_reaper/sys.rs",

@@ -520,6 +520,10 @@ pub fn spawn_daemon() -> Option<std::process::Child> {
         }
     };
     let mut cmd = Command::new(exe);
+    // A daemon serves every later session, so it starts from the allowlisted part of this environment and from the home
+    // directory, never the starting hook's own (the daemon drops the rest itself too, see `daemonenv`; doing it here as well
+    // keeps the process image, as `ps` shows it, free of the session's values).
+    cmd.env_clear().envs(std::env::vars().filter(|(k, _)| crate::daemonenv::kept(k))).current_dir(crate::daemonenv::cwd(defaults::env_var("home").map(PathBuf::from)));
     // The allocator is chosen before the daemon's first allocation, so the configured one travels in its environment.
     let alloc_env = defaults::text("diagnostics.allocator_env");
     if std::env::var_os(alloc_env).is_none() {

@@ -59,7 +59,15 @@ impl Env {
         c
     }
     fn start(&mut self) {
-        let child = self.cmd().arg("serve").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap();
+        self.start_in(None);
+    }
+    /// `serve` started in `dir` (the working directory of the process that starts it).
+    fn start_in(&mut self, dir: Option<&std::path::Path>) {
+        let mut c = self.cmd();
+        if let Some(d) = dir {
+            c.current_dir(d);
+        }
+        let child = c.arg("serve").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap();
         self.daemon = Some(child);
         let t = Instant::now();
         while t.elapsed() < common::READY_CEILING && ah_engine::client::ping(&self.sock()).is_none() {
@@ -174,6 +182,76 @@ fn a_daemon_started_from_a_workspace_child_or_subagent_still_runs_main_only_jobs
     e.stop();
     assert_eq!(r["status"], "ok", "{r}");
     assert_eq!(e.runs("jev_sweep").last().unwrap().3, "ok");
+}
+
+/// The environment (as `KEY=value` words) of process `pid`, from `ps eww` (macOS and procps both append it).
+fn process_env_words(pid: u32) -> String {
+    let o = Command::new("ps").args(["eww", "-p", &pid.to_string()]).output().unwrap();
+    String::from_utf8_lossy(&o.stdout).into_owned()
+}
+
+#[test]
+fn a_daemon_started_from_a_workspace_child_keeps_nothing_of_the_session_that_started_it() {
+    // #103: a daemon serves every session but inherited the whole environment and the working directory of whichever hook
+    // started it, so the first session to spawn it owned its session id, role, workspace and project for all the others
+    let mut e = Env::new("spawn-env", PROBE);
+    let start_dir = e.dir.join("child-worktree");
+    std::fs::create_dir_all(&start_dir).unwrap();
+    for (k, v) in [
+        ("DEVSWARM_SOURCE_BRANCH", "feat/child"),
+        ("DEVSWARM_BUILDER_ID", "builder-x"),
+        ("ANTIHALL_ROLE", "subagent"),
+        ("ANTIHALL_SESSION_ID", "child-session"),
+        ("CLAUDE_CODE_SESSION_ID", "child-session"),
+        ("CLAUDE_PROJECT_DIR", "/child/worktree"),
+        ("GIT_DIR", "/child/worktree/.git"),
+    ] {
+        e.extra.push((k.into(), v.into()));
+    }
+    let mut c = e.spawning_cmd();
+    c.current_dir(&start_dir);
+    {
+        use std::io::Write;
+        let payload = r#"{"session_id":"s","cwd":"/tmp","hook_event_name":"UserPromptSubmit","prompt":"spawn env probe"}"#;
+        let mut child = c.arg("hook").stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
+        child.stdin.take().unwrap().write_all(payload.as_bytes()).unwrap();
+        child.wait_with_output().unwrap();
+    }
+    let t = Instant::now();
+    while t.elapsed() < common::READY_CEILING && ah_engine::client::ping(&e.sock()).is_none() {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let pid = e.pid();
+    let env = process_env_words(pid);
+    assert!(env.contains("AH_ENGINE_DIR="), "the probe must see the daemon's environment at all");
+    for gone in ["DEVSWARM_SOURCE_BRANCH=", "DEVSWARM_BUILDER_ID=", "ANTIHALL_ROLE=", "ANTIHALL_SESSION_ID=", "CLAUDE_CODE_SESSION_ID=", "CLAUDE_PROJECT_DIR=", "GIT_DIR="] {
+        assert!(!env.contains(gone), "the daemon kept {gone} of the session that started it");
+    }
+    let home = std::fs::canonicalize(e.dir.join("home")).unwrap();
+    assert_eq!(process_cwd(pid), home, "the daemon kept the starting hook's working directory");
+    let eng = e.eng();
+    common::reap(&eng, || {
+        drop(ah_engine::client::exchange(&e.sock(), b"CTL stop\n", Duration::from_millis(500))); // best-effort stop; the reply is not needed
+    });
+}
+
+/// The working directory of process `pid`, from `lsof`.
+fn process_cwd(pid: u32) -> std::path::PathBuf {
+    let o = Command::new("lsof").args(["-a", "-d", "cwd", "-p", &pid.to_string(), "-Fn"]).output().unwrap();
+    let cwd = String::from_utf8_lossy(&o.stdout).lines().find_map(|l| l.strip_prefix('n').map(str::to_string)).unwrap_or_default();
+    std::fs::canonicalize(cwd).unwrap_or_default()
+}
+
+#[test]
+fn a_daemon_started_by_hand_in_a_workspace_leaves_that_directory() {
+    // the daemon sanitizes itself, so a start that is not the hook client's (the update script, a service unit) is covered too
+    let mut e = Env::new("serve-cwd", PROBE);
+    let worktree = e.dir.join("child-worktree");
+    std::fs::create_dir_all(&worktree).unwrap();
+    e.start_in(Some(&worktree));
+    let cwd = process_cwd(e.pid());
+    e.stop();
+    assert_eq!(cwd, std::fs::canonicalize(e.dir.join("home")).unwrap(), "the daemon stayed in the directory it was started from");
 }
 
 #[test]
