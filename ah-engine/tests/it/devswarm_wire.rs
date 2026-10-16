@@ -233,6 +233,41 @@ fn an_archive_never_acts_on_a_remembered_clean_answer() {
 }
 
 #[test]
+fn a_delete_plan_never_acts_on_a_remembered_clean_answer() {
+    use ah_engine::dsact::live::LiveState;
+    let w = world("stale-clean-prune");
+    let stub = Arc::new(Stub::default());
+    let wire = wire(&w, &stub, Executor::Off);
+    wire.reconcile(Cause::Startup);
+    // ws-1 is archived, and was archived long ago
+    Connection::open(&w.db).unwrap().execute("UPDATE builders SET isActive = 0, isHidden = 1 WHERE id = 'ws-1'", []).unwrap();
+    let marker = w
+        .home
+        .join(".anti-hall/devswarm")
+        .join(ah_engine::defaults::text("mesh_write.dir_archived"))
+        .join(format!("ws-1{}", ah_engine::defaults::text("mesh_write.json_suffix")));
+    write(&marker, &json!({}));
+    age(&marker, 40 * 86_400_000);
+    let runner = Shared(stub.clone());
+    let live = ah_engine::dswire::live::RtLive {
+        rt: &wire.rt,
+        home: w.home.clone(),
+        runner: &runner,
+        state_dir: w.state.clone(),
+        env: RequestEnv::from_pairs([("HOME", w.home.to_string_lossy().into_owned())]),
+        now: now(),
+    };
+    let row = |live: &ah_engine::dswire::live::RtLive| live.prune_rows(7).into_iter().find(|r| r["id"] == "ws-1").expect("ws-1 is archived");
+    assert_eq!(row(&live)["eligible"], json!(true), "clean, merged, old, nothing unread: the plan would delete it");
+    // git's clean answer for the worktree is remembered, then the tree is edited without any file under .git changing
+    assert_eq!(facts::Git { runner: &runner }.clean(w.wt.to_str().unwrap()), (Some(true), None));
+    stub.dirty.store(true, std::sync::atomic::Ordering::Relaxed);
+    let r = row(&live);
+    assert_eq!(r["eligible"], json!(false), "the delete plan asked git itself and saw the dirty tree: {r}");
+    assert_eq!(r["uncommitted"], json!(true));
+}
+
+#[test]
 fn a_state_edge_leads_to_exactly_one_archive() {
     let w = world("e2e");
     let stub = Arc::new(Stub::default());
