@@ -94,7 +94,8 @@ pub fn signature(duty: &str, ctx: &Ctx) -> Option<u64> {
         match kind {
             "appdb" => {
                 if let Some(db) = crate::meshw::ident::app_db_path(ctx.home, &ctx.st.env) {
-                    for sfx in ["", "-wal"] {
+                    let sfxs = ["", "-wal"];
+                    for sfx in sfxs {
                         let p = format!("{db}{sfx}");
                         stat(&mut h, &p, std::fs::metadata(&p).ok());
                     }
@@ -131,7 +132,7 @@ pub fn quiet(duty: &str, rec: &serde_json::Value) -> bool {
     if duty != "verdicts" {
         return true;
     }
-    let d = &rec["detail"];
+    let d = rec.get("detail").unwrap_or(&serde_json::Value::Null);
     let n = |k: &str| d.get(k).and_then(serde_json::Value::as_u64).unwrap_or(1);
     let len = |k: &str| d.get(k).and_then(serde_json::Value::as_array).map_or(1, Vec::len);
     n("stale") == 0 && len("forced") == 0 && d.get("drain").and_then(serde_json::Value::as_bool) == Some(false)

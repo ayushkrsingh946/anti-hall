@@ -122,9 +122,9 @@ fn resolve_send_target(inv: &Inv, rows: &[Row], arg: &str) -> R<Resolved> {
             }
             // GH #203: the roster shows only a short id, so a unique id prefix is the recipient
             let mut hits: Vec<&Row> = rows.iter().filter(|d| !d.id.is_empty() && d.id.starts_with(arg)).collect();
-            match hits.len() {
-                0 => Ok(Resolved::Unregistered),
-                1 => resolve_send_target(inv, rows, &hits[0].id.clone()),
+            match hits.as_slice() {
+                [] => Ok(Resolved::Unregistered),
+                [only] => resolve_send_target(inv, rows, &only.id.clone()),
                 _ => {
                     hits.sort_by(|a, b| a.id.cmp(&b.id));
                     Ok(Resolved::AmbiguousPrefix(hits.iter().map(|d| d.id.clone()).collect()))
