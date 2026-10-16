@@ -131,7 +131,9 @@ function main() {
   try {
     const pruneAfter = require('./lib/settings.js').getWithEnv('guards', 'pruneCompletedTasksAfter', 10, process.env);
     if (Number.isFinite(pruneAfter) && pruneAfter > 0 && completedCount > pruneAfter) {
-      fs.writeSync(1,
+      // stderr: stdout must stay empty or ONE JSON object (a later block printed after this line would be read as plain
+      // text and lost, and the engine dispatcher cannot merge plain stdout with another Stop hook's JSON)
+      fs.writeSync(2,
         '[task-guard] ' + completedCount + ' completed/cancelled tasks in the list (> ' + pruneAfter +
         ') — advisory: after recording them in the history ledger, prune them with ' +
         'TaskUpdate status=deleted so the harness reminder stops re-printing them every turn.\n'
@@ -154,7 +156,7 @@ function main() {
   };
   const quietExit = () => {
     const n = takeUnknownNote();
-    if (n) { try { fs.writeSync(1, '[task-guard] ' + n + '\n'); } catch (_) {} }
+    if (n) { try { fs.writeSync(2, '[task-guard] ' + n + '\n'); } catch (_) {} }
     process.exit(0);
   };
 
@@ -273,9 +275,9 @@ function main() {
     const cwd = payload && payload.cwd;
     const sid = (payload && payload.session_id && String(payload.session_id)) || undefined;
     if (isOmcLoopActive({ cwd, sessionId: sid })) {
-      // fs.writeSync(1): process.stdout.write races the async pipe flush with
-      // exit() on macOS node 18/20 (repo-wide rule for hook output).
-      fs.writeSync(1,
+      // fs.writeSync: process.stdout.write races the async pipe flush with
+      // exit() on macOS node 18/20 (repo-wide rule for hook output). stderr: an advisory, never stdout (see above).
+      fs.writeSync(2,
         '[task-guard] OMC autonomous loop active — deferring Stop block to avoid deadlock.\n'
       );
       process.exit(0);
@@ -295,8 +297,8 @@ function main() {
   // State is NOT written here (no block counter increment) so a future Stop after
   // agents finish can still hard-block on genuinely neglected work.
   if (!idleNeglect && haveAgents) {
-    // fs.writeSync(1): stdout.write races the async pipe flush on macOS node 18/20.
-    fs.writeSync(1,
+    // fs.writeSync: stdout.write races the async pipe flush on macOS node 18/20. stderr: an advisory, never stdout.
+    fs.writeSync(2,
       '[task-guard] open tasks remain but live agents are active — deferring Stop block.\n'
     );
     process.exit(0);
