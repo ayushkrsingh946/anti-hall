@@ -312,6 +312,41 @@ fn concurrent_cold_calls_on_guard_events_all_block() {
     }
 }
 
+/// The other side of the cold-start contract: with spawning disabled no daemon is starting, so a guard call does not wait for one: it
+/// keeps the unavailable contract (fail open, run no hook, print nothing), unlike the starting daemon above, which every call waits for.
+#[test]
+fn a_cold_guard_call_with_spawning_disabled_fails_open_without_waiting_or_running_hooks() {
+    let w = World::new("cold-nospawn");
+    std::fs::create_dir_all(w.path("home/.anti-hall")).unwrap();
+    std::fs::write(w.path("t.jsonl"), task_lines("pending")).unwrap();
+    let marker = w.path("hook-ran");
+    let run = format!("touch '{}'; exit 99", marker.display());
+    let map = serde_json::json!({ "Stop": ids_for("Stop", "").into_iter().map(|id| (id, serde_json::Value::from(run.clone()))).collect::<serde_json::Map<_, _>>() });
+    let map_path = w.path("nospawn-map.json");
+    std::fs::write(&map_path, map.to_string()).unwrap();
+    let payload = serde_json::json!({"hook_event_name": "Stop", "session_id": "s1", "cwd": w.path("proj"), "transcript_path": w.path("t.jsonl")}).to_string();
+    let mut c = Command::new(env!("CARGO_BIN_EXE_ah-engine"));
+    c.args(["hook", "--event", "Stop", "--fallback-map"])
+        .arg(&map_path)
+        .env_clear()
+        .env("PATH", std::env::var("PATH").unwrap_or_default())
+        .env("HOME", w.path("home"))
+        .env("AH_ENGINE_DIR", w.path("state"))
+        .env("AH_ENGINE_VERSION", "task-e2e")
+        .env("AH_ENGINE_NOSPAWN", "1")
+        .env("CLAUDE_PLUGIN_ROOT", &w.dir)
+        .current_dir(&w.dir)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut ch = c.spawn().unwrap();
+    ch.stdin.take().unwrap().write_all(payload.as_bytes()).unwrap();
+    let o = ch.wait_with_output().unwrap();
+    assert_eq!(o.status.code(), Some(0), "no daemon is starting: the guard call fails open");
+    assert!(o.stdout.is_empty(), "nothing printed: {:?}", String::from_utf8_lossy(&o.stdout));
+    assert!(!marker.exists(), "no hook runs on an unavailable daemon");
+}
+
 #[test]
 fn tasklist_guard_answers_a_quiet_stop_with_its_file_effects_and_answers_a_block() {
     let w = World::new("tasklist-guard");

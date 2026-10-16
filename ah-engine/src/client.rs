@@ -668,7 +668,9 @@ fn attempt_with(payload: &[u8], cfg: &ClientConfig, have_fallback: bool, hold_wa
                 note_unavailable();
                 return None;
             }
-            if !GUARD_CALL.get() {
+            // a guard call waits only for a daemon that is really starting; with spawning disabled (no daemon will come) it keeps
+            // the unavailable contract: fail open, run no hooks
+            if !GUARD_CALL.get() || defaults::env_var("nospawn").is_some() {
                 return absent_unguarded(&sock, payload, cfg, have_fallback);
             }
             absent_guarded(&sock, payload, cfg, hold_wait_on_ok)
@@ -676,13 +678,13 @@ fn attempt_with(payload: &[u8], cfg: &ClientConfig, have_fallback: bool, hold_wa
     }
 }
 
-/// No daemon listens and this is a guard event's call. The call that takes the spawn lock starts one; a call that finds the lock
-/// held finds a daemon being started by another call. Both wait for it to answer within `client.cold_guard_wait_ms` (the wait marker
-/// stays, so the wrapper's watchdog grants the slow window), then send the request once, on one connection, for what is left of the
-/// slow window (`wait_window`): one absolute budget, so the call never outlives the wrapper's watchdog. A call that gave up at once
-/// answered nothing, so every guard hook arriving while a daemon (re)starts was an allow, a lost block. A daemon that does not
-/// answer in time, or a spawn that fails, ends the call without the unavailable mark and without the daemon-down marker, so the
-/// dispatcher takes its daemon-down path (the Node hooks, or the event's failure mode), never an empty answer. The request is not
+/// No daemon listens, spawning is allowed, and this is a guard event's call: a daemon is really starting. The call that takes the
+/// spawn lock starts it; a call that finds the lock held finds it being started by another call. Both wait for it to answer within
+/// `client.cold_guard_wait_ms` (the wait marker stays, so the wrapper's watchdog grants the slow window), then send the request once,
+/// on one connection, for what is left of the slow window (`wait_window`): one absolute budget, so the call never outlives the
+/// wrapper's watchdog. A call that gave up at once answered nothing, so every guard hook arriving while a daemon (re)started was an
+/// allow, a lost block. A start that fails (the spawn fails, or the daemon never answers in time) ends the call on the unavailable
+/// path exactly as before: fail open, the spawn failure also marks the daemon down. The request is not
 /// sent under the ack protocol: the new daemon queues the whole burst of calls that waited with it, so a request can sit
 /// unacknowledged past `wire.ack_timeout_ms`, and the ack protocol would resend it and then give up; one connection is never resent,
 /// so never judged twice.
@@ -694,7 +696,8 @@ fn absent_guarded(sock: &Path, payload: &[u8], cfg: &ClientConfig, hold_wait_on_
             health::log_event("client_spawn_attempt", "singleflight", "absent");
             let Some(child) = spawn_daemon() else {
                 wait_marker(false);
-                health::log_event("client_down", "daemon", "spawn");
+                note_unavailable();
+                mark_daemon_down("spawn");
                 return None;
             };
             (Some(lock), Some(child))
@@ -734,6 +737,7 @@ fn absent_guarded(sock: &Path, payload: &[u8], cfg: &ClientConfig, hold_wait_on_
                 }
                 _ => {
                     wait_marker(false);
+                    note_unavailable();
                     health::log_event("client_down", "daemon", "cold_start");
                     None
                 }
@@ -742,6 +746,7 @@ fn absent_guarded(sock: &Path, payload: &[u8], cfg: &ClientConfig, hold_wait_on_
         std::thread::sleep(defaults::millis("client.cold_guard_poll_ms").min(cold_wait.saturating_sub(start.elapsed())));
     }
     wait_marker(false);
+    note_unavailable();
     health::log_event("client_down", "daemon", "cold_start");
     None
 }
