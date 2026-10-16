@@ -618,6 +618,8 @@ engine's clock and reader nonce and compares its output (the scratch home swappe
 marker and its cron-found-mail file with the engine's. One difference from Node: Node opens the
 store read-write (and would apply a pending schema migration); the engine opens it read only, so the migration waits for the next Node writer.
 
+**Own sends are not unread (`src/meshw/union.rs` `unread_for` / `unread_at`; Node: `reader-cursors.js` `countFor` with `excludeFamily`).** The unread count of tick, `read-primary`, the roster/summary `directUnread` and the statusline goes through one helper that leaves out the unread rows the recipient's own identity family sent (`recipientFamilyIds`: the id plus every row cross-linked by session id; a row has its sender in the store `sender` column, an NDJSON line in its `sender` field). The row lists stay whole, so an ack still walks them; only the count drops. Each count that left something out bumps `mesh_own_sends_excluded`. The roster/summary and the statusline read the floor (they have no reader of their own), tick and `read-primary` read at the caller's `reader_cursors` rows.
+
 **`inbox read-primary <id> [--format text] [--json] [--session S]` (`src/meshw/readprimary.rs`; Node: `inbox-cmd.js`, `inbox-read.js`
 `cmdInboxMessagesInner`, `cursors.js` `writeReadReceipt`).** A read that is not read-only: it files a read receipt, named by a fresh random
 id (`r` + the clock in base 36 + 12 random hex digits), in `read-receipts/<id>/` and prints the unread rows with the `ackCommand` that applies it.

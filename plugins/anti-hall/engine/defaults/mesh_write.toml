@@ -1727,6 +1727,10 @@ value = "store"
 doc = "The NDJSON line's sender field."
 value = "fromBranch"
 
+[mesh_write.ndjson_sender_field]
+doc = "The NDJSON line's resolved-sender field (the workspace id `pull` wrote: the registry row of the line's branch, else the Primary)."
+value = "sender"
+
 [mesh_write.ndjson_message_field]
 doc = "The NDJSON line's body field."
 value = "message"
@@ -2009,3 +2013,7 @@ doc = "Most nested checkouts whose superproject answer is kept at once (expired 
 value = 256
 min = 1
 max = 65536
+
+[metric.mesh_own_sends_excluded]
+doc = "Counts that left out unread rows the recipient's own identity family sent (an own send is not inbound mail)."
+value = { kind = "counter", unit = "counts", labels = [] }

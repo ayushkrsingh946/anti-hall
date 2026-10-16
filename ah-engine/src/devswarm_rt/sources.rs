@@ -547,20 +547,31 @@ impl Probe for FsProbe {
             }
             None => None,
         };
-        let (store_base, nd_base) = match &reader {
-            Some(r) => union::floor_bases(r, &self.home, id, cursor.as_deref()).ok()?,
-            None => (0.0, 0.0),
+        // the floor view (the statusline has no reader of its own), through the one unread helper: the mail the workspace's own
+        // identity family sent is not unread
+        let Some(r) = &reader else {
+            let u = union::union_unread(&union::UnionIn {
+                inbox: inbox.as_deref(),
+                cursor_file: cursor.as_deref(),
+                id,
+                store: None,
+                store_base: 0.0,
+                nd_base: 0.0,
+                now: self.now,
+            })
+            .ok()?;
+            return Some(u.unread);
         };
-        let u = union::union_unread(&union::UnionIn {
-            inbox: inbox.as_deref(),
-            cursor_file: cursor.as_deref(),
-            id,
-            store: reader.as_ref(),
-            store_base,
-            nd_base,
-            now: self.now,
-        })
-        .ok()?;
+        let bases = union::floor_bases(r, &self.home, id, cursor.as_deref()).ok()?;
+        let pairs: Vec<(String, Option<String>)> = r
+            .roster()
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|row| Some((row.get("id")?.as_str()?.to_string(), row.get("sessionId").and_then(|x| x.as_str()).map(str::to_string))))
+            .collect(); // keep: an unreadable registry means no family: every row counts, as before
+        let family = union::family_ids(id, &pairs);
+        let u = union::unread_at(r, id, inbox.as_deref(), cursor.as_deref(), bases, &family, self.now).ok()?;
+        crate::meshw::tick::note_own_excluded(&u);
         Some(u.unread)
     }
 }

@@ -5542,6 +5542,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `mesh_write.ndjson_from_field` | `fromBranch` |  |  | The NDJSON line's sender field. |
 | `mesh_write.ndjson_hash_field` | `_h` |  |  | The field of an NDJSON inbox line that carries the content hash of a natively drained message. |
 | `mesh_write.ndjson_message_field` | `message` |  |  | The NDJSON line's body field. |
+| `mesh_write.ndjson_sender_field` | `sender` |  |  | The NDJSON line's resolved-sender field (the workspace id `pull` wrote: the registry row of the line's branch, else the Primary). |
 | `mesh_write.ndjson_status_field` | `status` |  |  | The NDJSON line's status field. |
 | `mesh_write.ndjson_suffix` | `.ndjson` |  |  | Suffix of a journal file. |
 | `mesh_write.ndjson_ts_field` | `ts` |  |  | The field of an NDJSON line that carries its timestamp (first choice). |
@@ -8147,6 +8148,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_cli.app_reason_unreadable` | `app DB unreadable — cannot confirm the builder` |  |  | Why nothing is archived in the app when its database cannot be read. |
 | `devswarm_cli.app_row` | `\| {rank} \| {title} \| {type} \| {finish} \| {brief} \| {session} \|` |  |  | One workspace row of the app-state table. |
 | `devswarm_cli.app_short_id` | `8` |  |  | How many characters of an id the app-state table shows (UTF-16 units). |
+| `devswarm_cli.app_short_id_mesh_prefix` | `primary-` |  |  | An id starting with this (a Primary's mesh id) shows this prefix plus app_short_id characters, so its short form keeps the hash. |
 | `devswarm_cli.app_side_effect` | `hivecontrol changed OTHER app builders while archiving {id} — NOT undone, che...` |  |  | The message when archiving changed other builders. |
 | `devswarm_cli.app_state_archived` | `archived` |  |  | A builder's state when it is archived. |
 | `devswarm_cli.app_state_closed` | `closed` |  |  | A builder's state when it is closed but not archived. |
@@ -10687,6 +10689,7 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `jev_slow` | counter | calls |  | Jev calls slower than the SOFT limit (jev.soft_ms); their answers were still used. |
 | `jev_timeouts` | counter | calls |  | Jev calls that ran out of their time budget. |
 | `jev_verdicts` | counter | decisions | id, verdict | What each Jev decision did, by integration and verdict: added or changed (an on-mode outcome moved), would-change (a shadow call that would have moved it), none (Jev agreed with the baseline) or no-answer (it failed or was skipped). |
+| `mesh_own_sends_excluded` | counter | counts |  | Counts that left out unread rows the recipient's own identity family sent (an own send is not inbound mail). |
 | `rt_edges` | counter | edges |  | Workspace state changes emitted. |
 | `rt_reconcile_repairs` | counter | edges |  | Changes a full reconcile found that the event path had not already applied: the health measure of the realtime event layer (close to 0 is healthy). |
 | `rt_shadow_mismatches` | counter | mismatches |  | Differences between the engine's workspace state and the Node witness's. |

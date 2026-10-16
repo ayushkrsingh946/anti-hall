@@ -207,18 +207,21 @@ pub(crate) fn single_partition(rows: &[ident::Row], desc: &OVal, id: &str) -> R<
 
 /// `positions()`: the floor rows, then this reader's own rows when it is a declared reader: `(store base, nd base)`.
 pub(crate) fn read_bases(inv: &Inv, reader: &MeshReader, id: &str, cursor_file: Option<&str>) -> R<(f64, f64)> {
-    let (mut store_base, mut nd_base) = union::floor_bases(reader, &inv.home, id, cursor_file)?;
-    if let Some(me) = crate::meshw::cursors::reader_key(reader_nonce_cached(&inv.home).as_deref()) {
-        let cursor_rows = reader.reader_cursors(id).map_err(|e| ident::Defer(format!("cursor-rows:{e}")))?;
-        let own = |ns: &str| cursor_rows.iter().find(|r| r["ns"] == ns && r["reader"] == me.as_str()).and_then(|r| r["value"].as_f64());
-        if let Some(v) = own(defaults::text("mesh_write.cursor_ns_store")) {
-            store_base = v;
-        }
-        if let Some(v) = own(defaults::text("mesh_write.cursor_ns_nd")) {
-            nd_base = v;
-        }
+    let me = crate::meshw::cursors::reader_key(reader_nonce_cached(&inv.home).as_deref());
+    union::read_bases(reader, &inv.home, id, cursor_file, me.as_deref())
+}
+
+/// The recipient's identity family over a project's registry rows (`recipientFamilyIds`).
+pub(crate) fn family_of(id: &str, rows: &[ident::Row]) -> std::collections::HashSet<String> {
+    let pairs: Vec<(String, Option<String>)> = rows.iter().map(|r| (r.id.clone(), r.session_id.clone())).collect();
+    union::family_ids(id, &pairs)
+}
+
+/// Count the unread rows a family's own sends took out of a count (`mesh_own_sends_excluded`).
+pub(crate) fn note_own_excluded(u: &union::Unread) {
+    if u.own_excluded > 0 {
+        crate::metrics::bump("mesh_own_sends_excluded", &[]);
     }
-    Ok((store_base, nd_base))
 }
 
 /// What `count` reports for a single partition that a tick uses.
@@ -251,28 +254,24 @@ fn count_mail(inv: &Inv, id: &str, desc: &OVal, line_form: bool) -> R<Counted> {
     let Some(cursor_file) = union::path_field(desc, defaults::text("mesh_write.field_cursor_path"))? else { return defer("no-cursor-path") };
     let o = open_partition(inv, id, desc)?;
     single_partition(&o.rows, desc, id)?;
-    let (store_base, nd_base) = read_bases(inv, &o.reader, id, Some(cursor_file.as_str()))?;
     // known: the inbox and its cursor file both read (otherwise Node prints a warning and the count is unknown)
     let known = union::non_empty_lines(&inbox).is_some() && union::cursor_position(&cursor_file)?.is_some();
     if !known && !line_form {
         return defer("unknown-count");
     }
-    let input = union::UnionIn {
-        inbox: known.then_some(inbox.as_str()),
-        cursor_file: known.then_some(cursor_file.as_str()),
-        id,
-        store: Some(&o.reader),
-        store_base,
-        nd_base,
-        now: inv.now,
-    };
-    let u = union::union_unread(&input)?;
+    let me = crate::meshw::cursors::reader_key(reader_nonce_cached(&inv.home).as_deref());
+    let family = family_of(id, &o.rows);
+    let (inbox_in, cursor_in) = (known.then_some(inbox.as_str()), known.then_some(cursor_file.as_str()));
+    let c = union::unread_for(&o.reader, &inv.home, id, inbox_in, cursor_in, me.as_deref(), &family, inv.now)?;
+    note_own_excluded(&c);
+    let (store_base, nd_base, u) = (c.store_base, c.nd_base, c.union);
+    let input = union::UnionIn { inbox: inbox_in, cursor_file: cursor_in, id, store: Some(&o.reader), store_base, nd_base, now: inv.now };
     let total = if known { Some(union::merged_total(&input)?) } else { None };
     let nd_cursor = if nd_base.is_finite() && nd_base > 0.0 { nd_base.floor() } else { 0.0 };
     Ok(Counted {
         repo_key: o.repo_key,
         known,
-        unread: u.unread,
+        unread: c.unread,
         nd_unread: u.nd_unread_lines.len(),
         store_unread: u.store_only_unread.len(),
         nd_cursor,

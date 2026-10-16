@@ -1226,7 +1226,7 @@ function cmdInboxMessagesInner(id, flags, ctx, opts) {
         // Phase 3: the ONE countFor (own reader row, or the floor when headless /
         // undeclared). An UNKNOWN result (store read error) is never a "0
         // store-only unread": drop to the store-only reporting below.
-        union = readerCursors.countFor(s, { reader: callerReader, partition: id, inboxPath: desc.inboxPath, cursorPath: ndCursorPath, home, now: ctx && ctx.now });
+        union = readerCursors.countFor(s, { reader: callerReader, partition: id, inboxPath: desc.inboxPath, cursorPath: ndCursorPath, home, now: ctx && ctx.now, excludeFamily: true });
         if (union && union.unknown) union = null;
       } catch (_) { union = null; } // fail-open: falls back to store-only reporting below
     }

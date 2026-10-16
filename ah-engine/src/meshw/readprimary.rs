@@ -674,7 +674,10 @@ fn plan(inv: &Inv, a: &Args, promoted: Option<bool>) -> R<Planned> {
             return defer("unknown-count");
         }
         let input = union::UnionIn { inbox: Some(inbox), cursor_file: Some(cf), id, store: Some(&o.reader), store_base, nd_base, now: inv.now };
-        let u = union::union_unread(&input)?;
+        let me = crate::meshw::cursors::reader_key(tick::reader_nonce_cached(&inv.home).as_deref());
+        let counted = union::unread_for(&o.reader, &inv.home, id, Some(inbox), Some(cf), me.as_deref(), &tick::family_of(id, &o.rows), inv.now)?;
+        tick::note_own_excluded(&counted);
+        let u = counted.union;
         let merged_total = union::merged_total(&input)?;
         for line in &u.nd_unread_lines {
             msgs.push(ndjson_msg(line)?);
@@ -688,7 +691,7 @@ fn plan(inv: &Inv, a: &Args, promoted: Option<bool>) -> R<Planned> {
                 if x.sort_ts == y.sort_ts { std::cmp::Ordering::Equal } else { x.sort_ts.partial_cmp(&y.sort_ts).unwrap_or(std::cmp::Ordering::Equal) }
             },
         );
-        unread_count = u.unread as f64;
+        unread_count = counted.unread as f64;
         total_out = merged_total as f64;
         let nd_cursor = floor_pos(nd_base);
         union_cursors = Some((nd_cursor, store_base));

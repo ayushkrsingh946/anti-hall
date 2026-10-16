@@ -2574,7 +2574,7 @@ function unionUnreadFor(d, store, F, home) {
   if (!d) return null;
   let rc;
   try { rc = require('./reader-cursors.js'); } catch (_) { return null; }
-  const u = rc.countFor(store, { reader: null, partition: d.id, inboxPath: d.inboxPath || null, cursorPath: d.cursorPath || null, home, fsi: F });
+  const u = rc.countFor(store, { reader: null, partition: d.id, inboxPath: d.inboxPath || null, cursorPath: d.cursorPath || null, home, fsi: F, excludeFamily: true });
   return u && !u.unknown ? u : null;
 }
 
@@ -2733,13 +2733,17 @@ function computeSummary(store, opts) {
     // store's own unread rows). That is the overwhelmingly common shape, so the
     // extra read is paid only by rows that genuinely have two sides to merge.
     let unread = Math.max(0, total - cursor);
+    let ownUnreadFromUnion = null; // unread rows the workspace's own identity family sent, when the union already counted them
     // PERF BOUND (Round 13 item 5): pay for the union ONLY when the NDJSON side
     // actually has unread lines to merge — see ndjsonHasUnread's header for why
     // an empty tail makes the union provably equal to `total - cursor`.
     if ((d.inboxPath || d.cursorPath) && ndjsonHasUnread(d, F, floorFor(store, d.id, home, 'nd') || 0)) {
       try {
         const u = unionUnreadFor(d, store, F, home);
-        if (u && Number.isFinite(u.unread)) unread = Math.max(0, u.unread);
+        if (u && Number.isFinite(u.unread)) {
+          unread = Math.max(0, Number.isFinite(u.unreadAll) ? u.unreadAll : u.unread); // `unread` stays inclusive; directUnread leaves own sends out
+          if (Number.isFinite(u.ownExcluded)) ownUnreadFromUnion = u.ownExcluded;
+        }
       } catch (_) { /* fail-open: keep the store-only count rather than fail a projection */ }
     }
     const gates = store.currentGates(d.id);
@@ -2975,6 +2979,10 @@ function computeSummary(store, opts) {
     // exact `d.id` match.
     let ownFamily = null;
     try { ownFamily = identityFamily.recipientFamilyIds(d.id, registry); } catch (_) { ownFamily = null; }
+    // directUnread (#181): the unread direct mail WITHOUT what the workspace's own identity family sent (same family as below).
+    const ownUnread = ownUnreadFromUnion != null ? ownUnreadFromUnion
+      : (ownFamily && ownFamily.size ? unreadRows.filter((r) => r && r.sender != null && ownFamily.has(String(r.sender))).length : 0);
+    const directUnread = Math.max(0, unread - ownUnread);
     // directTotalFromOthers (wake-watch): the partition total WITHOUT rows the workspace's own identity family sent.
     // `total` is deliberately inclusive of them; wake-watch edge-triggers on someone ELSE's mail only, so a Primary is
     // not woken by its own sends (the same split as broadcastUnreadFromOthers above).
@@ -3000,7 +3008,7 @@ function computeSummary(store, opts) {
       nudgeCommand: d.nudgeCommand,
       total, cursor, unread,
       directTotalFromOthers,
-      directUnread: unread,
+      directUnread,
       oldestDirectUnreadTs,
       oldestDirectUnreadSender,
       broadcastUnread,

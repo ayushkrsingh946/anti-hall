@@ -911,7 +911,7 @@ function cmdInbox(sub, id, flags, ctx) {
     // shared projection, or `count` disagrees with `read-primary` per instance.
     // Phase 3: ONE countFor for count/read/ack. A read error is UNKNOWN — the
     // store side is then reported unavailable (never a silent 0).
-    let union = readerCursors.countFor(storeHandle, { reader: callerReader, partition: id, inboxPath, cursorPath, home, now: ctx && ctx.now });
+    let union = readerCursors.countFor(storeHandle, { reader: callerReader, partition: id, inboxPath, cursorPath, home, now: ctx && ctx.now, excludeFamily: true });
     if (union.unknown) {
       if (!storeUnavailable) {
         storeUnavailable = {
