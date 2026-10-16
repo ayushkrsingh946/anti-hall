@@ -31,6 +31,18 @@ pub enum Cause {
     Overflow,
 }
 
+impl Cause {
+    /// The label the work counters carry.
+    pub fn label(self) -> &'static str {
+        match self {
+            Cause::Startup => "startup",
+            Cause::Event => "event",
+            Cause::Periodic => "periodic",
+            Cause::Overflow => "overflow",
+        }
+    }
+}
+
 /// What one run produced.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Report {
@@ -257,6 +269,7 @@ impl Rt {
     /// Read the sources from the real home and reconcile (the production path).
     pub fn run_live(&self, cause: Cause, gh: Option<&dyn GithubState>, db: Option<&Db>) -> Report {
         let now = crate::health::now_ms() as i64;
+        let (_c, _s) = (sources::for_cause(cause.label()), sources::at_site("reconcile"));
         self.cache.begin();
         let probe = FsProbe::new(&self.det.home, now).with_cache(self.cache.clone());
         let app = self.det.app_db.as_deref().and_then(sources::read_app);

@@ -175,3 +175,13 @@ value = true
 doc = "Measure every Nth check call (1 = every call). Raise it only if the measured cost of the per-thread counters becomes a problem."
 value = 1
 min = 1
+
+[diagnostics.tally_soft_keys]
+doc = "Soft limit on the labelled work counters `status --threads` carries (and on exited-thread names): past it every further new key adds one to `tally_soft_hits`."
+value = 64
+min = 8
+
+[diagnostics.tally_hard_keys]
+doc = "Hard limit on the labelled work counters (and on exited-thread names): a new key past it is dropped and counted in `tally_dropped`; the existing keys keep counting."
+value = 256
+min = 16

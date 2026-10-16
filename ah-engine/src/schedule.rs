@@ -504,9 +504,8 @@ impl Scheduler {
                         self.save(spec, &snapshot); // committed before the run: a restart cannot run it again
                         let (me, spec) = (self.clone(), spec.clone());
                         let run_spec = spec.clone();
-                        if let Err(e) = std::thread::Builder::new()
-                            .name(format!("ah-schedule-{}", spec.name))
-                            .spawn(move || me.execute(&run_spec, due_ms, attempt, catch_up))
+                        if let Err(e) =
+                            crate::threads::spawn_named(format!("ah-schedule-{}", spec.name), move || me.execute(&run_spec, due_ms, attempt, catch_up))
                         {
                             crate::discard::note("schedule_spawn", &e.to_string());
                             let snapshot = {
@@ -833,8 +832,7 @@ mod tests {
         // the daemon inherits the environment of whichever hook started it; a job is the engine's own work, so the variables
         // the role detection reads are removed from its command (else a workspace child or subagent start refuses them all)
         let cmd = super::job_command(&sh("true")).unwrap();
-        let removed: Vec<String> =
-            cmd.get_envs().filter(|(_, v)| v.is_none()).map(|(k, _)| k.to_string_lossy().to_string()).collect();
+        let removed: Vec<String> = cmd.get_envs().filter(|(_, v)| v.is_none()).map(|(k, _)| k.to_string_lossy().to_string()).collect();
         for key in ["roles.declared_env", "roles.branch_env"] {
             let name = defaults::text(key);
             assert!(removed.iter().any(|r| r == name), "{name} removed: {removed:?}");

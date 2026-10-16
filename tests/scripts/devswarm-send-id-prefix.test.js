@@ -88,3 +88,28 @@ test('#203: a prefix matching nothing still fails closed as unregistered-recipie
     assert.equal(r.result.reason, 'unregistered-recipient');
   } finally { rm(home); rm(repo); }
 });
+
+// #203 follow-up: a Primary's registry id is a mesh id (`primary-<hash>`); the first 8 chars
+// were `primary-`, useless as a label and ambiguous. The short form keeps the hash.
+const names = require('../../plugins/anti-hall/companion/lib/devswarm-names.js');
+const PRIMARY = 'primary-d7a18d81';
+
+test('#203: a primary-<hash> id shortens to a form that keeps its hash; uuids keep 8 chars', () => {
+  assert.equal(names.shortId(PRIMARY), PRIMARY);
+  assert.equal(names.shortId('primary-d7a18d81ffee0011'), PRIMARY);
+  assert.equal(names.displayName(PRIMARY, 'Primary Workspace'), 'Primary Workspace (primary-d7a18d81)');
+  assert.equal(names.shortId(UUID_A), UUID_A.slice(0, 8));
+});
+
+test('#203: send --to <primary short form> resolves to the Primary', () => {
+  const home = tmpHome();
+  const repo = makeGitRepo('primary');
+  try {
+    const repoKey = repokey.repoKeyForWorktree(repo);
+    seed(home, repoKey, [{ id: PRIMARY, worktreePath: repo, sessionId: 's' }, { id: UUID_C, worktreePath: repo, sessionId: 's2' }]);
+    const r = cli.run(['send', '--to', names.shortId(PRIMARY), '--message', 'hi'], ctx(home, { cwd: repo }));
+    assert.equal(r.result.ok, true, JSON.stringify(r.result));
+    const s = storeLib.openStore({ home, hash: repoKey, backend: 'journal' });
+    try { assert.equal(s.listMessages(PRIMARY).length, 1); } finally { s.close(); }
+  } finally { rm(home); rm(repo); }
+});

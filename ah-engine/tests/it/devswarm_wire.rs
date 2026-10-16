@@ -765,6 +765,75 @@ fn where_a_periodic_reconcile_spends_its_cpu() {
             "PROFILE round {round}: run_live(Event)={ev:.1} ms run_live(Periodic)={per:.1} ms act_sweeps(true)={sw:.1} ms act_sweeps(false)={sw_soft:.1} ms"
         );
     }
+    // the whole periodic path as the scheduler runs it (reconcile + the sweeps that follow), with where its reads went
+    let before = ah_engine::threads::work();
+    for round in 0..3 {
+        let ms = cpu(&|| drop(wire.reconcile(Cause::Periodic)));
+        eprintln!("PROFILE periodic reconcile {round}: {ms:.1} ms");
+    }
+    print_work_since("PROFILE periodic", &before);
+}
+
+/// Print the labelled work counters (`probe_*`, `dswire_*`) that moved since `before`.
+fn print_work_since(tag: &str, before: &serde_json::Value) {
+    let now = ah_engine::threads::work();
+    for (k, v) in now.as_object().unwrap() {
+        let d = v.as_u64().unwrap_or(0) - before[k].as_u64().unwrap_or(0);
+        if d > 0
+            && (k.starts_with("probe_")
+                || k.starts_with("dswire_reconcile")
+                || k.starts_with("dswire_jev")
+                || k.starts_with("dswire_batches")
+                || k == "git_runs"
+                || k == "git_cache_hits")
+        {
+            eprintln!("{tag} {k} +{d}");
+        }
+    }
+}
+
+#[test]
+fn a_quiet_periodic_reconcile_reads_through_the_cache_only_and_counts_its_cpu_by_cause() {
+    let w = world("periodic-reads");
+    let stub = Arc::new(Stub::default());
+    let wire = wire(&w, &stub, Executor::Engine).with_full_sweep_every(3_600_000);
+    wire.reconcile(Cause::Startup);
+    wire.reconcile(Cause::Periodic); // the first run after the seed still sees the world's first edges
+    let before = ah_engine::threads::work();
+    wire.reconcile(Cause::Periodic);
+    wire.reconcile(Cause::Periodic);
+    let now = ah_engine::threads::work();
+    let moved = |k: &str| now[k].as_u64().unwrap_or(0) - before[k].as_u64().unwrap_or(0);
+    assert_eq!(moved("dswire_reconcile_runs.periodic.noop"), 2, "both quiet runs found nothing: {now}");
+    assert!(moved("dswire_reconcile_cpu_us.periodic.derive") > 0, "the derive phase carries its CPU: {now}");
+    let others: Vec<(&String, u64)> = now
+        .as_object()
+        .unwrap()
+        .iter()
+        .filter(|(k, _)| k.starts_with("probe_reads.") && k.ends_with(".periodic") && !k.starts_with("probe_reads.reconcile."))
+        .map(|(k, v)| (k, v.as_u64().unwrap_or(0) - before[k].as_u64().unwrap_or(0)))
+        .collect();
+    assert!(others.iter().all(|(_, d)| *d == 0), "a quiet periodic run reads nothing outside the reconcile's cached probe: {others:?}");
+}
+
+#[test]
+fn a_jev_sweep_thread_reports_its_cpu_under_its_name() {
+    let w = world("jev-thread");
+    let stub = Arc::new(Stub::default());
+    let (sweeper, seen) = recording_sweeper();
+    let wire = wire(&w, &stub, Executor::Off).with_jev_sweeper(sweeper);
+    let before = ah_engine::threads::exited().get("ah-dswire-jev").map_or(0, |e| e.0);
+    wire.jev.queue(&["ws-1".to_string()]);
+    wire.run_jev();
+    let t = Instant::now();
+    while seen.lock().unwrap().is_empty() && t.elapsed() < Duration::from_secs(5) {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    while ah_engine::threads::exited().get("ah-dswire-jev").map_or(0, |e| e.0) == before && t.elapsed() < Duration::from_secs(5) {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(seen.lock().unwrap().len(), 1, "the sweep ran once");
+    assert_eq!(ah_engine::threads::exited().get("ah-dswire-jev").map_or(0, |e| e.0), before + 1, "the sweep's thread is counted when it ends");
 }
 
 #[test]
@@ -1249,6 +1318,7 @@ fn dswire_cpu_under_a_synthetic_load() {
     std::thread::sleep(Duration::from_secs(3)); // warm-up
     let line = w.state.join("devswarm-line.json");
     let ino = |p: &Path| std::fs::metadata(p).ok().map(|m| (std::os::unix::fs::MetadataExt::ino(&m), m.modified().ok()));
+    let work0 = ah_engine::threads::work();
     let (c0, t0) = (cpu_s(), Instant::now());
     let (mut prev, mut writes) = (ino(&line), 0u64);
     while t0.elapsed() < Duration::from_secs(20) {
@@ -1264,6 +1334,7 @@ fn dswire_cpu_under_a_synthetic_load() {
     load.join().unwrap();
     stop.store(true, Ordering::SeqCst);
     h.join().unwrap();
+    print_work_since("BENCH", &work0);
     eprintln!("BENCH cpu={:.2}% of one core over {wall:.1} s, reconciles={writes} ({:.2}/s)", 100.0 * cpu / wall, writes as f64 / wall);
 }
 
@@ -1471,9 +1542,13 @@ fn drive(tag: &str, n: usize, warm: Duration, window: Duration) -> (f64, f64, f6
     drop(c);
     let load_stop = Arc::new(AtomicBool::new(false));
     let (ls, home, wts2) = (load_stop.clone(), w.home.clone(), wts.clone());
+    // the load generator's own CPU (the stand-in for sessions and companions, not the engine's), so it can be taken off the process total
+    let load_cpu = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let lc = load_cpu.clone();
     let load = std::thread::spawn(move || {
         let mut tick = 0u64;
         while !ls.load(Ordering::SeqCst) {
+            lc.store(ah_engine::limits::thread_cpu_us(), Ordering::Relaxed);
             for (i, wt) in &wts2 {
                 if tick % 10 == (*i as u64) % 10 {
                     let p = facts::transcript_path(&home, wt.to_str().unwrap(), &format!("s{i}"));
@@ -1514,12 +1589,40 @@ fn drive(tag: &str, n: usize, warm: Duration, window: Duration) -> (f64, f64, f6
         m
     };
     let (c0, r0, k0, t0, p0) = (cpu_of(&own), wire.reconciles(), watching::work::snapshot(), Instant::now(), per_thread(&own));
-    std::thread::sleep(window);
+    let work0 = ah_engine::threads::work();
+    let exited0 = ah_engine::threads::exited();
+    let (proc0, load0) = (ah_engine::limits::process_cpu_secs(), load_cpu.load(Ordering::Relaxed));
+    // the scheduler's safety-net job runs one periodic reconcile every `devswarm_rt.reconcile_ms` on a thread of its own, which exits
+    // with it; the window is shorter than that interval, so the runs are spread `periodic_runs_per_window` times over the window
+    let runs = b_periodic_runs();
+    let mut fired = 0u32;
+    while t0.elapsed() < window {
+        let next = window.mul_f64((fired as f64 + 1.0) / (runs as f64 + 1.0));
+        std::thread::sleep(next.saturating_sub(t0.elapsed()).min(window.saturating_sub(t0.elapsed())));
+        if fired < runs && t0.elapsed() >= next {
+            let wr = wire.clone();
+            std::thread::Builder::new()
+                .name("ah-schedule-devswarm_reconcile".into())
+                .spawn(move || drop(wr.reconcile(Cause::Periodic)))
+                .unwrap()
+                .join()
+                .unwrap();
+            fired += 1;
+        }
+    }
     for (name, v) in per_thread(&own) {
         eprintln!("SCALE thread {name}: {:.3}% of one core", 100.0 * (v - p0.get(&name).copied().unwrap_or(0.0)) / t0.elapsed().as_secs_f64());
     }
     eprintln!("SCALE work: {:?}", watching::work::snapshot().iter().zip(k0.iter()).map(|(a, b)| (a.0, a.1 - b.1)).collect::<Vec<_>>());
-    let (cpu, wall, rec) = (cpu_of(&own) - c0, t0.elapsed().as_secs_f64(), wire.reconciles() - r0);
+    // the whole process, minus the load generator: threads that were born and ended inside the window count too
+    let (proc1, load1) = (ah_engine::limits::process_cpu_secs(), load_cpu.load(Ordering::Relaxed));
+    let (cpu, wall, rec) = ((proc1 - proc0) - (load1.saturating_sub(load0)) as f64 / 1e6, t0.elapsed().as_secs_f64(), wire.reconciles() - r0);
+    print_work_since("SCALE", &work0);
+    for (n, (c, us)) in ah_engine::threads::exited() {
+        let (c0, us0) = exited0.get(&n).copied().unwrap_or((0, 0));
+        eprintln!("SCALE exited {n}: {} threads, {:.1} ms CPU", c - c0, (us - us0) as f64 / 1000.0);
+    }
+    eprintln!("SCALE own-live-threads cpu={:.3}s, process-minus-load cpu={cpu:.3}s, periodic runs fired={fired}", cpu_of(&own) - c0);
     let wakes = watching::work::snapshot().iter().find(|(k, _)| *k == "wakes").map_or(0, |x| x.1) - k0.iter().find(|(k, _)| *k == "wakes").map_or(0, |x| x.1);
     let rss_mb = ah_engine::limits::rss_kb() as f64 / 1024.0;
     load_stop.store(true, Ordering::SeqCst);
@@ -1527,6 +1630,12 @@ fn drive(tag: &str, n: usize, warm: Duration, window: Duration) -> (f64, f64, f6
     stop.store(true, Ordering::SeqCst);
     h.join().unwrap();
     (100.0 * cpu / wall, rss_mb, rss_mb - rss_before, rec as f64 / wall, wakes as f64 / wall)
+}
+
+/// How many periodic reconciles the scale window carries (`devswarm_scale.periodic_runs_per_window` in tests/budgets.toml).
+fn b_periodic_runs() -> u32 {
+    let b: toml::Table = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/budgets.toml")).unwrap().parse().unwrap();
+    b["devswarm_scale"]["periodic_runs_per_window"].as_integer().unwrap() as u32
 }
 
 #[test]

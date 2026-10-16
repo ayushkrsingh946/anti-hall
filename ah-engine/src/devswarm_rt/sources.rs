@@ -346,7 +346,7 @@ impl ReadCache {
             && c.sig == sig
         {
             c.epoch = epoch;
-            PROBE_CACHE_HITS.fetch_add(1, Ordering::Relaxed);
+            count_hit();
             return Some(c.val.clone());
         }
         let b = std::fs::read(p).ok()?;
@@ -366,7 +366,7 @@ impl ReadCache {
             && c.sig == sig
         {
             c.epoch = epoch;
-            PROBE_CACHE_HITS.fetch_add(1, Ordering::Relaxed);
+            count_hit();
             return c.val.clone();
         }
         let val = crate::dswire::facts::descriptor_at(p);
@@ -391,10 +391,61 @@ pub static PROBE_FILES_READ: std::sync::atomic::AtomicU64 = std::sync::atomic::A
 /// See [`PROBE_FILES_READ`].
 pub static PROBE_BYTES_READ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
+type Attr = (Option<&'static str>, Option<&'static str>);
+
+thread_local! {
+    /// (site, cause) the probe reads of this thread are attributed to; `None` is the default label from the defaults.
+    static WHERE: std::cell::Cell<Attr> = std::cell::Cell::default();
+}
+
+/// Restores the previous read attribution when dropped.
+pub struct WhereGuard(Attr);
+
+impl Drop for WhereGuard {
+    fn drop(&mut self) {
+        WHERE.with(|w| w.set(self.0));
+    }
+}
+
+/// Attribute the probe reads of this thread to `site` (the code path asking) until the guard drops; the cause is kept.
+pub fn at_site(site: &'static str) -> WhereGuard {
+    WHERE.with(|w| {
+        let old = w.get();
+        w.set((Some(site), old.1));
+        WhereGuard(old)
+    })
+}
+
+/// Attribute the probe reads of this thread to `cause` (why the run happens) until the guard drops, unless one is already set.
+pub fn for_cause(cause: &'static str) -> WhereGuard {
+    WHERE.with(|w| {
+        let old = w.get();
+        if old.1.is_none() {
+            w.set((old.0, Some(cause)));
+        }
+        WhereGuard(old)
+    })
+}
+
+fn labels() -> (&'static str, &'static str) {
+    let (s, c) = WHERE.with(|w| w.get());
+    (s.unwrap_or_else(|| defaults::text("devswarm_wire.probe_site_default")), c.unwrap_or_else(|| defaults::text("devswarm_wire.probe_cause_default")))
+}
+
 /// Count one file read of `n` bytes by a probe.
 pub fn count_read(n: usize) {
     PROBE_FILES_READ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     PROBE_BYTES_READ.fetch_add(n as u64, std::sync::atomic::Ordering::Relaxed);
+    let (site, cause) = labels();
+    crate::threads::tally(&format!("probe_reads.{site}.{cause}"), 1);
+    crate::threads::tally(&format!("probe_bytes.{site}.{cause}"), n as u64);
+}
+
+/// Count one read answered from the read cache.
+fn count_hit() {
+    PROBE_CACHE_HITS.fetch_add(1, Ordering::Relaxed);
+    let (site, cause) = labels();
+    crate::threads::tally(&format!("probe_hits.{site}.{cause}"), 1);
 }
 
 impl FsProbe {

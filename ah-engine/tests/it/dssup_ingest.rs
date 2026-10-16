@@ -862,3 +862,78 @@ fn the_ingest_verb_is_read_only_open_to_every_role_and_names_the_owner_and_the_p
     // nothing is running at shutdown: joining the drain threads is immediate
     assert!(ah_engine::dssup::ingest::join_all());
 }
+
+// ---- a repository nested in another repository (no Node needed) -------------------------------------------------------------
+
+/// `outer/` and `outer/inner/`, each an independent repository with one commit (the `~/Projects/tesla` / `tesla-docker` shape).
+fn nested(tag: &str) -> (TempDir, PathBuf, PathBuf, PathBuf) {
+    ah_engine::defaults::init().unwrap();
+    let t = TempDir::new(tag);
+    let root = std::fs::canonicalize(&t.0).unwrap();
+    let (home, outer, inner) = (root.join("home"), root.join("outer"), root.join("outer").join("inner"));
+    for d in [&home, &inner] {
+        std::fs::create_dir_all(d).unwrap();
+    }
+    for d in [&outer, &inner] {
+        git(&["init", "-q"], d);
+        git(&["commit", "-q", "--allow-empty", "-m", "init"], d);
+    }
+    (t, home, outer, inner)
+}
+
+fn descriptor(home: &Path, id: &str, repo_key: &str, worktree: &Path) {
+    let dir = home.join(".anti-hall/devswarm/workspaces");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join(format!("{id}.json")), json!({"id": id, "repoKey": repo_key, "worktreePath": worktree, "sessionId": "s"}).to_string()).unwrap();
+}
+
+fn ingest_log(home: &Path) -> String {
+    std::fs::read_to_string(home.join(ah_engine::defaults::text("devswarm_ingest.log_file"))).unwrap_or_default()
+}
+
+#[test]
+fn an_independent_repository_nested_in_another_is_its_own_project() {
+    // live 2026-10-16: tesla-docker (its own .git directory) inside ~/Projects/tesla (also a repository) was never drained: the
+    // identity resolver deferred "git-superproject" and the drain dropped the project without a word.
+    let (_t, home, outer, inner) = nested("ingest-nested");
+    let p = Project::resolve(inner.to_str().unwrap()).expect("a nested independent repository resolves");
+    assert_eq!(p.worktree, inner.to_string_lossy(), "rooted at the inner checkout, not the outer one");
+    let o = Project::resolve(outer.to_str().unwrap()).unwrap();
+    assert_ne!(o.repo_key, p.repo_key);
+    // registered, it is found with no heartbeat and no explicit setting
+    descriptor(&home, &p.workspace_id, &p.repo_key, &inner);
+    let t2 = TempDir::new("ingest-nested-state");
+    let found = ah_engine::dssup::ingest::discover(&home, &t2.0, "", now());
+    assert_eq!(found.iter().map(|f| f.repo_key.as_str()).collect::<Vec<_>>(), [p.repo_key.as_str()], "{found:?}");
+}
+
+#[test]
+fn a_dropped_path_is_logged_once_with_its_reason() {
+    ah_engine::defaults::init().unwrap();
+    let t = TempDir::new("ingest-drops");
+    let home = std::fs::canonicalize(&t.0).unwrap();
+    let plain = home.join("plain");
+    std::fs::create_dir_all(&plain).unwrap();
+    let state = home.join("state");
+    let explicit = plain.to_str().unwrap();
+    for _ in 0..3 {
+        assert!(ah_engine::dssup::ingest::discover(&home, &state, explicit, now()).is_empty());
+    }
+    let log = ingest_log(&home);
+    let lines: Vec<&str> = log.lines().filter(|l| l.contains(explicit)).collect();
+    assert_eq!(lines.len(), 1, "one line per (path, reason), not one per pass: {log}");
+    assert!(lines[0].contains(ah_engine::defaults::text("devswarm_ingest.drop_reason_non_git")), "{}", lines[0]);
+}
+
+#[test]
+fn an_unregistered_project_skipped_by_require_registered_is_logged() {
+    let (_t, home, _outer, inner) = nested("ingest-unregistered");
+    let hb = home.join(".anti-hall/devswarm/heartbeats");
+    std::fs::create_dir_all(&hb).unwrap();
+    std::fs::write(hb.join("ingest-x.json"), json!({"ts": now() - 1000, "workingDir": inner}).to_string()).unwrap();
+    let state = home.join("state");
+    assert!(ah_engine::dssup::ingest::discover(&home, &state, "", now()).is_empty());
+    let log = ingest_log(&home);
+    let want = ah_engine::defaults::text("devswarm_ingest.drop_reason_unregistered");
+    assert!(log.lines().any(|l| l.contains(inner.to_str().unwrap()) && l.contains(want)), "{log}");
+}
