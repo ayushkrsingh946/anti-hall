@@ -107,6 +107,25 @@ fn both_allocators_start_serve_a_hook_and_report_memory_mode() {
 }
 
 #[test]
+fn status_memory_reports_a_live_ledger_that_balances() {
+    let serve = start("ledger", "jemalloc");
+    let (code, stdout, stderr) = engine(&serve.root, &serve.state, &["status", "--memory", "--json"], "");
+    assert_eq!(code, 0, "status --memory: {stderr}");
+    let status: Value = serde_json::from_str(&stdout).unwrap();
+    let l = &status["memory"]["ledger"];
+    assert!(l["footprint"].as_f64().unwrap() > 0.0, "{l}");
+    // zones count what they hold (a fresh daemon: well under 5 MB), not the ~56 MB of address space the default zone reserves
+    assert!(l["system_malloc_other_zones"].as_f64().unwrap() < 5.0, "{l}");
+    assert!(l["unaccounted"].is_number(), "{l}");
+    let h = &l["heap"];
+    let allocated = h["allocated"].as_i64().unwrap();
+    assert!(allocated > 0 && h["allocated_usable"].as_u64().unwrap() > 0, "{h}");
+    let held: i64 = h["holders"].as_array().unwrap().iter().map(|x| x["bytes"].as_i64().unwrap()).sum();
+    assert_eq!(held + h["other"].as_i64().unwrap(), allocated, "holders + other == allocated: {h}");
+    assert!(l["invariant"]["other_nonneg"].is_boolean() && l["invariant"]["overcount_by"].is_array(), "{l}");
+}
+
+#[test]
 fn scratch_serve_exits_when_parent_process_dies() {
     let (root, state) = scratch("parent-death");
     let mut parent = Command::new("sh")

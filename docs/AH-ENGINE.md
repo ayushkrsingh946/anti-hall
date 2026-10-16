@@ -326,6 +326,11 @@ transcript file. When the resident-set cap trips (`diagnostics.mem_snapshot`) th
 allocator statistics, thread count, each worker's interpreter and regex cache, the transcript caches and the platform memory map.
 `ah-engine status --memory` prints the live figures, the latest snapshot and a summary of the log (top events and checks by total
 resident-set growth; a check's row counts every request it took part in, so rows overlap). Nothing here changes a decision.
+`status --memory` also carries a live ledger under `memory.ledger`: the process tier in MB (footprint, jemalloc resident, the C-library
+zones' bytes in use, never the address space they reserve) and a heap tier in bytes (the counted Rust heap, `allocated`, against the named
+holders of the memory registry; `other` is what no holder names, `attributed_pct` the named share). `invariant.other_nonneg` is false, with
+the holders listed in `overcount_by`, when the holders sum past the heap by more than `mem.ledger_skew_bytes`. The `sys_reserved_*` fields of
+`mem.ndjson` rows are the zones' reserved address space (formerly `sys_allocated_*`); `sys_in_use_*` is the usage figure.
 
 Memory budgets (issues #21 and #158, defaults file `mem.toml`). Every long-lived in-memory holder (the shared regex cache, each worker's
 QuickJS interpreter, the transcript-tail cache, the config values leaked on purpose) registers with one registry in `src/mem` and gets a
