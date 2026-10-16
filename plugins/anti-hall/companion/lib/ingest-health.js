@@ -401,10 +401,61 @@ function monitorFaultBannerOnce(o) {
   return emit ? banner : null;
 }
 
+// ENGINE OWNERSHIP + PROJECT QUALIFICATION (live 2026-10-16: two Node ingest
+// units were installed while the engine already drained ingest — one for a
+// scratch clone an agent ran `devswarm.js send` in, one for a registered
+// project the engine had not discovered yet).
+//
+// engineOwnsIngest(home, opts) -> boolean. Reads the ownership marker ah-engine
+// writes (devswarm/ingest-owner.json, name and lifetime from the engine's
+// engine/defaults/devswarm_ingest.toml owner_file / owner_valid_ms):
+// {owner, pid, ts, validForMs}. True only while owner === 'engine' and the
+// marker is younger than its own validForMs (spans engine restarts; an engine
+// gone for longer hands installs back to Node). Missing/unreadable/malformed
+// = false, i.e. the pre-fix behaviour.
+function ingestOwnerPath(home) {
+  return path.join(devswarmRoot(home), 'ingest-owner.json');
+}
+function engineOwnsIngest(home, opts) {
+  const o = opts || {};
+  const now = Number.isFinite(o.now) ? o.now : Date.now();
+  const F = (o.io && o.io.fs) || fs;
+  try {
+    const m = JSON.parse(F.readFileSync(ingestOwnerPath(home), 'utf8'));
+    return !!m && m.owner === 'engine' && Number.isFinite(m.ts) && Number.isFinite(m.validForMs)
+      && now - m.ts <= m.validForMs;
+  } catch (_) { return false; }
+}
+
+// projectRegistered(home, repoKey, opts) -> boolean. A project qualifies for an
+// AUTOMATIC ingest install only when a registered workspace descriptor
+// (devswarm/workspaces/*.json, written by register / register-primary) carries
+// its repoKey — the same rule the engine's discovery applies. A scratch clone,
+// plugin checkout or any other git directory an agent merely worked in has no
+// descriptor. Unreadable directory = false (no automatic install on doubt).
+function projectRegistered(home, repoKey, opts) {
+  if (!repoKey) return false;
+  const F = (opts && opts.io && opts.io.fs) || fs;
+  const dir = path.join(devswarmRoot(home), 'workspaces');
+  let names;
+  try { names = F.readdirSync(dir); } catch (_) { return false; }
+  for (const n of names) {
+    if (!String(n).endsWith('.json')) continue;
+    try {
+      const d = JSON.parse(F.readFileSync(path.join(dir, n), 'utf8'));
+      if (d && d.repoKey === repoKey) return true;
+    } catch (_) { /* a torn descriptor names nothing */ }
+  }
+  return false;
+}
+
 module.exports = {
   HEARTBEAT_STALE_MS,
   ingestHeartbeatPath,
   ingestProjectLockPath,
+  ingestOwnerPath,
+  engineOwnsIngest,
+  projectRegistered,
   daemonHealth,
   buildStaleBanner,
   launchdDisabledLabel,

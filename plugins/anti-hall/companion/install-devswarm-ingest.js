@@ -2120,6 +2120,20 @@ function main() {
   try {
     validateArgs(args); // footgun fix: --help/-h or an unknown flag exits here, no install
     if (process.platform === 'win32') return windowsNoop();
+    // ENGINE OWNS INGEST (live 2026-10-16): the one choke point every caller
+    // (devswarm.js self-heal, doctor --repair, update heal, a manual run) passes
+    // through. While ah-engine's ownership marker says engine, install nothing:
+    // a Node unit would be a second consumer and would undo a retirement.
+    // --uninstall stays open. Fail-open to the pre-fix behaviour on any error.
+    if (!UNINSTALL) {
+      let owned = false;
+      try { owned = require('./lib/ingest-health.js').engineOwnsIngest(HOME); } catch (_) { owned = false; }
+      if (owned) {
+        say('ingest daemon not installed: the anti-hall engine owns the ingest drain (' + path.join(HOME, '.anti-hall', 'devswarm', 'ingest-owner.json') + '). Skipping install (no-op, exit 0).');
+        process.exit(0);
+        return;
+      }
+    }
     if (!fs.existsSync(SCRIPT)) { say(`error: ingest daemon script not found at ${SCRIPT}`); process.exit(1); return; }
     // The node binary baked into the unit is validated the same way the script is.
     // process.execPath is normally self-evidently present (it is the interpreter

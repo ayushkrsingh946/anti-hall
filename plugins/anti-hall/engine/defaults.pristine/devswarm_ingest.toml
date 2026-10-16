@@ -16,7 +16,7 @@ doc = "The words of devswarm_ingest.mode, in the order witness, engine."
 value = ["witness", "engine"]
 
 [devswarm_ingest.projects]
-doc = "Extra projects to drain, as paths of a git repository separated by the character in projects_separator (any worktree of it will do). Projects with a fresh Node ingest heartbeat and the ones an earlier run remembered are drained too."
+doc = "Extra projects to drain, as paths of a git repository separated by the character in projects_separator (any worktree of it will do). Projects of registered DevSwarm workspaces, projects with a fresh Node ingest heartbeat and the ones an earlier run remembered are drained too (those three only when they qualify, see require_registered)."
 value = ""
 
 [devswarm_ingest.projects_separator]
@@ -26,6 +26,28 @@ value = ":"
 [devswarm_ingest.remembered]
 doc = "The projects the engine has drained or found, a JSON list of paths, in the engine state directory. Nothing is ever removed from it."
 value = "devswarm-ingest-projects.json"
+
+[devswarm_ingest.require_registered]
+doc = "Drain only projects that DevSwarm registered: a project qualifies when a workspace descriptor (devswarm/workspaces/*.json) carries its repo key. A scratch clone, a plugin checkout or any other git directory an agent happened to work in never qualifies. Paths in devswarm_ingest.projects always qualify. The registered workspaces' worktrees are also a discovery source, so a new project is drained by the engine without a Node ingest unit."
+value = true
+
+[devswarm_ingest.owner_file]
+doc = "The ownership marker the engine writes in the DevSwarm state directory (devswarm/<this>): {owner, pid, ts, validForMs}. owner is a word of devswarm_ingest.mode_words. The Node ingest installer, the devswarm.js self-heal, doctor --repair and the update heal read it and install or heal no Node ingest unit while owner is engine and ts is younger than validForMs."
+value = "ingest-owner.json"
+
+[devswarm_ingest.owner_refresh_ms]
+doc = "How often the engine rewrites the ownership marker while it owns the drain."
+value = 60000
+min = 1000
+max = 86400000
+unit = "ms"
+
+[devswarm_ingest.owner_valid_ms]
+doc = "How long the ownership marker stays valid after its last write (written into the marker as validForMs). It spans engine restarts, so a restart window never lets Node reinstall a retired unit; an engine that is gone for longer hands installs back to Node."
+value = 3600000
+min = 60000
+max = 604800000
+unit = "ms"
 
 [devswarm_ingest.discover_ms]
 doc = "How often the engine looks for projects it does not drain yet."
