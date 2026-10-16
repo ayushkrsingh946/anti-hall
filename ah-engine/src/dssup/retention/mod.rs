@@ -191,6 +191,54 @@ enum Witness {
     Unavailable(String),
     /// There is no Node on this machine at all: the witness is decommissioned, not failing.
     Absent(String),
+    /// Not asked: nothing moved since the last comparison that agreed (see [`witness_seen`]).
+    Skipped,
+}
+
+/// Retention comparisons skipped because the store and its plan were unchanged since the last agreeing one (the `status --threads` work counters).
+pub static WITNESS_SKIPS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// What a store looks like to the witness: the size and modification time of its database and log, and a digest of the plan
+/// (candidate rows, per-partition counts, the choice) together with the settings the plan was made under.
+struct Seen {
+    stat: Vec<[i64; 2]>,
+    digest: String,
+    /// The last agreeing comparison saw exactly this, and is younger than `devswarm_sup.rt_witness_skip_max_ms`.
+    unchanged: bool,
+}
+
+impl Seen {
+    /// Remember this state as the last one Node agreed with.
+    fn remember(&self, ctx: &Ctx, hash: &str) {
+        let p = ctx.home.join(defaults::text("devswarm_sup.rt_witnessed_file"));
+        let mut m: serde_json::Map<String, Value> = std::fs::read_to_string(&p).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+        m.insert(hash.to_string(), json!({"stat": self.stat, "digest": self.digest, "at": ctx.now}));
+        if let Some(d) = p.parent() {
+            crate::discard::harmless(std::fs::create_dir_all(d)); // keep: a lost stamp only repeats a comparison
+        }
+        crate::discard::harmless(crate::atomic::write(&p, Value::Object(m).to_string())); // keep: same
+    }
+}
+
+fn witness_seen(ctx: &Ctx, hash: &str, s: &Settings, plan: &Plan, c: &Choice) -> Seen {
+    use std::os::unix::fs::MetadataExt;
+    let db = plan::db_path(ctx.home, hash);
+    let mut wal = db.as_os_str().to_os_string();
+    wal.push(defaults::text("devswarm_sup.rt_wal_suffix"));
+    let stat: Vec<[i64; 2]> = [db, PathBuf::from(wal)]
+        .iter()
+        .map(|p| std::fs::metadata(p).map_or([-1, -1], |m| [m.len() as i64, m.mtime() * 1_000_000_000 + m.mtime_nsec()]))
+        .collect();
+    let body = json!([cand_rows(plan), parts_json(plan), format!("{c:?}"), format!("{s:?}")]).to_string();
+    let digest: String = ring::digest::digest(&ring::digest::SHA256, body.as_bytes()).as_ref().iter().map(|b| format!("{b:02x}")).collect();
+    let max = defaults::num("devswarm_sup.rt_witness_skip_max_ms") as i64;
+    let last = std::fs::read_to_string(ctx.home.join(defaults::text("devswarm_sup.rt_witnessed_file")))
+        .ok()
+        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+        .and_then(|v| v.get(hash).cloned());
+    let unchanged = last
+        .is_some_and(|l| l["digest"] == json!(digest) && l["stat"] == json!(stat) && l["at"].as_i64().is_some_and(|at| ctx.now >= at && ctx.now - at < max));
+    Seen { stat, digest, unchanged }
 }
 
 fn ask_node(ctx: &Ctx, runner: &dyn Runner, hash: &str, s: &Settings, st: &OVal) -> Witness {
@@ -260,12 +308,20 @@ pub(super) fn one_store(ctx: &Ctx, runner: &dyn Runner, st: &mut OVal, s: &Setti
     };
     let (chosen, choice) = choose(&first, s, bytes_before);
     let require = super::setting(ctx.st, "devswarm_sup.set_rt_require_witness").as_bool().unwrap_or(true);
-    match ask_node(ctx, runner, hash, s, st) {
+    let seen = witness_seen(ctx, hash, s, &first, &choice);
+    let witness = if seen.unchanged { Witness::Skipped } else { ask_node(ctx, runner, hash, s, st) };
+    match witness {
+        // the same store (size and modification time of its database and log) gave the same plan, and Node agreed with that plan
+        // not long ago: Node would say the same again, so it is not asked (a quiet store cost one Node run per sweep)
+        Witness::Skipped => {
+            WITNESS_SKIPS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
         Witness::Said(v) => {
             if let Some(why) = disagreement(&first, &choice, &v) {
                 witness_log(ctx, &json!({"ts": ctx.now, "duty": "retention", "store": hash, "match": false, "detail": why}));
                 return Ended::Held(why);
             }
+            seen.remember(ctx, hash);
             witness_log(
                 ctx,
                 &json!({"ts": ctx.now, "duty": "retention", "store": hash, "match": true, "candidates": first.cands.len(), "chosen": choice.age + choice.size}),

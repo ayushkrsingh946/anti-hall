@@ -93,8 +93,115 @@ pub struct Git<'a> {
     pub runner: &'a dyn Runner,
 }
 
+/// Git calls started and git calls answered from memory since the process started (the `status --threads` work counters).
+pub static GIT_RUNS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// See [`GIT_RUNS`].
+pub static GIT_CACHE_HITS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Modification time (ns) and size of each file a call's answer depends on; `None` for a file that does not exist.
+type GitSig = Vec<Option<(i64, u64)>>;
+
+/// One remembered git answer.
+struct GitCached {
+    sig: GitSig,
+    result: RunResult,
+    at: i64,
+}
+
+static GIT_CACHE: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, GitCached>>> = std::sync::LazyLock::new(Default::default);
+
+/// What a git call reads, which decides the files its remembered answer depends on and how long it is kept.
+#[derive(Clone, Copy, PartialEq)]
+enum GitClass {
+    /// `git status`.
+    Status,
+    /// `git rev-parse HEAD`.
+    Ref,
+    /// The merge and pushed proofs.
+    Proof,
+}
+
+impl GitClass {
+    /// The settings of the class that name the paths in the worktree, in its git directory and in the common directory that its answer
+    /// depends on.
+    fn files(self) -> [&'static str; 3] {
+        [self.wt_key(), self.gitdir_key(), self.common_key()]
+    }
+    fn wt_key(self) -> &'static str {
+        match self {
+            GitClass::Status => "devswarm_wire.git_cache_status_wt",
+            GitClass::Ref => "devswarm_wire.git_cache_ref_wt",
+            GitClass::Proof => "devswarm_wire.git_cache_proof_wt",
+        }
+    }
+    fn gitdir_key(self) -> &'static str {
+        match self {
+            GitClass::Status => "devswarm_wire.git_cache_status_gitdir",
+            GitClass::Ref => "devswarm_wire.git_cache_ref_gitdir",
+            GitClass::Proof => "devswarm_wire.git_cache_proof_gitdir",
+        }
+    }
+    fn common_key(self) -> &'static str {
+        match self {
+            GitClass::Status => "devswarm_wire.git_cache_status_common",
+            GitClass::Ref => "devswarm_wire.git_cache_ref_common",
+            GitClass::Proof => "devswarm_wire.git_cache_proof_common",
+        }
+    }
+    /// How long the answer is kept, in ms; a dirty `status` has its own, longer limit.
+    fn max_ms(self, dirty: bool) -> i64 {
+        (match (self, dirty) {
+            (GitClass::Status, false) => defaults::num("devswarm_wire.git_cache_status_max_ms"),
+            (GitClass::Status, true) => defaults::num("devswarm_wire.git_cache_status_dirty_max_ms"),
+            (GitClass::Ref, _) => defaults::num("devswarm_wire.git_cache_ref_max_ms"),
+            (GitClass::Proof, _) => defaults::num("devswarm_wire.git_cache_proof_max_ms"),
+        }) as i64
+    }
+    /// Whether an answer that ended with `status` is a settled one worth remembering (`git merge-base --is-ancestor` answers a proven "no"
+    /// with 1); a failure (a locked index, a missing repository) is read again at the next call.
+    fn settled(self, status: Option<i32>) -> bool {
+        let key = match self {
+            GitClass::Proof => "devswarm_wire.git_cache_proof_exit_codes",
+            GitClass::Status | GitClass::Ref => "devswarm_wire.git_cache_exit_codes",
+        };
+        status.is_some_and(|s| defaults::list(key).iter().any(|c| c.parse::<i32>().ok() == Some(s)))
+    }
+    fn tag(self) -> char {
+        match self {
+            GitClass::Status => 's',
+            GitClass::Ref => 'r',
+            GitClass::Proof => 'p',
+        }
+    }
+}
+
+/// The directory that holds the refs of a worktree's repository: the linked worktree's `commondir`, else its git directory.
+fn common_dir(gitdir: &Path) -> PathBuf {
+    let spec = defaults::text("devswarm_wire.git_commondir_file");
+    match std::fs::read_to_string(gitdir.join(spec)).ok().map(|t| t.trim().to_string()).filter(|t| !t.is_empty()) {
+        Some(rel) => gitdir.join(rel),
+        None => gitdir.to_path_buf(),
+    }
+}
+
+/// The signature of what a `class` of git call reads, `None` when the worktree's git directory is unknown (then nothing is remembered).
+fn git_sig(wt: &str, class: GitClass) -> Option<GitSig> {
+    use std::os::unix::fs::MetadataExt;
+    let gitdir = git_dir(wt)?;
+    let common = common_dir(&gitdir);
+    let stat = |p: PathBuf| std::fs::metadata(p).ok().map(|m| (m.mtime() * 1_000_000_000 + m.mtime_nsec(), m.len()));
+    let mut sig = GitSig::new();
+    for (key, base) in class.files().into_iter().zip([Path::new(wt).to_path_buf(), gitdir, common]) {
+        for f in defaults::list(key) {
+            sig.push(stat(base.join(f)));
+        }
+    }
+    Some(sig)
+}
+
 impl Git<'_> {
     fn run(&self, wt: &str, args: &[&str]) -> RunResult {
+        GIT_RUNS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let mut a = vec!["-C".to_string(), wt.to_string()];
         a.extend(args.iter().map(|s| s.to_string()));
         self.runner.run(&RunSpec {
@@ -105,12 +212,37 @@ impl Git<'_> {
             ..RunSpec::default()
         })
     }
+
+    /// [`Self::run`], answered from memory while the files a `class` of call depends on are unchanged and the answer is younger than its
+    /// limit (`devswarm_wire.git_cache_<class>_max_ms`; a dirty `status` has its own, longer limit, since only a commit or an index
+    /// write cleans a tree and both move the signature). A call that timed out, failed to start, ended with an exit status the class does not settle on, or has no signature is never remembered.
+    fn run_cached(&self, wt: &str, class: GitClass, args: &[&str]) -> RunResult {
+        let Some(sig) = git_sig(wt, class) else { return self.run(wt, args) };
+        let key = format!("{}\0{wt}\0{}", class.tag(), args.join("\0"));
+        let now = crate::health::now_ms() as i64;
+        if let Some(c) = GIT_CACHE.lock().unwrap_or_else(|e| e.into_inner()).get(&key) {
+            let dirty = class == GitClass::Status && !c.result.stdout.trim().is_empty();
+            if c.sig == sig && now - c.at < class.max_ms(dirty) {
+                GIT_CACHE_HITS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                return c.result.clone();
+            }
+        }
+        let result = self.run(wt, args);
+        if !result.timed_out && !result.missing && class.settled(result.status) {
+            let mut cache = GIT_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+            if cache.len() >= defaults::num("devswarm_wire.git_cache_max_entries") as usize {
+                cache.clear(); // bounded: the next reconcile refills it
+            }
+            cache.insert(key, GitCached { sig, result: result.clone(), at: now });
+        }
+        result
+    }
     /// `git rev-parse HEAD`.
     pub fn head(&self, wt: &str) -> Option<String> {
         if !Path::new(wt).exists() {
             return None;
         }
-        let r = self.run(wt, &["rev-parse", "HEAD"]);
+        let r = self.run_cached(wt, GitClass::Ref, &["rev-parse", "HEAD"]);
         let h = r.stdout.trim().to_string();
         (r.ok && !h.is_empty()).then_some(h)
     }
@@ -121,15 +253,23 @@ impl Git<'_> {
         }
         let mut args: Vec<&str> = defaults::list("devswarm_act.git_pushed_args");
         args.push(head);
-        let r = self.run(wt, &args);
+        let r = self.run_cached(wt, GitClass::Proof, &args);
         r.ok.then(|| !r.stdout.trim().is_empty())
     }
     /// `git status --porcelain`: `(clean, reason)` as Node's `cleanFact`.
     pub fn clean(&self, wt: &str) -> (Option<bool>, Option<&'static str>) {
+        self.clean_with(wt, true)
+    }
+    /// [`Self::clean`] asked of git itself, never from memory: an owner's own request reads the tree as it is now.
+    pub fn clean_now(&self, wt: &str) -> (Option<bool>, Option<&'static str>) {
+        self.clean_with(wt, false)
+    }
+    fn clean_with(&self, wt: &str, remembered: bool) -> (Option<bool>, Option<&'static str>) {
         if !Path::new(wt).exists() {
             return (None, Some("worktree-missing"));
         }
-        let r = self.run(wt, &["status", "--porcelain"]);
+        let args = ["status", "--porcelain"];
+        let r = if remembered { self.run_cached(wt, GitClass::Status, &args) } else { self.run(wt, &args) };
         if !r.ok {
             return (None, Some("git-status-failed"));
         }
@@ -141,17 +281,17 @@ impl Git<'_> {
         if !Path::new(wt).exists() {
             return (None, "unproven".into());
         }
-        let s = self.run(wt, &["symbolic-ref", "refs/remotes/origin/HEAD"]);
+        let s = self.run_cached(wt, GitClass::Proof, &["symbolic-ref", "refs/remotes/origin/HEAD"]);
         let sym = s.stdout.trim().to_string();
         let Some(short) = s.ok.then(|| sym.strip_prefix("refs/remotes/").filter(|r| r.starts_with("origin/")).map(str::to_string)).flatten() else {
             return (None, "default-branch-unknown".into());
         };
         let full = format!("refs/remotes/{short}");
-        let v = self.run(wt, &["rev-parse", "--verify", "--quiet", &format!("{full}^{{commit}}")]);
+        let v = self.run_cached(wt, GitClass::Proof, &["rev-parse", "--verify", "--quiet", &format!("{full}^{{commit}}")]);
         if !v.ok {
             return (None, "unproven".into());
         }
-        let r = self.run(wt, &["merge-base", "--is-ancestor", head, &full]);
+        let r = self.run_cached(wt, GitClass::Proof, &["merge-base", "--is-ancestor", head, &full]);
         match r.status {
             Some(0) => (Some(true), format!("git:{short}")),
             Some(1) => (Some(false), "git:not-ancestor".into()),

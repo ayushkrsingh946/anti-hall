@@ -142,7 +142,7 @@ impl RtLive<'_> {
         let Some(app) = app else { return json!({"appReadable": false}) };
         let Some(b) = app.builders.iter().find(|b| b.id == id) else { return json!({"appReadable": true, "found": false}) };
         let wt = b.worktree.clone().unwrap_or_default();
-        let (clean, why) = self.git().clean(&wt);
+        let (clean, why) = self.git().clean_now(&wt);
         json!({
             "appReadable": true, "found": true, "builderType": b.builder_type, "archived": archived_flags(b), "isPrimary": is_primary(b),
             "cwd": b.worktree, "primaryCwd": Self::primary_cwd(app, &b.repo), "clean": clean, "cleanReason": why,

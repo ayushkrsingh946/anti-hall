@@ -48,8 +48,8 @@ doc = "The -t of every monitor call: it long-polls at most this long, then exits
 value = { type = "number", section = "devswarm", key = "monitorTimeoutSec", env = "ANTIHALL_DEVSWARM_MONITOR_TIMEOUT_SEC", default = 30 }
 
 [devswarm_ingest.interval_sec]
-doc = "The -i of every monitor call, and the least time between two calls after a successful one (Node: DEFAULT_MONITOR_INTERVAL_SEC)."
-value = 3
+doc = "The -i of every monitor call, and the least time between two calls after a successful one (Node: DEFAULT_MONITOR_INTERVAL_SEC was 3). Each call is a Node process of the DevSwarm CLI whose CPU (about 70 ms) is its start-up, not its polling, so the pause is what bounds the cost: 30 s halves the calls per minute, and a native message waits at most this long longer (the native queue is the discouraged channel; the mesh is not affected)."
+value = 30
 min = 1
 max = 3600
 unit = "s"

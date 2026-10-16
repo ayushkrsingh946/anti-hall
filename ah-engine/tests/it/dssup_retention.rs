@@ -376,6 +376,35 @@ fn a_store_that_changes_during_the_comparison_is_left_alone() {
 }
 
 #[test]
+fn a_quiet_store_is_not_put_to_node_again_until_it_or_its_plan_changes() {
+    if !have_node_sqlite() {
+        return;
+    }
+    let c = generate("rt-quiet", 44, "small");
+    // nothing is old enough to prune, so the plan is the same at every later time; only the store itself can change it
+    let env = env_of("3650", "5", "100", "true");
+    let h = copy_home(&c, "quiet");
+    let r = rewriting(|v| v);
+    let hour = 3_600_000;
+    let asked = |r: &Rewriting| *r.seen.lock().unwrap();
+    // each run is past the store's revisit interval, so the sweep reaches the store every time
+    for i in 0..5 {
+        engine_duty(&h, c.now + i * 7 * hour, &env, &r);
+    }
+    assert_eq!(asked(&r), 1, "the store and its plan never moved, so Node is asked once, not on every run");
+    // a store that moved is compared again
+    let conn = rusqlite::Connection::open(plan::db_path(&h, HASH)).unwrap();
+    conn.execute("UPDATE reader_cursors SET value = value / 2 WHERE ns = 'store'", []).unwrap();
+    drop(conn);
+    engine_duty(&h, c.now + 5 * 7 * hour, &env, &r);
+    assert_eq!(asked(&r), 2, "a changed store is put to Node again");
+    // the comparison also lapses on its own (devswarm_sup.rt_witness_skip_max_ms)
+    let week = 7 * 24 * hour;
+    engine_duty(&h, c.now + 5 * 7 * hour + week + hour, &env, &r);
+    assert_eq!(asked(&r), 3, "an old agreement is not trusted for ever");
+}
+
+#[test]
 fn a_row_that_stopped_being_eligible_after_the_plan_is_not_tombstoned() {
     if !have_node_sqlite() {
         return;

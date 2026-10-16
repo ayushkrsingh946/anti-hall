@@ -362,7 +362,7 @@ fn the_drain_imports_a_batch_loss_free_and_idempotently_and_matches_nodes_rows()
     assert!(wal::pending(&wal::wal_path(&dev(&x), "monitor", &x.project.repo_key)).unwrap().is_empty());
     let calls = std::fs::read_to_string(&x.log).unwrap();
     let first = calls.lines().next().unwrap();
-    assert_eq!(first, format!("{}|workspace monitor -i 3 -t 30|unset", x.main.display()), "{calls}");
+    assert_eq!(first, format!("{}|workspace monitor -i {} -t 30|unset", x.main.display(), ah_engine::defaults::num("devswarm_ingest.interval_sec")), "{calls}");
     // the same batch again (a re-observed in-flight batch) inserts nothing; two different ones add
     enqueue(&x, "2", a);
     d.step(&sys);

@@ -7585,6 +7585,23 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_wire.executor_auto` | `auto` |  |  | The executor word that follows devswarm_sup.mode (poke and escalate only; auto-archive has no auto word). |
 | `devswarm_wire.executor_words` | `engine, node, off` |  |  | The words of the executor settings, in the order engine, node, off. Anything else reads as node (the engine stands down). |
 | `devswarm_wire.git_bin` | `git` |  |  | The git executable the fact readers run. |
+| `devswarm_wire.git_cache_exit_codes` | `0` |  |  | The exit statuses of `git status` and `git rev-parse HEAD` that are an answer worth remembering; any other (a locked index, a missing repository) is asked again at the next call. |
+| `devswarm_wire.git_cache_max_entries` | `4096` |  |  | Most git answers remembered at once (workspace x call); past it the memory is cleared and refilled by the next reconcile. |
+| `devswarm_wire.git_cache_proof_common` | `packed-refs, refs/remotes/origin, refs/remotes/origin/HEAD` |  |  | Files of the repository's common directory whose change makes a remembered merge or pushed proof stale (a fetch moves the remote branches; the top directory of a remote catches a ref written in it). |
+| `devswarm_wire.git_cache_proof_exit_codes` | `0, 1` |  |  | The exit statuses of the merge and pushed proofs that are an answer worth remembering: 0, and 1 (`git merge-base --is-ancestor` answers a proven 'not merged' with it); any other is asked again at the next call. |
+| `devswarm_wire.git_cache_proof_gitdir` | `HEAD, logs/HEAD` |  |  | Files of the worktree's git directory whose change makes a remembered merge or pushed proof stale. |
+| `devswarm_wire.git_cache_proof_max_ms` | `300000` |  | ms | The longest a remembered merge or pushed proof is kept while its files are unchanged (a remote branch in a sub-directory moves no signature file; a later merge is then seen at most this late). |
+| `devswarm_wire.git_cache_proof_wt` | `` |  |  | Paths in the worktree whose change makes a remembered merge or pushed proof stale. |
+| `devswarm_wire.git_cache_ref_common` | `` |  |  | Files of the repository's common directory whose change makes a remembered HEAD stale. |
+| `devswarm_wire.git_cache_ref_gitdir` | `HEAD, logs/HEAD` |  |  | Files of the worktree's git directory whose change makes a remembered HEAD stale. |
+| `devswarm_wire.git_cache_ref_max_ms` | `600000` |  | ms | The longest a remembered HEAD is kept while its files are unchanged (a safety net for a repository that keeps no reflog). |
+| `devswarm_wire.git_cache_ref_wt` | `` |  |  | Paths in the worktree whose change makes a remembered HEAD stale. |
+| `devswarm_wire.git_cache_status_common` | `` |  |  | Files of the repository's common directory whose change makes a remembered `git status` stale. |
+| `devswarm_wire.git_cache_status_dirty_max_ms` | `600000` |  | ms | The longest a remembered DIRTY `git status` is kept while its files are unchanged. A dirty tree turns clean only by staging, a commit or a checkout, each of which moves a signature file, so this is a safety net and the answer errs towards 'not clean'. |
+| `devswarm_wire.git_cache_status_gitdir` | `index, HEAD, logs/HEAD` |  |  | Files of the worktree's git directory whose change makes a remembered `git status` stale (staging writes the index; a commit or checkout moves HEAD and appends to its reflog). |
+| `devswarm_wire.git_cache_status_max_ms` | `120000` |  | ms | The longest a remembered CLEAN `git status` is kept while its files are unchanged. A clean tree turns dirty by an edit that moves no git file, so this is the staleness bound of the clean answer. |
+| `devswarm_wire.git_cache_status_wt` | `.` |  |  | Paths in the worktree whose change makes a remembered `git status` stale ('.' is the top directory: a file added or removed there). Edits to tracked files are caught by the age limits below, since they move no git file until staged. |
+| `devswarm_wire.git_commondir_file` | `commondir` |  |  | The file in a linked worktree's git directory that names the repository's common directory (where the refs and packed-refs live). |
 | `devswarm_wire.git_dir_file` | `2 entries` |  |  | The file a linked worktree has in place of a .git directory, and the prefix of its one line. |
 | `devswarm_wire.git_timeout_ms` | `4000` |  | ms | Time limit of each git call that reads a workspace's facts (HEAD, status, merge proof). A call over the limit is killed and the fact counts as not proven. |
 | `devswarm_wire.id_flag` | `--id` |  |  | The flag that names the workspace. |
@@ -7986,6 +8003,8 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_sup.rt_tmp_suffix` | `.tmp` |  |  | The suffix of the temporary file an archive file is written to before it is renamed into place. |
 | `devswarm_sup.rt_vacuum_ratio` | `0.2` |  |  | Reclaim space (VACUUM) when the freelist, or the bytes tombstoned this run, exceed this share of the file; always when enforcing the size limit. |
 | `devswarm_sup.rt_wal_suffix` | `-wal` |  |  | The suffix of a sqlite file's write-ahead log. |
+| `devswarm_sup.rt_witness_skip_max_ms` | `604800000` |  | ms | How long an agreeing retention comparison of a store stays valid while the store (database and log size and modification time) and the engine's plan for it are unchanged. Past it the store is compared with Node again; the plan of an unchanged store can still change with time alone (rows get old enough), and then its digest differs and Node is asked at once. |
+| `devswarm_sup.rt_witnessed_file` | `.anti-hall/logs/devswarm-retention-witnessed.json` |  |  | The state of each store the last time Node's plan agreed with the engine's (a JSON object store -> database and log size and modification time, plan digest, ms), relative to the home directory. A store in the same state is not compared again before rt_witness_skip_max_ms. |
 | `devswarm_sup.set_app_sync` | `5 entries` |  |  | Sync the DevSwarm desktop app's state (archived flags, titles, message gaps) into anti-hall every tick. Node: devswarm.appSync. |
 | `devswarm_sup.set_child_gate_days` | `5 entries` |  |  | Days a per-session child-gate state file is kept before the housekeeping sweep removes it. Node: devswarm.childGateRetentionDays. A value that is not a positive number reads as the default. |
 | `devswarm_sup.set_dry_run_retention` | `5 entries` |  |  | Dry run of the native retention: it plans and compares with Node's planner, logs what it would tombstone and writes nothing (no archive, no tombstone, no state). |
@@ -8770,7 +8789,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_ingest.hb_prefix` | `ingest-` |  |  | The start of a drain's heartbeat file name (followed by the repo key and .json). Node's file. |
 | `devswarm_ingest.hc_cache` | `hivecontrol-path.json` |  |  | The path cache the installer writes, relative to the DevSwarm state directory. |
 | `devswarm_ingest.hc_cache_key` | `hivecontrol` |  |  | The key of the path cache that holds the executable. |
-| `devswarm_ingest.interval_sec` | `3` |  | s | The -i of every monitor call, and the least time between two calls after a successful one (Node: DEFAULT_MONITOR_INTERVAL_SEC). |
+| `devswarm_ingest.interval_sec` | `30` |  | s | The -i of every monitor call, and the least time between two calls after a successful one (Node: DEFAULT_MONITOR_INTERVAL_SEC was 3). Each call is a Node process of the DevSwarm CLI whose CPU (about 70 ms) is its start-up, not its polling, so the pause is what bounds the cost: 30 s halves the calls per minute, and a native message waits at most this long longer (the native queue is the discouraged channel; the mesh is not affected). |
 | `devswarm_ingest.js_object_text` | `[object Object]` |  |  | What JavaScript's String() makes of an object. |
 | `devswarm_ingest.json_suffix` | `.json` |  |  | The suffix of a JSON file. |
 | `devswarm_ingest.last_resort_hex` | `16` |  |  | How many hex digits of the WAL path's hash name its last-resort files. |

@@ -819,6 +819,104 @@ fn the_merge_proof_asks_git_the_way_node_does() {
     assert_eq!(g.merge_proof("/does/not/exist", HEAD).0, None);
 }
 
+/// Counts the git calls it is asked to run; every answer is a clean, merged workspace.
+#[derive(Default)]
+struct GitCount(Mutex<Vec<String>>);
+
+impl Runner for GitCount {
+    fn run(&self, spec: &RunSpec) -> RunResult {
+        let rest: Vec<&str> = spec.args.iter().skip(2).map(String::as_str).collect();
+        self.0.lock().unwrap().push(rest.join(" "));
+        let out = match rest.as_slice() {
+            ["rev-parse", "HEAD"] => format!("{HEAD}\n"),
+            ["status", ..] => self_dirty(spec),
+            _ => String::new(),
+        };
+        RunResult { ok: true, status: Some(0), stdout: out, ..RunResult::default() }
+    }
+}
+
+/// A worktree whose file `dirty` exists is reported dirty by the stand-in `git status`.
+fn self_dirty(spec: &RunSpec) -> String {
+    if Path::new(&spec.args[1]).join("dirty").exists() { " M f\n".into() } else { String::new() }
+}
+
+fn runs(c: &GitCount, what: &str) -> usize {
+    c.0.lock().unwrap().iter().filter(|a| a.starts_with(what)).count()
+}
+
+fn repo_with_git_dir(name: &str) -> (TempDir, String) {
+    let t = TempDir::new(name);
+    let g = t.0.join(".git");
+    std::fs::create_dir_all(g.join("logs")).unwrap();
+    for f in ["index", "HEAD", "logs/HEAD"] {
+        std::fs::write(g.join(f), "1").unwrap();
+    }
+    let wt = t.0.to_string_lossy().into_owned();
+    (t, wt)
+}
+
+fn touch(path: PathBuf, body: &str) {
+    std::fs::write(path, body).unwrap();
+}
+
+#[test]
+fn git_status_is_not_rerun_until_the_index_or_head_changes() {
+    ah_engine::defaults::init().unwrap();
+    let (t, wt) = repo_with_git_dir("gitcache-status");
+    let count = GitCount::default();
+    let g = facts::Git { runner: &count };
+    assert_eq!(g.clean(&wt), (Some(true), None));
+    for _ in 0..5 {
+        assert_eq!(g.clean(&wt), (Some(true), None));
+    }
+    assert_eq!(runs(&count, "status"), 1, "nothing changed: git ran once");
+    // staging writes the index: the answer is read again
+    touch(t.0.join(".git/index"), "22");
+    g.clean(&wt);
+    g.clean(&wt);
+    assert_eq!(runs(&count, "status"), 2, "an index write re-runs git, once");
+    // a commit moves HEAD and appends to its reflog
+    touch(t.0.join(".git/logs/HEAD"), "333");
+    g.clean(&wt);
+    assert_eq!(runs(&count, "status"), 3);
+    // an owner's own request is never answered from memory
+    g.clean_now(&wt);
+    g.clean_now(&wt);
+    assert_eq!(runs(&count, "status"), 5);
+    // a dirty answer is remembered too, and a commit (HEAD moves) makes it read again
+    touch(t.0.join("dirty"), "");
+    touch(t.0.join(".git/index"), "4444");
+    assert_eq!(g.clean(&wt), (Some(false), Some("uncommitted-changes")));
+    assert_eq!(g.clean(&wt), (Some(false), Some("uncommitted-changes")));
+    assert_eq!(runs(&count, "status"), 6);
+    std::fs::remove_file(t.0.join("dirty")).unwrap();
+    touch(t.0.join(".git/HEAD"), "55555");
+    assert_eq!(g.clean(&wt), (Some(true), None), "a commit cleaned it: git is asked again");
+}
+
+#[test]
+fn head_and_merge_proof_are_remembered_until_a_ref_moves() {
+    ah_engine::defaults::init().unwrap();
+    let (t, wt) = repo_with_git_dir("gitcache-refs");
+    let count = GitCount::default();
+    let g = facts::Git { runner: &count };
+    for _ in 0..4 {
+        assert_eq!(g.head(&wt).as_deref(), Some(HEAD));
+        g.merge_proof(&wt, HEAD);
+    }
+    assert_eq!(runs(&count, "rev-parse HEAD"), 1);
+    assert_eq!(runs(&count, "symbolic-ref"), 1);
+    assert_eq!(runs(&count, "merge-base"), 0, "git answered empty for symbolic-ref, so the proof stops there");
+    touch(t.0.join(".git/logs/HEAD"), "22");
+    g.head(&wt);
+    assert_eq!(runs(&count, "rev-parse HEAD"), 2, "a commit moves HEAD's reflog");
+    // a fetch rewrites packed-refs
+    touch(t.0.join(".git/packed-refs"), "x");
+    g.merge_proof(&wt, HEAD);
+    assert_eq!(runs(&count, "symbolic-ref"), 2);
+}
+
 #[test]
 fn an_archive_of_a_primary_or_unknown_builder_is_refused() {
     let w = world("archive");
