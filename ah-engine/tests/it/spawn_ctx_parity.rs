@@ -1131,7 +1131,7 @@ fn verify_first_orch_codex_matches_node() {
 }
 
 // ------------------------------------------------------------------------------------------------------------------
-// devswarm-parent-inbox: an active Primary with no git checkout around its working directory
+// devswarm-parent-inbox: an active Primary with no git checkout around its working directory (the checkout cases are in devswarm_parent_inbox_parity)
 // ------------------------------------------------------------------------------------------------------------------
 
 fn prompt(extra: Value) -> Value {
@@ -1170,8 +1170,8 @@ fn parent_inbox_cases() -> Vec<Case> {
         primary(case("cwd-nonexistent", prompt(json!({"cwd":"$HOME/gone/deeper"})))),
         primary(case("cwd-root", prompt(json!({"cwd":"/"})))),
         primary(case("cwd-relative-defers", prompt(json!({"cwd":"proj"})))).defer(),
-        primary(case("cwd-in-a-checkout-defers", prompt(json!({"cwd":repo_dir})))).defer(),
-        primary(case("cwd-in-a-checkout-subdir-defers", prompt(json!({"cwd":format!("{repo_dir}/ah-engine/src")})))).defer(),
+        primary(case("cwd-in-a-checkout", prompt(json!({"cwd":repo_dir})))),
+        primary(case("cwd-in-a-checkout-subdir", prompt(json!({"cwd":format!("{repo_dir}/ah-engine/src")})))),
         primary(case("no-session", without("session_id"))),
         primary(case("session-empty", prompt(json!({"session_id":""})))),
         primary(case("session-numeric", prompt(json!({"session_id":7})))),
@@ -1215,7 +1215,7 @@ fn devswarm_parent_inbox_without_a_checkout_matches_node() {
     assert_eq!(t.blocks, 0);
     assert!(t.stdout_nonempty >= 18, "the corpus must exercise the emitted reminder: {}", t.stdout_nonempty);
     assert!(t.state_changed >= 20, "the corpus must exercise the dedupe state: {}", t.state_changed);
-    assert_eq!(t.deferred, 9, "deferred {}", t.deferred);
+    assert_eq!(t.deferred, 7, "deferred {}", t.deferred);
 }
 
 // ------------------------------------------------------------------------------------------------------------------
@@ -1223,7 +1223,6 @@ fn devswarm_parent_inbox_without_a_checkout_matches_node() {
 // ------------------------------------------------------------------------------------------------------------------
 
 fn child_turn_cases() -> Vec<Case> {
-    let repo_dir = repo().to_string_lossy().into_owned();
     let child = |c: Case| {
         c.env("DEVSWARM_REPO_ID", "r")
             .env("DEVSWARM_SOURCE_BRANCH", "feat/x")
@@ -1298,20 +1297,18 @@ fn child_turn_cases() -> Vec<Case> {
             .seed(desc(r#"{"inboxPath":"$HOME/in.ndjson","cursorPath":"$HOME/in.cursor"}"#))
             .file("in.ndjson", "{\"a\":1}\n{\"a\":2}\n")
             .file("in.cursor", "2"),
-        child(case("mail-unread-defers", dflt()))
+        child(case("mail-unread", dflt()))
             .seed(desc(r#"{"inboxPath":"$HOME/in.ndjson","cursorPath":"$HOME/in.cursor"}"#))
             .file("in.ndjson", "{\"a\":1}\n{\"a\":2}\n")
-            .file("in.cursor", "1")
-            .defer(),
+            .file("in.cursor", "1"),
         child(case("mail-cursor-json-line", dflt()))
             .seed(desc(r#"{"inboxPath":"$HOME/in.ndjson","cursorPath":"$HOME/in.cursor"}"#))
             .file("in.ndjson", "{\"a\":1}\n")
             .file("in.cursor", "{\"line\":1}"),
-        child(case("mail-cursor-json-unread-defers", dflt()))
+        child(case("mail-cursor-json-unread", dflt()))
             .seed(desc(r#"{"inboxPath":"$HOME/in.ndjson","cursorPath":"$HOME/in.cursor"}"#))
             .file("in.ndjson", "{\"a\":1}\n")
-            .file("in.cursor", "{\"line\":0}")
-            .defer(),
+            .file("in.cursor", "{\"line\":0}"),
         child(case("mail-cursor-garbage", dflt()))
             .seed(desc(r#"{"inboxPath":"$HOME/in.ndjson","cursorPath":"$HOME/in.cursor"}"#))
             .file("in.ndjson", "{\"a\":1}\n")
@@ -1342,7 +1339,8 @@ fn child_turn_cases() -> Vec<Case> {
         child(case("no-cwd-defers", without("cwd"))).defer(),
         child(case("cwd-relative-defers", prompt(json!({"cwd":"proj"})))).defer(),
         child(case("cwd-numeric-defers", prompt(json!({"cwd":5})))).defer(),
-        child(case("cwd-in-a-checkout-defers", prompt(json!({"cwd":repo_dir})))).defer(),
+        // a working directory inside a checkout registers the child and writes the project's SQLite store, which this suite compares byte for
+        // byte (clock readings and page layout differ between two writers): `devswarm_child_turn_parity.rs` covers it table by table
         child(case("cwd-nonexistent", prompt(json!({"cwd":"$HOME/gone/deeper"})))),
         child(case("no-session", without("session_id"))),
         child(case("session-empty", prompt(json!({"session_id":""})))),

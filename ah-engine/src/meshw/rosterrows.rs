@@ -236,8 +236,8 @@ fn idle_ms(e: &Eng) -> f64 {
     if n.is_finite() && n > 0.0 { n } else { defaults::num("devswarm_cli.rr_idle_ms_default") as f64 }
 }
 
-/// `isDormantByActivity(row, home, { now, lastOutboundTs })`.
-fn dormant_by_activity(e: &Eng, id: &str, wt: Option<&str>, session: Option<&str>, last_out: Option<f64>) -> R<bool> {
+/// `readActivityTs(row, home, { lastOutboundTs })`: the newest activity signal (0 for none) and whether the session transcript was seen.
+fn activity(e: &Eng, id: &str, wt: Option<&str>, session: Option<&str>, last_out: Option<f64>) -> R<(f64, bool)> {
     let home = e.inv.home.as_path();
     let mut best = 0.0f64;
     if is_safe_id(id)
@@ -269,6 +269,12 @@ fn dormant_by_activity(e: &Eng, id: &str, wt: Option<&str>, session: Option<&str
     {
         best = t;
     }
+    Ok((best, saw_transcript))
+}
+
+/// `isDormantByActivity(row, home, { now, lastOutboundTs })`.
+fn dormant_by_activity(e: &Eng, id: &str, wt: Option<&str>, session: Option<&str>, last_out: Option<f64>) -> R<bool> {
+    let (best, saw_transcript) = activity(e, id, wt, session, last_out)?;
     if best <= 0.0 || !e.now.is_finite() {
         return Ok(false);
     }
@@ -696,6 +702,51 @@ fn fold(e: &Eng, rows: &mut Vec<Obj>, snap: &Option<&Snap>) -> R<()> {
         keep
     });
     Ok(())
+}
+
+/// The row-state readers the Primary prompt hook needs apart from [`Verdicts`]: the app's verdict alone (`appArchivedVerdict`, then the
+/// supervisor's active-list cache), the ghost-label fold target, and the two activity windows.
+pub(crate) struct Windows<'a>(Eng<'a>);
+
+impl<'a> Windows<'a> {
+    pub(crate) fn new(inv: &'a Inv, repo_key: &'a str) -> Windows<'a> {
+        Windows(Eng { inv, now: inv.now as f64, repo_key, dormant: std::cell::OnceCell::new() })
+    }
+
+    /// The app side of "archived" for a row.
+    pub(crate) fn app_archived(&self, id: &str, wt: Option<&str>) -> R<bool> {
+        app_archived(&self.0, id, wt)
+    }
+
+    /// `rosterFoldTarget(home, id, present, { aliases, appBuilderId })`.
+    pub(crate) fn fold_target(&self, id: &str, present: &HashSet<String>, aliases: &[(String, String)], app_builder: Option<&str>) -> R<Option<String>> {
+        fold_target(&self.0, id, present, aliases, app_builder)
+    }
+
+    /// `dormantThresholdMs(env)` (defers on a value the engine does not reproduce).
+    pub(crate) fn dormant_ms(&self) -> R<f64> {
+        dormant_ms(&self.0)
+    }
+
+    /// `idleThresholdMs(env)`.
+    pub(crate) fn idle_ms(&self) -> f64 {
+        idle_ms(&self.0)
+    }
+
+    /// `isSessionAliveRow({ sessionId })`.
+    pub(crate) fn session_alive(&self, session: Option<&str>) -> R<bool> {
+        session_alive(&self.0, session)
+    }
+
+    /// `readActivityTs`: the newest activity signal (0 for none) and whether the session transcript was seen.
+    pub(crate) fn activity(&self, id: &str, wt: Option<&str>, session: Option<&str>, last_out: Option<f64>) -> R<(f64, bool)> {
+        activity(&self.0, id, wt, session, last_out)
+    }
+
+    /// `isDormantByActivity`.
+    pub(crate) fn dormant_by_activity(&self, id: &str, wt: Option<&str>, session: Option<&str>, last_out: Option<f64>) -> R<bool> {
+        dormant_by_activity(&self.0, id, wt, session, last_out)
+    }
 }
 
 // ---------------------------------------------------------------------------------------------------------------------

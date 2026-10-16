@@ -182,10 +182,10 @@ pub fn distinct_repo_keys(descs: &[Descriptor]) -> R<Vec<Project>> {
 
 /// A registry row of the project being reconciled.
 #[derive(Debug, Clone)]
-struct Target {
-    id: String,
-    worktree: String,
-    session: Option<String>,
+pub(crate) struct Target {
+    pub(crate) id: String,
+    pub(crate) worktree: String,
+    pub(crate) session: Option<String>,
 }
 
 fn has_archived_counterpart(home: &Path, id: &str) -> bool {
@@ -211,7 +211,7 @@ fn same_path(a: &str, b: &str) -> bool {
 
 /// `isArchivedWorkspace(home, id, worktreePath, {sessionId})`: anti-hall's own archived marker, matched to this worktree and not
 /// superseded by a live descriptor of another session.
-fn marker_archived(home: &Path, t: &Target) -> R<bool> {
+pub(crate) fn marker_archived(home: &Path, t: &Target) -> R<bool> {
     if !is_safe_id(&t.id) {
         return Ok(false);
     }

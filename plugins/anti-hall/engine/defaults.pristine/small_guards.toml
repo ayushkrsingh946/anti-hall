@@ -1659,11 +1659,11 @@ value = "apply_patch"
 
 [devswarm_prompt.parent_summary]
 doc = "One-line description of the devswarm-parent-inbox check in the generated reference."
-value = "DevSwarm Primary prompt hook: answers the silent cases (not a Primary, DevSwarm inactive, switch off, judge child) and an active Primary with no git checkout around its working directory (its communication-override reminder through the emit-dedupe store) in the engine; a Primary in a checkout defers to the Node hook, which owns the roster, mailbox and dedupe state (port of devswarm-parent-inbox.js)."
+value = "DevSwarm Primary prompt hook: answers the silent cases (not a Primary, DevSwarm inactive, switch off, judge child) and every active Primary turn, in a git checkout or not, in the engine: the communication-override reminder through emit-dedupe, the ingest-daemon banners and summary refresh, the mailbox-wake line, the session-drift and maintainer-notice feeds, the live workspace table of the project's summary with its nudges, archive recommendation and not-draining / stale-build labels, the orphaned-mesh, stale-registry and broadcast segments, the Primary's own inbox with the questions it was asked, the screenshot-sync ask and the parked supervisor escalations. A seat conflict still owed its repeat, a setting of the hook set anywhere, an unseen maintainer notice, a row the supervisor's auto-archive owns and the other rare states defer to the Node hook, each cause logged as parent-inbox-defer (port of devswarm-parent-inbox.js)."
 
 [devswarm_prompt.child_summary]
 doc = "One-line description of the devswarm-child-turn check in the generated reference."
-value = "DevSwarm child prompt hook: answers the silent cases (not a child workspace, DevSwarm inactive, switch off, judge child) in the engine; an active child defers to the Node hook, which writes the heartbeat and descriptor and renders the mailbox (port of the gate of devswarm-child-turn.js)."
+value = "DevSwarm child prompt hook: answers the silent cases (not a child workspace, DevSwarm inactive, switch off, judge child) and every active child turn in the engine: the heartbeat (with the git push state in a checkout), the descriptor and registry row under the workspace lock, the fixed reminder block through emit-dedupe, the step plan, unread parent mail and the archive request. An archived workspace, an ingest daemon that is not healthy, mesh-direct unread mail, a store Node would first create and the other rare states defer to the Node hook (port of devswarm-child-turn.js)."
 
 [devswarm_prompt.parent_setting]
 doc = "Where the devswarm.parentInbox switch (default on) is read from: no environment variable, then settings.json, then the plugin option."
@@ -1848,6 +1848,177 @@ value = "DEVSWARM_BUILDER_NAME"
 [devswarm_prompt.mode_setting]
 doc = "Where devswarm.supervisorMode is read from: environment variable, settings.json, then the plugin option; `values` are the accepted words and `manifest_default` is the default the plugin manifest declares for the option (a stored option equal to it counts as unset, as in hooks/lib/settings.js)."
 value = { section = "devswarm", key = "supervisorMode", env = "ANTIHALL_DEVSWARM_SUPERVISOR", option = "devswarm_supervisor_mode", default = "auto", manifest_default = "auto", values = ["auto", "on", "off"] }
+
+[devswarm_prompt.summary_dir]
+doc = "The directory, under the anti-hall directory, of the per-project mailbox summaries the registration refreshes and the hook reads."
+value = "devswarm/summaries"
+
+[devswarm_prompt.archived_stop_setting]
+doc = "The setting devswarm.archivedChildStop (on by default): an archived child workspace is told to save a handover and stop, and its descriptor is not rewritten. The engine leaves an archived workspace to the Node hook."
+value = { section = "devswarm", key = "archivedChildStop", type = "boolean", env = "ANTIHALL_DEVSWARM_ARCHIVED_CHILD_STOP", option = "devswarm_archived_child_stop", default = true }
+
+[devswarm_prompt.git_push_args]
+doc = "The git arguments, after `-C <worktree>`, of the push-state probe the heartbeat carries (companion/lib/devswarm-git-truth.js gitPushState): the commits ahead of the upstream."
+value = ["rev-list", "--count", "@{u}..HEAD"]
+
+[devswarm_prompt.git_env]
+doc = "The environment the push-state probe adds to the request's: the read-only git environment (hooks/lib/git-env.js), so the probe never takes a repository lock."
+value = { GIT_OPTIONAL_LOCKS = "0" }
+
+[devswarm_prompt.git_timeout_ms]
+doc = "How long the push-state probe may run (companion/lib/devswarm-git-truth.js GIT_TIMEOUT_MS); a probe that does not finish leaves the push keys out of the heartbeat."
+value = 4000
+min = 10
+unit = "ms"
+
+[devswarm_prompt.not_repo_re]
+doc = "What git says on stderr when the directory is no repository: the probe then has no answer, which is not the same as 'no upstream'."
+value = "not a git repository"
+
+[devswarm_prompt.stale_key]
+doc = "The emit-dedupe key of the ingest-daemon stale banner; a healthy daemon forgets it (companion/lib/ingest-health.js STALE_DEDUPE_KEY)."
+value = "devswarm-ingest-stale"
+
+[devswarm_prompt.fault_key]
+doc = "The emit-dedupe key of the ingest monitor-fault banner; a healthy daemon forgets it (companion/lib/ingest-health.js MONITOR_FAULT_DEDUPE_KEY)."
+value = "devswarm-ingest-monitor-fault"
+
+[devswarm_prompt.archive_marker]
+doc = "The token a parent embeds in a message to ask the child to archive its own workspace (companion/lib/devswarm-store.js ARCHIVE_REQUEST_MARKER)."
+value = "[[ANTIHALL_ARCHIVE_REQUEST]]"
+
+[devswarm_prompt.unread_segment]
+doc = "The child's unread-parent-mail segment (hooks/devswarm-child-turn.js buildUnreadSegment). Placeholders: {count}, {cli}, {id}."
+value = '''
+⚠️ anti-hall · devswarm-child-inbox: priority — you have {count} unread parent message(s). STOP and address these parent message(s) FIRST before continuing. Read them the SAFE way via the durable inbox cursor — `node {cli} inbox read-primary {id}` (anti-hall devswarm CLI) (read-only; after handling, run the `ackCommand` it returns). Do NOT run `hivecontrol workspace read-messages` or `monitor` — those DESTRUCTIVELY drain the native queue.'''
+
+[devswarm_prompt.archive_request]
+doc = "The segment that relays a parent's request to archive the workspace (hooks/devswarm-child-turn.js buildArchiveRequestSegment). Placeholders: {cli}, {id}."
+value = '''
+💡 anti-hall · devswarm-archive-request: your parent asks you to archive this workspace. Confirm with YOUR user, then run `node {cli} archive {id}`. NEVER auto-archive.'''
+
+[devswarm_prompt.proto_key]
+doc = "A descriptor key the engine does not merge (JavaScript would set the prototype); a descriptor that holds it is left to the Node hook."
+value = "__proto__"
+
+[devswarm_prompt.escape_marker]
+doc = "The text that marks a JSON escape sequence; a descriptor the engine's parser rejects and that holds one is left to the Node hook (JavaScript may parse it)."
+value = "\\u"
+
+[devswarm_prompt.log_verb]
+doc = "The verb name the registration's summary-refresh failures are logged under."
+value = "child-turn"
+
+[devswarm_prompt.defer_log_kind]
+doc = "The event-log kind of the line the child-turn check writes when it hands a turn to the Node hook; the line's text is the cause."
+value = "child-turn-defer"
+
+[devswarm_prompt.mesh_direct]
+doc = "The child's nudge for mesh mail addressed to it (hooks/devswarm-child-turn.js buildMeshDirectSegment). Placeholders: {count}, {age}, {cli}, {id}."
+value = '''
+⚠️ anti-hall · devswarm-mesh-direct: you have {count} unread mesh direct message(s){age} addressed to you. Read them via `node {cli} inbox read-primary {id}` (read-only; after handling, run the `ackCommand` it returns).'''
+
+[devswarm_prompt.mesh_direct_urgent]
+doc = "The loudest form of the mesh-direct nudge, for urgent or high-urgency mail. Placeholders: {count}, {age}, {cli}, {id}."
+value = '''
+⚠️ anti-hall · devswarm-mesh-direct: urgent — you have {count} unread mesh direct message(s){age} addressed to you. STOP and read them FIRST via `node {cli} inbox read-primary {id}` (read-only; after handling, run the `ackCommand` it returns), before continuing.'''
+
+[devswarm_prompt.mesh_direct_age]
+doc = "The age of the oldest unread mesh mail, appended to the nudge. Placeholder: {minutes}."
+value = " (oldest {minutes}m)"
+
+[devswarm_prompt.urgent_levels]
+doc = "The urgency values (the summary's urgencyMax) that make the mesh-direct nudge loud."
+value = ["urgent", "high"]
+
+[devswarm_prompt.ms_per_minute]
+doc = "Milliseconds in the minute the age of unread mail is counted in."
+value = 60000
+min = 1
+unit = "ms"
+
+[devswarm_prompt.relative_none]
+doc = "How an unknown or unset time reads in a banner (companion/lib/ingest-health.js formatRelative)."
+value = "—"
+
+[devswarm_prompt.launchd_platform]
+doc = "The platform name (as the host reports it) on which the ingest job is a launchd job whose disabled state the stale banner looks up."
+value = "macos"
+
+[devswarm_prompt.test_markers]
+doc = "Environment variables that mark a test run; under one the service manager is never asked (companion/lib/test-home-guard.js TEST_MARKERS)."
+value = ["NODE_TEST_CONTEXT", "ANTIHALL_TEST_ISOLATION"]
+
+[devswarm_prompt.launchctl_args]
+doc = "The arguments of the launchd query that lists the disabled jobs of the user's domain. Placeholder: {uid}."
+value = ["print-disabled", "gui/{uid}"]
+
+[devswarm_prompt.launchctl_timeout_ms]
+doc = "How long the launchd query may run (companion/lib/ingest-health.js launchdDisabledLabel)."
+value = 3000
+min = 10
+unit = "ms"
+
+[devswarm_prompt.launchd_label_prefix]
+doc = "The prefix of a project's ingest job label; the project key follows."
+value = "com.anti-hall.devswarm-ingest."
+
+[devswarm_prompt.banner_keepalive]
+doc = "Delivered turns after which an unchanged ingest banner is sent again (companion/lib/ingest-health.js STALE_KEEPALIVE_TURNS)."
+value = 50
+min = 0
+max = 100000
+
+[devswarm_prompt.banner_grace_ms]
+doc = "A stale ingest heartbeat younger than this, with the daemon's lock held by a live process, is a hand-over in progress and gets no banner (companion/lib/ingest-health.js BANNER_GRACE_MS)."
+value = 300000
+min = 0
+unit = "ms"
+
+[devswarm_prompt.stale_banner]
+doc = "The ingest-daemon stale banner (companion/lib/ingest-health.js buildStaleBanner). Placeholders: {age}, {tail}."
+value = '''
+⚠️ anti-hall · devswarm-stale-data: ingest daemon last alive {age} ago — roster/app-state freshness may be stale (the daemon may have stopped or never started for this worktree). Mesh sends are written directly to the store and are NOT affected. {tail}Shown once per stale episode.'''
+
+[devswarm_prompt.stale_doctor]
+doc = "The stale banner's advice when the daemon's launchd job is not disabled."
+value = "Run /anti-hall:doctor to check the DevSwarm ingest daemon. "
+
+[devswarm_prompt.stale_disabled]
+doc = "The stale banner's advice when launchd lists the daemon's job disabled. Placeholders: {label}, {uid}."
+value = "The launchd job {label} is DISABLED, so it cannot auto-start and self-heal is skipped; if that was not intentional, re-enable with: launchctl enable gui/{uid}/{label} (anti-hall never does this for you). "
+
+[devswarm_prompt.fault_banner]
+doc = "The banner for a live ingest daemon whose app monitor is not answering and that is not a configuration fault (buildMonitorFaultBanner). Placeholders: {beat}, {what}, {err}."
+value = '''
+⚠️ anti-hall · devswarm-ingest-failing: the ingest daemon is healthy (heartbeat {beat} ago) but the DevSwarm app's `hivecontrol workspace monitor` is not answering ({what}{err}). Native-queue ingestion is paused until it answers; anti-hall mesh messages sent through the shared store are not affected. /anti-hall:doctor cannot repair this — check or restart the DevSwarm app.'''
+
+[devswarm_prompt.fault_config]
+doc = "The banner for a live ingest daemon whose monitor fails with a configuration error code. Placeholders: {beat}, {what}, {code}, {err}."
+value = '''
+⚠️ anti-hall · devswarm-ingest-failing: the daemon is alive (heartbeat {beat} ago) but {what} ({code}){err} — ingesting NOTHING. Run /anti-hall:doctor to repair the ingest daemon.'''
+
+[devswarm_prompt.fault_no_ok]
+doc = "What a monitor fault says when no poll has succeeded since the daemon started. Placeholder: {rel}."
+value = "no monitor poll has succeeded since the daemon started {rel} ago"
+
+[devswarm_prompt.fault_ok_stale]
+doc = "What a monitor fault says when the last successful poll is too old. Placeholder: {rel}."
+value = "the last successful monitor poll was {rel} ago"
+
+[devswarm_prompt.fault_failing]
+doc = "What a monitor fault says otherwise. Placeholder: {n}."
+value = "`hivecontrol workspace monitor` has failed {n}x in a row"
+
+[devswarm_prompt.fault_error]
+doc = "The last monitor error, appended to a fault banner. Placeholder: {error}."
+value = "; last error: {error}"
+
+[devswarm_prompt.fault_error_max]
+doc = "The most characters of the last monitor error a fault banner quotes."
+value = 160
+min = 1
+max = 4096
 
 [guardkit.render_reserve]
 doc = "Extra bytes reserved beyond a message template's length when its placeholders are filled (a capacity hint, not a limit)."

@@ -121,7 +121,7 @@ fn pid_alive(pid: f64) -> bool {
 }
 
 /// `ingest-health.js` `daemonHealth(home, repoKey).status === 'healthy'`.
-fn daemon_healthy(inv: &Inv, repo_key: Option<&str>) -> R<bool> {
+pub(crate) fn daemon_healthy(inv: &Inv, repo_key: Option<&str>) -> R<bool> {
     let Some(rk) = repo_key else { return Ok(false) };
     let root = devswarm_root(&inv.home);
     let beat = read_json(&root.join(defaults::text("mesh_write.dir_heartbeats")).join(format!(
