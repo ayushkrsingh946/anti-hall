@@ -276,7 +276,17 @@ impl Wire {
             return Report { generation: self.rt.current().generation, edges: Vec::new(), repairs: 0 }; // off reads nothing and acts on nothing
         }
         self.reconciles.fetch_add(1, Ordering::Relaxed);
+        let _cause = crate::devswarm_rt::sources::for_cause(cause.label());
+        let cpu = crate::limits::thread_cpu_us();
         let rep = self.rt.run_live(cause, None, self.db.as_deref());
+        let derive_us = crate::limits::thread_cpu_us().saturating_sub(cpu);
+        let outcome = if rep.edges.is_empty() { "noop" } else { "changed" };
+        crate::threads::tally(&format!("dswire_reconcile_cpu_us.{}.derive", cause.label()), derive_us);
+        crate::threads::tally(&format!("dswire_reconcile_runs.{}.{outcome}", cause.label()), 1);
+        self.count(&mut |m| {
+            m.add("dswire_reconcile_cpu_us", &[("cause", cause.label()), ("phase", "derive")], derive_us);
+            m.inc("dswire_reconcile_runs", &[("cause", cause.label()), ("outcome", outcome)]);
+        });
         self.count(&mut |m| self.rt.publish(m));
         if self.rt.mode() != Mode::On {
             return rep;
@@ -298,7 +308,11 @@ impl Wire {
                 Cause::Periodic => self.full_sweep_due(now_ms()),
                 _ => true,
             };
+            let cpu = crate::limits::thread_cpu_us();
             self.act_sweeps(full);
+            let sweep_us = crate::limits::thread_cpu_us().saturating_sub(cpu);
+            crate::threads::tally(&format!("dswire_reconcile_cpu_us.{}.sweep", cause.label()), sweep_us);
+            self.count(&mut |m| m.add("dswire_reconcile_cpu_us", &[("cause", cause.label()), ("phase", "sweep")], sweep_us));
         }
         rep
     }
@@ -317,6 +331,8 @@ impl Wire {
         if only.is_empty() || self.jev_busy.swap(true, Ordering::SeqCst) {
             if !only.is_empty() {
                 self.jev.queue(&only); // a sweep is running: keep them for the next one
+                crate::threads::tally("dswire_jev_coalesced", 1);
+                self.count(&mut |m| m.inc("dswire_jev_coalesced", &[]));
             }
             return;
         }
@@ -324,7 +340,9 @@ impl Wire {
         let busy = self.jev_busy.clone();
         let snap = self.rt.current();
         let sweeper = self.jev_sweeper.clone();
-        let spawned = std::thread::Builder::new().name("ah-dswire-jev".into()).spawn(move || {
+        crate::threads::tally("dswire_jev_threads", 1);
+        self.count(&mut |m| m.inc("dswire_jev_threads", &[]));
+        let spawned = crate::threads::spawn_named("ah-dswire-jev".into(), move || {
             sweeper(&home, &only, &snap);
             busy.store(false, Ordering::SeqCst);
         });

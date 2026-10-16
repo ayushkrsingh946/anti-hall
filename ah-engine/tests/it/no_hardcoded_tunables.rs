@@ -159,6 +159,7 @@ const ALLOW: &[(&str, &str, &str)] = &[
     ("src/mem/mod.rs", "static LEAKED", "a byte counter initialised to zero: state, not a tunable"),
     ("src/watch/kq.rs", "const FFLAGS", "the kqueue vnode event flags the backend subscribes to: a kernel protocol constant, not a tunable"),
     ("src/watch/kq.rs", "const GONE", "the kqueue vnode event flags that mean the file went away: a kernel protocol constant, not a tunable"),
+    ("src/devswarm_rt/sources.rs", "static WHERE", "a thread-local slot initialised empty (which code path and cause the probe reads of this thread are attributed to): state, not a tunable"),
     ("src/deadline.rs", "static REQ", "a thread-local slot initialised empty (the request being served): state, not a tunable"),
     ("src/deadline.rs", "static EVENT", "a thread-local slot initialised empty (the hook event of the request being served): state, not a tunable"),
     ("src/deadline.rs", "static STAGED", "a thread-local list initialised empty (the state writes a request staged): state, not a tunable"),

@@ -166,3 +166,13 @@ unit = "MB"
 [files.debug_log]
 doc = "Debug log file name (state directory): one NDJSON line per debug event, written only in debug mode."
 value = "debug.ndjson"
+
+[diagnostics.tally_soft_keys]
+doc = "Soft limit on the labelled work counters `status --threads` carries (and on exited-thread names): past it every further new key adds one to `tally_soft_hits`."
+value = 64
+min = 8
+
+[diagnostics.tally_hard_keys]
+doc = "Hard limit on the labelled work counters (and on exited-thread names): a new key past it is dropped and counted in `tally_dropped`; the existing keys keep counting."
+value = 256
+min = 16

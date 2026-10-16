@@ -329,6 +329,7 @@ pub fn run(w: &Wire, stop: &dyn Fn() -> bool) {
         if let Some(batch) = l.watcher.next(sleep.max(tun.min_sleep)) {
             work::add(&work::BATCHES, 1);
             work::add(&work::PATHS, batch.paths.len() as u64);
+            crate::threads::tally(&format!("dswire_batches.{}", batch_role(&batch.paths)), 1);
             let p = plan_with(&l.have, batch.rescan, &batch.paths, &|id| w.beat_is_quiet(id));
             work::add(&work::QUIET_BEATS, p.quiet_beats as u64);
             // a transcript is gated (it only matters when it grew, and not more than once per interval); a commit is not
@@ -376,4 +377,16 @@ fn queue_dirty(w: &Wire, ids: &[String]) {
 /// Whether a changed path in the batch belongs to `id`'s git directory.
 fn git_dirty(have: &HashMap<PathBuf, Role>, id: &str, paths: &[PathBuf]) -> bool {
     paths.iter().any(|p| matches!(p.parent().and_then(|d| have.get(d)), Some(Role::Git(x)) if x == id))
+}
+
+/// What a batch of changed paths is made of, for the work counters: the DevSwarm state directory's role (`batch_role_names`) when
+/// every path is in the same one, the mixed label when they differ, the other label when none is (transcripts, repositories).
+fn batch_role(paths: &[PathBuf]) -> &'static str {
+    let (dirs, names) = (crate::defaults::list("devswarm_wire.batch_role_dirs"), crate::defaults::list("devswarm_wire.batch_role_names"));
+    let role = |p: &PathBuf| dirs.iter().position(|d| p.parent().and_then(|x| x.file_name()).is_some_and(|n| n == crate::defaults::text(d)));
+    match paths.first().map(role) {
+        Some(Some(i)) if paths.iter().all(|p| role(p) == Some(i)) => names.get(i).copied().unwrap_or(crate::defaults::text("devswarm_wire.batch_role_other")),
+        Some(Some(_)) => crate::defaults::text("devswarm_wire.batch_role_mixed"),
+        _ => crate::defaults::text("devswarm_wire.batch_role_other"),
+    }
 }

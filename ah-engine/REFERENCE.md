@@ -7583,6 +7583,10 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_wire.advisory_prune_ms` | `604800000` |  | ms | A session's seen-generation file untouched for this long is removed when the next advisory is written. |
 | `devswarm_wire.advisory_session_max` | `128` |  |  | Longest session id (characters) used as a file name; a longer or unsafe id gets no advisory. |
 | `devswarm_wire.archive_log_name` | `.anti-hall/logs/devswarm-auto-archive.ndjson` |  |  | Node's auto-archive log under the home directory's logs directory; the newest ok line for a workspace dates its archive. |
+| `devswarm_wire.batch_role_dirs` | `mesh_write.dir_heartbeats, mesh_write.dir_workspaces, mesh_write.dir_summarie...` |  |  | The DevSwarm state directories a watcher batch is classified by, as defaults keys; the same position in `batch_role_names` is the role. |
+| `devswarm_wire.batch_role_mixed` | `mixed` |  |  | The role label of a watcher batch whose paths fall in different state directories. |
+| `devswarm_wire.batch_role_names` | `heartbeat, descriptor, summary, plan` |  |  | The role label (work counter `dswire_batches.<role>`) of each directory in `batch_role_dirs`. |
+| `devswarm_wire.batch_role_other` | `other` |  |  | The role label of a watcher batch with paths outside the state directories (transcripts, repositories). |
 | `devswarm_wire.beat_dir_key` | `mesh_write.dir_heartbeats` |  |  | The mesh_write.* setting that names the heartbeats directory, whose files are workspace heartbeats: the beat of a workspace the state calls working is not a hint to reconcile (see devswarm_rt.stall_ms: the deadline check re-reads it when the silence clock runs out); every other beat is. |
 | `devswarm_wire.check_event` | `UserPromptSubmit` |  |  | The hook event the devswarm-rt-advisory check answers. |
 | `devswarm_wire.check_script` | `devswarm-rt-advisory` |  |  | The name of the plugin script (engine/logic/<name>.js) that decides the advisory. |
@@ -7645,6 +7649,8 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_wire.owner_verbs` | `13 items` |  |  | The `ah-engine devswarm <verb>` verbs and what each does: status, line, advisory, supervisor, ingest and ledger (the action audit: per-feature counts, success rate, refusals by reason, mistake rate, in-doubt keys, witness agreement) read the state; archive, plan-prune, prune and recover (kill and resume one session; Node's recovery code does the kill after the engine's refusals) act at the owner's request; wake-watch runs the idle-wake Monitor until the session ends. `create` answers deferred (the Node verb keeps it, because the engine cannot reproduce its source-freshness check yet); `merge` is a devswarm.js verb (compat_verbs) and runs the hivecontrol merge itself. |
 | `devswarm_wire.periodic_full_sweep_ms` | `300000` |  | ms | The longest the periodic reconcile goes without a full action sweep (every workspace's git facts, the mistake scan, the nag pass). In between it sweeps in full only when the reconcile saw a change in the DevSwarm state; edges are acted on through the event path either way. |
 | `devswarm_wire.plan_flag` | `--plan` |  |  | The flag of prune that names the plan. |
+| `devswarm_wire.probe_cause_default` | `none` |  |  | The cause label of a probe read made outside any reconcile (work counter `probe_reads.<site>.<cause>`). |
+| `devswarm_wire.probe_site_default` | `other` |  |  | The site label of a probe read made outside any attributed code path (work counter `probe_reads.<site>.<cause>`). |
 | `devswarm_wire.reconcile_min_gap_ms` | `1000` |  | ms | The least time between two reconciles the file events ask for. Changes inside the gap are folded into one reconcile at its end (none is lost), so a burst of changes, or a source that changes all the time, costs at most one reconcile per gap. 0 reconciles on every batch. |
 | `devswarm_wire.request_flag` | `--request` |  |  | The flag that carries an owner request's own id (the idempotency key's last part). |
 | `devswarm_wire.role_child_env` | `ANTIHALL_DEVSWARM_SOURCE_BRANCH` |  |  | The environment variable whose non-blank value marks a DevSwarm workspace child. |
@@ -9958,6 +9964,8 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `diagnostics.mem_snapshot_wait_ms` | `3000` |  | ms | Longest the snapshot waits for every worker to report its interpreter and caches (a busy worker reports after its request); workers that have not reported by then are listed as missing. |
 | `diagnostics.summary_read_bytes` | `8388608` |  | bytes | Most of the memory log (newest part) `status --memory` reads to build its summary. |
 | `diagnostics.summary_top` | `10` |  |  | Rows shown per ranking (events, checks) in the memory summary of `ah-engine status --memory`. |
+| `diagnostics.tally_hard_keys` | `256` |  |  | Hard limit on the labelled work counters (and on exited-thread names): a new key past it is dropped and counted in `tally_dropped`; the existing keys keep counting. |
+| `diagnostics.tally_soft_keys` | `64` |  |  | Soft limit on the labelled work counters `status --threads` carries (and on exited-thread names): past it every further new key adds one to `tally_soft_hits`. |
 | `diagnostics.threads_ctl` | `threads` |  |  | The control request that asks the daemon for one snapshot of every thread's CPU time and the work counters (the client asks twice, the window apart, and reports the difference). |
 | `diagnostics.threads_flag` | `--threads` |  |  | The `ah-engine status` flag that reports the live daemon's per-thread CPU and work counters over a short window (`status --threads [--json]`). |
 | `diagnostics.threads_name_max` | `64` |  |  | macOS: the size of the buffer a thread name is read into (the OS limit, MAXTHREADNAMESIZE). |
@@ -10692,8 +10700,12 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `dswire_actions` | counter | actions | kind, outcome | DevSwarm actions the engine ran or declined from a state change, by kind and outcome. |
 | `dswire_advisory` | counter | advisories |  | Advisories injected into a session. |
 | `dswire_full_sweeps` | counter | sweeps |  | Full action sweeps (every workspace's facts read, plus the mistake scan and the nag pass) run by the DevSwarm layer. |
+| `dswire_jev_coalesced` | counter | requests |  | Jev sweep requests folded into the queue because a sweep was already running. |
 | `dswire_jev_dirty` | counter | marks |  | Workspaces marked dirty for a per-child Jev sweep. |
+| `dswire_jev_threads` | counter | threads |  | Threads started for a per-child Jev sweep (one per sweep that found queued workspaces and no sweep running). |
 | `dswire_mode_change` | counter | changes | mode | Times the DevSwarm layer's mode (devswarm_rt.mode) changed while the daemon ran, by the new mode. |
+| `dswire_reconcile_cpu_us` | counter | us | cause, phase | CPU microseconds of the calling thread spent in a DevSwarm reconcile, by cause (startup, event, periodic, overflow) and phase (derive: read and diff the sources; sweep: the action sweeps that follow). |
+| `dswire_reconcile_runs` | counter | runs | cause, outcome | DevSwarm reconciles by cause and outcome (noop: no state change found; changed: edges found). |
 | `dswire_stall_actions` | counter | actions | kind, outcome | Pokes and escalations of silent workspaces the engine ran or refused (feature 5), by kind (poke, escalate) and outcome (ok, failed, refused); the same actions, their inputs and the mistake signals found later are in the action log (`ah-engine telemetry actions stall`). |
 | `dswire_standdown` | counter | sweeps | kind | Action sweeps the engine skipped because the action's executor is not the engine. |
 | `ingest_drops` | counter | paths | reason | Paths found as ingest projects that were not drained, counted when the reason is first seen or changes, by reason. |

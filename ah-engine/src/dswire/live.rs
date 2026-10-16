@@ -72,6 +72,7 @@ impl RtLive<'_> {
     }
 
     fn auto_archive_facts(&self, app: &AppRead, b: &AppBuilder, fresh: bool) -> Value {
+        let _site = sources::at_site(if fresh { "facts_fresh" } else { "facts" });
         let descs = facts::descriptors(&self.home);
         let mine = facts::descs_of(&descs, b);
         let mut ids = vec![b.id.clone()];
@@ -165,6 +166,7 @@ impl RtLive<'_> {
         // Every condition is read again NOW from its source, never taken from the snapshot: the workspace is still active (not
         // archived, hidden or closed), not paused, not waiting on CI, and silent on enough sources. The snapshot is consulted only for
         // the CI wait, whose source (the GitHub realtime state) the engine cannot re-read here.
+        let _site = sources::at_site("nudge_recheck");
         let app = self.app()?;
         let b = app.builders.iter().find(|b| b.id == id)?;
         let cfg = self.rt.cfg();
@@ -335,6 +337,7 @@ impl LiveState for RtLive<'_> {
     }
 
     fn post_archive(&self, id: &str) -> Option<Value> {
+        let _site = sources::at_site("post_archive");
         let app = self.app()?;
         let b = app.builders.iter().find(|b| b.id == id)?;
         let wt = b.worktree.clone()?;
