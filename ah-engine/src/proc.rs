@@ -100,7 +100,7 @@ fn drain_capped(mut r: impl Read + Send + 'static, cap: usize, marker: Vec<u8>) 
                 Ok(0) => break,
                 Ok(n) => {
                     let room = cap.saturating_sub(b.len());
-                    b.extend_from_slice(&chunk[..n.min(room)]);
+                    b.extend_from_slice(chunk.get(..n.min(room)).unwrap_or_default());
                     cut |= n > room;
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}

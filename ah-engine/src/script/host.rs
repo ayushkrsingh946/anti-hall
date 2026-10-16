@@ -733,7 +733,7 @@ fn tail_scan(path: &str, window: f64, line_max: f64, mut each: impl FnMut(u64, O
                     over = true;
                     buf.clear();
                 } else {
-                    buf.extend_from_slice(&chunk[..take]);
+                    buf.extend_from_slice(chunk.get(..take).unwrap_or_default());
                 }
             }
             std::io::BufRead::consume(&mut r, take);

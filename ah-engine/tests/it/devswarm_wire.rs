@@ -610,7 +610,8 @@ fn where_a_periodic_reconcile_spends_its_cpu() {
         std::fs::create_dir_all(&wt).unwrap();
         sh(&wt, &["init", "-q"]);
         sh(&wt, &["commit", "-q", "--allow-empty", "-m", "x"]);
-        c.execute(&format!("INSERT INTO builders VALUES ('ws-{i}','r1','b{i}',?1,'Child {i}',0,NULL,'standard',1,NULL)"), params![wt.to_str().unwrap()]).unwrap();
+        c.execute(&format!("INSERT INTO builders VALUES ('ws-{i}','r1','b{i}',?1,'Child {i}',0,NULL,'standard',1,NULL)"), params![wt.to_str().unwrap()])
+            .unwrap();
         write(&root.join(format!("workspaces/ws-{i}.json")), &json!({"id": format!("ws-{i}"), "worktreePath": wt, "sessionId": format!("s{i}")}));
         write(&root.join(format!("heartbeats/ws-{i}.json")), &json!({"ts": now()}));
     }
@@ -630,7 +631,9 @@ fn where_a_periodic_reconcile_spends_its_cpu() {
         let per = cpu(&|| drop(wire.rt.run_live(Cause::Periodic, None, None)));
         let sw = cpu(&|| drop(wire.act_sweeps(true)));
         let sw_soft = cpu(&|| drop(wire.act_sweeps(false)));
-        eprintln!("PROFILE round {round}: run_live(Event)={ev:.1} ms run_live(Periodic)={per:.1} ms act_sweeps(true)={sw:.1} ms act_sweeps(false)={sw_soft:.1} ms");
+        eprintln!(
+            "PROFILE round {round}: run_live(Event)={ev:.1} ms run_live(Periodic)={per:.1} ms act_sweeps(true)={sw:.1} ms act_sweeps(false)={sw_soft:.1} ms"
+        );
     }
 }
 

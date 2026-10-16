@@ -113,12 +113,12 @@ impl PayloadInput {
                 Ok(0) => break,
                 Ok(n) => {
                     if let Some(f) = file.as_mut() {
-                        f.write_all(&chunk[..n])?;
+                        f.write_all(chunk.get(..n).unwrap_or_default())?;
                     } else if raw.len() + n <= keep {
-                        raw.extend_from_slice(&chunk[..n]);
+                        raw.extend_from_slice(chunk.get(..n).unwrap_or_default());
                     } else {
                         let take = keep - raw.len();
-                        raw.extend_from_slice(&chunk[..take]);
+                        raw.extend_from_slice(chunk.get(..take).unwrap_or_default());
                         let mut f = create_anonymous_payload()?;
                         f.write_all(&raw)?;
                         f.write_all(&chunk[take..n])?;
@@ -190,7 +190,7 @@ fn scan_tool_name(input: &mut impl Read) -> Result<Option<String>, ()> {
         if n == 0 {
             break;
         }
-        for &b in &buf[..n] {
+        for &b in buf.get(..n).unwrap_or_default() {
             if in_string {
                 if escaped {
                     if role != StringRole::Other {

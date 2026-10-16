@@ -71,7 +71,7 @@ pub fn encode(kind: Kind, body: &str) -> Vec<u8> {
 /// `None` = the header is not complete yet, or is not a frame header (the decode of what was read says which).
 pub fn total_len(buf: &[u8]) -> Option<usize> {
     let nl = buf.iter().take(64).position(|&b| b == b'\n')?;
-    let head = std::str::from_utf8(&buf[..nl]).ok()?;
+    let head = std::str::from_utf8(buf.get(..nl)?).ok()?;
     let mut it = head.split(' ');
     if it.next() != Some(MAGIC) {
         return None;

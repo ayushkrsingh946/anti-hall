@@ -241,7 +241,7 @@ pub fn call_full(args: &[&str], env: &Env, cwd: Option<&str>, timeout: std::time
                     Ok(0) | Err(_) => break,
                     Ok(n) => {
                         if let Ok(mut b) = buf.lock() {
-                            b.extend_from_slice(&chunk[..n]);
+                            b.extend_from_slice(chunk.get(..n).unwrap_or_default());
                             if b.len() > limit {
                                 too_much.store(true, Ordering::SeqCst);
                                 break;

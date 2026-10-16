@@ -123,7 +123,11 @@ impl State {
         // `state.integrations[id] || (state.integrations[id] = {})`: an absent or falsy entry is replaced by an empty one
         match ints.iter().position(|(n, _)| n == id) {
             None => ints.push((id.to_string(), J::Obj(Vec::new()))),
-            Some(i) if !truthy(Some(&ints[i].1)) => ints[i].1 = J::Obj(Vec::new()),
+            Some(i) if ints.get(i).is_some_and(|e| !truthy(Some(&e.1))) => {
+                if let Some(e) = ints.get_mut(i) {
+                    e.1 = J::Obj(Vec::new());
+                }
+            }
             Some(_) => {}
         }
         match ints.iter_mut().find(|(n, _)| n == id) {

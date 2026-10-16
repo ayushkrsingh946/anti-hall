@@ -274,7 +274,7 @@ impl fmt::Display for Token {
 /// replaced by `_`. `None` for empty input.
 pub fn sanitize_name(b: &[u8]) -> Option<String> {
     let cap = defaults::num("telemetry.token_max_len") as usize;
-    let b = &b[..b.len().min(cap)];
+    let b = b.get(..b.len().min(cap)).unwrap_or_default();
     if b.is_empty() {
         return None;
     }

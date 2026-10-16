@@ -16,6 +16,9 @@ The DevSwarm supervisor sweep: auto-archive, pokes, app sync, retention, reconci
 - `devswarm.autoArchive.ignorePings` = true: Whether the idle gate ignores the child's own wake/heartbeat/status turns
 - `devswarm.autoArchive.maxPerSweep` = 3: Most auto-archives in one sweep
 - `devswarm.autoArchive.mode` = "on": Auto-archive mode: on (archive), dry-run (plan only, nothing spawned), off
+- `devswarm.nag.enabled` = true: Whether the Primary is nagged about a workspace that is done but still open (merged, clean, no unread mail, past idleMin)
+- `devswarm.nag.everyMs` = 1800000: Gap between two digests about the same still-open done workspace
+- `devswarm.nag.hourlyCap` = 4: Most nag messages sent to the Primary in any rolling hour
 - `devswarm.nudgeCooldownSec` = 120: Seconds between two pokes of one workspace
 - `devswarm.nudgeMaxAttempts` = 2: Pokes before a stale workspace is escalated
 - `devswarm.appSync` = true: Sync the DevSwarm desktop app's state (archived flags, titles, message gaps) into anti-hall every tick
@@ -37,6 +40,8 @@ The DevSwarm supervisor sweep: auto-archive, pokes, app sync, retention, reconci
 - `devswarm.retention.maxStoreMB` = 100: Store size limit in MB: above it the oldest eligible bodies are tombstoned whatever their age; 0 = no limit
 - `devswarm.supervisorSweepBudgetMs` = 20000: Time budget for one deferred stage of the sweep tail (one stage per tick)
 - `devswarm.sweepTailMode` = "node": Who decides the sweep tail (archived registry rows, twin descriptors; the reconcile port): node (the default; Node's scheduled functions...
+- `devswarm.dormantMs` = 1800000: How long a workspace whose session transcript resolves may stay silent before the roster calls it dormant (Node: devswarm.dormantMs, a...
 - `devswarm.activeFloorPct` = 50: Least percent of a project's previous active-workspace snapshot a new one must hold, or the previous one is kept (0 turns the floor off)
+- `devswarm.archivedChildStop` = true: The setting devswarm.archivedChildStop: an archived child's watcher stays alive but silent
 
 _Generated from the engine registry by `ah-engine docs --format skill`; do not edit by hand._

@@ -208,7 +208,7 @@ fn once_ack(sock: &Path, payload: &[u8], deadline: Duration, window: Duration, r
                     &[("what", &"read"), ("err", &defaults::text("msg.client_closed_before_ack"))],
                 )));
             }
-            Ok(n) => buf.extend_from_slice(&chunk[..n]),
+            Ok(n) => buf.extend_from_slice(chunk.get(..n).unwrap_or_default()),
             Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
             Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => return Once::NoAck,
             Err(e) => return Once::Done(Exch::Failed(defaults::render("msg.client_io", &[("what", &"read"), ("err", &e)]))),
@@ -255,7 +255,7 @@ fn once_ack(sock: &Path, payload: &[u8], deadline: Duration, window: Duration, r
         }
         match s.read(&mut chunk) {
             Ok(0) => break,
-            Ok(n) => buf.extend_from_slice(&chunk[..n]),
+            Ok(n) => buf.extend_from_slice(chunk.get(..n).unwrap_or_default()),
             Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
             Err(e) => {
                 let why = defaults::render("msg.client_io", &[("what", &"read"), ("err", &e)]);

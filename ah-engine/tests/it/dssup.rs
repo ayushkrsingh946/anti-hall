@@ -1019,14 +1019,20 @@ fn where_a_supervisor_tick_spends_its_cpu() {
     let f = fx("tickprof", true);
     for i in 0..700 {
         put(&dev(&f).join(format!("heartbeats/old-{i}.json")), &json!({"ts": now() - 86_400_000}));
-        put(&dev(&f).join(format!("workspaces/old-{i}.json")), &json!({"id": format!("old-{i}"), "worktreePath": format!("/gone/{i}"), "sessionId": format!("{i}"), "status": "done"}));
+        put(
+            &dev(&f).join(format!("workspaces/old-{i}.json")),
+            &json!({"id": format!("old-{i}"), "worktreePath": format!("/gone/{i}"), "sessionId": format!("{i}"), "status": "done"}),
+        );
         put(&dev(&f).join(format!("summaries/old-{i}.json")), &json!({"workspaces": {}}));
         put(&dev(&f).join(format!("plans/old-{i}.json")), &json!({"steps": []}));
     }
     for i in 2..=10 {
         let wt = f.home.join(format!("wt-{i}"));
         std::fs::create_dir_all(&wt).unwrap();
-        put(&dev(&f).join(format!("workspaces/ws-{i}.json")), &json!({"id": format!("ws-{i}"), "worktreePath": wt, "sessionId": format!("{i}1111111-2222-3333-4444-555555555555")}));
+        put(
+            &dev(&f).join(format!("workspaces/ws-{i}.json")),
+            &json!({"id": format!("ws-{i}"), "worktreePath": wt, "sessionId": format!("{i}1111111-2222-3333-4444-555555555555")}),
+        );
         put(&dev(&f).join(format!("heartbeats/ws-{i}.json")), &json!({"ts": now()}));
     }
     let st = settings(&f, &[]);
@@ -1034,7 +1040,11 @@ fn where_a_supervisor_tick_spends_its_cpu() {
         let out = tick::run(&ctx(&f, &st, true), Owner::Engine, &Rec::default());
         let per: Vec<String> = out["duties"]
             .as_array()
-            .map(|d| d.iter().map(|x| format!("{}={}ms/{}ms-cpu({})", x["duty"].as_str().unwrap_or("?"), x["ms"], x["cpuMs"], x["outcome"].as_str().unwrap_or("?"))).collect())
+            .map(|d| {
+                d.iter()
+                    .map(|x| format!("{}={}ms/{}ms-cpu({})", x["duty"].as_str().unwrap_or("?"), x["ms"], x["cpuMs"], x["outcome"].as_str().unwrap_or("?")))
+                    .collect()
+            })
             .unwrap_or_default();
         eprintln!("TICKPROF round {round}: ran={} {}", out["ran"], per.join(" "));
     }

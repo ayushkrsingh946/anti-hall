@@ -117,10 +117,10 @@ fn reader<R: Read + Send + 'static>(r: Option<R>) -> Option<Capture> {
                         let room = max.saturating_sub(b.len());
                         if n > room && !cut {
                             cut = true;
-                            b.extend_from_slice(&chunk[..room]);
+                            b.extend_from_slice(chunk.get(..room).unwrap_or_default());
                             b.extend_from_slice(defaults::text("mem.proc_output_marker").as_bytes());
                         } else if !cut {
-                            b.extend_from_slice(&chunk[..n]);
+                            b.extend_from_slice(chunk.get(..n).unwrap_or_default());
                         }
                     }
                 }
@@ -235,7 +235,7 @@ fn feed_file(file: &File, stdin: &mut impl Write) -> std::io::Result<()> {
             Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
             Err(e) => return Err(e),
         };
-        match stdin.write_all(&buf[..n]) {
+        match stdin.write_all(buf.get(..n).unwrap_or_default()) {
             Ok(()) => off += n as u64,
             Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => return Ok(()),
             Err(e) => return Err(e),

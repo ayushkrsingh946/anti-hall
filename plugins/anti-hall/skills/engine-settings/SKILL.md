@@ -32,7 +32,7 @@ Settings switches, the generated reference and the Jev classifier.
 - `claim-ledger`: Stop, never blocks: records the checkable claims of the last reply that no evidence in the session backs; asks the Jev shadow question...
 - `output-verify-guard`: PostToolUse advisory: flags a test-runner output with both a passing and a failing signal; asks the Jev shadow question...
 - `jev-weekly-scorecard`: Stays silent when the weekly Jev scorecard notice cannot be due (Jev off, notice off, child workspace, checked within a week); when the...
-- `jev-review-reminder`: Stays silent when no session-start Jev notice can be due (Jev and the semantic judge off, the recommend notice off or shown within 30...
+- `jev-review-reminder`: SessionStart notices of Jev: the one-time legacy-key notice, the recommend-Jev notice (Jev off) and the review-due line (Jev on), with...
 
 ## Switches
 
@@ -56,8 +56,11 @@ Settings switches, the generated reference and the Jev classifier.
 - `guards.speculationGuard` = true: Where the on/off switch is read from (guards.speculationGuard, default on)
 - `jev.semanticJudge` = false: Where the opt-in switch is read from (jev.semanticJudge, default off)
 - `guards.stopAck` = true: Where the stop-ack switch is read from (guards.stopAck, default on; hooks/lib/stop-ack.js)
+- `jev.reviewAfterDays` = 7: The setting jev.reviewAfterDays: days an integration must have been in shadow (and since its last review) before a review is due
 - `jev.recommendNoticeHeadless` = false: The setting jev.recommendNoticeHeadless (off by default): show the recommend notice in a non-interactive run too
+- `jev.reviewMinDecisions` = 30: The setting jev.reviewMinDecisions: decisions an integration must have logged before a review is due
 - `jev.recommendNotice` = true: The setting jev.recommendNotice (on by default): the one-in-30-days notice recommending Jev while it is off
+- `jev.reviewReminder` = true: The setting jev.reviewReminder (on by default): the session-start line that says a Jev shadow review is due
 - `jev.weeklyNotice` = true: The setting jev.weeklyNotice (on by default; a legacy jev.json value is honoured)
 - `jev.enabled` = false: The setting jev.enabled (off by default; a legacy jev.json value is honoured)
 - `context.roleGuard` = true: Switch context.roleGuard (default on): off lets every role run every engine verb (the PreToolUse Bash check and the command-line check...

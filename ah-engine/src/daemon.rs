@@ -485,15 +485,17 @@ fn phases_json(t: &crate::telemetry::Telemetry) -> serde_json::Value {
     let snap = t.with_metrics(|m| m.snapshot(""));
     let mut out = serde_json::Map::new();
     let mut checks = serde_json::Map::new();
-    for h in snap["histograms"].as_array().into_iter().flatten() {
-        let row = serde_json::json!({"count": h["count"], "p50_us": h["p50_us"], "p95_us": h["p95_us"], "max_us": h["max_us"]});
-        match h["name"].as_str() {
+    let field = |h: &serde_json::Value, k: &str| h.get(k).cloned().unwrap_or(serde_json::Value::Null);
+    let label = |h: &serde_json::Value, k: &str| h.get("labels").and_then(|l| l.get(k)).and_then(serde_json::Value::as_str).unwrap_or_default().to_string();
+    for h in snap.get("histograms").and_then(serde_json::Value::as_array).into_iter().flatten() {
+        let row = serde_json::json!({"count": field(h, "count"), "p50_us": field(h, "p50_us"), "p95_us": field(h, "p95_us"), "max_us": field(h, "max_us")});
+        match h.get("name").and_then(serde_json::Value::as_str) {
             Some("hook_phase_us") => {
-                let (event, phase) = (h["labels"]["event"].as_str().unwrap_or_default(), h["labels"]["phase"].as_str().unwrap_or_default());
-                out.entry(event.to_string()).or_insert_with(|| serde_json::json!({})).as_object_mut().map(|o| o.insert(phase.to_string(), row));
+                let (event, phase) = (label(h, "event"), label(h, "phase"));
+                out.entry(event).or_insert_with(|| serde_json::json!({})).as_object_mut().map(|o| o.insert(phase, row));
             }
             Some("check_latency_us") => {
-                checks.insert(h["labels"]["check"].as_str().unwrap_or_default().to_string(), row);
+                checks.insert(label(h, "check"), row);
             }
             _ => {}
         }
@@ -948,7 +950,7 @@ fn read_request(s: &mut UnixStream, cfg: &Config) -> Result<(Vec<u8>, bool), &'s
     loop {
         if !head_checked && let Some(nl) = buf.iter().position(|&b| b == b'\n') {
             head_checked = true;
-            announced = crate::wire::announced_len(&String::from_utf8_lossy(&buf[..nl])).and_then(|n| (nl + 1).checked_add(n));
+            announced = crate::wire::announced_len(&String::from_utf8_lossy(buf.get(..nl).unwrap_or_default())).and_then(|n| (nl + 1).checked_add(n));
             if announced.is_some_and(|total| total as u64 > cfg.max_request) {
                 return Err(defaults::text("msg.reply_too_large"));
             }
@@ -963,7 +965,7 @@ fn read_request(s: &mut UnixStream, cfg: &Config) -> Result<(Vec<u8>, bool), &'s
             Ok(0) if announced.is_some() => return Err(defaults::text("msg.reply_read_error")), // the client closed before its announced length arrived
             Ok(0) => return Ok((buf, false)),
             Ok(n) => {
-                buf.extend_from_slice(&chunk[..n]);
+                buf.extend_from_slice(chunk.get(..n).unwrap_or_default());
                 if buf.len() as u64 > cfg.max_request && announced.is_none() {
                     return Err(defaults::text("msg.reply_too_large"));
                 }
@@ -1037,7 +1039,7 @@ fn write_line(s: &mut UnixStream, bytes: &[u8], cfg: &Config) -> Result<(), Stri
     let deadline = Instant::now() + cfg.write_deadline;
     let mut written = 0;
     while written < bytes.len() {
-        match s.write(&bytes[written..]) {
+        match s.write(bytes.get(written..).unwrap_or_default()) {
             Ok(0) => return Err(defaults::text("msg.reply_write_deadline").into()),
             Ok(n) => written += n,
             Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
@@ -1070,9 +1072,9 @@ fn wait_res(s: &mut UnixStream) -> ResWait {
         match s.read(&mut chunk) {
             Ok(0) => return ResWait::Missing(defaults::text("wire.why_closed")),
             Ok(n) => {
-                buf.extend_from_slice(&chunk[..n]);
+                buf.extend_from_slice(chunk.get(..n).unwrap_or_default());
                 if let Some(nl) = buf.iter().position(|&b| b == b'\n') {
-                    return match crate::wire::parse_ack_res(&String::from_utf8_lossy(&buf[..nl])) {
+                    return match crate::wire::parse_ack_res(&String::from_utf8_lossy(buf.get(..nl).unwrap_or_default())) {
                         Some(p) => ResWait::Got(p, began.elapsed()),
                         None => ResWait::Missing(defaults::text("wire.why_garbled")),
                     };

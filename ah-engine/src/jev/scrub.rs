@@ -54,17 +54,17 @@ fn replace_lb(re: &Regex, hay: &str, to: &str) -> String {
     let (mut last, mut at) = (0, 0);
     while at <= hay.len() {
         let Some(m) = re.find_at(hay, at) else { break };
-        let rejected = hay[..m.start()].chars().next_back().is_some_and(alnum);
+        let rejected = hay.get(..m.start()).unwrap_or_default().chars().next_back().is_some_and(alnum);
         if rejected {
-            at = m.start() + hay[m.start()..].chars().next().map_or(1, char::len_utf8);
+            at = m.start() + hay.get(m.start()..).unwrap_or_default().chars().next().map_or(1, char::len_utf8);
             continue;
         }
-        out.push_str(&hay[last..m.start()]);
+        out.push_str(hay.get(last..m.start()).unwrap_or_default());
         out.push_str(to);
         last = m.end();
         at = if m.end() > m.start() { m.end() } else { m.end() + 1 };
     }
-    out.push_str(&hay[last..]);
+    out.push_str(hay.get(last..).unwrap_or_default());
     out
 }
 

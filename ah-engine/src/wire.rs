@@ -25,9 +25,10 @@ pub fn tag_request(payload: &[u8]) -> Option<Vec<u8>> {
     }
     let suffix = format!("{}{}", defaults::text("wire.head_tag"), payload.len() - nl - 1);
     let mut out = Vec::with_capacity(payload.len() + suffix.len());
-    out.extend_from_slice(&payload[..nl]);
+    let (head, tail) = payload.split_at(nl);
+    out.extend_from_slice(head);
     out.extend_from_slice(suffix.as_bytes());
-    out.extend_from_slice(&payload[nl..]);
+    out.extend_from_slice(tail);
     Some(out)
 }
 
@@ -38,7 +39,7 @@ pub fn announced_len(head: &str) -> Option<usize> {
     }
     let tag = defaults::text("wire.head_tag");
     let i = head.rfind(tag)?;
-    head[i + tag.len()..].trim().parse().ok()
+    head.get(i + tag.len()..)?.trim().parse().ok()
 }
 
 /// ACK(req): the request is read and parsed. `wait_us` is how long it queued.
@@ -75,12 +76,12 @@ pub enum FoSeen {
 pub fn parse_fail_open(buf: &[u8]) -> FoSeen {
     let prefix = format!("{} {} ", defaults::text("wire.ack_magic"), defaults::text("wire.fo_word"));
     let p = prefix.as_bytes();
-    let n = buf.len().min(p.len());
-    if buf[..n] != p[..n] {
+    if buf.iter().zip(p).any(|(a, b)| a != b) {
+        // the bytes seen so far differ from the prefix (a shorter buffer is compared over its own length)
         return FoSeen::No;
     }
     let Some(nl) = buf.iter().position(|&b| b == b'\n') else { return FoSeen::Need };
-    let rest = String::from_utf8_lossy(&buf[p.len().min(nl)..nl]).into_owned();
+    let rest = String::from_utf8_lossy(buf.get(p.len().min(nl)..nl).unwrap_or_default()).into_owned();
     match rest.split_once(' ') {
         Some((reason, check)) if buf.len() >= p.len() => FoSeen::Fo { len: nl + 1, reason: reason.to_string(), check: check.to_string() },
         _ => FoSeen::No,
@@ -107,12 +108,12 @@ pub enum AckSeen {
 pub fn parse_ack_req(buf: &[u8]) -> AckSeen {
     let prefix = format!("{} {} ", defaults::text("wire.ack_magic"), defaults::text("wire.req_word"));
     let p = prefix.as_bytes();
-    let n = buf.len().min(p.len());
-    if buf[..n] != p[..n] {
+    if buf.iter().zip(p).any(|(a, b)| a != b) {
+        // the bytes seen so far differ from the prefix (a shorter buffer is compared over its own length)
         return AckSeen::No;
     }
     let Some(nl) = buf.iter().position(|&b| b == b'\n') else { return AckSeen::Need };
-    match std::str::from_utf8(&buf[p.len().min(nl)..nl]).ok().and_then(|t| t.trim().parse().ok()) {
+    match std::str::from_utf8(buf.get(p.len().min(nl)..nl).unwrap_or_default()).ok().and_then(|t| t.trim().parse().ok()) {
         Some(wait_us) if buf.len() >= p.len() => AckSeen::Req { len: nl + 1, wait_us },
         _ => AckSeen::No,
     }
@@ -168,7 +169,7 @@ pub fn caps_path() -> std::path::PathBuf {
 
 /// The daemon speaks the protocol: say so (best effort; without the file clients use the original exchange).
 pub fn announce() {
-    if let Err(e) = std::fs::write(caps_path(), std::process::id().to_string()) {
+    if let Err(e) = crate::atomic::write(caps_path(), std::process::id().to_string()) {
         crate::health::log_event("wire", "announce_failed", &e.to_string());
     }
 }

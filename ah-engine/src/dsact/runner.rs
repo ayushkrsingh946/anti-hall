@@ -94,7 +94,7 @@ fn drain(mut r: impl Read + Send + 'static, cap: usize) -> Drained {
                     if let Ok(mut g) = shared.lock() {
                         let room = cap.saturating_sub(g.0.len());
                         g.1 |= n > room;
-                        g.0.extend_from_slice(&chunk[..n.min(room)]);
+                        g.0.extend_from_slice(chunk.get(..n.min(room)).unwrap_or_default());
                     }
                 }
             }

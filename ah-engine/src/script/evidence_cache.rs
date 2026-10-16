@@ -159,13 +159,13 @@ pub(super) fn cached(path: &str, w: u64) -> Option<String> {
     f.read_exact_at(&mut buf, k.parsed_to).ok()?;
     crate::load::note_scan(buf.len() as u64);
     let mut at = 0usize;
-    while let Some(i) = buf[at..].iter().position(|b| *b == b'\n') {
-        let line = make_line(k.parsed_to, &buf[at..at + i]);
+    while let Some(i) = buf.get(at..).and_then(|r| r.iter().position(|b| *b == b'\n')) {
+        let line = make_line(k.parsed_to, buf.get(at..at + i).unwrap_or_default());
         k.lines.push_back(line);
         k.parsed_to += (i + 1) as u64;
         at += i + 1;
     }
-    let pending = (at < buf.len()).then(|| make_line(k.parsed_to, &buf[at..]));
+    let pending = (at < buf.len()).then(|| make_line(k.parsed_to, buf.get(at..).unwrap_or_default()));
     // the answer: every line of the window, the unfinished one last
     let max_chars = defaults::num("transcript.evidence_max_chars") as f64;
     let mut chars = 0usize;

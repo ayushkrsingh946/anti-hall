@@ -126,7 +126,7 @@ fn semver_opt(rx: &Rx, v: Option<&str>) -> bool {
 fn parse_version(rx: &Rx, v: &str) -> Option<Vec<f64>> {
     let t = rx.v_strip.replace(js_trim(v), "").into_owned();
     let m = rx.vprefix.captures(&t)?;
-    let parts: Vec<f64> = m[1].split('.').map(|n| n.parse::<f64>().unwrap_or(f64::NAN)).collect();
+    let parts: Vec<f64> = m.get(1).map_or("", |x| x.as_str()).split('.').map(|n| n.parse::<f64>().unwrap_or(f64::NAN)).collect();
     parts.iter().all(|n| n.is_finite()).then_some(parts)
 }
 
@@ -256,7 +256,7 @@ fn extract_changelog(rx: &Rx, text: &str, from: Option<&str>, to: Option<&str>) 
     for (i, raw) in pieces.iter().enumerate() {
         let line = if i + 1 < pieces.len() { raw.strip_suffix('\r').unwrap_or(raw) } else { raw };
         if let Some(m) = rx.heading.captures(line) {
-            sections.push((m[1].to_string(), vec![line]));
+            sections.push((m.get(1).map_or(String::new(), |x| x.as_str().to_string()), vec![line]));
         } else if let Some(cur) = sections.last_mut() {
             cur.1.push(line);
         }

@@ -226,7 +226,7 @@ fn valid_utf8(path: &Path) -> Result<bool, SetupError> {
         if n == 0 {
             return Ok(carry.is_empty());
         }
-        carry.extend_from_slice(&chunk[..n]);
+        carry.extend_from_slice(chunk.get(..n).unwrap_or_default());
         match std::str::from_utf8(&carry) {
             Ok(_) => carry.clear(),
             Err(e) if e.error_len().is_some() => return Ok(false),

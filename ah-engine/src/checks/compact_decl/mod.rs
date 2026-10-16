@@ -47,13 +47,13 @@ pub(crate) fn read_tail(path: &str, max: u64) -> Option<Vec<String>> {
     let mut buf = vec![0u8; n as usize];
     let mut got = 0usize;
     while got < buf.len() {
-        match f.read(&mut buf[got..]) {
+        match buf.get_mut(got..).map_or(Ok(0), |rest| f.read(rest)) {
             Ok(0) => break,
             Ok(k) => got += k,
             Err(_) => return None,
         }
     }
-    let text = String::from_utf8_lossy(&buf[..got]);
+    let text = String::from_utf8_lossy(buf.get(..got).unwrap_or_default());
     let mut lines: Vec<String> = text.split('\n').map(str::to_string).collect();
     if size > n {
         lines.remove(0);
@@ -112,7 +112,7 @@ fn strip_leading_reminders(txt: &str) -> &str {
         let after_ws = rest.trim_start_matches(is_js_space);
         let Some(inner) = after_ws.strip_prefix(open) else { break };
         let Some(end) = inner.find(close) else { break };
-        rest = &inner[end + close.len()..];
+        rest = inner.get(end + close.len()..).unwrap_or_default();
     }
     rest
 }

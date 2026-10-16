@@ -246,7 +246,9 @@ fn jev_ask(spec: &str) -> rquickjs::Result<Option<String>> {
                 if flag("full") {
                     // a flagged Stop whose wait ran out fails open on its baseline, and says so
                     let mut j: serde_json::Value = serde_json::from_str(&decision_json(&d)).unwrap_or_default();
-                    j["reason"] = serde_json::Value::String(crate::defaults::text("jev.reason_fail_open").to_string());
+                    if let Some(o) = j.as_object_mut() {
+                        o.insert("reason".to_string(), serde_json::Value::String(crate::defaults::text("jev.reason_fail_open").to_string()));
+                    }
                     return Ok(Some(j.to_string()));
                 }
             }

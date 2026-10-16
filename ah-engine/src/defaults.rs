@@ -420,7 +420,7 @@ fn overlay_table() -> Option<&'static [(&'static str, &'static V)]> {
 
 fn overlaid(key: &str) -> Option<&'static V> {
     let o = overlay_table()?;
-    o.binary_search_by(|(k, _)| (*k).cmp(key)).ok().map(|i| o[i].1)
+    o.binary_search_by(|(k, _)| (*k).cmp(key)).ok().and_then(|i| o.get(i)).map(|e| e.1)
 }
 
 /// A JSON value as static data in the shape of the shipped default `d` (the layers have already checked the shape). `None` for a
