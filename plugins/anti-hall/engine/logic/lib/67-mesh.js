@@ -24,6 +24,13 @@ ah.mesh = {
   // This hook's own reader on a partition: {reader: false} (no reader key), {reader: true, state: 'none'} (no store) or
   // {reader: true, state: 'ok', own} (own: its store row's value, null when it has none); with `count` and a row, also unread, total.
   ownReader: function (key, id, inbox, cursor, count, now) { return meshNeed(ahHost.meshOwnReader(key, id, inbox, cursor, !!count, now)); },
+  // The reader nonce of the hook that sent the request (deriveReaderNonce), null for a headless caller.
+  readerNonce: function () { return meshNeed(ahHost.meshReaderNonce()).nonce; },
+  // A child's own unread mail (openStoreForUnread + countFor with its own reader, else readUnread): {state: 'nd', unread, known}
+  // (no key or no store) or {state: 'ok', unread, known, age}.
+  countFor: function (key, id, inbox, cursor, now) { return meshNeed(ahHost.meshCountFor(key, id, inbox, cursor, now)); },
+  // The project key of the checkout around `cwd` (resolveContext(cwd, {missingPath: 'ancestor'}).repoKey), null when none.
+  contextKey: function (cwd) { return meshNeed(ahHost.meshContextKey(cwd)).key; },
   // {verdict: true | false | null, cache}: the app database's archive verdict; with `cache` a cache write is owed (performCache).
   appArchived: function (id, wt, cache) { return meshNeed(ahHost.meshAppArchived(id, wt, !!cache)); },
   // Perform every cache write this call's lookups owe.

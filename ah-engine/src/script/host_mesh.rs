@@ -12,6 +12,9 @@
 //! | `meshMessageCount(key, id)` | `{state: "none"}` (no store file) or `{state: "ok", count}`: the messages a partition holds |
 //! | `meshUnion(key, id, inbox, cursor, own, now)` | `{state: "none"}` or `{state: "ok", storeOnly: [row], age}`: the store rows no inbox line covers and the age in ms of the oldest unread row |
 //! | `meshOwnReader(key, id, inbox, cursor, count, now)` | `{reader: false}`, `{reader: true, state: "none"}` or `{reader: true, state: "ok", own, unread?, total?}`: this hook's own reader row on a partition and, with `count`, its unread count and the partition's message count |
+//! | `meshReaderNonce()` | `{nonce}`: the reader nonce of the hook that sent the request (`deriveReaderNonce`), `null` for a headless caller |
+//! | `meshCountFor(key, id, inbox, cursor, now)` | `{state: "nd", unread, known}` (no key or no store: the inbox and its cursor alone) or `{state: "ok", unread, known, age}`: a child's own unread mail counted with its own reader (`countFor`) |
+//! | `meshContextKey(cwd)` | `{key}`: the project key of the checkout around `cwd` (`resolveContext(cwd, {missingPath: 'ancestor'}).repoKey`), `null` when none |
 //! | `meshAppArchived(id, worktree, cache)` | `{verdict: true \| false \| null, cache: n \| null}`: the app database's archive verdict; `cache` names a cache write owed |
 //! | `meshPerformCache()` | perform every cache write the call's lookups owe |
 //! | `meshSessionAlive(session)` | `{alive}`: a session record of this session names a live process |
@@ -128,6 +131,12 @@ fn open_store(st: &Settings, key: &str) -> Result<Option<crate::mesh::MeshReader
 /// walked from the request's sender (the daemon's socket peer) or, in a one-shot `check`, from this process, as the Node hook
 /// walks from itself. A daemon request whose sender the socket did not name has no answer.
 fn own_reader(st: &Settings) -> Result<Option<String>, No> {
+    Ok(crate::meshw::cursors::reader_key(own_nonce(st)?.as_deref()))
+}
+
+/// The reader nonce of the hook that sent this request (`deriveReaderNonce({ home })`), walked as [`own_reader`] walks; `None` for
+/// a headless caller (no harness ancestor).
+fn own_nonce(st: &Settings) -> Result<Option<String>, No> {
     let start = match st.env.get(defaults::text("request_env.peer_pid_key")) {
         None => i64::from(std::process::id()),
         Some(v) => match v.parse::<i64>() {
@@ -135,7 +144,32 @@ fn own_reader(st: &Settings) -> Result<Option<String>, No> {
             _ => return Err(No),
         },
     };
-    Ok(crate::meshw::cursors::reader_key(ident::reader_nonce_from(Path::new(&st.home), start).as_deref()))
+    Ok(ident::reader_nonce_from(Path::new(&st.home), start))
+}
+
+/// A workspace's own unread mail as a child hook counts it (`openStoreForUnread`, then `countFor` with this hook's own reader, or
+/// `readUnread` when there is no store): `{state: "nd", unread, known}` (no project key or no store: the inbox and its cursor file
+/// alone) or `{state: "ok", unread, known, age}`. `known`: the inbox and its cursor file both read (`readUnread`'s `known`).
+fn count_for(st: &Settings, key: Option<&str>, id: &str, inbox: Option<&str>, cursor: Option<&str>, now: f64) -> Result<Value, No> {
+    let lines = inbox.and_then(crate::meshw::union::non_empty_lines);
+    let position = match (&lines, cursor) {
+        (Some(_), Some(c)) => crate::meshw::union::cursor_position(c).map_err(|_| No)?,
+        _ => None,
+    };
+    let known = lines.is_some() && position.is_some();
+    let store = match key {
+        Some(k) => open_store(st, k)?,
+        None => None,
+    };
+    let Some(store) = store else {
+        let u = union_unread(&UnionIn { inbox, cursor_file: cursor, id, store: None, store_base: 0.0, nd_base: position.unwrap_or(0.0), now: now as i64 })
+            .map_err(|_| No)?;
+        return Ok(json!({"state": "nd", "unread": if known { u.unread } else { 0 }, "known": known}));
+    };
+    let reader = own_reader(st)?;
+    let (sb, nb) = floor_positions(&store, &st.home, id, cursor, reader.as_deref())?;
+    let u = union_unread(&UnionIn { inbox, cursor_file: cursor, id, store: Some(&store), store_base: sb, nd_base: nb, now: now as i64 }).map_err(|_| No)?;
+    Ok(json!({"state": "ok", "unread": u.unread, "known": known, "age": u.oldest_unread_age_ms.filter(|a| a.is_finite())}))
 }
 
 /// `positions(store, { reader, partition, cursorPath, home })` as `(store base, nd base)`: the floor view, overlaid by `reader`'s
@@ -320,6 +354,20 @@ pub(super) fn install<'js>(c: &Ctx<'js>, h: &Object<'js>) -> rquickjs::Result<()
                 Ok(answer(with_settings(|st| own_view(st, &key, &id, inbox.as_deref(), cursor.as_deref(), count, now))?))
             },
         )?,
+    )?;
+    h.set(
+        "meshReaderNonce",
+        Function::new(c.clone(), || -> rquickjs::Result<String> { Ok(answer(with_settings(|st| own_nonce(st).map(|n| json!({"nonce": n})))?)) })?,
+    )?;
+    h.set(
+        "meshCountFor",
+        Function::new(c.clone(), |key: Option<String>, id: String, inbox: Option<String>, cursor: Option<String>, now: f64| -> rquickjs::Result<String> {
+            Ok(answer(with_settings(|st| count_for(st, key.as_deref(), &id, inbox.as_deref(), cursor.as_deref(), now))?))
+        })?,
+    )?;
+    h.set(
+        "meshContextKey",
+        Function::new(c.clone(), |cwd: String| answer(ident::resolve_context(&cwd, true).map(|c| json!({"key": c.repo_key})).map_err(|_| No)))?,
     )?;
     h.set(
         "meshAppArchived",

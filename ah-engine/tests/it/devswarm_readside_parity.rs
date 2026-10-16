@@ -1,11 +1,11 @@
 //! Node-vs-engine parity for the read-side answers of `devswarm-child-drain` and `devswarm-parent-gate`.
 //!
 //! Every case runs the engine (`ah-engine check <name>`) and the real Node hook on the same isolated home, the same
-//! environment and the same payload. The rule under test is one-directional: where the engine answers, Node must print
-//! nothing, exit 0 and change nothing in the home (the engine's answer is byte for byte Node's); where Node would act
-//! (a drain nudge from a seeded store, a Stop gate that reads state) the engine must defer. The engine itself never
-//! writes. Homes are isolated (`HOME`, `USERPROFILE`) and `ANTIHALL_INGEST_DRY_RUN=1` is set on every process, so the
-//! real `~/.anti-hall/devswarm` store is never touched.
+//! environment and the same payload. Where the engine answers, Node run on the same home (put back after the engine's run)
+//! must print and exit the same, byte for byte, and leave the home as the engine left it (a drain nudge records its throttle
+//! state; clock readings masked); where the engine defers it must have written nothing. Homes are isolated (`HOME`,
+//! `USERPROFILE`) and `ANTIHALL_INGEST_DRY_RUN=1` is set on every process, so the real `~/.anti-hall/devswarm` store is never
+//! touched.
 #![allow(clippy::unwrap_used, clippy::expect_used)] // a test crate: a panic is the failure report, and E2 exempts tests
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
@@ -29,8 +29,6 @@ enum Want {
     Answer,
     /// The engine defers.
     Defer,
-    /// The engine defers and Node really does act (prints a nudge): the case that proves "never weaker".
-    DeferNodeActs,
 }
 
 #[derive(Clone)]
@@ -220,20 +218,30 @@ fn exec(case: &Case) -> &'static str {
     let before = tree(&home_dir);
     let (ecode, eout, eerr) = engine(case, &home, &root, &input);
     assert_eq!(ecode, 0, "{}: engine exit {ecode}: {eerr}", case.name);
-    assert_eq!(tree(&home_dir), before, "{}: the engine changed the home", case.name);
     if eout.trim_end() == FALLBACK {
+        assert_eq!(tree(&home_dir), before, "{}: a deferral must write nothing", case.name);
         assert_ne!(case.want, Want::Answer, "{}: engine deferred but the case expects an answer", case.name);
-        if case.want == Want::DeferNodeActs {
-            let (ncode, nout, _) = node(case, &home, &root, &input);
-            assert!(ncode == 0 && !nout.trim().is_empty(), "{}: the case expects Node to act, it printed {nout:?}", case.name);
-        }
         return "defer";
     }
     assert_eq!(case.want, Want::Answer, "{}: engine answered {eout:?} but the case expects a deferral", case.name);
+    // the engine's home (a nudge records its throttle state), then the same home put back for Node
+    let after_engine = tree(&home_dir);
+    std::fs::remove_dir_all(&home_dir).unwrap();
+    for (rel, body) in &before {
+        let p = home_dir.join(rel);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, body).unwrap();
+    }
     let (ncode, nout, nerr) = node(case, &home, &root, &input);
     assert_eq!((ecode, &eout, &eerr), (ncode, &nout, &nerr), "{}: engine and Node differ", case.name);
-    assert_eq!(tree(&home_dir), before, "{}: Node changed the home, the engine did not", case.name);
+    assert_eq!(masked(after_engine), masked(tree(&home_dir)), "{}: the home differs after the engine and after Node", case.name);
     "answer"
+}
+
+/// Clock readings (13-digit runs: the nudge's throttle time) are each side's own.
+fn masked(t: BTreeMap<String, Vec<u8>>) -> BTreeMap<String, Vec<u8>> {
+    let re = regex::Regex::new(r"\d{13}").unwrap();
+    t.into_iter().filter(|(k, _)| !k.ends_with("-wal") && !k.ends_with("-shm")).map(|(k, v)| (k, re.replace_all(&String::from_utf8_lossy(&v), "T").into_owned().into_bytes())).collect()
 }
 
 fn bash(cmd: &str) -> Value {
@@ -261,13 +269,13 @@ fn drain_cases() -> Vec<Case> {
         drain("tool-null", a, &[], tool(Value::Null)).desc(INBOX),
         drain("tool-number", a, &[], tool(json!(7))).desc(INBOX),
         drain("tool-empty-string", a, &[], tool(json!(""))).desc(INBOX),
-        drain("tool-absent-continues", d, &[], json!({"hook_event_name":"PostToolUse","tool_input":{"command":"ls"}})).desc(INBOX),
+        drain("tool-absent-continues", a, &[], json!({"hook_event_name":"PostToolUse","tool_input":{"command":"ls"}})).desc(INBOX),
         drain("subagent-agent-id", a, &[], with(b(), "agent_id", json!("a1"))).desc(INBOX),
         drain("subagent-agent-type", a, &[], with(b(), "agent_type", json!("Explore"))).desc(INBOX),
         drain("subagent-empty-agent-id", a, &[], with(b(), "agent_id", json!(""))).desc(INBOX),
         drain("subagent-zero-agent-id", a, &[], with(b(), "agent_id", json!(0))).desc(INBOX),
         drain("subagent-false-agent-type", a, &[], with(b(), "agent_type", json!(false))).desc(INBOX),
-        drain("subagent-null-ids-are-not-subagents", d, &[], with(with(b(), "agent_id", Value::Null), "agent_type", Value::Null)).desc(INBOX),
+        drain("subagent-null-ids-are-not-subagents", a, &[], with(with(b(), "agent_id", Value::Null), "agent_type", Value::Null)).desc(INBOX),
         drain("read-primary", a, &[], bash("node x/devswarm.js inbox read-primary")).desc(INBOX),
         drain("read-primary-upper", a, &[], bash("NODE X INBOX READ-PRIMARY")).desc(INBOX),
         drain("read-primary-flags", a, &[], bash("devswarm.js inbox -s abc read-primary --json")).desc(INBOX),
@@ -275,15 +283,15 @@ fn drain_cases() -> Vec<Case> {
         drain("read-primary-tab", a, &[], bash("devswarm.js inbox\tread-primary")).desc(INBOX),
         drain("read-primary-nbsp", a, &[], bash("devswarm.js inbox\u{a0}read-primary")).desc(INBOX),
         drain("read-primary-newline", a, &[], bash("echo 1\ndevswarm.js inbox\nread-primary")).desc(INBOX),
-        drain("read-primary-prefixed-word-defers", d, &[], bash("xinbox read-primary")).desc(INBOX),
-        drain("read-primary-suffixed-word-defers", d, &[], bash("devswarm.js inbox read-primaryx")).desc(INBOX),
+        drain("read-primary-prefixed-word-counts", a, &[], bash("xinbox read-primary")).desc(INBOX),
+        drain("read-primary-suffixed-word-counts", a, &[], bash("devswarm.js inbox read-primaryx")).desc(INBOX),
         drain("read-primary-dash-word-matches", a, &[], bash("devswarm.js inbox read-primary-extra")).desc(INBOX),
-        drain("read-primary-underscore-defers", d, &[], bash("devswarm.js inbox read-primary_x")).desc(INBOX),
-        drain("read-primary-between-defers", d, &[], bash("devswarm.js inbox pull read-primary")).desc(INBOX),
-        drain("read-primary-kelvin-sign-defers", d, &[], bash("INBOX READ-PRIMARY".replace('K', "\u{212a}").replace("INBOX", "\u{212a}NBOX").as_str()))
+        drain("read-primary-underscore-counts", a, &[], bash("devswarm.js inbox read-primary_x")).desc(INBOX),
+        drain("read-primary-between-counts", a, &[], bash("devswarm.js inbox pull read-primary")).desc(INBOX),
+        drain("read-primary-kelvin-sign-counts", a, &[], bash("INBOX READ-PRIMARY".replace('K', "\u{212a}").replace("INBOX", "\u{212a}NBOX").as_str()))
             .desc(INBOX),
-        drain("command-not-a-string-defers", d, &[], json!({"tool_name":"Bash","tool_input":{"command":["inbox","read-primary"]}})).desc(INBOX),
-        drain("tool-input-absent-defers", d, &[], json!({"tool_name":"Bash"})).desc(INBOX),
+        drain("command-not-a-string-counts", a, &[], json!({"tool_name":"Bash","tool_input":{"command":["inbox","read-primary"]}})).desc(INBOX),
+        drain("tool-input-absent-counts", a, &[], json!({"tool_name":"Bash"})).desc(INBOX),
         drain("id-missing", a, &[("-DEVSWARM_BUILDER_ID", "")], b()).desc(INBOX),
         drain("id-empty", a, &[(id, "")], b()).desc(INBOX),
         drain("id-space", a, &[(id, "a b")], b()).desc(INBOX),
@@ -306,14 +314,14 @@ fn drain_cases() -> Vec<Case> {
         drain("descriptor-inbox-zero", a, &[], b()).desc("{\"inboxPath\":0}"),
         drain("descriptor-inbox-negative-zero", a, &[], b()).desc("{\"inboxPath\":-0}"),
         drain("descriptor-inbox-wrong-case-key", a, &[], b()).desc("{\"inboxpath\":\"x\"}"),
-        drain("descriptor-inbox-string-defers", d, &[], b()).desc(INBOX),
+        drain("descriptor-inbox-missing-file-counts-zero", a, &[], b()).desc(INBOX),
         drain("descriptor-inbox-true-defers", d, &[], b()).desc("{\"inboxPath\":true}"),
         drain("descriptor-inbox-one-defers", d, &[], b()).desc("{\"inboxPath\":1}"),
         drain("descriptor-inbox-object-defers", d, &[], b()).desc("{\"inboxPath\":{}}"),
         drain("descriptor-inbox-array-defers", d, &[], b()).desc("{\"inboxPath\":[]}"),
         drain("descriptor-inbox-duplicate-key-last-wins", a, &[], b()).desc("{\"inboxPath\":\"x\",\"inboxPath\":\"\"}"),
-        drain("descriptor-malformed-defers", d, &[], b()).desc("{not json"),
-        drain("descriptor-empty-file-defers", d, &[], b()).desc(""),
+        drain("descriptor-malformed-is-no-descriptor", a, &[], b()).desc("{not json"),
+        drain("descriptor-empty-file-is-no-descriptor", a, &[], b()).desc(""),
         drain("descriptor-lone-surrogate-defers", d, &[], b()).desc("{\"inboxPath\":\"\\ud800\"}"),
         drain("descriptor-overflow-number-defers", d, &[], b()).desc("{\"inboxPath\":1e999}"),
         drain("payload-not-object-defers", d, &[], json!(["x"])).desc(INBOX),
@@ -330,13 +338,12 @@ fn drain_cases() -> Vec<Case> {
         drain("cold-launcher-setting-off-file", a, &[], tool(json!("Read")))
             .cold()
             .seed(".anti-hall/settings.json", "{\"devswarm\":{\"stableLauncher\":false}}"),
-        // Node acts here: the engine must not answer
-        drain("unread-ndjson-node-nudges", Want::DeferNodeActs, &[], b()).store(3, 0),
-        drain("unread-store-node-nudges", Want::DeferNodeActs, &[], b()).store(0, 2),
-        drain("unread-both-node-nudges", Want::DeferNodeActs, &[], b()).store(2, 2),
-        drain("nothing-unread-defers", d, &[], b()).store(0, 0),
+        // Node nudges here: the engine's nudge and throttle state must be Node's
+        drain("unread-ndjson-nudges", a, &[], b()).store(3, 0),
+        drain("unread-store-nudges", a, &[], b()).store(0, 2),
+        drain("unread-both-nudges", a, &[], b()).store(2, 2),
+        drain("nothing-unread-is-silent", a, &[], b()).store(0, 0),
     ];
-    // the two drain-only seeds above need the throttle not to exist; a second Bash call after a nudge is Node's to throttle
     v.push(drain("read-primary-with-unread-is-silent", a, &[], bash("devswarm.js inbox read-primary")).store(3, 2));
     v.push(drain("subagent-with-unread-is-silent", a, &[], with(b(), "agent_id", json!("a1"))).store(3, 2));
     v.push(drain("non-bash-with-unread-is-silent", a, &[], tool(json!("Edit"))).store(3, 2));
