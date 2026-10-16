@@ -297,6 +297,18 @@ value = { kind = "counter", unit = "lookups", labels = ["result"] }
 doc = "Why a transcript evidence lookup read its window afresh: none (nothing kept: first call, daemon restart, eviction or idle expiry), file (another file or a shorter one), window (the window moved past the kept lines) or digest (the file was rewritten in place)."
 value = { kind = "counter", unit = "lookups", labels = ["reason"] }
 
+[metric.check_cpu_us]
+doc = "CPU time (microseconds, the worker thread's own) spent inside each built-in check, by check: the sum over its calls. Divide by `check_calls` for the mean; wall time is `check_latency_us`."
+value = { kind = "counter", unit = "us", labels = ["check"] }
+
+[metric.tasks_cache]
+doc = "Task-line lookups of `ah.transcript.tasks` (task-guard, tasklist-guard, task-tracker): hit (nothing appended), extend (only the appended bytes were read) or rebuild (the window was read afresh)."
+value = { kind = "counter", unit = "lookups", labels = ["result"] }
+
+[metric.tasks_cache_rebuild]
+doc = "Why a task-line lookup read its window afresh: none (nothing kept: first call, daemon restart, eviction or idle expiry), file (another file or a shorter one), window (the window moved past the kept lines) or digest (the file was rewritten in place)."
+value = { kind = "counter", unit = "lookups", labels = ["reason"] }
+
 [metric.rule_hits]
 doc = "Regex rule matches, by action (deny, warn, context)."
 value = { kind = "counter", unit = "matches", labels = ["action"] }

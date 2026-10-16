@@ -56,6 +56,7 @@ pub mod host_transcript;
 pub mod host_ts;
 pub mod recache;
 pub mod sysmem;
+pub mod tasks_cache;
 
 use crate::checks::git::util::Settings;
 use crate::checks::{Exact, RouteMeta, Verdict};

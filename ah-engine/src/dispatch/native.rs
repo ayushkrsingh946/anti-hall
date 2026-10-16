@@ -171,6 +171,7 @@ pub fn evaluate(meta: &Meta, p: &Value, over_cpu: &dyn Fn() -> bool, observe: &d
                 &crate::defaults::render("msg.log_deadline_soft", &[("check", &check), ("event", &meta.event), ("elapsed_ms", &elapsed), ("ran_ms", &ran)]),
             );
         }
+        crate::load::note_check_cpu(crate::limits::thread_cpu_us().saturating_sub(cpu_before));
         observe(&e, &a, started.elapsed().as_micros() as u64);
         out.push((e.id, a));
     }

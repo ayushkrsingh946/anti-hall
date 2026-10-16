@@ -31,7 +31,7 @@ pub struct ScanTasks {
     pub open_task_ids: Vec<String>,
 }
 
-fn created_re() -> std::sync::Arc<Regex> {
+pub(crate) fn created_re() -> std::sync::Arc<Regex> {
     static R: crate::defaults::Cache<Regex> = crate::defaults::Cache::new();
     R.get_or_init(|| jsre::compile(defaults::text("taskstate.re_created"), true))
 }
@@ -47,9 +47,55 @@ fn actionable_priority(p: &Option<String>) -> bool {
     }
 }
 
+/// What one line says about task activity when the widened scan reads it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Decisive {
+    /// A tool use named by `tasklist_guard.task_tool_names`: the search ends with a yes.
+    Hit,
+    /// A line only JavaScript's parser could read: the search ends unsure.
+    Unsure,
+}
+
+/// One SIMD substring finder per tool name: the widened window is read on every Stop whose tail holds no task activity, and a
+/// byte-by-byte comparison of every name at every offset made that read cost 180 ms of CPU on a 33 MB transcript (#22).
+pub(crate) fn wide_finders<'a>(names: &[&'a str]) -> Vec<memchr::memmem::Finder<'a>> {
+    names.iter().map(|n| memchr::memmem::Finder::new(n.as_bytes())).collect()
+}
+
+/// What the widened scan makes of one line (its bytes without the newline): `None` when the line cannot decide the search.
+pub(crate) fn judge_wide_line(buf: &[u8], names: &[&str], finders: &[memchr::memmem::Finder<'_>]) -> Option<Decisive> {
+    // only a line that names a task tool can matter; the rest is skipped without decoding
+    if !finders.iter().any(|f| f.find(buf).is_some()) {
+        return None;
+    }
+    let line = String::from_utf8_lossy(buf).into_owned();
+    let line = line.strip_suffix('\r').unwrap_or(&line);
+    let t = js_trim(line);
+    if t.is_empty() {
+        return None;
+    }
+    let entry = match serde_json::from_str::<Value>(t) {
+        Ok(e) => e,
+        Err(_) if maybe_valid_for_js(t) => return Some(Decisive::Unsure),
+        Err(_) => return None,
+    };
+    let mut uses = Vec::new();
+    collect_tool_uses(&entry, &mut uses);
+    uses.iter().any(|tu| get(tu, "name").and_then(Value::as_str).is_some_and(|n| names.contains(&n))).then_some(Decisive::Hit)
+}
+
 /// `hasTaskActivityInText` over the last `window` bytes of a file, read one line at a time: the widened scan covers 16 MB and
-/// holding that as one string was the biggest transient the daemon had. `None` when the file cannot be read.
+/// holding that as one string was the biggest transient the daemon had. `None` when the file cannot be read. The decisive lines
+/// are kept between calls ([`crate::script::tasks_cache::wide_activity`]); [`has_task_activity_in_file_uncached`] reads it all.
 fn has_task_activity_in_file(path: &str, window: u64) -> Option<R<bool>> {
+    match crate::script::tasks_cache::wide_activity(path, window) {
+        Some(answer) => Some(answer),
+        None => has_task_activity_in_file_uncached(path, window),
+    }
+}
+
+/// [`has_task_activity_in_file`] reading the whole window: the reference the kept lines are tested against.
+pub(crate) fn has_task_activity_in_file_uncached(path: &str, window: u64) -> Option<R<bool>> {
     use std::io::{BufRead, Seek, SeekFrom};
     let size = std::fs::metadata(path).ok()?.len();
     let mut f = std::fs::File::open(path).ok()?;
@@ -59,9 +105,7 @@ fn has_task_activity_in_file(path: &str, window: u64) -> Option<R<bool>> {
     }
     let mut rd = std::io::BufReader::new(f);
     let names = defaults::list("tasklist_guard.task_tool_names");
-    // one SIMD substring finder per tool name: the widened window is read on every Stop whose tail holds no task activity, and a
-    // byte-by-byte comparison of every name at every offset made that read cost 180 ms of CPU on a 33 MB transcript (#22)
-    let finders: Vec<memchr::memmem::Finder<'_>> = names.iter().map(|n| memchr::memmem::Finder::new(n.as_bytes())).collect();
+    let finders = wide_finders(&names);
     let mut buf: Vec<u8> = Vec::new();
     loop {
         buf.clear();
@@ -72,25 +116,10 @@ fn has_task_activity_in_file(path: &str, window: u64) -> Option<R<bool>> {
         if buf.last() == Some(&b'\n') {
             buf.pop();
         }
-        // only a line that names a task tool can matter; the rest is skipped without decoding
-        if !finders.iter().any(|f| f.find(&buf).is_some()) {
-            continue;
-        }
-        let line = String::from_utf8_lossy(&buf).into_owned();
-        let line = line.strip_suffix('\r').unwrap_or(&line);
-        let t = js_trim(line);
-        if t.is_empty() {
-            continue;
-        }
-        let entry = match serde_json::from_str::<Value>(t) {
-            Ok(e) => e,
-            Err(_) if maybe_valid_for_js(t) => return Some(Err(Unsure)),
-            Err(_) => continue,
-        };
-        let mut uses = Vec::new();
-        collect_tool_uses(&entry, &mut uses);
-        if uses.iter().any(|tu| get(tu, "name").and_then(Value::as_str).is_some_and(|n| names.contains(&n))) {
-            return Some(Ok(true));
+        match judge_wide_line(&buf, &names, &finders) {
+            Some(Decisive::Hit) => return Some(Ok(true)),
+            Some(Decisive::Unsure) => return Some(Err(Unsure)),
+            None => {}
         }
     }
 }
@@ -98,8 +127,40 @@ fn has_task_activity_in_file(path: &str, window: u64) -> Option<R<bool>> {
 /// The pass. `Ok(None)` is the quiet end (a JSON `null` entry makes the Node hook throw, so it decides nothing). `window` is
 /// the tail read, `wide` the widened window searched for task activity when a cut tail holds none.
 pub fn scan_tasks(path: &str, window: u64, wide: u64) -> R<Option<ScanTasks>> {
+    // the task lines kept since the last call when there are any, else the window read afresh
+    if let Some((kept, truncated)) = crate::script::tasks_cache::lines(path, window) {
+        let lines: Vec<&str> = kept.iter().map(String::as_str).collect();
+        return scan_lines(&lines, truncated, path, window, wide);
+    }
+    scan_tasks_uncached(path, window, wide)
+}
+
+/// [`scan_tasks`] reading the whole window: the reference the kept lines are tested against.
+pub fn scan_tasks_uncached(path: &str, window: u64, wide: u64) -> R<Option<ScanTasks>> {
     let Some((data, truncated)) = read_tail(path, window) else { return Ok(Some(ScanTasks::default())) };
     let lines = lines_of(&data, truncated);
+    scan_lines(&lines, truncated, path, window, wide)
+}
+
+/// The text of one tool result as the scan reads it: the string content, else the text blocks of an array content joined by
+/// newlines.
+pub(crate) fn result_text(it: &Value) -> String {
+    let mut text = get(it, "content").and_then(Value::as_str).unwrap_or("").to_string();
+    if text.is_empty()
+        && let Some(arr) = get(it, "content").and_then(Value::as_array)
+    {
+        text = arr
+            .iter()
+            .filter(|b| get(b, "type").and_then(Value::as_str) == Some("text") && get(b, "text").is_some_and(Value::is_string))
+            .filter_map(|b| get(b, "text").and_then(Value::as_str))
+            .collect::<Vec<_>>()
+            .join("\n");
+    }
+    text
+}
+
+/// The pass over the lines of the window (the first, partial, line already taken off when the file was cut).
+fn scan_lines(lines: &[&str], truncated: bool, path: &str, window: u64, wide: u64) -> R<Option<ScanTasks>> {
     let empty = Value::Object(serde_json::Map::new());
     let mut s = ScanTasks::default();
     let mut lookup_ids: HashSet<String> = HashSet::new();
@@ -130,17 +191,7 @@ pub fn scan_tasks(path: &str, window: u64, wide: u64) -> R<Option<ScanTasks>> {
                     continue;
                 }
                 let Some(use_id) = get(it, "tool_use_id").and_then(Value::as_str) else { continue };
-                let mut text = get(it, "content").and_then(Value::as_str).unwrap_or("").to_string();
-                if text.is_empty()
-                    && let Some(arr) = get(it, "content").and_then(Value::as_array)
-                {
-                    text = arr
-                        .iter()
-                        .filter(|b| get(b, "type").and_then(Value::as_str) == Some("text") && get(b, "text").is_some_and(Value::is_string))
-                        .filter_map(|b| get(b, "text").and_then(Value::as_str))
-                        .collect::<Vec<_>>()
-                        .join("\n");
-                }
+                let text = result_text(it);
                 if let Some(m) = created_re().captures(&text) {
                     let digits = m.get(1).map_or("", |g| g.as_str()).to_string();
                     let n = number_of_digits(&digits);

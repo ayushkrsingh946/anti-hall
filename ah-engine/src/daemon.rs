@@ -598,11 +598,13 @@ struct DaemonObserver<'a> {
 /// and the counted events it noted (a kept-walk hit or the reason it missed).
 fn observe_check_cost(t: &Telemetry, check: &str, micros: u64) {
     let bytes = crate::load::take_check_scan();
+    let cpu = crate::load::take_check_cpu();
     let notes = crate::load::take_counts();
     let size = crate::load::size_bucket(crate::load::transcript_size());
     t.with_metrics(|m| {
         let l = [("check", check), ("size", size.as_str())];
         m.add("check_bytes_read", &l, bytes);
+        m.add("check_cpu_us", &[("check", check)], cpu);
         m.observe("check_latency_by_size_us", &l, micros);
         for (metric, label, value) in notes {
             m.inc(metric, &[(label, value)]);

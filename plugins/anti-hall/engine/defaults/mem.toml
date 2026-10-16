@@ -114,6 +114,24 @@ value = 80
 min = 1
 max = 100
 
+[mem.tasks_cache_soft_bytes]
+doc = "Bytes of kept transcript task lines held before the least recently used are dropped down to the low-water mark."
+value = 6291456
+min = 4096
+unit = "bytes"
+
+[mem.tasks_cache_hard_bytes]
+doc = "Bytes of kept transcript task lines at which an insert is refused (the answer is returned, not kept) and the cache is recycled."
+value = 12582912
+min = 4096
+unit = "bytes"
+
+[mem.tasks_cache_low_water_pct]
+doc = "Percent of mem.tasks_cache_soft_bytes the kept transcript task lines are evicted down to when the soft limit is reached."
+value = 80
+min = 1
+max = 100
+
 [mem.transcript_tail_soft_bytes]
 doc = "Bytes of cached transcript-tail answers (`transcriptDedupeTail`) held before the least recently used are dropped down to the low-water mark."
 value = 4194304
