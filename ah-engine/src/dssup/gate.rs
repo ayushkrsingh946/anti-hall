@@ -80,6 +80,12 @@ pub fn signature(duty: &str, ctx: &Ctx) -> Option<u64> {
         return None;
     }
     let mut h = std::collections::hash_map::DefaultHasher::new();
+    // what the duty is told besides the files: who pokes, the settings in force (a config reload) and the environment's own
+    // anti-hall switches. A change of any of them runs the duty at once.
+    (ctx.engine_pokes, defaults::generation()).hash(&mut h);
+    let mut env: Vec<(&String, &String)> = ctx.st.env.iter().filter(|(k, _)| k.starts_with(defaults::text("devswarm_sup.gate_env_prefix"))).collect();
+    env.sort();
+    env.hash(&mut h);
     for spec in defaults::raw("devswarm_sup.gate_inputs").get(duty)?.strings() {
         spec.hash(&mut h);
         let (kind, rel) = spec.split_once(':').unwrap_or((spec, ""));
@@ -198,6 +204,26 @@ mod tests {
         assert_eq!(signature("retention", &ctx).unwrap(), before, "a reader opening the store must not wake the gate");
         std::fs::write(store.join("devswarm.db-wal"), "a commit").unwrap();
         assert_ne!(signature("retention", &ctx).unwrap(), before, "a commit (the -wal) does");
+    }
+
+    #[test]
+    fn who_pokes_and_the_environment_switches_are_part_of_the_signature() {
+        crate::defaults::init().unwrap();
+        let d = crate::db::TempDir::new("sup-gate-env");
+        let home = d.0.join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        let st = settings();
+        let a = signature("app_sync", &ctx_for(&home, &st)).unwrap();
+        let mut ctx = ctx_for(&home, &st);
+        ctx.engine_pokes = false;
+        assert_ne!(signature("app_sync", &ctx).unwrap(), a, "the duty is told who pokes");
+        let mut st2 = settings();
+        st2.env.insert("ANTIHALL_DEVSWARM_SUP_WITNESS".into(), "off".into());
+        assert_ne!(signature("app_sync", &ctx_for(&home, &st2)).unwrap(), a, "a switch in the environment");
+        st2.env.insert("UNRELATED".into(), "x".into());
+        let b = signature("app_sync", &ctx_for(&home, &st2)).unwrap();
+        st2.env.insert("UNRELATED".into(), "y".into());
+        assert_eq!(signature("app_sync", &ctx_for(&home, &st2)).unwrap(), b, "other variables are not inputs");
     }
 
     #[test]
