@@ -222,6 +222,7 @@ Every `AH_ENGINE_*` variable the engine or its wrappers read. A variable that ov
 | `AH_ENGINE_READ_MS` | `daemon.read_ms` | Total time a client has to deliver its request. |
 | `AH_ENGINE_REFRESH_MS` | `refresh.every_ms` | How often the refresh job looks for requests; a request waits at most this long (plus jitter). Cheap when there is none: it reads a few small files. 0 turns the job off. |
 | `AH_ENGINE_RELEASE_BASE` |  | Test-only: download base URL for the engine binary (http allowed). Honored by hooks/ah-engine-bootstrap.sh only with AH_WRAPPER_TEST=1. |
+| `AH_ENGINE_REQUEST_PEER_PID` | `request_env.peer_pid_key` | The name under which a daemon request's sender pid (its socket peer; 0 when the socket did not say) reaches the checks. Not on the allowlist, so no client can set it; host functions that walk the process ancestry (the DevSwarm reader nonce) start there. Absent in a one-shot `ah-engine check`, which starts at itself. |
 | `AH_ENGINE_ROLLBACK_FAIL_N` | `rollback.fail_n` | Engine failures seen by the hook wrapper (timeout, signal death, no answer) within rollback.fail_window_s that roll a never-healthy binary back. The wrapper counts them because a hung binary cannot count its own. |
 | `AH_ENGINE_ROLLBACK_FAIL_WINDOW_S` | `rollback.fail_window_s` | Window in which the wrapper's engine failures are counted for rollback.fail_n. |
 | `AH_ENGINE_ROLLBACK_ON_MISMATCH` | `rollback.on_mismatch` | 1 = a binary whose sha256 differs from the one the installer recorded (swapped by hand) and that has never run healthy is rolled back to the known-good binary at the next check. 0 = never roll back on a mismatch alone (a local build you are developing). `accept` records the installed binary as the expected one. |
@@ -717,6 +718,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `request_env.incomplete_key` | `ah_env_incomplete` |  |  | Reserved name, never a forwardable variable, that carries the request's incomplete flag inside the forwarded environment object (the client's variables were dropped or it had no HOME), so the daemon's checks defer to the Node guards. |
 | `request_env.line_prefix` | `E ` |  |  | Prefix of the request line that carries the forwarded environment as one JSON object. |
 | `request_env.max_bytes` | `65536` |  | bytes | Largest forwarded environment (sum of names and values); a client whose allowed variables exceed it forwards none of them and the request is marked incomplete, so every check defers to the Node guard (a missing or empty HOME marks it incomplete too). |
+| `request_env.peer_pid_key` | `AH_ENGINE_REQUEST_PEER_PID` |  |  | The name under which a daemon request's sender pid (its socket peer; 0 when the socket did not say) reaches the checks. Not on the allowlist, so no client can set it; host functions that walk the process ancestry (the DevSwarm reader nonce) start there. Absent in a one-shot `ah-engine check`, which starts at itself. |
 | `request_env.presence_only` | `AI_GATEWAY_API_KEY, TYPESAFE_API_KEY, ANTHROPIC_API_KEY` |  |  | Environment variables whose PRESENCE the checks need but whose value they must never see (a secret): the client forwards the presence text when one is set and non-empty, nothing otherwise, and the value never leaves the client. These are the legacy API-key variables the session-start key notice looks for (credentials.js legacyKeyPresent). |
 | `request_env.presence_text` | `1` |  |  | The value a presence-only variable carries on the wire. |
 
@@ -4040,6 +4042,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_role.pg_dir_liveness` | `liveness` |  |  | The supervisor verdict files, under the DevSwarm directory. |
 | `devswarm_role.pg_dir_names` | `names` |  |  | The directory of cached workspace display names under the DevSwarm state directory. |
 | `devswarm_role.pg_dir_stray` | `stray` |  |  | The straying-plan states (devswarm-plan.js listStray), under the DevSwarm directory. |
+| `devswarm_role.pg_dir_stray_seen` | `stray-seen` |  |  | The straying warnings each Primary session was already shown (stray-seen/<sha1(session)>.json), under the DevSwarm directory. |
 | `devswarm_role.pg_dir_summaries` | `summaries` |  |  | The per-project summary projections, under the DevSwarm directory. |
 | `devswarm_role.pg_dir_workspaces` | `workspaces` |  |  | The workspace descriptors, under the DevSwarm directory. |
 | `devswarm_role.pg_err_archived_unread` | `💡 anti-hall · devswarm-parent-gate: {n} archived workspace(s) still have unre...` |  |  | Stderr line counting archived families that still hold unread mail: {n}. |
@@ -4070,6 +4073,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_role.pg_journal_dir` | `journal` |  |  | The journal backend directory of a store (inferBackendFromDisk). |
 | `devswarm_role.pg_kind_children` | `children` |  |  | The block kind of a child family. |
 | `devswarm_role.pg_kind_mailbox` | `mailbox` |  |  | The block kind of the Primary's own family. |
+| `devswarm_role.pg_kind_wakepath` | `wakepath` |  |  | The block kind of the clean pass's mailbox-wake block (its loop-state signature is the hashed prefix and this kind). |
 | `devswarm_role.pg_max_shown` | `5` |  |  | Rows, twins and ids named in the reason before the rest is counted. |
 | `devswarm_role.pg_max_unknown_shown` | `3` |  |  | Unknown members named per row (MAX_UNKNOWN_MEMBERS_SHOWN). |
 | `devswarm_role.pg_more_unknown` | ` (+{n} more)` |  |  | More unknown members than shown: {n}. |
@@ -4077,6 +4081,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_role.pg_neglect` | `Neglect: {n} workspace(s) still need attention before this Primary turn ends:...` |  |  | The neglect line: {n}, {shown}, {more}. |
 | `devswarm_role.pg_no_session` | `nosession` |  |  | The state-file name used when the payload has no session id (stateFileFor). |
 | `devswarm_role.pg_own_unknown` | `YOUR OWN inbound status could not be confirmed (own-summary unreadable or cor...` |  |  | The own-summary-unreadable segment: {id}. |
+| `devswarm_role.pg_own_unread` | `YOU (the Primary) have {n} unread parent/peer message(s) — STOP and read them...` |  |  | The reason segment for the Primary's own unread mail. Placeholders: {n}, {id}. |
 | `devswarm_role.pg_plural_s` | `s` |  |  | Plural suffix. |
 | `devswarm_role.pg_poke_prefix` | `[Primary poke]` |  |  | The text prefix of a system poke row, never real unread (devswarm-noise.js POKE_PREFIX). |
 | `devswarm_role.pg_reason_default` | `inbox status could not be confirmed` |  |  | Label of an unknown-inbox reason not in reason_labels. |
@@ -4094,6 +4099,20 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_role.pg_skip_ttl` | ` (15-min TTL)` |  |  | Appended to the override command. |
 | `devswarm_role.pg_status_escalated` | `escalated` |  |  | The escalated verdict status. |
 | `devswarm_role.pg_status_stale` | `stale` |  |  | The stale verdict status. |
+| `devswarm_role.pg_stray_head` | `⚠️ anti-hall · devswarm-straying: ` |  |  | Starts the straying advisory line. |
+| `devswarm_role.pg_stray_jev_close` | `)` |  |  | Closes the Jev notes of a straying warning. |
+| `devswarm_role.pg_stray_jev_open` | ` (Jev: ` |  |  | Opens the Jev notes of a straying warning. |
+| `devswarm_role.pg_stray_join` | `; ` |  |  | Joins the warnings on the straying line, and the Jev notes of one warning. |
+| `devswarm_role.pg_stray_line_max` | `3` |  |  | Straying warnings named on the one advisory line; the rest are counted (devswarm-supervision.js LINE_MAX_ENTRIES). |
+| `devswarm_role.pg_stray_more_close` | ` more)` |  |  | Closes the count of straying warnings past the line's cap. |
+| `devswarm_role.pg_stray_more_open` | ` (+` |  |  | Opens the count of straying warnings past the line's cap. |
+| `devswarm_role.pg_stray_no_session` | `no-session` |  |  | The session text hashed into the stray-seen file name when the Stop payload has no session id. |
+| `devswarm_role.pg_stray_seen_hash_len` | `16` |  |  | Hex characters of the session hash that name a stray-seen file. |
+| `devswarm_role.pg_stray_seen_jev` | `#jev` |  |  | Ends a shown-set key whose warning carries Jev notes (a Jev note arriving later shows the warning once more). |
+| `devswarm_role.pg_stray_seen_max` | `200` |  |  | Most shown straying warnings a stray-seen file keeps (the oldest go first). |
+| `devswarm_role.pg_stray_seen_sep` | `#` |  |  | Joins a straying signal's key and episode number in its shown-set key. |
+| `devswarm_role.pg_stray_step` | `: step ` |  |  | Between a warned workspace's title and its step number on the straying line. |
+| `devswarm_role.pg_stray_tail` | ` — advisory (Jev notes are recommendations; your call); `devswarm.js correct ...` |  |  | Ends the straying advisory line. |
 | `devswarm_role.pg_tail` | `If this is intentional, say so explicitly. Escape hatch: the user may direct ...` |  |  | The closing sentence of the reason. |
 | `devswarm_role.pg_title_fmt` | `{name} ({short})` |  |  | A workspace's display name: {name}, {short} (the id's first characters). |
 | `devswarm_role.pg_twin_more` | ` and {n} more` |  |  | More twins than shown: {n}. |
@@ -5630,6 +5649,8 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `mesh_write.summary_failed` | `summary-failed` |  |  | Log result of a summary refresh the engine could not do after its write (Node's next derive refreshes the file). |
 | `mesh_write.summary_pending_questions_cap` | `200` |  |  | Most per-sender pending questions a summary keeps per workspace (devswarm-store.js DEFAULT_PENDING_QUESTIONS_CAP). |
 | `mesh_write.summary_recent_cap` | `50` |  |  | Most broadcast runs a summary keeps in recent[] (devswarm-store.js DEFAULT_RECENT_CAP). |
+| `mesh_write.super_cache_max` | `256` |  |  | Most nested checkouts whose superproject answer is kept at once (expired entries go first, then all). |
+| `mesh_write.super_cache_ttl_ms` | `300000` |  | ms | How long a superproject answer git gave for a nested checkout is reused (identity.js SUPER_CACHE_TTL_MS). |
 | `mesh_write.supervision_log` | `devswarm-supervision.ndjson` |  |  | The supervision event log (one JSON line per plan step event), under the logs directory. |
 | `mesh_write.supervision_max_bytes` | `1048576` |  |  | Size above which Node rotates the supervision log before appending; the engine defers a plan write while the log is above it (rotation stays Node's). |
 | `mesh_write.synthetic_session_prefix` | `unclaimed:` |  |  | The same prefix as the routing code names it (SYNTHETIC_SESSION_PREFIX). |

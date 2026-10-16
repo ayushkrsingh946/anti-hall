@@ -509,6 +509,11 @@ fn phases_json(t: &crate::telemetry::Telemetry) -> serde_json::Value {
     serde_json::Value::Object(out)
 }
 
+thread_local! {
+    /// The socket peer of the request this thread is serving ([`serve_conn`] sets it, the request parse takes it).
+    static REQUEST_PEER: std::cell::Cell<Option<u32>> = const { std::cell::Cell::new(None) };
+}
+
 /// Pure-ish request handler (no socket I/O) so it is unit-testable.
 pub fn handle_request(req: &[u8], sh: &Shared) -> (Reply, After) {
     handle_request_with(req, sh, &sh.cfg())
@@ -523,6 +528,8 @@ pub fn handle_request_with(req: &[u8], sh: &Shared, cfg: &crate::cfgstore::Snaps
     let (head, body) = text.split_once('\n').unwrap_or((&text, ""));
     if let Some(v) = head.strip_prefix("V ") {
         let (env, payload) = crate::reqenv::split_request(body);
+        // 0 = a daemon request whose sender the socket did not name: ancestry walks must not start at the daemon itself
+        let env = env.with_peer_pid(Some(REQUEST_PEER.with(|c| c.take()).unwrap_or(0)));
         if let Some(root) = crate::bootstrap::ROOT_ENVS.iter().find_map(|n| env.get(n)) {
             sh.config.offer_root(root);
         }
@@ -1203,6 +1210,7 @@ fn serve_conn(mut s: UnixStream, sh: &Shared, wait: Duration, in_flight: u64) ->
         crate::deadline::watch_peer(s.as_raw_fd());
     }
     let acked_at = Instant::now();
+    REQUEST_PEER.with(|c| c.set(crate::limits::peer_pid(&s)));
     let (request, event) = request_context(&req);
     let _breadcrumb = crate::crash::enter("request", &request, &event, "", "");
     health::write_crash_breadcrumb(&request, &event, "", sh.started.elapsed().as_secs(), sh.memory());

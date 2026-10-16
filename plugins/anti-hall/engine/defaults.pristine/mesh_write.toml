@@ -1996,3 +1996,16 @@ value = { section = "devswarm", key = "sendMultiRecipient", env = "ANTIHALL_DEVS
 [mesh_write.quiet_fail_to]
 doc = "`send --quiet` line of one failed recipient of a multi-recipient send. Placeholders: {to}, {why}."
 value = "ok:false -> {to}: {why}"
+
+[mesh_write.super_cache_ttl_ms]
+doc = "How long a superproject answer git gave for a nested checkout is reused (identity.js SUPER_CACHE_TTL_MS)."
+value = 300000
+unit = "ms"
+min = 1000
+max = 86400000
+
+[mesh_write.super_cache_max]
+doc = "Most nested checkouts whose superproject answer is kept at once (expired entries go first, then all)."
+value = 256
+min = 1
+max = 65536

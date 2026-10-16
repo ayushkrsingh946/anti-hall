@@ -438,6 +438,9 @@ struct PgCase {
     own_store: bool,
     /// A linked worktree of the cwd checkout (same project, another workspace: `{wt3}` in seeds).
     linked: bool,
+    /// A separate repository nested (untracked) inside the cwd checkout (`{nested}` in seeds): only git can tell it has no
+    /// superproject.
+    nested: bool,
     payload: Option<Value>,
     steps: Vec<PgWant>,
     /// The seconds in "awaiting child pickup (Ns)" are masked before comparing: the engine and Node run a moment apart.
@@ -474,6 +477,7 @@ fn pg(name: &'static str, steps: &[PgWant]) -> PgCase {
         child_wt: false,
         own_store: false,
         linked: false,
+        nested: false,
         payload: None,
         steps: steps.to_vec(),
         fuzz_secs: false,
@@ -505,6 +509,11 @@ impl PgCase {
     fn linked(mut self) -> PgCase {
         self.git_cwd = true;
         self.linked = true;
+        self
+    }
+    fn nested(mut self) -> PgCase {
+        self.git_cwd = true;
+        self.nested = true;
         self
     }
     fn fuzz(mut self) -> PgCase {
@@ -571,6 +580,17 @@ fn pg_git(dir: &Path) {
     assert!(ok.success());
 }
 
+/// The shown-at times of the straying warnings (stray-seen/*.json) are each side's own clock: masked before the homes are compared.
+fn pg_mask_times(mut snap: BTreeMap<String, Vec<u8>>) -> BTreeMap<String, Vec<u8>> {
+    let re = regex::Regex::new(r"\d{10,}").unwrap();
+    for (k, v) in snap.iter_mut() {
+        if k.contains("stray-seen") {
+            *v = re.replace_all(&String::from_utf8_lossy(v), "T").into_owned().into_bytes();
+        }
+    }
+    snap
+}
+
 /// What one case did: steps answered, steps deferred, answered blocks, answered escalations.
 #[derive(Default)]
 struct PgTally {
@@ -594,6 +614,10 @@ fn pg_exec(case: &PgCase) -> PgTally {
     }
     if case.child_wt {
         pg_git(&wt2);
+    }
+    let nested = wt.join("nested");
+    if case.nested {
+        pg_git(&nested);
     }
     let wt3 = tmp.join("wt3");
     if case.linked {
@@ -627,6 +651,7 @@ fn pg_exec(case: &PgCase) -> PgTally {
             .replace("{pid}", &std::process::id().to_string())
             .replace("{wt2}", &wt2.to_string_lossy())
             .replace("{wt3}", &wt3.to_string_lossy())
+            .replace("{nested}", &nested.to_string_lossy())
             .replace("{home}", &home.to_string_lossy())
             .replace("{now}", &now);
         let (aged, rel) = match rel.strip_prefix("~aged/") {
@@ -681,7 +706,7 @@ fn pg_exec(case: &PgCase) -> PgTally {
             if case.fuzz_secs { mask_secs(&t) } else { t }
         };
         assert_eq!((ecode, norm(&eout), norm(&eerr)), (ncode, norm(&nout), norm(&nerr)), "{label}: engine and Node differ");
-        assert_eq!(after_engine, snapshot(&home), "{label}: the home differs after the engine and after Node");
+        assert_eq!(pg_mask_times(after_engine), pg_mask_times(snapshot(&home)), "{label}: the home differs after the engine and after Node");
         let text = String::from_utf8_lossy(&eout);
         t.blocks += usize::from(text.contains("\"decision\":\"block\""));
         t.escalations += usize::from(text.contains("Escalation: this neglect signature"));
@@ -880,7 +905,29 @@ fn pg_cases() -> Vec<PgCase> {
         child("child-other-session-record-blocks", &[A]).seed(".claude/sessions/4242.json", r#"{"pid":4242,"sessionId":"someone-else"}"#),
         child("child-stale-verdict-defers", &[D]).seed(".anti-hall/devswarm/liveness/c-1.json", r#"{"status":"stale"}"#),
         child("child-ok-verdict-blocks", &[A]).seed(".anti-hall/devswarm/liveness/c-1.json", r#"{"status":"ok"}"#),
-        child("child-stray-plan-defers", &[D]).seed(".anti-hall/devswarm/stray/c-1.json", r#"{"id":"c-1","active":[]}"#),
+        child("child-stray-plan-without-warnings-is-silent", &[A]).seed(".anti-hall/devswarm/stray/c-1.json", r#"{"id":"c-1","active":[]}"#),
+        // the straying advisory: shown once per session, capped, Jev notes, another project's child skipped, the switch
+        pg("stray-advisory-shown-once", &[A, A])
+            .own()
+            .seed(".anti-hall/devswarm/stray/c-5.json", r#"{"id":"c-5","active":[{"key":"stall","n":1,"step":2,"reason":"no progress for 40m"}]}"#),
+        pg("stray-advisory-capped-named-with-jev", &[A, A])
+            .own()
+            .seed(".anti-hall/devswarm/names/c-5.json", r#"{"name":"Lane five"}"#)
+            .seed(
+                ".anti-hall/devswarm/stray/c-5.json",
+                r#"{"id":"c-5","active":[{"key":"stall","n":1,"step":2,"reason":"stalled"},{"key":"burn","n":3,"step":2,"reason":"burning tokens","jev":[{"verdict":"stuck","confidence":0.876},{"verdict":"ok","confidence":1}]}]}"#,
+            )
+            .seed(".anti-hall/devswarm/stray/c-6.json", r#"{"id":"c-6","active":[{"key":"scope","n":1,"step":1,"reason":"off scope {x}"},{"key":"stall","n":2,"step":4,"reason":"stalled"}]}"#),
+        child("stray-advisory-of-another-project-is-skipped", &[A])
+            .seed(".anti-hall/devswarm/stray/c-1.json", r#"{"id":"c-1","worktreePath":"{wt2}","active":[{"key":"stall","n":1,"step":2,"reason":"stalled"}]}"#),
+        pg("stray-advisory-plan-tracking-off", &[A])
+            .own()
+            .env("ANTIHALL_DEVSWARM_PLAN_TRACKING", "0")
+            .seed(".anti-hall/devswarm/stray/c-5.json", r#"{"id":"c-5","active":[{"key":"stall","n":1,"step":2,"reason":"stalled"}]}"#),
+        pg("stray-advisory-seen-file-a-json-string", &[A, A])
+            .own()
+            .seed(".anti-hall/devswarm/stray/c-5.json", r#"{"id":"c-5","active":[{"key":"stall","n":1,"step":2,"reason":"stalled"}]}"#)
+            .seed(".anti-hall/devswarm/stray-seen/640d87e741e6aa4c.json", r#""str""#),
         child("child-loop-state-other-sig-restarts", &[A]).seed(PG_GATE_STATE, r#"{"sig":"other","blocks":3,"escalated":true,"intents":{"other":{"r":1}}}"#),
         child("child-loop-state-escalated-is-quiet", &[A]).seed(PG_GATE_STATE, &format!(r#"{{"sig":"{children_sig}","blocks":4,"escalated":true}}"#)),
         child("child-loop-state-intent-raises-budget", &[A, A]).seed(
@@ -916,11 +963,44 @@ fn pg_cases() -> Vec<PgCase> {
             .seed(".anti-hall/devswarm/workspaces/c-3.json", r#"{"id":"c-3","worktreePath":"{wt3}","sessionId":"sess-c3"}"#)
             .seed(".anti-hall/devswarm/summaries/{key}.json", r#"{"workspaces":{"c-3":{"archive_ready":true}}}"#)
             .seed(PG_GATE_STATE, &format!(r#"{{"sig":"{children_sig}","blocks":3}}"#)),
-        pg("linked-child-live-clean-pass-defers", &[D])
+        // a live child on the clean pass: the mailbox-wake block (no watcher, no recent tick) up to the cap, then quiet
+        pg("linked-child-live-clean-pass-wake-block-cap-quiet", &[A, A, A, A, A])
             .linked()
             .seed(".anti-hall/devswarm/workspaces/c-3.json", r#"{"id":"c-3","worktreePath":"{wt3}","sessionId":"sess-c3","inboxPath":"{home}/in.ndjson","cursorPath":"{home}/cur.json"}"#)
             .seed("in.ndjson", "")
             .seed("cur.json", "0"),
+        pg("linked-child-live-recent-tick-is-clean", &[A])
+            .linked()
+            .seed(".anti-hall/devswarm/workspaces/c-3.json", r#"{"id":"c-3","worktreePath":"{wt3}","sessionId":"sess-c3","inboxPath":"{home}/in.ndjson","cursorPath":"{home}/cur.json"}"#)
+            .seed("in.ndjson", "")
+            .seed("cur.json", "0")
+            .seed(".anti-hall/devswarm/wake-tick/{own}.json", r#"{"ts":{now}}"#),
+        pg("linked-child-live-stale-tick-blocks", &[A])
+            .linked()
+            .seed(".anti-hall/devswarm/workspaces/c-3.json", r#"{"id":"c-3","worktreePath":"{wt3}","sessionId":"sess-c3","inboxPath":"{home}/in.ndjson","cursorPath":"{home}/cur.json"}"#)
+            .seed("in.ndjson", "")
+            .seed("cur.json", "0")
+            .seed(".anti-hall/devswarm/wake-tick/{own}.json", r#"{"ts":{old}}"#),
+        pg("linked-child-live-watcher-live-is-clean", &[A])
+            .linked()
+            .seed(".anti-hall/devswarm/workspaces/c-3.json", r#"{"id":"c-3","worktreePath":"{wt3}","sessionId":"sess-c3","inboxPath":"{home}/in.ndjson","cursorPath":"{home}/cur.json"}"#)
+            .seed("in.ndjson", "")
+            .seed("cur.json", "0")
+            .seed(".anti-hall/devswarm/locks/wake-watch-{own}.lock", r#"{"pid":{pid},"ts":{now}}"#),
+        pg("linked-child-live-not-claude-is-clean", &[A])
+            .linked()
+            .env("DEVSWARM_AI_AGENT", "codex")
+            .seed(".anti-hall/devswarm/workspaces/c-3.json", r#"{"id":"c-3","worktreePath":"{wt3}","sessionId":"sess-c3","inboxPath":"{home}/in.ndjson","cursorPath":"{home}/cur.json"}"#)
+            .seed("in.ndjson", "")
+            .seed("cur.json", "0"),
+        pg("linked-child-live-wake-state-kept-fields", &[A, A])
+            .linked()
+            .seed(".anti-hall/devswarm/workspaces/c-3.json", r#"{"id":"c-3","worktreePath":"{wt3}","sessionId":"sess-c3","inboxPath":"{home}/in.ndjson","cursorPath":"{home}/cur.json"}"#)
+            .seed("in.ndjson", "")
+            .seed("cur.json", "0")
+            .seed(PG_GATE_STATE, r#"{"intents":{"k":{"ts":1}},"qSig":"q","extra":[1],"sig":"other","blocks":7}"#),
+        // a descriptor in a repository nested inside another one: the superproject question git answers
+        pg("nested-repo-descriptor-answers", &[A, A]).nested().seed(".anti-hall/devswarm/workspaces/n-1.json", r#"{"id":"n-1","worktreePath":"{nested}","sessionId":"sess-n1"}"#),
         // the Primary's own mailbox
         pg("own-summary-corrupt-blocks-then-conservation-defers", &[A, A, A, D]).git().seed(".anti-hall/devswarm/summaries/{key}.json", "{oops"),
         pg("own-store-clean-pass", &[A, A]).own(),
@@ -928,6 +1008,10 @@ fn pg_cases() -> Vec<PgCase> {
         pg("own-store-other-project-child-is-clean", &[A, A]).own().child().seed(PG_CHILD, PG_CHILD_BODY),
         pg("own-pending-question-defers", &[D]).own().env("PG_SUMMARY", "question"),
         pg("own-unread-defers", &[D]).own().env("PG_SUMMARY", "unread"),
+        // per-session reader rows on the Primary's own partition: its own view (walked from the hook's process ancestry) is read
+        pg("own-reader-view-past-the-mail-is-clean", &[A, A]).own().env("PG_READER", "self").seed(".claude/sessions/{pid}.json", r#"{"pid":{pid},"sessionId":"sess-own","startedAt":5}"#),
+        pg("own-reader-view-of-a-stranger-is-the-floor", &[A, A]).own().env("PG_READER", "other").seed(".claude/sessions/{pid}.json", r#"{"pid":{pid},"sessionId":"sess-own","startedAt":5}"#),
+        pg("own-reader-view-headless-is-the-floor", &[A, A]).own().env("PG_READER", "self"),
         pg("own-parked-escalation-defers", &[D]).own().seed(".anti-hall/devswarm/escalation-pending/e1.json", r#"{"parentId":"p","row":{}}"#),
         pg("own-drain-marker-defers", &[D])
             .git()

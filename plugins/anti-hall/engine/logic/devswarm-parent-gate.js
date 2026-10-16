@@ -268,7 +268,7 @@ function pgNewEntry(id, wt, session) {
 }
 
 function pgGate(p, root, l) {
-  var home = l.home, fx = { err: '', out: '', unlink: null, write: null, cacheOwed: false };
+  var home = l.home, fx = { err: '', out: '', unlink: null, write: null, extra: [], cacheOwed: false };
   var sidRaw = p.session_id, sid;
   if (sidRaw === undefined || sidRaw === null || sidRaw === false || sidRaw === '') sid = ah.cfg('devswarm_role.pg_no_session');
   else if (typeof sidRaw === 'string') sid = sidRaw;
@@ -475,14 +475,13 @@ function pgGate(p, root, l) {
     });
   }
   if (archivedUnreadFamilies > 0) fx.err += text.render(ah.cfg('devswarm_role.pg_err_archived_unread'), { n: String(archivedUnreadFamilies) });
-  // emitStrayingAdvisory: any stray plan state is Node's
-  if (pgHasJson(pgDir(home) + '/' + ah.cfg('devswarm_role.pg_dir_stray'))) throw meshDefer;
+  pgStray(home, sidRaw, selfKey, keyOf, now, fx);
 
   if (blocking.length === 0) {
     // a pass that only deferred unread mail keeps the loop state and skips the wake-coverage line; only a clean pass clears the state,
     // after the wake-coverage line (which needs a live child of this project) is known to be silent
     if (!busyAdvisoryHeld) {
-      if (own.id !== null && selfKey !== null && pgLiveChild(home, cwd, selfKey, descriptors)) throw meshDefer;
+      if (own.id !== null && pgWakeBlock(home, cwd, own.id, now, l, stateFile, stateRel, fx)) return fx;
       fx.unlink = stateRel;
     }
     return fx;
@@ -542,22 +541,95 @@ function pgGate(p, root, l) {
   return fx;
 }
 
-// `liveChildState(home, cwd, { excludeHeldIgnored: true }).live` for the clean pass: a descriptor of this project (not this worktree) that
-// is neither archived, held nor ignored. Fails toward "live" (defer) wherever the projection is not reproduced.
-function pgLiveChild(home, cwd, selfKey, descriptors) {
-  var sr = ah.fs.realpath(cwd), selfReal = sr === null ? cwd : sr;
-  for (var i = 0; i < descriptors.length; i++) {
-    var d = descriptors[i], rr = ah.fs.realpath(d.worktree), real = rr === null ? d.worktree : rr;
-    if (real === selfReal) continue;
-    if (ah.mesh.repoKey(d.worktree) !== selfKey) continue;
-    if (pgMarkerArchived(home, d)) continue;
-    var app = ah.mesh.appArchived(d.id, d.worktree, false).verdict;
-    if (app === true) continue;
-    if (app === null && d.worktree.indexOf(ah.cfg('devswarm_role.pg_repos_root_marker')) >= 0) throw meshDefer;
-    if (pgExists(pgDir(home) + '/' + ah.cfg('devswarm_role.pg_dir_archive_ignore') + '/' + d.id + '.json')) continue;
-    return true;
+// `emitStrayingAdvisory(home, sessionId, repoKeyOf, selfKey)`: the straying warnings of this project's children (devswarm-plan.js
+// listStray) this Primary session was not shown yet, as one capped stderr line (devswarm-supervision.js strayingLine), and the shown
+// set (stray-seen/<sha1(session)>.json, bounded) written once the gate settles. Advisory only: it never blocks.
+function pgStray(home, sidRaw, selfKey, keyOf, now, fx) {
+  if (!ah.settings.bool('devswarm_prompt.plan_tracking_setting')) return;
+  var dir = pgDir(home) + '/' + ah.cfg('devswarm_role.pg_dir_stray'), entries = [];
+  (pgNames(dir) || []).forEach(function (n) {
+    if (!/\.json$/.test(n)) return;
+    var key = n.slice(0, -5);
+    if (!pgSafeId(key)) return;
+    var state = pgJson(dir + '/' + n);
+    if (!jx.isObj(state) || !Array.isArray(state.active) || !state.active.length) return;
+    // another project's child is skipped; an unresolvable worktree (null key) is kept
+    var childKey = state.worktreePath ? keyOf(state.worktreePath) : null;
+    if (selfKey && childKey && childKey !== selfKey) return;
+    state.active.forEach(function (a) {
+      var jevSeen = Array.isArray(a.jev) && a.jev.length ? ah.cfg('devswarm_role.pg_stray_seen_jev') : '';
+      entries.push({ id: state.id, seenKey: a.key + ah.cfg('devswarm_role.pg_stray_seen_sep') + a.n + jevSeen, step: a.step, reason: a.reason, jev: a.jev });
+    });
+  });
+  if (!entries.length) return;
+  var sidText = String(sidRaw || ah.cfg('devswarm_role.pg_stray_no_session'));
+  var rel = ah.cfg('devswarm_role.pg_devswarm_dir') + '/' + ah.cfg('devswarm_role.pg_dir_stray_seen') + '/' + ah.sha1(sidText).slice(0, ah.cfgNum('devswarm_role.pg_stray_seen_hash_len')) + '.json';
+  var seen = {}, sr = jx.read(home + '/' + rel);
+  if (sr.big) throw meshDefer;
+  if (sr.text !== undefined) {
+    var j = jx.parse(sr.text);
+    if (j.unsure) throw meshDefer;
+    if (!j.invalid) seen = j.v || {};
   }
-  return false;
+  var fresh = entries.filter(function (e) { return !seen[e.seenKey]; });
+  if (!fresh.length) return;
+  var max = ah.cfgNum('devswarm_role.pg_stray_line_max');
+  var parts = fresh.slice(0, max).map(function (e) {
+    var title = pgRawName(home, e.id) || e.id;
+    var jevText = Array.isArray(e.jev) && e.jev.length
+      ? ah.cfg('devswarm_role.pg_stray_jev_open') + e.jev.map(function (x) { return x.verdict + ' ' + Number(x.confidence).toFixed(2); }).join(ah.cfg('devswarm_role.pg_stray_join')) + ah.cfg('devswarm_role.pg_stray_jev_close')
+      : '';
+    return title + ah.cfg('devswarm_role.pg_stray_step') + e.step + ' ' + e.reason + jevText;
+  });
+  var more = fresh.length > max ? ah.cfg('devswarm_role.pg_stray_more_open') + (fresh.length - max) + ah.cfg('devswarm_role.pg_stray_more_close') : '';
+  fx.err += ah.cfg('devswarm_role.pg_stray_head') + parts.join(ah.cfg('devswarm_role.pg_stray_join')) + more + ah.cfg('devswarm_role.pg_stray_tail') + '\n';
+  // Node assigns into the parsed value in strict mode: a JSON primitive throws there, after the line, and nothing is written
+  if (typeof seen !== 'object') return;
+  fresh.forEach(function (e) { seen[e.seenKey] = now; });
+  var keys = Object.keys(seen), keep = ah.cfgNum('devswarm_role.pg_stray_seen_max');
+  if (keys.length > keep) {
+    keys.sort(function (a, b) { return seen[a] - seen[b]; });
+    keys.slice(0, keys.length - keep).forEach(function (k) { delete seen[k]; });
+  }
+  fx.extra.push({ rel: rel, body: JSON.stringify(seen) });
+}
+
+// `readName(home, id)`: the cached display name of a workspace, or null.
+function pgRawName(home, id) {
+  if (typeof id !== 'string' || !pgSafeId(id)) return null;
+  var v = pgJson(pgDir(home) + '/' + ah.cfg('devswarm_role.pg_dir_names') + '/' + id + '.json');
+  return v && typeof v.name === 'string' && v.name ? v.name : null;
+}
+
+// The clean pass's mailbox-wake block (`wakeCoverage` + `noWakePathLine`): a Claude Primary with a live child of this project, no live
+// watcher and no recent cron tick is told to arm both, under its own loop-state signature and the same forced-acknowledgement cap,
+// then quiet. True when it decided (a block written to `fx`, or the spent cap's quiet pass); false when nothing is missing.
+function pgWakeBlock(home, cwd, ownId, now, l, stateFile, stateRel, fx) {
+  if (!pgSafeId(ownId)) return false; // wakeCoverage: an id it cannot use is "unknown"
+  var raw = ah.env.get(ah.cfg('devswarm_role.agent_env'));
+  if ((raw === null ? '' : raw.trim().toLowerCase()) !== ah.cfg('devswarm_role.claude_agent')) return false;
+  var ctx = { home: home, now: now };
+  var lc = piLiveChildren(ctx, cwd);
+  if (!lc.known || !lc.live) return false;
+  var tick = piJson(pgDir(home) + '/' + ah.cfg('devswarm_parent.dir_wake_tick') + '/' + ownId + '.json');
+  var ageMin = tick && piFinite(tick.ts) ? Math.max(0, Math.floor((now - tick.ts) / ah.cfgNum('devswarm_prompt.ms_per_minute'))) : null;
+  var warn = piSetDefault('devswarm_parent.set_cron_warn');
+  if (!(ageMin === null || ageMin > warn)) return false;
+  if (ah.settings.bool('wake_watch.set_enabled') === false) return false;
+  if (piWatcherLive(home, ownId, now)) return false;
+  var cron = text.render(ah.cfg('devswarm_parent.wake_cron_part'), { cron: dwWakeCron(), cli: l.cli, id: ownId });
+  var wakeText = text.render(ah.cfg('devswarm_parent.wake_both'), { mon: text.render(ah.cfg('devswarm_parent.wake_monitor'), { watcher: l.watcher }), cron: cron });
+  var wsig = ah.sha1(ah.cfg('devswarm_role.pg_sig_prefix') + ah.cfg('devswarm_role.pg_kind_wakepath'));
+  var wblocks = 0, prevState = {};
+  var prev = pgJson(stateFile);
+  if (prev && typeof prev === 'object') prevState = prev;
+  if (prev && prev.sig === wsig && Number.isFinite(prev.blocks)) wblocks = prev.blocks;
+  if (ah.settings.touched('devswarm_role.pg_set_cap')) throw meshDefer;
+  if (wblocks >= ah.cfg('devswarm_role.pg_set_cap').default) return true; // the budget of this unchanged condition is spent: quiet
+  var next = Object.assign({ qSig: '', qBlocks: 0, qEscalated: false, intents: {}, intentAcks: 0 }, prevState, { sig: wsig, blocks: wblocks + 1, escalated: false });
+  fx.write = { rel: stateRel, body: JSON.stringify(next) };
+  fx.out = JSON.stringify({ decision: ah.cfg('devswarm_role.pg_decision_block'), reason: wakeText }) + '\n';
+  return true;
 }
 
 // `isStale(pluginRoot)` of hooks/lib/stop-version-gate.js.
@@ -660,6 +732,8 @@ function pgReason(blocking, ownId, escalate, hasIntent, ownUnknown, ownParsed) {
     body += text.render(ah.cfg('devswarm_role.pg_attribution'), { id: b.id, n: String(b.unread), parts: parts });
   });
   if (ownUnknown) body += text.render(ah.cfg('devswarm_role.pg_own_unknown'), { id: ownId === null ? '' : ownId });
+  // the Primary's own mail (store rows past its read position; a summary count with an urgency is still Node's)
+  else if (ownEntry !== null && ownEntry.unread > 0) body += text.render(ah.cfg('devswarm_role.pg_own_unread'), { n: String(ownEntry.unread), id: ownId });
   if (ownEntry !== null && ownEntry.mergedTwins.length > 0) {
     var tw = ownEntry.mergedTwins;
     var list = tw.slice(0, max).join('; '), moreT = tw.length > max ? text.render(ah.cfg('devswarm_role.pg_twin_more'), { n: String(tw.length - max) }) : '';
@@ -677,7 +751,9 @@ function pgReason(blocking, ownId, escalate, hasIntent, ownUnknown, ownParsed) {
 
 // Apply what the gate decided, only once nothing can defer any more.
 function pgApply(fx) {
-  if (fx.unlink !== null || fx.write !== null || fx.cacheOwed) ah.commit();
+  if (fx.unlink !== null || fx.write !== null || fx.extra.length || fx.cacheOwed) ah.commit();
+  // the advisory writes are best-effort, as Node's (a failed write shows the line again next Stop)
+  fx.extra.forEach(function (w) { ah.state.writeAtomic(w.rel, w.body); });
   if (fx.unlink !== null) ah.state.remove(fx.unlink);
   if (fx.write !== null && !ah.state.writeAtomic(fx.write.rel, fx.write.body)) {
     // Node: `catch (_) { return; }` -- nothing printed on stdout
