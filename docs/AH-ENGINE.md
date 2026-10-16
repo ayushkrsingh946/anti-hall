@@ -1038,7 +1038,7 @@ so setting it in `config.toml`, `settings.json` or the environment takes effect 
 | `procwatch` | process watch: orphans, resource use, report (see Process watch) | 30 s (`schedule.procwatch_ms`) | in the daemon |
 | `agent_tick` | one agent-tracker tick (see The agent tracker) | a minute (`schedule.agent_tick_ms`) | a subprocess |
 
-Every finished run records the CPU time of the threads that ran it (`cpu_us`, `cpu_ms` in `schedule list`, and the `schedule_cpu_us{job}` counter; a subprocess job's own CPU is not in it), so each job's cost is measurable without a profiler.
+Every finished run records the CPU time of the threads that ran it (`cpu_us`, `cpu_ms` in `schedule list`, and the `schedule_cpu_us` counter (by `job`); a subprocess job's own CPU is not in it), so each job's cost is measurable without a profiler.
 
 - **Timing.** The ticker sleeps until the next job is due (at most `schedule.tick_ms`). Each next run is one interval
   after the current one starts, plus up to `jitter_ms`, so jobs do not run in step.
@@ -1273,6 +1273,7 @@ Files:
 | `task_guards.toml` | switches, limits, file layout and messages of the task checks and their shared helpers |
 | `roles.toml` | the role matrix (which role may run which engine verb), role detection names, the engine skill areas and their size budgets, and the role note texts; the `anti-hall:engine` skills are generated from it and the registry (`ah-engine/scripts/gen-engine-skills.sh`) |
 | `broad_kill.toml` | the broad-kill guard: blocked commands, the scoped `pkill -P` form, lookup patterns, wrappers and shells it looks through, and the block texts |
+| `devswarm_parent.toml` | names and message templates of the `devswarm-parent-inbox` check (the Primary prompt hook inside a git checkout) |
 | `devswarm_role.toml` | names, switches and message templates of the `devswarm-child-role` and `devswarm-parent-gate` checks |
 | `small_guards.toml` | patterns, switches, limits and messages of the small Bash guard ports and their shared helpers |
 | `verify_first.toml` | the verify-first protocol texts (copied byte for byte from `hooks/verify-first-core.js`), the switches and message of the verify-first and fable-availability checks |
@@ -1396,6 +1397,11 @@ State lives in `~/.anti-hall/ah-engine/` (override with `AH_ENGINE_DIR`): `hot.d
 `spool.log` and its `spool.quarantine`, the `backups/` directory, the optional `schedules.json`, the event log,
 `failure.json`, the breaker and crash-loop markers, the run marker, the start counter and the per-session advisory stamps. The rules file is
 `rules.json` there, or the path in `AH_ENGINE_RULES`.
+
+A daemon found gone without a clean exit is logged as `crash` (counts toward the crash-loop stop, marks the engine degraded, writes
+`last_crash`) unless the operating system booted after its last sign of life (its newest breadcrumb, or its start): then it is a
+`system_restart` (a reboot, an OS update, a power loss), reported under `health.system_restarts` in `status --json` and counted
+nowhere else. `health.system_restart_slack_ms` is the margin.
 
 ## Scripted check logic and the host API (D88)
 

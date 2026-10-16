@@ -611,7 +611,13 @@ fn the_hook_check_delivers_queued_reminders_once_and_the_tick_sees_the_delivery(
     let payload = json!({"hook_event_name": "UserPromptSubmit", "session_id": "s1"});
     let first = crate::script::run_forced("agent-reminders", &payload, &Value::Null, "UserPromptSubmit", &renv).expect("a shipped script").expect("a verdict");
     match first {
-        crate::checks::Verdict::Advisory(j) => assert!(j.contains("no output"), "{j}"),
+        crate::checks::Verdict::Advisory(j) => {
+            // the advisory is the hook's stdout line: a JSON object the dispatcher can combine with other hooks' answers, not plain text
+            let v = crate::dispatch::combine::parse_object(&j).unwrap_or_else(|| panic!("an advisory is a JSON object: {j}"));
+            let ctx = crate::dispatch::combine::context_of(&j).expect("the reminders ride in additionalContext");
+            assert!(ctx.contains("no output"), "{ctx}");
+            assert!(v.to_json().contains("\"hookEventName\":\"UserPromptSubmit\""), "{j}");
+        }
         other => panic!("expected an advisory, got {other:?}"),
     }
     let second = crate::script::run_forced("agent-reminders", &payload, &Value::Null, "PostToolUse", &renv).expect("a shipped script").expect("a verdict");

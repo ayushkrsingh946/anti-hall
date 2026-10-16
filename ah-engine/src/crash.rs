@@ -262,4 +262,33 @@ mod tests {
         assert_eq!(crash["breadcrumb"]["event"], "Stop");
         assert_eq!(crash["breadcrumb"]["check"], "task-guard");
     }
+
+    /// live20.1: a restart after an OS reboot or update was recorded as `crash:unknown`. When the system booted after the dead
+    /// daemon's last sign of life, the unclean stop is a `system_restart`: its own reason, no crash report, no crash-loop count.
+    #[test]
+    fn unclean_stop_before_the_system_boot_is_a_system_restart_not_a_crash() {
+        let _lock = env_lock();
+        let d = crate::db::TempDir::new("system-restart");
+        // SAFETY: this test sets the engine state dir before using health state helpers.
+        unsafe { std::env::set_var(crate::defaults::env_name("dir"), &d.0) };
+        let marker = d.0.join(crate::defaults::text("files.run_marker"));
+        std::fs::write(&marker, std::process::id().to_string()).unwrap();
+        crate::health::write_crash_breadcrumb("job", "", "", 0, json!({}));
+        let boot_after = crate::health::now_ms() + 10_000;
+        crate::health::reap_marker_at(Some(boot_after));
+        let s = crate::health::summary();
+        assert_eq!(s["system_restarts"]["total"], 1, "{s}");
+        assert_eq!(s["restarts"]["total"], 0, "a system stop is not a crash restart: {s}");
+        assert_eq!(s["degraded"], false, "a system stop does not degrade the engine: {s}");
+        assert!(crate::health::last_crash().is_none(), "no crash report for a system stop");
+        assert!(!marker.exists(), "the marker is claimed");
+        // the same stale marker with the system booted BEFORE the daemon's last sign of life is a crash
+        std::fs::write(&marker, std::process::id().to_string()).unwrap();
+        crate::health::write_crash_breadcrumb("job", "", "", 0, json!({}));
+        crate::health::reap_marker_at(Some(crate::health::now_ms().saturating_sub(60_000)));
+        assert!(crate::health::last_crash().is_some(), "a daemon that died while the system stayed up is a crash");
+        assert_eq!(crate::health::summary()["restarts"]["by_reason"]["crash:unknown"], 1);
+        // and without a boot time the answer stays a crash
+        assert!(!crate::health::stopped_by_system(None, 1));
+    }
 }

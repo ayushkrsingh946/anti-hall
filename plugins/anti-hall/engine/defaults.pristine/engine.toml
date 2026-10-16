@@ -751,6 +751,11 @@ value = ["crashloop", "crashloop_reset", "reset"]
 doc = "Event kinds that count toward the crash-loop threshold."
 value = ["crash", "panic", "start_fail", "watchdog", "rss"]
 
+[health.system_restart_slack_ms]
+doc = "How much later than a dead daemon's last sign of life (its newest breadcrumb, or its start) the operating system must have booted for the unclean stop to be reported as a `system_restart` (the machine stopped under it) instead of a `crash`. A margin against clock steps."
+value = 0
+unit = "ms"
+
 [health.advisory_ttl_ms]
 doc = "A recorded failure older than this no longer produces an advisory."
 value = 3600000
