@@ -237,7 +237,7 @@ fn witness_seen(ctx: &Ctx, hash: &str, s: &Settings, plan: &Plan, c: &Choice) ->
         .and_then(|t| serde_json::from_str::<Value>(&t).ok())
         .and_then(|v| v.get(hash).cloned());
     let unchanged = last
-        .is_some_and(|l| l["digest"] == json!(digest) && l["stat"] == json!(stat) && l["at"].as_i64().is_some_and(|at| ctx.now >= at && ctx.now - at < max));
+        .is_some_and(|l| l.get("digest") == Some(&json!(digest)) && l.get("stat") == Some(&json!(stat)) && l.get("at").and_then(Value::as_i64).is_some_and(|at| ctx.now >= at && ctx.now - at < max));
     Seen { stat, digest, unchanged }
 }
 

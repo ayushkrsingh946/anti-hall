@@ -613,7 +613,7 @@ fn a_missing_binary_backs_off_on_the_configuration_ladder_and_a_killed_poll_keep
     assert_eq!(d.start(&sys), Start::Started);
     let t0 = std::time::Instant::now();
     d.step(&sys);
-    assert!(t0.elapsed().as_secs() < 20, "bounded by the hard limit (timeout + margin), not by the child");
+    assert!(t0.elapsed() < crate::common::scaled(std::time::Duration::from_secs(20)), "bounded by the hard limit (timeout + margin), not by the child");
     assert_eq!(rows(&x).iter().map(|r| r.3.as_str()).collect::<Vec<_>>(), ["printed before the kill"]);
     assert_eq!(d.stats.errors, 1);
     d.stop();

@@ -10,7 +10,16 @@ use std::collections::VecDeque;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-static WINDOW: Mutex<VecDeque<(Instant, String)>> = Mutex::new(VecDeque::new());
+/// The sliding windows. Skipped-class fail-opens (a check or verdict really did not apply) drive the degraded state and the notice;
+/// reporting-class ones (the verdict applied, only its delivery or telemetry failed) are kept apart so a flood of them can neither
+/// flip the state nor push the skipped ones out of the bounded window.
+#[derive(Default)]
+struct Win {
+    skipped: VecDeque<(Instant, String)>,
+    reporting: VecDeque<(Instant, String)>,
+}
+
+static WINDOW: Mutex<Win> = Mutex::new(Win { skipped: VecDeque::new(), reporting: VecDeque::new() });
 
 /// Fail-opens noted but not yet added to the telemetry counters (a site without a telemetry handle notes here; the daemon
 /// drains it after every request and before every status).
@@ -49,14 +58,53 @@ pub fn drain_into(t: &Telemetry) {
     }
 }
 
-fn lock() -> std::sync::MutexGuard<'static, VecDeque<(Instant, String)>> {
+fn lock() -> std::sync::MutexGuard<'static, Win> {
     WINDOW.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Whether `reason` is reporting-only (`fail_open.reporting_reasons`): the verdict applied, the engine only failed to report it.
+pub fn is_reporting(reason: &str) -> bool {
+    defaults::list("fail_open.reporting_reasons").contains(&reason)
+}
+
+/// What a fail-open of `reason` means for the session, from `fail_open.effects` ("reason=text" entries); the default text when the
+/// reason has no entry.
+pub fn effect(reason: &str) -> String {
+    defaults::list("fail_open.effects")
+        .into_iter()
+        .find_map(|e| e.split_once('=').filter(|(r, _)| *r == reason).map(|(_, t)| t.to_string()))
+        .unwrap_or_else(|| defaults::text("fail_open.effect_default").to_string())
 }
 
 fn prune(w: &mut VecDeque<(Instant, String)>, now: Instant) {
     let span = Duration::from_secs(defaults::num("fail_open.window_s"));
     while w.front().is_some_and(|(t, _)| now.duration_since(*t) > span) {
         w.pop_front();
+    }
+}
+
+impl Win {
+    /// Record one fail-open in the window of its class. Bounded: a class's window never holds more than twice the hard limit, a flood
+    /// past that only moves its oldest out.
+    fn push(&mut self, now: Instant, reason: &str) {
+        let w = if is_reporting(reason) { &mut self.reporting } else { &mut self.skipped };
+        prune(w, now);
+        if w.len() as u64 >= defaults::num("fail_open.hard_per_window").saturating_mul(2) {
+            w.pop_front();
+        }
+        w.push_back((now, reason.to_string()));
+    }
+
+    /// (skipped count, most frequent skipped reason, reporting count) inside the window.
+    fn counts(&mut self, now: Instant) -> (u64, String, u64) {
+        prune(&mut self.skipped, now);
+        prune(&mut self.reporting, now);
+        let mut by: std::collections::BTreeMap<&str, u64> = std::collections::BTreeMap::new();
+        for (_, r) in self.skipped.iter() {
+            *by.entry(r.as_str()).or_default() += 1;
+        }
+        let top = by.iter().max_by_key(|(_, n)| **n).map(|(r, _)| (*r).to_string()).unwrap_or_default();
+        (self.skipped.len() as u64, top, self.reporting.len() as u64)
     }
 }
 
@@ -73,28 +121,19 @@ pub fn note(reason: &str, check: &str, detail: &str) {
     let max = defaults::num("fail_open.log_detail_max") as usize;
     let detail: String = detail.chars().take(max).collect();
     crate::health::log_event("fail_open", reason, &defaults::render("fail_open.msg_log", &[("check", &check), ("detail", &detail)]));
-    let now = Instant::now();
-    let mut w = lock();
-    prune(&mut w, now);
-    // bounded: the window never holds more than twice the hard limit, a flood past that only moves the oldest out
-    if w.len() as u64 >= defaults::num("fail_open.hard_per_window").saturating_mul(2) {
-        w.pop_front();
-    }
-    w.push_back((now, reason.to_string()));
-    drop(w);
+    lock().push(Instant::now(), reason);
     sync_notice(true);
 }
 
-/// The window's state: (count in the window, most frequent reason).
+/// The skipped-class window: (count in the window, most frequent reason). Reporting-only reasons are not in it.
 pub fn window() -> (u64, String) {
-    let mut w = lock();
-    prune(&mut w, Instant::now());
-    let mut by: std::collections::BTreeMap<&str, u64> = std::collections::BTreeMap::new();
-    for (_, r) in w.iter() {
-        *by.entry(r.as_str()).or_default() += 1;
-    }
-    let top = by.iter().max_by_key(|(_, n)| **n).map(|(r, _)| (*r).to_string()).unwrap_or_default();
-    (w.len() as u64, top)
+    let (n, top, _) = lock().counts(Instant::now());
+    (n, top)
+}
+
+/// How many reporting-only fail-opens (verdict applied, delivery or telemetry failed) are inside the window.
+pub fn reporting_in_window() -> u64 {
+    lock().counts(Instant::now()).2
 }
 
 /// `ok`, `degraded` (soft limit) or `failing` (hard limit), by the number of fail-opens inside the window.
@@ -111,8 +150,13 @@ pub fn state(n: u64) -> &'static str {
 /// The one-line session notice while degraded (`None` while ok).
 pub fn notice() -> Option<String> {
     let (n, top) = window();
-    (state(n) != defaults::text("fail_open.state_ok"))
-        .then(|| defaults::render("fail_open.msg_notice", &[("n", &n), ("window", &defaults::num("fail_open.window_s")), ("top", &top)]))
+    notice_for(n, &top)
+}
+
+fn notice_for(n: u64, top: &str) -> Option<String> {
+    (state(n) != defaults::text("fail_open.state_ok")).then(|| {
+        defaults::render("fail_open.msg_notice", &[("n", &n), ("window", &defaults::num("fail_open.window_s")), ("top", &top), ("effect", &effect(top))])
+    })
 }
 
 /// The file that holds the session notice while the engine is degraded (written by the daemon, read by the hook client).
@@ -167,12 +211,15 @@ pub fn status(t: &Telemetry) -> serde_json::Value {
     let by: Vec<_> = by
         .into_iter()
         .filter(|c| c["name"] == "fail_open")
-        .map(|c| serde_json::json!({"reason": c["labels"]["reason"], "check": c["labels"]["check"], "count": c["value"]}))
+        .map(|c| {
+            let reporting = c.pointer("/labels/reason").and_then(serde_json::Value::as_str).is_some_and(is_reporting);
+            serde_json::json!({"reason": c["labels"]["reason"], "check": c["labels"]["check"], "count": c["value"], "reporting_only": reporting})
+        })
         .collect();
     serde_json::json!({
         "state": state(n), "in_window": n, "window_s": defaults::num("fail_open.window_s"),
         "soft": defaults::num("fail_open.soft_per_window"), "hard": defaults::num("fail_open.hard_per_window"),
-        "top_reason": top, "totals": by,
+        "top_reason": top, "effect": effect(&top), "reporting_in_window": reporting_in_window(), "totals": by,
     })
 }
 
@@ -182,7 +229,10 @@ mod tests {
 
     #[test]
     fn the_notice_rides_one_answer_per_session_and_only_while_the_file_exists() {
-        let raw = r#"{"session_id":"s-notice","hook_event_name":"UserPromptSubmit"}"#;
+        // a session id new to every run: the once-per-session stamp outlives the run in the scratch state dir
+        let unique = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+        let raw = format!(r#"{{"session_id":"s-notice-{}-{unique}","hook_event_name":"UserPromptSubmit"}}"#, std::process::id());
+        let raw = raw.as_str();
         let plain = || crate::client::Outcome { out: String::new(), code: 0, err: String::new() };
         crate::discard::harmless(std::fs::create_dir_all(crate::paths::dir())); // keep: the scratch state dir of this test run
         crate::discard::harmless(std::fs::remove_file(notice_path())); // keep: a leftover of an earlier run
@@ -195,6 +245,56 @@ mod tests {
         blocked.code = 2;
         assert_eq!(with_notice(r#"{"session_id":"s-other"}"#, "PreToolUse", blocked).out, "", "a block is never decorated");
         crate::discard::harmless(std::fs::remove_file(notice_path())); // keep: cleanup of the scratch file
+    }
+
+    /// Feed `reasons` into a private window (never the process-wide one, which other tests also write) and return the state and notice.
+    fn assess(reasons: &[&str]) -> (&'static str, Option<String>, u64) {
+        let mut w = Win::default();
+        let now = Instant::now();
+        for r in reasons {
+            w.push(now, r);
+        }
+        let (n, top, reporting) = w.counts(now);
+        (state(n), notice_for(n, &top), reporting)
+    }
+
+    #[test]
+    fn a_burst_of_undelivered_verdicts_is_not_degraded_and_gives_no_skipped_notice() {
+        let burst = vec![defaults::text("wire.reason_undelivered"); (defaults::num("fail_open.hard_per_window") * 3) as usize];
+        let (st, notice, reporting) = assess(&burst);
+        assert_eq!(st, defaults::text("fail_open.state_ok"), "the verdict was applied, only its confirmation was late");
+        assert_eq!(notice, None);
+        assert!(reporting > 0, "still counted, for status");
+    }
+
+    #[test]
+    fn a_burst_of_script_timeouts_gives_the_skipped_notice() {
+        let burst = vec![defaults::text("fail_open.reason_script_timeout"); defaults::num("fail_open.soft_per_window") as usize];
+        let (st, notice, _) = assess(&burst);
+        assert_eq!(st, defaults::text("fail_open.state_soft"));
+        let text = notice.expect("a notice");
+        assert!(text.contains("script_timeout"), "{text}");
+        assert!(text.contains(&effect("script_timeout")), "{text}");
+    }
+
+    #[test]
+    fn a_reporting_flood_neither_flips_the_state_nor_hides_skipped_ones() {
+        let mut mixed = vec![defaults::text("wire.reason_undelivered"); (defaults::num("fail_open.hard_per_window") * 4) as usize];
+        mixed.extend(vec![defaults::text("fail_open.reason_busy"); defaults::num("fail_open.soft_per_window") as usize]);
+        let (st, notice, _) = assess(&mixed);
+        assert_eq!(st, defaults::text("fail_open.state_soft"), "only the skipped class counts");
+        let text = notice.expect("a notice");
+        assert!(text.contains("busy") && !text.contains("undelivered_verdict"), "{text}");
+    }
+
+    #[test]
+    fn every_recorded_reason_has_a_class_and_an_effect() {
+        for k in ["fail_open.reason_internal", "fail_open.reason_busy", "fail_open.reason_deadline", "fail_open.reason_script_timeout", "fail_open.reason_jev_breaker", "fail_open.reason_missing_key", "wire.reason_undelivered"] {
+            let r = defaults::text(k);
+            assert_ne!(effect(r), defaults::text("fail_open.effect_default"), "{r} has no effect text");
+        }
+        assert!(is_reporting(defaults::text("wire.reason_undelivered")));
+        assert!(!is_reporting(defaults::text("fail_open.reason_busy")));
     }
 
     #[test]

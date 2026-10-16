@@ -80,7 +80,6 @@ jev/breaker.rs | Breakers.state | one entry per vendor (two), keys are vendor na
 # ---- added by the live20 train (config layers #195, fail-open accounting #201, CPU lane E, Stop-Jev gate) ----------------------
 defaults.rs | OVERLAY | one table per DISTINCT effective config content, reused when a content comes back (OVERLAY_W pool); leak noted with mem::note_leak | the owner's layered settings read by every defaults accessor; a few hundred bytes per applied edit
 dssup/liveness.rs | ACTIVITY | at most devswarm_sup.lv_git_cache_max_entries entries; the map is cleared when full and entries expire after lv_git_cache_max_ms | per-worktree git-activity cache so a sweep does not re-run git for an unchanged HEAD
-failopen.rs | WINDOW | pruned to fail_open.window_s on every note and capped at twice fail_open.hard_per_window | recent fail-opens for the degraded/failing state
 failopen.rs | PENDING | capped at fail_open.pending_max; drained into the telemetry counters at every request end | fail-open counts not yet added to telemetry
 failopen.rs | REQUEST | at most one entry per daemon worker thread; removed at that thread's next request begin or take | the first fail-open of the request in progress on a thread
 jev/assist.rs | JevStats.gate | one row per (integration id, gate kind): integration ids are the shipped set times three kinds; reset at every metrics drain | Stop-gate counters per integration

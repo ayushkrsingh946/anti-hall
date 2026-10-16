@@ -62,11 +62,13 @@ fn digest_at(f: &std::fs::File, at: u64, len: u64) -> Option<u64> {
 /// Where the first line of a window starts: the byte after the first newline at or after `from`, which is how a window cut out of
 /// a file loses its first (partial) line. `Ok(None)` when no newline follows (the window holds no whole line).
 fn first_line_start(f: &std::fs::File, from: u64, size: u64) -> Option<Option<u64>> {
+    // a line is usually short: look in small steps first, then in larger ones up to the configured chunk
     let chunk = defaults::num("transcript.evidence_read_chunk_bytes").max(1);
+    let mut step = chunk.min(defaults::num("transcript.tasks_cache_probe_bytes").max(1));
     let mut at = from;
     let mut buf: Vec<u8> = Vec::new();
     while at < size {
-        let n = chunk.min(size - at) as usize;
+        let n = step.min(size - at) as usize;
         buf.resize(n, 0);
         f.read_exact_at(&mut buf, at).ok()?;
         crate::load::note_scan(n as u64);
@@ -74,6 +76,7 @@ fn first_line_start(f: &std::fs::File, from: u64, size: u64) -> Option<Option<u6
             return Some(Some(at + i as u64 + 1));
         }
         at += n as u64;
+        step = (step * 2).min(chunk);
     }
     Some(None)
 }

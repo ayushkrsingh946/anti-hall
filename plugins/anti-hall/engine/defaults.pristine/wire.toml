@@ -137,7 +137,7 @@ doc = "Why text: the bytes after the reply were not an ACK(res) line."
 value = "garbled"
 
 [fail_open.window_s]
-doc = "Length of the sliding window the engine counts its own fail-opens in (missing config, deadline cut, script timeout, Jev breaker open, busy, internal error, undelivered verdict)."
+doc = "Length of the sliding window the engine counts its own fail-opens in (missing config, deadline cut, script timeout, Jev breaker open, busy, internal error; reporting-only reasons such as undelivered_verdict are counted apart and do not count toward the limits)."
 value = 60
 unit = "s"
 min = 1
@@ -163,8 +163,8 @@ doc = "Health-log detail of one fail-open. Placeholders: {check}, {detail}."
 value = "check={check} {detail}"
 
 [fail_open.msg_notice]
-doc = "One-line session notice while the engine is degraded by fail-opens. Placeholders: {n}, {window}, {top}."
-value = "anti-hall: the engine failed open {n} times in the last {window}s (most often {top}); checks are being skipped. Run the doctor."
+doc = "One-line session notice while the engine is degraded by fail-opens. Only skipped-class reasons count toward it (see fail_open.reporting_reasons). Placeholders: {n}, {window}, {top}, {effect} (the fail_open.effects text of {top})."
+value = "anti-hall: the engine failed open {n} times in the last {window}s (most often {top}: {effect}). Run the doctor."
 
 [fail_open.state_ok]
 doc = "Degraded state name: below the soft limit."
@@ -222,3 +222,23 @@ value = "fail-open-notice"
 [fail_open.notice_tag]
 doc = "Tag of the once-per-session stamp of the degraded notice (distinct from the other advisories')."
 value = "fail-open"
+
+[fail_open.reporting_reasons]
+doc = "Reporting-only fail_open reasons: the verdict WAS applied and only its delivery or telemetry failed (undelivered_verdict: the client's confirmation was late, missing or the write failed). They stay in the counters and in status (reporting_in_window) but do not count toward the soft/hard limits, the degraded state or the session notice. Every other reason is skipped-class: a check or verdict really did not apply."
+value = ["undelivered_verdict"]
+
+[fail_open.effects]
+doc = "What each fail_open reason means for the session, as reason=text entries; the text fills {effect} of the degraded notice and the doctor findings. A reason without an entry uses fail_open.effect_default."
+value = [
+  "internal_error=a request hit an internal error and got no verdict from the engine",
+  "busy=requests were shed because the engine was busy and got no verdict from the engine",
+  "deadline_cut=a check was cut at the client deadline and deferred to its Node hook",
+  "script_timeout=a scripted check ran out of time and gave no verdict",
+  "jev_breaker_open=the Jev judgement was skipped because its circuit breaker is open",
+  "missing_key=a config reload was rejected, the previous settings keep serving and checks needing the new settings cannot run",
+  "undelivered_verdict=the verdict was applied, only the client's confirmation of it was missing (reporting only)",
+]
+
+[fail_open.effect_default]
+doc = "{effect} text for a fail_open reason that has no fail_open.effects entry (and for an empty window)."
+value = "some requests got no verdict from the engine"

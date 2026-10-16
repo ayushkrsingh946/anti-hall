@@ -113,8 +113,14 @@ pub fn evaluate(meta: &Meta, p: &Value, over_cpu: &dyn Fn() -> bool, observe: &d
         crate::deadline::beat();
         let check = e.check.as_deref().unwrap_or("");
         if crate::deadline::note_soft_overrun() {
-            // the client's fail-fast wait is over: this and the later checks still run (up to the hard deadline), the Node hook is not needed
-            crate::health::log_event("deadline_soft", check, &crate::defaults::render("msg.log_deadline_soft", &[("check", &check), ("event", &meta.event)]));
+            // the client's fail-fast wait was over before any check of this request started (it waited in the queue): this and the later
+            // checks still run (up to the hard deadline), the Node hook is not needed
+            let elapsed = crate::deadline::elapsed_ms().unwrap_or(0);
+            crate::health::log_event(
+                "deadline_soft",
+                check,
+                &crate::defaults::render("msg.log_deadline_soft_queued", &[("check", &check), ("event", &meta.event), ("elapsed_ms", &elapsed)]),
+            );
         }
         // past the request's HARD deadline nobody reads this reply's answer for the entry: it is not started, and its own Node hook
         // answers it (the entries answered in time still count), so a slow machine costs single checks, never the event
@@ -155,6 +161,17 @@ pub fn evaluate(meta: &Meta, p: &Value, over_cpu: &dyn Fn() -> bool, observe: &d
             }
         };
         crate::deadline::beat();
+        if crate::deadline::note_soft_overrun() {
+            // the client's fail-fast wait ended while THIS check was running: it is the one the line names, with how long it ran
+            // (the line used to name the next check to start: ship-it-guard, 0.7 ms mean over 49,811 live calls, was blamed for time earlier checks spent)
+            let (elapsed, ran) = (crate::deadline::elapsed_ms().unwrap_or(0), started.elapsed().as_millis());
+            crate::health::log_event(
+                "deadline_soft",
+                check,
+                &crate::defaults::render("msg.log_deadline_soft", &[("check", &check), ("event", &meta.event), ("elapsed_ms", &elapsed), ("ran_ms", &ran)]),
+            );
+        }
+        crate::load::note_check_cpu(crate::limits::thread_cpu_us().saturating_sub(cpu_before));
         observe(&e, &a, started.elapsed().as_micros() as u64);
         out.push((e.id, a));
     }

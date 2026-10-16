@@ -141,6 +141,30 @@ value = 6291456
 min = 65536
 unit = "bytes"
 
+[transcript.tasks_cache_max_paths]
+doc = "How many transcript windows' task lines `ah.transcript.tasks` keeps between calls, so a Stop reads only the bytes appended since the last one (0 turns the cache off and every call reads and parses its whole window). Each window size of a transcript is one entry. The least recently used is dropped first."
+value = 24
+min = 0
+unit = "count"
+
+[transcript.tasks_cache_idle_ms]
+doc = "How long kept task lines may sit unused before they are dropped."
+value = 600000
+min = 0
+unit = "ms"
+
+[transcript.tasks_cache_probe_bytes]
+doc = "Bytes the first look for the newline that ends the cut first line of a window reads (a line is usually shorter); each further look reads twice as much, up to transcript.evidence_read_chunk_bytes."
+value = 4096
+min = 1
+unit = "bytes"
+
+[transcript.tasks_cache_entry_max_bytes]
+doc = "Largest estimated size of the kept task lines of one window; a larger one is not kept (the next call reads its window afresh)."
+value = 4194304
+min = 65536
+unit = "bytes"
+
 [transcript.evidence_fingerprint_bytes]
 doc = "Bytes hashed at each end of the kept lines to notice that a transcript was rewritten in place."
 value = 4096

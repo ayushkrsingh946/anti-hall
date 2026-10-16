@@ -177,6 +177,10 @@ value = ["taskId", "id", "task_id"]
 doc = "The object keys the tool-use collector descends into, in order (the Node `collectToolUses`)."
 value = ["content", "message", "messages", "tool_uses", "parts"]
 
+[taskstate.task_tools]
+doc = "The tool names a task reconstruction reacts to (a call that creates, updates, lists or reads tasks, or rewrites the whole list). The kept task lines (transcript.tasks_cache_*) hold every line that names one; a name a reconstruction acts on that is missing here would make its kept answer differ from a fresh read."
+value = ["TodoWrite", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet"]
+
 [taskstate.open_statuses]
 doc = "Statuses (lowercase) that make a task open."
 value = ["pending", "in_progress", "in-progress"]

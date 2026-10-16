@@ -21,6 +21,7 @@ type Note = (&'static str, &'static str, &'static str);
 thread_local! {
     static SCAN_BYTES: Cell<u64> = const { Cell::new(0) };
     static CHECK_SCAN_BYTES: Cell<u64> = const { Cell::new(0) };
+    static CHECK_CPU_US: Cell<u64> = const { Cell::new(0) };
     static NOTES: std::cell::RefCell<Vec<Note>> = const { std::cell::RefCell::new(Vec::new()) };
     static TRANSCRIPT_SIZE: Cell<Option<u64>> = const { Cell::new(None) };
 }
@@ -36,6 +37,16 @@ pub fn note_scan(bytes: u64) {
 /// ([`take_scan`]) is not affected.
 pub fn take_check_scan() -> u64 {
     CHECK_SCAN_BYTES.with(Cell::take)
+}
+
+/// The CPU the check that just ran spent on this thread, in microseconds (the dispatcher notes it as the check finishes).
+pub fn note_check_cpu(us: u64) {
+    CHECK_CPU_US.with(|c| c.set(us));
+}
+
+/// The CPU noted for the check that just finished, and reset.
+pub fn take_check_cpu() -> u64 {
+    CHECK_CPU_US.with(Cell::take)
 }
 
 /// A check on this thread saw one `metric` event labelled `label` = `value` (for instance a kept-walk hit, or the reason it

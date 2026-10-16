@@ -262,8 +262,11 @@ impl RtLive<'_> {
     fn facts_with(&self, kind: &str, id: &str, fresh: bool) -> Option<Value> {
         let kinds = defaults::list("devswarm_act.automatic_kinds");
         let owner = defaults::list("devswarm_act.owner_kinds");
+        let ([k_auto, k_nudge_a, k_nudge_b, ..], [o_found_a, o_empty_a, o_empty_b, o_found_b, ..]) = (kinds.as_slice(), owner.as_slice()) else {
+            return None;
+        };
         let app = self.app();
-        if kind == kinds[0] {
+        if kind == *k_auto {
             let app = app?;
             let b = app.builders.iter().find(|b| b.id == id)?;
             return Some(self.auto_archive_facts(&app, b, fresh));
@@ -273,20 +276,28 @@ impl RtLive<'_> {
             let b = app.builders.iter().find(|b| b.id == id)?;
             let mut f = self.auto_archive_facts(&app, b, false);
             let open = b.active == Some(true) && b.hidden == Some(false);
-            f["lifecycle"] = json!(if open { "active" } else { "inactive" });
-            if defaults::list("devswarm_act.nag_done_requires").contains(&"pushed") {
-                let wt = f["worktreePath"].as_str().unwrap_or_default().to_string();
-                f["pushed"] = json!(f["head"].as_str().and_then(|h| self.git().pushed(&wt, h)) == Some(true));
+            let lifecycle = json!(if open { "active" } else { "inactive" });
+            let pushed = if defaults::list("devswarm_act.nag_done_requires").contains(&"pushed") {
+                let wt = f.get("worktreePath").and_then(Value::as_str).unwrap_or_default().to_string();
+                Some(json!(f.get("head").and_then(Value::as_str).and_then(|h| self.git().pushed(&wt, h)) == Some(true)))
+            } else {
+                None
+            };
+            if let Some(o) = f.as_object_mut() {
+                o.insert("lifecycle".into(), lifecycle);
+                if let Some(p) = pushed {
+                    o.insert("pushed".into(), p);
+                }
             }
             return Some(f);
         }
-        if kind == format!("{}-or-{}", kinds[1], kinds[2]) {
+        if kind == format!("{}-or-{}", k_nudge_a, k_nudge_b) {
             return self.nudge_facts(id);
         }
-        if kind == owner[0] || kind == owner[3] {
+        if kind == *o_found_a || kind == *o_found_b {
             return Some(self.found(&app, id));
         }
-        if kind == owner[1] || kind == owner[2] {
+        if kind == *o_empty_a || kind == *o_empty_b {
             return Some(json!({}));
         }
         None

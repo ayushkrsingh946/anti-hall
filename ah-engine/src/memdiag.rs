@@ -406,6 +406,7 @@ pub fn capture(memory: Value, workers: usize, rss_cap_kb: u64, uptime_s: u64) {
     let (sp_entries, sp_bytes) = crate::script::host_spawn::cache_usage();
     let (walks, walk_est, walk_read) = crate::checks::agent_scan::kept_usage();
     let (ev_entries, ev_bytes) = crate::script::evidence_cache::usage();
+    let (tk_entries, tk_bytes) = crate::script::tasks_cache::usage();
     let mut snap = json!({
         "ts": crate::health::now_ms(), "pid": std::process::id(), "uptime_s": uptime_s,
         "rss_kb": crate::limits::rss_kb(), "rss_cap_kb": rss_cap_kb, "threads": crate::limits::thread_count(),
@@ -421,6 +422,7 @@ pub fn capture(memory: Value, workers: usize, rss_cap_kb: u64, uptime_s: u64) {
             "transcript_tail": {"entries": tc_entries, "bytes": tc_bytes},
             "spawn_probe": {"entries": sp_entries, "bytes": sp_bytes},
             "transcript_evidence": {"entries": ev_entries, "bytes": ev_bytes},
+            "transcript_tasks": {"entries": tk_entries, "bytes": tk_bytes},
             "agent_scan_walks": {"transcripts": walks, "estimated_bytes": walk_est, "transcript_bytes_read": walk_read},
         },
         "memory": memory,

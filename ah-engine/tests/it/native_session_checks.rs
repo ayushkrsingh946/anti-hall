@@ -186,7 +186,7 @@ fn budget_ms(key: &str) -> f64 {
     let b = &v["native_session_checks"];
     let num = |v: &toml::Value| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)).unwrap();
     let factor = if cfg!(debug_assertions) { num(&b["debug_factor"]) } else { 1.0 };
-    num(&b[key]) * factor
+    num(&b[key]) * factor * crate::common::time_scale() as f64
 }
 
 /// The answer's context with the part the dispatcher spilled to a file (a SessionStart join is over the host's inline cap) put back.

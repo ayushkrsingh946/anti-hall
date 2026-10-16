@@ -233,6 +233,31 @@ pub fn process_cpu_secs() -> f64 {
     t(ru.ru_utime) + t(ru.ru_stime)
 }
 
+/// When the operating system booted, in milliseconds since the Unix epoch (`None` when the platform does not say). A process
+/// whose last sign of life is older than this was ended by the machine stopping, not by a fault of its own.
+pub fn boot_time_ms() -> Option<u64> {
+    #[cfg(target_os = "macos")]
+    {
+        let name = c"kern.boottime";
+        // SAFETY: `timeval` is a plain C struct of integers, for which all-zero bytes are a valid value.
+        let mut tv: libc::timeval = unsafe { std::mem::zeroed() };
+        let mut len = std::mem::size_of::<libc::timeval>();
+        // SAFETY: `name` is a NUL-terminated C string; `tv` is writable for `len` bytes, which is the size passed; no new value is set.
+        let rc = unsafe { libc::sysctlbyname(name.as_ptr(), (&mut tv as *mut libc::timeval).cast(), &mut len, std::ptr::null_mut(), 0) };
+        (rc == 0 && tv.tv_sec > 0).then(|| tv.tv_sec as u64 * 1000 + tv.tv_usec as u64 / 1000)
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let stat = std::fs::read_to_string("/proc/stat").ok()?;
+        let secs: u64 = stat.lines().find_map(|l| l.strip_prefix("btime "))?.trim().parse().ok()?;
+        Some(secs * 1000)
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        None
+    }
+}
+
 /// Current resident set of this process in KB (0 when it cannot be read).
 pub fn rss_kb() -> u64 {
     #[cfg(target_os = "linux")]

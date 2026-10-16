@@ -76,6 +76,15 @@ fn task_json(t: &Task) -> Value {
 ///   hook would end silently (a JSON `null` entry makes it throw), or `{"unreadable":true}` when the file cannot be read;
 /// - any variant: `{"unsure":true}` when a record or value only JavaScript could read exactly was met.
 pub fn transcript_tasks(path: &str, variant: &str, window: f64, wide: f64) -> String {
+    tasks_of(path, variant, window, wide, true)
+}
+
+/// [`transcript_tasks`] reading the whole window every time: the reference the kept lines are tested against.
+pub fn transcript_tasks_uncached(path: &str, variant: &str, window: f64, wide: f64) -> String {
+    tasks_of(path, variant, window, wide, false)
+}
+
+fn tasks_of(path: &str, variant: &str, window: f64, wide: f64, kept: bool) -> String {
     let unsure = || json!({"unsure": true}).to_string();
     let window = if window.is_finite() && window > 0.0 { window as u64 } else { defaults::num("taskstate.tail_bytes") };
     if variant == "scan" {
@@ -83,7 +92,8 @@ pub fn transcript_tasks(path: &str, variant: &str, window: f64, wide: f64) -> St
             return json!({"unreadable": true}).to_string();
         }
         let wide = if wide.is_finite() && wide > 0.0 { wide as u64 } else { window };
-        return match scanview::scan_tasks(path, window, wide) {
+        let scan = if kept { scanview::scan_tasks(path, window, wide) } else { scanview::scan_tasks_uncached(path, window, wide) };
+        return match scan {
             Err(_) => unsure(),
             Ok(None) => json!({"quiet": true}).to_string(),
             Ok(Some(s)) => json!({
@@ -96,8 +106,17 @@ pub fn transcript_tasks(path: &str, variant: &str, window: f64, wide: f64) -> St
         };
     }
     let v = if variant == "state" { Variant::State } else { Variant::Guard };
-    let Some((data, truncated)) = read_tail(path, window) else { return json!({"tasks": [], "unreadable": true}).to_string() };
-    let lines = lines_of(&data, truncated);
+    // the task lines kept since the last call when there are any, else the window read afresh
+    let kept_lines = if kept { super::tasks_cache::lines(path, window) } else { None };
+    let data;
+    let (lines, truncated): (Vec<&str>, bool) = match &kept_lines {
+        Some((k, truncated)) => (k.iter().map(String::as_str).collect(), *truncated),
+        None => {
+            let Some((d, truncated)) = read_tail(path, window) else { return json!({"tasks": [], "unreadable": true}).to_string() };
+            data = d;
+            (lines_of(&data, truncated), truncated)
+        }
+    };
     let Ok(mut facts) = reconstruct(&lines, v) else { return unsure() };
     if truncated && backfill(&mut facts, path, window).is_err() {
         return unsure();

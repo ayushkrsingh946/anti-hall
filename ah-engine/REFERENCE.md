@@ -594,6 +594,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `health.rss_probe` | `ps, -o, rss=, -p, {pid}` |  |  | Command used to read this process's resident set where /proc is unavailable (macOS): the program, then its arguments with `{pid}` substituted. |
 | `health.scrub_patterns` | `7 items` |  |  | Patterns removed from anything that goes into a diagnostic: each item is [regex, replacement]. Order matters. |
 | `health.serve_arg` | `serve` |  |  | Subcommand a daemon is started with; also how a live engine is recognised in the process list. |
+| `health.system_restart_slack_ms` | `0` |  | ms | How much later than a dead daemon's last sign of life (its newest breadcrumb, or its start) the operating system must have booted for the unclean stop to be reported as a `system_restart` (the machine stopped under it) instead of a `crash`. A margin against clock steps. |
 
 ### engine.toml / hook
 
@@ -1291,6 +1292,10 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `transcript.task_result_max_bytes` | `1024` |  | bytes | Longest task-tool result text kept; the rest is cut at a character boundary and flagged. |
 | `transcript.task_statuses_kept` | `256` |  |  | How many of the newest task_status attachments (agents re-injected by a compaction) the index keeps. |
 | `transcript.task_tools` | `TodoWrite, TaskCreate, TaskUpdate, TaskList, TaskGet` |  |  | Names of the task tools whose uses and string results are kept in order, so a task list can be rebuilt from the index (mirrors hooks/lib/task-state.js). |
+| `transcript.tasks_cache_entry_max_bytes` | `4194304` |  | bytes | Largest estimated size of the kept task lines of one window; a larger one is not kept (the next call reads its window afresh). |
+| `transcript.tasks_cache_idle_ms` | `600000` |  | ms | How long kept task lines may sit unused before they are dropped. |
+| `transcript.tasks_cache_max_paths` | `24` |  | count | How many transcript windows' task lines `ah.transcript.tasks` keeps between calls, so a Stop reads only the bytes appended since the last one (0 turns the cache off and every call reads and parses its whole window). Each window size of a transcript is one entry. The least recently used is dropped first. |
+| `transcript.tasks_cache_probe_bytes` | `4096` |  | bytes | Bytes the first look for the newline that ends the cut first line of a window reads (a line is usually shorter); each further look reads twice as much, up to transcript.evidence_read_chunk_bytes. |
 | `transcript.terminal_statuses` | `completed failed stopped killed cancelled canceled` |  |  | Task-notification statuses that mean an agent has ended (hooks/lib/agent-scan.js TERMINAL_NOTIFICATION_STATUS), case-insensitive. |
 | `transcript.tool_input_max_bytes` | `4096` |  | bytes | Largest serialized tool input kept as is for a recent tool use; a larger input is replaced by null and flagged. |
 
@@ -3957,6 +3962,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `taskstate.re_not_found` | `^\s*Task\s*(?:#\S+)?\s*not\s+found\b` |  |  | JavaScript regex source (case-insensitive) of the TaskGet or TaskUpdate result that says one task id does not exist. |
 | `taskstate.since_status_re` | `^(pending\|in[-_]?progress)$` |  |  | JavaScript regex source (case-insensitive) of the TaskUpdate statuses that restart a task's clock (`sinceMs`, read by the idle-neglect proof). |
 | `taskstate.tail_bytes` | `1572864` |  |  | How much of the end of a transcript the task reconstruction reads (the Node `MAX_TAIL_BYTES`, 1.5 MiB). |
+| `taskstate.task_tools` | `TodoWrite, TaskCreate, TaskUpdate, TaskList, TaskGet` |  |  | The tool names a task reconstruction reacts to (a call that creates, updates, lists or reads tasks, or rewrites the whole list). The kept task lines (transcript.tasks_cache_*) hold every line that names one; a name a reconstruction acts on that is missing here would make its kept answer differ from a fresh read. |
 | `taskstate.terminal_status_re` | `^(completed\|done\|cancelled\|canceled\|deleted)$` |  |  | JavaScript regex source (case-insensitive) of the statuses that close a task for the backfill (`TERMINAL`). |
 | `taskstate.tools_collect_keys` | `content, message, messages, tool_uses, parts` |  |  | The object keys the tool-use collector descends into, in order (the Node `collectToolUses`). |
 | `taskstate.unknown_file_prefix` | `last-unknown` |  |  | Prefix of the per-session file that remembers which unknown set was last announced. |
@@ -4704,8 +4710,8 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `doctor_msg.explicit_retired` | `RE-RETIRED ` |  |  | The mark of a re-retired resurrected row. |
 | `doctor_msg.explicit_skipped` | `skipped ` |  |  | The mark of an explicit repair row that changed nothing. |
 | `doctor_msg.explicit_unloaded` | `UNLOADED ` |  |  | The mark of an unloaded orphan. |
-| `doctor_msg.fail_open_hard` | `the engine failed open {n} times in the last {window}s (most often {top}), pa...` |  |  | Finding: the engine has failed open more often than the hard limit in the recent window. Placeholders: {n}, {window}, {top}. |
-| `doctor_msg.fail_open_soft` | `the engine failed open {n} times in the last {window}s (most often {top}): ch...` |  |  | Finding: the engine has failed open more often than the soft limit in the recent window. Placeholders: {n}, {window}, {top}. |
+| `doctor_msg.fail_open_hard` | `the engine failed open {n} times in the last {window}s (most often {top}: {ef...` |  |  | Finding: the engine has failed open more often than the hard limit in the recent window. Placeholders: {n}, {window}, {top}, {effect}. |
+| `doctor_msg.fail_open_soft` | `the engine failed open {n} times in the last {window}s (most often {top}: {ef...` |  |  | Finding: the engine has failed open more often than the soft limit in the recent window. Placeholders: {n}, {window}, {top}, {effect}. |
 | `doctor_msg.failure_recorded` | `last recorded failure ({class}): {reason} {hint}` |  |  | DMN-11. Placeholders: {class}, {reason}, {hint}. |
 | `doctor_msg.fix_exec` | `made {path} executable` |  |  | Repair row. Placeholder: {path}. |
 | `doctor_msg.fix_heal_dry` | `would add the missing settings to {n} defaults file(s)` |  |  | Dry-run repair row. Placeholder: {n}. |
@@ -9977,15 +9983,18 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `mem.proc_output_max_bytes` | `8388608` |  | bytes | Most bytes of a helper process's stdout, and of its stderr, the daemon keeps (git, gh and the other helpers it runs). The rest is read and discarded so the helper does not block, and the kept text ends with mem.proc_output_marker. |
 | `mem.quickjs_hard_bytes` | `33554432` |  | bytes | Absolute ceiling of one worker's script interpreter heap (bytes). A call's own allowance (script.call_memory_bytes above the size after loading) never lifts the ceiling past it, so a baseline that creeps up cannot raise the limit without bound. An interpreter found above it is recycled and the call that needed it fails open (a deferral). |
 | `mem.quickjs_low_water_pct` | `90` |  |  | Percent of mem.quickjs_soft_bytes an interpreter is unloaded down to once it reached the soft limit, so the next load does not trigger another unload. |
-| `mem.quickjs_soft_bytes` | `4194304` |  | bytes | What ONE worker thread's script interpreter may hold after loading a check (measured after a collection). At or above it the least recently called checks are unloaded down to the low-water mark and rebuilt from their files by their next call. All shipped checks loaded take about 5 MB per worker; the default keeps headroom above that cold set so the first hook call does not unload and rebuild checks while racing the client deadline. A limit near 3 MB made the replay about twice as slow (the checks one request runs are reloaded again and again), and 4 MB costs a few percent. Default 4 MiB, from a 600-event replay on a scratch daemon (4 workers): soft 6 MiB held 18.9 MB in the interpreters (footprint 58.8 MB, CPU 6.7 s), 4 MiB 14.7 MB (55.2 MB, 7.6 s), 3 MiB 8.7 MB (51.8 MB) but CPU tripled (19.6 s, checks reloaded constantly), 2 MiB the same thrash. |
-| `mem.regex_hard_bytes` | `16777216` |  | bytes | Estimated bytes of compiled regular expressions at which the `ah.re.*` cache refuses an insert (the pattern is compiled and used, not kept) and is recycled. |
+| `mem.quickjs_soft_bytes` | `5242880` |  | bytes | What ONE worker thread's script interpreter may hold after loading a check (measured after a collection). At or above it the least recently called checks are unloaded down to the low-water mark and rebuilt from their files by their next call. All shipped checks loaded take about 3.84 MB per worker after a collection (measured 2026-10-16 with 73 checks, `examples/script_mem.rs`, 4 threads) plus the garbage a request leaves before the next collection; the default keeps headroom above that cold set so the first hook call does not unload and rebuild checks while racing the client deadline. At 4 MiB the loaded set sat 9% under the limit and live20.1 unloaded and rebuilt checks 154 times (four workers, bytes held 4.2 MB each: at the limit). A limit near 3 MB made the replay about twice as slow (the checks one request runs are reloaded again and again), and 4 MB costs a few percent. Default 5 MiB; the 4 MiB of the replay below was the knee when the cold set was smaller. The sweep, from a 600-event replay on a scratch daemon (4 workers): soft 6 MiB held 18.9 MB in the interpreters (footprint 58.8 MB, CPU 6.7 s), 4 MiB 14.7 MB (55.2 MB, 7.6 s), 3 MiB 8.7 MB (51.8 MB) but CPU tripled (19.6 s, checks reloaded constantly), 2 MiB the same thrash. |
+| `mem.regex_hard_bytes` | `33554432` |  | bytes | Estimated bytes of compiled regular expressions at which the `ah.re.*` cache refuses an insert (the pattern is compiled and used, not kept) and is recycled. |
 | `mem.regex_low_water_pct` | `80` |  |  | Percent of mem.regex_soft_bytes the `ah.re.*` cache is evicted down to when the soft limit is reached. |
 | `mem.regex_max_entries` | `512` |  |  | Compiled regular expressions the process-wide `ah.re.*` cache keeps at most (all workers share one cache); past it the least recently used pattern is dropped first. |
-| `mem.regex_soft_bytes` | `8388608` |  | bytes | Estimated bytes of compiled regular expressions the shared `ah.re.*` cache may hold before it evicts the least recently used down to its low-water mark (an entry weighs script.regex_entry_base_bytes plus script.regex_bytes_per_src_byte per byte of its translated source). The shipped patterns are about 3.3 MB compiled, so the default keeps all of them. |
+| `mem.regex_soft_bytes` | `16777216` |  | bytes | Estimated bytes of compiled regular expressions the shared `ah.re.*` cache may hold before it evicts the least recently used down to its low-water mark (an entry weighs script.regex_entry_base_bytes plus script.regex_bytes_per_src_byte per byte of its translated source). The shipped checks reach about 47 distinct patterns on a short run (7.3 MB estimated, up to 5.3 MB measured on 4 workers) and more across a real day; at 8 MiB the working set did not fit and the cache evicted and recompiled in a cycle (live20.1: 16 evictions in 7 h, one every ~30 min, bursts under load). 16 MiB keeps them all. |
 | `mem.spawn_probe_hard_bytes` | `131072` |  | bytes | Bytes of kept spawn-probe answers at which an insert is refused (the answer is returned, not kept) and the cache is recycled. |
 | `mem.spawn_probe_low_water_pct` | `80` |  |  | Percent of mem.spawn_probe_soft_bytes the spawn-probe cache is evicted down to when the soft limit is reached. |
 | `mem.spawn_probe_max_entries` | `64` |  |  | Spawn-probe answers the cache keeps at most; past it the least recently used is dropped first. |
 | `mem.spawn_probe_soft_bytes` | `65536` |  | bytes | Bytes of kept spawn-probe answers (`spawnProbeCached`) held before the least recently used are dropped down to the low-water mark. |
+| `mem.tasks_cache_hard_bytes` | `12582912` |  | bytes | Bytes of kept transcript task lines at which an insert is refused (the answer is returned, not kept) and the cache is recycled. |
+| `mem.tasks_cache_low_water_pct` | `80` |  |  | Percent of mem.tasks_cache_soft_bytes the kept transcript task lines are evicted down to when the soft limit is reached. |
+| `mem.tasks_cache_soft_bytes` | `6291456` |  | bytes | Bytes of kept transcript task lines held before the least recently used are dropped down to the low-water mark. |
 | `mem.transcript_tail_hard_bytes` | `8388608` |  | bytes | Bytes of cached transcript-tail answers at which an insert is refused (the answer is returned, not kept) and the cache is recycled. |
 | `mem.transcript_tail_low_water_pct` | `80` |  |  | Percent of mem.transcript_tail_soft_bytes the transcript-tail cache is evicted down to when the soft limit is reached. |
 | `mem.transcript_tail_max_entries` | `256` |  |  | Transcript-tail answers the cache keeps at most; past it the least recently used is dropped first. |
@@ -9996,10 +10005,12 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | Key | Default | Env override | Unit | What it is |
 |---|---|---|---|---|
 | `fail_open.check_none` | `-` |  |  | check label of a fail-open that is not tied to one check. |
+| `fail_open.effect_default` | `some requests got no verdict from the engine` |  |  | {effect} text for a fail_open reason that has no fail_open.effects entry (and for an empty window). |
+| `fail_open.effects` | `7 items` |  |  | What each fail_open reason means for the session, as reason=text entries; the text fills {effect} of the degraded notice and the doctor findings. A reason without an entry uses fail_open.effect_default. |
 | `fail_open.hard_per_window` | `20` |  |  | Hard limit: this many fail-opens inside the window and the doctor check fails. The engine keeps failing open, it never blocks a session. |
 | `fail_open.log_detail_max` | `200` |  | chars | Longest detail text a fail-open writes to the health log, in characters. |
 | `fail_open.msg_log` | `check={check} {detail}` |  |  | Health-log detail of one fail-open. Placeholders: {check}, {detail}. |
-| `fail_open.msg_notice` | `anti-hall: the engine failed open {n} times in the last {window}s (most often...` |  |  | One-line session notice while the engine is degraded by fail-opens. Placeholders: {n}, {window}, {top}. |
+| `fail_open.msg_notice` | `anti-hall: the engine failed open {n} times in the last {window}s (most often...` |  |  | One-line session notice while the engine is degraded by fail-opens. Only skipped-class reasons count toward it (see fail_open.reporting_reasons). Placeholders: {n}, {window}, {top}, {effect} (the fail_open.effects text of {top}). |
 | `fail_open.notice_file` | `fail-open-notice` |  |  | File in the state directory that holds the one-line session notice while the engine is degraded by fail-opens; the daemon writes it past the soft limit and removes it when the rate falls back, the hook client adds its text to one answer per session. |
 | `fail_open.notice_tag` | `fail-open` |  |  | Tag of the once-per-session stamp of the degraded notice (distinct from the other advisories'). |
 | `fail_open.pending_max` | `1024` |  |  | Most fail-opens held between two drains into the telemetry counters (the daemon drains after every request); past it the extra ones still reach the window and the log. |
@@ -10009,11 +10020,12 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `fail_open.reason_jev_breaker` | `jev_breaker_open` |  |  | fail_open reason: the Jev circuit breaker was open, so the judgement was skipped. |
 | `fail_open.reason_missing_key` | `missing_key` |  |  | fail_open reason: the shipped defaults were unavailable or missing a key, so the check could not run. |
 | `fail_open.reason_script_timeout` | `script_timeout` |  |  | fail_open reason: a scripted check ran out of time. |
+| `fail_open.reporting_reasons` | `undelivered_verdict` |  |  | Reporting-only fail_open reasons: the verdict WAS applied and only its delivery or telemetry failed (undelivered_verdict: the client's confirmation was late, missing or the write failed). They stay in the counters and in status (reporting_in_window) but do not count toward the soft/hard limits, the degraded state or the session notice. Every other reason is skipped-class: a check or verdict really did not apply. |
 | `fail_open.soft_per_window` | `5` |  |  | Soft limit: this many fail-opens inside the window and the engine reports itself degraded (status, a doctor WARN and a one-line session notice). Counting continues. |
 | `fail_open.state_hard` | `failing` |  |  | Degraded state name: at or past the hard limit. |
 | `fail_open.state_ok` | `ok` |  |  | Degraded state name: below the soft limit. |
 | `fail_open.state_soft` | `degraded` |  |  | Degraded state name: at or past the soft limit. |
-| `fail_open.window_s` | `60` |  | s | Length of the sliding window the engine counts its own fail-opens in (missing config, deadline cut, script timeout, Jev breaker open, busy, internal error, undelivered verdict). |
+| `fail_open.window_s` | `60` |  | s | Length of the sliding window the engine counts its own fail-opens in (missing config, deadline cut, script timeout, Jev breaker open, busy, internal error; reporting-only reasons such as undelivered_verdict are counted apart and do not count toward the limits). |
 
 ### wire.toml / wire
 
@@ -10359,7 +10371,8 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `msg.log_crashloop_rollback` | Log detail added when a crash-loop trip also requested a roll-back. |
 | `msg.log_daemon_killed` | Log detail when the daemon was killed by a signal while starting. |
 | `msg.log_daemon_spawn_failed` | Event-log detail (kind spawn_fail, code os<n>) when the client could not start the daemon (fork or exec failed: EAGAIN, ENOMEM, a missing executable). Placeholder: {err}. |
-| `msg.log_deadline_soft` | Log detail when a request is still being evaluated after the client's fail-fast wait (its SOFT deadline); the checks keep running up to the hard deadline. |
+| `msg.log_deadline_soft` | Log detail when the client's fail-fast wait (the request's SOFT deadline) ended while a check was running: the request is {elapsed_ms} ms old and that check ran {ran_ms} ms. Nothing is cut: the checks keep running up to the hard deadline and the client uses the late reply. |
+| `msg.log_deadline_soft_queued` | Log detail when the client's fail-fast wait (the request's SOFT deadline) had already ended before the first check of the request started, so the request waited {elapsed_ms} ms (queue, connection) before any check ran. {check} is the first check of the request. Nothing is cut. |
 | `msg.log_debug_off` | Event-log detail when debug mode turns off (the setting was switched off and neither the environment variable nor the flag holds it on). |
 | `msg.log_debug_on` | Event-log detail when debug mode turns on (the setting, the environment variable or the flag). |
 | `msg.log_fallback_read_error` | Log detail when reading the Node fallback's stdout or stderr failed part-way. |
@@ -10383,6 +10396,7 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `msg.log_stall` | Log detail when the accept loop stalled. |
 | `msg.log_start` | Log detail for a daemon start. Placeholders: {version}, {pid}, {rlimit}. |
 | `msg.log_stuck` | Log detail when a worker is stuck. Placeholder: {i}. |
+| `msg.log_system_restart` | Log detail when a daemon is found gone without a clean exit AND the operating system booted after its last sign of life (a reboot, an OS update, a power loss): the machine stopped it, it did not crash. Placeholders: {pid}, {last_alive_ms}, {boot_ms}. |
 | `msg.metrics_quantile_note` | Printed with every latency histogram: how to read its percentiles. |
 | `msg.no_price_for_model` | Said by `impact` for a model that is not in the price table, instead of a guessed figure. Placeholder: {model}. |
 | `msg.panic_payload_unknown` | Panic payload text when Rust did not carry a string. |
@@ -10531,6 +10545,7 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `busy_replies` | counter | requests |  | Requests answered BUSY (queue full or rate limited), which made the client fall back. |
 | `check_bytes_read` | counter | bytes | check, size | Transcript bytes a built-in check read (tail windows and walks it opened), by check and transcript size class; divide by check_calls for the mean per run. |
 | `check_calls` | counter | runs | check | Built-in check runs, by check. |
+| `check_cpu_us` | counter | us | check | CPU time (microseconds, the worker thread's own) spent inside each built-in check, by check: the sum over its calls. Divide by `check_calls` for the mean; wall time is `check_latency_us`. |
 | `check_decisions` | counter | runs | check, decision | Built-in check outcomes, by check and decision (allow, block, advisory, defer). |
 | `check_latency_by_size_us` | histogram | us | check, size | Wall time of a built-in check run, by check and by the size class of the transcript the request named (load.size_labels). |
 | `check_latency_us` | histogram | us | check | Wall time of a built-in check run, by check. |
@@ -10578,6 +10593,8 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `slow_replies` | counter | replies |  | Replies finished after their client's deadline had passed: slow but healthy (the client fell back to Node), counted apart from errors. |
 | `spool_applied` | counter | writes |  | Spooled writes the daemon applied (D24). |
 | `spool_quarantined` | counter | records |  | Spool records moved to quarantine: damaged, or refused for good by the store (D24). |
+| `tasks_cache` | counter | lookups | result | Task-line lookups of `ah.transcript.tasks` (task-guard, tasklist-guard, task-tracker): hit (nothing appended), extend (only the appended bytes were read) or rebuild (the window was read afresh). |
+| `tasks_cache_rebuild` | counter | lookups | reason | Why a task-line lookup read its window afresh: none (nothing kept: first call, daemon restart, eviction or idle expiry), file (another file or a shorter one), window (the window moved past the kept lines) or digest (the file was rewritten in place). |
 | `tel_dropped` | counter | samples | reason | Telemetry samples or events that could not be kept: slots (a counter table was full) or ring (an event was overwritten before it was flushed). |
 | `tel_events` | counter | invocations | k, h, e, o | Telemetry invocations recorded, by kind (k), hook or check (h), hook event (e) and outcome (o) (D78). |
 | `tel_injected_bytes` | counter | bytes | h, e | Bytes injected into model context, by hook or check (h) and hook event (e). The whole-hook rows (h=hook) add up to the total; a per-check row is attribution inside it (D78). |

@@ -385,7 +385,8 @@ impl Shared {
     pub fn health_event(&self) -> crate::telemetry::event::Event {
         let cfg = self.cfg();
         let load = self.load.report(health::now_ms());
-        let degraded = health::summary()["degraded"].as_bool().unwrap_or(false);
+        let degraded =
+            health::overall_degraded(&health::summary(), crate::failopen::state(crate::failopen::window().0) != defaults::text("fail_open.state_ok"));
         let busy = self.busy_since.iter().filter(|b| b.load(SeqCst) != 0).count() as u64;
         let (cpu_permille, budget_mask) = {
             let b = lk(&self.budget);
@@ -418,6 +419,10 @@ impl Shared {
         let b = health::breaker_remaining();
         let c = health::crashloop_remaining();
         let gs = crate::gate::global().stats();
+        // one flag for `degraded` and `health.degraded`: the health summary's own reasons or an unhealthy fail-open window
+        let mut health_summary = health::summary();
+        let degraded = health::overall_degraded(&health_summary, crate::failopen::state(crate::failopen::window().0) != defaults::text("fail_open.state_ok"));
+        health_summary["degraded"] = serde_json::Value::Bool(degraded);
         serde_json::json!({
             "running": true,
             "pid": std::process::id(),
@@ -432,7 +437,7 @@ impl Shared {
             "rss_peak_kb": self.rss_peak_kb.fetch_max(rss_now, SeqCst).max(rss_now),
             "memory": self.memory(),
             "load": self.load.report(health::now_ms()),
-            "health": health::summary(),
+            "health": health_summary,
             "cpu_s": (limits::process_cpu_secs() * 1000.0).round() / 1000.0,
             "queue_depth": self.depth.load(SeqCst),
             "queue_cap": cfg.queue,
@@ -463,7 +468,7 @@ impl Shared {
                 })
             }),
             "fail_open": crate::failopen::status(&self.telemetry),
-            "degraded": crate::failopen::state(crate::failopen::window().0) != defaults::text("fail_open.state_ok"),
+            "degraded": degraded,
             "mem_limit": self.rlimit,
             "malloc_stack_logging": cfg.malloc_stack_logging,
             "storage": self.storage,
@@ -593,11 +598,13 @@ struct DaemonObserver<'a> {
 /// and the counted events it noted (a kept-walk hit or the reason it missed).
 fn observe_check_cost(t: &Telemetry, check: &str, micros: u64) {
     let bytes = crate::load::take_check_scan();
+    let cpu = crate::load::take_check_cpu();
     let notes = crate::load::take_counts();
     let size = crate::load::size_bucket(crate::load::transcript_size());
     t.with_metrics(|m| {
         let l = [("check", check), ("size", size.as_str())];
         m.add("check_bytes_read", &l, bytes);
+        m.add("check_cpu_us", &[("check", check)], cpu);
         m.observe("check_latency_by_size_us", &l, micros);
         for (metric, label, value) in notes {
             m.inc(metric, &[(label, value)]);
