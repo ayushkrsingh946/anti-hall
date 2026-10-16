@@ -416,6 +416,10 @@ value = { kind = "gauge", unit = "ms", labels = [] }
 doc = "Scheduled runs that finished, by job and status (ok, failed, timeout, planned, skipped) (D33)."
 value = { kind = "counter", unit = "runs", labels = ["job", "status"] }
 
+[metric.schedule_cpu_us]
+doc = "CPU time (microseconds) the threads that ran a scheduled job used, by job; a subprocess job's own CPU is not in it. Divide by schedule_runs for the mean per run."
+value = { kind = "counter", unit = "us", labels = ["job"] }
+
 [metric.schedule_missed]
 doc = "Runs that caught up a missed window or skipped it, by job (D33)."
 value = { kind = "counter", unit = "runs", labels = ["job"] }
