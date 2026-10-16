@@ -615,6 +615,42 @@ fn a_command_over_the_classify_cap_defers_before_it_is_parsed() {
     crate::discard::harmless(std::fs::remove_dir_all(&h)); // keep: cleanup
 }
 
+/// The git guard asks for the same segments again and again (aliases, backstops, runners, shell definitions); the tokenizer and the
+/// segment splitter are kept per call, so a repeated question is not a second scan. `interpreter_polls` counts the interpreter's
+/// work on a fixed scale (a clock would make the test depend on the load of the machine).
+#[test]
+fn the_git_guard_scans_each_segment_once_per_call() {
+    let h = home("gitmemo");
+    let e = env(&h);
+    let proj = format!("{h}/proj");
+    std::fs::create_dir_all(format!("{proj}/.git/refs/heads")).unwrap();
+    std::fs::write(format!("{proj}/.git/HEAD"), "ref: refs/heads/main\n").unwrap();
+    let cmds = [
+        "cd src/mod && grep -nE 'alpha|beta' notes.txt | head -20; ls -la | wc -l && echo done",
+        "git status --short && git log --oneline -5 && git diff --stat HEAD~1 | tail -3",
+        "for f in a b c; do echo $f | sed 's/a/b/' >> out.txt; done; cat out.txt | sort | uniq -c | sort -rn | head",
+        "python3 -c \"import json; print(json.dumps({'a': 1}))\" && node -e \"console.log(process.version)\" && true",
+    ];
+    let polls = std::thread::spawn(move || {
+        let run = |c: &str| run_forced("git", &json!({"tool_name": "Bash", "session_id": "s", "cwd": proj, "tool_input": {"command": c}}), &e);
+        for c in cmds {
+            assert_eq!(run(c), Some(Some(Verdict::Allow)), "{c}");
+        }
+        let before = super::interpreter_polls();
+        for _ in 0..30 {
+            for c in cmds {
+                assert_eq!(run(c), Some(Some(Verdict::Allow)));
+            }
+        }
+        super::interpreter_polls() - before
+    })
+    .join()
+    .expect("the runs hold");
+    // measured on these 120 runs: 183 polls when every question is scanned again, 103 with the per-call memo
+    assert!(polls < 140, "the guard scanned the same segments again: {polls} interpreter polls for 120 runs (103 with the memo, 183 without)");
+    crate::discard::harmless(std::fs::remove_dir_all(&h)); // keep: cleanup
+}
+
 // The coordinator-work-guard corpus was written from the script and replayed against hooks/coordinator-work-guard.js (the PreToolUse
 // cases; the PostToolUse ones are compared by the coordinator_post parity lane, which runs both hooks through whole sessions).
 #[test]
