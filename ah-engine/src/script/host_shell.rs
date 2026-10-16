@@ -67,18 +67,21 @@ pub fn substitutions(text: &str) -> Vec<String> {
     while i < n {
         let Some(c) = at(&s, i) else { break };
         let c2 = at(&s, i + 1);
-        if !in_single && !in_double && c == '<' && c2 == Some('<') {
-            if let Some(h) = parse_heredoc_at(&s, i, &mut st) {
-                if h.quoted {
-                    i = h.end;
-                } else {
-                    i += h.opener_len;
-                    if at(&s, i) == Some('\n') {
-                        i += 1;
-                    }
+        if !in_single
+            && !in_double
+            && c == '<'
+            && c2 == Some('<')
+            && let Some(h) = parse_heredoc_at(&s, i, &mut st)
+        {
+            if h.quoted {
+                i = h.end;
+            } else {
+                i += h.opener_len;
+                if at(&s, i) == Some('\n') {
+                    i += 1;
                 }
-                continue;
             }
+            continue;
         }
         if in_single {
             if c == '\'' {
