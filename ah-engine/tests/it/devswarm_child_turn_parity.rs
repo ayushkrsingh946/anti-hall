@@ -86,7 +86,8 @@ fn plugin() -> PathBuf {
 
 fn cmd(prog: impl AsRef<std::ffi::OsStr>, home: &Path, extra: &[(&str, &str)]) -> Command {
     let mut c = Command::new(prog);
-    c.env_clear()
+    c.current_dir(home) // a relative path in a scene (inboxPath "in.ndjson") resolves inside the scratch home, never the repo
+        .env_clear()
         .env("PATH", std::env::var("PATH").unwrap_or_default())
         .env("HOME", home)
         .env("USERPROFILE", home)
