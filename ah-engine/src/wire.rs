@@ -14,7 +14,8 @@
 //! No ACK(req) within the client's short timeout means the daemon has not started on the request. The client closes that connection and
 //! resends; the daemon that eventually reads the closed connection finds its ACK(req) write refused and does not judge it, so the
 //! resend is never a second judging. Once ACK(req) arrives the client never resends and waits for the reply up to its hard deadline.
-//! A reply with no ACK(res) afterwards is an `undelivered_verdict` fail-open on the daemon.
+//! A reply with no ACK(res) afterwards is an `undelivered_verdict` fail-open on the daemon. ACK(res) follows the hand-over of the
+//! reply (printed by a hook call, taken in by the dispatcher), never the dispatcher's own work after it, which can take seconds.
 use crate::defaults;
 
 /// Opt a request in: add the body length to the head line. `None` for requests that do not take part (control verbs).
