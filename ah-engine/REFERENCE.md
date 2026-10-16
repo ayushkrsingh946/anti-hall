@@ -4402,7 +4402,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `doctor.default_event` | `PreToolUse` |  |  | The hook event a self-test payload is evaluated as when it names none. |
 | `doctor.ds_builder_env` | `DEVSWARM_BUILDER_ID` |  |  | The environment variable that names a child's workspace id. |
 | `doctor.ds_builder_id` | `cg-self-test-child` |  |  | The id of the self-test child workspace. |
-| `doctor.ds_child_env` | `DISABLE_ANTIHALL_DEVSWARM=, ANTIHALL_DEVSWARM_SUPERVISOR=on, DEVSWARM_REPO_ID...` |  |  | The environment of a DevSwarm child workspace in the self-tests: supervisor forced on, a source branch set. |
+| `doctor.ds_child_env` | `DISABLE_ANTIHALL_DEVSWARM=, ANTIHALL_DEVSWARM_SUPERVISOR=on, DEVSWARM_REPO_ID...` |  |  | The environment of a DevSwarm child workspace in the self-tests: supervisor forced on, a source branch set, the stable launchers off (the throwaway home has none installed, so the gate would defer to the hook that installs them). |
 | `doctor.ds_cursor_dir` | `cursor` |  |  | The directory of workspace cursor files under the DevSwarm directory. |
 | `doctor.ds_heartbeat_dir` | `heartbeats` |  |  | The directory of heartbeat files under the DevSwarm directory. |
 | `doctor.ds_inbox_dir` | `inbox` |  |  | The directory of workspace inbox files under the DevSwarm directory. |
@@ -4420,17 +4420,12 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `doctor.ds_log_not_draining` | `not-draining-suppressed.jsonl` |  |  | The log of suppressed "child not draining" nudges. |
 | `doctor.ds_log_rearm` | `rearm-cues.jsonl` |  |  | The log of wake-watch re-arm decisions. |
 | `doctor.ds_payload_inbox` | `{"hook_event_name":"UserPromptSubmit","session_id":"pi","prompt":"hi","cwd":"...` |  |  | The prompt payload of the parent-inbox self-test; {CWD} is the working directory. |
-| `doctor.ds_payload_stop` | `{"hook_event_name":"Stop","session_id":"{SID}"}` |  |  | The Stop payload of the gate self-tests; {SID} is a fresh session id. |
-| `doctor.ds_payload_turn` | `{"hook_event_name":"UserPromptSubmit","session_id":"ct","prompt":"hi"}` |  |  | The prompt payload of the child-turn self-test. |
-| `doctor.ds_primary_env` | `DISABLE_ANTIHALL_DEVSWARM=, ANTIHALL_DEVSWARM_SUPERVISOR=on, DEVSWARM_REPO_ID...` |  |  | The environment of a DevSwarm Primary in the self-tests: supervisor forced on, no source branch. |
-| `doctor.ds_script_cgate` | `devswarm-child-gate.js` |  |  | The Node hook behind the child-gate self-test. |
-| `doctor.ds_script_inbox` | `devswarm-parent-inbox.js` |  |  | The Node hook behind the parent-inbox self-test. |
-| `doctor.ds_script_pgate` | `devswarm-parent-gate.js` |  |  | The Node hook behind the parent-gate self-test. |
-| `doctor.ds_script_turn` | `devswarm-child-turn.js` |  |  | The Node hook behind the child-turn self-test (run when the engine defers). |
+| `doctor.ds_payload_stop` | `{"hook_event_name":"Stop","session_id":"{SID}","cwd":"{CWD}"}` |  |  | The Stop payload of the gate self-tests; {SID} is a fresh session id, {CWD} the working directory. |
+| `doctor.ds_payload_turn` | `{"hook_event_name":"UserPromptSubmit","session_id":"ct","prompt":"hi","cwd":"...` |  |  | The prompt payload of the child-turn self-test; {CWD} is the working directory. |
+| `doctor.ds_primary_env` | `DISABLE_ANTIHALL_DEVSWARM=, ANTIHALL_DEVSWARM_SUPERVISOR=on, DEVSWARM_REPO_ID...` |  |  | The environment of a DevSwarm Primary in the self-tests: supervisor forced on, no source branch, the stable launchers off (the throwaway home has none installed, so the gate would defer to the hook that installs them). |
 | `doctor.ds_session_prefix` | `sess-` |  |  | The prefix of a self-test workspace's session id. |
 | `doctor.ds_summaries_dir` | `summaries` |  |  | The directory of the shared project summaries under the DevSwarm directory. |
 | `doctor.ds_summary_json` | `{"workspaces":{"wsA":{"total":3,"cursor":0,"unread":3,"directUnread":3}}}` |  |  | The shared summary the parent-inbox self-test publishes: one workspace with three unread messages. |
-| `doctor.ds_supervisor_files` | `11 items` |  |  | The supervisor's own scripts (relative to the plugin root) that must parse; a present file that does not is a failure. |
 | `doctor.ds_trigger_idle` | `idle-skip` |  |  | The re-arm log trigger of a Primary with no live children. |
 | `doctor.ds_trigger_limit` | `limit-skip` |  |  | The re-arm log trigger of a deferred re-arm under limit conservation. |
 | `doctor.ds_turn_re` | `devswarm-child-workspace` |  |  | What a child-turn reminder contains. |
@@ -4511,18 +4506,12 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `doctor.macos_name` | `macos` |  |  | The OS name the engine and the release assets use for macOS. |
 | `doctor.marker_file` | `bootstrap.installed` |  |  | The file the bootstrap writes after an install: '<version> <asset sha256> <binary sha256>'. |
 | `doctor.max_daemon_probes` | `16` |  |  | How many of the most recent daemon start events the two-daemons check looks at. |
-| `doctor.max_hook_output` | `1048576` |  | bytes | The most bytes of a Node hook's output a live self-test keeps. |
 | `doctor.mb` | `1048576` |  |  | Bytes in a megabyte, for the sizes the report shows. |
 | `doctor.min_free_mb` | `100` |  |  | A state directory on a volume with less free space than this (MB) is reported as nearly full. |
 | `doctor.mode_mask` | `511` |  |  | Mask of the permission bits shown for a file mode (octal 0777). |
 | `doctor.no_exit_code` | `null` |  |  | What the render check shows as the exit code when the statusline was ended by a signal or never started. |
 | `doctor.no_short` | `n` |  |  | The short no of the orphan rows. |
-| `doctor.node_check_flag` | `--check` |  |  | The Node flag that checks a script's syntax without running it. |
-| `doctor.node_default` | `node` |  |  | The Node binary a live self-test runs a deferred hook with when the engine's own variable for it is not set. |
-| `doctor.node_min_major` | `22` |  |  | The oldest Node major version the fallback hooks support. |
-| `doctor.node_timeout_ms` | `30000` |  | ms | How long a Node hook gets in a live self-test before it is killed and the self-test fails. |
-| `doctor.node_twins` | `true` |  |  | Whether the doctor may start Node: to run a check's Node twin where the engine defers (live self-tests, the statusline render) and to syntax-check the Node supervisor and statusline files. Node is not a doctor requirement either way: with this off, or with no Node on PATH, a deferral is reported as a warning, never a pass. On while the engine still defers some self-tests to their Node twins (git, command and edit guards, DevSwarm hooks), so the report stays as complete as the live hook path; the runtime cutover turns it off. The test-only statusline stand-in always runs under Node. |
-| `doctor.node_version_flag` | `--version` |  |  | The flag that makes Node print its version. |
+| `doctor.node_default` | `node` |  |  | The Node binary the update post-pull stage runs when the engine's own variable for it is not set. Not used by the doctor, which never starts Node. |
 | `doctor.omc_probe_session` | `doctor-omc-probe` |  |  | The session id the OMC loop probe presents (a loop pinned to another session does not count). |
 | `doctor.omc_time_fields` | `last_checked_at, updated_at, started_at` |  |  | The timestamp fields of an oh-my-claudecode loop state file; the loop counts as active when any of them is within the freshness window. |
 | `doctor.orphans_bootout` | `launchctl, bootout, gui/{uid}/{label}` |  |  | The command that unloads a launchd label. Placeholders: {uid}, {label}. |
@@ -4540,14 +4529,16 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `doctor.pair_sep` | `\|` |  |  | The separator inside a pair in a list of replacements. |
 | `doctor.passthrough_env` | `PATH, TMPDIR` |  |  | The process environment variables a live self-test keeps (the rest of its environment is the test's own). |
 | `doctor.passwd_buf` | `4096` |  |  | Buffer size for the user database lookup of the account's home. |
+| `doctor.payload_cwd_key` | `cwd` |  |  | The payload field that carries a hook's working directory; a self-test payload without it gets the fixture directory (the live hook path always has one). |
 | `doctor.platform_names` | `3 entries` |  |  | Node's name for each operating system and architecture Rust names differently (process.platform and process.arch). |
 | `doctor.plist_args_re` | `<key>ProgramArguments</key>\s*<array>([\s\S]*?)</array>` |  |  | The program arguments of a launchd property list. |
 | `doctor.plist_ext` | `.plist` |  |  | The extension of a launchd property list. |
 | `doctor.plist_string_re` | `<string>([\s\S]*?)</string>` |  |  | One string of a property list array. |
 | `doctor.plist_wd_re` | `<key>WorkingDirectory</key>\s*<string>([\s\S]*?)</string>` |  |  | The working directory of a launchd property list. |
+| `doctor.plugin_manifest_file` | `.claude-plugin/plugin.json` |  |  | A plugin's manifest, relative to its install path. |
+| `doctor.plugin_name` | `anti-hall` |  |  | The plugin name anti-hall declares in its manifest; another enabled plugin with this name makes Claude Code (2.1.296+) skip hooks. |
 | `doctor.plugin_prefix` | `anti-hall@` |  |  | The registry key prefix of anti-hall plugin installs. |
 | `doctor.plugin_root_envs` | `CLAUDE_PLUGIN_ROOT, CODEX_PLUGIN_ROOT` |  |  | Environment variables that name the plugin root, first set one wins, after the engine's own and the --plugin-root flag. |
-| `doctor.poll_ms` | `20` |  | ms | How often a live self-test checks whether its Node hook has finished. |
 | `doctor.probe_label` | `doctor probe` |  |  | The name a probe of another program is logged under. |
 | `doctor.probe_poll_ms` | `20` |  |  | How often a running probe is polled. |
 | `doctor.probe_timeout_ms` | `5000` |  |  | How long a probe of another program (node, git, the installed engine, ps) may run. |
@@ -4567,7 +4558,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `doctor.script_re` | `[\w-]+\.js` |  |  | The name pattern of a hook script in the registry. |
 | `doctor.self_plugin_key` | `anti-hall@anti-hall` |  |  | The enabledPlugins key of anti-hall itself, left out of the scan of other plugins. |
 | `doctor.selftest_home_prefix` | `anti-hall-doctor-` |  |  | The name prefix of the throwaway home the live self-tests run against. |
-| `doctor.selftests` | `21 items` |  |  | The live self-tests. Each runs the named built-in check in-process (when the engine defers the payload, as the dispatcher would, its Node hook `script` is run instead) on the payload with the given environment (HOME is always the throwaway home) and expects: block (the guard denies: exit 2), allow (it does not), stop-block (a Stop decision of block), or alert-stale (see version-alert). `ok` and `bad` are the findings; `warn` is used instead of `bad` when set. |
+| `doctor.selftests` | `21 items` |  |  | The live self-tests. Each runs the named built-in check in-process on the payload with the given environment (HOME is always the throwaway home) and expects: block (the guard denies: exit 2), allow (it does not), stop-block (a Stop decision of block), or alert-stale (see version-alert). `ok` and `bad` are the findings; `warn` is used instead of `bad` when set. |
 | `doctor.service_exec_re` | `(?m)^ExecStart=(.*)$` |  |  | The command of a systemd unit file. |
 | `doctor.service_ext` | `.service` |  |  | The extension of a systemd unit file. |
 | `doctor.service_quoted_re` | `"((?:[^"\\]\|\\.)*)"` |  |  | A double-quoted word of a systemd command. |
@@ -4586,18 +4577,14 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `doctor.start_event` | `start` |  |  | The kind of event log line a daemon writes when it starts. |
 | `doctor.start_pid_re` | `\bpid (\d+)` |  |  | Finds the daemon's pid in the detail of a start event (group 1). |
 | `doctor.stat_gnu_args` | `-c, %s, /` |  |  | Arguments that only GNU/busybox stat accepts, to tell the userland flavour. |
-| `doctor.statusline_check` | `statusline` |  |  | The name the statusline render check is reported under when the engine defers the render to Node. |
+| `doctor.statusline_check` | `statusline` |  |  | The name the statusline render check is reported under when the engine does not decide the render. |
 | `doctor.statusline_dispatcher` | `statusline/statusline.js` |  |  | The statusline dispatcher script, relative to the plugin root; the render check requires it to be installed. |
 | `doctor.statusline_marker` | `statusline.js` |  |  | A statusLine command that contains this is the anti-hall dispatcher. |
-| `doctor.statusline_max_bytes` | `1048576` |  | bytes | The most bytes of statusline output the render check keeps. |
 | `doctor.statusline_min_lines` | `2` |  |  | How many lines the statusline must print for the render check to pass (line 1 plus the context gauge on line 2). |
 | `doctor.statusline_rich` | `statusline/statusline-rich.js` |  |  | The line-1 renderer script, relative to the plugin root. |
 | `doctor.statusline_sample` | `{"workspace":{"current_dir":{cwd}},"cwd":{cwd},"model":{"display_name":"docto...` |  |  | The session payload the render check pipes to the statusline; {cwd} is the working directory as a JSON string. |
 | `doctor.statusline_scopes` | `3 entries, 3 entries, 3 entries` |  |  | Where a statusLine command may be configured, in order: label and file relative to the project (a leading ~ means the home directory). |
-| `doctor.statusline_script_env` | `ANTIHALL_DOCTOR_SL_SCRIPT` |  |  | Test-only: the environment variable that names a stand-in script (run under Node) for the render check instead of the engine's own statusline. |
 | `doctor.statusline_shown` | `48` |  |  | How many UTF-16 units of a custom statusLine command the doctor shows. |
-| `doctor.statusline_timeout_env` | `ANTIHALL_DOCTOR_SL_TIMEOUT_MS` |  |  | Test-only: the environment variable that shortens the render check's timeout, in milliseconds. |
-| `doctor.statusline_timeout_ms` | `30000` |  | ms | How long the render check lets the statusline run before it warns (CPU contention under parallel runs is the usual cause). |
 | `doctor.store_backend_env` | `ANTIHALL_DEVSWARM_STORE_BACKEND` |  |  | The environment variable that forces a DevSwarm store backend. |
 | `doctor.store_db` | `devswarm.db` |  |  | The SQLite database file of a store. |
 | `doctor.stores_aside_dir` | `stores-aside` |  |  | The directory under the DevSwarm directory that leaked stores are moved into. |
@@ -4618,7 +4605,6 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `doctor.version_alert_env` | `ANTIHALL_VERSION_ALERT=` |  |  | Environment pairs of the version-alert self-test (the off switch is cleared so an inherited one cannot fake a pass). |
 | `doctor.version_alert_payload` | `{"hook_event_name":"SessionStart","session_id":"{SID}"}` |  |  | The SessionStart payload of the version-alert self-test; {SID} is a unique session id. |
 | `doctor.version_alert_re` | `"additionalContext"\s*:\s*"[^"]*version-alert: v{stale} is available \(you ar...` |  |  | The pattern of the version nudge in what the version-alert check prints; {stale} is the cached newer version, already escaped. |
-| `doctor.version_alert_script` | `version-alert.js` |  |  | The Node hook that answers the version-alert self-test when the engine defers it. |
 | `doctor.version_alert_sessions` | `doctor-va-stale, doctor-va-current` |  |  | Session id prefixes of the stale-cache and current-cache version-alert runs. |
 | `doctor.version_arg` | `version` |  |  | The argument that makes the engine print its version. |
 | `doctor.version_check_file` | `version-check.json` |  |  | The cached latest-version file the version-alert self-test seeds, under the anti-hall directory. |
@@ -4652,7 +4638,6 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `doctor_msg.bin_wrong_arch` | `{path} was built for {bin_arch} but this {host_os} machine is {host_arch}; it...` |  |  | BIN-06a. Placeholders: {path}, {bin_arch}, {host_os}, {host_arch}, {bootstrap}. |
 | `doctor_msg.bin_wrong_os` | `{path} was built for {bin_os} but this machine runs {host_os} - Fix: reinstal...` |  |  | BIN-05. Placeholders: {path}, {bin_os}, {host_os}, {bootstrap}. |
 | `doctor_msg.breaker` | `client circuit breaker open for {secs}s more ({reason}); hooks use the Node f...` |  |  | DMN-09. Placeholders: {secs}, {reason}. |
-| `doctor_msg.capture_failed` | `the output of {script} could not be captured` |  |  | The thread that captured a Node hook's output failed. Placeholder: {script}. |
 | `doctor_msg.claude_missing` | `the claude CLI is not on PATH; Claude Code's own `claude doctor` was skipped` |  |  | The claude CLI is not on PATH; the optional sub-check is skipped. |
 | `doctor_msg.claude_ok` | `claude doctor (Claude Code {v}): no installation issues found` |  |  | Placeholder: {v}. |
 | `doctor_msg.claude_problem` | `claude doctor: {line} (see `claude doctor` for details)` |  |  | A problem line from `claude doctor`. Placeholder: {line}. |
@@ -4681,7 +4666,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `doctor_msg.daemon_up` | `the engine daemon is running ({reply})` |  |  | The engine daemon is running. Placeholder: {reply}. |
 | `doctor_msg.daemons_many` | `{n} engine daemons are running; the extra ones (pids {pids}) do not serve {so...` |  |  | DMN-10. Placeholders: {n}, {pids}, {sock}. |
 | `doctor_msg.db_bad` | `{file} is not a SQLite database (bad header) - Fix: mv {file} {file}.bad (the...` |  |  | ST-09. Placeholder: {file}. |
-| `doctor_msg.deferred` | `{check}: the engine defers this self-test to its Node hook, so it was not exe...` |  |  | A live self-test the engine could not decide itself: the check defers this payload to its Node hook. Placeholder: {check}. |
+| `doctor_msg.deferred` | `{check}: the engine does not decide this self-test, so it was not exercised here` |  |  | A live self-test the engine does not decide: the check defers this payload. Placeholder: {check}. |
 | `doctor_msg.ds_cgate_bad` | `devswarm-child-gate did NOT force a child heartbeat at Stop` |  |  | The child-gate hook failed. |
 | `doctor_msg.ds_cgate_ok` | `devswarm-child-gate forces a child to self-report to its parent before stopping` |  |  | The child-gate hook still works. |
 | `doctor_msg.ds_cron_found` | `cron ticks that found mail while a watcher was armed: {n} (cron-found-mail.js...` |  |  | Cron ticks that found mail while a watcher was armed. Placeholder: {n}. |
@@ -4699,9 +4684,9 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `doctor_msg.ds_runtime_deferred` | `DevSwarm is active ({n} workspace descriptor(s)); the per-workspace liveness ...` |  |  | A DevSwarm session is active; the runtime checks the engine doctor does not make yet. Placeholder: {n}. |
 | `doctor_msg.ds_scheduler_launchd` | `launchd` |  |  | The name of the macOS scheduler in the installed line. |
 | `doctor_msg.ds_scheduler_systemd` | `systemd` |  |  | The name of the Linux scheduler in the installed line. |
-| `doctor_msg.ds_syntax` | `supervisor lib SYNTAX ERROR: {file} — {error}` |  |  | A supervisor script that does not parse. Placeholders: {file}, {error}. |
 | `doctor_msg.ds_turn_bad` | `devswarm-child-turn did NOT heartbeat/remind a child session (said={said}, he...` |  |  | The child-turn hook failed. Placeholders: {said}, {beat}. |
 | `doctor_msg.ds_turn_ok` | `devswarm-child-turn writes a turn-authored heartbeat + reminds the child to u...` |  |  | The child-turn hook still works. |
+| `doctor_msg.engine_on_path` | `the hooks run ah-engine from PATH ({path}) because the home install is not ex...` |  |  | The home install is not executable and the hook wrapper runs ah-engine from PATH instead (ah-hook.sh), so that engine counts as working. The ah-doctor.sh fallback prints the same text. Placeholder: {path}. |
 | `doctor_msg.engine_version` | `ah-engine {version}` |  |  | The engine version finding. Placeholder: {version}. |
 | `doctor_msg.enotdir` | `Not a directory (os error 20)` |  |  | The OS error for a path component that is a file. |
 | `doctor_msg.explicit_failed` | `FAILED ` |  |  | The mark of a failed explicit repair. |
@@ -4761,7 +4746,6 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `doctor_msg.home_unset` | `HOME is not set; the engine cannot find its state (~/.anti-hall) - Fix: expor...` |  |  | EV-01. |
 | `doctor_msg.hook_missing` | `{file} — REGISTERED BUT MISSING` |  |  | A registered hook script is not on disk. Placeholder: {file}. |
 | `doctor_msg.hook_present` | `{file} present` |  |  | A registered hook script is on disk. Placeholder: {file}. |
-| `doctor_msg.hook_timeout` | `{script} did not finish within the self-test time limit` |  |  | A Node hook did not finish a live self-test in time. Placeholder: {script}. |
 | `doctor_msg.hooks_invalid` | `hooks.json invalid or unreadable: {error}` |  |  | hooks.json or its registry does not parse. Placeholder: {error}. |
 | `doctor_msg.hooks_valid` | `hooks.json is valid JSON ({n} hook script(s) registered)` |  |  | hooks.json and its registry parse. Placeholder: {n}. |
 | `doctor_msg.inbox_corrupt` | `{n} of the last {m} lines of {file} are not JSON` |  |  | LG-04. Placeholders: {n}, {m}, {file}. |
@@ -4792,16 +4776,12 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `doctor_msg.logs_repo_tag` | ` repoKey={repo}` |  |  | The repository tag of an entry line. Placeholder: {repo}. |
 | `doctor_msg.logs_showing` | `showing the most recent {shown} of {n} — re-run with a narrower window if you...` |  |  | --logs prints only the most recent entries. Placeholders: {shown}, {n}. |
 | `doctor_msg.logs_summary` | `{n} warn/error entries in the central anti-hall log across {components} compo...` |  |  | --logs found entries. Placeholders: {n}, {components}, {summary} (component:count, sorted), {at}. |
-| `doctor_msg.no_engine_no_node` | `no working engine (and no usable Node fallback): the anti-hall hooks do not r...` |  |  | ND-04: no working engine and no usable Node behind it. |
+| `doctor_msg.no_engine` | `no working engine: the anti-hall hooks do not run - Fix: reinstall the engine...` |  |  | ND-04: no working engine. The ah-doctor.sh fallback prints the same text. |
 | `doctor_msg.no_entry` | `(no entry)` |  |  | Stands for an event with no entry. |
 | `doctor_msg.no_parent` | `no parent directory exists` |  |  | Reason. |
 | `doctor_msg.no_plugin_root` | `plugin root not found (pass --plugin-root <dir> or set AH_ENGINE_PLUGIN_ROOT)...` |  |  | The doctor could not find the plugin root, so the checks that read the plugin's files were skipped. |
 | `doctor_msg.no_write` | `write permission denied or read-only volume` |  |  | Reason. |
 | `doctor_msg.no_write_in` | `{parent} is not writable` |  |  | Reason. Placeholder: {parent}. |
-| `doctor_msg.node_broken` | `node does not run: {why}; Node is optional, only the few checks the engine st...` |  |  | ND-03: Node is optional. Placeholder: {why}. |
-| `doctor_msg.node_missing` | `node is not on PATH; Node is optional (the engine runs the hooks), only the f...` |  |  | ND-01: Node is optional. Placeholder: {min}. |
-| `doctor_msg.node_ok` | `Node {v} (>= {min}) found; optional (the engine runs the hooks)` |  |  | ND-05: a note, Node is optional. Placeholders: {v}, {min}. |
-| `doctor_msg.node_old` | `Node {v} is < {min}; Node is optional, but the few checks the engine still ha...` |  |  | ND-02: Node is optional. Placeholders: {v}, {min}. |
 | `doctor_msg.not_json` | `{file} is not valid JSON` |  |  | A plugin file that does not parse as JSON. Placeholder: {file}. |
 | `doctor_msg.omc_enabled` | `OMC plugin enabled in settings (enabledPlugins["{key}"])` |  |  | oh-my-claudecode is enabled. Placeholder: {key}. |
 | `doctor_msg.omc_loop_active` | `an OMC autonomous loop is ACTIVE right now — anti-hall task-guard/tasklist-gu...` |  |  | An oh-my-claudecode autonomous loop is active. |
@@ -4829,6 +4809,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `doctor_msg.plugin_double` | `{n} anti-hall plugins are enabled ({keys}); every hook runs twice - Fix: disa...` |  |  | PL-04. Placeholders: {n}, {keys}. |
 | `doctor_msg.plugin_json_bad` | `{file} is not valid JSON ({err}); plugin enablement could not be checked - Fi...` |  |  | PL-09. Placeholders: {file}, {err}. |
 | `doctor_msg.plugin_moved` | `{key} is registered at {path}, which does not exist (moved or pruned) - Fix: ...` |  |  | PL-07. Placeholders: {key}, {path}. |
+| `doctor_msg.plugin_name_clash` | `enabled plugin {key} ({path}) shares the plugin name '{name}'; Claude Code 2....` |  |  | PL-10. Placeholders: {key}, {name}, {path}. |
 | `doctor_msg.plugin_no_registry` | `no plugin registry at {file} (a manual or Codex install); plugin enablement w...` |  |  | No registry file. Placeholder: {file}. |
 | `doctor_msg.plugin_not_registered` | `no anti-hall plugin is registered in {file}; the hooks do not run - Fix: /plu...` |  |  | PL-02. Placeholder: {file}. |
 | `doctor_msg.plugin_ok` | `plugin {key} v{version} is registered and enabled` |  |  | PL-08. Placeholders: {key}, {version}. |
@@ -4877,10 +4858,9 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `doctor_msg.statusline_none` | `no anti-hall statusLine configured (installer retired)` |  |  | No statusLine is configured. |
 | `doctor_msg.statusline_one_line` | `statusline rendered only 1 line — line 2 (context gauge) did NOT render despi...` |  |  | The statusline printed only one line although the payload carried a context window. |
 | `doctor_msg.statusline_renders` | `statusline renders {n} lines (line 1 + live context gauge on line 2)` |  |  | The statusline printed both lines. Placeholder: {n}. |
-| `doctor_msg.statusline_rich_bad` | `statusline-rich.js missing/invalid — line 1 falls back to the simple renderer` |  |  | The line-1 renderer script is missing or invalid. |
-| `doctor_msg.statusline_rich_ok` | `statusline-rich.js (line-1 renderer) present, syntax valid` |  |  | The line-1 renderer script is present and its syntax is valid. |
+| `doctor_msg.statusline_rich_bad` | `statusline-rich.js missing — line 1 falls back to the simple renderer` |  |  | The line-1 renderer script is missing. |
+| `doctor_msg.statusline_rich_ok` | `statusline-rich.js (line-1 renderer) present` |  |  | The line-1 renderer script is present. |
 | `doctor_msg.statusline_set` | `statusline set ({label}) -> {command}…` |  |  | A custom statusline is configured. Placeholders: {label}, {command}. |
-| `doctor_msg.statusline_timeout` | `statusline.js timed out under load (30s) — likely CPU contention, not a real ...` |  |  | The statusline did not finish within the render check's timeout. |
 | `doctor_msg.stores_changed` | `no longer eligible at apply time (registry changed or worktree reappeared) — ...` |  |  | A store that no longer matches when the repair runs. |
 | `doctor_msg.stores_failed` | `failed to move {dir} aside — {error}` |  |  | A leaked store that could not be moved. Placeholders: {dir}, {error}. |
 | `doctor_msg.stores_moved` | `moved {dir} aside to {dest} (worktreePath {worktree} no longer exists); nothi...` |  |  | A leaked store moved aside. Placeholders: {dir}, {dest}, {worktree}. |
@@ -9464,7 +9444,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `opcli.migration_status_node` | `node` |  |  | Migration status word: Node still answers (a check with a Node twin, a duty that runs as Node's function, a post-update stage that names a Node function, a planned command). Also the duty kind that names a Node function. |
 | `opcli.migration_status_partial` | `partial` |  |  | Migration status word: the engine answers, but a Node path remains (a real deferral, a Node witness, a Node key that still ships, a Node switch that is on). |
 | `opcli.migration_switches` | `1 entries` |  |  | Migration report: the Node switches, name to defaults key; native when the key is 0, partial otherwise. |
-| `opcli.migration_verb_node_keys` | `2 entries` |  |  | Migration report: per command, the defaults keys whose presence means a Node path of that command remains (the command is then partial). A lane that removes the Node path removes the key, and the report follows. |
+| `opcli.migration_verb_node_keys` | `1 entries` |  |  | Migration report: per command, the defaults keys whose presence means a Node path of that command remains (the command is then partial). A lane that removes the Node path removes the key, and the report follows. |
 | `opcli.migration_why_defer` | `defer` |  |  | Migration reason: the check's script (or a script it includes) has a real deferral (opcli.migration_defer_re outside comments). |
 | `opcli.migration_why_fn` | `fn` |  |  | Migration reason prefix: the post-update stage names this Node function. |
 | `opcli.migration_why_key` | `node_key` |  |  | Migration reason prefix: this Node key of the command still ships. |

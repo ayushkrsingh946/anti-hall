@@ -84,20 +84,16 @@ value = "the text is anything else"
 doc = "The text of the doctor's Jev test call (no user content)."
 value = "anti-hall doctor health check"
 
-[doctor.node_twins]
-doc = "Whether the doctor may start Node: to run a check's Node twin where the engine defers (live self-tests, the statusline render) and to syntax-check the Node supervisor and statusline files. Node is not a doctor requirement either way: with this off, or with no Node on PATH, a deferral is reported as a warning, never a pass. On while the engine still defers some self-tests to their Node twins (git, command and edit guards, DevSwarm hooks), so the report stays as complete as the live hook path; the runtime cutover turns it off. The test-only statusline stand-in always runs under Node."
-value = true
-
-[doctor.node_version_flag]
-doc = "The flag that makes Node print its version."
-value = "--version"
+[doctor.payload_cwd_key]
+doc = "The payload field that carries a hook's working directory; a self-test payload without it gets the fixture directory (the live hook path always has one)."
+value = "cwd"
 
 [doctor.version_alert_check]
 doc = "The built-in check the version-alert self-test runs."
 value = "version-alert"
 
 [doctor.statusline_check]
-doc = "The name the statusline render check is reported under when the engine defers the render to Node."
+doc = "The name the statusline render check is reported under when the engine does not decide the render."
 value = "statusline"
 
 [doctor.logs_flag]
@@ -160,23 +156,9 @@ value = "\"decision\"\\s*:\\s*\"block\""
 doc = "The pattern of the version nudge in what the version-alert check prints; {stale} is the cached newer version, already escaped."
 value = "\"additionalContext\"\\s*:\\s*\"[^\"]*version-alert: v{stale} is available \\(you are running v"
 
-[doctor.node_timeout_ms]
-doc = "How long a Node hook gets in a live self-test before it is killed and the self-test fails."
-value = 30000
-unit = "ms"
-
-[doctor.max_hook_output]
-doc = "The most bytes of a Node hook's output a live self-test keeps."
-value = 1048576
-unit = "bytes"
-
 [doctor.node_default]
-doc = "The Node binary a live self-test runs a deferred hook with when the engine's own variable for it is not set."
+doc = "The Node binary the update post-pull stage runs when the engine's own variable for it is not set. Not used by the doctor, which never starts Node."
 value = "node"
-
-[doctor.version_alert_script]
-doc = "The Node hook that answers the version-alert self-test when the engine defers it."
-value = "version-alert.js"
 
 [doctor.version_check_file]
 doc = "The cached latest-version file the version-alert self-test seeds, under the anti-hall directory."
@@ -189,29 +171,29 @@ value = "999.0.0"
 # ---- the live self-tests: each runs a built-in check on a crafted payload and expects a block or an allow --------------------------
 
 [doctor.selftests]
-doc = "The live self-tests. Each runs the named built-in check in-process (when the engine defers the payload, as the dispatcher would, its Node hook `script` is run instead) on the payload with the given environment (HOME is always the throwaway home) and expects: block (the guard denies: exit 2), allow (it does not), stop-block (a Stop decision of block), or alert-stale (see version-alert). `ok` and `bad` are the findings; `warn` is used instead of `bad` when set."
+doc = "The live self-tests. Each runs the named built-in check in-process on the payload with the given environment (HOME is always the throwaway home) and expects: block (the guard denies: exit 2), allow (it does not), stop-block (a Stop decision of block), or alert-stale (see version-alert). `ok` and `bad` are the findings; `warn` is used instead of `bad` when set."
 value = [
-  { check = "git", script = "git-guard.js", want = "block", payload = "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git push --force origin main\"}}", ok = "git-guard blocks `git push --force`", bad = "git-guard did NOT block force-push" },
-  { check = "git", script = "git-guard.js", want = "block", payload = "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git commit -m \\\"x\\n\\nCo-Authored-By: Claude <noreply@anthropic.com>\\\"\"}}", ok = "git-guard blocks AI self-credit trailer", bad = "git-guard did NOT block AI self-credit" },
-  { check = "git", script = "git-guard.js", want = "allow", payload = "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git status\"}}", ok = "git-guard allows `git status`", bad = "git-guard wrongly blocked `git status`" },
-  { check = "command", script = "command-guard.js", want = "block", env = ["CLAUDE_CODE_ENTRYPOINT=cli"], payload = "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"npm run build\"}}", ok = "command-guard blocks heavy cmd in coordinator", bad = "command-guard did NOT block heavy cmd in coordinator" },
-  { check = "command", script = "command-guard.js", want = "allow", env = ["CLAUDE_CODE_ENTRYPOINT=cli"], payload = "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"npm run build\"},\"agent_id\":\"test-agent\",\"agent_type\":\"general-purpose\"}", ok = "command-guard ALLOWS heavy cmd in subagent (payload agent_id)", bad = "command-guard wrongly blocked a subagent — delegation would deadlock" },
-  { check = "command", script = "command-guard.js", want = "allow", env = ["CLAUDE_CODE_ENTRYPOINT=cli"], payload = "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git status\"}}", ok = "command-guard allows light cmd in coordinator", bad = "command-guard wrongly blocked a light cmd" },
-  { check = "command", script = "command-guard.js", want = "block", env = ["CLAUDE_CODE_ENTRYPOINT=cli"], payload = "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git status && npm run build\"}}", ok = "command-guard blocks heavy SECOND segment (`git status && npm run build`)", bad = "command-guard MISSED heavy second segment — per-segment fix regressed" },
-  { check = "command", script = "command-guard.js", want = "block", env = ["CLAUDE_CODE_ENTRYPOINT=cli"], payload = "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"cd app && npm test\"}}", ok = "command-guard blocks heavy cmd after `cd` (`cd app && npm test`)", bad = "command-guard MISSED heavy cmd after cd — per-segment fix regressed" },
-  { check = "command", script = "command-guard.js", want = "block", env = ["CLAUDE_CODE_ENTRYPOINT=cli"], payload = "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"echo \\\"$(npm run build)\\\"\"}}", ok = "command-guard blocks heavy cmd in $(...) substitution (`echo \"$(npm run build)\"`)", bad = "command-guard MISSED heavy cmd in command substitution — recursive-parse fix regressed" },
-  { check = "command", script = "command-guard.js", want = "block", env = ["CLAUDE_CODE_ENTRYPOINT=cli"], payload = "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"bash -c \\\"npm run build\\\"\"}}", ok = "command-guard blocks heavy `bash -c \"npm run build\"` payload", bad = "command-guard MISSED heavy bash -c payload — recursive-parse fix regressed" },
-  { check = "command", script = "command-guard.js", want = "allow", env = ["CLAUDE_CODE_ENTRYPOINT=cli"], payload = "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"echo \\\"$(date)\\\"\"}}", ok = "command-guard allows benign substitution (`echo \"$(date)\"` — date is not heavy)", bad = "command-guard wrongly blocked benign `echo \"$(date)\"` — over-blocking substitutions" },
-  { check = "command", script = "command-guard.js", want = "block", env = ["CLAUDE_CODE_ENTRYPOINT=cli", "ANTIHALL_DEVSWARM_SUPERVISOR=on", "DEVSWARM_REPO_ID=repo-x"], payload = "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"hivecontrol workspace monitor\"}}", ok = "command-guard blocks `hivecontrol workspace monitor` under DevSwarm (blocking long-poll)", bad = "command-guard did NOT block hivecontrol monitor under DevSwarm — destructive-read redirect regressed" },
-  { check = "command", script = "command-guard.js", want = "allow", env = ["CLAUDE_CODE_ENTRYPOINT=cli", "ANTIHALL_DEVSWARM_SUPERVISOR=on", "DEVSWARM_REPO_ID=repo-x"], payload = "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"grep -n 'hivecontrol workspace monitor' docs/KB.md\"}}", ok = "command-guard allows grep of quoted hivecontrol DATA under DevSwarm (no false-positive)", bad = "command-guard wrongly blocked a grep of quoted hivecontrol data — destructive-read redirect over-blocks" },
-  { check = "edit-guard", script = "edit-guard.js", want = "block", env = ["CLAUDE_CODE_ENTRYPOINT=cli"], payload = "{\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":\"src/x.js\",\"old_string\":\"a\",\"new_string\":\"b\"}}", ok = "edit-guard blocks coordinator edit", bad = "edit-guard did NOT block coordinator edit" },
-  { check = "edit-guard", script = "edit-guard.js", want = "allow", env = ["CLAUDE_CODE_ENTRYPOINT=cli"], payload = "{\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":\"src/x.js\",\"old_string\":\"a\",\"new_string\":\"b\"},\"agent_id\":\"test-agent\",\"agent_type\":\"general-purpose\"}", ok = "edit-guard ALLOWS subagent edit", bad = "edit-guard wrongly blocked a subagent edit — delegation would deadlock" },
-  { check = "speculation-guard", script = "speculation-guard.js", want = "stop-block", event = "Stop", transcript = ["{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"That change should be fine.\"}]}}"], payload = "{\"transcript_path\":\"{TRANSCRIPT}\",\"session_id\":\"doctor-spec-{NOW}\"}", ok = "speculation-guard flags \"should be fine\" (hedge w/o evidence)", bad = "speculation-guard did NOT flag \"should be fine\"" },
-  { check = "tasklist-guard", script = "tasklist-guard.js", want = "stop-block", event = "Stop", transcript = ["{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"name\":\"Edit\",\"id\":\"toolu_e0\",\"input\":{\"file_path\":\"/x/f0\"}}]}}", "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"name\":\"Edit\",\"id\":\"toolu_e1\",\"input\":{\"file_path\":\"/x/f1\"}}]}}", "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"name\":\"Edit\",\"id\":\"toolu_e2\",\"input\":{\"file_path\":\"/x/f2\"}}]}}", "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"name\":\"Edit\",\"id\":\"toolu_e3\",\"input\":{\"file_path\":\"/x/f3\"}}]}}"], payload = "{\"transcript_path\":\"{TRANSCRIPT}\",\"cwd\":\"{CWD}\",\"session_id\":\"doctor-tl-{NOW}\"}", ok = "tasklist-guard blocks untracked work (4 edits, no tasks, no progress file)", bad = "tasklist-guard did NOT block untracked work" },
-  { check = "codex-nudge", script = "codex-nudge.js", want = "stop-block", event = "Stop", transcript = ["{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"name\":\"Edit\",\"id\":\"toolu_a.ts\",\"input\":{\"file_path\":\"/x/a.ts\"}}]}}", "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"name\":\"Edit\",\"id\":\"toolu_b.ts\",\"input\":{\"file_path\":\"/x/b.ts\"}}]}}", "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"name\":\"Edit\",\"id\":\"toolu_c.ts\",\"input\":{\"file_path\":\"/x/c.ts\"}}]}}"], payload = "{\"transcript_path\":\"{TRANSCRIPT}\",\"session_id\":\"doctor-cx-{NOW}\"}", ok = "codex-nudge flags substantial code change with no Codex review", bad = "codex-nudge did NOT flag uncovered code change" },
-  { check = "model-routing", script = "model-routing-guard.js", want = "block", payload = "{\"tool_name\":\"Agent\",\"tool_input\":{\"model\":\"opus\",\"subagent_type\":\"general-purpose\",\"description\":\"fetch and download the build artifacts\",\"prompt\":\"fetch and download the build artifacts from the CI bucket\"}}", ok = "model-routing-guard blocks mechanical task pinned to flagship model (opus + fetch/download)", bad = "model-routing-guard did NOT block mechanical+flagship spawn — routing guard not firing" },
-  { check = "model-routing", script = "model-routing-guard.js", want = "allow", payload = "{\"tool_name\":\"Agent\",\"tool_input\":{\"description\":\"summarise the findings from the last round\",\"prompt\":\"summarise the findings from the last round\"}}", ok = "model-routing-guard allows benign spawn with no model and no mechanical signals", bad = "model-routing-guard wrongly blocked a benign spawn" },
-  { check = "swarm-guard", script = "swarm-guard.js", want = "allow", payload = "{\"tool_name\":\"Agent\",\"tool_input\":{}}", ok = "swarm-guard allows a spawn under normal memory", warn = "swarm-guard returned exit {code} (blocked) — check memory pressure" },
+  { check = "git", want = "block", payload = "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git push --force origin main\"}}", ok = "git-guard blocks `git push --force`", bad = "git-guard did NOT block force-push" },
+  { check = "git", want = "block", payload = "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git commit -m \\\"x\\n\\nCo-Authored-By: Claude <noreply@anthropic.com>\\\"\"}}", ok = "git-guard blocks AI self-credit trailer", bad = "git-guard did NOT block AI self-credit" },
+  { check = "git", want = "allow", payload = "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git status\"}}", ok = "git-guard allows `git status`", bad = "git-guard wrongly blocked `git status`" },
+  { check = "command", want = "block", env = ["CLAUDE_CODE_ENTRYPOINT=cli"], payload = "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"npm run build\"}}", ok = "command-guard blocks heavy cmd in coordinator", bad = "command-guard did NOT block heavy cmd in coordinator" },
+  { check = "command", want = "allow", env = ["CLAUDE_CODE_ENTRYPOINT=cli"], payload = "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"npm run build\"},\"agent_id\":\"test-agent\",\"agent_type\":\"general-purpose\"}", ok = "command-guard ALLOWS heavy cmd in subagent (payload agent_id)", bad = "command-guard wrongly blocked a subagent — delegation would deadlock" },
+  { check = "command", want = "allow", env = ["CLAUDE_CODE_ENTRYPOINT=cli"], payload = "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git status\"}}", ok = "command-guard allows light cmd in coordinator", bad = "command-guard wrongly blocked a light cmd" },
+  { check = "command", want = "block", env = ["CLAUDE_CODE_ENTRYPOINT=cli"], payload = "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git status && npm run build\"}}", ok = "command-guard blocks heavy SECOND segment (`git status && npm run build`)", bad = "command-guard MISSED heavy second segment — per-segment fix regressed" },
+  { check = "command", want = "block", env = ["CLAUDE_CODE_ENTRYPOINT=cli"], payload = "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"cd app && npm test\"}}", ok = "command-guard blocks heavy cmd after `cd` (`cd app && npm test`)", bad = "command-guard MISSED heavy cmd after cd — per-segment fix regressed" },
+  { check = "command", want = "block", env = ["CLAUDE_CODE_ENTRYPOINT=cli"], payload = "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"echo \\\"$(npm run build)\\\"\"}}", ok = "command-guard blocks heavy cmd in $(...) substitution (`echo \"$(npm run build)\"`)", bad = "command-guard MISSED heavy cmd in command substitution — recursive-parse fix regressed" },
+  { check = "command", want = "block", env = ["CLAUDE_CODE_ENTRYPOINT=cli"], payload = "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"bash -c \\\"npm run build\\\"\"}}", ok = "command-guard blocks heavy `bash -c \"npm run build\"` payload", bad = "command-guard MISSED heavy bash -c payload — recursive-parse fix regressed" },
+  { check = "command", want = "allow", env = ["CLAUDE_CODE_ENTRYPOINT=cli"], payload = "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"echo \\\"$(date)\\\"\"}}", ok = "command-guard allows benign substitution (`echo \"$(date)\"` — date is not heavy)", bad = "command-guard wrongly blocked benign `echo \"$(date)\"` — over-blocking substitutions" },
+  { check = "command", want = "block", env = ["CLAUDE_CODE_ENTRYPOINT=cli", "ANTIHALL_DEVSWARM_SUPERVISOR=on", "DEVSWARM_REPO_ID=repo-x"], payload = "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"hivecontrol workspace monitor\"}}", ok = "command-guard blocks `hivecontrol workspace monitor` under DevSwarm (blocking long-poll)", bad = "command-guard did NOT block hivecontrol monitor under DevSwarm — destructive-read redirect regressed" },
+  { check = "command", want = "allow", env = ["CLAUDE_CODE_ENTRYPOINT=cli", "ANTIHALL_DEVSWARM_SUPERVISOR=on", "DEVSWARM_REPO_ID=repo-x"], payload = "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"grep -n 'hivecontrol workspace monitor' docs/KB.md\"}}", ok = "command-guard allows grep of quoted hivecontrol DATA under DevSwarm (no false-positive)", bad = "command-guard wrongly blocked a grep of quoted hivecontrol data — destructive-read redirect over-blocks" },
+  { check = "edit-guard", want = "block", env = ["CLAUDE_CODE_ENTRYPOINT=cli"], payload = "{\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":\"src/x.js\",\"old_string\":\"a\",\"new_string\":\"b\"}}", ok = "edit-guard blocks coordinator edit", bad = "edit-guard did NOT block coordinator edit" },
+  { check = "edit-guard", want = "allow", env = ["CLAUDE_CODE_ENTRYPOINT=cli"], payload = "{\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":\"src/x.js\",\"old_string\":\"a\",\"new_string\":\"b\"},\"agent_id\":\"test-agent\",\"agent_type\":\"general-purpose\"}", ok = "edit-guard ALLOWS subagent edit", bad = "edit-guard wrongly blocked a subagent edit — delegation would deadlock" },
+  { check = "speculation-guard", want = "stop-block", event = "Stop", transcript = ["{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"That change should be fine.\"}]}}"], payload = "{\"transcript_path\":\"{TRANSCRIPT}\",\"session_id\":\"doctor-spec-{NOW}\"}", ok = "speculation-guard flags \"should be fine\" (hedge w/o evidence)", bad = "speculation-guard did NOT flag \"should be fine\"" },
+  { check = "tasklist-guard", want = "stop-block", event = "Stop", transcript = ["{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"name\":\"Edit\",\"id\":\"toolu_e0\",\"input\":{\"file_path\":\"/x/f0\"}}]}}", "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"name\":\"Edit\",\"id\":\"toolu_e1\",\"input\":{\"file_path\":\"/x/f1\"}}]}}", "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"name\":\"Edit\",\"id\":\"toolu_e2\",\"input\":{\"file_path\":\"/x/f2\"}}]}}", "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"name\":\"Edit\",\"id\":\"toolu_e3\",\"input\":{\"file_path\":\"/x/f3\"}}]}}"], payload = "{\"transcript_path\":\"{TRANSCRIPT}\",\"cwd\":\"{CWD}\",\"session_id\":\"doctor-tl-{NOW}\"}", ok = "tasklist-guard blocks untracked work (4 edits, no tasks, no progress file)", bad = "tasklist-guard did NOT block untracked work" },
+  { check = "codex-nudge", want = "stop-block", event = "Stop", transcript = ["{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"name\":\"Edit\",\"id\":\"toolu_a.ts\",\"input\":{\"file_path\":\"/x/a.ts\"}}]}}", "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"name\":\"Edit\",\"id\":\"toolu_b.ts\",\"input\":{\"file_path\":\"/x/b.ts\"}}]}}", "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"name\":\"Edit\",\"id\":\"toolu_c.ts\",\"input\":{\"file_path\":\"/x/c.ts\"}}]}}"], payload = "{\"transcript_path\":\"{TRANSCRIPT}\",\"session_id\":\"doctor-cx-{NOW}\"}", ok = "codex-nudge flags substantial code change with no Codex review", bad = "codex-nudge did NOT flag uncovered code change" },
+  { check = "model-routing", want = "block", payload = "{\"tool_name\":\"Agent\",\"tool_input\":{\"model\":\"opus\",\"subagent_type\":\"general-purpose\",\"description\":\"fetch and download the build artifacts\",\"prompt\":\"fetch and download the build artifacts from the CI bucket\"}}", ok = "model-routing-guard blocks mechanical task pinned to flagship model (opus + fetch/download)", bad = "model-routing-guard did NOT block mechanical+flagship spawn — routing guard not firing" },
+  { check = "model-routing", want = "allow", payload = "{\"tool_name\":\"Agent\",\"tool_input\":{\"description\":\"summarise the findings from the last round\",\"prompt\":\"summarise the findings from the last round\"}}", ok = "model-routing-guard allows benign spawn with no model and no mechanical signals", bad = "model-routing-guard wrongly blocked a benign spawn" },
+  { check = "swarm-guard", want = "allow", payload = "{\"tool_name\":\"Agent\",\"tool_input\":{}}", ok = "swarm-guard allows a spawn under normal memory", warn = "swarm-guard returned exit {code} (blocked) — check memory pressure" },
 ]
 
 # ---- finding texts ----------------------------------------------------------------------------------------------------------------
@@ -273,8 +255,8 @@ doc = "A registered hook script is not on disk. Placeholder: {file}."
 value = "{file} — REGISTERED BUT MISSING"
 
 [doctor_msg.deferred]
-doc = "A live self-test the engine could not decide itself: the check defers this payload to its Node hook. Placeholder: {check}."
-value = "{check}: the engine defers this self-test to its Node hook, so it was not exercised here"
+doc = "A live self-test the engine does not decide: the check defers this payload. Placeholder: {check}."
+value = "{check}: the engine does not decide this self-test, so it was not exercised here"
 
 [doctor_msg.statusline_installed]
 doc = "A legacy anti-hall statusLine is still configured. Placeholder: {label}."
@@ -396,14 +378,6 @@ value = "⚠️"
 doc = "A plugin file that does not parse as JSON. Placeholder: {file}."
 value = "{file} is not valid JSON"
 
-[doctor_msg.hook_timeout]
-doc = "A Node hook did not finish a live self-test in time. Placeholder: {script}."
-value = "{script} did not finish within the self-test time limit"
-
-[doctor_msg.capture_failed]
-doc = "The thread that captured a Node hook's output failed. Placeholder: {script}."
-value = "the output of {script} could not be captured"
-
 [doctor.platform_names]
 doc = "Node's name for each operating system and architecture Rust names differently (process.platform and process.arch)."
 value = { macos = "darwin", aarch64 = "arm64", x86_64 = "x64" }
@@ -431,13 +405,6 @@ value = ["ANTIHALL_VERSION_ALERT="]
 [doctor.version_alert_sessions]
 doc = "Session id prefixes of the stale-cache and current-cache version-alert runs."
 value = ["doctor-va-stale", "doctor-va-current"]
-
-[doctor.poll_ms]
-doc = "How often a live self-test checks whether its Node hook has finished."
-value = 20
-unit = "ms"
-
-# ---- install-health checks (doctor lane): the engine binary, daemon, state directory, configuration, plugin registry, toolchain, logs, witness ----
 
 [doctor.exec_bit]
 doc = "Permission bits that mean 'executable' (octal 0111)."
@@ -482,10 +449,6 @@ value = 262144
 [doctor.log_warn_factor]
 doc = "A log or inbox larger than its cap times this is reported as not being trimmed."
 value = 2
-
-[doctor.node_min_major]
-doc = "The oldest Node major version the fallback hooks support."
-value = 22
 
 [doctor.probe_timeout_ms]
 doc = "How long a probe of another program (node, git, the installed engine, ps) may run."
@@ -638,6 +601,14 @@ value = "hooks/hooks.json"
 [doctor.plugin_prefix]
 doc = "The registry key prefix of anti-hall plugin installs."
 value = "anti-hall@"
+
+[doctor.plugin_name]
+doc = "The plugin name anti-hall declares in its manifest; another enabled plugin with this name makes Claude Code (2.1.296+) skip hooks."
+value = "anti-hall"
+
+[doctor.plugin_manifest_file]
+doc = "A plugin's manifest, relative to its install path."
+value = ".claude-plugin/plugin.json"
 
 [doctor.registry_file]
 doc = "The host's plugin registry, relative to the home directory."
@@ -1062,6 +1033,10 @@ value = "{key} is registered at {path}, which does not exist (moved or pruned) -
 doc = "PL-04. Placeholders: {n}, {keys}."
 value = "{n} anti-hall plugins are enabled ({keys}); every hook runs twice - Fix: disable all but one: /plugin disable <key>"
 
+[doctor_msg.plugin_name_clash]
+doc = "PL-10. Placeholders: {key}, {name}, {path}."
+value = "enabled plugin {key} ({path}) shares the plugin name '{name}'; Claude Code 2.1.296+ skips the hooks of plugins that share a name - Fix: disable one: /plugin disable {key}"
+
 [doctor_msg.plugin_old_node]
 doc = "PL-05. Placeholders: {key}, {version}."
 value = "enabled plugin {key} (v{version}) still wires Node hooks directly; it runs beside the engine - Fix: claude plugin update {key}, or disable it"
@@ -1166,25 +1141,13 @@ value = "git is on PATH but does not run ({why}) - Fix: xcode-select --install (
 doc = "EV-07."
 value = "gh is not on PATH; only the optional PR/CI helpers need it"
 
-[doctor_msg.node_missing]
-doc = "ND-01: Node is optional. Placeholder: {min}."
-value = "node is not on PATH; Node is optional (the engine runs the hooks), only the few checks the engine still hands to Node are skipped - Fix: none needed; install Node >= {min} to run those checks"
+[doctor_msg.engine_on_path]
+doc = "The home install is not executable and the hook wrapper runs ah-engine from PATH instead (ah-hook.sh), so that engine counts as working. The ah-doctor.sh fallback prints the same text. Placeholder: {path}."
+value = "the hooks run ah-engine from PATH ({path}) because the home install is not executable"
 
-[doctor_msg.no_engine_no_node]
-doc = "ND-04: no working engine and no usable Node behind it."
-value = "no working engine (and no usable Node fallback): the anti-hall hooks do not run - Fix: reinstall the engine (sh hooks/ah-engine-bootstrap.sh -v); Node is not needed"
-
-[doctor_msg.node_broken]
-doc = "ND-03: Node is optional. Placeholder: {why}."
-value = "node does not run: {why}; Node is optional, only the few checks the engine still hands to Node are skipped - Fix: reinstall Node or take it off PATH"
-
-[doctor_msg.node_ok]
-doc = "ND-05: a note, Node is optional. Placeholders: {v}, {min}."
-value = "Node {v} (>= {min}) found; optional (the engine runs the hooks)"
-
-[doctor_msg.node_old]
-doc = "ND-02: Node is optional. Placeholders: {v}, {min}."
-value = "Node {v} is < {min}; Node is optional, but the few checks the engine still hands to Node may silently no-op - Fix: install Node >= {min} or take it off PATH"
+[doctor_msg.no_engine]
+doc = "ND-04: no working engine. The ah-doctor.sh fallback prints the same text."
+value = "no working engine: the anti-hall hooks do not run - Fix: reinstall the engine (sh hooks/ah-engine-bootstrap.sh -v)"
 
 [doctor_msg.log_huge]
 doc = "LG-01. Placeholders: {file}, {mb}, {cap_mb}."
@@ -1382,30 +1345,6 @@ doc = "How many lines the statusline must print for the render check to pass (li
 value = 2
 min = 1
 
-[doctor.statusline_timeout_ms]
-doc = "How long the render check lets the statusline run before it warns (CPU contention under parallel runs is the usual cause)."
-value = 30000
-unit = "ms"
-min = 1
-
-[doctor.statusline_max_bytes]
-doc = "The most bytes of statusline output the render check keeps."
-value = 1048576
-unit = "bytes"
-min = 1
-
-[doctor.statusline_script_env]
-doc = "Test-only: the environment variable that names a stand-in script (run under Node) for the render check instead of the engine's own statusline."
-value = "ANTIHALL_DOCTOR_SL_SCRIPT"
-
-[doctor.statusline_timeout_env]
-doc = "Test-only: the environment variable that shortens the render check's timeout, in milliseconds."
-value = "ANTIHALL_DOCTOR_SL_TIMEOUT_MS"
-
-[doctor.node_check_flag]
-doc = "The Node flag that checks a script's syntax without running it."
-value = "--check"
-
 [doctor_msg.statusline_dispatcher_missing]
 doc = "The statusline dispatcher script is not installed."
 value = "statusline.js dispatcher missing"
@@ -1418,21 +1357,17 @@ value = "statusline renders {n} lines (line 1 + live context gauge on line 2)"
 doc = "The statusline printed only one line although the payload carried a context window."
 value = "statusline rendered only 1 line — line 2 (context gauge) did NOT render despite context_window in the payload"
 
-[doctor_msg.statusline_timeout]
-doc = "The statusline did not finish within the render check's timeout."
-value = "statusline.js timed out under load (30s) — likely CPU contention, not a real failure; re-run outside contention to confirm"
-
 [doctor_msg.statusline_no_output]
 doc = "The statusline printed nothing, or failed. Placeholder: {code}."
 value = "statusline.js produced no output (exit {code})"
 
 [doctor_msg.statusline_rich_ok]
-doc = "The line-1 renderer script is present and its syntax is valid."
-value = "statusline-rich.js (line-1 renderer) present, syntax valid"
+doc = "The line-1 renderer script is present."
+value = "statusline-rich.js (line-1 renderer) present"
 
 [doctor_msg.statusline_rich_bad]
-doc = "The line-1 renderer script is missing or invalid."
-value = "statusline-rich.js missing/invalid — line 1 falls back to the simple renderer"
+doc = "The line-1 renderer script is missing."
+value = "statusline-rich.js missing — line 1 falls back to the simple renderer"
 
 # ---- OMC, Codex and other plugins ---------------------------------------------------------------------------------------------------
 
@@ -2026,10 +1961,6 @@ value = "skipped "
 
 # ---- the DevSwarm supervisor section ----------------------------------------------------------------------------------------------
 
-[doctor.ds_supervisor_files]
-doc = "The supervisor's own scripts (relative to the plugin root) that must parse; a present file that does not is a failure."
-value = ["hooks/lib/devswarm-detect.js", "companion/lib/target-session.js", "companion/lib/liveness.js", "companion/lib/recovery.js", "companion/lib/doctor-devswarm.js", "companion/lib/doctor-descriptors.js", "companion/lib/doctor-runtime.js", "companion/devswarm-supervisor.js", "companion/install-devswarm-supervisor.js", "companion/install-devswarm-ingest.js", "companion/devswarm-ingest.js"]
-
 [doctor.ds_label]
 doc = "The launchd label of the DevSwarm liveness supervisor."
 value = "com.anti-hall.devswarm-supervisor"
@@ -2086,37 +2017,21 @@ value = "ds-inbox"
 doc = "The scratch directory label of the parent-gate self-test."
 value = "ds-pgate"
 
-[doctor.ds_script_turn]
-doc = "The Node hook behind the child-turn self-test (run when the engine defers)."
-value = "devswarm-child-turn.js"
-
-[doctor.ds_script_cgate]
-doc = "The Node hook behind the child-gate self-test."
-value = "devswarm-child-gate.js"
-
-[doctor.ds_script_inbox]
-doc = "The Node hook behind the parent-inbox self-test."
-value = "devswarm-parent-inbox.js"
-
-[doctor.ds_script_pgate]
-doc = "The Node hook behind the parent-gate self-test."
-value = "devswarm-parent-gate.js"
-
 [doctor.ds_child_env]
-doc = "The environment of a DevSwarm child workspace in the self-tests: supervisor forced on, a source branch set."
-value = ["DISABLE_ANTIHALL_DEVSWARM=", "ANTIHALL_DEVSWARM_SUPERVISOR=on", "DEVSWARM_REPO_ID=repo-x", "DEVSWARM_SOURCE_BRANCH=feature-x"]
+doc = "The environment of a DevSwarm child workspace in the self-tests: supervisor forced on, a source branch set, the stable launchers off (the throwaway home has none installed, so the gate would defer to the hook that installs them)."
+value = ["DISABLE_ANTIHALL_DEVSWARM=", "ANTIHALL_DEVSWARM_SUPERVISOR=on", "DEVSWARM_REPO_ID=repo-x", "DEVSWARM_SOURCE_BRANCH=feature-x", "ANTIHALL_DEVSWARM_STABLE_LAUNCHER=0"]
 
 [doctor.ds_primary_env]
-doc = "The environment of a DevSwarm Primary in the self-tests: supervisor forced on, no source branch."
-value = ["DISABLE_ANTIHALL_DEVSWARM=", "ANTIHALL_DEVSWARM_SUPERVISOR=on", "DEVSWARM_REPO_ID=repo-x", "DEVSWARM_SOURCE_BRANCH="]
+doc = "The environment of a DevSwarm Primary in the self-tests: supervisor forced on, no source branch, the stable launchers off (the throwaway home has none installed, so the gate would defer to the hook that installs them)."
+value = ["DISABLE_ANTIHALL_DEVSWARM=", "ANTIHALL_DEVSWARM_SUPERVISOR=on", "DEVSWARM_REPO_ID=repo-x", "DEVSWARM_SOURCE_BRANCH=", "ANTIHALL_DEVSWARM_STABLE_LAUNCHER=0"]
 
 [doctor.ds_payload_turn]
-doc = "The prompt payload of the child-turn self-test."
-value = "{\"hook_event_name\":\"UserPromptSubmit\",\"session_id\":\"ct\",\"prompt\":\"hi\"}"
+doc = "The prompt payload of the child-turn self-test; {CWD} is the working directory."
+value = "{\"hook_event_name\":\"UserPromptSubmit\",\"session_id\":\"ct\",\"prompt\":\"hi\",\"cwd\":\"{CWD}\"}"
 
 [doctor.ds_payload_stop]
-doc = "The Stop payload of the gate self-tests; {SID} is a fresh session id."
-value = "{\"hook_event_name\":\"Stop\",\"session_id\":\"{SID}\"}"
+doc = "The Stop payload of the gate self-tests; {SID} is a fresh session id, {CWD} the working directory."
+value = "{\"hook_event_name\":\"Stop\",\"session_id\":\"{SID}\",\"cwd\":\"{CWD}\"}"
 
 [doctor.ds_payload_inbox]
 doc = "The prompt payload of the parent-inbox self-test; {CWD} is the working directory."
@@ -2181,10 +2096,6 @@ value = "limit-skip"
 [doctor_msg.head_devswarm]
 doc = "The heading of the DevSwarm supervisor section."
 value = "DevSwarm liveness supervisor (optional)"
-
-[doctor_msg.ds_syntax]
-doc = "A supervisor script that does not parse. Placeholders: {file}, {error}."
-value = "supervisor lib SYNTAX ERROR: {file} — {error}"
 
 [doctor_msg.ds_turn_ok]
 doc = "The child-turn hook still works."
