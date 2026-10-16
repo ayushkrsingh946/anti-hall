@@ -23,7 +23,7 @@ use crate::defaults;
 use crate::mem::{BoundedCache, Spec};
 use rquickjs::{Ctx, Function, Object};
 use serde_json::json;
-use std::cell::Cell;
+use std::cell::RefCell;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
@@ -39,8 +39,10 @@ struct Walk {
 static NEXT: AtomicU64 = AtomicU64::new(1);
 
 thread_local! {
-    /// The handle of the walk this thread made last (0: none); the questions are about that one.
-    static MINE: Cell<u64> = const { Cell::new(0) };
+    /// The walk this thread made last, with its handle in the cache (none: no walk); the questions are about that one. The
+    /// thread holds the walk itself, so a cache eviction between the walk and its questions cannot lose it (the cache only
+    /// accounts for the bytes); at most one walk per worker thread stays alive, until that thread walks again.
+    static MINE: RefCell<Option<(u64, Arc<Walk>)>> = const { RefCell::new(None) };
 }
 
 fn cache() -> &'static BoundedCache<u64, Arc<Walk>> {
@@ -195,11 +197,12 @@ pub fn evidence_walk(path: &str, window: f64, payload: Option<&str>) -> String {
     let h = NEXT.fetch_add(1, Relaxed);
     let ttl = defaults::num("transcript.evidence_walk_idle_ms");
     let exp = (ttl > 0).then(|| crate::health::now_ms().saturating_add(ttl));
-    if !cache().insert_with_ttl(h, Arc::new(walk), weight, exp) {
+    let walk = Arc::new(walk);
+    if !cache().insert_with_ttl(h, Arc::clone(&walk), weight, exp) {
         crate::load::note_count("evidence_walk", "result", "refused");
         return unsure();
     }
-    MINE.with(|m| m.set(h));
+    MINE.with(|m| *m.borrow_mut() = Some((h, walk)));
     json!({
         "truncated": truncated, "walked": true, "lastText": last_text, "toolsThisTurn": tools_this_turn, "toolsAtEnd": tools_at_end,
         "evidenceChars": evidence_chars, "withLastChars": with_last_chars,
@@ -209,16 +212,15 @@ pub fn evidence_walk(path: &str, window: f64, payload: Option<&str>) -> String {
 
 /// Drop this thread's previous walk.
 fn forget_mine() {
-    let old = MINE.with(|m| m.replace(0));
-    if old != 0 {
+    let old = MINE.with(|m| m.borrow_mut().take());
+    if let Some((old, _)) = old {
         cache().remove(&old);
     }
 }
 
 /// The text `which` names (`evidence` or `withLast`) of this thread's last walk, run through `f`.
 fn with_text<R>(which: &str, f: impl FnOnce(&str) -> rquickjs::Result<R>) -> rquickjs::Result<R> {
-    let h = MINE.with(Cell::get);
-    let Some(walk) = (h != 0).then(|| cache().get_at(&h, crate::health::now_ms())).flatten() else {
+    let Some(walk) = MINE.with(|m| m.borrow().as_ref().map(|(_, w)| Arc::clone(w))) else {
         return Err(super::host::err("walkHas", defaults::text("transcript.msg_walk_lost")));
     };
     match which {
@@ -438,13 +440,26 @@ mod tests {
     }
 
     #[test]
+    fn an_evicted_walk_still_answers_its_questions() {
+        // review finding: the shared cache may evict the walk (LRU, recycle, entry cap) between the walk and its questions
+        let p = write("evict", &[user("go"), assistant("m1", "sha abc1234 here", 0)]);
+        evidence_walk(&p, 1e9, Some("other"));
+        let h = MINE.with(|m| m.borrow().as_ref().map(|(h, _)| *h)).unwrap();
+        cache().remove(&h);
+        assert!(cache().get(&h).is_none(), "evicted from the cache");
+        assert_eq!(walk_has("withLast", "abc1234").ok(), Some(true), "the thread still holds its walk");
+        std::fs::remove_file(&p).ok();
+    }
+
+    #[test]
     fn a_dropped_or_never_made_walk_throws_and_the_next_walk_replaces_the_last() {
         std::thread::spawn(|| assert!(walk_has("evidence", "x").is_err(), "no walk on this thread yet")).join().unwrap();
         let p = write("replace", &[user("go"), assistant("m1", "one", 0)]);
         evidence_walk(&p, 1e9, None);
-        let first = MINE.with(Cell::get);
+        let handle = || MINE.with(|m| m.borrow().as_ref().map(|(h, _)| *h)).unwrap();
+        let first = handle();
         evidence_walk(&p, 1e9, None);
-        assert_ne!(MINE.with(Cell::get), first);
+        assert_ne!(handle(), first);
         assert!(cache().get(&first).is_none(), "the thread's previous walk is gone");
         std::fs::remove_file(&p).ok();
         assert_eq!(evidence_walk("relative.jsonl", 1e9, None), r#"{"unsure":true}"#);
