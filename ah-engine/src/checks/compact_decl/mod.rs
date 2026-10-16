@@ -63,7 +63,19 @@ pub(crate) fn read_tail(path: &str, max: u64) -> Option<Vec<String>> {
 
 /// ASCII-case-insensitive substring test on bytes.
 pub(crate) fn contains_ci(hay: &[u8], needle: &[u8]) -> bool {
-    !needle.is_empty() && hay.windows(needle.len()).any(|w| w.eq_ignore_ascii_case(needle))
+    // the candidates are the places where the first byte of the needle occurs in either case (a vectorised search); the rest of the
+    // needle is compared there. A scan that compared every window of a 1.5 MB window byte by byte was a third of the call.
+    let Some((&first, rest)) = needle.split_first() else { return false };
+    let (lo, up) = (first.to_ascii_lowercase(), first.to_ascii_uppercase());
+    let mut from = 0;
+    while let Some(at) = memchr::memchr2(lo, up, hay.get(from..).unwrap_or_default()) {
+        let start = from + at;
+        if hay.get(start + 1..start + needle.len()).is_some_and(|tail| tail.eq_ignore_ascii_case(rest)) {
+            return true;
+        }
+        from = start + 1;
+    }
+    false
 }
 
 /// What one transcript line does to the current turn.
@@ -214,11 +226,16 @@ pub(crate) fn json_depth(line: &str) -> usize {
 /// The assistant text of the current turn, one part per text block, in order. `None` when a line could not be handled
 /// exactly.
 ///
-/// Mirrors `compact-advice.js` `readTurn` (the turn text only).
+/// Mirrors `compact-advice.js` `readTurn` (the turn text only). The turn is what follows the LAST real prompt, and a prompt clears
+/// whatever came before it, so the lines are read from the end and the walk stops at that prompt: nothing earlier can change the
+/// answer, and a transcript window is mostly earlier turns (the walk used to parse all of it, about 3 ms of a 4 ms call on a 1.5 MB
+/// window). A line the parser rejects and that could hold the declaration still defers, wherever it is in the turn; one BEFORE the
+/// last prompt no longer does, because Node's fold forgets it at that prompt as well.
 pub(crate) fn turn_texts(lines: &[String]) -> Option<Vec<String>> {
     let word = defaults::text("compact_decl.safe_word").as_bytes();
-    let mut parts: Vec<String> = Vec::new();
-    for line in lines.iter().filter(|l| !l.is_empty()) {
+    // the text of each line of the turn, newest line first
+    let mut newest_first: Vec<Vec<String>> = Vec::new();
+    for line in lines.iter().rev().filter(|l| !l.is_empty()) {
         let e: Value = match serde_json::from_str(line) {
             Ok(v) => v,
             Err(_) => {
@@ -239,10 +256,128 @@ pub(crate) fn turn_texts(lines: &[String]) -> Option<Vec<String>> {
             continue;
         }
         match classify(&e) {
-            Step::NewTurn => parts.clear(),
-            Step::Text(t) => parts.extend(t),
+            Step::NewTurn => break,
+            Step::Text(t) => newest_first.push(t),
             Step::Other => {}
         }
     }
-    Some(parts)
+    Some(newest_first.into_iter().rev().flatten().collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn user(t: &str) -> String {
+        json!({"type": "user", "message": {"role": "user", "content": t}}).to_string()
+    }
+
+    fn assistant(t: &str) -> String {
+        json!({"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": t}]}}).to_string()
+    }
+
+    fn tool_result() -> String {
+        json!({"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "content": "ok"}]}}).to_string()
+    }
+
+    /// The forward fold the reverse scan replaces: every line is read, a new turn clears what came before it.
+    fn forward(lines: &[String]) -> Option<Vec<String>> {
+        let word = defaults::text("compact_decl.safe_word").as_bytes();
+        let mut parts: Vec<String> = Vec::new();
+        for line in lines.iter().filter(|l| !l.is_empty()) {
+            let e: Value = match serde_json::from_str(line) {
+                Ok(v) => v,
+                Err(_) => {
+                    if contains_ci(line.as_bytes(), word)
+                        || line.contains("\\u")
+                        || json_depth(line) > defaults::num("compact_decl.deep_json_depth") as usize
+                        || crate::checks::guardkit::jsdiff::js_reads_differently_str(line)
+                    {
+                        return None;
+                    }
+                    continue;
+                }
+            };
+            if !e.is_object() && !e.is_array() {
+                continue;
+            }
+            match classify(&e) {
+                Step::NewTurn => parts.clear(),
+                Step::Text(t) => parts.extend(t),
+                Step::Other => {}
+            }
+        }
+        Some(parts)
+    }
+
+    fn init() {
+        crate::defaults::init().expect("defaults");
+    }
+
+    /// The turn text is what follows the last real prompt, so a line before that prompt is never read: the answer cannot depend on
+    /// it (the fold clears at the prompt), and reading it was most of the cost of a call on a long transcript.
+    #[test]
+    fn lines_before_the_last_prompt_are_not_read() {
+        init();
+        let word = defaults::text("compact_decl.safe_word");
+        // a line the parser rejects and that holds the word: a fold from the start gives up on it ...
+        let torn = format!("{{\"type\":\"assistant\",\"message\": {word} torn");
+        let lines = vec![torn, user("first"), assistant("old"), user("second"), tool_result(), assistant("new one"), assistant("new two")];
+        assert_eq!(forward(&lines), None, "the forward fold reads the torn line");
+        // ... the turn after `second` does not contain it, so the answer is the turn's own text
+        assert_eq!(turn_texts(&lines), Some(vec!["new one".to_string(), "new two".to_string()]));
+    }
+
+    /// A line the parser rejects INSIDE the current turn still defers (it may hold the declaration).
+    #[test]
+    fn a_torn_line_inside_the_turn_still_defers() {
+        init();
+        let word = defaults::text("compact_decl.safe_word");
+        let torn = format!("{{\"type\":\"assistant\",\"message\": {word} torn");
+        let lines = vec![user("p"), assistant("a"), torn, assistant("b")];
+        assert_eq!(turn_texts(&lines), None);
+        assert_eq!(turn_texts(&lines), forward(&lines));
+        // one that cannot hold it is skipped, as before
+        let lines = vec![user("p"), assistant("a"), "not json at all".to_string(), assistant("b")];
+        assert_eq!(turn_texts(&lines), Some(vec!["a".to_string(), "b".to_string()]));
+    }
+
+    /// The same answer as the forward fold on windows where no unreadable line sits before the last prompt.
+    #[test]
+    fn it_agrees_with_the_forward_fold_on_generated_windows() {
+        init();
+        let mut seed = 0x2545_f491_4f6c_dd1du64;
+        let mut next = move |n: u64| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed % n
+        };
+        for _ in 0..400 {
+            let mut lines = Vec::new();
+            for i in 0..(next(14) as usize) {
+                lines.push(match next(8) {
+                    0 | 1 => user(&format!("prompt {i}")),
+                    2 | 3 => assistant(&format!("text {i}")),
+                    4 => tool_result(),
+                    5 => String::new(),
+                    6 => json!({"type": "system", "subtype": "compact_boundary"}).to_string(),
+                    _ => json!({"type": "attachment", "n": i}).to_string(),
+                });
+            }
+            assert_eq!(turn_texts(&lines), forward(&lines), "{lines:?}");
+        }
+    }
+
+    #[test]
+    fn contains_ci_agrees_with_a_plain_scan() {
+        let naive = |hay: &[u8], needle: &[u8]| !needle.is_empty() && hay.windows(needle.len()).any(|w| w.eq_ignore_ascii_case(needle));
+        let hays: [&[u8]; 8] = [b"", b"s", b"SAFE", b"a safe b", b"unSAfe", b"sa", b"xxsafxxSaFe", "caf\u{e9} SAFE".as_bytes()];
+        for h in hays {
+            for n in [&b"safe"[..], b"", b"s", b"SAFE", b"e", b"zz"] {
+                assert_eq!(contains_ci(h, n), naive(h, n), "{h:?} {n:?}");
+            }
+        }
+    }
 }
