@@ -438,6 +438,9 @@ struct PgCase {
     own_store: bool,
     /// A linked worktree of the cwd checkout (same project, another workspace: `{wt3}` in seeds).
     linked: bool,
+    /// A separate repository nested (untracked) inside the cwd checkout (`{nested}` in seeds): only git can tell it has no
+    /// superproject.
+    nested: bool,
     payload: Option<Value>,
     steps: Vec<PgWant>,
     /// The seconds in "awaiting child pickup (Ns)" are masked before comparing: the engine and Node run a moment apart.
@@ -474,6 +477,7 @@ fn pg(name: &'static str, steps: &[PgWant]) -> PgCase {
         child_wt: false,
         own_store: false,
         linked: false,
+        nested: false,
         payload: None,
         steps: steps.to_vec(),
         fuzz_secs: false,
@@ -505,6 +509,11 @@ impl PgCase {
     fn linked(mut self) -> PgCase {
         self.git_cwd = true;
         self.linked = true;
+        self
+    }
+    fn nested(mut self) -> PgCase {
+        self.git_cwd = true;
+        self.nested = true;
         self
     }
     fn fuzz(mut self) -> PgCase {
@@ -571,6 +580,17 @@ fn pg_git(dir: &Path) {
     assert!(ok.success());
 }
 
+/// The shown-at times of the straying warnings (stray-seen/*.json) are each side's own clock: masked before the homes are compared.
+fn pg_mask_times(mut snap: BTreeMap<String, Vec<u8>>) -> BTreeMap<String, Vec<u8>> {
+    let re = regex::Regex::new(r"\d{10,}").unwrap();
+    for (k, v) in snap.iter_mut() {
+        if k.contains("stray-seen") {
+            *v = re.replace_all(&String::from_utf8_lossy(v), "T").into_owned().into_bytes();
+        }
+    }
+    snap
+}
+
 /// What one case did: steps answered, steps deferred, answered blocks, answered escalations.
 #[derive(Default)]
 struct PgTally {
@@ -594,6 +614,10 @@ fn pg_exec(case: &PgCase) -> PgTally {
     }
     if case.child_wt {
         pg_git(&wt2);
+    }
+    let nested = wt.join("nested");
+    if case.nested {
+        pg_git(&nested);
     }
     let wt3 = tmp.join("wt3");
     if case.linked {
@@ -627,7 +651,10 @@ fn pg_exec(case: &PgCase) -> PgTally {
             .replace("{pid}", &std::process::id().to_string())
             .replace("{wt2}", &wt2.to_string_lossy())
             .replace("{wt3}", &wt3.to_string_lossy())
+            .replace("{nested}", &nested.to_string_lossy())
             .replace("{home}", &home.to_string_lossy())
+            .replace("{own}", &own)
+            .replace("{cwd}", &cwd)
             .replace("{now}", &now);
         let (aged, rel) = match rel.strip_prefix("~aged/") {
             Some(r) => (true, r.to_string()),
@@ -681,7 +708,7 @@ fn pg_exec(case: &PgCase) -> PgTally {
             if case.fuzz_secs { mask_secs(&t) } else { t }
         };
         assert_eq!((ecode, norm(&eout), norm(&eerr)), (ncode, norm(&nout), norm(&nerr)), "{label}: engine and Node differ");
-        assert_eq!(after_engine, snapshot(&home), "{label}: the home differs after the engine and after Node");
+        assert_eq!(pg_mask_times(after_engine), pg_mask_times(snapshot(&home)), "{label}: the home differs after the engine and after Node");
         let text = String::from_utf8_lossy(&eout);
         t.blocks += usize::from(text.contains("\"decision\":\"block\""));
         t.escalations += usize::from(text.contains("Escalation: this neglect signature"));
@@ -711,6 +738,26 @@ fn lines(l: &[&str]) -> String {
 }
 
 const PG_GATE_STATE: &str = ".anti-hall/devswarm/parent-gate/s1.json";
+const PG_SUMMARY: &str = ".anti-hall/devswarm/summaries/{key}.json";
+const PG_REPLIES: &str = ".anti-hall/devswarm/parent-gate/{key}-replies.json";
+/// A registry row of the summary (`"c-7":{...}`) at a worktree that does not exist.
+const PG_ROW_C7: &str = r#","c-7":{"id":"c-7","worktreePath":"/nonexistent-pg/c7","sessionId":"sess-c7"}"#;
+
+/// The Primary's own summary: its entry with `questions` (the pendingQuestions array, plus any further entry fields after it), the
+/// further registry rows `rows` (each `,"id":{...}`) and the archived registry rows (`None`: a summary that predates the field).
+fn pg_sum(questions: &str, rows: &str, archived: Option<&str>) -> String {
+    let mut s = String::from(r#"{"generatedAt":1,"workspaces":{"{own}":{"id":"{own}","worktreePath":"{cwd}","sessionId":"sess-own","unread":0,"pendingQuestions":"#);
+    s.push_str(questions);
+    s.push('}');
+    s.push_str(rows);
+    s.push_str(r#"},"recent":[]"#);
+    if let Some(a) = archived {
+        s.push_str(r#","archivedRegistryRows":"#);
+        s.push_str(a);
+    }
+    s.push('}');
+    s
+}
 const PG_CHILD: &str = ".anti-hall/devswarm/workspaces/c-1.json";
 const PG_CHILD_BODY: &str = r#"{"id":"c-1","worktreePath":"{wt2}","sessionId":"sess-c1"}"#;
 
@@ -880,7 +927,29 @@ fn pg_cases() -> Vec<PgCase> {
         child("child-other-session-record-blocks", &[A]).seed(".claude/sessions/4242.json", r#"{"pid":4242,"sessionId":"someone-else"}"#),
         child("child-stale-verdict-defers", &[D]).seed(".anti-hall/devswarm/liveness/c-1.json", r#"{"status":"stale"}"#),
         child("child-ok-verdict-blocks", &[A]).seed(".anti-hall/devswarm/liveness/c-1.json", r#"{"status":"ok"}"#),
-        child("child-stray-plan-defers", &[D]).seed(".anti-hall/devswarm/stray/c-1.json", r#"{"id":"c-1","active":[]}"#),
+        child("child-stray-plan-without-warnings-is-silent", &[A]).seed(".anti-hall/devswarm/stray/c-1.json", r#"{"id":"c-1","active":[]}"#),
+        // the straying advisory: shown once per session, capped, Jev notes, another project's child skipped, the switch
+        pg("stray-advisory-shown-once", &[A, A])
+            .own()
+            .seed(".anti-hall/devswarm/stray/c-5.json", r#"{"id":"c-5","active":[{"key":"stall","n":1,"step":2,"reason":"no progress for 40m"}]}"#),
+        pg("stray-advisory-capped-named-with-jev", &[A, A])
+            .own()
+            .seed(".anti-hall/devswarm/names/c-5.json", r#"{"name":"Lane five"}"#)
+            .seed(
+                ".anti-hall/devswarm/stray/c-5.json",
+                r#"{"id":"c-5","active":[{"key":"stall","n":1,"step":2,"reason":"stalled"},{"key":"burn","n":3,"step":2,"reason":"burning tokens","jev":[{"verdict":"stuck","confidence":0.876},{"verdict":"ok","confidence":1}]}]}"#,
+            )
+            .seed(".anti-hall/devswarm/stray/c-6.json", r#"{"id":"c-6","active":[{"key":"scope","n":1,"step":1,"reason":"off scope {x}"},{"key":"stall","n":2,"step":4,"reason":"stalled"}]}"#),
+        child("stray-advisory-of-another-project-is-skipped", &[A])
+            .seed(".anti-hall/devswarm/stray/c-1.json", r#"{"id":"c-1","worktreePath":"{wt2}","active":[{"key":"stall","n":1,"step":2,"reason":"stalled"}]}"#),
+        pg("stray-advisory-plan-tracking-off", &[A])
+            .own()
+            .env("ANTIHALL_DEVSWARM_PLAN_TRACKING", "0")
+            .seed(".anti-hall/devswarm/stray/c-5.json", r#"{"id":"c-5","active":[{"key":"stall","n":1,"step":2,"reason":"stalled"}]}"#),
+        pg("stray-advisory-seen-file-a-json-string", &[A, A])
+            .own()
+            .seed(".anti-hall/devswarm/stray/c-5.json", r#"{"id":"c-5","active":[{"key":"stall","n":1,"step":2,"reason":"stalled"}]}"#)
+            .seed(".anti-hall/devswarm/stray-seen/640d87e741e6aa4c.json", r#""str""#),
         child("child-loop-state-other-sig-restarts", &[A]).seed(PG_GATE_STATE, r#"{"sig":"other","blocks":3,"escalated":true,"intents":{"other":{"r":1}}}"#),
         child("child-loop-state-escalated-is-quiet", &[A]).seed(PG_GATE_STATE, &format!(r#"{{"sig":"{children_sig}","blocks":4,"escalated":true}}"#)),
         child("child-loop-state-intent-raises-budget", &[A, A]).seed(
@@ -916,18 +985,145 @@ fn pg_cases() -> Vec<PgCase> {
             .seed(".anti-hall/devswarm/workspaces/c-3.json", r#"{"id":"c-3","worktreePath":"{wt3}","sessionId":"sess-c3"}"#)
             .seed(".anti-hall/devswarm/summaries/{key}.json", r#"{"workspaces":{"c-3":{"archive_ready":true}}}"#)
             .seed(PG_GATE_STATE, &format!(r#"{{"sig":"{children_sig}","blocks":3}}"#)),
-        pg("linked-child-live-clean-pass-defers", &[D])
+        // a live child on the clean pass: the mailbox-wake block (no watcher, no recent tick) up to the cap, then quiet
+        pg("linked-child-live-clean-pass-wake-block-cap-quiet", &[A, A, A, A, A])
             .linked()
             .seed(".anti-hall/devswarm/workspaces/c-3.json", r#"{"id":"c-3","worktreePath":"{wt3}","sessionId":"sess-c3","inboxPath":"{home}/in.ndjson","cursorPath":"{home}/cur.json"}"#)
             .seed("in.ndjson", "")
             .seed("cur.json", "0"),
+        pg("linked-child-live-recent-tick-is-clean", &[A])
+            .linked()
+            .seed(".anti-hall/devswarm/workspaces/c-3.json", r#"{"id":"c-3","worktreePath":"{wt3}","sessionId":"sess-c3","inboxPath":"{home}/in.ndjson","cursorPath":"{home}/cur.json"}"#)
+            .seed("in.ndjson", "")
+            .seed("cur.json", "0")
+            .seed(".anti-hall/devswarm/wake-tick/{own}.json", r#"{"ts":{now}}"#),
+        pg("linked-child-live-stale-tick-blocks", &[A])
+            .linked()
+            .seed(".anti-hall/devswarm/workspaces/c-3.json", r#"{"id":"c-3","worktreePath":"{wt3}","sessionId":"sess-c3","inboxPath":"{home}/in.ndjson","cursorPath":"{home}/cur.json"}"#)
+            .seed("in.ndjson", "")
+            .seed("cur.json", "0")
+            .seed(".anti-hall/devswarm/wake-tick/{own}.json", r#"{"ts":{old}}"#),
+        pg("linked-child-live-watcher-live-is-clean", &[A])
+            .linked()
+            .seed(".anti-hall/devswarm/workspaces/c-3.json", r#"{"id":"c-3","worktreePath":"{wt3}","sessionId":"sess-c3","inboxPath":"{home}/in.ndjson","cursorPath":"{home}/cur.json"}"#)
+            .seed("in.ndjson", "")
+            .seed("cur.json", "0")
+            .seed(".anti-hall/devswarm/locks/wake-watch-{own}.lock", r#"{"pid":{pid},"ts":{now}}"#),
+        pg("linked-child-live-not-claude-is-clean", &[A])
+            .linked()
+            .env("DEVSWARM_AI_AGENT", "codex")
+            .seed(".anti-hall/devswarm/workspaces/c-3.json", r#"{"id":"c-3","worktreePath":"{wt3}","sessionId":"sess-c3","inboxPath":"{home}/in.ndjson","cursorPath":"{home}/cur.json"}"#)
+            .seed("in.ndjson", "")
+            .seed("cur.json", "0"),
+        pg("linked-child-live-wake-state-kept-fields", &[A, A])
+            .linked()
+            .seed(".anti-hall/devswarm/workspaces/c-3.json", r#"{"id":"c-3","worktreePath":"{wt3}","sessionId":"sess-c3","inboxPath":"{home}/in.ndjson","cursorPath":"{home}/cur.json"}"#)
+            .seed("in.ndjson", "")
+            .seed("cur.json", "0")
+            .seed(PG_GATE_STATE, r#"{"intents":{"k":{"ts":1}},"qSig":"q","extra":[1],"sig":"other","blocks":7}"#),
+        // a descriptor in a repository nested inside another one: the superproject question git answers
+        pg("nested-repo-descriptor-answers", &[A, A]).nested().seed(".anti-hall/devswarm/workspaces/n-1.json", r#"{"id":"n-1","worktreePath":"{nested}","sessionId":"sess-n1"}"#),
         // the Primary's own mailbox
         pg("own-summary-corrupt-blocks-then-conservation-defers", &[A, A, A, D]).git().seed(".anti-hall/devswarm/summaries/{key}.json", "{oops"),
         pg("own-store-clean-pass", &[A, A]).own(),
         pg("own-store-clean-clears-state", &[A]).own().seed(PG_GATE_STATE, r#"{"sig":"x","blocks":2}"#),
         pg("own-store-other-project-child-is-clean", &[A, A]).own().child().seed(PG_CHILD, PG_CHILD_BODY),
-        pg("own-pending-question-defers", &[D]).own().env("PG_SUMMARY", "question"),
+        // a question from a sender no registry row names is informational only: on its own it never blocks
+        pg("own-pending-question-from-retired-sender-is-clean", &[A]).own().env("PG_SUMMARY", "question"),
+        // ---- the questions asked of the Primary (its summary entry's pendingQuestions) ----
+        pg("own-question-live-asker-blocks", &[A, A]).own().seed(PG_SUMMARY, &pg_sum(r#"[{"from":"c-7","ts":{five}}]"#, PG_ROW_C7, Some("[]"))),
+        // an asker whose id is `__proto__` (a legal id): every id-keyed map must hold it like any other key (Node uses Map/Set)
+        pg("own-question-from-a-proto-named-asker-blocks", &[A, A]).own().seed(
+            PG_SUMMARY,
+            &pg_sum(r#"[{"from":"__proto__","ts":{five}}]"#, r#","__proto__":{"id":"__proto__","worktreePath":"/nonexistent-pg/p","sessionId":"sess-p"}"#, Some("[]")),
+        ),
+        // the question ceiling: the cap of forced blocks, the one escalation, then the quiet pass that keeps the state
+        pg("own-question-ceiling-escalates-then-quiet", &[A, A, A, A, A, A])
+            .own()
+            .seed(PG_SUMMARY, &pg_sum(r#"[{"from":"c-7","ts":{old}}]"#, PG_ROW_C7, Some("[]"))),
+        pg("own-questions-many-with-ages", &[A, A]).own().seed(
+            PG_SUMMARY,
+            &pg_sum(
+                r#"[{"from":"c-1","ts":{five}},{"from":"c-2","ts":{old}},{"from":"c-3","ts":1},{"from":"c-4","ts":"soon"},null,{"ts":5},{"from":"c-5","ts":99999999999999},{"from":"c-1","ts":{old}},{"from":42,"ts":3}]"#,
+                r#","c-1":{"worktreePath":"/nonexistent-pg/c1"},"c-2":{"worktreePath":"/nonexistent-pg/c2","sessionId":"s2"},"c-3":{},"c-4":{"sessionId":"s4"},"c-5":{"worktreePath":"/nonexistent-pg/c5"}"#,
+                Some(r#"[{"id":"x-1","worktreePath":"/nonexistent-pg/x1"},null,7,{"id":null}]"#),
+            ),
+        ),
+        pg("own-question-answered-is-clean", &[A])
+            .own()
+            .seed(PG_SUMMARY, &pg_sum(r#"[{"from":"c-7","ts":{five}}]"#, PG_ROW_C7, Some("[]")))
+            .seed(PG_REPLIES, "{\"m\":\"c-7\",\"t\":{now}}\nnot json\n"),
+        pg("own-question-one-answered-one-open", &[A])
+            .own()
+            .seed(PG_SUMMARY, &pg_sum(r#"[{"from":"c-7","ts":{five}},{"from":"c-8","ts":{five}}]"#, &format!(r#"{PG_ROW_C7},"c-8":{{"id":"c-8"}}"#), Some("[]")))
+            .seed(PG_REPLIES, r#"{"c-7":{"lastReplyTs":{now}},"c-8":{"lastReplyTs":1}}"#),
+        // a reply recorded under a twin of the asker (same worktree) answers it; one recorded under the Primary's own row does not
+        pg("own-question-answered-by-a-family-twin", &[A])
+            .own()
+            .child()
+            .seed(
+                PG_SUMMARY,
+                &pg_sum(
+                    r#"[{"from":"c-7","ts":{five}},{"from":"c-8","ts":{five}}]"#,
+                    r#","c-7":{"worktreePath":"{wt2}"},"c-7b":{"worktreePath":"{wt2}"},"c-8":{"worktreePath":"{cwd}","sessionId":"x"}"#,
+                    Some("[]"),
+                ),
+            )
+            .seed(PG_REPLIES, "{\"m\":\"c-7b\",\"t\":{now}}\n{\"m\":\"{own}\",\"t\":{now}}\n"),
+        pg("own-question-retired-and-live-names-both", &[A]).own().seed(PG_SUMMARY, &pg_sum(r#"[{"from":"gone-1","ts":{five}},{"from":"c-7","ts":{five}},{"from":"gone-1","ts":2}]"#, PG_ROW_C7, Some("[]"))),
+        pg("own-question-legacy-summary-retired-sender-blocks", &[A]).own().seed(PG_SUMMARY, &pg_sum(r#"[{"from":"gone-1","ts":{five}}]"#, "", None)),
+        // a truncated question list blocks on every Stop: no question ceiling over an incomplete view
+        pg("own-question-list-truncated-blocks-every-time", &[A, A, A, A, A])
+            .own()
+            .seed(PG_SUMMARY, &pg_sum(r#"[],"pendingQuestionsTruncated":{"cap":200,"kept":200,"dropped":3}"#, "", Some("[]"))),
+        pg("own-question-list-truncated-odd-shape", &[A]).own().seed(PG_SUMMARY, &pg_sum(r#"[],"pendingQuestionsTruncated":true"#, "", Some("[]"))),
+        pg("own-question-and-truncated-list", &[A, A, A, A, A])
+            .own()
+            .seed(PG_SUMMARY, &pg_sum(r#"[{"from":"c-7","ts":{old}}],"pendingQuestionsTruncated":{"cap":2,"kept":"2"}"#, PG_ROW_C7, Some("[]"))),
+        // a question from a neglected child of this project: the question segment leads the neglect line
+        pg("own-question-and-neglected-child", &[A, A])
+            .linked()
+            .seed(".anti-hall/devswarm/workspaces/c-3.json", r#"{"id":"c-3","worktreePath":"{wt3}","sessionId":"sess-c3"}"#)
+            .seed(PG_SUMMARY, &pg_sum(r#"[{"from":"c-3","ts":{old}}]"#, "", Some("[]"))),
+        pg("own-question-and-neglected-child-stale-build-still-blocks", &[A])
+            .linked()
+            .seed(".anti-hall/devswarm/workspaces/c-3.json", r#"{"id":"c-3","worktreePath":"{wt3}","sessionId":"sess-c3"}"#)
+            .seed(PG_SUMMARY, &pg_sum(r#"[{"from":"c-3","ts":{old}}]"#, "", Some("[]")))
+            .seed(
+                ".claude/plugins/installed_plugins.json",
+                r#"{"version":2,"plugins":{"anti-hall@anti-hall":[{"scope":"user","version":"999.0.0","installPath":"/x"}]}}"#,
+            ),
+        pg("own-question-past-the-neglect-escalation-still-blocks", &[A, A])
+            .linked()
+            .seed(".anti-hall/devswarm/workspaces/c-3.json", r#"{"id":"c-3","worktreePath":"{wt3}","sessionId":"sess-c3"}"#)
+            .seed(PG_SUMMARY, &pg_sum(r#"[{"from":"c-3","ts":{old}}]"#, "", Some("[]")))
+            .seed(PG_GATE_STATE, &format!(r#"{{"sig":"{children_sig}","blocks":4,"escalated":true,"intents":{{"{children_sig}":{{"ts":1}}}},"intentAcks":2}}"#)),
+        // an asker that was put away: an archive-ignore mark drops it; an archived marker drops it only once its session is dead
+        pg("own-question-asker-archive-ignored-is-clean", &[A])
+            .own()
+            .seed(PG_SUMMARY, &pg_sum(r#"[{"from":"c-7","ts":{five}}]"#, PG_ROW_C7, Some("[]")))
+            .seed(".anti-hall/devswarm/archive-ignore/c-7.json", "{}"),
+        pg("own-question-asker-archived-with-a-session-record", &[A])
+            .own()
+            .seed(PG_SUMMARY, &pg_sum(r#"[{"from":"c-7","ts":{five}}]"#, "", Some(r#"[{"id":"c-7","worktreePath":"/nonexistent-pg/c7","sessionId":"sess-c7"}]"#)))
+            .seed(".anti-hall/devswarm/archived/c-7.json", r#"{"id":"c-7","sessionId":"sess-c7"}"#)
+            .seed(".claude/sessions/4242.json", r#"{"pid":4242,"sessionId":"sess-c7"}"#),
+        pg("own-question-asker-archived-without-a-session-record-blocks", &[A])
+            .own()
+            .seed(PG_SUMMARY, &pg_sum(r#"[{"from":"c-7","ts":{five}}]"#, PG_ROW_C7, Some("[]")))
+            .seed(".anti-hall/devswarm/archived/c-7.json", r#"{"id":"c-7"}"#),
+        pg("own-question-asker-held-defers", &[D])
+            .own()
+            .env("ANTIHALL_DEVSWARM_HELD_PARTITIONS", "c-7")
+            .seed(PG_SUMMARY, &pg_sum(r#"[{"from":"c-7","ts":{five}}]"#, PG_ROW_C7, Some("[]"))),
+        pg("own-jev-question-candidate-defers", &[D])
+            .own()
+            .seed(PG_SUMMARY, &pg_sum(r#"[],"jevQuestionCandidates":[{"from":"c-7","ts":1}]"#, PG_ROW_C7, Some("[]"))),
         pg("own-unread-defers", &[D]).own().env("PG_SUMMARY", "unread"),
+        // per-session reader rows on the Primary's own partition: its own view (walked from the hook's process ancestry) is read
+        pg("own-reader-view-past-the-mail-is-clean", &[A, A]).own().env("PG_READER", "self").seed(".claude/sessions/{pid}.json", r#"{"pid":{pid},"sessionId":"sess-own","startedAt":5}"#),
+        pg("own-reader-view-of-a-stranger-is-the-floor", &[A, A]).own().env("PG_READER", "other").seed(".claude/sessions/{pid}.json", r#"{"pid":{pid},"sessionId":"sess-own","startedAt":5}"#),
+        pg("own-reader-view-headless-is-the-floor", &[A, A]).own().env("PG_READER", "self"),
         pg("own-parked-escalation-defers", &[D]).own().seed(".anti-hall/devswarm/escalation-pending/e1.json", r#"{"parentId":"p","row":{}}"#),
         pg("own-drain-marker-defers", &[D])
             .git()

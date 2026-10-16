@@ -123,13 +123,27 @@ fn open_store(st: &Settings, key: &str) -> Result<Option<crate::mesh::MeshReader
     crate::mesh::MeshReader::open(&db).map(Some).map_err(|_| No)
 }
 
-/// `positions(store, { reader: null, partition, cursorPath, home })` (the floor view) as `(store base, nd base)`.
-fn floor_positions(store: &crate::mesh::MeshReader, home: &str, partition: &str, cursor_path: Option<&str>, own: bool) -> Result<(f64, f64), No> {
+/// The reader key of the hook that sent this request (`readerKey(deriveReaderNonce({ home }))`): its nearest harness ancestor,
+/// walked from the request's sender (the daemon's socket peer) or, in a one-shot `check`, from this process, as the Node hook
+/// walks from itself. A daemon request whose sender the socket did not name has no answer.
+fn own_reader(st: &Settings) -> Result<Option<String>, No> {
+    let start = match st.env.get(defaults::text("request_env.peer_pid_key")) {
+        None => i64::from(std::process::id()),
+        Some(v) => match v.parse::<i64>() {
+            Ok(p) if p > 0 => p,
+            _ => return Err(No),
+        },
+    };
+    Ok(crate::meshw::cursors::reader_key(ident::reader_nonce_from(Path::new(&st.home), start).as_deref()))
+}
+
+/// `positions(store, { reader, partition, cursorPath, home })` as `(store base, nd base)`: the floor view, overlaid by `reader`'s
+/// own rows where it holds any (`reader` None: the floor view alone).
+fn floor_positions(store: &crate::mesh::MeshReader, home: &str, partition: &str, cursor_path: Option<&str>, reader: Option<&str>) -> Result<(f64, f64), No> {
     let rows = store.reader_cursors(partition).map_err(|_| No)?;
     let floor = defaults::text("mesh_write.floor_reader");
-    if own && rows.iter().any(|r| r["reader"].as_str() != Some(floor)) {
-        return Err(No); // this reader's own view: its key comes from the hook's process ancestry
-    }
+    let own_of = |ns: &str| reader.and_then(|r| rows.iter().find(|x| x["ns"] == ns && x["reader"] == r)).and_then(|x| x["value"].as_f64());
+    let (own_store, own_nd) = (own_of(defaults::text("mesh_write.cursor_ns_store")), own_of(defaults::text("mesh_write.cursor_ns_nd")));
     let row_of = |ns: &str| rows.iter().find(|r| r["ns"] == ns && r["reader"] == floor).and_then(|r| r["value"].as_f64());
     let cursors = format!("{}/{}", devswarm_dir(home), defaults::text("devswarm_role.pg_dir_cursors"));
     let read_cursor = |p: &str| crate::meshw::cursors::read_cursor(Path::new(p));
@@ -185,7 +199,7 @@ fn floor_positions(store: &crate::mesh::MeshReader, home: &str, partition: &str,
         }
         None => cp.as_deref().map_or(0.0, read_cursor),
     };
-    Ok((store_floor, nd_floor))
+    Ok((own_store.unwrap_or(store_floor), own_nd.unwrap_or(nd_floor)))
 }
 
 fn message_count(st: &Settings, key: &str, id: &str) -> Result<Value, No> {
@@ -197,7 +211,8 @@ fn message_count(st: &Settings, key: &str, id: &str) -> Result<Value, No> {
 
 fn union_of(st: &Settings, key: &str, id: &str, inbox: Option<&str>, cursor: Option<&str>, own: bool, now: f64) -> Result<Value, No> {
     let Some(store) = open_store(st, key)? else { return Ok(json!({"state": "none"})) };
-    let (sb, nb) = floor_positions(&store, &st.home, id, cursor, own)?;
+    let reader = if own { own_reader(st)? } else { None };
+    let (sb, nb) = floor_positions(&store, &st.home, id, cursor, reader.as_deref())?;
     let u = union_unread(&UnionIn { inbox, cursor_file: cursor, id, store: Some(&store), store_base: sb, nd_base: nb, now: now as i64 }).map_err(|_| No)?;
     let age = u.oldest_unread_age_ms.filter(|a| a.is_finite());
     Ok(json!({"state": "ok", "storeOnly": u.store_only_unread, "age": age}))

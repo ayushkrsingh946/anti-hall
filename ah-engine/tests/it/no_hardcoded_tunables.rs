@@ -144,6 +144,7 @@ const ALLOW: &[(&str, &str, &str)] = &[
     ("src/script/host_childturn.rs", "static PLANNED", "a thread-local slot for the registration the call planned, initialised empty: state, not a tunable"),
     ("src/script/host_parentinbox.rs", "static SNAP", "a thread-local slot for the app database snapshot the call read, initialised empty: state, not a tunable"),
     ("src/script/host.rs", "static CALL", "a thread-local slot for the request state of one script call, initialised empty: state, not a tunable"),
+    ("src/daemon.rs", "static REQUEST_PEER", "a thread-local slot for the socket peer of the request being served, initialised empty: state, not a tunable"),
     ("src/mem/registry.rs", "pub const fn new(", "the constructor signature of a holder's identity (its config keys are the arguments)"),
     ("src/mem/registry.rs", "pub const fn with_entries(", "the constructor signature of a holder's identity"),
     (
