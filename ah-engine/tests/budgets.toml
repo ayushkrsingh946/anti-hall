@@ -36,3 +36,10 @@ devswarm_parent_inbox_checkout_p50_ms = 40
 devswarm_child_turn_p50_ms = 10
 devswarm_child_turn_checkout_p50_ms = 40
 debug_factor = 10
+
+[time_scale]
+# The headroom factor of the wall-clock assertions (tests/common/scale.rs, `scaled`). The factor is ceil(load1 / (cores * load_per_core)):
+# 1 while the one-minute load is at most half the cores (a quiet machine keeps every bound exactly as written), 2 up to the cores, and so
+# on, never above `max`. AH_TEST_TIME_SCALE=<n> overrides it (CI sets it).
+load_per_core = 0.5
+max = 8

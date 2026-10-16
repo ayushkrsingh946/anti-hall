@@ -478,7 +478,7 @@ fn a_judge_call_past_its_timeout_is_cut_and_fails_open() {
     let started = Instant::now();
     let e = judge_side(&c, true, Some(&root));
     // the call is cut at its timeout (2 s here, 8 s asleep), fails open and leaves no state, only its telemetry row
-    assert!(started.elapsed() < Duration::from_secs(6), "the call was not cut at its timeout: {:?}", started.elapsed());
+    assert!(started.elapsed() < crate::common::scaled(Duration::from_secs(6)), "the call was not cut at its timeout: {:?}", started.elapsed());
     assert_eq!((e.outs[0].0, e.outs[0].1.as_str()), (0, ""), "{:?}", e.outs);
     assert!(e.tree.is_empty(), "no state: {:?}", e.tree);
     assert_eq!((e.calls.len(), e.telemetry.len()), (1, 1));

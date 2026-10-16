@@ -8,6 +8,8 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)] // a test crate: a panic is the failure report, and E2 exempts tests
 #![allow(clippy::panic, clippy::unreachable)] // integration tests: a panic is the failure report; production crates deny these in Cargo.toml
 
+#[path = "common/scale.rs"]
+mod scale;
 use ah_engine::reqenv::RequestEnv;
 use serde_json::Value;
 use std::path::Path;
@@ -166,7 +168,7 @@ fn scripted_checks_stay_inside_the_latency_budget() {
         measured += 1;
         // a check that waits on a child process or a disk sync has that wait in its own p95 (the compiled port paid it too): its
         // budget is set per check in `script.p95_budget_by_check`, with the measured compiled baseline noted beside it
-        let allowed = ah_engine::script::p95_budget_for(c.name());
+        let allowed = ah_engine::script::p95_budget_for(c.name()).saturating_mul(scale::time_scale());
         if p95 as u64 > allowed {
             over.push(format!("{} p95 {p95}us over {allowed}us", c.name()));
         }

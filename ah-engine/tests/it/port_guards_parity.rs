@@ -463,7 +463,7 @@ fn spawn_payload(tool: &str, input: Value, transcript: Option<&str>) -> Value {
 
 /// The wall-clock headroom factor for a loaded runner: `AH_TEST_TIME_SCALE` (CI sets it), 1 when unset.
 fn time_scale() -> u64 {
-    std::env::var("AH_TEST_TIME_SCALE").ok().and_then(|v| v.parse().ok()).unwrap_or(1).max(1)
+    crate::common::time_scale()
 }
 
 fn log_of(ages_ms: &[u64]) -> String {

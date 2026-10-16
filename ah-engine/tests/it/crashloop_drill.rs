@@ -190,7 +190,7 @@ fn sha_of(p: &Path) -> String {
 fn wait_for(what: &str, mut done: impl FnMut() -> bool) {
     let t = Instant::now();
     while !done() {
-        assert!(t.elapsed() < Duration::from_secs(20), "timed out waiting for {what}");
+        assert!(t.elapsed() < crate::common::scaled(Duration::from_secs(20)), "timed out waiting for {what}");
         std::thread::sleep(Duration::from_millis(100));
     }
 }
