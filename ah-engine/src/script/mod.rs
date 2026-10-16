@@ -251,6 +251,7 @@ impl Pool {
         let epoch = Instant::now();
         let d = deadline.clone();
         rt.set_interrupt_handler(Some(Box::new(move || {
+            POLLS.with(|c| c.set(c.get().wrapping_add(1)));
             let (cpu, wall) = (d.cpu.load(Ordering::Relaxed), d.wall.load(Ordering::Relaxed));
             if cpu != 0 || wall != 0 {
                 crate::deadline::beat(); // the interpreter is running: a slow call, not a hung worker
@@ -295,6 +296,16 @@ fn budget() -> &'static crate::mem::Budget {
 
 thread_local! {
     static POOL: RefCell<Option<Pool>> = const { RefCell::new(None) };
+    /// How many times the interpreter has polled its interrupt handler on this thread. The interpreter polls on a fixed count of
+    /// calls and backward jumps, so the number is a measure of the work scripts did that does not depend on the machine's load
+    /// (a test that a script does less work cannot use a clock).
+    static POLLS: std::cell::Cell<u64> = std::cell::Cell::default();
+}
+
+/// The interrupt polls of this thread's interpreter so far (see [`POLLS`]).
+#[cfg(test)]
+pub(crate) fn interpreter_polls() -> u64 {
+    POLLS.with(std::cell::Cell::get)
 }
 
 /// The calling thread's interpreter after a collection: (checks loaded, bytes QuickJS holds, allocations outstanding,
