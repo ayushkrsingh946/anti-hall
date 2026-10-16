@@ -192,6 +192,11 @@ var ah = {
     walkHas: function (which, needle) { return ahHost.transcriptWalkHas(which, needle); },
     // The same sorted array `ah.re.numbers(src, flags, text, strip)` gives on that text.
     walkNumbers: function (which, src, flags, strip) { return JSON.parse(ahHost.transcriptWalkNumbers(which, src, flags || '', strip || '')); },
+    // The tool uses of the lines of the last windowBytes that hold one of `needles`, read in the engine (the tasklist guard's work count):
+    // null (unreadable) or, in order, ['u'] (a line only JavaScript reads exactly: stop, defer), ['n'] (a line that is JSON null: stop) and
+    // [timestamp (a string, else null), [[name, file_path|null, command|null]]] per entry with a string timestamp or a tool use
+    // (found through the `keys` of nested objects; a non-string name is ''). Blank and invalid lines are left out.
+    toolUseScan: function (p, windowBytes, needles, keys) { var r = ahHost.toolUseScan(p, windowBytes || 0, needles, keys); return r === null || r === undefined ? null : JSON.parse(r); },
     // Finished-but-not-stopped named teammates of a Claude transcript tail: null, {unsure: true} or {teammates: [{name, idleSinceMs}]}.
     teammates: function (p, tailBytes) { var r = ahHost.transcriptTeammates(p, tailBytes || 0); return r === null || r === undefined ? null : JSON.parse(r); },
     // Finished-but-not-closed agents of a Codex rollout tail: null, {unsure: true} or {agents: [{id, label, idleSinceMs}]}.
