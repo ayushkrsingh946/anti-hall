@@ -30,9 +30,9 @@ use crate::defaults;
 use crate::dsact::runner::{Runner, System};
 use crate::mem::{Owner as MemOwner, Spec};
 use crate::meshw::idlock::devswarm_root;
-use drain::{Drainer, Project, Start};
+use drain::{Drainer, DropReason, Project, Start};
 use serde_json::{Value, json};
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
@@ -93,10 +93,42 @@ fn registered(home: &Path) -> (BTreeSet<String>, Vec<String>) {
     (keys, worktrees.into_values().collect())
 }
 
+/// The last drop reason logged per path. In-process on purpose: the discovery loop runs in one daemon thread and repeats every
+/// `devswarm_ingest.discover_ms`, so a map keeps it to one line per (path, reason) with no file I/O; a restart repeats each line
+/// once, which is wanted (the log then says what the new process sees). Bounded by `devswarm_ingest.drop_log_max_paths`.
+static DROPPED: Mutex<BTreeMap<String, String>> = Mutex::new(BTreeMap::new());
+
+/// Log that `path` is not drained, and count it, when `reason` is new for the path.
+fn note_drop(home: &Path, path: &str, reason: &DropReason) {
+    let word = reason.word();
+    {
+        let mut g = DROPPED.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if g.get(path).is_some_and(|w| w == word) {
+            return;
+        }
+        if g.len() >= defaults::num("devswarm_ingest.drop_log_max_paths") as usize && !g.contains_key(path) {
+            g.clear();
+        }
+        g.insert(path.to_string(), word.to_string());
+    }
+    drain::log_line(home, &defaults::render("devswarm_ingest.msg_project_dropped", &[("path", &path), ("reason", &word), ("detail", &reason.detail)]));
+    crate::metrics::bump("ingest_drops", &[("reason", word)]);
+}
+
+/// The path resolves again (or was never dropped): forget its reason, so a later drop is logged afresh.
+fn note_kept(path: &str) {
+    DROPPED.lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(path);
+}
+
 /// The projects to drain: explicit, the registered workspaces' projects, from fresh Node heartbeats, and remembered; all but the
 /// explicit ones only when a workspace descriptor names their repo key (`devswarm_ingest.require_registered`). Newly found
 /// qualifying paths are remembered in `<state dir>/devswarm_ingest.remembered`. One project per repo key.
 pub fn discover(home: &Path, state_dir: &Path, explicit: &str, now: i64) -> Vec<Project> {
+    discover_with(home, state_dir, explicit, now, true)
+}
+
+/// [`discover`]; `log` writes the drop lines (the read-only status verb, a separate process each time, does not).
+fn discover_with(home: &Path, state_dir: &Path, explicit: &str, now: i64, log: bool) -> Vec<Project> {
     let mut paths: BTreeSet<String> = BTreeSet::new();
     let sep = defaults::text("devswarm_ingest.projects_separator");
     let explicit: BTreeSet<String> = explicit.split(sep).map(str::trim).filter(|p| !p.is_empty()).map(str::to_string).collect();
@@ -125,9 +157,23 @@ pub fn discover(home: &Path, state_dir: &Path, explicit: &str, now: i64) -> Vec<
     let mut out = Vec::new();
     let mut found: BTreeSet<String> = BTreeSet::new();
     for p in explicit.iter().chain(paths.iter()).chain(remembered.iter()) {
-        let Some(pr) = Project::resolve(p) else { continue };
+        let pr = match Project::resolve_why(p) {
+            Ok(pr) => pr,
+            Err(why) => {
+                if log {
+                    note_drop(home, p, &why);
+                }
+                continue;
+            }
+        };
         if require && !explicit.contains(p) && !registered_keys.contains(&pr.repo_key) {
+            if log {
+                note_drop(home, p, &DropReason::new("devswarm_ingest.drop_reason_unregistered", pr.repo_key));
+            }
             continue;
+        }
+        if log {
+            note_kept(p);
         }
         if !before.contains(p) {
             found.insert(p.clone());
@@ -751,7 +797,7 @@ fn discover_readonly(home: &Path, state_dir: &Path, explicit: &str, now: i64) ->
     if let Ok(t) = std::fs::read(&remembered) {
         crate::discard::harmless(crate::atomic::write(scratch.join(defaults::text("devswarm_ingest.remembered")), t)); // keep: a read-only copy
     }
-    let out = discover(home, &scratch, explicit, now);
+    let out = discover_with(home, &scratch, explicit, now, false);
     crate::discard::harmless(std::fs::remove_dir_all(&scratch)); // keep: our own scratch
     out
 }

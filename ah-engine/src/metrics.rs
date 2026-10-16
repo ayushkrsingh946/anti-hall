@@ -83,6 +83,34 @@ pub fn is_registered(name: &str) -> bool {
     defaults::has(&format!("metric.{name}"))
 }
 
+/// Counts bumped by code that holds no `Metrics` (resolvers, discovery): series key -> (name, labels, count). The daemon moves them
+/// into its registry whenever it reads or snapshots the metrics ([`drain_pending`]).
+type Pending = BTreeMap<String, (String, Vec<(String, String)>, u64)>;
+static PENDING: std::sync::Mutex<Pending> = std::sync::Mutex::new(BTreeMap::new());
+
+/// Add one to the counter `name` from code that has no `Metrics` at hand. A name nobody registered is ignored (a test catches it),
+/// and so is a new series once `telemetry.max_series` are waiting, so the table stays bounded between two drains.
+pub fn bump(name: &str, labels: &[(&str, &str)]) {
+    if !is_registered(name) {
+        return;
+    }
+    let key = series(name, labels);
+    let mut g = PENDING.lock().unwrap_or_else(|e| e.into_inner());
+    if !g.contains_key(&key) && g.len() >= defaults::num("telemetry.max_series") as usize {
+        return;
+    }
+    g.entry(key).or_insert_with(|| (name.to_string(), labels.iter().map(|(l, v)| (l.to_string(), v.to_string())).collect(), 0)).2 += 1;
+}
+
+/// Move the counts [`bump`] gathered into `m`.
+pub fn drain_pending(m: &mut Metrics) {
+    let taken = std::mem::take(&mut *PENDING.lock().unwrap_or_else(|e| e.into_inner()));
+    for (name, labels, n) in taken.into_values() {
+        let l: Vec<(&str, &str)> = labels.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
+        m.add(&name, &l, n);
+    }
+}
+
 impl Metrics {
     /// Resolve the series key, collapsing label values into the overflow series once a metric has too many.
     fn key(&mut self, name: &str, labels: &[(&str, &str)], exists: bool) -> String {

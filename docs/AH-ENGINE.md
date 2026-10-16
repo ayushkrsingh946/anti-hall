@@ -768,6 +768,8 @@ An engine poke / escalation writes Node's liveness verdict and recovery log line
 - *The witness.* The engine mirrors each drained batch's raw bytes and the rows it wrote under `~/.anti-hall/witness/`. Every `witness_every_ms` Node's own `ingestPayload` runs over the mirror in a scratch HOME against an empty scratch store; per batch the message count, the lossy flag and every row's hash, time and body are compared, and every mirrored row is checked in the live store (a loss check). Node never reads the live queue or the live store. One line per comparison goes to `~/.anti-hall/logs/devswarm-ingest-witness.ndjson`.
 - *Not ported.* The sweep of other projects' orphaned ingest lock files (the engine's lock takeover already reclaims a dead holder of its own project's lock) and the wedged-holder SIGKILL (the engine never signals a lock holder). A message time whose `Date.parse` form the engine does not reproduce uses the import time and counts in `tsFallbacks`. When the engine cannot derive the summary projection for an exotic store it logs `summary refresh deferred`; the next refresh by any writer updates it.
 
+- *Dropped paths.* A path found as a project that is not drained is logged in the ingest log once per (path, reason) and counted in `ingest_drops` (label `reason`: `identity-deferred`, `not-a-repository`, `main-worktree-missing`, `no-repo-key`, `primary-id-error`, `not-registered`; texts in `devswarm_ingest.drop_reason_*`).
+
 The Node witness runs non-acting (scratch HOME, recording stub, `devswarm_rt.witness_home`); `rt-shadow.ndjson` and `dsact.shadow` record agreement.
 
 ## Telemetry (D78, D77)

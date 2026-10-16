@@ -8787,6 +8787,13 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_ingest.discover_max_age_ms` | `900000` |  | ms | A Node ingest heartbeat written within this long names a project the Node daemon serves, so the engine serves it after the cutover. |
 | `devswarm_ingest.discover_ms` | `60000` |  | ms | How often the engine looks for projects it does not drain yet. |
 | `devswarm_ingest.done_body_prefix` | `DONE:` |  |  | The start of an auto done notice body (`DONE: <branch> ...`); the word after it names the sender's branch, for rows written before the ingest stamped a sender. |
+| `devswarm_ingest.drop_log_max_paths` | `1024` |  |  | Most paths whose last drop reason is remembered (the once-per-reason memory); past it the memory starts over, which can repeat a line. |
+| `devswarm_ingest.drop_reason_defer` | `identity-deferred` |  |  | The drop reason when the identity resolver cannot tell the project's repository without git (detail: the deferral code, e.g. git-superproject). |
+| `devswarm_ingest.drop_reason_no_key` | `no-repo-key` |  |  | The drop reason when the resolver gave no repo key. |
+| `devswarm_ingest.drop_reason_no_main` | `main-worktree-missing` |  |  | The drop reason when the repository's main worktree is not an existing directory (detail: that path). |
+| `devswarm_ingest.drop_reason_non_git` | `not-a-repository` |  |  | The drop reason for a path that is not in a git repository or no longer exists (detail: the kind the resolver reported). |
+| `devswarm_ingest.drop_reason_primary_id` | `primary-id-error` |  |  | The drop reason when the Primary's workspace id could not be derived (detail: the resolver's code). |
+| `devswarm_ingest.drop_reason_unregistered` | `not-registered` |  |  | The drop reason for a project no workspace descriptor names while devswarm_ingest.require_registered is on (detail: its repo key). |
 | `devswarm_ingest.entry_rand_len` | `8` |  |  | How many random base-36 characters end a WAL entry id (`<time>-<pid>-<seq>-<random>`). |
 | `devswarm_ingest.env_hivecontrol` | `ANTIHALL_DEVSWARM_HIVECONTROL` |  |  | The environment variable that names the hivecontrol executable (the installer baked it into the unit; the engine reads it too). |
 | `devswarm_ingest.env_path` | `PATH` |  |  | The environment variable the heartbeat records the daemon's PATH from. |
@@ -8833,6 +8840,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_ingest.msg_no_detail` | `monitor run failed (no error detail)` |  |  | The error text of a failed monitor call that carried none. |
 | `devswarm_ingest.msg_no_store` | `the store is not open` |  |  | The refusal when the store is not open. |
 | `devswarm_ingest.msg_output_truncated` | `WARN: monitor output exceeded the cap ({bytes} bytes kept) - the excess is un...` |  |  | The log line when a monitor call printed more than could be kept. {bytes}. |
+| `devswarm_ingest.msg_project_dropped` | `ingest project skipped: path={path}, reason={reason}, detail={detail}` |  |  | The log line when a path found as a project is not drained, written once per (path, reason). {path} {reason} {detail}. |
 | `devswarm_ingest.msg_quarantine_capped` | `not written (quarantine directory at its file cap; existing files preserved)` |  |  | What the loss line says when the quarantine directory is full. |
 | `devswarm_ingest.msg_quarantine_failed` | `quarantine write failed` |  |  | What the loss line says when the quarantine file could not be written. |
 | `devswarm_ingest.msg_refused_prefix` | `ingest drain not started: ` |  |  | The start of the log line when a drain does not start. |
@@ -10660,6 +10668,7 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `dswire_mode_change` | counter | changes | mode | Times the DevSwarm layer's mode (devswarm_rt.mode) changed while the daemon ran, by the new mode. |
 | `dswire_stall_actions` | counter | actions | kind, outcome | Pokes and escalations of silent workspaces the engine ran or refused (feature 5), by kind (poke, escalate) and outcome (ok, failed, refused); the same actions, their inputs and the mistake signals found later are in the action log (`ah-engine telemetry actions stall`). |
 | `dswire_standdown` | counter | sweeps | kind | Action sweeps the engine skipped because the action's executor is not the engine. |
+| `ingest_drops` | counter | paths | reason | Paths found as ingest projects that were not drained, counted when the reason is first seen or changes, by reason. |
 
 ## Impact kinds
 
