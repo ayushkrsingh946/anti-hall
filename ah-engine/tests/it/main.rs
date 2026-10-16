@@ -66,6 +66,7 @@ mod jev_cache_parity;
 mod jev_integrations_parity;
 mod jev_keep_parity;
 mod jev_report_parity;
+mod jev_review_scan_mem;
 mod jev_scrub_reload;
 mod js_number_printers;
 mod judge_parity;
