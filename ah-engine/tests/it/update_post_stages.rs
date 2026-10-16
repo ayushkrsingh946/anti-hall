@@ -323,6 +323,72 @@ fn seed_split(home: &Path) {
     put(home, &format!(".anti-hall/devswarm/store/{STORE}/journal/w1.ndjson"), "{\"workspaceId\":\"w1\",\"ts\":1,\"hash\":\"zz\",\"body\":\"only in the journal\"}\n");
 }
 
+static CHILD: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// A linked worktree of the shared checkout: a CHILD worktree (the main one is the Primary checkout).
+fn child() -> &'static Path {
+    CHILD.get_or_init(|| {
+        let r = repo();
+        let git = |args: &[&str]| {
+            let ok = Command::new("git").args(args).current_dir(r).env("GIT_CONFIG_GLOBAL", "/dev/null").status().unwrap().success();
+            assert!(ok, "git {args:?}");
+        };
+        git(&["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init"]);
+        let p = PathBuf::from(format!("{}-child", r.display()));
+        git(&["worktree", "add", "-q", &p.to_string_lossy()]);
+        fs::canonicalize(p).unwrap()
+    })
+}
+
+/// The `primary-<hash>` sender label of the child worktree.
+fn child_label() -> String {
+    ah_engine::meshw::ident::canonical_mesh_id(&child().to_string_lossy()).unwrap().unwrap()
+}
+
+fn msg_from(st: &MeshStore, ws: &str, n: i64, hash: &str, sender: &str) {
+    st.append_mesh_row(&MeshRow {
+        workspace_id: ws.into(),
+        ts: 1_790_000_000_000 + n,
+        hash: Some(hash.into()),
+        body: format!("m{n}"),
+        sender: Some(sender.into()),
+        recipient: Some(ws.into()),
+        mtype: Some("direct".into()),
+        urgency: Some("normal".into()),
+        ..MeshRow::default()
+    })
+    .unwrap();
+}
+
+/// A message sent under the label of the PRIMARY checkout, whose worktree has a registered row: not a child's label.
+fn seed_labels_primary(home: &Path) {
+    let st = open_store(home, STORE);
+    registry(&st, "kid-1", Some(&repo().to_string_lossy()), None);
+    msg_from(&st, "kid-1", 0, "p1", &anchor());
+}
+
+/// A child worktree's sends carry its `primary-<hash>` label and no registry row holds that label: the label would be aliased.
+fn seed_labels_sender(home: &Path) {
+    let st = open_store(home, STORE);
+    registry(&st, "kid-2", Some(&child().to_string_lossy()), None);
+    msg_from(&st, "kid-2", 0, "c1", &child_label());
+}
+
+/// The phantom `primary-<childhash>` registry row an older build minted for the child, beside the child's real row.
+fn seed_labels_row(home: &Path) {
+    let st = open_store(home, STORE);
+    let wt = child().to_string_lossy().into_owned();
+    registry(&st, "kid-2", Some(&wt), None);
+    registry(&st, &child_label(), Some(&wt), None);
+    msg_from(&st, &child_label(), 0, "c1", "kid-2");
+}
+
+/// The same, but two real rows live on the child worktree: which one the label stands for is not provable, so nothing is guessed.
+fn seed_labels_ambiguous(home: &Path) {
+    seed_labels_row(home);
+    registry(&open_store(home, STORE), "kid-3", Some(&child().to_string_lossy()), None);
+}
+
 // ---- the picture of a world ----------------------------------------------------------------------------------------------
 
 fn near_now(v: i64) -> bool {
@@ -396,6 +462,9 @@ fn picture(w: &World, answer: Value, anchor: Option<&str>) -> Value {
     let pid = std::process::id();
     let far = ah_engine::meshw::cursors::short_nonce(&format!("anc:{pid}:{FAR_FUTURE}"));
     text = text.replace(&format!("h:{pid}:"), "h:{PID}:").replace(&far, "{SHORT}");
+    if CHILD.get().is_some() {
+        text = text.replace(&child_label(), "{CHILD_LABEL}");
+    }
     if let Some(r) = REPO.get() {
         text = text.replace(r.to_string_lossy().as_ref(), "{REPO}");
     }
@@ -566,6 +635,11 @@ case!(split_merge_on_stores_that_are_not_split_reports_zero, "merge-split-backen
 case!(split_merge_ignores_the_ingest_dry_run_switch_like_node, "merge-split-backend-stores", "dry_run", "merge-split-backend-stores", "mergeSplitBackendStores", "mergeSplitBackendStoresPostUpdate", seed_not_split, live: false, markers: false);
 case!(split_merge_already_done_is_skipped, "merge-split-backend-stores", "already_done", "merge-split-backend-stores", "mergeSplitBackendStores", "mergeSplitBackendStoresPostUpdate", seed_not_split, live: true, markers: true);
 
+case!(child_labels_skip_the_label_of_the_primary_checkout, "child-sender-labels", "primary_label", "child-sender-labels", "childSenderLabels", "childSenderLabelsPostUpdate", seed_labels_primary, live: true, markers: false);
+case!(child_labels_preview_counts_an_unaliased_sender_label, "child-sender-labels", "sender_dry", "child-sender-labels", "childSenderLabels", "childSenderLabelsPostUpdate", seed_labels_sender, live: false, markers: false);
+case!(child_labels_report_an_ambiguous_child_row_and_guess_nothing, "child-sender-labels", "ambiguous", "child-sender-labels", "childSenderLabels", "childSenderLabelsPostUpdate", seed_labels_ambiguous, live: true, markers: false);
+case!(child_labels_already_done_is_skipped, "child-sender-labels", "already_done", "child-sender-labels", "childSenderLabels", "childSenderLabelsPostUpdate", seed_labels_sender, live: true, markers: true);
+
 case!(promote_turns_a_marker_into_the_heartbeat_session, "promote-unclaimed", "bad_state", "promote-unclaimed", "promoteUnclaimed", "promoteUnclaimedPostUpdate", seed_promote, live: true, markers: false);
 case!(promote_ignores_the_ingest_dry_run_switch_like_node, "promote-unclaimed", "dry_run_switch", "promote-unclaimed", "promoteUnclaimed", "promoteUnclaimedPostUpdate", seed_promote, live: false, markers: false);
 
@@ -600,7 +674,7 @@ fn a_stage_switched_off_reports_itself_skipped_and_touches_nothing() {
     let out = run_engine(&w, &o, &["--post-pull-only"]);
     let status: Value = serde_json::from_str(out.stdout.lines().next().unwrap()).unwrap();
     let status = &status["status"];
-    for (key, name) in [("readerCursorsImport", "reader-cursors-import"), ("readerFloorRepair", "reader-floor-repair"), ("dualPartitionAcks", "dual-partition-acks"), ("promoteUnclaimed", "promote-unclaimed"), ("cursorHygiene", "cursor-hygiene"), ("mergeSplitBackendStores", "merge-split-backend-stores")] {
+    for (key, name) in [("readerCursorsImport", "reader-cursors-import"), ("readerFloorRepair", "reader-floor-repair"), ("dualPartitionAcks", "dual-partition-acks"), ("promoteUnclaimed", "promote-unclaimed"), ("cursorHygiene", "cursor-hygiene"), ("mergeSplitBackendStores", "merge-split-backend-stores"), ("childSenderLabels", "child-sender-labels")] {
         let a = &status[key];
         assert_eq!(a["attempted"], json!(false), "{key}: {a}");
         assert_eq!(a["disabled"], json!(true), "{key}: {a}");
@@ -735,4 +809,24 @@ fn a_split_store_is_left_to_the_node_function_untouched() {
     assert!(calls[0].contains("mergeSplitBackendStoresPostUpdate"), "{calls:?}");
     let after = picture(&w, Value::Null, None);
     assert_eq!(before, after, "the engine changed a split store it handed to Node");
+}
+
+/// Aliasing a child's label, forwarding its unread mail and retiring the phantom row are Node's: the engine sees there is work, writes
+/// nothing, and the stage's Node function answers from the untouched state (also for the preview of a registry label row).
+#[test]
+fn child_label_repairs_are_left_to_the_node_function_untouched() {
+    let cases: [(fn(&Path), bool); 3] = [(seed_labels_sender, true), (seed_labels_row, true), (seed_labels_row, false)];
+    for (seed, live) in cases {
+        let o = Opt { ds: true, no_upstream_move: true, live, no_node: true, stage_only: Some("child-sender-labels"), ..Opt::default() };
+        let w = world(&o);
+        seed(&w.home);
+        let before = picture(&w, Value::Null, None);
+        let ans = engine_answer(&w, &o, "childSenderLabels");
+        assert_eq!(ans["attempted"], json!(false), "{ans}");
+        let calls = stage_node_calls(&w);
+        assert_eq!(calls.len(), 1, "{calls:?}");
+        assert!(calls[0].contains("childSenderLabelsPostUpdate"), "{calls:?}");
+        let after = picture(&w, Value::Null, None);
+        assert_eq!(before, after, "the engine changed a store it handed to Node");
+    }
 }

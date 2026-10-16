@@ -58,6 +58,7 @@ pub(crate) fn run(ctx: &Ctx, which: &str, dry: bool) -> Option<Tally> {
                 "reader_cursors_import" => reader_cursors_import(ctx, &mut cx, &hashes, dry),
                 "reader_floor_repair" => reader_floor_repair(ctx, &mut cx, &hashes, dry),
                 "dual_partition_acks" => dual_partition_acks(ctx, &mut cx, &hashes, dry),
+                "child_sender_labels" => super::childlabels::run(ctx, &hashes, dry),
                 _ => return None,
             };
             if cx.deferred {
@@ -100,7 +101,7 @@ fn merge_split(ctx: &Ctx) -> Option<Tally> {
     Some(t)
 }
 
-fn swallowed(ctx: &Ctx, stage: &str, what: &str, e: &str) {
+pub(super) fn swallowed(ctx: &Ctx, stage: &str, what: &str, e: &str) {
     ctx.note(defaults::render("update_post.note_store", &[("stage", &stage), ("what", &what), ("error", &e)]));
 }
 
@@ -398,12 +399,12 @@ fn reconcile(cx: &mut Cx, h: &Handle, dry: bool, probe: bool, t: &mut Tally) -> 
 }
 
 /// `v[k]` of a JSON value: `null` when absent.
-fn jv<'a>(v: &'a Value, k: &str) -> &'a Value {
+pub(super) fn jv<'a>(v: &'a Value, k: &str) -> &'a Value {
     v.get(k).unwrap_or(&Value::Null)
 }
 
 /// `String(d.id)` of a registry row.
-fn row_id(d: &Value) -> Option<String> {
+pub(super) fn row_id(d: &Value) -> Option<String> {
     match jv(d, "id") {
         Value::String(s) => Some(s.clone()),
         Value::Number(n) => Some(to_js_string(n.as_f64()?)),
