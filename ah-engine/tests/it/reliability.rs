@@ -101,6 +101,15 @@ exec "$REAL_AH_ENGINE_BIN" "$@"
             .and_then(|s| s.trim().parse::<u64>().ok())
             .is_some_and(|until| until > ah_engine::health::now_ms())
     }
+    /// Block until the daemon-down marker has run out (or is absent), polling instead of sleeping a fixed TTL: a loaded machine
+    /// writes the marker late, so a fixed `ttl + 200 ms` sleep can end before it has expired. 5 s deadline, then fail.
+    fn wait_down_marker_expired(&self) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while self.fresh_down_marker() {
+            assert!(std::time::Instant::now() < deadline, "the daemon-down marker was still fresh after 5 s: {}", self.diag());
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
     fn spawn_attempt_count(&self) -> usize {
         self.health_log().lines().filter(|line| line.contains("\tclient_spawn_attempt\t")).count()
     }
@@ -1777,7 +1786,6 @@ fn a_stopped_daemon_costs_at_most_one_slow_call() {
     let old = e.pid().unwrap();
     signal(old, libc::SIGSTOP);
     let max_ms = clamped_num("client.slow_fallback_max_ms", 3000);
-    let ttl_ms = clamped_num("client.down_marker_ttl_ms", 3000);
     let (_, code, dt) = e.wrapper_hook(DENY_IN);
     println!("TIMING hung-daemon call 0 wall_ms={:.1} rc={code}", dt.as_secs_f64() * 1000.0);
     assert!(code == 0 || code == 2, "call 0 exited {code}");
@@ -1785,7 +1793,7 @@ fn a_stopped_daemon_costs_at_most_one_slow_call() {
     let mut times = Vec::new();
     for phase in 0..2 {
         if phase == 1 {
-            std::thread::sleep(Duration::from_millis(ttl_ms + 200)); // past the down marker: the hang must not cost again
+            e.wait_down_marker_expired(); // past the down marker: the hang must not cost again
         }
         for i in 0..5 {
             let (_, code, dt) = e.wrapper_hook(DENY_IN);
@@ -1882,7 +1890,7 @@ fn a_stale_heartbeat_fails_fast_and_never_kills_a_process_that_is_not_the_daemon
     println!("TIMING stale-heartbeat wall_ms={:.1} rc={code}", dt.as_secs_f64() * 1000.0);
     let marked = e.fresh_down_marker();
     // past the down marker, the same unchanged heartbeat confirms the hang: the replacement path runs and must spare it
-    std::thread::sleep(Duration::from_millis(clamped_num("client.down_marker_ttl_ms", 3000) + 200));
+    e.wait_down_marker_expired();
     let (_, code2, dt2) = e.wrapper_hook(DENY_IN);
     println!("TIMING stale-heartbeat confirming call wall_ms={:.1} rc={code2}", dt2.as_secs_f64() * 1000.0);
     let survived = stand_in.try_wait().unwrap().is_none();
@@ -1939,7 +1947,7 @@ fn a_stopped_daemon_that_resumes_before_confirmation_is_not_killed() {
     let (_, code, dt) = e.wrapper_hook(DENY_IN);
     println!("TIMING resumed-daemon suspect call wall_ms={:.1} rc={code}", dt.as_secs_f64() * 1000.0);
     signal(old, libc::SIGCONT);
-    std::thread::sleep(Duration::from_millis(clamped_num("client.down_marker_ttl_ms", 3000) + 200));
+    e.wait_down_marker_expired();
     let (_, after, _) = e.wrapper_hook(DENY_IN);
     let (survived, same) = (alive(old), e.pid() == Some(old));
     let log = e.health_log();
@@ -1976,7 +1984,7 @@ fn a_heartbeat_that_reads_old_but_keeps_moving_is_never_killed() {
     for i in 0..3 {
         let (_, code, dt) = e.wrapper_hook(DENY_IN);
         println!("TIMING moving-old-heartbeat call {i} wall_ms={:.1} rc={code}", dt.as_secs_f64() * 1000.0);
-        std::thread::sleep(Duration::from_millis(clamped_num("client.down_marker_ttl_ms", 3000) + 200));
+        e.wait_down_marker_expired();
     }
     stop.store(true, Ordering::SeqCst);
     ah_engine::discard::harmless(toucher.join());
@@ -2009,7 +2017,7 @@ fn stale_planted_heartbeat_two_calls(e: &Env, pid: u32, content: &str) {
     });
     for i in 0..2 {
         if i == 1 {
-            std::thread::sleep(Duration::from_millis(clamped_num("client.down_marker_ttl_ms", 3000) + 200));
+            e.wait_down_marker_expired();
         }
         let (_, code, dt) = e.wrapper_hook(DENY_IN);
         println!("TIMING planted-heartbeat call {i} wall_ms={:.1} rc={code}", dt.as_secs_f64() * 1000.0);
