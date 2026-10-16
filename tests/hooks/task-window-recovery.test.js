@@ -250,7 +250,7 @@ test('a REAL numbering restart (#1,#2,#1) is the boundary: the earlier epoch is 
       upd('2', { description: 'more' }, 'toolu_u'),
     ]);
     assert.strictEqual(blocked(r), false, r.stdout);
-    assert.ok(r.stdout.includes(UNKNOWN_NOTE), r.stdout);
+    assert.ok(r.stderr.includes(UNKNOWN_NOTE), r.stderr);
   } finally { h.cleanup(); }
 });
 
@@ -260,9 +260,9 @@ test('UNKNOWN NOTE: advisory only (never blocks by itself), throttled (not repea
     const msgs = [...create(17, 'stale', 'toolu_a'), ...taskListEmpty('toolu_l'), ...filler(BIG), upd('17', { description: 'more' }, 'toolu_u')];
     const first = guard(h, msgs);
     assert.strictEqual(blocked(first), false, first.stdout);
-    assert.ok(first.stdout.includes('[task-guard] ' + UNKNOWN_NOTE), first.stdout);
+    assert.ok(first.stderr.includes('[task-guard] ' + UNKNOWN_NOTE), first.stderr);
     const second = guard(h, msgs);
-    assert.ok(!second.stdout.includes('unknown state'), 'throttled: ' + second.stdout);
+    assert.ok(!second.stderr.includes('unknown state'), 'throttled: ' + second.stderr);
     const h2 = makeHome();
     try {
       const r = guard(h2, [...create(17, 'stale', 'toolu_a'), ...taskListEmpty('toolu_l'), ...filler(BIG), ...create(5, 'visible open', 'toolu_v'), upd('17', { description: 'more' }, 'toolu_u')]);
@@ -355,7 +355,7 @@ test('PRUNE: the last-unknown-* throttle files are swept after the 7-day TTL (ow
     const eightDays = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000);
     fs.utimesSync(old, eightDays, eightDays);
     const r = guard(h, [...create(17, 'stale', 'toolu_a'), ...taskListEmpty('toolu_l'), ...filler(BIG), upd('17', { description: 'more' }, 'toolu_u')]);
-    assert.ok(r.stdout.includes(UNKNOWN_NOTE), r.stdout);
+    assert.ok(r.stderr.includes(UNKNOWN_NOTE), r.stderr);
     assert.ok(!fs.existsSync(old), 'stale throttle file swept');
     assert.ok(fs.readdirSync(dir).some((n) => /^last-unknown-guard-t\.json$/.test(n)), 'own file kept');
   } finally { h.cleanup(); }

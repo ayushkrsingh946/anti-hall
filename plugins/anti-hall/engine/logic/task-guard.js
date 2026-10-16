@@ -325,7 +325,12 @@ function tgBlockReason(p, idle, demand, nudge, home) {
   });
 }
 
-function tgExact(out) { return out === '' ? 'allow' : { exact: { code: 0, out: out, err: '' } }; }
+// `note` (the advisories and the unknown-state note) goes to stderr: stdout stays empty or ONE JSON object, else the host reads a
+// block printed after a note as plain text (the block is lost) and the dispatcher cannot merge it with another Stop hook's JSON.
+function tgExact(note, json) {
+  json = json || '';
+  return note === '' && json === '' ? 'allow' : { exact: { code: 0, out: json, err: note } };
+}
 
 function tgQuiet(out, tasks, home, sessionId) {
   var plan = tk.unknownNote(tasks, home, sessionId, ah.cfg('task_guard.unknown_tag'));
@@ -418,5 +423,5 @@ function decide(p) {
   if (metrics !== null) { try { ah.state.writeAtomic(metrics.rel, metrics.body); } catch (e) { /* fail-open, as Node's writeMetrics */ } }
   var note = plan.write();
   if (note) reason += '\n' + note;
-  return tgExact(out + text.render(ah.cfg('task_guard.block_json'), { reason: JSON.stringify(reason) }));
+  return tgExact(out, text.render(ah.cfg('task_guard.block_json'), { reason: JSON.stringify(reason) }));
 }

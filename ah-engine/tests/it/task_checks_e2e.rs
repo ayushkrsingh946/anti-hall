@@ -133,6 +133,12 @@ fn dispatch_tier_does_nothing_while_jev_is_off_answers_when_it_is_on_and_defers_
 /// A Stop run through the dispatcher with every Stop hook of the event mapped to a no-op, except `only`, which is mapped to
 /// exit 99: a result of 99 proves the check deferred to its Node hook, 0 that the engine answered.
 fn stop_run(w: &World, only: &str, payload: &str) -> (i32, String) {
+    let (code, out, _) = stop_run_env(w, only, payload, &[]);
+    (code, out)
+}
+
+/// [`stop_run`] with extra environment variables, returning stderr too.
+fn stop_run_env(w: &World, only: &str, payload: &str, env: &[(&str, &str)]) -> (i32, String, String) {
     let ids = ids_for("Stop", "");
     assert!(ids.iter().any(|i| i == only), "{ids:?}");
     let map: serde_json::Map<String, serde_json::Value> = ids.iter().map(|id| (id.clone(), if id == only { "exit 99" } else { "true" }.into())).collect();
@@ -148,6 +154,7 @@ fn stop_run(w: &World, only: &str, payload: &str) -> (i32, String) {
         .env("AH_ENGINE_VERSION", "task-e2e")
         .env("AH_ENGINE_DISPATCH_IN_PROCESS", "1")
         .env("CLAUDE_PLUGIN_ROOT", &w.dir)
+        .envs(env.iter().copied())
         .current_dir(&w.dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -155,7 +162,7 @@ fn stop_run(w: &World, only: &str, payload: &str) -> (i32, String) {
     let mut ch = c.spawn().unwrap();
     ch.stdin.take().unwrap().write_all(payload.as_bytes()).unwrap();
     let o = ch.wait_with_output().unwrap();
-    (o.status.code().unwrap_or(-1), String::from_utf8_lossy(&o.stdout).into_owned())
+    (o.status.code().unwrap_or(-1), String::from_utf8_lossy(&o.stdout).into_owned(), String::from_utf8_lossy(&o.stderr).into_owned())
 }
 
 fn task_lines(status: &str) -> String {
@@ -182,6 +189,45 @@ fn task_guard_answers_a_stop_with_nothing_open_and_blocks_one_with_an_open_task(
         assert_eq!(out.contains("\"decision\":\"block\""), state_kept, "{status}: blocks exactly when a task is open: {out}");
         assert_eq!(state_file.exists(), state_kept, "{status}: the loop state file");
     }
+}
+
+/// stdout is nothing or one JSON object: the host reads anything else as plain text (a block next to a note is lost) and the
+/// dispatcher cannot merge plain text with another Stop hook's JSON (`dispatch_conflict`).
+fn assert_stdout_is_json_or_empty(out: &str, what: &str) {
+    let t = out.trim();
+    assert!(t.is_empty() || serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(t).is_ok(), "{what}: stdout is not one JSON object: {out:?}");
+}
+
+#[test]
+fn task_guard_advisories_never_share_stdout_with_the_answer() {
+    let w = World::new("task-guard-advisory");
+    std::fs::create_dir_all(w.path("home/.anti-hall/agents")).unwrap();
+    let payload = serde_json::json!({"hook_event_name": "Stop", "session_id": "s1", "cwd": w.path("proj"), "transcript_path": w.path("t.jsonl")}).to_string();
+    // live agents and an open task: the step-aside advisory goes to stderr, stdout stays empty
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64;
+    std::fs::write(w.path("home/.anti-hall/agents/a.json"), format!("{{\"ts\": {}}}", now - 60_000)).unwrap();
+    std::fs::write(w.path("t.jsonl"), task_lines("in_progress")).unwrap();
+    let (code, out, err) = stop_run_env(&w, "task-guard", &payload, &[]);
+    assert_eq!(code, 0, "answered by the engine");
+    assert_stdout_is_json_or_empty(&out, "live agents");
+    assert!(err.contains("[task-guard] open tasks remain but live agents are active"), "the advisory is kept on stderr: {err:?}");
+    // the prune advisory next to a block: stdout is exactly the block, the advisory on stderr
+    std::fs::remove_file(w.path("home/.anti-hall/agents/a.json")).unwrap();
+    let line = |v: serde_json::Value| format!("{v}\n");
+    let mut t = String::new();
+    for n in 1..=3 {
+        t += &line(serde_json::json!({"type": "assistant", "message": {"id": format!("c{n}"), "role": "assistant", "content": [{"type": "tool_use", "id": format!("c{n}"), "name": "TaskCreate", "input": {"subject": format!("t{n}")}}]}}));
+        t += &line(serde_json::json!({"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": format!("c{n}"), "content": format!("Task #{n} created successfully: t{n}")}]}}));
+    }
+    for n in 1..=2 {
+        t += &line(serde_json::json!({"type": "assistant", "message": {"id": format!("u{n}"), "role": "assistant", "content": [{"type": "tool_use", "id": format!("u{n}"), "name": "TaskUpdate", "input": {"taskId": n.to_string(), "status": "completed"}}]}}));
+    }
+    std::fs::write(w.path("t.jsonl"), t).unwrap();
+    let (code, out, err) = stop_run_env(&w, "task-guard", &payload, &[("ANTIHALL_PRUNE_COMPLETED_TASKS_AFTER", "1")]);
+    assert_eq!(code, 0, "answered by the engine");
+    assert_stdout_is_json_or_empty(&out, "prune advisory + block");
+    assert!(out.contains("\"decision\":\"block\""), "the block reaches the host: {out:?}");
+    assert!(err.contains("[task-guard] 2 completed/cancelled tasks"), "the prune advisory is kept on stderr: {err:?}");
 }
 
 #[test]
