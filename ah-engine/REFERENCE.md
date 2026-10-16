@@ -1289,6 +1289,10 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `transcript.task_result_max_bytes` | `1024` |  | bytes | Longest task-tool result text kept; the rest is cut at a character boundary and flagged. |
 | `transcript.task_statuses_kept` | `256` |  |  | How many of the newest task_status attachments (agents re-injected by a compaction) the index keeps. |
 | `transcript.task_tools` | `TodoWrite, TaskCreate, TaskUpdate, TaskList, TaskGet` |  |  | Names of the task tools whose uses and string results are kept in order, so a task list can be rebuilt from the index (mirrors hooks/lib/task-state.js). |
+| `transcript.tasks_cache_entry_max_bytes` | `4194304` |  | bytes | Largest estimated size of the kept task lines of one window; a larger one is not kept (the next call reads its window afresh). |
+| `transcript.tasks_cache_idle_ms` | `600000` |  | ms | How long kept task lines may sit unused before they are dropped. |
+| `transcript.tasks_cache_max_paths` | `24` |  | count | How many transcript windows' task lines `ah.transcript.tasks` keeps between calls, so a Stop reads only the bytes appended since the last one (0 turns the cache off and every call reads and parses its whole window). Each window size of a transcript is one entry. The least recently used is dropped first. |
+| `transcript.tasks_cache_probe_bytes` | `4096` |  | bytes | Bytes the first look for the newline that ends the cut first line of a window reads (a line is usually shorter); each further look reads twice as much, up to transcript.evidence_read_chunk_bytes. |
 | `transcript.terminal_statuses` | `completed failed stopped killed cancelled canceled` |  |  | Task-notification statuses that mean an agent has ended (hooks/lib/agent-scan.js TERMINAL_NOTIFICATION_STATUS), case-insensitive. |
 | `transcript.tool_input_max_bytes` | `4096` |  | bytes | Largest serialized tool input kept as is for a recent tool use; a larger input is replaced by null and flagged. |
 
@@ -3916,6 +3920,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `taskstate.re_not_found` | `^\s*Task\s*(?:#\S+)?\s*not\s+found\b` |  |  | JavaScript regex source (case-insensitive) of the TaskGet or TaskUpdate result that says one task id does not exist. |
 | `taskstate.since_status_re` | `^(pending\|in[-_]?progress)$` |  |  | JavaScript regex source (case-insensitive) of the TaskUpdate statuses that restart a task's clock (`sinceMs`, read by the idle-neglect proof). |
 | `taskstate.tail_bytes` | `1572864` |  |  | How much of the end of a transcript the task reconstruction reads (the Node `MAX_TAIL_BYTES`, 1.5 MiB). |
+| `taskstate.task_tools` | `TodoWrite, TaskCreate, TaskUpdate, TaskList, TaskGet` |  |  | The tool names a task reconstruction reacts to (a call that creates, updates, lists or reads tasks, or rewrites the whole list). The kept task lines (transcript.tasks_cache_*) hold every line that names one; a name a reconstruction acts on that is missing here would make its kept answer differ from a fresh read. |
 | `taskstate.terminal_status_re` | `^(completed\|done\|cancelled\|canceled\|deleted)$` |  |  | JavaScript regex source (case-insensitive) of the statuses that close a task for the backfill (`TERMINAL`). |
 | `taskstate.tools_collect_keys` | `content, message, messages, tool_uses, parts` |  |  | The object keys the tool-use collector descends into, in order (the Node `collectToolUses`). |
 | `taskstate.unknown_file_prefix` | `last-unknown` |  |  | Prefix of the per-session file that remembers which unknown set was last announced. |
@@ -9906,6 +9911,9 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `mem.spawn_probe_low_water_pct` | `80` |  |  | Percent of mem.spawn_probe_soft_bytes the spawn-probe cache is evicted down to when the soft limit is reached. |
 | `mem.spawn_probe_max_entries` | `64` |  |  | Spawn-probe answers the cache keeps at most; past it the least recently used is dropped first. |
 | `mem.spawn_probe_soft_bytes` | `65536` |  | bytes | Bytes of kept spawn-probe answers (`spawnProbeCached`) held before the least recently used are dropped down to the low-water mark. |
+| `mem.tasks_cache_hard_bytes` | `12582912` |  | bytes | Bytes of kept transcript task lines at which an insert is refused (the answer is returned, not kept) and the cache is recycled. |
+| `mem.tasks_cache_low_water_pct` | `80` |  |  | Percent of mem.tasks_cache_soft_bytes the kept transcript task lines are evicted down to when the soft limit is reached. |
+| `mem.tasks_cache_soft_bytes` | `6291456` |  | bytes | Bytes of kept transcript task lines held before the least recently used are dropped down to the low-water mark. |
 | `mem.transcript_tail_hard_bytes` | `8388608` |  | bytes | Bytes of cached transcript-tail answers at which an insert is refused (the answer is returned, not kept) and the cache is recycled. |
 | `mem.transcript_tail_low_water_pct` | `80` |  |  | Percent of mem.transcript_tail_soft_bytes the transcript-tail cache is evicted down to when the soft limit is reached. |
 | `mem.transcript_tail_max_entries` | `256` |  |  | Transcript-tail answers the cache keeps at most; past it the least recently used is dropped first. |
@@ -9964,7 +9972,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `wire.reason_undelivered` | `undelivered_verdict` |  |  | fail_open reason for a verdict the client never confirmed with ACK(res). |
 | `wire.req_word` | `REQ` |  |  | Second word of ACK(req): the daemon has read and parsed the request and will judge it. |
 | `wire.res_max_bytes` | `1024` |  | bytes | Longest ACK(res) line the daemon reads (the client's phase timings and the launcher counters ride in it). |
-| `wire.res_wait_ms` | `250` |  | ms | How long the daemon waits, after writing a reply, for the client's ACK(res). A reply whose ACK(res) is missing, late or malformed is counted and logged as an undelivered_verdict fail-open (a client that died closes its end, so that case is answered at once). |
+| `wire.res_wait_ms` | `250` |  | ms | How long the daemon waits, after writing a reply, for the client's ACK(res), sent once the reply is handed over (printed by a hook call, taken in by the dispatcher, before any work of its own). A reply whose ACK(res) is missing, late or malformed is counted and logged as an undelivered_verdict fail-open (a client that died closes its end, so that case is answered at once). |
 | `wire.res_word` | `RES` |  |  | Second word of ACK(res): the client has the verdict and handed it to the host. |
 | `wire.retry_min_ms` | `150` |  | ms | The client retries a request that was not acked only when at least this much of its deadline is left. |
 | `wire.why_closed` | `closed` |  |  | Why text: the client closed the connection without ACK(res). |
@@ -10280,6 +10288,7 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `busy_replies` | counter | requests |  | Requests answered BUSY (queue full or rate limited), which made the client fall back. |
 | `check_bytes_read` | counter | bytes | check, size | Transcript bytes a built-in check read (tail windows and walks it opened), by check and transcript size class; divide by check_calls for the mean per run. |
 | `check_calls` | counter | runs | check | Built-in check runs, by check. |
+| `check_cpu_us` | counter | us | check | CPU time (microseconds, the worker thread's own) spent inside each built-in check, by check: the sum over its calls. Divide by `check_calls` for the mean; wall time is `check_latency_us`. |
 | `check_decisions` | counter | runs | check, decision | Built-in check outcomes, by check and decision (allow, block, advisory, defer). |
 | `check_latency_by_size_us` | histogram | us | check, size | Wall time of a built-in check run, by check and by the size class of the transcript the request named (load.size_labels). |
 | `check_latency_us` | histogram | us | check | Wall time of a built-in check run, by check. |
@@ -10326,6 +10335,8 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `slow_replies` | counter | replies |  | Replies finished after their client's deadline had passed: slow but healthy (the client fell back to Node), counted apart from errors. |
 | `spool_applied` | counter | writes |  | Spooled writes the daemon applied (D24). |
 | `spool_quarantined` | counter | records |  | Spool records moved to quarantine: damaged, or refused for good by the store (D24). |
+| `tasks_cache` | counter | lookups | result | Task-line lookups of `ah.transcript.tasks` (task-guard, tasklist-guard, task-tracker): hit (nothing appended), extend (only the appended bytes were read) or rebuild (the window was read afresh). |
+| `tasks_cache_rebuild` | counter | lookups | reason | Why a task-line lookup read its window afresh: none (nothing kept: first call, daemon restart, eviction or idle expiry), file (another file or a shorter one), window (the window moved past the kept lines) or digest (the file was rewritten in place). |
 | `tel_dropped` | counter | samples | reason | Telemetry samples or events that could not be kept: slots (a counter table was full) or ring (an event was overwritten before it was flushed). |
 | `tel_events` | counter | invocations | k, h, e, o | Telemetry invocations recorded, by kind (k), hook or check (h), hook event (e) and outcome (o) (D78). |
 | `tel_injected_bytes` | counter | bytes | h, e | Bytes injected into model context, by hook or check (h) and hook event (e). The whole-hook rows (h=hook) add up to the total; a per-check row is attribution inside it (D78). |

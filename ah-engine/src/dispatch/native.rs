@@ -155,6 +155,7 @@ pub fn evaluate(meta: &Meta, p: &Value, over_cpu: &dyn Fn() -> bool, observe: &d
             }
         };
         crate::deadline::beat();
+        crate::load::note_check_cpu(crate::limits::thread_cpu_us().saturating_sub(cpu_before));
         observe(&e, &a, started.elapsed().as_micros() as u64);
         out.push((e.id, a));
     }
