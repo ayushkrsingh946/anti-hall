@@ -374,6 +374,13 @@ pub(crate) fn import_plan_dry(cx: &mut Cx, h: &Handle, partition: &str, cursor_p
     import_plan(cx, h, partition, cursor_path);
 }
 
+/// What `raiseAllLossFree` would plan for a partition not yet imported, for its side effect on [`Cx::deferred`] only.
+pub(crate) fn raise_probe(cx: &mut Cx, h: &Handle, partition: &str) {
+    if cursors::rows_from_reader(h.rd(), partition).is_ok_and(|rows| cursors::needs_import(&rows)) {
+        import_plan(cx, h, partition, None);
+    }
+}
+
 /// `importPlan(store, { partition, cursorPath, home })`.
 fn import_plan(cx: &mut Cx, h: &Handle, partition: &str, cursor_path: Option<&str>) -> Plan {
     let home = cx.home.clone();
@@ -469,11 +476,14 @@ pub(crate) fn import_legacy(cx: &mut Cx, h: &Handle, partition: &str, cursor_pat
                 return Ok(false);
             }
             let plan = import_plan(cx, h, partition, cursor_path);
+            if cx.deferred {
+                return Err(rusqlite::Error::ExecuteReturnedResults); // a case only Node decides: roll back, write nothing
+            }
             let wrote = apply_import(tx, partition, &rows, &plan, now)?;
             floors = Some(plan.floors);
             Ok(wrote)
         })
-        .map_err(|e| e.to_string())?;
+        .or_else(|e| if cx.deferred { Ok(false) } else { Err(e.to_string()) })?;
     if imported && let Some(f) = floors {
         for ns in namespaces() {
             dual_write(h, cx, partition, ns, cursor_path, f.at(ns));
@@ -495,6 +505,9 @@ pub(crate) fn raise_all_loss_free(cx: &mut Cx, h: &Handle, partition: &str, ns: 
             let mut rows = tx.rows(partition)?;
             if cursors::needs_import(&rows) {
                 let plan = import_plan(cx, h, partition, None);
+                if cx.deferred {
+                    return Err(rusqlite::Error::ExecuteReturnedResults); // a case only Node decides: roll back, write nothing
+                }
                 apply_import(tx, partition, &rows, &plan, now)?;
                 rows = tx.rows(partition)?;
             }
@@ -509,7 +522,10 @@ pub(crate) fn raise_all_loss_free(cx: &mut Cx, h: &Handle, partition: &str, ns: 
             }
             Ok(c)
         })
-        .map_err(|e| e.to_string())?;
+        .or_else(|e| if cx.deferred { Ok(0) } else { Err(e.to_string()) })?;
+    if cx.deferred {
+        return Ok(0);
+    }
     dual_write(h, cx, partition, ns, None, value as f64);
     Ok(n)
 }

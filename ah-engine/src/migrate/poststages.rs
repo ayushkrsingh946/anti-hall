@@ -103,6 +103,19 @@ fn import_needs_node(cx: &mut Cx, h: &rc::Handle, home: &Path) -> bool {
     false
 }
 
+/// Plan (read-only) every partition of a store for the floor repair; true when any plan met a case only Node decides.
+fn repair_needs_node(cx: &mut Cx, h: &rc::Handle) -> bool {
+    for id in h.rd().workspace_ids() {
+        if is_safe_id(&id) {
+            let _planned = rc::repair_pinned_floors(cx, h, &id, true); // keep: only the deferral flag matters, errors surface in the real pass
+            if cx.deferred {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 /// `importReaderCursorsAllStores(home)`.
 fn reader_cursors_import(ctx: &Ctx, cx: &mut Cx, hashes: &[String], dry: bool) -> Option<Tally> {
     let home = Path::new(&ctx.home);
@@ -166,6 +179,10 @@ fn reader_floor_repair(ctx: &Ctx, cx: &mut Cx, hashes: &[String], dry: bool) -> 
             }
         };
         t.add("stores", 1.0);
+        if !dry && repair_needs_node(cx, &h) {
+            // a case only Node decides: write nothing for this store, the Node fallback starts from the untouched state
+            return Some(t);
+        }
         for id in h.rd().workspace_ids() {
             if !is_safe_id(&id) {
                 continue;
@@ -206,7 +223,14 @@ fn dual_partition_acks(ctx: &Ctx, cx: &mut Cx, hashes: &[String], dry: bool) -> 
             }
         };
         t.add("stores", 1.0);
-        if let Err(e) = reconcile(cx, &h, dry, &mut t) {
+        if !dry {
+            // plan the whole store first (read-only): a case only Node decides leaves the store untouched for the fallback
+            let _planned = reconcile(cx, &h, true, true, &mut Tally::default()); // keep: only the deferral flag matters
+            if cx.deferred {
+                return Some(t);
+            }
+        }
+        if let Err(e) = reconcile(cx, &h, dry, false, &mut t) {
             t.add("errors", 1.0);
             swallowed(ctx, "dual-partition-acks", hash, &e);
         }
@@ -252,9 +276,9 @@ fn keys(m: &Msg) -> Vec<&String> {
     [m.hash.as_ref(), m.orig.as_ref()].into_iter().flatten().collect()
 }
 
-/// `reconcileDualPartitionAcks(s, home, dryRun, out)`: for every anchor/partner pair on one worktree, raise a partition's floor
+/// `reconcileDualPartitionAcks(s, home, dryRun, out)` (`probe`: plan only, and run what a raise would plan for an unimported partition): for every anchor/partner pair on one worktree, raise a partition's floor
 /// through the contiguous prefix of rows already consumed in the other (MAX-only, loss-free; stops at the first row not).
-fn reconcile(cx: &mut Cx, h: &Handle, dry: bool, t: &mut Tally) -> Result<(), String> {
+fn reconcile(cx: &mut Cx, h: &Handle, dry: bool, probe: bool, t: &mut Tally) -> Result<(), String> {
     let registry = h.rd().roster().map_err(|e| e.to_string())?;
     let mut order: Vec<String> = Vec::new();
     let mut groups: HashMap<String, Vec<String>> = HashMap::new();
@@ -273,6 +297,9 @@ fn reconcile(cx: &mut Cx, h: &Handle, dry: bool, t: &mut Tally) -> Result<(), St
             order.push(key.clone());
         }
         groups.entry(key).or_default().push(id);
+    }
+    if cx.deferred {
+        return Ok(()); // a worktree only git can place: nothing is raised for this store
     }
     let sid_of: HashMap<String, String> = registry.iter().filter_map(|d| row_id(d).map(|i| (i, jv(d, "sessionId").as_str().unwrap_or("").to_string()))).collect();
     for mesh_id in order {
@@ -315,6 +342,10 @@ fn reconcile(cx: &mut Cx, h: &Handle, dry: bool, t: &mut Tally) -> Result<(), St
             }
             t.add("partitions", 1.0);
             t.add("rows", (to as i64 - me.floor) as f64);
+            if probe {
+                rc::raise_probe(cx, h, id);
+                continue;
+            }
             if dry {
                 t.add("wouldRaise", 1.0);
                 continue;

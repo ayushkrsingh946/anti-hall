@@ -137,6 +137,53 @@ fn seed_import_deferred(home: &Path) {
     put(home, &format!(".claude/sessions/{pid}.json"), &format!(r#"{{"pid":{pid},"startedAt":{FAR_FUTURE},"cwd":"relative/dir"}}"#));
 }
 
+/// Two imported partitions; `a1` has a reader whose process is gone (it would be retired), `primary-0123abcd` a live reader whose
+/// session names a relative `cwd` that only Node can classify.
+fn seed_floors_deferred(home: &Path) {
+    let st = open_store(home, STORE);
+    let pid = std::process::id();
+    for p in ["a1", "primary-0123abcd"] {
+        for i in 0..3 {
+            msg(&st, p, i, &format!("{p}{i}"), None);
+        }
+        for ns in ["store", "nd"] {
+            cur(&st, p, ns, "#floor", 0);
+        }
+    }
+    for ns in ["store", "nd"] {
+        cur(&st, "a1", ns, GONE, 0);
+        cur(&st, "primary-0123abcd", ns, &format!("h:{pid}:{FAR_FUTURE}"), 0);
+    }
+    put(home, &format!(".claude/sessions/{pid}.json"), &format!(r#"{{"pid":{pid},"startedAt":{FAR_FUTURE},"cwd":"relative/dir"}}"#));
+}
+
+/// `seed_dual`, plus a registry row whose worktree path is relative (only git can place it).
+fn seed_dual_deferred(home: &Path) {
+    seed_dual(home);
+    registry(&open_store(home, STORE), "rel-1", Some("relative/wt"), None);
+}
+
+/// The anchor was never imported and the twin read all three of its rows (so the anchor would be raised through the import),
+/// while a live session names a relative `cwd` that only Node can classify.
+fn seed_dual_import_deferred(home: &Path) {
+    let st = open_store(home, STORE);
+    let (a, wt) = (anchor(), repo().to_string_lossy().into_owned());
+    registry(&st, &a, Some(&wt), None);
+    registry(&st, "kid-1", Some(&wt), None);
+    for (i, h) in ["x1", "x2", "x3"].iter().enumerate() {
+        msg(&st, &a, i as i64, h, None);
+    }
+    for (i, (h, o)) in [("y1", Some("x1")), ("y2", Some("x2")), ("y3", Some("x3"))].iter().enumerate() {
+        msg(&st, "kid-1", 10 + i as i64, h, *o);
+    }
+    for ns in ["store", "nd"] {
+        cur(&st, "kid-1", ns, "#floor", if ns == "store" { 3 } else { 0 });
+    }
+    drop(st);
+    let pid = std::process::id();
+    put(home, &format!(".claude/sessions/{pid}.json"), &format!(r#"{{"pid":{pid},"startedAt":{FAR_FUTURE},"cwd":"relative/dir"}}"#));
+}
+
 /// Floors the v0.106.0 import pinned: readers whose process is gone, one whose session file names another session, one live
 /// but not local, one local that really read; an nd floor imported as 0 on a partition with a legacy nd cursor.
 fn seed_floors(home: &Path) {
@@ -565,4 +612,29 @@ fn a_store_needing_the_node_fallback_is_left_untouched_by_the_engine() {
     let after = picture(&w, Value::Null, None);
     assert_eq!(before["stores"], after["stores"], "the engine wrote rows for a store it handed to Node");
     assert!(before["stores"][STORE]["reader_cursors"].as_array().unwrap().is_empty(), "seed must start without reader rows");
+}
+
+/// The same for the two repairs that write per partition: the engine plans the whole store first and, when Node must decide any
+/// part of it, writes nothing (not even the partition that alone would be repaired).
+#[test]
+fn the_repairs_leave_a_store_needing_the_node_fallback_untouched() {
+    type Seed = fn(&Path);
+    let cases: [(Seed, &str, &str, &str); 3] = [
+        (seed_floors_deferred, "reader-floor-repair", "readerFloorRepair", "readerFloorRepairPostUpdate"),
+        (seed_dual_deferred, "dual-partition-acks", "dualPartitionAcks", "dualPartitionAcksPostUpdate"),
+        (seed_dual_import_deferred, "dual-partition-acks", "dualPartitionAcks", "dualPartitionAcksPostUpdate"),
+    ];
+    for (seed, row, key, func) in cases {
+        let o = Opt { ds: true, no_upstream_move: true, live: true, no_node: true, stage_only: Some(row), ..Opt::default() };
+        let w = world(&o);
+        seed(&w.home);
+        let before = picture(&w, Value::Null, None);
+        let ans = engine_answer(&w, &o, key);
+        assert_eq!(ans["attempted"], json!(false), "{row}: {ans}");
+        let calls = stage_node_calls(&w);
+        assert_eq!(calls.len(), 1, "{row}: {calls:?}");
+        assert!(calls[0].contains(func), "{row}: {calls:?}");
+        let after = picture(&w, Value::Null, None);
+        assert_eq!(before["stores"], after["stores"], "{row}: the engine wrote to a store it handed to Node");
+    }
 }
