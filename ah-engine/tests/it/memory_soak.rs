@@ -169,10 +169,15 @@ fn a_long_mixed_run_stays_under_the_default_cap_and_flat_with_zero_restarts() {
         let (ev, p) = s.payload(i);
         s.hook(&map, ev, &p);
         if i + 1 == warm {
-            at_warm = Some(s.status());
+            let st = s.status();
+            eprintln!("soak warm: calls={warm} rss_kb={} heap_live_kb={}", st["memory"]["rss_kb"], st["memory"]["heap_live_kb"]);
+            at_warm = Some(st);
         }
-        if (i + 1) % (total / 5).max(1) == 0 && i + 1 > warm {
-            samples.push(s.status());
+        if (i + 1) % (total / 20).max(1) == 0 && i + 1 > warm {
+            let st = s.status();
+            // the RSS series of the run, one line per sample (`--no-capture` shows it)
+            eprintln!("soak sample: calls={} rss_kb={} heap_live_kb={} pid={}", i + 1, st["memory"]["rss_kb"], st["memory"]["heap_live_kb"], st["pid"]);
+            samples.push(st);
         }
     }
     let at_warm = at_warm.expect("a warm-up sample");
