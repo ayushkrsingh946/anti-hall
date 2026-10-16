@@ -1706,5 +1706,34 @@ test_timeout_override_needs_the_test_gate() {
 }
 check timeout_override_needs_the_test_gate test_timeout_override_needs_the_test_gate
 
+# Launcher hand-off: with the thin launcher installed under $HOME it is exec'd with the args and the resolved plugin root;
+# --doctor / --fallback-only skip it; a missing or non-executable launcher keeps the old path (fail open, exit 0).
+test_launcher_handoff() {
+  lh=$tmp/lh-home
+  mkdir -p "$lh/.anti-hall/ah-engine/bin"
+  printf '#!/bin/sh\nprintf "%%s\\n" "$*" >"%s/lh.args"\nexit 7\n' "$tmp" >"$lh/.anti-hall/ah-engine/bin/ah-hook"
+  chmod +x "$lh/.anti-hall/ah-engine/bin/ah-hook"
+  set +e
+  HOME=$lh sh "$wrapper" PreToolUse --host codex <"$payload" >/dev/null 2>&1
+  rc=$?
+  set -e
+  [ "$rc" -eq 7 ] || return 1
+  grep -q '^PreToolUse --host codex --plugin-root .*/\.\.$' "$tmp/lh.args" || return 1
+  # --fallback-only is not handed off (the launcher delegates it back here)
+  rm -f "$tmp/lh.args"
+  set +e
+  HOME=$lh sh "$wrapper" Stop --fallback-only <"$payload" >/dev/null 2>&1
+  set -e
+  [ ! -f "$tmp/lh.args" ] || return 1
+  # launcher missing or not executable: old path, fail open
+  chmod -x "$lh/.anti-hall/ah-engine/bin/ah-hook"
+  set +e
+  HOME=$lh sh "$wrapper" Stop <"$payload" >/dev/null 2>&1
+  rc=$?
+  set -e
+  [ "$rc" -eq 0 ] && [ ! -f "$tmp/lh.args" ]
+}
+check launcher_handoff test_launcher_handoff
+
 printf 'wrapper tests: %s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

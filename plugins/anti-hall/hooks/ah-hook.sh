@@ -1,4 +1,16 @@
 #!/bin/sh
+# thin launcher shim: hand the call to the Rust launcher when it is installed; otherwise (or for --doctor / --fallback-only,
+# which the launcher itself delegates back here) run this wrapper unchanged. Builtins only (no dirname/cd/pwd forks) on the hot path.
+ah_l=${HOME:-}/.anti-hall/ah-engine/bin/ah-hook
+if [ -x "$ah_l" ]; then
+  case " $* " in
+    *" --doctor "*|*" --fallback-only "*) ;;
+    *)
+      case $0 in */*) ah_r=${0%/*}/.. ;; *) ah_r=.. ;; esac
+      exec "$ah_l" "$@" --plugin-root "$ah_r"
+      ;;
+  esac
+fi
 # Reliability wrapper for `ah-engine hook --event <Event>`.
 #
 # Dispatcher-equivalent fallback outcome table (D74 / dispatch::node):
