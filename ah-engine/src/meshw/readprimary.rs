@@ -101,6 +101,8 @@ struct Msg {
     /// The absolute store position when the row is a store row (the own-partition ack target).
     index: Option<f64>,
     hash: Option<String>,
+    /// Sent by the reader's own identity family: counted out of the unread and left out of the list (the ack still walks it).
+    own: bool,
 }
 
 /// A row of the store partition, in `listMessages`' key order (`origin` first in a union read).
@@ -132,6 +134,7 @@ fn store_msg(r: &Value, origin: bool) -> Msg {
         index: r["index"].as_f64(),
         hash: r["hash"].as_str().map(str::to_string),
         fields: o,
+        own: false,
     }
 }
 
@@ -179,7 +182,7 @@ fn ndjson_msg(line: &str) -> R<Msg> {
         .put("body", OVal::Str(body))
         .put("sender", common::s_or_null(sender.as_deref()))
         .put("status", status);
-    Ok(Msg { sort_ts: ts.unwrap_or(f64::INFINITY), index: None, hash, fields: o })
+    Ok(Msg { sort_ts: ts.unwrap_or(f64::INFINITY), index: None, hash, fields: o, own: false })
 }
 
 /// The per-row additions of the read, in Node's order: the forward marker, the instance digest, `from`/`text`/`kind`,
@@ -680,11 +683,16 @@ fn plan(inv: &Inv, a: &Args, promoted: Option<bool>) -> R<Planned> {
         tick::note_own_excluded(&counted);
         let u = counted.union;
         let merged_total = union::merged_total(&input)?;
+        let family = tick::family_of(id, &o.rows);
         for line in &u.nd_unread_lines {
-            msgs.push(ndjson_msg(line)?);
+            let mut m = ndjson_msg(line)?;
+            m.own = union::line_sender(line).is_some_and(|x| family.contains(&x));
+            msgs.push(m);
         }
         for r in &u.store_only_unread {
-            msgs.push(store_msg(r, true));
+            let mut m = store_msg(r, true);
+            m.own = r.get("sender").and_then(Value::as_str).is_some_and(|x| family.contains(x));
+            msgs.push(m);
         }
         // Array#sort is stable and a non-finite `ts` sorts last (a pair of them compares equal)
         msgs.sort_by(
@@ -698,13 +706,20 @@ fn plan(inv: &Inv, a: &Args, promoted: Option<bool>) -> R<Planned> {
         union_cursors = Some((nd_cursor, store_base));
         nd_op_target = Some(nd_cursor + u.nd_skipped as f64 + u.nd_unread_lines.len() as f64);
     } else {
+        let family = tick::family_of(id, &o.rows);
         o.reader
             .for_each_message(id, floor_pos(store_base) as u64, |m| {
-                msgs.push(store_msg(&m, false));
+                let mut x = store_msg(&m, false);
+                x.own = m["sender"].as_str().is_some_and(|f| family.contains(f));
+                msgs.push(x);
                 true
             })
             .map_err(|e| ident::Defer(format!("store-read:{e}")))?;
-        unread_count = (total_store as f64 - store_base).max(0.0);
+        let own_unread = msgs.iter().filter(|m| m.own).count();
+        if own_unread > 0 {
+            crate::metrics::bump("mesh_own_sends_excluded", &[]);
+        }
+        unread_count = ((total_store as f64 - store_base).max(0.0) - own_unread as f64).max(0.0);
         total_out = total_store as f64;
     }
     if msgs.len() > limit {
@@ -714,6 +729,9 @@ fn plan(inv: &Inv, a: &Args, promoted: Option<bool>) -> R<Planned> {
     let max_index = msgs.iter().filter_map(|m| m.index).fold(None, |acc: Option<f64>, i| Some(acc.map_or(i, |a| a.max(i))));
     let own_target = max_index.map_or(store_base, |m| store_base.max(m));
     let delivered = msgs.len();
+    // #181: the unread list leaves out the mail the reader's own family sent, as its count does (the targets above already walked it)
+    msgs.retain(|m| !m.own);
+    // the receipt names the rows the reader was shown
     let hashes: Vec<OVal> = msgs.iter().map(|m| common::s_or_null(m.hash.as_deref())).collect();
     let mut rows: Vec<OVal> = Vec::with_capacity(msgs.len());
     let mut body_bytes = 0.0;
