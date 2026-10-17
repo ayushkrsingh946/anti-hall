@@ -15,4 +15,5 @@ mod callsites;
 mod expected;
 mod harness;
 mod hooks;
+mod sup;
 mod surfaces;

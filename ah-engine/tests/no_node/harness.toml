@@ -89,3 +89,12 @@ session = '{"session_id":"no-node","cwd":"{cwd}","workspace":{"current_dir":"{cw
 [units]
 # Where launchd and systemd user units land under HOME; any file there that runs node is a Node path.
 dirs = ["Library/LaunchAgents", ".config/systemd/user"]
+
+[sup]
+# The supervisor tick (tests/no_node/sup.rs): the scheduler job it runs, the duties it must report (devswarm_sup.duties), and
+# the minimal DevSwarm fixture (a workspace descriptor under the DevSwarm state directory, relative to HOME).
+job = "devswarm_supervisor"
+duties = ["log_rotate", "verdicts", "reconcile", "deferred", "app_sync", "retention", "housekeeping"]
+workspaces_dir = ".anti-hall/devswarm/workspaces"
+workspace_id = "ws-nonode"
+descriptor = '{"id":"{id}","title":"no-node fixture","worktree":"{cwd}","cwd":"{cwd}","role":"child"}'
