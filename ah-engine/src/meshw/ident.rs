@@ -860,7 +860,7 @@ pub(crate) mod fifo_kit {
     pub fn within<T: Send + 'static>(what: &str, f: impl FnOnce() -> T + Send + 'static) -> T {
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || crate::discard::harmless(tx.send(f())));
-        let bound = std::time::Duration::from_millis(crate::defaults::num("mesh_write.fifo_test_bound_ms") as u64);
+        let bound = std::time::Duration::from_millis(crate::defaults::num("mesh_write.fifo_test_bound_ms"));
         rx.recv_timeout(bound).unwrap_or_else(|_| panic!("{what}: still blocked after {bound:?}"))
     }
 

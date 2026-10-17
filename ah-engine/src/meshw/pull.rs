@@ -649,9 +649,8 @@ pub(crate) fn store_feed_left(inv: &Inv, p: &Plan, raw: &str) -> bool {
 /// hash) and fsync it, then the best-effort store feed. `Err` when the durable append fails (the WAL entry then stays pending).
 fn ingest_raw(inv: &Inv, p: &Plan, raw: &str, at: &dyn Fn(&str)) -> Result<Ingested, String> {
     let batch = import::parse_batch(raw);
-    let mut seen = inbox_hashes(&p.inbox).map_err(|why| {
+    let mut seen = inbox_hashes(&p.inbox).inspect_err(|why| {
         crate::metrics::bump("mesh_descriptor_read_skipped", &[("site", defaults::text("mesh_write.site_pull_inbox")), ("reason", why.as_str())]);
-        why
     })?;
     let (lines, imported, duplicate) = batch_lines(p, &batch, &mut seen);
     // DURABLE append precedes the WAL `done`: one append of the whole batch, a leading newline after a torn tail, then the fsync
