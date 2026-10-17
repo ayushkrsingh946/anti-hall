@@ -80,10 +80,6 @@ impl Sc {
     fn ack(self, session: &str, body: &str) -> Sc {
         self.file(&format!(".anti-hall/stop-ack/stop-ack-{session}.json"), body)
     }
-    fn defers(mut self) -> Sc {
-        self.defers = true;
-        self
-    }
     fn warm(mut self) -> Sc {
         self.warm = true;
         self
@@ -179,10 +175,8 @@ pub(crate) fn scenarios() -> Vec<Sc> {
     v.push(sc("description-control-chars", s1.clone()).lines(&agent("01", "a\u{1}b\tc\n\nd\u{85}e  ")).aged("out-01.txt", "{}\n", OLD));
     v.push(sc("description-unicode", s1.clone()).lines(&agent("01", "réparer — ü 😀 done")).aged("out-01.txt", "{}\n", OLD));
     v.push(
-        sc("description-cut-through-pair-defers", s1.clone())
-            .lines(&agent("01", &format!("{}😀tail", "x".repeat(59))))
-            .aged("out-01.txt", "{}\n", OLD)
-            .defers(),
+        // Node keeps the lone high half of the cut pair (JSON-escaped as \ud83d); so does the engine, byte for byte
+        sc("description-cut-through-pair-native", s1.clone()).lines(&agent("01", &format!("{}😀tail", "x".repeat(59)))).aged("out-01.txt", "{}\n", OLD),
     );
     let other = "11111111-2222-3333-4444-555555555555";
     v.push(sc("previous-session-agent-is-skipped", s1.clone()).lines(&[task_status_typed(
@@ -279,10 +273,7 @@ pub(crate) fn scenarios() -> Vec<Sc> {
     ));
     v.push(sc("state-corrupt-nudges", s1.clone()).lines(&one()).file(".anti-hall/silent-agent-nudge-state.json", "{oops"));
     v.push(
-        sc("state-index-key-defers", s1.clone())
-            .lines(&one())
-            .file(".anti-hall/silent-agent-nudge-state.json", "{\"nudged\":{\"7\":\"x\"},\"everNudged\":{}}")
-            .defers(),
+        sc("state-index-key", s1.clone()).lines(&one()).file(".anti-hall/silent-agent-nudge-state.json", "{\"nudged\":{\"7\":\"x\"},\"everNudged\":{}}"),
     );
 
     // ---- the stale-build downgrade (stop-version-gate.js)
@@ -308,8 +299,10 @@ pub(crate) fn scenarios() -> Vec<Sc> {
         v.push(s.env("ANTIHALL_MARKETPLACE_DIR", "$HOME/mk/plugins/marketplaces/anti-hall"));
     }
     {
-        let mut s = sc("no-plugin-root-defers", s1.clone()).lines(&one()).defers();
+        // no root: Node judges the stale-build gate against its own install directory, so the engine defers to it (logged)
+        let mut s = sc("no-plugin-root", s1.clone()).lines(&one());
         s.no_root = true;
+        s.defers = true;
         v.push(s);
     }
 
@@ -327,7 +320,7 @@ pub(crate) fn scenarios() -> Vec<Sc> {
     v.push(sc("ack-string-nudges", s1.clone()).lines(&one()).ack("s1", &json!({format!("silent-agent-nudge:{sig1}"): "5"}).to_string()));
     v.push(sc("ack-corrupt-nudges", s1.clone()).lines(&one()).ack("s1", "{nope"));
     v.push(sc("ack-list-nudges", s1.clone()).lines(&one()).ack("s1", "[5]"));
-    v.push(sc("ack-lone-surrogate-defers", s1.clone()).lines(&one()).ack("s1", "{\"k\":\"\\ud800\"}").defers());
+    v.push(sc("ack-lone-surrogate", s1.clone()).lines(&one()).ack("s1", "{\"k\":\"\\ud800\"}"));
     {
         let sig2 = sha1_hex(&format!("{},{}", id("01"), id("02")))[..16].to_string();
         v.push(

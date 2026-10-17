@@ -703,7 +703,10 @@ fn run_core(raw: &str, args: &Args, payload: Option<&File>, complete: bool, tele
     let answers = match (&parsed, complete) {
         // A payload serde_json cannot read falls back to Node (JS may still parse it, e.g. a lone surrogate escape): the
         // engine must not be a worse guard than Node (D74). Only a guard entry with no runnable Node command blocks.
-        (_, false) | (None, _) => Vec::new(),
+        (_, false) | (None, _) => {
+            log_defer(&args.event, &defaults::render("dispatch.msg_unparsed", &[("len", &raw.len())]));
+            Vec::new()
+        }
         (Some(_), _) if entries.iter().all(|e| e.check.is_none()) => Vec::new(),
         (Some(p), _) if defaults::num("dispatch.in_process") == 1 => native::evaluate(&meta, p, &|| false, &|_, _, _| {}),
         (Some(_), _) => match ask_daemon_for(&meta, raw, guard) {

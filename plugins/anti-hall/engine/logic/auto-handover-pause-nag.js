@@ -3,19 +3,22 @@
 // nag, or nagQuietMin elapsed, at a quiet point: no open tasks, no subagent spawned in the last two minutes), the re-arm (back below
 // the threshold) and the decisive prompt appended when the session has a handover file. The latch is the one auto-handover.js shares
 // (<home>/.anti-hall/auto-handover/<tag>.json) and is written in Node's shape; every write is collected while deciding and done at the
-// end, so a case that must defer defers before anything is written. A Stop blocks with {"decision":"block","reason":...}. A transcript
-// path that is not absolute, a request whose HOME is unset and what the host cannot say exactly as Node would defer to Node. Mirrors
+// end, so a case that defers does so before anything is written. A Stop blocks with {"decision":"block","reason":...}. The home is
+// Node's os.homedir() (hookProc.adoptHome: HOME unset adopts the passwd home); a relative transcript path is opened from the absolute
+// payload cwd; only what the engine cannot reproduce exactly defers, logged under ctxbudget.ah_unsure_log_kind (cb.defer). Mirrors
 // hooks/auto-handover-pause-nag.js and hooks/lib/auto-handover-*.js, handover-freshness.js (lib/75-ctxbudget.js).
 // Keys and texts: ctxbudget.toml (ctxbudget.*).
 'use strict';
 
 function pnBlock(reason) { return { exact: { code: 0, out: text.render(cb.c('ctxbudget.stop_block_line'), { reason: JSON.stringify(reason) }), err: '' } }; }
 
-function decide(p) {
+function decide(p) { return cb.run(function () { return pnDecide(p); }); }
+
+function pnDecide(p) {
   if (ah.env.get(ah.cfg('ctxbudget.judge_child_env')) === ah.cfg('ctxbudget.judge_child_on')) return 'allow';
   if (p === null || typeof p !== 'object' || ah.cfg('coordinator_work.agent_markers').some(function (k) { return p[k] !== undefined && p[k] !== null; }) || p.stop_hook_active === true) return 'allow';
-  var home = ah.env.get(ah.cfg('ctxbudget.home_env'));
-  if (home === null || !ah.path.isAbsolute(home)) return 'defer';
+  var noHome = hookProc.adoptHome();
+  if (noHome !== null) cb.defer(noHome);
   if (ah.settings.skipped(ah.cfg('ctxbudget.skip_auto_handover'))) return 'allow';
   var cfg = cb.resolveEffective();
   if (!cfg.enabled) return 'allow';
@@ -23,7 +26,7 @@ function decide(p) {
   if (!tag) return 'allow';
   var latch = cb.readLatch(tag);
   var tp = typeof p.transcript_path === 'string' ? p.transcript_path : null;
-  if (tp && !ah.path.isAbsolute(tp)) return 'defer';
+  if (tp) tp = cb.open(p, tp); // Node reads a relative path from its own directory, the payload cwd
   // the tail's lines are read only by the fire and nag branches below (most Stops take neither), so they are fetched on first use
   var linesLoaded = false, linesMemo = null;
   var linesOf = function () {
@@ -34,19 +37,15 @@ function decide(p) {
   if (latch.fired !== true) {
     // the Stop-side fire, once per arm; never for a crossing against a guessed window
     result = cb.getContextPct(tp, p.session_id, w);
-    if (result === 'defer') return 'defer';
     var over = cb.overThreshold(result, cfg);
     if (over === cb.c('ctxbudget.ah_via_pct') || over === cb.c('ctxbudget.ah_via_tokens')) {
       var hp = cb.expectedHandoverPath(p);
-      if (hp === false) return 'defer';
       var suffix = cb.decisiveSuffixFor(p, cfg, linesOf());
-      if (suffix === 'defer') return 'defer';
       w.latch = { fired: true, firedAt: now, firedPct: result.pct, firedVia: cb.c('ctxbudget.ah_via_stop_prefix') + over, lastNagPct: result.pct, lastNagAt: now, softFired: latch.softFired === true };
       reason = cb.fire(result, over, p, cfg.maxTokens, hp) + suffix;
     }
   } else if (cfg.nag) {
     result = cb.getContextPct(tp, p.session_id, w);
-    if (result === 'defer') return 'defer';
     if (result && isFinite(result.pct)) {
       if (!cb.overThreshold(result, cfg)) {
         w.latch = { fired: false }; // dropped back below: re-arm
@@ -57,12 +56,9 @@ function decide(p) {
         var shown = Math.round(result.pct), risen = result.pct >= lastNagPct + cfg.nagStepPct, quietElapsed = now - lastNagAt >= cfg.nagQuietMin * 60 * 1000;
         if ((risen || quietElapsed) && !(!risen && latch.lastPauseNagPct === shown)) {
           var open = cb.hasOpenTasks(linesOf());
-          if (open === 'defer') return 'defer';
           var spawned = open === true ? false : cb.recentSpawn(tag, now);
-          if (spawned === 'defer') return 'defer';
           if (open !== true && !spawned) {
             var sfx = cb.decisiveSuffixFor(p, cfg, linesOf());
-            if (sfx === 'defer') return 'defer';
             w.latch = Object.assign({}, latch, { lastNagAt: now, lastPauseNagPct: shown });
             if (risen) w.latch.lastNagPct = result.pct;
             reason = cb.pause(result.pct, p) + sfx;

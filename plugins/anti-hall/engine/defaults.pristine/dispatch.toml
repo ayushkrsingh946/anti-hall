@@ -666,3 +666,7 @@ value = [
   { id = "devswarm-child-drain", matcher = "Bash", command = "node \"${PLUGIN_ROOT}/hooks/devswarm-child-drain.js\"", timeout = 10, check = "devswarm-child-drain" },
   { id = "agent-reminders", matcher = "", command = "sh \"${PLUGIN_ROOT}/hooks/agent-reminders\"", timeout = 10, check = "agent-reminders" },
 ]
+
+[dispatch.msg_unparsed]
+doc = "Deferral reason (event log, counted with the other dispatch fallbacks) when the payload is not readable as JSON, so the Node hooks decide (D74). Placeholder: {len} (bytes read)."
+value = "payload not readable as JSON ({len} bytes): the Node hooks decide"

@@ -22,6 +22,13 @@ var cb = {
     if (p && typeof p.transcript_path === 'string' && p.transcript_path) return ah.sha1(p.transcript_path).slice(0, cb.n('ctxbudget.ah_hash_tag_len'));
     return null;
   },
+  // A case only Node decides exactly (what it is is `why`): logged under ctxbudget.ah_unsure_log_kind, then the decision defers. The
+  // checks collect every write and make them at the end, so `run` turns the throw into 'defer' before anything is written.
+  DEFER: { defer: true },
+  defer: function (why) { ah.log(ah.cfg('ctxbudget.ah_unsure_log_kind'), why); throw cb.DEFER; },
+  run: function (f) { try { return f(); } catch (e) { if (e === cb.DEFER) return 'defer'; throw e; } },
+  // The transcript path to open (hookProc.openKnown); a relative one without an absolute payload cwd defers.
+  open: function (p, tp) { var o = hookProc.openKnown(p, tp); if (o === null) cb.defer('relative_transcript'); return o; },
   rel: function (dir, name) { return cb.c('ctxbudget.state_root') + '/' + dir + '/' + name; },
   readObj: function (rel) {
     var raw = ah.state.readText(rel);
@@ -82,7 +89,8 @@ var cb = {
     return null;
   },
   // `getContextPct(transcriptPath, env, {home, sessionId})`: {pct, used, max, source, estimated, windowKnown, windowLabel} or null.
-  // A transcript path that is not absolute is for Node: 'defer'. `writes.inferred` is set when the inferred window must be recorded.
+  // `tp` is the path to open (a relative payload path joined to the hook's directory by the caller, hookProc.open), so it is read as
+  // Node's process reads it. `writes.inferred` is set when the inferred window must be recorded.
   getContextPct: function (tp, sessionId, writes) {
     var tag = cb.tagFromSessionId(sessionId);
     if (tag) {
@@ -90,7 +98,6 @@ var cb = {
       if (stored) return { pct: stored.pct, used: stored.usedTokens, max: stored.maxTokens, source: 'statusline', estimated: false, windowKnown: true, windowLabel: null };
     }
     if (typeof tp !== 'string' || !tp) return null;
-    if (!ah.path.isAbsolute(tp)) return 'defer';
     var size = ah.fs.size(tp);
     if (size === null || size <= 0) return null;
     // both readers below look at the newest line holding their marker and skip every other, so only those lines are fetched
@@ -154,23 +161,39 @@ var cb = {
     var names = ah.fs.readdir(sessionDir) || [], count = names.filter(function (f) { return ho.handoverRe.test(f); }).length, seq = count + 1;
     return seq > 1 ? text.render(cb.c('ctxbudget.ah_handover_name_n'), { n: seq }) : cb.c('ctxbudget.ah_handover_name');
   },
-  // `expectedHandoverPath(payload)`: the repo-relative path of the next handover; null with no cwd; false when the host cannot say.
+  // The payload's working directory, or null without one; a relative one (resolved by Node against its own directory) defers.
+  cwdOf: function (p) {
+    if (!p || typeof p.cwd !== 'string' || !p.cwd) return null;
+    if (!ah.path.isAbsolute(p.cwd)) cb.defer('relative_cwd');
+    return p.cwd;
+  },
+  // ho.localDate(); a request time zone other than UTC (which only Node applies) defers.
+  localDate: function () {
+    var d = ho.localDate();
+    if (d === null) cb.defer('local_date');
+    return d;
+  },
+  // handover-find repoRoot(cwd): the git top level unless it is the home directory, else cwd. The home compared is the call's own
+  // (ah.home(): HOME, or the passwd home hookProc.adoptHome made it), as Node's realHome(). A checkout the resolver cannot classify
+  // exactly defers.
+  repoRoot: function (cwd) {
+    var ctx = ho.context(cwd), h = ah.home(), rh = ah.fs.realpath(h || '') || h;
+    if (ctx.unsure) cb.defer('repo_root');
+    return ctx.toplevel && ctx.toplevel !== rh ? ctx.toplevel : cwd;
+  },
+  // `expectedHandoverPath(payload)`: the repo-relative path of the next handover; null with no cwd.
   expectedHandoverPath: function (p) {
-    var cwd = p && typeof p.cwd === 'string' && p.cwd ? p.cwd : null;
+    var cwd = cb.cwdOf(p);
     if (cwd === null) return null;
-    if (!ah.path.isAbsolute(cwd)) return false;
-    var date = ho.localDate(), rr = ho.repoRoot(cwd);
-    if (date === null || rr === null) return false;
+    var date = cb.localDate(), rr = cb.repoRoot(cwd);
     var sid = ho.sanitize(p.session_id), name = cb.nextHandoverName(ah.path.join(rr, cb.c('ctxbudget.ah_handover_dir_rel')) + '/' + date + '/' + sid);
     return [cb.c('ctxbudget.ah_handover_dir_rel'), date, sid, name].join('/');
   },
-  // `sessionHandover(payload)`: {filePath, mtimeMs} of this session's newest handover; null; false when the host cannot say.
+  // `sessionHandover(payload)`: {filePath, mtimeMs} of this session's newest handover; null.
   sessionHandover: function (p) {
-    var cwd = p && typeof p.cwd === 'string' && p.cwd ? p.cwd : null;
+    var cwd = cb.cwdOf(p);
     if (cwd === null) return null;
-    if (!ah.path.isAbsolute(cwd)) return false;
-    var rr = ho.repoRoot(cwd);
-    if (rr === null) return false;
+    var rr = cb.repoRoot(cwd);
     var sid = ho.sanitize(p.session_id), root = ah.path.join(rr, cb.c('ctxbudget.ah_handover_dir_rel'));
     var c = ho.collect(root, ho.handoverRe, sid);
     if (c.length === 0) return null;
@@ -190,11 +213,10 @@ var cb = {
     if (typeof latch.gateBackstopAt === 'number' && isFinite(latch.gateBackstopAt)) return false;
     return pct > latch.handoverPct + cfg.gateBudgetPct;
   },
-  // `noteHandover`: the latch with the newest handover recorded, null when none is new; 'defer' when the host cannot say.
+  // `noteHandover`: the latch with the newest handover recorded, null when none is new.
   noteHandover: function (latch, p, pct, now) {
     if (!latch || latch.fired !== true || !isFinite(pct)) return null;
     var h = cb.sessionHandover(p);
-    if (h === false) return 'defer';
     if (!h) return null;
     var since = typeof latch.firedAt === 'number' && isFinite(latch.firedAt) ? latch.firedAt - cb.n('ctxbudget.ah_mtime_slack_ms') : 0;
     if (h.mtimeMs < since) return null;
@@ -253,8 +275,8 @@ var cb = {
   },
   // `relativeHandoverPath(payload, filePath)`: the path relative to the working directory when it lies under it.
   relativeHandoverPath: function (p, file) {
-    var cwd = p && typeof p.cwd === 'string' && p.cwd ? p.cwd : null;
-    if (!cwd || !file || !ah.path.isAbsolute(cwd)) return file;
+    var cwd = cb.cwdOf(p);
+    if (!cwd || !file) return file;
     var rel = ah.path.relative(cwd, file);
     return rel && rel.indexOf('..') !== 0 ? rel : file;
   },
@@ -277,26 +299,39 @@ var cb = {
       else if (v !== null && typeof v === 'object') cb.toolUses(v, out);
     }
   },
-  // `isFresh(lines, handoverMtimeMs)`: null (unknown), true (no counted work after the handover) or false; 'defer' where the host cannot say.
-  isFresh: function (lines, mtime) {
+  // `isFresh(lines, handoverMtimeMs, cwd)`: null (unknown), true (no counted work after the handover) or false. `cwd` is the hook's
+  // physical directory (the payload's absolute cwd, links resolved; null without one): Node's isUnderTmpRoot resolves a relative
+  // written path against it with path.resolve, which is exactly the lexical resolution below; with no cwd known that path defers. A
+  // line or a timestamp only V8 reads defers.
+  isFresh: function (lines, mtime, cwd) {
     if (typeof mtime !== 'number' || !isFinite(mtime)) return null;
-    var cx = { tmp: wd.tmpdir(), cwd: null }, recognized = false, last = 0;
+    var under = wd.underTmp;
+    wd.underTmp = function (q, c) {
+      if (!q) return false;
+      if (q.charAt(0) !== '/' && !c.cwd) cb.defer('fresh_path');
+      return wd.isUnder(ah.path.resolveAbs(q.charAt(0) === '/' ? q : c.cwd + '/' + q), c.tmp);
+    };
+    try { return cb.freshScan(lines, mtime, { tmp: wd.tmpdir(), cwd: cwd }); } finally { wd.underTmp = under; }
+  },
+  freshScan: function (lines, mtime, cx) {
+    var recognized = false, last = 0;
     for (var i = 0; i < (lines || []).length; i++) {
       var line = lines[i];
       if (!line) continue;
       var r = jx.parse(line);
-      if (r.unsure) return 'defer';
+      if (r.unsure) cb.defer('fresh_line');
       if (r.invalid) continue;
       var e = r.v;
       if (!e || typeof e !== 'object' || !e.message || typeof e.message !== 'object') continue;
       recognized = true;
       var ts = typeof e.timestamp === 'string' ? jx.isoMs(e.timestamp) : NaN;
-      if (ts === undefined) return 'defer';
+      if (ts === undefined) ts = jx.dateParse(e.timestamp);
+      if (ts === undefined) cb.defer('fresh_timestamp');
       if (!isFinite(ts)) continue;
       var uses = [];
       cb.toolUses(e, uses);
       for (var u = 0; u < uses.length; u++) {
-        try { if (wd.counted(uses[u], cx) && ts > last) last = ts; } catch (x) { if (x === wd.UNSURE) return 'defer'; throw x; }
+        if (wd.counted(uses[u], cx) && ts > last) last = ts;
       }
     }
     return recognized ? last <= mtime + cb.n('ctxbudget.ah_freshness_grace_ms') : null;
@@ -309,10 +344,10 @@ var cb = {
     return (next === -1 ? rest : rest.slice(0, next)).trim();
   },
   wholeWords: function (key) { return new RegExp('^(?:' + cb.c(key).map(function (w) { return w.replace(/[.*+?^${}()|[\]\\\/-]/g, '\\$&'); }).join('|') + ')\\.?$', 'i'); },
-  // `isTaskCompleteFromFile(filePath)`: false on any read problem; 'defer' for a file over the read cap (a capped read shows another file).
+  // `isTaskCompleteFromFile(filePath)`: false on any read problem; a file over the read cap (a capped read shows another file) defers.
   taskComplete: function (file) {
     var f = jx.read(file);
-    if (f.big) return 'defer';
+    if (f.big) cb.defer('handover_big');
     if (f.absent || !f.text) return false;
     var open = cb.extractSection(f.text, cb.c('ctxbudget.ah_heading_open'));
     if (open !== null && cb.wholeWords('ctxbudget.ah_open_empty_words').test(open)) return true;
@@ -330,7 +365,7 @@ var cb = {
       if (!tools.some(function (t) { return line.indexOf(t) !== -1; })) continue;
       var r = jx.parse(line);
       if (r.invalid) continue;
-      if (r.unsure) return 'defer';
+      if (r.unsure) cb.defer('task_line');
       var e = r.v;
       if (!e || e.type !== 'assistant' || e.isSidechain === true) continue;
       var content = e.message && Array.isArray(e.message.content) ? e.message.content : [];
@@ -365,15 +400,15 @@ var cb = {
     var open = cb.c('ctxbudget.ah_open_statuses');
     return Object.keys(map).some(function (key) { return open.indexOf(map[key]) !== -1; });
   },
-  // `hasRecentSpawn(tag, now)`: a `<ms> <tag>` line of the spawn log within the activity window; 'defer' for a log over the read cap.
+  // `hasRecentSpawn(tag, now)`: a `<ms> <tag>` line of the spawn log within the activity window; a log over the read cap defers.
   recentSpawn: function (tag, now) {
     if (!tag) return false;
     var rel = cb.c('ctxbudget.ah_spawn_log'), size = ah.fs.size(ah.home() + '/' + rel);
-    if (size !== null && size > ah.cfgNum('script.read_max_bytes')) return 'defer';
+    if (size !== null && size > ah.cfgNum('script.read_max_bytes')) cb.defer('spawn_log_big');
     var txt = ah.state.readText(rel);
     if (txt === null) return false;
-    var win = cb.n('ctxbudget.ah_spawn_activity_ms');
-    return txt.trim().split(/\r?\n/).some(function (line) {
+    var lines = txt.trim().split(/\r?\n/), win = cb.n('ctxbudget.ah_spawn_activity_ms');
+    return lines.some(function (line) {
       if (!line) return false;
       var sp = line.indexOf(' ');
       if (sp < 0) return false;
@@ -381,16 +416,14 @@ var cb = {
       return line.slice(sp + 1) === tag && isFinite(ms) && (now - ms) <= win;
     });
   },
-  // `decisiveSuffixFor(payload, settings, lines)`: '' when off or without a handover file; 'defer' where the host cannot say.
+  // `decisiveSuffixFor(payload, settings, lines)`: '' when off or without a handover file.
   decisiveSuffixFor: function (p, cfg, lines) {
     if (!cfg.decisivePrompt) return '';
     var h = cb.sessionHandover(p);
-    if (h === false) return 'defer';
     if (!h) return '';
-    var fresh = cb.isFresh(lines, h.mtimeMs);
-    if (fresh === 'defer') return 'defer';
+    // Node's process.cwd() is the physical directory (getcwd resolves links, e.g. /tmp to /private/tmp)
+    var dir = cb.cwdOf(p), fresh = cb.isFresh(lines, h.mtimeMs, dir === null ? null : ah.fs.realpath(dir) || dir);
     var complete = fresh === true ? cb.taskComplete(h.filePath) : false;
-    if (complete === 'defer') return 'defer';
     return cb.decisiveSuffix(p, cb.relativeHandoverPath(p, h.filePath), fresh, complete);
   },
 };

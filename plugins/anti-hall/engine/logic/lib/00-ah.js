@@ -69,6 +69,9 @@ var ah = {
   // change would defer the call, and the Node hook would apply the change again).
   commit: function () { ahHost.commit(); },
   home: function () { return ahHost.home(); },
+  // Make absolute directory `h` the home of the rest of this call (settings, skips and the scoped state reads and writes), as a Node
+  // hook whose os.homedir() falls back to the passwd home sees it. false (nothing changed) for a path that is not absolute.
+  useHome: function (h) { return ahHost.useHome(h); },
   pid: function () { return ahHost.pid(); },
   fnv: function (t) { return ahHost.fnv(t); },
   contentHash: function (parts) { return ahHost.contentHash(parts); },
