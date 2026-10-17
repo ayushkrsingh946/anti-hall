@@ -428,7 +428,13 @@ impl Drainer {
 
     fn import(&self, raw: &str, now: i64) -> Result<Imported, Refused> {
         let Some(store) = &self.store else { return Err(Refused::Store(defaults::text("devswarm_ingest.msg_no_store").to_string())) };
-        import::ingest_payload(store, &self.home, &self.project.workspace_id, raw, now)
+        let done = import::ingest_payload(store, &self.home, &self.project.workspace_id, raw, now)?;
+        // the drain's own log line; the recon pull shares the importer and writes none (Node's `pull` does not either)
+        if done.fallbacks > 0 {
+            let (wher, id) = (defaults::text("mesh_write.sender_fallback_ingest"), &self.project.workspace_id);
+            self.log(&defaults::render("mesh_write.msg_sender_fallback", &[("where", &wher), ("id", id), ("n", &done.fallbacks)]));
+        }
+        Ok(done)
     }
 
     /// Replay every open batch of the WAL (and of a prior reader key's, adopted); true when nothing is left pending.

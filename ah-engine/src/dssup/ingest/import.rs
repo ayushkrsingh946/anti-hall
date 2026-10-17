@@ -218,16 +218,18 @@ pub struct Imported {
     pub lossy: bool,
     /// The rows, for the witness and the summary.
     pub rows: Vec<Row>,
+    /// Rows whose sender is the Primary fallback (no registered workspace is checked out under the message's branch).
+    pub fallbacks: usize,
 }
 
 /// `ingestPayload(s, raw, {workspaceId, home, now})`.
 pub fn ingest_payload(store: &MeshStore, home: &Path, workspace_id: &str, raw: &str, now: i64) -> Result<Imported, Refused> {
     let batch = parse_batch(raw);
     let mut rows = rows(workspace_id, &batch, now);
+    let mut fallbacks = 0_usize;
     if !rows.is_empty() {
         // sender: the registry row checked out under the message's branch (a native message names only its branch)
         let registry = registry_pairs(store.reader());
-        let mut fallbacks = 0_usize;
         for (r, m) in rows.iter_mut().zip(&batch.messages) {
             r.sender = field(m, defaults::text("devswarm_ingest.from_branch_key")).and_then(|b| branch_sender(&registry, &b));
             if r.sender.is_none() {
@@ -237,13 +239,6 @@ pub fn ingest_payload(store: &MeshStore, home: &Path, workspace_id: &str, raw: &
         }
         if fallbacks > 0 {
             crate::metrics::bump("mesh_sender_fallback", &[("where", defaults::text("mesh_write.sender_fallback_ingest"))]);
-            super::drain::log_line(
-                home,
-                &defaults::render(
-                    "mesh_write.msg_sender_fallback",
-                    &[("where", &defaults::text("mesh_write.sender_fallback_ingest")), ("id", &workspace_id), ("n", &fallbacks)],
-                ),
-            );
         }
     }
     let mut inserted = 0;
@@ -267,7 +262,7 @@ pub fn ingest_payload(store: &MeshStore, home: &Path, workspace_id: &str, raw: &
         inserted = out?;
     }
     let lossy = rows.is_empty() && !raw.trim().is_empty() && !batch.recognized;
-    Ok(Imported { total: rows.len(), inserted, duplicate: rows.len() - inserted, lossy, rows })
+    Ok(Imported { total: rows.len(), inserted, duplicate: rows.len() - inserted, lossy, rows, fallbacks })
 }
 
 #[cfg(test)]
