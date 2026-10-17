@@ -444,6 +444,7 @@ fn picture(w: &World, answer: Value, anchor: Option<&str>) -> Value {
     let pid = regex::Regex::new(r#""pid":\d+"#).unwrap();
     let ts = regex::Regex::new(r#"^\{"ts":"[^"]*""#).unwrap();
     let generated = regex::Regex::new(r#""generatedAt":\d+"#).unwrap();
+    let archived_at = regex::Regex::new(r#""archivedAt":\d+"#).unwrap();
     let files: BTreeMap<String, String> = tree(&w.home)
         .into_iter()
         .filter(|(k, _)| {
@@ -452,6 +453,7 @@ fn picture(w: &World, answer: Value, anchor: Option<&str>) -> Value {
         .map(|(k, v)| {
             let v = pid.replace_all(&norm(&v, w), r#""pid":0"#).into_owned();
             let v = generated.replace_all(&v, r#""generatedAt":0"#).into_owned();
+            let v = archived_at.replace_all(&v, r#""archivedAt":0"#).into_owned();
             (k, v.lines().map(|l| ts.replace(l, r#"{"ts":"T""#).into_owned()).collect::<Vec<_>>().join("\n"))
         })
         .collect();
@@ -467,6 +469,10 @@ fn picture(w: &World, answer: Value, anchor: Option<&str>) -> Value {
         text = text.replace(&child_label(), "{CHILD_LABEL}");
     }
     if let Some(r) = REPO.get() {
+        // the repo key of the shared checkout (its name carries this process's id and a hash of its path)
+        if let Ok(Some(k)) = ah_engine::meshw::ident::repo_key_for_worktree(&r.to_string_lossy()) {
+            text = text.replace(&k, "{REPOKEY}");
+        }
         text = text.replace(r.to_string_lossy().as_ref(), "{REPO}");
     }
     let mut v: Value = serde_json::from_str(&norm(&text, w)).unwrap();
@@ -511,9 +517,17 @@ struct Case {
     seed: fn(&Path),
     live: bool,
     markers: bool,
+    /// The anchor is the mesh id of the nested repository (a working directory only git can place).
+    nested: bool,
+    /// Answer members left out of the comparison with the frozen Node result (the documented difference only), and files likewise.
+    mask: &'static [&'static str],
 }
 
 impl Case {
+    fn anchor(&self) -> String {
+        if self.nested { nested_anchor() } else { anchor() }
+    }
+
     fn opt(&self) -> Opt {
         Opt { ds: true, no_upstream_move: true, live: self.live, ..Opt::default() }
     }
@@ -532,6 +546,9 @@ impl Case {
             "cursor-hygiene" => "cursorHygiene",
             "merge-split-backend-stores" => "mergeSplitBackendStores",
             "child-sender-labels" => "repairChildSenderLabels",
+            "owner-key-migrate" => "ownerKeyMigrate",
+            "app-archived-markers" => "markAppArchived",
+            "re-retire-resurrected" => "reRetireResurrected",
             _ => "none",
         }
     }
@@ -545,7 +562,7 @@ fn stage_node_calls(w: &World) -> Vec<String> {
 /// Record (when asked) and replay one scenario; returns the replay world's picture and the world, for follow-up checks.
 fn replay(c: &Case) -> (Value, World, Opt) {
     let o = c.opt();
-    let anchor = anchor();
+    let anchor = c.anchor();
     if recording() {
         let a = world(&o);
         (c.seed)(&a.home);
@@ -564,8 +581,21 @@ fn replay(c: &Case) -> (Value, World, Opt) {
     let ans = engine_answer(&w, &eo, c.key);
     assert_eq!(stage_node_calls(&w), Vec::<String>::new(), "{}/{}: the engine ran Node for the stage", c.stage, c.name);
     let got = picture(&w, ans, Some(&anchor));
+    let unmasked = |v: &Value| {
+        let mut v = v.clone();
+        if let Some(o) = v["answer"].as_object_mut() {
+            o.retain(|k, _| !c.mask.contains(&k.as_str()));
+        }
+        if !c.mask.is_empty()
+            && let Some(f) = v["files"].as_object_mut()
+        {
+            f.remove(".anti-hall/devswarm/wake/");
+        }
+        v
+    };
+    let (want_m, got_m) = (unmasked(&want), unmasked(&got));
     for k in ["answer", "stores", "files"] {
-        assert!(want[k] == got[k], "{}/{}: {k} differs from the frozen Node result\n{}", c.stage, c.name, diff(&want[k], &got[k]));
+        assert!(want_m[k] == got_m[k], "{}/{}: {k} differs from the frozen Node result\n{}", c.stage, c.name, diff(&want_m[k], &got_m[k]));
     }
     (got, w, eo)
 }
@@ -589,7 +619,7 @@ fn diff(want: &Value, got: &Value) -> String {
 /// A second run changes nothing: the one-time marker is stamped by the first run (or the stage is idempotent without one).
 fn second_run_is_a_no_op(c: &Case, first: &Value, w: &World, o: &Opt) {
     let again = engine_answer(w, o, c.key);
-    let pic = picture(w, again.clone(), Some(&anchor()));
+    let pic = picture(w, again.clone(), Some(&c.anchor()));
     assert_eq!(first["stores"], pic["stores"], "{}/{}: a second run changed a store", c.stage, c.name);
     let strip = |v: &Value| {
         let mut f = v["files"].as_object().unwrap().clone();
@@ -611,7 +641,7 @@ macro_rules! case {
     ($fn:ident, $stage:literal, $name:literal, $row:literal, $key:literal, $func:literal, $seed:expr, live: $live:literal, markers: $markers:literal) => {
         #[test]
         fn $fn() {
-            run_case(&Case { stage: $stage, name: $name, row: $row, key: $key, func: $func, seed: $seed, live: $live, markers: $markers });
+            run_case(&Case { stage: $stage, name: $name, row: $row, key: $key, func: $func, seed: $seed, live: $live, markers: $markers, nested: false, mask: &[] });
         }
     };
 }
@@ -662,7 +692,7 @@ fn marker_of(w: &World) -> Option<String> {
 /// A store with data but no marker is settled as sqlite and pinned by a read-write open, like Node; a preview (read-only open) pins nothing.
 #[test]
 fn a_store_without_a_marker_is_adopted_as_sqlite_and_pinned_like_node() {
-    let (_, w, o) = replay(&Case { stage: "reader-floor-repair", name: "no_marker", row: "reader-floor-repair", key: "readerFloorRepair", func: "readerFloorRepairPostUpdate", seed: seed_floors_no_marker, live: true, markers: false });
+    let (_, w, o) = replay(&Case { stage: "reader-floor-repair", name: "no_marker", row: "reader-floor-repair", key: "readerFloorRepair", func: "readerFloorRepairPostUpdate", seed: seed_floors_no_marker, live: true, markers: false, nested: false, mask: &[] });
     assert_eq!(marker_of(&w).as_deref(), Some("sqlite"));
     assert_eq!(stage_node_calls(&w), Vec::<String>::new());
     let again = engine_answer(&w, &o, "readerFloorRepair");
@@ -671,13 +701,13 @@ fn a_store_without_a_marker_is_adopted_as_sqlite_and_pinned_like_node() {
 
 #[test]
 fn a_preview_of_a_store_without_a_marker_writes_no_marker() {
-    let (_, w, _) = replay(&Case { stage: "reader-floor-repair", name: "no_marker_dry", row: "reader-floor-repair", key: "readerFloorRepair", func: "readerFloorRepairPostUpdate", seed: seed_floors_no_marker, live: false, markers: false });
+    let (_, w, _) = replay(&Case { stage: "reader-floor-repair", name: "no_marker_dry", row: "reader-floor-repair", key: "readerFloorRepair", func: "readerFloorRepairPostUpdate", seed: seed_floors_no_marker, live: false, markers: false, nested: false, mask: &[] });
     assert_eq!(marker_of(&w), None);
 }
 
 #[test]
 fn split_merge_pins_a_store_without_a_marker_even_in_a_preview_like_node() {
-    let (_, w, _) = replay(&Case { stage: "merge-split-backend-stores", name: "no_marker", row: "merge-split-backend-stores", key: "mergeSplitBackendStores", func: "mergeSplitBackendStoresPostUpdate", seed: seed_not_split_no_marker, live: false, markers: false });
+    let (_, w, _) = replay(&Case { stage: "merge-split-backend-stores", name: "no_marker", row: "merge-split-backend-stores", key: "mergeSplitBackendStores", func: "mergeSplitBackendStoresPostUpdate", seed: seed_not_split_no_marker, live: false, markers: false, nested: false, mask: &[] });
     assert_eq!(marker_of(&w).as_deref(), Some("sqlite"));
 }
 
@@ -712,7 +742,7 @@ fn a_stage_switched_off_reports_itself_skipped_and_touches_nothing() {
     let out = run_engine(&w, &o, &["--post-pull-only"]);
     let status: Value = serde_json::from_str(out.stdout.lines().next().unwrap()).unwrap();
     let status = &status["status"];
-    for (key, name) in [("readerCursorsImport", "reader-cursors-import"), ("readerFloorRepair", "reader-floor-repair"), ("dualPartitionAcks", "dual-partition-acks"), ("promoteUnclaimed", "promote-unclaimed"), ("cursorHygiene", "cursor-hygiene"), ("mergeSplitBackendStores", "merge-split-backend-stores"), ("childSenderLabels", "child-sender-labels")] {
+    for (key, name) in [("readerCursorsImport", "reader-cursors-import"), ("readerFloorRepair", "reader-floor-repair"), ("dualPartitionAcks", "dual-partition-acks"), ("promoteUnclaimed", "promote-unclaimed"), ("cursorHygiene", "cursor-hygiene"), ("mergeSplitBackendStores", "merge-split-backend-stores"), ("childSenderLabels", "child-sender-labels"), ("ownerKeyMigrate", "owner-key-migrate"), ("appArchivedMarkers", "app-archived-markers"), ("reRetireResurrected", "re-retire-resurrected"), ("wakeMonitor", "wake-monitor")] {
         let a = &status[key];
         assert_eq!(a["attempted"], json!(false), "{key}: {a}");
         assert_eq!(a["disabled"], json!(true), "{key}: {a}");
@@ -972,4 +1002,403 @@ fn ingest_is_left_to_node_in_witness_mode_and_when_switched_off() {
     fs::write(&toml, off).unwrap();
     engine_answer(&w, &o, "ingestHeal");
     assert!(node_calls(&w).contains("ingestUnitNeedsHeal"), "the switch did not hand the stage to Node: {}", node_calls(&w));
+}
+
+
+// ---- the git classifier of the post-update stages (roadmap #61 G3) ---------------------------------------------------------------
+
+fn git_in(dir: &Path, args: &[&str]) {
+    let ok = Command::new("git")
+        .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "protocol.file.allow=always"])
+        .args(args)
+        .current_dir(dir)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .status()
+        .unwrap()
+        .success();
+    assert!(ok, "git {args:?} in {}", dir.display());
+}
+
+fn scratch_dir(tag: &str) -> PathBuf {
+    let p = fs::canonicalize(std::env::temp_dir()).unwrap().join(format!("ah-g3-{tag}-{}-{}", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
+    fs::create_dir_all(&p).unwrap();
+    p
+}
+
+static INNER: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// A repository nested, untracked, inside `repo()`: its `.git` is a directory below another checkout, which only git can classify.
+fn inner() -> &'static Path {
+    INNER.get_or_init(|| {
+        let p = repo().join("inner");
+        fs::create_dir_all(&p).unwrap();
+        git_in(&p, &["init", "-q"]);
+        fs::canonicalize(p).unwrap()
+    })
+}
+
+fn nested_anchor() -> String {
+    ah_engine::meshw::ident::canonical_mesh_id(&inner().to_string_lossy()).unwrap().unwrap()
+}
+
+/// `seed_dual` on a worktree nested in another checkout.
+fn seed_dual_nested(home: &Path) {
+    let st = open_store(home, STORE);
+    let (a, wt) = (nested_anchor(), inner().to_string_lossy().into_owned());
+    registry(&st, &a, Some(&wt), None);
+    registry(&st, "kid-1", Some(&wt), None);
+    for (i, h) in ["x1", "x2", "x3"].iter().enumerate() {
+        msg(&st, &a, i as i64, h, None);
+    }
+    for (i, (h, o)) in [("y1", Some("x1")), ("y2", Some("x2")), ("y3", Some("x3")), ("y4", None)].iter().enumerate() {
+        msg(&st, "kid-1", 10 + i as i64, h, *o);
+    }
+    for ns in ["store", "nd"] {
+        cur(&st, &a, ns, "#floor", if ns == "store" { 2 } else { 0 });
+        cur(&st, "kid-1", ns, "#floor", 0);
+    }
+}
+
+fn nested_case() -> Case {
+    Case { stage: "dual-partition-acks", name: "nested_repo", row: "dual-partition-acks", key: "dualPartitionAcks", func: "dualPartitionAcksPostUpdate", seed: seed_dual_nested, live: true, markers: false, nested: true, mask: &[] }
+}
+
+/// A worktree nested in another checkout is classified by git as Node does: the stage answers natively, equal to the frozen Node run
+/// (the answer, the store, the files), runs Node for nothing, and a second run is a no-op.
+#[test]
+fn dual_acks_classify_a_nested_repository_with_git_like_node() {
+    run_case(&nested_case());
+}
+
+/// The classifier itself, on real repositories (one implementation for hooks and the post-update stages): it answers as `identity.js` does for an untracked nested repo, a gitlink in the parent's index, and a linked worktree of a submodule.
+#[test]
+fn the_git_classifier_mirrors_identity_js() {
+    use ah_engine::meshw::ident::resolve_context;
+    let s = |p: &Path| p.to_string_lossy().into_owned();
+    // 1. untracked nested repository
+    let nested = inner();
+    let on = resolve_context(&s(nested), false).unwrap();
+    assert_eq!((on.kind.as_str(), on.worktree_root.as_deref()), ("main", Some(s(nested).as_str())), "git says no superproject: the nested repo is its own root");
+    // 2. a nested repo registered as a gitlink in the parent's index: git names the parent as its superproject
+    let top = scratch_dir("gitlink");
+    git_in(&top, &["init", "-q"]);
+    let sub = top.join("sub");
+    fs::create_dir_all(&sub).unwrap();
+    git_in(&sub, &["init", "-q"]);
+    git_in(&sub, &["commit", "-q", "--allow-empty", "-m", "c"]);
+    let sha = String::from_utf8(Command::new("git").args(["rev-parse", "HEAD"]).current_dir(&sub).output().unwrap().stdout).unwrap();
+    git_in(&top, &["update-index", "--add", "--cacheinfo", &format!("160000,{},sub", sha.trim())]);
+    let on = resolve_context(&s(&sub), false).unwrap();
+    assert_eq!((on.kind.as_str(), on.worktree_root.as_deref(), on.toplevel.as_deref()), ("submodule-in-main", Some(s(&top).as_str()), Some(s(&sub).as_str())));
+    // 3. a linked worktree of an absorbed submodule, checked out beside the superproject: the core.worktree hop
+    let base = scratch_dir("subwt");
+    let (lib, sup) = (base.join("lib"), base.join("sup"));
+    for d in [&lib, &sup] {
+        fs::create_dir_all(d).unwrap();
+        git_in(d, &["init", "-q"]);
+        git_in(d, &["commit", "-q", "--allow-empty", "-m", "c"]);
+    }
+    git_in(&sup, &["submodule", "add", "-q", &s(&lib), "libsub"]);
+    git_in(&sup, &["commit", "-q", "-m", "add"]);
+    let wt = base.join("libsub-wt");
+    git_in(&sup.join("libsub"), &["worktree", "add", "-q", "--detach", &s(&wt)]);
+    let wt = fs::canonicalize(wt).unwrap();
+    let on = resolve_context(&s(&wt), false).unwrap();
+    assert_eq!((on.kind.as_str(), on.worktree_root.as_deref()), ("submodule-in-main", Some(s(&fs::canonicalize(&sup).unwrap()).as_str())));
+}
+
+
+// ---- owner-key-migrate (roadmap #61 G3) ------------------------------------------------------------------------------------------
+
+/// Descriptors an earlier build wrote without an `ownerKey`: an active one in a real worktree (the key resolves from git), an active
+/// one whose worktree is gone, an archived one, one with a key already, a legacy one with no session id; plus a non-descriptor file.
+fn seed_owner_keys(home: &Path) {
+    let wt = repo().to_string_lossy().into_owned();
+    put(home, ".anti-hall/devswarm/workspaces/ok-1.json", &format!(r#"{{"id":"ok-1","worktreePath":"{wt}","sessionId":"s1"}}"#));
+    put(home, ".anti-hall/devswarm/workspaces/ok-2.json", r#"{"id":"ok-2","worktreePath":"/nonexistent/ok-2","sessionId":"s2","repoKey":"kept-abc123"}"#);
+    put(home, ".anti-hall/devswarm/workspaces/ok-3.json", r#"{"id":"ok-3","worktreePath":"/nonexistent/ok-3"}"#);
+    put(home, ".anti-hall/devswarm/workspaces/ok-4.json", r#"{"id":"ok-4","worktreePath":"/nonexistent/ok-4","ownerKey":"already-111111"}"#);
+    put(home, ".anti-hall/devswarm/archived/ok-5.json", &format!(r#"{{"id":"ok-5","worktreePath":"{wt}","sessionId":"s5"}}"#));
+    put(home, ".anti-hall/devswarm/workspaces/notes.json", r#"{"hello":"world"}"#);
+}
+
+/// An active descriptor stranded in its legacy hash bucket while its worktree now resolves a real repo key: the re-home (registry row
+/// and backlog moved between stores) is Node's.
+fn seed_owner_keys_rehome(home: &Path) {
+    let wt = repo().to_string_lossy().into_owned();
+    let hash = ah_engine::meshw::send::hash_from_workspace_id("rh-1");
+    put(home, ".anti-hall/devswarm/workspaces/rh-1.json", &format!(r#"{{"id":"rh-1","worktreePath":"{wt}","sessionId":"s1","ownerKey":"{hash}"}}"#));
+    put(home, ".anti-hall/devswarm/workspaces/ok-1.json", &format!(r#"{{"id":"ok-1","worktreePath":"{wt}","sessionId":"s1"}}"#));
+}
+
+case!(owner_keys_are_backfilled_on_active_and_archived_descriptors, "owner-key-migrate", "bad_state", "owner-key-migrate", "ownerKeyMigrate", "ownerKeyMigratePostUpdate", seed_owner_keys, live: true, markers: false);
+case!(owner_keys_ignore_the_ingest_dry_run_switch_like_node, "owner-key-migrate", "dry_run_switch", "owner-key-migrate", "ownerKeyMigrate", "ownerKeyMigratePostUpdate", seed_owner_keys, live: false, markers: false);
+case!(owner_keys_already_done_is_skipped, "owner-key-migrate", "already_done", "owner-key-migrate", "ownerKeyMigrate", "ownerKeyMigratePostUpdate", seed_owner_keys, live: true, markers: true);
+
+/// The re-home stays with Node: the engine writes nothing (not even the descriptor it could have backfilled) and Node's function runs.
+#[test]
+fn owner_keys_needing_a_rehome_are_left_to_the_node_function_untouched() {
+    let o = Opt { ds: true, no_upstream_move: true, live: true, no_node: true, stage_only: Some("owner-key-migrate"), ..Opt::default() };
+    let w = world(&o);
+    seed_owner_keys_rehome(&w.home);
+    let before = picture(&w, Value::Null, None);
+    let ans = engine_answer(&w, &o, "ownerKeyMigrate");
+    assert_eq!(ans["attempted"], json!(false), "{ans}");
+    let calls = stage_node_calls(&w);
+    assert_eq!(calls.len(), 1, "{calls:?}");
+    assert!(calls[0].contains("ownerKeyMigratePostUpdate"), "{calls:?}");
+    assert_eq!(before["files"], picture(&w, Value::Null, None)["files"], "the engine wrote for a stage it handed to Node");
+}
+
+/// Nothing is deleted: every descriptor file is still there and every key it had is kept (only `ownerKey` / `repoKey` are added).
+#[test]
+fn owner_key_migrate_deletes_nothing_and_keeps_every_field() {
+    let o = Opt { ds: true, no_upstream_move: true, live: true, no_node: true, stage_only: Some("owner-key-migrate"), ..Opt::default() };
+    let w = world(&o);
+    seed_owner_keys(&w.home);
+    let before = picture(&w, Value::Null, None);
+    engine_answer(&w, &o, "ownerKeyMigrate");
+    let after = picture(&w, Value::Null, None);
+    for (f, text) in before["files"].as_object().unwrap() {
+        let now = after["files"].get(f).unwrap_or_else(|| panic!("file {f} vanished"));
+        if f.contains("/workspaces/") || f.contains("/archived/") {
+            let body = |v: &Value| v.as_str().unwrap().split_once(' ').map(|(_, b)| b.to_string()).unwrap_or_default();
+            if body(text).is_empty() {
+                continue; // a directory
+            }
+            let (was, is): (Value, Value) = (serde_json::from_str(&body(text)).unwrap(), serde_json::from_str(&body(now)).unwrap());
+            for (k, v) in was.as_object().unwrap() {
+                assert_eq!(is.get(k), Some(v), "{f}: field {k} changed");
+            }
+        }
+    }
+}
+
+
+// ---- app-archived-markers (roadmap #61 G3) ---------------------------------------------------------------------------------------
+
+const B_ARCHIVED: &str = "11111111-1111-4111-8111-111111111111";
+const B_DELETED: &str = "22222222-2222-4222-8222-222222222222";
+const B_OPEN: &str = "33333333-3333-4333-8333-333333333333";
+const B_MARKED: &str = "44444444-4444-4444-8444-444444444444";
+
+/// The DevSwarm app's database on this platform, with the tables the app sync reads and one repository, the Primary, one archived
+/// builder, one open builder and one archived builder that a twin descriptor shares a worktree with.
+fn seed_app_db(home: &Path) {
+    let file = ah_engine::meshw::ident::app_db_path(home, &std::collections::HashMap::new()).expect("app db path");
+    fs::create_dir_all(Path::new(&file).parent().unwrap()).unwrap();
+    let c = rusqlite::Connection::open(&file).unwrap();
+    c.execute_batch(
+        "CREATE TABLE repositories (id TEXT PRIMARY KEY, path TEXT, name TEXT, defaultBaseBranch TEXT);
+         CREATE TABLE builders (id TEXT PRIMARY KEY, repositoryId TEXT, sourceBranch TEXT, branchName TEXT, worktreePath TEXT, terminalId TEXT, label TEXT, createdAt TEXT, lastAccessed TEXT, rank INTEGER, isHidden INTEGER, pullRequestId TEXT, builderType TEXT, isPinned INTEGER, isActive INTEGER, lastSelectedAt TEXT);
+         CREATE TABLE builder_terminals (id TEXT, builderId TEXT, terminalId TEXT, terminalType TEXT, aiAgent TEXT, ai_session_config TEXT, isActive INTEGER, panelStatus TEXT, createdAt TEXT, lastViewedAt TEXT, initialPrompt TEXT, initialPromptDeliveredAt TEXT, initialPromptWithheldAt TEXT);
+         CREATE TABLE pull_requests (id TEXT PRIMARY KEY, repositoryId TEXT, branchName TEXT, number INTEGER, state TEXT, isDraft INTEGER, url TEXT, checkStatus TEXT, reviewStatus TEXT, lastSyncedAt TEXT);
+         CREATE TABLE workspace_messages (repositoryId TEXT, toBranch TEXT, createdAt TEXT, message TEXT);
+         INSERT INTO repositories VALUES ('r1', '/code/r1', 'r1', 'main');",
+    )
+    .unwrap();
+    let ins = |id: &str, wt: &str, hidden: i64, active: i64, kind: &str| {
+        c.execute(
+            "INSERT INTO builders (id, repositoryId, sourceBranch, branchName, worktreePath, label, createdAt, rank, isHidden, builderType, isPinned, isActive) VALUES (?1, 'r1', 'main', 'b', ?2, 'L', '2026-01-01T00:00:00.000Z', 1, ?3, ?4, 0, ?5)",
+            rusqlite::params![id, wt, hidden, kind, active],
+        )
+        .unwrap();
+    };
+    ins("55555555-5555-4555-8555-555555555555", "/code/r1", 0, 1, "primary");
+    ins(B_ARCHIVED, "/code/wts/archived", 1, 0, "standard");
+    ins(B_OPEN, "/code/wts/open", 0, 1, "standard");
+    ins("66666666-6666-4666-8666-666666666666", "/code/wts/twin", 1, 0, "standard");
+}
+
+/// Descriptors an earlier build never marked: archived in the app by id, deleted in the app (no row), open in the app, archived through
+/// a twin builder on its worktree, one already marked, one with no worktree, one that is not a descriptor.
+fn seed_app_archived(home: &Path) {
+    seed_app_db(home);
+    let d = |id: &str, wt: &str| put(home, &format!(".anti-hall/devswarm/workspaces/{id}.json"), &format!(r#"{{"id":"{id}","worktreePath":"{wt}","sessionId":"s-{id}"}}"#));
+    d(B_ARCHIVED, "/code/wts/archived");
+    d(B_DELETED, "/code/wts/deleted");
+    d(B_OPEN, "/code/wts/open");
+    d("twin-ws", "/code/wts/twin");
+    d(B_MARKED, "/code/wts/gone-already-marked");
+    put(home, ".anti-hall/devswarm/workspaces/nowt.json", r#"{"id":"nowt"}"#);
+    put(home, ".anti-hall/devswarm/workspaces/junk.json", "[1,2");
+    put(home, &format!(".anti-hall/devswarm/archived/{B_MARKED}.json"), r#"{"id":"mine","archivedBy":"owner","archivedAt":1}"#);
+}
+
+case!(app_markers_are_written_for_what_the_app_proves_archived_or_deleted, "app-archived-markers", "bad_state", "app-archived-markers", "appArchivedMarkers", "markAppArchivedPostUpdate", seed_app_archived, live: true, markers: false);
+case!(app_markers_preview_writes_nothing, "app-archived-markers", "dry_run", "app-archived-markers", "appArchivedMarkers", "markAppArchivedPostUpdate", seed_app_archived, live: false, markers: false);
+case!(app_markers_already_done_is_skipped, "app-archived-markers", "already_done", "app-archived-markers", "appArchivedMarkers", "markAppArchivedPostUpdate", seed_app_archived, live: true, markers: true);
+case!(app_markers_without_an_app_database_do_nothing, "app-archived-markers", "no_db", "app-archived-markers", "appArchivedMarkers", "markAppArchivedPostUpdate", seed_nothing, live: true, markers: false);
+
+/// A marker is created, never replaced; no descriptor is touched or removed.
+#[test]
+fn app_markers_never_overwrite_a_marker_and_never_touch_a_descriptor() {
+    let o = Opt { ds: true, no_upstream_move: true, live: true, no_node: true, stage_only: Some("app-archived-markers"), ..Opt::default() };
+    let w = world(&o);
+    seed_app_archived(&w.home);
+    let before = picture(&w, Value::Null, None);
+    let ans = engine_answer(&w, &o, "appArchivedMarkers");
+    assert_eq!(ans["marked"], json!(3), "{ans}");
+    let after = picture(&w, Value::Null, None);
+    for (f, v) in before["files"].as_object().unwrap() {
+        if f.contains("/workspaces/") || f.ends_with(&format!("archived/{B_MARKED}.json")) {
+            assert_eq!(after["files"].get(f), Some(v), "{f} changed");
+        }
+    }
+}
+
+
+// ---- re-retire-resurrected (roadmap #61 G3) --------------------------------------------------------------------------------------
+
+fn archive_marker(home: &Path, id: &str, wt: &str) {
+    put(home, &format!(".anti-hall/devswarm/archived/{id}.json"), &format!(r#"{{"id":"{id}","worktreePath":"{wt}","archivedBy":"owner","archivedAt":1}}"#));
+}
+
+/// A registry row an old migration resurrected: its worktree is archived under another id and its session is a placeholder (a
+/// candidate); a twin on the same worktree with a real session (live, left alone); a row whose only marker is its own (no forward target);
+/// a row with no archive link at all.
+fn seed_resurrected(home: &Path) {
+    let st = open_store(home, STORE);
+    registry(&st, "rz-1", Some("/nonexistent/wt1"), Some("unclaimed:rz-1"));
+    registry(&st, "rz-2", Some("/nonexistent/wt1"), Some("real-session-2"));
+    registry(&st, "solo", Some("/nonexistent/wt2"), Some("unclaimed:solo"));
+    registry(&st, "free", Some("/nonexistent/wt3"), Some("unclaimed:free"));
+    drop(st);
+    archive_marker(home, "arch-1", "/nonexistent/wt1");
+    archive_marker(home, "solo", "/nonexistent/wt2");
+}
+
+/// Nothing resurrected: only the live twin and the unlinked row.
+fn seed_not_resurrected(home: &Path) {
+    let st = open_store(home, STORE);
+    registry(&st, "rz-2", Some("/nonexistent/wt1"), Some("real-session-2"));
+    registry(&st, "free", Some("/nonexistent/wt3"), Some("unclaimed:free"));
+    drop(st);
+    archive_marker(home, "arch-1", "/nonexistent/wt1");
+}
+
+/// Only a row with no forward target.
+fn seed_unhealable_only(home: &Path) {
+    let st = open_store(home, STORE);
+    registry(&st, "solo", Some("/nonexistent/wt2"), Some("unclaimed:solo"));
+    drop(st);
+    archive_marker(home, "solo", "/nonexistent/wt2");
+}
+
+case!(resurrected_rows_are_reported_not_removed, "re-retire-resurrected", "bad_state", "re-retire-resurrected", "reRetireResurrected", "reRetireResurrectedPostUpdate", seed_resurrected, live: true, markers: false);
+case!(resurrected_report_with_nothing_found, "re-retire-resurrected", "nothing", "re-retire-resurrected", "reRetireResurrected", "reRetireResurrectedPostUpdate", seed_not_resurrected, live: true, markers: false);
+case!(resurrected_report_names_a_row_with_no_forward_target, "re-retire-resurrected", "unhealable_only", "re-retire-resurrected", "reRetireResurrected", "reRetireResurrectedPostUpdate", seed_unhealable_only, live: true, markers: false);
+case!(resurrected_report_ignores_the_ingest_dry_run_switch_like_node, "re-retire-resurrected", "dry_run_switch", "re-retire-resurrected", "reRetireResurrected", "reRetireResurrectedPostUpdate", seed_resurrected, live: false, markers: false);
+case!(resurrected_already_done_is_skipped, "re-retire-resurrected", "already_done", "re-retire-resurrected", "reRetireResurrected", "reRetireResurrectedPostUpdate", seed_resurrected, live: true, markers: true);
+
+/// The update only reports: every registry row, every message and every marker is still there after the stage.
+#[test]
+fn the_resurrected_report_removes_nothing() {
+    let o = Opt { ds: true, no_upstream_move: true, live: true, no_node: true, stage_only: Some("re-retire-resurrected"), ..Opt::default() };
+    let w = world(&o);
+    seed_resurrected(&w.home);
+    let before = picture(&w, Value::Null, None);
+    let ans = engine_answer(&w, &o, "reRetireResurrected");
+    assert_eq!(ans["candidates"], json!(1), "{ans}");
+    assert_eq!(stage_node_calls(&w), Vec::<String>::new());
+    let after = picture(&w, Value::Null, None);
+    assert_eq!(before["stores"], after["stores"], "the report changed a store");
+    for f in before["files"].as_object().unwrap().keys() {
+        assert!(after["files"].get(f).is_some(), "file {f} vanished");
+    }
+}
+
+
+// ---- wake-monitor (roadmap #61 G3) -----------------------------------------------------------------------------------------------
+//
+// The one documented difference from Node: `wakeMonitorPostUpdate` decides `shipped` by loading the watcher script with require();
+// the engine runs no Node and decides it by the script being present and naming both exports it needs (`resolveIdentity`,
+// `lockPathFor`). They differ only for a script that names both exports yet does not load (a syntax error): Node answers
+// shipped:false with its load-error detail and stops before the state directory; the engine answers shipped:true and goes on.
+// So `unloadable_watcher` leaves out exactly that branch: the answer members `shipped`, `detail` and `stateDirEnsured`, and the
+// `.anti-hall/devswarm/wake/` directory the engine goes on to make. Everything else is compared.
+
+const WATCHER_REL: &str = ".claude/plugins/marketplaces/anti-hall/plugins/anti-hall/companion/lib/devswarm-wake-watch.js";
+
+/// A registered workspace whose worktree is the working directory (the stage resolves its identity from it).
+fn wake_workspace(home: &Path) {
+    put(home, ".anti-hall/devswarm/workspaces/ws-wake.json", &format!(r#"{{"id":"ws-wake","worktreePath":"{}","sessionId":"s-wake"}}"#, home.display()));
+}
+
+fn wake_lock(home: &Path, pid: i64) {
+    put(home, ".anti-hall/devswarm/locks/wake-watch-ws-wake.lock", &format!(r#"{{"pid":{pid},"ts":{FAR_FUTURE}}}"#));
+}
+
+fn seed_wake_unresolved(_: &Path) {}
+
+fn seed_wake_idle(home: &Path) {
+    wake_workspace(home);
+}
+
+/// Pid 1 always exists (and answers EPERM to a probe from another user, which Node also reads as alive).
+fn seed_wake_live(home: &Path) {
+    wake_workspace(home);
+    wake_lock(home, 1);
+}
+
+fn seed_wake_dead(home: &Path) {
+    wake_workspace(home);
+    wake_lock(home, 2_147_483_000);
+}
+
+fn seed_wake_no_exports(home: &Path) {
+    wake_workspace(home);
+    put(home, WATCHER_REL, "module.exports = {};\n");
+}
+
+fn seed_wake_missing(home: &Path) {
+    wake_workspace(home);
+    let p = home.join(WATCHER_REL);
+    fs::rename(&p, p.with_extension("js.moved")).unwrap();
+}
+
+fn seed_wake_unloadable(home: &Path) {
+    wake_workspace(home);
+    put(home, WATCHER_REL, "module.exports = { resolveIdentity: 1, lockPathFor: 1 };\n)(\n");
+}
+
+case!(wake_monitor_without_an_identity_reports_shipped_and_asks_for_a_manual_arm, "wake-monitor", "unresolved", "wake-monitor", "wakeMonitor", "wakeMonitorPostUpdate", seed_wake_unresolved, live: true, markers: false);
+case!(wake_monitor_not_live_names_the_arm_command, "wake-monitor", "not_live", "wake-monitor", "wakeMonitor", "wakeMonitorPostUpdate", seed_wake_idle, live: true, markers: false);
+case!(wake_monitor_sees_a_live_watcher_lock, "wake-monitor", "live", "wake-monitor", "wakeMonitor", "wakeMonitorPostUpdate", seed_wake_live, live: true, markers: false);
+case!(wake_monitor_ignores_a_lock_of_a_dead_process, "wake-monitor", "dead_lock", "wake-monitor", "wakeMonitor", "wakeMonitorPostUpdate", seed_wake_dead, live: true, markers: false);
+case!(wake_monitor_reports_a_watcher_without_its_exports_as_not_shipped, "wake-monitor", "no_exports", "wake-monitor", "wakeMonitor", "wakeMonitorPostUpdate", seed_wake_no_exports, live: true, markers: false);
+case!(wake_monitor_reports_a_missing_watcher_as_not_shipped, "wake-monitor", "missing_watcher", "wake-monitor", "wakeMonitor", "wakeMonitorPostUpdate", seed_wake_missing, live: true, markers: false);
+case!(wake_monitor_runs_the_same_under_the_ingest_dry_run_switch, "wake-monitor", "dry_run_switch", "wake-monitor", "wakeMonitor", "wakeMonitorPostUpdate", seed_wake_live, live: false, markers: false);
+
+/// The documented difference: everything but the branch a non-loading watcher takes equals the frozen Node result; that branch is
+/// Node's load-failure answer on one side and the engine's presence-and-exports answer on the other.
+#[test]
+fn wake_monitor_differs_from_node_only_in_shipped_for_a_watcher_that_does_not_load() {
+    let c = Case { stage: "wake-monitor", name: "unloadable_watcher", row: "wake-monitor", key: "wakeMonitor", func: "wakeMonitorPostUpdate", seed: seed_wake_unloadable, live: true, markers: false, nested: false, mask: &["shipped", "detail", "stateDirEnsured"] };
+    let (got, _, _) = replay(&c);
+    let want: Value = serde_json::from_str(&fs::read_to_string(fixture_path(c.stage, c.name)).unwrap()).unwrap();
+    assert_eq!(want["answer"]["shipped"], json!(false), "Node reads a script that does not load as not shipped");
+    assert!(want["answer"]["detail"].as_str().unwrap().contains("failed to load"), "{want}");
+    assert_eq!(got["answer"]["shipped"], json!(true), "the engine decides shipped without loading the script");
+}
+
+/// The stage arms nothing and removes nothing: no lock is written, no workspace or lock file goes, no Node runs.
+#[test]
+fn wake_monitor_arms_nothing_deletes_nothing_and_runs_no_node() {
+    let o = Opt { ds: true, no_upstream_move: true, live: true, no_node: true, stage_only: Some("wake-monitor"), ..Opt::default() };
+    let w = world(&o);
+    seed_wake_live(&w.home);
+    let lock = w.home.join(".anti-hall/devswarm/locks/wake-watch-ws-wake.lock");
+    let before = fs::read(&lock).unwrap();
+    let before_tree = tree(&w.home);
+    let ans = engine_answer(&w, &o, "wakeMonitor");
+    assert_eq!(ans["live"], json!(true), "{ans}");
+    assert_eq!(stage_node_calls(&w), Vec::<String>::new());
+    assert_eq!(fs::read(&lock).unwrap(), before, "the lock was rewritten");
+    let after_tree = tree(&w.home);
+    let new: Vec<&String> = after_tree.keys().filter(|k| !before_tree.contains_key(*k)).filter(|k| !k.starts_with(".anti-hall/ah-engine") && !k.starts_with(".anti-hall/logs") && !k.starts_with(".anti-hall/state")).collect();
+    assert_eq!(new, vec![".anti-hall/devswarm/wake/"], "only the watcher state directory is created");
+    for k in before_tree.keys().filter(|k| !k.starts_with(".anti-hall/ah-engine") && !k.starts_with(".anti-hall/logs")) {
+        assert!(after_tree.contains_key(k), "{k} vanished");
+    }
 }

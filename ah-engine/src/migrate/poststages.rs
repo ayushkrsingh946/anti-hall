@@ -6,13 +6,15 @@
 //! Every stage is idempotent (a second run finds nothing to do), fail-open (an error is counted and the stage retries next run),
 //! and moves or marks, never deletes: a reader row is retired by marking it, a cursor only rises, a descriptor is rewritten in
 //! place. A store the engine cannot open the way Node would (no sqlite `BACKEND` marker: a journal store, a store Node would
-//! first mark), or a case only Node decides (a session working directory only git can classify), returns `None`: the stage
+//! first mark), or a case only Node decides (a working directory git cannot place: a relative path, or a git call that failed), returns `None`: the stage
 //! table's `fallback` Node function then runs the whole stage.
 use super::readercur::{self as rc, Cx, Handle};
 use super::{Ctx, list_store_hashes};
 use crate::checks::jsport::num::to_js_string;
 use crate::defaults;
 use crate::meshw::cursors::{self, LogRec};
+use crate::meshw::args::Args;
+use crate::meshw::common::Inv;
 use crate::meshw::ident;
 use crate::meshw::idlock::is_safe_id;
 use crate::meshw::store::mesh_message_hash;
@@ -50,6 +52,9 @@ pub(crate) fn run(ctx: &Ctx, which: &str, dry: bool) -> Option<Tally> {
     let t = match which {
         "promote_unclaimed" => super::promote::promote_unclaimed(ctx),
         "cursor_hygiene" => Some(super::cursorhyg::run(ctx)),
+        "owner_key_migrate" => owner_key_migrate(ctx),
+        "app_archived_markers" => app_archived_markers(ctx, dry),
+        "re_retire_resurrected" => re_retire_resurrected(ctx),
         "merge_split_backend_stores" => merge_split(ctx),
         _ => {
             let hashes = stores(ctx, dry)?;
@@ -69,6 +74,166 @@ pub(crate) fn run(ctx: &Ctx, which: &str, dry: bool) -> Option<Tally> {
     };
     let _ = home;
     t
+}
+
+/// `migrateOwnerKeys(home, {env, cwd})` (`ownerKeyMigratePostUpdate`): the engine's own `migrate-owner-keys` verb. It backfills a missing
+/// `ownerKey` on every descriptor (a descriptor is rewritten in place, atomically; nothing is deleted). The re-home of a stranded active
+/// descriptor (registry row and backlog moved between stores) is Node's: the verb decides it before writing anything, so the whole stage
+/// then runs as Node's function. Node ignores the ingest dry-run switch here and so does this.
+fn owner_key_migrate(ctx: &Ctx) -> Option<Tally> {
+    let inv = Inv {
+        home: std::path::PathBuf::from(&ctx.home),
+        env: ctx.env.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+        cwd: ctx.cwd.clone(),
+        now: crate::health::now_ms() as i64,
+        stdin: None,
+        write_home: std::path::PathBuf::from(&ctx.home),
+        store_override: None,
+    };
+    let ans = crate::meshw::lifeverbs::migrate_owner_keys(&inv, &Args::default()).ok()?;
+    let out = crate::checks::guardkit::ojson::OVal::parse(&ans.stdout)?;
+    let mut t = Tally::default();
+    for k in ["scanned", "backfilled", "rehomed", "errors"] {
+        if let Some(crate::checks::guardkit::ojson::OVal::Num(n)) = out.get(k) {
+            t.add(k, *n);
+        }
+    }
+    Some(t)
+}
+
+/// `markAppArchivedDescriptors(home, {env, cwd})` (`markAppArchivedPostUpdate`): the archived marker for every active descriptor the
+/// DevSwarm app's own database proves archived or deleted, planned and written by the same code the supervisor's app sync uses
+/// (`dssup::appsync::plan`). A marker is created only when absent (never overwritten) and the descriptor is never touched or deleted;
+/// the ingest dry-run switch makes it a preview. A database the engine cannot read exactly as Node's `builderStates` does, or a
+/// descriptor shape only Node decides, hands the whole stage to Node before anything is written.
+fn app_archived_markers(ctx: &Ctx, dry: bool) -> Option<Tally> {
+    use crate::dssup::appsync::{plan, snap};
+    let home = Path::new(&ctx.home);
+    let env: ident::Env = ctx.env.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+    let file = ident::app_db_path(home, &env)?;
+    let snapshot = snap::read(&file).ok()??;
+    // whatever the engine cannot read as JavaScript would: Node's, before the first write
+    plan::read_json_dir(&plan::dir_of(home, "devswarm_sup.as_dir_workspaces")).ok()?;
+    plan::read_json_dir(&plan::dir_of(home, "devswarm_sup.as_dir_archived")).ok()?;
+    let marks = plan::plan_marks(home, &snapshot).ok()?;
+    let ext = defaults::text("devswarm_sup.as_json_ext");
+    let wdir = plan::dir_of(home, "devswarm_sup.as_dir_workspaces");
+    let scanned = crate::checks::jsport::fsx::read_dir_names(&wdir.to_string_lossy())
+        .unwrap_or_default()
+        .iter()
+        .filter(|(n, _)| n.strip_suffix(ext).is_some_and(plan::safe_id))
+        .count();
+    let (mut marked, mut errors) = (0.0, 0.0);
+    if !dry {
+        let now = crate::health::now_ms() as i64;
+        for m in &marks.marks {
+            match plan::write_marker(home, m, now) {
+                plan::Wrote::Marked => marked += 1.0,
+                plan::Wrote::Exists => {}
+                plan::Wrote::Failed(e) => {
+                    errors += 1.0;
+                    swallowed(ctx, "app-archived-markers", &m.id, &e);
+                }
+            }
+        }
+    }
+    let mut t = Tally::default();
+    t.add("scanned", scanned as f64);
+    t.add("marked", marked);
+    t.add("errors", errors);
+    // Node's `pending`: the planned markers not written (all of them in a preview)
+    let pending = (marks.marks.len() as f64 - marked).max(0.0);
+    t.add("pending", pending);
+    // a preview leaves its planned markers pending, which keeps the one-time stamp off
+    t.pending_rows = if dry { pending } else { 0.0 };
+    Some(t)
+}
+
+/// `reRetireResurrectedRowsAllStores(home, {dryRun: true})` (`reRetireResurrectedPostUpdate`): the update only REPORTS the registry rows
+/// an old migration resurrected (a row with a proven archive link, not live, whose archived twin is another id). It writes nothing
+/// but the BACKEND marker an open of an old store pins, as Node's open does; the removal stays the operator's (`doctor --repair-resurrected`).
+fn re_retire_resurrected(ctx: &Ctx) -> Option<Tally> {
+    let home = Path::new(&ctx.home);
+    let hashes = stores(ctx, false)?;
+    let inv = Inv {
+        home: home.to_path_buf(),
+        env: ctx.env.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+        cwd: ctx.cwd.clone(),
+        now: crate::health::now_ms() as i64,
+        stdin: None,
+        write_home: home.to_path_buf(),
+        store_override: None,
+    };
+    let now = inv.now as f64;
+    let index = archive_index(home)?;
+    let mut t = Tally::default();
+    for hash in &hashes {
+        let registry = match rc::open(home, hash, false).map_err(|e| e.to_string()).and_then(|h| h.rd().roster().map_err(|e| e.to_string())) {
+            Ok(r) => r,
+            Err(e) => {
+                t.add("errors", 1.0);
+                swallowed(ctx, "re-retire-resurrected", hash, &e);
+                continue;
+            }
+        };
+        for row in &registry {
+            let Some(id) = row_id(row).filter(|i| crate::meshw::idlock::is_safe_id(i)) else { continue };
+            let desc = ident::read_descriptor(home, &id);
+            let desc_wt = match desc.as_ref().and_then(|d| d.get("worktreePath")) {
+                Some(crate::checks::guardkit::ojson::OVal::Str(s)) if !s.is_empty() => Some(s.clone()),
+                Some(v) if v.truthy() => return None, // a worktree of a type only Node reads
+                _ => None,
+            };
+            let row_wt = desc_wt.or_else(|| jv(row, "worktreePath").as_str().filter(|w| !w.is_empty()).map(str::to_string));
+            let Some(wt) = row_wt.clone() else { continue };
+            let real = if wt.starts_with('/') { ident::realpath(&wt).unwrap_or_else(|| wt.clone()) } else { return None };
+            let Some(hits) = index.get(&real).filter(|h| !h.is_empty()) else { continue };
+            let hit = hits.iter().find(|h| **h != id).unwrap_or(&hits[0]);
+            let session = jv(row, "sessionId").as_str().map(str::to_string);
+            if crate::meshw::rosterrows::sibling_partition_live(&inv, now, &id, Some(&wt), session.as_deref()).ok()? {
+                continue;
+            }
+            if *hit == id {
+                t.add("unhealable", 1.0);
+                continue;
+            }
+            t.add("candidates", 1.0);
+        }
+    }
+    // the answer's `left` placeholder counts the rows needing a manual review
+    let unhealable = t.get("unhealable");
+    t.add("left", unhealable);
+    Some(t)
+}
+
+/// `buildArchivedWorktreeIndex(home)`: the ids of the archive markers, by the real path of the worktree each names, in directory order.
+fn archive_index(home: &Path) -> Option<HashMap<String, Vec<String>>> {
+    let mut idx: HashMap<String, Vec<String>> = HashMap::new();
+    let dir = ident_archived_dir(home);
+    let suffix = defaults::text("mesh_write.json_suffix");
+    let Ok(rd) = std::fs::read_dir(&dir) else { return Some(idx) };
+    for e in rd.flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        let Some(id) = name.strip_suffix(suffix) else { continue };
+        if !crate::meshw::idlock::is_safe_id(id) {
+            continue;
+        }
+        let Some(marker) = std::fs::read(e.path()).ok().and_then(|b| crate::checks::guardkit::ojson::OVal::parse(&String::from_utf8_lossy(&b))) else { continue };
+        let wt = match marker.get("worktreePath") {
+            Some(crate::checks::guardkit::ojson::OVal::Str(s)) if !s.is_empty() => s.clone(),
+            _ => continue,
+        };
+        if !wt.starts_with('/') {
+            return None;
+        }
+        let real = ident::realpath(&wt).unwrap_or(wt);
+        idx.entry(real).or_default().push(id.to_string());
+    }
+    Some(idx)
+}
+
+fn ident_archived_dir(home: &Path) -> std::path::PathBuf {
+    crate::meshw::idlock::devswarm_root(home).join(defaults::text("mesh_write.dir_archived"))
 }
 
 /// `store.listStoreHashes(home)`, when the engine can open every one of them as Node would. A store with no readable `BACKEND` marker

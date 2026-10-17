@@ -219,9 +219,9 @@ fn nearest_dot_git(dir: &str) -> Option<String> {
     }
 }
 
-/// Whether `<gitdir>/config` names a `core.worktree` (Node then hops to that checkout; the engine defers).
-fn has_core_worktree(gitdir: &str) -> bool {
-    let Ok(cfg) = std::fs::read(format!("{gitdir}/{}", defaults::text("mesh_write.git_config_file"))) else { return false };
+/// `coreWorktreeOf(gitdir)`: the real path of `core.worktree` in `<gitdir>/config` (resolved against the gitdir), or `None`.
+fn core_worktree_of(gitdir: &str) -> Option<String> {
+    let cfg = std::fs::read(format!("{gitdir}/{}", defaults::text("mesh_write.git_config_file"))).ok()?;
     let cfg = String::from_utf8_lossy(&cfg);
     let mut in_core = false;
     for line in cfg.lines() {
@@ -232,12 +232,28 @@ fn has_core_worktree(gitdir: &str) -> bool {
         }
         if in_core
             && let Some(rest) = t.strip_prefix(defaults::text("mesh_write.git_worktree_key"))
-            && rest.trim_start().starts_with('=')
+            && let Some(v) = rest.trim_start().strip_prefix('=')
         {
-            return true;
+            let v = v.trim();
+            return if v.is_empty() { None } else { realpath(&resolve(gitdir, v)) };
         }
     }
-    false
+    None
+}
+
+/// `isGitlinkPath(P, dir)`: `dir` is a submodule path declared in P's `.gitmodules` (pure fs).
+fn is_gitlink_path(p: &str, dir: &str) -> bool {
+    let Some(rel) = dir.strip_prefix(&format!("{}/", p.trim_end_matches('/'))) else { return false };
+    if rel.is_empty() {
+        return false;
+    }
+    let Ok(txt) = std::fs::read(format!("{p}/{}", defaults::text("mesh_write.gitmodules_file"))) else { return false };
+    String::from_utf8_lossy(&txt).lines().any(|l| {
+        l.trim_start()
+            .strip_prefix(defaults::text("mesh_write.gitmodules_path_key"))
+            .and_then(|r| r.trim_start().strip_prefix('='))
+            .is_some_and(|v| v.trim().trim_end_matches('/') == rel)
+    })
 }
 
 /// The superproject answers git gave, per nested checkout (identity.js `superCache`): `(answer, when)`. Only an answer git gave
@@ -355,6 +371,10 @@ pub fn resolve_context(cwd: &str, ancestor: bool) -> R<Ctx> {
                 return Ok(Some(p));
             }
             if ri.has_commondir {
+                // a linked worktree of a submodule checked out at a gitlink path of the enclosing checkout
+                if core_worktree_of(&ri.common).is_some() && is_gitlink_path(&p, root) {
+                    return Ok(Some(p));
+                }
                 return Ok(None);
             }
         }
@@ -366,8 +386,18 @@ pub fn resolve_context(cwd: &str, ancestor: bool) -> R<Ctx> {
     let mut depth = 0u64;
     while depth < defaults::num("mesh_write.max_submodule_hops") {
         let sp = super_of(&root, &ri)?;
-        if sp.is_none() && ri.is_file && ri.has_commondir && has_core_worktree(&ri.common) {
-            return defer("core-worktree");
+        if sp.is_none() && ri.is_file && ri.has_commondir {
+            // a linked worktree of a submodule: hop to the submodule checkout its common dir names when that is itself a submodule
+            let co = core_worktree_of(&ri.common).filter(|c| *c != root);
+            if let Some((co, co_info)) = co.and_then(|c| gitdir_of(&c).map(|i| (c, i)))
+                && co_info.g == ri.common
+                && super_of(&co, &co_info)?.is_some()
+            {
+                root = co;
+                ri = co_info;
+                depth += 1;
+                continue;
+            }
         }
         let Some(sp) = sp else { break };
         let Some(spi) = gitdir_of(&sp) else { break };
