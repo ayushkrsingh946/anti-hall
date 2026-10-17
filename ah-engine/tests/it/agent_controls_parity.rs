@@ -984,6 +984,11 @@ fn silent_corpus() -> Vec<Sc> {
         .transcript(&stale_run("01"))
         .file(".anti-hall/stop-ack/stop-ack-s1.json", &json!({"pad": "x".repeat(4_300_000)}).to_string())
         .quiet());
+    // never weaker than Node: a relative HOME names a directory the engine cannot see, so the Node twin decides (Claude + Codex)
+    add(old(sc("relative-home-defers-to-node", h, stop_payload_for(json!("s1"))).transcript(&stale_run("01")), "01").env("HOME", "relative").defers());
+    let mut codex_stop = stop_payload_for(json!("s1"));
+    codex_stop["turn_id"] = json!("t");
+    add(old(sc("codex-relative-home-defers-to-node", h, codex_stop).transcript(&stale_run("01")), "01").env("HOME", "relative").defers());
     // heartbeat source
     add(sc("heartbeat-stale", h, stop_payload_for(json!("s1"))).file(".anti-hall/agents/hb1.json", &hb("hb1", "s1", "running", 90.0)));
     add(sc("heartbeat-fresh", h, stop_payload_for(json!("s1"))).file(".anti-hall/agents/hb1.json", &hb("hb1", "s1", "running", 2.0)));

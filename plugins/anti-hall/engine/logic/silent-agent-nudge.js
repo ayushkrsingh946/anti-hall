@@ -5,7 +5,7 @@
 // state file. A silent agent not yet nudged for this snapshot and not covered by the once-per-agent cap is nudged: the state is
 // written (after the reply is delivered) and the Stop is blocked, unless the host already registered a newer plugin version than
 // the one running (stop-version-gate: nothing said, nothing written) or this exact set of agents was acked for the session
-// (stop-ack: state written, nothing said). Every Stop is decided here (no Node twin): a relative transcript or output path is opened
+// (stop-ack: state written, nothing said). Every Stop is decided here except a relative HOME (logged defer to the Node twin): a relative transcript or output path is opened
 // from the hook process's directory (hookProc), an input the interpreter cannot read as V8 does (a transcript line, a heartbeat, the
 // state or ack file over the read cap or too deep to parse) takes the silent_nudge.unsure_quiet policy, and each such case is logged
 // (silent_nudge.unsure_log_kind). Keys and texts: agent_controls.toml (silent_nudge.*, agent_scan.*).
@@ -186,10 +186,11 @@ function snStuckAdvisory(p) {
 function decide(p, opts) {
   if (ah.env.get(ah.cfg('silent_nudge.judge_child_env')) === ah.cfg('silent_nudge.judge_child_value')) return 'allow';
   if (p !== null && typeof p === 'object' && p[ah.cfg('procwatch.f_event')] === ah.cfg('procwatch.stuck_event')) return snStuckAdvisory(p);
-  // Node: HOME || USERPROFILE, and no nudge without either. A relative one names a directory of the hook process's own: nothing said.
+  // Node: HOME || USERPROFILE (an empty one falls through), and no nudge without either. A relative one names a directory of the hook
+  // process's own, which the engine cannot see: the Node twin decides (logged), never a quieter answer.
   var home = ah.env.get(ah.cfg('env.home')) || ah.env.get(ah.cfg('silent_nudge.home_fallback_env'));
   if (!home) return 'allow';
-  if (home.charAt(0) !== '/') { ah.log(ah.cfg('silent_nudge.unsure_log_kind'), 'relative_home'); return 'allow'; }
+  if (home.charAt(0) !== '/') { ah.log(ah.cfg('silent_nudge.unsure_log_kind'), 'relative_home'); return 'defer'; }
   if (!ah.settings.bool('silent_nudge.setting')) return 'allow';
   var guard = ah.cfg('silent_nudge.guard_name');
   if (ah.settings.skipped(guard)) return 'allow';
