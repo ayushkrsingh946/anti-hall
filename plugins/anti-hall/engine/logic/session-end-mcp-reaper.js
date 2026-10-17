@@ -19,31 +19,36 @@ function mrArgv0(cmd) {
 
 function mrRe(key, flags) { return jx.re(key, flags); }
 
+// The per-call constants of the signature test, read and compiled once per sweep, never per listed row (the listing holds hundreds of
+// orphans, and a host call or a pattern lookup per row dominated the sweep). Same keys, same patterns, same order as the row test.
+function mrMatcher() {
+  return {
+    orphan: ah.cfgNum('mcp_reaper.orphan_ppid'), program: ah.cfg('mcp_reaper.start_program'),
+    self: mrRe('mcp_reaper.mcp_self_re', 'i'), modelctx: mrRe('mcp_reaper.modelctx_re', 'i'), runtime: mrRe('mcp_reaper.runtime_re', ''),
+    token: mrRe('mcp_reaper.token_re', 'i'), tokenA0: mrRe('mcp_reaper.token_argv0_re', 'i'), start: mrRe('mcp_reaper.start_re', 'i'),
+    suffix: mrRe('mcp_reaper.suffix_re', 'i'), scoped: mrRe('mcp_reaper.scoped_re', 'i'), suffixA0: mrRe('mcp_reaper.suffix_argv0_re', 'i'),
+    runners: ah.cfg('mcp_reaper.runner_exclude_res').map(function (src) { return new RegExp(src, 'i'); })
+  };
+}
+
 // `matchesMcp(cmd, extraRe)`: a real MCP command, never a mere mention of one.
-function mrMatchesMcp(cmd, extra) {
+function mrMatchesMcp(m, cmd, extra) {
   if (!cmd) return false;
-  if (mrRe('mcp_reaper.mcp_self_re', 'i').test(cmd)) return false;
-  if (mrRe('mcp_reaper.modelctx_re', 'i').test(cmd)) return true;
-  var base = mrArgv0(cmd), runtime = mrRe('mcp_reaper.runtime_re', '').test(base), program = ah.cfg('mcp_reaper.start_program');
-  if (mrRe('mcp_reaper.token_re', 'i').test(cmd) && (runtime || mrRe('mcp_reaper.token_argv0_re', 'i').test(base))) return true;
-  if (mrRe('mcp_reaper.start_re', 'i').test(cmd) && (runtime || base === program)) return true;
-  if ((mrRe('mcp_reaper.suffix_re', 'i').test(cmd) || mrRe('mcp_reaper.scoped_re', 'i').test(cmd)) && (runtime || mrRe('mcp_reaper.suffix_argv0_re', 'i').test(base) || base === program)) return true;
+  if (m.self.test(cmd)) return false;
+  if (m.modelctx.test(cmd)) return true;
+  var base = mrArgv0(cmd), runtime = m.runtime.test(base);
+  if (m.token.test(cmd) && (runtime || m.tokenA0.test(base))) return true;
+  if (m.start.test(cmd) && (runtime || base === m.program)) return true;
+  if ((m.suffix.test(cmd) || m.scoped.test(cmd)) && (runtime || m.suffixA0.test(base) || base === m.program)) return true;
   return !!(extra && extra.test(cmd));
 }
 
-var mrRunners = { gen: -1, list: [] };
-function mrExcludedRunner(cmd) {
-  if (!cmd) return false;
-  var g = ahHost.cfgGen();
-  if (mrRunners.gen !== g) mrRunners = { gen: g, list: ah.cfg('mcp_reaper.runner_exclude_res').map(function (src) { return new RegExp(src, 'i'); }) };
-  return mrRunners.list.some(function (re) { return re.test(cmd); });
-}
-
-function mrInvariant(p, extra, exclude) {
-  if (p.ppid !== ah.cfgNum('mcp_reaper.orphan_ppid')) return false;
-  if (!mrMatchesMcp(p.cmd, extra)) return false;
+function mrInvariant(m, p, extra, exclude) {
+  if (p.ppid !== m.orphan) return false;
+  if (!mrMatchesMcp(m, p.cmd, extra)) return false;
   if (exclude && exclude.test(p.cmd)) return false;
-  return !mrExcludedRunner(p.cmd);
+  for (var i = 0; i < m.runners.length; i++) if (m.runners[i].test(p.cmd)) return false;
+  return true;
 }
 
 function mrInitPid1(rows) {
@@ -106,7 +111,7 @@ function decide(p) {
   var extra = mrUserRe(ah.settings.str('mcp_reaper.match_setting')), exclude = mrUserRe(ah.settings.str('mcp_reaper.exclude_setting'));
   var minAge = mrEnvInt('mcp_reaper.min_age_env', 'mcp_reaper.min_age_default_s'), max = mrEnvInt('mcp_reaper.max_env', 'mcp_reaper.max_default');
   // ---- the selection: signature, parent PID 1, exclusions; the age floor; the service-manager filter; the cap ----
-  var raw = rows.filter(function (q) { return mrInvariant(q, extra, exclude); }), kept = [], skipped = [];
+  var matcher = mrMatcher(), raw = rows.filter(function (q) { return mrInvariant(matcher, q, extra, exclude); }), kept = [], skipped = [];
   if (raw.length) {
     var exact = ah.cfgNum('hostproc.max_exact_id');
     if (raw.some(function (q) { return !(q.pid >= 0 && q.pid < exact); })) return mrDefer('pid_range');
@@ -139,7 +144,7 @@ function decide(p) {
   candidates.forEach(function (c) { ah.proc.signal(c.pid, false); });
   ah.sleep(ah.cfgNum('mcp_reaper.grace_ms'));
   // a fresh listing: a pid recycled during the grace period must qualify again on its own signature
-  var again = ah.proc.list(), still = again === null ? [] : again.rows.filter(function (q) { return mrInvariant(q, extra, exclude); }).map(function (q) { return q.pid; });
+  var again = ah.proc.list(), matcher2 = mrMatcher(), still = again === null ? [] : again.rows.filter(function (q) { return mrInvariant(matcher2, q, extra, exclude); }).map(function (q) { return q.pid; });
   candidates.forEach(function (c) {
     if (still.indexOf(c.pid) === -1) return;
     mrLog(logRel, logAbs, mrProc(c, ah.cfg('mcp_reaper.action_kill')));
