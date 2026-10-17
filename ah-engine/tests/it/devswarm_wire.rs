@@ -607,6 +607,34 @@ fn state_edges_queue_a_per_child_jev_sweep() {
     assert_eq!(r["children"], 0);
 }
 
+#[test]
+fn a_restricted_jev_sweep_parses_only_the_plan_files_that_can_match() {
+    ah_engine::defaults::init().unwrap();
+    let t = TempDir::new("sweep-only");
+    let home = t.0.join("home");
+    let plans = home.join(".anti-hall/devswarm/plans");
+    for i in 0..20 {
+        write(
+            &plans.join(format!("primary-{i:04}.json")),
+            &json!({"id": format!("primary-{i:04}"), "worktreePath": format!("/wt/other-{i}"), "steps": [{"title": "s"}]}),
+        );
+    }
+    // a plan named by neither id nor file stem is still found by its worktree (the queue carries both)
+    write(&plans.join("primary-zzzz.json"), &json!({"id": "primary-zzzz", "worktreePath": "/wt/mine", "steps": [{"title": "s"}]}));
+    let env = ah_engine::jev::settings::Env::from_pairs([
+        ("HOME", home.to_string_lossy().into_owned()),
+        ("ANTIHALL_JEV", "1".to_string()),
+        ("CLAUDE_PLUGIN_OPTION_JEV_INTEGRATION_DEVSWARM_WAIT_KIND", "on".to_string()),
+    ]);
+    let parsed = || ah_engine::threads::work()["jev_sweep_plans_parsed"].as_u64().unwrap_or(0);
+    let before = parsed();
+    ah_engine::jev::sweep::sweep_only(&home, &env, now(), Some(&["/wt/mine".to_string()]));
+    assert_eq!(parsed() - before, 1, "21 plan files, one can match: one is parsed");
+    let before = parsed();
+    ah_engine::jev::sweep::sweep_only(&home, &env, now(), Some(&["primary-0003".to_string()]));
+    assert_eq!(parsed() - before, 1, "a plan named by its file stem is parsed alone");
+}
+
 // ---- watcher plan ----------------------------------------------------------------------------------------------------------
 
 #[test]
