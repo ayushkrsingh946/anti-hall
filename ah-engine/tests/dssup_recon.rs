@@ -46,6 +46,8 @@ fn init_defaults() {
     ONCE.call_once(|| {
         // SAFETY: set once, before this process reads the defaults; nothing else here touches this variable
         unsafe { std::env::set_var("AH_ENGINE_PLUGIN_ROOT", Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().join("plugins/anti-hall")) };
+        // the hivecontrol guard (src/hcguard.rs) only lets a stub run from a scratch root; the fixtures live under ~/.anti-hall/scratch
+        unsafe { std::env::set_var("AH_HC_STUB_DIR", PathBuf::from(std::env::var("HOME").unwrap()).join(".anti-hall/scratch/recon-tests")) };
         ah_engine::defaults::init().expect("defaults load");
     });
 }
