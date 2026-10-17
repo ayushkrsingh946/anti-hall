@@ -13,6 +13,8 @@ use super::{Ctx, list_store_hashes};
 use crate::checks::jsport::num::to_js_string;
 use crate::defaults;
 use crate::meshw::cursors::{self, LogRec};
+use crate::meshw::args::Args;
+use crate::meshw::common::Inv;
 use crate::meshw::ident;
 use crate::meshw::idlock::is_safe_id;
 use crate::meshw::store::mesh_message_hash;
@@ -55,6 +57,7 @@ fn run_stage(ctx: &Ctx, which: &str, dry: bool) -> Option<Tally> {
     let t = match which {
         "promote_unclaimed" => super::promote::promote_unclaimed(ctx),
         "cursor_hygiene" => Some(super::cursorhyg::run(ctx)),
+        "owner_key_migrate" => owner_key_migrate(ctx),
         "merge_split_backend_stores" => merge_split(ctx),
         _ => {
             let hashes = stores(ctx, dry)?;
@@ -74,6 +77,31 @@ fn run_stage(ctx: &Ctx, which: &str, dry: bool) -> Option<Tally> {
     };
     let _ = home;
     t
+}
+
+/// `migrateOwnerKeys(home, {env, cwd})` (`ownerKeyMigratePostUpdate`): the engine's own `migrate-owner-keys` verb. It backfills a missing
+/// `ownerKey` on every descriptor (a descriptor is rewritten in place, atomically; nothing is deleted). The re-home of a stranded active
+/// descriptor (registry row and backlog moved between stores) is Node's: the verb decides it before writing anything, so the whole stage
+/// then runs as Node's function. Node ignores the ingest dry-run switch here and so does this.
+fn owner_key_migrate(ctx: &Ctx) -> Option<Tally> {
+    let inv = Inv {
+        home: std::path::PathBuf::from(&ctx.home),
+        env: ctx.env.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+        cwd: ctx.cwd.clone(),
+        now: crate::health::now_ms() as i64,
+        stdin: None,
+        write_home: std::path::PathBuf::from(&ctx.home),
+        store_override: None,
+    };
+    let ans = crate::meshw::lifeverbs::migrate_owner_keys(&inv, &Args::default()).ok()?;
+    let out = crate::checks::guardkit::ojson::OVal::parse(&ans.stdout)?;
+    let mut t = Tally::default();
+    for k in ["scanned", "backfilled", "rehomed", "errors"] {
+        if let Some(crate::checks::guardkit::ojson::OVal::Num(n)) = out.get(k) {
+            t.add(k, *n);
+        }
+    }
+    Some(t)
 }
 
 /// `store.listStoreHashes(home)`, when the engine can open every one of them as Node would. A store with no readable `BACKEND` marker

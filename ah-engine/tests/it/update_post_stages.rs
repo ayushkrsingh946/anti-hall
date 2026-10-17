@@ -538,6 +538,7 @@ impl Case {
             "cursor-hygiene" => "cursorHygiene",
             "merge-split-backend-stores" => "mergeSplitBackendStores",
             "child-sender-labels" => "repairChildSenderLabels",
+            "owner-key-migrate" => "ownerKeyMigrate",
             _ => "none",
         }
     }
@@ -718,7 +719,7 @@ fn a_stage_switched_off_reports_itself_skipped_and_touches_nothing() {
     let out = run_engine(&w, &o, &["--post-pull-only"]);
     let status: Value = serde_json::from_str(out.stdout.lines().next().unwrap()).unwrap();
     let status = &status["status"];
-    for (key, name) in [("readerCursorsImport", "reader-cursors-import"), ("readerFloorRepair", "reader-floor-repair"), ("dualPartitionAcks", "dual-partition-acks"), ("promoteUnclaimed", "promote-unclaimed"), ("cursorHygiene", "cursor-hygiene"), ("mergeSplitBackendStores", "merge-split-backend-stores"), ("childSenderLabels", "child-sender-labels")] {
+    for (key, name) in [("readerCursorsImport", "reader-cursors-import"), ("readerFloorRepair", "reader-floor-repair"), ("dualPartitionAcks", "dual-partition-acks"), ("promoteUnclaimed", "promote-unclaimed"), ("cursorHygiene", "cursor-hygiene"), ("mergeSplitBackendStores", "merge-split-backend-stores"), ("childSenderLabels", "child-sender-labels"), ("ownerKeyMigrate", "owner-key-migrate")] {
         let a = &status[key];
         assert_eq!(a["attempted"], json!(false), "{key}: {a}");
         assert_eq!(a["disabled"], json!(true), "{key}: {a}");
@@ -1109,4 +1110,71 @@ fn the_git_classifier_is_opt_in_and_mirrors_identity_js() {
     assert_eq!((on.kind.as_str(), on.worktree_root.as_deref()), ("submodule-in-main", Some(s(&fs::canonicalize(&sup).unwrap()).as_str())));
     // the scope ends with the closure
     assert_eq!(resolve_context(&s(nested), false), Err(Defer("git-superproject".into())));
+}
+
+
+// ---- owner-key-migrate (roadmap #61 G3) ------------------------------------------------------------------------------------------
+
+/// Descriptors an earlier build wrote without an `ownerKey`: an active one in a real worktree (the key resolves from git), an active
+/// one whose worktree is gone, an archived one, one with a key already, a legacy one with no session id; plus a non-descriptor file.
+fn seed_owner_keys(home: &Path) {
+    let wt = repo().to_string_lossy().into_owned();
+    put(home, ".anti-hall/devswarm/workspaces/ok-1.json", &format!(r#"{{"id":"ok-1","worktreePath":"{wt}","sessionId":"s1"}}"#));
+    put(home, ".anti-hall/devswarm/workspaces/ok-2.json", r#"{"id":"ok-2","worktreePath":"/nonexistent/ok-2","sessionId":"s2","repoKey":"kept-abc123"}"#);
+    put(home, ".anti-hall/devswarm/workspaces/ok-3.json", r#"{"id":"ok-3","worktreePath":"/nonexistent/ok-3"}"#);
+    put(home, ".anti-hall/devswarm/workspaces/ok-4.json", r#"{"id":"ok-4","worktreePath":"/nonexistent/ok-4","ownerKey":"already-111111"}"#);
+    put(home, ".anti-hall/devswarm/archived/ok-5.json", &format!(r#"{{"id":"ok-5","worktreePath":"{wt}","sessionId":"s5"}}"#));
+    put(home, ".anti-hall/devswarm/workspaces/notes.json", r#"{"hello":"world"}"#);
+}
+
+/// An active descriptor stranded in its legacy hash bucket while its worktree now resolves a real repo key: the re-home (registry row
+/// and backlog moved between stores) is Node's.
+fn seed_owner_keys_rehome(home: &Path) {
+    let wt = repo().to_string_lossy().into_owned();
+    let hash = ah_engine::meshw::send::hash_from_workspace_id("rh-1");
+    put(home, ".anti-hall/devswarm/workspaces/rh-1.json", &format!(r#"{{"id":"rh-1","worktreePath":"{wt}","sessionId":"s1","ownerKey":"{hash}"}}"#));
+    put(home, ".anti-hall/devswarm/workspaces/ok-1.json", &format!(r#"{{"id":"ok-1","worktreePath":"{wt}","sessionId":"s1"}}"#));
+}
+
+case!(owner_keys_are_backfilled_on_active_and_archived_descriptors, "owner-key-migrate", "bad_state", "owner-key-migrate", "ownerKeyMigrate", "ownerKeyMigratePostUpdate", seed_owner_keys, live: true, markers: false);
+case!(owner_keys_ignore_the_ingest_dry_run_switch_like_node, "owner-key-migrate", "dry_run_switch", "owner-key-migrate", "ownerKeyMigrate", "ownerKeyMigratePostUpdate", seed_owner_keys, live: false, markers: false);
+case!(owner_keys_already_done_is_skipped, "owner-key-migrate", "already_done", "owner-key-migrate", "ownerKeyMigrate", "ownerKeyMigratePostUpdate", seed_owner_keys, live: true, markers: true);
+
+/// The re-home stays with Node: the engine writes nothing (not even the descriptor it could have backfilled) and Node's function runs.
+#[test]
+fn owner_keys_needing_a_rehome_are_left_to_the_node_function_untouched() {
+    let o = Opt { ds: true, no_upstream_move: true, live: true, no_node: true, stage_only: Some("owner-key-migrate"), ..Opt::default() };
+    let w = world(&o);
+    seed_owner_keys_rehome(&w.home);
+    let before = picture(&w, Value::Null, None);
+    let ans = engine_answer(&w, &o, "ownerKeyMigrate");
+    assert_eq!(ans["attempted"], json!(false), "{ans}");
+    let calls = stage_node_calls(&w);
+    assert_eq!(calls.len(), 1, "{calls:?}");
+    assert!(calls[0].contains("ownerKeyMigratePostUpdate"), "{calls:?}");
+    assert_eq!(before["files"], picture(&w, Value::Null, None)["files"], "the engine wrote for a stage it handed to Node");
+}
+
+/// Nothing is deleted: every descriptor file is still there and every key it had is kept (only `ownerKey` / `repoKey` are added).
+#[test]
+fn owner_key_migrate_deletes_nothing_and_keeps_every_field() {
+    let o = Opt { ds: true, no_upstream_move: true, live: true, no_node: true, stage_only: Some("owner-key-migrate"), ..Opt::default() };
+    let w = world(&o);
+    seed_owner_keys(&w.home);
+    let before = picture(&w, Value::Null, None);
+    engine_answer(&w, &o, "ownerKeyMigrate");
+    let after = picture(&w, Value::Null, None);
+    for (f, text) in before["files"].as_object().unwrap() {
+        let now = after["files"].get(f).unwrap_or_else(|| panic!("file {f} vanished"));
+        if f.contains("/workspaces/") || f.contains("/archived/") {
+            let body = |v: &Value| v.as_str().unwrap().split_once(' ').map(|(_, b)| b.to_string()).unwrap_or_default();
+            if body(text).is_empty() {
+                continue; // a directory
+            }
+            let (was, is): (Value, Value) = (serde_json::from_str(&body(text)).unwrap(), serde_json::from_str(&body(now)).unwrap());
+            for (k, v) in was.as_object().unwrap() {
+                assert_eq!(is.get(k), Some(v), "{f}: field {k} changed");
+            }
+        }
+    }
 }
