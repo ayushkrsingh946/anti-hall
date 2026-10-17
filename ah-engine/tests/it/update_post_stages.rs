@@ -644,6 +644,43 @@ case!(child_labels_already_done_is_skipped, "child-sender-labels", "already_done
 case!(promote_turns_a_marker_into_the_heartbeat_session, "promote-unclaimed", "bad_state", "promote-unclaimed", "promoteUnclaimed", "promoteUnclaimedPostUpdate", seed_promote, live: true, markers: false);
 case!(promote_ignores_the_ingest_dry_run_switch_like_node, "promote-unclaimed", "dry_run_switch", "promote-unclaimed", "promoteUnclaimed", "promoteUnclaimedPostUpdate", seed_promote, live: false, markers: false);
 
+/// An earlier build's store: sqlite data and no `BACKEND` marker (Node's `resolveStoreBackend` infers sqlite from the database file).
+fn seed_floors_no_marker(home: &Path) {
+    seed_floors(home);
+    fs::remove_file(ds(home).join("store").join(STORE).join("BACKEND")).unwrap();
+}
+
+fn seed_not_split_no_marker(home: &Path) {
+    seed_not_split(home);
+    fs::remove_file(ds(home).join("store").join(STORE).join("BACKEND")).unwrap();
+}
+
+fn marker_of(w: &World) -> Option<String> {
+    fs::read_to_string(ds(&w.home).join("store").join(STORE).join("BACKEND")).ok().map(|s| s.trim().to_string())
+}
+
+/// A store with data but no marker is settled as sqlite and pinned by a read-write open, like Node; a preview (read-only open) pins nothing.
+#[test]
+fn a_store_without_a_marker_is_adopted_as_sqlite_and_pinned_like_node() {
+    let (_, w, o) = replay(&Case { stage: "reader-floor-repair", name: "no_marker", row: "reader-floor-repair", key: "readerFloorRepair", func: "readerFloorRepairPostUpdate", seed: seed_floors_no_marker, live: true, markers: false });
+    assert_eq!(marker_of(&w).as_deref(), Some("sqlite"));
+    assert_eq!(stage_node_calls(&w), Vec::<String>::new());
+    let again = engine_answer(&w, &o, "readerFloorRepair");
+    assert_eq!(again["skippedAlreadyDone"], json!(true), "{again}");
+}
+
+#[test]
+fn a_preview_of_a_store_without_a_marker_writes_no_marker() {
+    let (_, w, _) = replay(&Case { stage: "reader-floor-repair", name: "no_marker_dry", row: "reader-floor-repair", key: "readerFloorRepair", func: "readerFloorRepairPostUpdate", seed: seed_floors_no_marker, live: false, markers: false });
+    assert_eq!(marker_of(&w), None);
+}
+
+#[test]
+fn split_merge_pins_a_store_without_a_marker_even_in_a_preview_like_node() {
+    let (_, w, _) = replay(&Case { stage: "merge-split-backend-stores", name: "no_marker", row: "merge-split-backend-stores", key: "mergeSplitBackendStores", func: "mergeSplitBackendStoresPostUpdate", seed: seed_not_split_no_marker, live: false, markers: false });
+    assert_eq!(marker_of(&w).as_deref(), Some("sqlite"));
+}
+
 // ---- fallback, the switch, nothing deleted -------------------------------------------------------------------------------------
 
 /// A journal store is not one the engine opens: the stage hands the whole run to Node (here a shim that fails, so the answer is the

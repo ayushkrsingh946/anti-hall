@@ -76,6 +76,26 @@ pub(crate) fn sqlite_store(home: &Path, hash: &str) -> bool {
     marker == defaults::text("mesh.backend_sqlite") && dir.join(defaults::text("mesh_write.store_file")).is_file()
 }
 
+/// `resolveStoreBackend` for a store with no `BACKEND` marker (or one that names neither backend): a non-empty database file means
+/// sqlite (`inferBackendFromDisk` prefers it over any journal), and a read-write open pins that with the marker (a temporary file,
+/// then a rename). A journal marker, no database or an empty one is not the engine's to settle: false.
+pub(crate) fn adopt_legacy_marker(home: &Path, hash: &str, read_only: bool) -> bool {
+    let dir = store_dir(home, hash);
+    let (marker_name, sqlite) = (defaults::text("mesh.backend_marker"), defaults::text("mesh.backend_sqlite"));
+    let marker = std::fs::read_to_string(dir.join(marker_name)).map(|s| s.trim().to_lowercase()).unwrap_or_default();
+    if marker == defaults::text("mesh_write.backend_journal") || marker == sqlite {
+        return false; // a journal store stays Node's; a sqlite marker with no database file is a store the engine cannot open either
+    }
+    if !std::fs::metadata(dir.join(defaults::text("mesh_write.store_file"))).is_ok_and(|m| m.len() > 0) {
+        return false;
+    }
+    if read_only {
+        return true;
+    }
+    let tmp = dir.join(format!("{marker_name}.{}.{}{}", std::process::id(), crate::health::now_ms(), defaults::text("mesh_write.tmp_suffix")));
+    std::fs::write(&tmp, sqlite).and_then(|()| std::fs::rename(&tmp, dir.join(marker_name))).is_ok()
+}
+
 /// `openStore({ home, hash, readOnly })`.
 pub(crate) fn open(home: &Path, hash: &str, read_only: bool) -> Result<Handle, String> {
     let db = store_dir(home, hash).join(defaults::text("mesh_write.store_file"));
