@@ -42,6 +42,13 @@ struct Case {
 /// Cases that first add an orphan partition with unread mail to both homes (`orphan.js`).
 const ORPHAN_CASES: &[&str] = &["send-with-orphan", "mesh-read-with-orphan"];
 
+/// Cases that first add a live descriptor (`workspaces/<id>.json`, no registry row of that id) to both homes: the id, and whether
+/// its worktree is the registered child's (else a path nothing is registered under).
+const DESCRIPTOR_CASES: &[(&str, &str, bool)] = &[
+    ("send-by-descriptor-short-id", "aaaa1111-0000-4000-8000-000000000001", true),
+    ("send-by-descriptor-unmatched", "bbbb2222-0000-4000-8000-000000000002", false),
+];
+
 #[test]
 fn engine_verbs_match_node_byte_for_byte() {
     if !node_sqlite_available() {
@@ -210,6 +217,23 @@ fn engine_verbs_match_node_byte_for_byte() {
             extra: vec![],
             native: true,
         },
+        // GH #203: a descriptor-only workspace's short id resolves through its descriptor (the engine answers it, no defer)
+        Case {
+            name: "send-by-descriptor-short-id",
+            cwd: "main",
+            argv: vec![s("send"), s("--to"), s("aaaa1111"), s("--message"), s("via descriptor short id")],
+            stdin: None,
+            extra: vec![],
+            native: true,
+        },
+        Case {
+            name: "send-by-descriptor-unmatched",
+            cwd: "main",
+            argv: vec![s("send"), s("--to"), s("bbbb2222"), s("--message"), s("x")],
+            stdin: None,
+            extra: vec![],
+            native: true,
+        },
         Case { name: "send-no-target", cwd: "main", argv: vec![s("send"), s("--message"), s("x")], stdin: None, extra: vec![], native: true },
         Case {
             name: "send-two-targets",
@@ -354,6 +378,12 @@ fn engine_verbs_match_node_byte_for_byte() {
                     .output()
                     .unwrap();
                 assert!(o.status.success(), "orphan seed failed: {}", String::from_utf8_lossy(&o.stderr));
+            }
+            if let Some((_, id, child)) = DESCRIPTOR_CASES.iter().find(|(n, _, _)| *n == c.name) {
+                let wt = if *child { fx.child.clone() } else { fx.root.join("no-such-worktree") };
+                let dir = h.join(".anti-hall/devswarm/workspaces");
+                fs::create_dir_all(&dir).unwrap();
+                fs::write(dir.join(format!("{id}.json")), format!("{{\"id\":\"{id}\",\"worktreePath\":{:?}}}\n", wt.to_string_lossy())).unwrap();
             }
             fs::create_dir_all(h.join(".anti-hall")).unwrap();
             fs::write(h.join(".anti-hall").join("settings.json"), "{\"mesh\":{\"engine_writes\":\"on\"}}\n").unwrap();
