@@ -1133,6 +1133,8 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 
 | Key | Default | Env override | Unit | What it is |
 |---|---|---|---|---|
+| `telemetry.byte_buckets_bytes` | `8 items` |  | bytes | Upper bounds of the byte histogram buckets (the per-call memory histograms `check_mem_peak_bytes` and `check_mem_alloc_bytes`); a quantile is reported as the upper bound of the bucket holding that rank, so it is an upper estimate. |
+| `telemetry.byte_unit` | `bytes` |  |  | The metric unit that makes a histogram use the byte buckets (`telemetry.byte_buckets_bytes`) instead of the latency buckets. |
 | `telemetry.bytes_per_token` | `4` |  | bytes | Bytes of injected context counted as one token when `impact` estimates what injection costs. |
 | `telemetry.cmd_record` | `mesh, migrate, jev-setup, doctor:--repair\\|--fix, config:heal` |  |  | The engine commands whose runs are recorded as `cmd` events (they write state). Each entry is a command word, or `command:arg\|arg` to record only runs that carry one of those arguments (`doctor:--repair\|--fix` records a repair, not a read-only check; `config:heal` records the heal, not the show). |
 | `telemetry.daemon_event_label` | `snapshot` |  |  | The `e` label of the daemon health snapshot events. |
@@ -1169,6 +1171,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `telemetry.snapshot_ms` | `60000` | `AH_ENGINE_SNAPSHOT_MS` | ms | Interval of the scheduled metrics snapshot job, which keeps the counters in hot.db and their rollups in archive.db (D51); the daemon also keeps one when it exits. |
 | `telemetry.summary_event_limit` | `5000` |  |  | Most events of one kind `telemetry summary` reads to build its jev, cmd, model and daemon sections. |
 | `telemetry.token_max_len` | `64` |  | bytes | Longest identifier a telemetry event may hold in any text field (hook, event, model, task class, spawn key); longer ones are cut. Event text fields hold identifiers only, never prose. |
+| `telemetry.top_checks` | `5` |  |  | How many checks `status --json` lists in `cpu.top_checks`, the ones that spent the most CPU (with calls and CPU per call). |
 
 ### storage.toml / backup
 
@@ -10066,6 +10069,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `diagnostics.debug_thread_top` | `8` |  |  | Threads (grouped by name) listed per per-thread CPU sample in the debug log. |
 | `diagnostics.malloc_stack_logging` | `` |  |  | Diagnostic label for an operator-run macOS `MallocStackLogging` repro (`lite` or empty). The engine only accepts and reports it; the OS facility must be enabled in the process environment before start. |
 | `diagnostics.mem_log` | `true` |  |  | Append one NDJSON line per served request to the memory log: time, request kind, event, the checks that ran, resident set and allocator figures before and after, and the size of the transcript file. Costs a few microseconds and one small append per request; turn it off once the memory question is closed. |
+| `diagnostics.mem_log_checks_cap` | `64` |  |  | Most checks whose per-call memory (`check_mem`: check, peak, allocated bytes) one request line of the memory log lists; further checks of the same request are left off the line. |
 | `diagnostics.mem_log_max_bytes` | `4194304` |  | bytes | Size at which the memory log is rotated (the old file is kept once, as <name>.1, replacing the previous one), so the log never holds more than twice this. |
 | `diagnostics.mem_snapshot` | `true` |  |  | When the resident-set cap trips, write one snapshot before the daemon exits: allocator figures, thread count, the interpreters and caches of every worker, and the platform's own memory map of the process. |
 | `diagnostics.mem_snapshot_max_bytes` | `262144` |  | bytes | Largest the snapshot file may be; the platform memory-map text is cut to fit. |
@@ -10731,6 +10735,9 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `check_decisions` | counter | runs | check, decision | Built-in check outcomes, by check and decision (allow, block, advisory, defer). |
 | `check_latency_by_size_us` | histogram | us | check, size | Wall time of a built-in check run, by check and by the size class of the transcript the request named (load.size_labels). |
 | `check_latency_us` | histogram | us | check | Wall time of a built-in check run, by check. |
+| `check_mem_alloc_bytes` | histogram | bytes | check | The bytes one call of a built-in check (and its script) allocated in total, freed or not, by check: a histogram whose max is the check's worst call (`diagnostics.check_mem`). |
+| `check_mem_peak_bytes` | histogram | bytes | check | The most one call of a built-in check (and its script) grew the heap above where the call started, in bytes, by check: a histogram whose max is the check's worst call. Counted from per-thread counters in the allocator (`diagnostics.check_mem`). |
+| `check_mem_retained_bytes` | counter | bytes | check | The bytes a check's calls kept allocated when they returned (allocated minus freed, positive only), by check: the sum over its calls. A check that keeps growing here holds on to memory. Calls that freed more than they allocated add nothing. |
 | `client_gone_skipped` | counter | checks |  | Checks not run because the request's client had already closed its connection (daemon.skip_when_client_gone). |
 | `db_archive_bytes` | gauge | bytes |  | Size of archive.db (0 until it is first used). |
 | `db_archive_wal_bytes` | gauge | bytes |  | Size of archive.db's write-ahead log. |
@@ -10743,6 +10750,7 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `dispatch_entries` | counter | entries | event, entry, outcome, cfg | What the dispatcher's plan did to each table entry of an event it asked the daemon about (D87): ran, skipped_predicate, skipped_max_rules, skipped_budget, shadowed or off, by event, entry, outcome and the hash of the non-default hook configuration the plan was made under (`default` when none). |
 | `dispatch_overhead_us` | histogram | us | event | Wall time of a dispatched hook request that no built-in check accounts for (request wall minus the sum of the checks), by hook event: parsing, plan, locks, waits and queueing inside the daemon. |
 | `errors` | counter | requests |  | Requests answered ERR. |
+| `event_check_cpu_us` | counter | us | event | CPU time (microseconds, the worker thread's own) spent inside built-in checks while serving each hook event: the sum over every check call of that event (`status --json` `cpu.by_event`). |
 | `evidence_cache` | counter | lookups | result | Transcript evidence lookups (claim-ledger and other `ah.transcript.evidence` callers): hit (nothing appended), extend (only the appended bytes were read) or rebuild (the window was read afresh). |
 | `evidence_cache_rebuild` | counter | lookups | reason | Why a transcript evidence lookup read its window afresh: none (nothing kept: first call, daemon restart, eviction or idle expiry), file (another file or a shorter one), window (the window moved past the kept lines) or digest (the file was rewritten in place). |
 | `evidence_walk` | counter | walks | result | Evidence walks (the claim ledger's `ah.transcript.evidenceWalk`) the memory registry refused to keep, so the check deferred. |

@@ -83,6 +83,7 @@ const ALLOW: &[(&str, &str, &str)] = &[
     ("src/load.rs", "static SCAN_BYTES", "a thread-local counter initialised to zero: state, not a tunable"),
     ("src/load.rs", "static CHECK_SCAN_BYTES", "a thread-local counter initialised to zero: state, not a tunable"),
     ("src/load.rs", "static CHECK_CPU_US", "a thread-local counter initialised to zero: state, not a tunable"),
+    ("src/load.rs", "static CHECK_MEM", "a thread-local note initialised to none: state, not a tunable"),
     ("src/load.rs", "static NOTES", "a thread-local list initialised empty: state, not a tunable"),
     ("src/load.rs", "static TRANSCRIPT_SIZE", "a thread-local slot initialised empty: state, not a tunable"),
     ("src/load.rs", "static REQUEST", "a thread-local slot initialised empty: state, not a tunable"),
