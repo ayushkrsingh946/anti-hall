@@ -230,16 +230,13 @@ pub fn report(a: &Value, b: &Value, wall_us: u64) -> Value {
     let work: serde_json::Map<String, Value> = b["work"].as_object().map(|m| m.iter().map(|(k, v)| rate(k, v)).collect()).unwrap_or_default();
     // threads that ended: their CPU is the difference of the totals (a live thread's CPU is in `by_name`)
     let gone = |v: &Value, n: &str, k: &str| v.get("exited").and_then(|e| e.get(n)).and_then(|e| e.get(k)).and_then(Value::as_u64).unwrap_or(0);
-    let mut exited_by_name: Vec<(String, u64, f64)> = b["exited"]
+    let mut exited_by_name: Vec<(String, u64, f64, u64)> = b["exited"]
         .as_object()
         .map(|m| {
             m.keys()
                 .map(|n| {
-                    (
-                        n.clone(),
-                        gone(b, n, "exits").saturating_sub(gone(a, n, "exits")),
-                        100.0 * gone(b, n, "cpu_us").saturating_sub(gone(a, n, "cpu_us")) as f64 / wall,
-                    )
+                    let us = gone(b, n, "cpu_us").saturating_sub(gone(a, n, "cpu_us"));
+                    (n.clone(), gone(b, n, "exits").saturating_sub(gone(a, n, "exits")), 100.0 * us as f64 / wall, us / 1000)
                 })
                 .collect()
         })
@@ -251,7 +248,7 @@ pub fn report(a: &Value, b: &Value, wall_us: u64) -> Value {
         "window_ms": wall_us / 1000,
         "cpu_pct_total": round(rows.iter().map(|r| r.2).sum()),
         "by_name": by_name.iter().map(|(n, p, c)| json!({"name": n, "threads": c, "cpu_pct": round(*p)})).collect::<Vec<_>>(),
-        "exited_by_name": exited_by_name.iter().map(|(n, c, p)| json!({"name": n, "exits": c, "cpu_pct": round(*p)})).collect::<Vec<_>>(),
+        "exited_by_name": exited_by_name.iter().map(|(n, c, p, ms)| json!({"name": n, "exits": c, "cpu_pct": round(*p), "cpu_ms": ms, "cpu_total_ms": gone(b, n, "cpu_us") / 1000})).collect::<Vec<_>>(),
         "threads": rows.iter().map(|(n, t, p, c)| json!({"name": n, "tid": t, "cpu_pct": round(*p), "cpu_total_ms": c / 1000})).collect::<Vec<_>>(),
         "work_per_s": work,
         "work_total": b["work"],
@@ -309,6 +306,7 @@ mod tests {
         let row = r["exited_by_name"].as_array().unwrap().iter().find(|t| t["name"] == "ah-test-brief").cloned().unwrap_or(Value::Null);
         assert_eq!(row["exits"], json!(3), "{r}");
         assert!(row["cpu_pct"].as_f64().unwrap_or(0.0) > 30.0, "three 40 ms spinners over ~120 ms of wall are mostly CPU: {r}");
+        assert!(row["cpu_ms"].as_u64().unwrap_or(0) > 0, "the exited threads' cumulative CPU is reported in ms, not only as a window percentage: {r}");
         tally("test_tally", 2);
         assert_eq!(work()["test_tally"], json!(2));
     }

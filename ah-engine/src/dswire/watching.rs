@@ -302,6 +302,7 @@ pub fn run(w: &Wire, stop: &dyn Fn() -> bool) {
         let held_back = l.gate.tick(now); // growth the interval held back, now due
         if now >= l.next_flush {
             l.next_flush = now + tun.flush;
+            w.run_jev(); // the queued sweeps start here, at most one per flush interval, however many batches queued ids since
             w.jev.flush();
         }
         if !held_back.is_empty() {
@@ -365,13 +366,12 @@ pub fn run(w: &Wire, stop: &dyn Fn() -> bool) {
     w.jev.flush();
 }
 
-/// Queue the per-child Jev sweeps of `ids` and run them.
+/// Queue the per-child Jev sweeps of `ids`; the loop's flush tick starts them (a sweep per batch was a thread per batch: #191).
 fn queue_dirty(w: &Wire, ids: &[String]) {
     let n = w.jev.queue(ids);
     if n > 0 {
         w.count_dirty(n);
     }
-    w.run_jev();
 }
 
 /// Whether a changed path in the batch belongs to `id`'s git directory.

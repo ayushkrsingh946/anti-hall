@@ -607,6 +607,61 @@ fn state_edges_queue_a_per_child_jev_sweep() {
     assert_eq!(r["children"], 0);
 }
 
+#[test]
+fn a_restricted_jev_sweep_parses_only_the_plan_files_that_can_match() {
+    ah_engine::defaults::init().unwrap();
+    let t = TempDir::new("sweep-only");
+    let home = t.0.join("home");
+    let plans = home.join(".anti-hall/devswarm/plans");
+    for i in 0..20 {
+        write(
+            &plans.join(format!("primary-{i:04}.json")),
+            &json!({"id": format!("primary-{i:04}"), "worktreePath": format!("/wt/other-{i}"), "steps": [{"title": "s"}]}),
+        );
+    }
+    // a plan named by neither id nor file stem is still found by its worktree (the queue carries both)
+    write(&plans.join("primary-zzzz.json"), &json!({"id": "primary-zzzz", "worktreePath": "/wt/mine", "steps": [{"title": "s"}]}));
+    let env = ah_engine::jev::settings::Env::from_pairs([
+        ("HOME", home.to_string_lossy().into_owned()),
+        ("ANTIHALL_JEV", "1".to_string()),
+        ("CLAUDE_PLUGIN_OPTION_JEV_INTEGRATION_DEVSWARM_WAIT_KIND", "on".to_string()),
+    ]);
+    let parsed = || ah_engine::threads::work()["jev_sweep_plans_parsed"].as_u64().unwrap_or(0);
+    let before = parsed();
+    ah_engine::jev::sweep::sweep_only(&home, &env, now(), Some(&["/wt/mine".to_string()]));
+    assert_eq!(parsed() - before, 1, "21 plan files, one can match: one is parsed");
+    let before = parsed();
+    ah_engine::jev::sweep::sweep_only(&home, &env, now(), Some(&["primary-0003".to_string()]));
+    assert_eq!(parsed() - before, 1, "a plan named by its file stem is parsed alone");
+}
+
+#[test]
+fn a_restricted_jev_sweep_still_matches_a_plan_whose_worktree_is_written_escaped() {
+    ah_engine::defaults::init().unwrap();
+    let t = TempDir::new("sweep-escaped");
+    let home = t.0.join("home");
+    let plans = home.join(".anti-hall/devswarm/plans");
+    std::fs::create_dir_all(&plans).unwrap();
+    // the same worktree the way a JSON writer may escape it: `\/` for `/`, `\u00e9` for a non-ASCII char
+    let escaped = [
+        ("primary-esc1.json", r#"{"id":"primary-esc1","worktreePath":"\/tmp\/ws-x","steps":[{"title":"s"}]}"#, "/tmp/ws-x"),
+        ("primary-esc2.json", r#"{"id":"primary-esc2","worktreePath":"/tmp/caf\u00e9","steps":[{"title":"s"}]}"#, "/tmp/caf\u{e9}"),
+    ];
+    let env = ah_engine::jev::settings::Env::from_pairs([
+        ("HOME", home.to_string_lossy().into_owned()),
+        ("ANTIHALL_JEV", "1".to_string()),
+        ("CLAUDE_PLUGIN_OPTION_JEV_INTEGRATION_DEVSWARM_WAIT_KIND", "on".to_string()),
+    ]);
+    let parsed = || ah_engine::threads::work()["jev_sweep_plans_parsed"].as_u64().unwrap_or(0);
+    // each file is added in turn; the sweep must parse every escaped file written so far (none is skipped by the text prefilter)
+    for (n, (file, text, wt)) in escaped.iter().enumerate() {
+        std::fs::write(plans.join(file), text).unwrap();
+        let before = parsed();
+        ah_engine::jev::sweep::sweep_only(&home, &env, now(), Some(&[wt.to_string()]));
+        assert_eq!(parsed() - before, n as u64 + 1, "the escaped plan for {wt} is parsed, not skipped");
+    }
+}
+
 // ---- watcher plan ----------------------------------------------------------------------------------------------------------
 
 #[test]
@@ -814,6 +869,35 @@ fn a_quiet_periodic_reconcile_reads_through_the_cache_only_and_counts_its_cpu_by
         .map(|(k, v)| (k, v.as_u64().unwrap_or(0) - before[k].as_u64().unwrap_or(0)))
         .collect();
     assert!(others.iter().all(|(_, d)| *d == 0), "a quiet periodic run reads nothing outside the reconcile's cached probe: {others:?}");
+}
+
+#[test]
+fn many_git_batches_inside_one_flush_interval_start_at_most_one_jev_sweep() {
+    let w = world("jev-burst");
+    let (sweeper, seen) = recording_sweeper();
+    let wire = Arc::new(wire(&w, &Arc::new(Stub::default()), Executor::Off).with_jev_sweeper(sweeper));
+    let stop = Arc::new(AtomicBool::new(false));
+    let (wr, st) = (wire.clone(), stop.clone());
+    let h = std::thread::spawn(move || watching::run(&wr, &|| st.load(Ordering::SeqCst)));
+    std::thread::sleep(Duration::from_millis(1500)); // the loop is up and watching the worktree's git directory
+    let threads = || ah_engine::threads::work()["dswire_jev_threads"].as_u64().unwrap_or(0);
+    let (t0, n0) = (threads(), seen.lock().unwrap().len());
+    for i in 0..15 {
+        touch(w.wt.join(".git/HEAD"), &format!("ref: refs/heads/b{i}"));
+        std::thread::sleep(Duration::from_millis(60));
+    }
+    std::thread::sleep(Duration::from_millis(300));
+    let burst = threads() - t0;
+    assert!(burst <= 1, "15 git batches inside one flush interval started {burst} Jev sweep threads");
+    // nothing is dropped: the queued workspace is swept on the flush tick
+    let t = Instant::now();
+    while seen.lock().unwrap().len() == n0 && t.elapsed() < Duration::from_secs(10) {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    stop.store(true, Ordering::SeqCst);
+    h.join().unwrap();
+    let swept: Vec<Vec<String>> = seen.lock().unwrap()[n0..].to_vec();
+    assert!(swept.iter().any(|ids| ids.iter().any(|i| i == "ws-1")), "ws-1 is swept at the next flush tick: {swept:?}");
 }
 
 #[test]
