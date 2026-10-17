@@ -914,10 +914,10 @@ mod descriptor_prefix_tests {
         let dir = crate::meshw::idlock::devswarm_root(&home).join(defaults::text("mesh_write.dir_workspaces"));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::File::create(dir.join(format!("c5dbd3c3-1e53{}", defaults::text("mesh_write.json_suffix")))).unwrap();
-        assert!(descriptor_prefix_exists(&home, "c5dbd3c3"));
-        assert!(descriptor_prefix_exists(&home, "c5dbd3c3-1e53"));
-        assert!(!descriptor_prefix_exists(&home, "deadbeef"));
-        assert!(!descriptor_prefix_exists(&home, "../x"));
+        assert_eq!(descriptor_prefix_ids(&home, "c5dbd3c3"), vec!["c5dbd3c3-1e53".to_string()]);
+        assert_eq!(descriptor_prefix_ids(&home, "c5dbd3c3-1e53").len(), 1);
+        assert!(descriptor_prefix_ids(&home, "deadbeef").is_empty());
+        assert!(descriptor_prefix_ids(&home, "../x").is_empty());
         std::fs::remove_dir_all(&home).ok();
     }
 }
