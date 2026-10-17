@@ -654,19 +654,35 @@ pub fn compute(st: &MeshStore, inv: &Inv, touched: Option<&str>) -> R<OVal> {
         }
         let total = st.reader().message_count(&d.id).or_else(|e| err("count", e))? as f64;
         let floor = floor_of(st, &mut cur, home, &d.id, false)?;
-        let cursor = floor;
+        // #181: a workspace's unread is counted from its OWN reader (the latest live reader row of its partition), the same
+        // position `inbox tick` reports; only a partition with no reader row falls back to the shared floor
+        let owner = crate::meshw::union::owner_of(&st.reader().reader_cursors(&d.id).or_else(|e| err("reader-cursors", e))?);
+        if owner.is_none() {
+            crate::metrics::bump("mesh_summary_owner_fallback", &[]);
+        }
+        let cursor = owner.as_ref().and_then(|o| o.store).unwrap_or(floor);
         let mut unread = (total - cursor).max(0.0);
         // unread rows the recipient's own family sent, when the union already counted them (the store-only path counts them below)
         let mut own_unread: Option<usize> = None;
         let family = recipient_family(&d.id, &rows);
         if d.inbox_path.is_some() || d.cursor_path.is_some() {
-            let nd_floor = floor_of(st, &mut cur, home, &d.id, true)?;
+            let nd_floor = match owner.as_ref().and_then(|o| o.nd) {
+                Some(v) => v,
+                None => floor_of(st, &mut cur, home, &d.id, true)?,
+            };
             let (known, lines) = ndjson_backlog(d.inbox_path.as_deref(), d.cursor_path.as_deref());
             if known && lines > nd_floor {
                 // the NDJSON side has unread lines: the summary counts the loss-free union at the floors (reader-cursors
                 // `countFor` with no reader), which `unionUnreadFor` reports when it is known
-                let u =
-                    crate::meshw::union::unread_at(st.reader(), &d.id, d.inbox_path.as_deref(), d.cursor_path.as_deref(), (floor, nd_floor), &family, inv.now)?;
+                let u = crate::meshw::union::unread_at(
+                    st.reader(),
+                    &d.id,
+                    d.inbox_path.as_deref(),
+                    d.cursor_path.as_deref(),
+                    (cursor, nd_floor),
+                    &family,
+                    inv.now,
+                )?;
                 crate::meshw::tick::note_own_excluded(&u);
                 unread = u.union.unread as f64;
                 own_unread = Some(u.own_excluded);
@@ -1035,5 +1051,58 @@ mod tests {
         assert!(cross_linked("x", None, "y", Some("x")));
         assert!(!cross_linked("x", Some("x"), "x", None));
         assert!(!cross_linked("x", None, "y", None));
+    }
+
+    /// A scratch store holding workspace "X" with three directs from "other", `#floor` at 1 and the given store reader rows
+    /// `(reader, position, updated_at)`; the summary row of X.
+    fn summary_row_of_x(tag: &str, readers: &[(&str, i64, i64)]) -> (i64, i64) {
+        use crate::meshw::store::{CursorPut, RegistryRow};
+        let dir = std::env::temp_dir().join(format!("ah-summary-owner-{}-{tag}", std::process::id()));
+        crate::discard::harmless(std::fs::remove_dir_all(&dir)); // keep: cleanup that raced; an absent directory is the goal state
+        std::fs::create_dir_all(&dir).unwrap();
+        let st = MeshStore::open(&dir.join(defaults::text("mesh_write.store_file"))).unwrap();
+        let row =
+            RegistryRow { id: "X".into(), worktree_path: Some("/w/x".into()), session_id: None, inbox_path: None, cursor_path: None, nudge_command: None };
+        st.upsert_registry(&row, 1, |a, b| a == b).unwrap();
+        for i in 0..3 {
+            st.append_message_from("X", 1_700_000_000_000 + i, Some(&format!("h{i}")), "m", Some("other")).unwrap();
+        }
+        let put = |ns: &str, reader: &str, value: i64, at: i64| CursorPut {
+            partition: "X".into(),
+            ns: ns.into(),
+            reader: reader.into(),
+            value,
+            retired_line: None,
+            updated_at: at,
+        };
+        let mut puts = vec![put("store", "#floor", 1, 1), put("nd", "#floor", 0, 1)];
+        puts.extend(readers.iter().map(|(r, v, at)| put("store", r, *v, *at)));
+        st.reader_cursor_txn(&puts).unwrap();
+        let inv = Inv {
+            home: dir.clone(),
+            env: HashMap::new(),
+            cwd: dir.to_string_lossy().into_owned(),
+            now: 1_700_000_100_000,
+            stdin: None,
+            write_home: dir.clone(),
+            store_override: None,
+        };
+        let sum = compute(&st, &inv, None).unwrap();
+        let w = sum.get("workspaces").and_then(|w| w.get("X")).expect("X is in the summary").clone();
+        let num = |k: &str| match w.get(k) {
+            Some(OVal::Num(x)) => *x as i64,
+            _ => panic!("{k} is no number"),
+        };
+        let got = (num("unread"), num("cursor"));
+        crate::discard::harmless(std::fs::remove_dir_all(dir)); // keep: test cleanup; an absent directory is the goal state
+        got
+    }
+
+    #[test]
+    fn a_workspace_is_counted_from_its_own_reader_not_from_a_lagging_one_holding_the_floor() {
+        // #181: 3 messages, `#floor` 1 (reader B lags), reader A (latest) read all 3: X's unread is 0, as `inbox tick` says
+        assert_eq!(summary_row_of_x("lag", &[("h:1:1", 3, 10), ("h:2:2", 1, 5)]), (0, 3));
+        // no reader row: the floor is the fallback
+        assert_eq!(summary_row_of_x("floor", &[]), (2, 1));
     }
 }

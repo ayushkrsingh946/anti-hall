@@ -132,8 +132,14 @@ test('P0 #2: a LIVE reader with NO session file is never retired — the floor n
     retirePass(home); // the design's retire sweep runs with the session files absent
     const a = readPrimary(home, repo, id, A);
     assert.strictEqual((a.messages || []).length, 3, 'A reads and acks everything');
-    assert.strictEqual(summaryUnread(home, repo, id), 3,
-      'R (live) has read nothing: the floor view must still show its 3 unread — a missing session file retired R and let the floor pass it (rejected-patch P0 #2)');
+    // #181: the roster counts a workspace from its OWN (latest) reader — A, which read everything, so 0 — while the FLOOR view is what
+    // proves R was not retired: a missing session file must not let the floor pass the live reader that has read nothing.
+    assert.strictEqual(summaryUnread(home, repo, id), 0, 'the roster row is A\'s own view: A read all 3');
+    const sf = openS(home, repo);
+    try {
+      assert.strictEqual(require(path.join(ROOT, 'companion', 'lib', 'reader-cursors.js')).countFor(sf, { reader: null, partition: id, home }).unread, 3,
+        'R (live) has read nothing: the floor view must still show its 3 unread — a missing session file retired R and let the floor pass it (rejected-patch P0 #2)');
+    } finally { sf.close(); }
     const r = readPrimary(home, repo, id, R);
     assert.strictEqual((r.messages || []).length, 3, 'and R itself still receives all 3');
   } finally { rm(home); rm(repo); }

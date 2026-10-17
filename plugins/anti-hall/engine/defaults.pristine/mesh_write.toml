@@ -2091,6 +2091,10 @@ value = "read-receipt"
 doc = "Reads of a file named by a descriptor that were skipped because it is no regular file (a FIFO, socket or device) or is over the read cap, by site and reason."
 value = { kind = "counter", unit = "reads", labels = ["site", "reason"] }
 
+[metric.mesh_summary_owner_fallback]
+doc = "Roster/summary rows counted from the shared floor because the workspace's partition has no live reader row."
+value = { kind = "counter", unit = "rows", labels = [] }
+
 [mesh_write.fifo_test_bound_ms]
 doc = "How long a test waits for a read of a FIFO before it calls the read blocked."
 value = 10000

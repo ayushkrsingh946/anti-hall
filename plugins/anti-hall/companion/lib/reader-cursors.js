@@ -437,6 +437,22 @@ function countFor(store, opts) {
   return res;
 }
 
+// ownerOf(rows) -> { reader, store, nd } | null. A workspace's OWN read position: the LATEST live declared reader row of its
+// partition (highest updatedAt over both namespaces, then the higher value), with that reader's position per namespace (null where it
+// has no row). '#floor' and retired rows are not readers. null when the partition has no reader row (the caller falls back to the
+// floor). The roster/summary counts unread from here so it reports what `inbox tick` reports for the same workspace (#181).
+function ownerOf(rows) {
+  let best = null;
+  for (const r of rows || []) {
+    if (!r || r.reader === FLOOR || isRetired(r) || !Number.isFinite(r.value)) continue;
+    const at = Number.isFinite(r.updatedAt) ? r.updatedAt : 0;
+    if (!best || at > best.at || (at === best.at && r.value > best.value)) best = { at, value: r.value, reader: r.reader };
+  }
+  if (!best) return null;
+  const pos = (ns) => { const r = rowOf(rows, ns, best.reader); return r && Number.isFinite(r.value) ? r.value : null; };
+  return { reader: best.reader, store: pos('store'), nd: pos('nd') };
+}
+
 // familyOf(store, partition) -> Set of ids that are the partition's recipient itself or cross-linked to it
 // (devswarm-identity-family.js recipientFamilyIds), or null when the registry cannot be read.
 function familyOf(store, partition) {
@@ -847,7 +863,7 @@ module.exports = {
   FLOOR, NAMESPACES, RETIRE_PIN_AGE_MS, PID_REUSE_MARGIN_MS,
   readerKey, parseReader, provablyEnded, psSnapshot, defaultProcTable,
   legacyStoreFloor, legacyNdFloor, legacyShortFor, liveHarnessReaders, importPlan,
-  positions, baseFor, floorOf, countFor,
+  positions, baseFor, floorOf, countFor, familyOf, ownerOf,
   importLegacy, declare, ackFor, raiseAllLossFree, raiseFloorBounded, retireEnded, repairPinnedFloors,
   isRetired, liveMinRow,
 };

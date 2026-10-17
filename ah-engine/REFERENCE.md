@@ -6652,8 +6652,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `ops.table_headers_integrations` | `Integration, Effective, Configured, Source, Logs to` |  |  | The columns of the Jev integrations table. |
 | `ops.true_word` | `true` |  |  | The value `judge on` stores. |
 | `ops.trust_done` | `trusted {repo}/{rel} (sha256 {hash}):` |  |  | First line after a trust is recorded. Placeholders: repo, rel, hash. |
-| `ops.trust_exotic_breaks` | `
-,  ,  ` |  |  | Line-break characters that make a .git file's gitdir line ambiguous between the engine and JavaScript; a repository whose .git file holds one is refused. List of strings. |
+| `ops.trust_exotic_breaks` | `,  ,  ` |  |  | Line-break characters that make a .git file's gitdir line ambiguous between the engine and JavaScript; a repository whose .git file holds one is refused. List of strings. |
 | `ops.trust_missing` | `no {rel} in {top}` |  |  | No allowlist file. Placeholders: rel, top. |
 | `ops.trust_not_git` | `not inside a git repository: {target}` |  |  | No repository. Placeholder: target. |
 | `ops.trust_state` | `{rel} in {top} is {state}` |  |  | An unusable allowlist file. Placeholders: rel, top, state. |
@@ -8685,8 +8684,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_cli.rr_mb_grep_file_long` | `--file` |  |  | The long flag by which the pattern filter reads its patterns from a file (refused, with or without `=value`). |
 | `devswarm_cli.rr_mb_grep_file_short` | `f` |  |  | The short flag letter for the same (refused anywhere in a flag cluster). |
 | `devswarm_cli.rr_mb_inbox_word` | `inbox` |  |  | The word a mailbox cron prompt must contain (as a whole word) next to the CLI script name. |
-| `devswarm_cli.rr_mb_line_terms` | `\n
-  ` |  |  | The line terminator characters a script path may not contain (a regex dot does not cross them). |
+| `devswarm_cli.rr_mb_line_terms` | `\n  ` |  |  | The line terminator characters a script path may not contain (a regex dot does not cross them). |
 | `devswarm_cli.rr_mb_node` | `node` |  |  | The interpreter word a mailbox-class command starts with (companion/lib/devswarm-idle.js: a ping turn is made only of such calls). |
 | `devswarm_cli.rr_mb_pipe` | `\|` |  |  | The pipe character that separates a mailbox command from its read-only filters. |
 | `devswarm_cli.rr_mb_quotes` | `'"` |  |  | The two quote characters of a mailbox command, in this order: the literal quote, the string quote. |
@@ -10828,6 +10826,7 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `mesh_own_sends_excluded` | counter | counts |  | Counts that left out unread rows the recipient's own identity family sent (an own send is not inbound mail). |
 | `mesh_ref_resolved` | counter | references | outcome | How a workspace reference given to a verb (send --to, archive, nudge, gate, ...) resolved, by outcome: exact, mesh, prefix, ambiguous, none. |
 | `mesh_sender_fallback` | counter | messages | where | Messages whose sender came from a fallback instead of the message's own branch, by where: ingest (a child's queue: the Primary), read (the NDJSON line's own sender, or the Primary for a NULL store row). |
+| `mesh_summary_owner_fallback` | counter | rows |  | Roster/summary rows counted from the shared floor because the workspace's partition has no live reader row. |
 | `mesh_watcher_matched_by_checkout` | counter | checks |  | Watcher-live checks answered by another row's lock on the same checkout because the workspace's own id had no live lock. |
 | `rt_edges` | counter | edges |  | Workspace state changes emitted. |
 | `rt_reconcile_repairs` | counter | edges |  | Changes a full reconcile found that the event path had not already applied: the health measure of the realtime event layer (close to 0 is healthy). |

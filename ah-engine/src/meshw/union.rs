@@ -351,6 +351,33 @@ pub fn read_bases(reader: &MeshReader, home: &Path, id: &str, cursor_file: Optio
     Ok((store_base, nd_base))
 }
 
+/// One workspace's own read position (`ownerPositions` in reader-cursors.js): the LATEST live declared reader row of its
+/// partition (the highest `updatedAt` over both namespaces, then the higher value), with that reader's position per namespace.
+/// A retired row (`value <= retiredLine`) and the `#floor` row are not readers. `None` when the partition has no reader row.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Owner {
+    /// The harness identity of the row.
+    pub reader: String,
+    /// Its store position, when it has a store row.
+    pub store: Option<f64>,
+    /// Its NDJSON position, when it has an NDJSON row.
+    pub nd: Option<f64>,
+}
+
+/// [`Owner`] over the raw `reader_cursors` rows of a partition.
+pub fn owner_of(rows: &[Value]) -> Option<Owner> {
+    let floor = defaults::text("mesh_write.floor_reader");
+    let live = |r: &&Value| {
+        let (v, line) = (r["value"].as_f64(), r["retiredLine"].as_f64());
+        r["reader"].as_str().is_some_and(|x| x != floor) && v.is_some() && !matches!((v, line), (Some(v), Some(l)) if v <= l)
+    };
+    let key = |r: &Value| (r["updatedAt"].as_f64().unwrap_or(0.0), r["value"].as_f64().unwrap_or(0.0));
+    let best = rows.iter().filter(live).max_by(|a, b| key(a).partial_cmp(&key(b)).unwrap_or(std::cmp::Ordering::Equal))?;
+    let reader = best["reader"].as_str()?.to_string();
+    let at = |ns: &str| rows.iter().find(|r| r["ns"] == ns && r["reader"] == reader.as_str()).and_then(|r| r["value"].as_f64());
+    Some(Owner { store: at(defaults::text("mesh_write.cursor_ns_store")), nd: at(defaults::text("mesh_write.cursor_ns_nd")), reader })
+}
+
 /// The `sender` an NDJSON line carries (the id `pull` resolved), when it names one.
 pub fn line_sender(line: &str) -> Option<String> {
     match OVal::parse(line)?.get(defaults::text("mesh_write.ndjson_sender_field")) {
@@ -510,7 +537,7 @@ mod tests {
 
     /// A store partition "w" holding one row per sender (`None` = NULL sender) and `#floor` rows at `floor`, plus extra reader rows
     /// `(reader, store position)`. No NDJSON inbox.
-    fn senders_fixture(tag: &str, senders: &[Option<&str>], floor: i64, readers: &[(&str, i64)]) -> (std::path::PathBuf, MeshReader) {
+    fn senders_fixture(tag: &str, senders: &[Option<&str>], floor: i64, readers: &[(&str, i64, i64)]) -> (std::path::PathBuf, MeshReader) {
         let dir = std::env::temp_dir().join(format!("ah-union-for-{}-{tag}", std::process::id()));
         crate::discard::harmless(std::fs::remove_dir_all(&dir)); // keep: cleanup that raced; an absent directory is the goal state
         std::fs::create_dir_all(&dir).unwrap();
@@ -531,8 +558,8 @@ mod tests {
             c.execute("INSERT INTO reader_cursors VALUES ('w', ?1, ?2, ?3, NULL, 0)", params![ns, floor_reader, if ns == ns_store { floor } else { 0 }])
                 .unwrap();
         }
-        for (reader, pos) in readers {
-            c.execute("INSERT INTO reader_cursors VALUES ('w', ?1, ?2, ?3, NULL, 0)", params![ns_store, reader, pos]).unwrap();
+        for (reader, pos, at) in readers {
+            c.execute("INSERT INTO reader_cursors VALUES ('w', ?1, ?2, ?3, NULL, ?4)", params![ns_store, reader, pos, at]).unwrap();
         }
         drop(c);
         (dir, MeshReader::open(&db).unwrap())
@@ -541,7 +568,7 @@ mod tests {
     #[test]
     fn the_unread_the_caller_has_read_is_zero_even_when_a_lagging_reader_holds_the_floor() {
         // #181: 3 messages, `#floor` 1 (reader B lags), reader A read all 3: A's unread is 0, the floor view still says 2
-        let (dir, r) = senders_fixture("lag", &[None, None, None], 1, &[("h:1:1", 3), ("h:2:2", 1)]);
+        let (dir, r) = senders_fixture("lag", &[None, None, None], 1, &[("h:1:1", 3, 10), ("h:2:2", 1, 5)]);
         let home = dir.clone();
         let none = HashSet::new();
         let a = unread_for(&r, &home, "w", None, None, Some("h:1:1"), &none, 1).unwrap();
@@ -558,6 +585,25 @@ mod tests {
         let family: HashSet<String> = ["P", "alias"].iter().map(|s| s.to_string()).collect();
         let u = unread_for(&r, &dir, "w", None, None, None, &family, 1).unwrap();
         assert_eq!((u.unread, u.own_excluded, u.union.unread), (2, 2, 4), "other + NULL count; the union keeps every row");
+        crate::discard::harmless(std::fs::remove_dir_all(dir)); // keep: test cleanup; an absent directory is the goal state
+    }
+
+    #[test]
+    fn the_owner_is_the_latest_live_reader_row_and_a_retired_or_floor_row_is_none() {
+        // #181: 3 messages, `#floor` 1, reader A (latest) at 3, a lagging reader B at 1: the owner is A
+        let (dir, r) = senders_fixture("owner", &[None, None, None], 1, &[("h:1:1", 3, 10), ("h:2:2", 1, 5)]);
+        let rows = r.reader_cursors("w").unwrap();
+        let o = owner_of(&rows).unwrap();
+        assert_eq!((o.reader.as_str(), o.store, o.nd), ("h:1:1", Some(3.0), None));
+        let floor_only: Vec<Value> = rows.iter().filter(|x| x["reader"] == "#floor").cloned().collect();
+        assert_eq!(owner_of(&floor_only), None, "no reader row: the floor is not an owner");
+        let mut retired = rows.clone();
+        for x in &mut retired {
+            if x["reader"] == "h:1:1" {
+                x["retiredLine"] = serde_json::json!(3);
+            }
+        }
+        assert_eq!(owner_of(&retired).unwrap().reader, "h:2:2", "a retired row is not live");
         crate::discard::harmless(std::fs::remove_dir_all(dir)); // keep: test cleanup; an absent directory is the goal state
     }
 }
