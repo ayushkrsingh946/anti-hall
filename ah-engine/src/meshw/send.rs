@@ -10,6 +10,7 @@
 //! summary the engine cannot reproduce defers before anything is written.
 use crate::checks::guardkit::ojson::OVal;
 use crate::defaults;
+use crate::meshw::actverbs::note_ref;
 use crate::meshw::args::Args;
 use crate::meshw::common::{self, Inv, Obj, n, s, s_or_null};
 use crate::meshw::ident::{self, Defer, R, Row, defer};
@@ -103,12 +104,14 @@ fn resolve_send_target(inv: &Inv, rows: &[Row], arg: &str) -> R<Resolved> {
                     return defer("ambiguous-recipient");
                 }
                 if same_group && !same_row {
+                    note_ref("mesh_write.ref_outcome_mesh");
                     return Ok(Resolved::Row(b.clone()));
                 }
             }
             // staleTwinSuccessor: proven inert only when the row has no session, a synthetic one, or its own id as session
             let sid = row.session_id.as_deref().unwrap_or("");
             if sid.is_empty() || sid.starts_with(defaults::text("mesh_write.synthetic_session_prefix")) || sid == row.id {
+                note_ref("mesh_write.ref_outcome_exact");
                 return Ok(Resolved::Row(row.clone()));
             }
             defer("stale-twin")
@@ -118,14 +121,26 @@ fn resolve_send_target(inv: &Inv, rows: &[Row], arg: &str) -> R<Resolved> {
                 return defer("retired-redirect"); // one hop through a fold-time redirect is Node's
             }
             if by_mesh.is_some() {
+                note_ref("mesh_write.ref_outcome_mesh");
                 return Ok(Resolved::from_row(by_mesh));
             }
             // GH #203: the roster shows only a short id, so a unique id prefix is the recipient
             let mut hits: Vec<&Row> = rows.iter().filter(|d| !d.id.is_empty() && d.id.starts_with(arg)).collect();
             match hits.as_slice() {
-                [] => Ok(Resolved::Unregistered),
-                [only] => resolve_send_target(inv, rows, &only.id.clone()),
+                [] => {
+                    // a live descriptor id by that prefix routes through its descriptor (Node's alias step): not answered here
+                    if descriptor_prefix_exists(&inv.home, arg) {
+                        return defer("descriptor-prefix");
+                    }
+                    note_ref("mesh_write.ref_outcome_none");
+                    Ok(Resolved::Unregistered)
+                }
+                [only] => {
+                    note_ref("mesh_write.ref_outcome_prefix");
+                    resolve_send_target(inv, rows, &only.id.clone())
+                }
                 _ => {
+                    note_ref("mesh_write.ref_outcome_ambiguous");
                     hits.sort_by(|a, b| a.id.cmp(&b.id));
                     Ok(Resolved::AmbiguousPrefix(hits.iter().map(|d| d.id.clone()).collect()))
                 }
@@ -133,6 +148,19 @@ fn resolve_send_target(inv: &Inv, rows: &[Row], arg: &str) -> R<Resolved> {
         }
         _ => defer("ambiguous-recipient"),
     }
+}
+
+/// A live descriptor (a `workspaces/<id>.json`) has an id starting with `prefix`.
+fn descriptor_prefix_exists(home: &std::path::Path, prefix: &str) -> bool {
+    if !crate::meshw::idlock::is_safe_id(prefix) {
+        return false;
+    }
+    let dir = crate::meshw::idlock::devswarm_root(home).join(defaults::text("mesh_write.dir_workspaces"));
+    let suffix = defaults::text("mesh_write.json_suffix");
+    std::fs::read_dir(dir).is_ok_and(|rd| {
+        rd.flatten()
+            .any(|e| e.file_name().to_string_lossy().strip_suffix(suffix).is_some_and(|id| id.starts_with(prefix) && crate::meshw::idlock::is_safe_id(id)))
+    })
 }
 
 /// A fold-time retired-redirect file exists for `id` (its content is not read: any file at all is left to Node).
@@ -831,4 +859,23 @@ fn do_append(c: &AppendCtx<'_>) -> R<Obj> {
         );
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod descriptor_prefix_tests {
+    use super::*;
+
+    /// #203: a live descriptor id by prefix is found (the engine then hands the send to Node's alias step); other prefixes are not.
+    #[test]
+    fn a_live_descriptor_id_prefix_is_found() {
+        let home = std::env::temp_dir().join(format!("ah-descprefix-{}", std::process::id()));
+        let dir = crate::meshw::idlock::devswarm_root(&home).join(defaults::text("mesh_write.dir_workspaces"));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::File::create(dir.join(format!("c5dbd3c3-1e53{}", defaults::text("mesh_write.json_suffix")))).unwrap();
+        assert!(descriptor_prefix_exists(&home, "c5dbd3c3"));
+        assert!(descriptor_prefix_exists(&home, "c5dbd3c3-1e53"));
+        assert!(!descriptor_prefix_exists(&home, "deadbeef"));
+        assert!(!descriptor_prefix_exists(&home, "../x"));
+        std::fs::remove_dir_all(&home).ok();
+    }
 }

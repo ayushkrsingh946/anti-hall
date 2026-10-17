@@ -5617,6 +5617,11 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `mesh_write.receipt_keep_ms` | `604800000` |  |  | READ_RECEIPT_KEEP_MS: a read receipt file older than this is pruned by the next receipt written for the id; the engine leaves a pruning write to Node. |
 | `mesh_write.receipt_ttl_ms` | `86400000` |  |  | Age past which a read receipt can no longer be acked (READ_RECEIPT_TTL_MS, 24 hours). |
 | `mesh_write.receipt_version` | `1` |  |  | The `v` of a read receipt record. |
+| `mesh_write.ref_outcome_ambiguous` | `ambiguous` |  |  | The `outcome` label of a workspace reference that matched several workspaces and was refused with the candidate list. |
+| `mesh_write.ref_outcome_exact` | `exact` |  |  | The `outcome` label of a workspace reference that was a full id. |
+| `mesh_write.ref_outcome_mesh` | `mesh` |  |  | The `outcome` label of a workspace reference that was a mesh label (`primary-<hash>`). |
+| `mesh_write.ref_outcome_none` | `none` |  |  | The `outcome` label of a workspace reference nothing resolved (the verb's own not-registered answer follows). |
+| `mesh_write.ref_outcome_prefix` | `prefix` |  |  | The `outcome` label of a workspace reference that was the unique prefix of one workspace id (the short id the roster prints). |
 | `mesh_write.repo_key_hex` | `6` |  |  | Hex characters of the common-dir hash in a repoKey. |
 | `mesh_write.repo_name_fallback` | `repo` |  |  | A repo name that sanitizes to nothing. |
 | `mesh_write.repo_name_max` | `40` |  |  | Length cap of a repo name in a repoKey (identity.js MAX_NAME_LEN). |
@@ -7022,6 +7027,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `update.remote_manifest` | `plugins/anti-hall/.claude-plugin/plugin.json` |  |  | The manifest as git names it on a remote ref (`--check` reads the remote version from it). |
 | `update.semver_re` | `^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$` |  |  | A version string: X.Y.Z with an optional pre-release or build suffix; no path separators. Fully anchored. |
 | `update.settings_file` | `.anti-hall/settings.json` |  |  | The settings file, relative to the home directory (updates.quiet is read from it). |
+| `update.settings_rel` | `../settings.json` |  |  | The user's harness settings file, relative to the plugins root: its `enabledPlugins` says which registered install is the enabled one. |
 | `update.undefined_word` | `undefined` |  |  | How a missing stage field reads inside a text. |
 | `update.v_strip_re` | `^[vV]` |  |  | A leading v on a version. |
 | `update.version_prefix_re` | `^([0-9]+(?:\.[0-9]+)*)` |  |  | The leading numeric part of a version string. |
@@ -9591,6 +9597,8 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `wake_watch.handoff_not_registered` | `the harness has not registered it` |  |  | Part of the cached-only note when the registry names no version. |
 | `wake_watch.handoff_still_registers` | `the harness still registers {version}` |  |  | Part of the cached-only note: the registry's version. {version}. |
 | `wake_watch.inbox_suffix` | `.ndjson` |  |  | End of an inbox file's name. |
+| `wake_watch.install_fallback_key` | `anti-hall@anti-hall` |  |  | The install key used when no registered anti-hall install is enabled in the user's settings. |
+| `wake_watch.install_key_prefix` | `anti-hall@` |  |  | The start of every anti-hall install key in the registry and in `enabledPlugins` (`anti-hall@<marketplace>`): the registered installs the enabled one is chosen from. |
 | `wake_watch.install_location_field` | `installLocation` |  |  | The member of a registered marketplace that names the directory it lives in. |
 | `wake_watch.installed_file` | `installed_plugins.json` |  |  | The harness registry of installed plugins, under the plugins directory. |
 | `wake_watch.json_suffix` | `.json` |  |  | End of a JSON state file's name. |
@@ -10724,6 +10732,7 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `jev_timeouts` | counter | calls |  | Jev calls that ran out of their time budget. |
 | `jev_verdicts` | counter | decisions | id, verdict | What each Jev decision did, by integration and verdict: added or changed (an on-mode outcome moved), would-change (a shadow call that would have moved it), none (Jev agreed with the baseline) or no-answer (it failed or was skipped). |
 | `mesh_own_sends_excluded` | counter | counts |  | Counts that left out unread rows the recipient's own identity family sent (an own send is not inbound mail). |
+| `mesh_ref_resolved` | counter | references | outcome | How a workspace reference given to a verb (send --to, archive, nudge, gate, ...) resolved, by outcome: exact, mesh, prefix, ambiguous, none. |
 | `mesh_sender_fallback` | counter | messages | where | Messages whose sender came from a fallback instead of the message's own branch, by where: ingest (a child's queue: the Primary), read (the NDJSON line's own sender, or the Primary for a NULL store row). |
 | `mesh_watcher_matched_by_checkout` | counter | checks |  | Watcher-live checks answered by another row's lock on the same checkout because the workspace's own id had no live lock. |
 | `rt_edges` | counter | edges |  | Workspace state changes emitted. |

@@ -761,6 +761,6 @@ mod tests {
         assert_eq!(version_from_installed_json(&rx, &r, &s).as_deref(), Some("0.300.1"));
         std::fs::write(&settings, r#"{"enabledPlugins":{}}"#).unwrap();
         assert_eq!(version_from_installed_json(&rx, &r, &s).as_deref(), Some("0.300.2"), "none enabled -> the pin");
-        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
