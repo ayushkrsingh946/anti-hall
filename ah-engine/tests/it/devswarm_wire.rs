@@ -817,6 +817,35 @@ fn a_quiet_periodic_reconcile_reads_through_the_cache_only_and_counts_its_cpu_by
 }
 
 #[test]
+fn many_git_batches_inside_one_flush_interval_start_at_most_one_jev_sweep() {
+    let w = world("jev-burst");
+    let (sweeper, seen) = recording_sweeper();
+    let wire = Arc::new(wire(&w, &Arc::new(Stub::default()), Executor::Off).with_jev_sweeper(sweeper));
+    let stop = Arc::new(AtomicBool::new(false));
+    let (wr, st) = (wire.clone(), stop.clone());
+    let h = std::thread::spawn(move || watching::run(&wr, &|| st.load(Ordering::SeqCst)));
+    std::thread::sleep(Duration::from_millis(1500)); // the loop is up and watching the worktree's git directory
+    let threads = || ah_engine::threads::work()["dswire_jev_threads"].as_u64().unwrap_or(0);
+    let (t0, n0) = (threads(), seen.lock().unwrap().len());
+    for i in 0..15 {
+        touch(w.wt.join(".git/HEAD"), &format!("ref: refs/heads/b{i}"));
+        std::thread::sleep(Duration::from_millis(60));
+    }
+    std::thread::sleep(Duration::from_millis(300));
+    let burst = threads() - t0;
+    assert!(burst <= 1, "15 git batches inside one flush interval started {burst} Jev sweep threads");
+    // nothing is dropped: the queued workspace is swept on the flush tick
+    let t = Instant::now();
+    while seen.lock().unwrap().len() == n0 && t.elapsed() < Duration::from_secs(10) {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    stop.store(true, Ordering::SeqCst);
+    h.join().unwrap();
+    let swept: Vec<Vec<String>> = seen.lock().unwrap()[n0..].to_vec();
+    assert!(swept.iter().any(|ids| ids.iter().any(|i| i == "ws-1")), "ws-1 is swept at the next flush tick: {swept:?}");
+}
+
+#[test]
 fn a_jev_sweep_thread_reports_its_cpu_under_its_name() {
     let w = world("jev-thread");
     let stub = Arc::new(Stub::default());
