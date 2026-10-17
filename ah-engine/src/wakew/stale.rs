@@ -3,8 +3,8 @@
 //! `companion/lib/devswarm-wake-watch.js`. A pure read of the harness registry, the version cache and the marketplace clone.
 use super::read;
 use super::who::Proc;
-use crate::defaults;
 use crate::checks::jsport::json::J;
+use crate::defaults;
 use crate::operator::update::{compare_versions, semver_ok};
 use std::path::{Path, PathBuf};
 
@@ -86,8 +86,7 @@ fn owning_install(p: &Proc) -> Option<Install> {
 
 /// `enabledPlugins[key] === true` in the user's settings. An unreadable file or a missing entry is "not enabled".
 fn enabled(p: &Proc, key: &str) -> bool {
-    let Some(s) = json_at(&p.home.join(t("wake_watch.user_settings_rel"))) else { return false };
-    matches!(s.get(t("wake_watch.enabled_plugins_field")).and_then(|e| e.get(key)), Some(J::Bool(true)))
+    crate::install::is_enabled(json_at(&p.home.join(t("wake_watch.user_settings_rel"))).as_ref(), key)
 }
 
 /// The version the registry records for `key`.

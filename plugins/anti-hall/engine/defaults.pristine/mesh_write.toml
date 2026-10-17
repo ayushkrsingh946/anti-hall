@@ -2039,6 +2039,30 @@ value = "mesh sender fallback: where={where}, partition={id}, messages={n}"
 doc = "Messages whose sender came from a fallback instead of the message's own branch, by where: ingest (a child's queue: the Primary), read (the NDJSON line's own sender, or the Primary for a NULL store row)."
 value = { kind = "counter", unit = "messages", labels = ["where"] }
 
+[mesh_write.ref_outcome_exact]
+doc = "The `outcome` label of a workspace reference that was a full id."
+value = "exact"
+
+[mesh_write.ref_outcome_mesh]
+doc = "The `outcome` label of a workspace reference that was a mesh label (`primary-<hash>`)."
+value = "mesh"
+
+[mesh_write.ref_outcome_prefix]
+doc = "The `outcome` label of a workspace reference that was the unique prefix of one workspace id (the short id the roster prints)."
+value = "prefix"
+
+[mesh_write.ref_outcome_ambiguous]
+doc = "The `outcome` label of a workspace reference that matched several workspaces and was refused with the candidate list."
+value = "ambiguous"
+
+[mesh_write.ref_outcome_none]
+doc = "The `outcome` label of a workspace reference nothing resolved (the verb's own not-registered answer follows)."
+value = "none"
+
+[metric.mesh_ref_resolved]
+doc = "How a workspace reference given to a verb (send --to, archive, nudge, gate, ...) resolved, by outcome: exact, mesh, prefix, ambiguous, none."
+value = { kind = "counter", unit = "references", labels = ["outcome"] }
+
 [metric.mesh_watcher_matched_by_checkout]
 doc = "Watcher-live checks answered by another row's lock on the same checkout because the workspace's own id had no live lock."
 value = { kind = "counter", unit = "checks", labels = [] }

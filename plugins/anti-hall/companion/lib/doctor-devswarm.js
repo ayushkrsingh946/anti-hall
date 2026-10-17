@@ -14,6 +14,7 @@ const { spawnSync } = require('child_process');
 const { isDevswarmActive } = require('../../hooks/lib/devswarm-detect.js');
 const { computeLiveness, livenessPathFor, projectDirFor, devswarmRoot, isSafeId, unreadBacklog, heartbeatVersion, sessionPidFor } = require('./liveness.js');
 const { checkResults: descriptorChecks } = require('./doctor-descriptors.js');
+const enabledInstall = require('../../hooks/lib/enabled-install.js');
 const { DEVSWARM_BASELINE } = require('../../hooks/lib/devswarm-baseline.js');
 const { classifyVersionDrift } = require('../../hooks/devswarm-version.js');
 // item 4b — stale-anti-hall-BUILD detection (distinct from classifyVersionDrift
@@ -489,10 +490,7 @@ function installDivergenceCheck(opts) {
 // callers must word their message so it stays accurate either way.
 function resolveInstallScope(home, installedRoot, F) {
   try {
-    const data = JSON.parse(F.readFileSync(path.join(home, '.claude', 'plugins', 'installed_plugins.json'), 'utf8'));
-    const reg = (data && data.plugins && typeof data.plugins === 'object') ? data.plugins : data;
-    const entry = reg && reg['anti-hall@anti-hall'];
-    const list = Array.isArray(entry) ? entry : (entry ? [entry] : []);
+    const list = enabledInstall.enabledEntries(enabledInstall.forHome(home, F));
     const target = path.resolve(installedRoot);
     for (const e of list) {
       if (e && typeof e.installPath === 'string' && path.resolve(e.installPath) === target) {
