@@ -25,7 +25,7 @@ value = [
   { name = "auto-archived-state-migrate", enabled = true, key = "autoArchivedStateMigrate", fn = "", native = "auto_archived", already = "", label = "auto-archived-state migrate", out = ["scanned", "migrated", "pending", "errors"], detail = "auto-archived-state migrate: scanned {scanned}, migrated {migrated}{errors}", budget = true, gate = true, files = [], state = [], passes = [], gate_json = '{"attempted":false,"detail":"not a DevSwarm session — auto-archived-state migrate skipped (gate closed)"}', done_json = '' },
   { name = "settings-migrate", enabled = true, key = "settingsMigrate", fn = "", native = "settings", budget = true, gate = false, files = [], state = [], passes = ["version"], gate_json = '', done_json = '' },
   { name = "heal-registry-rows", enabled = true, key = "healRegistryRows", fn = "healRegistryPostUpdate", budget = true, gate = true, files = ["hooks/lib/devswarm-detect.js", "scripts/devswarm.js", "companion/lib/devswarm-store.js"], state = ["healRegistry"], passes = ["version", "hashes"], gate_json = '{"attempted":false,"detail":"not a DevSwarm session — heal-registry-rows skipped (gate closed)"}', done_json = '{"attempted":true,"checked":0,"healed":0,"rehomed":0,"stores":[],"skippedAlreadyDone":true,"detail":"heal-registry-rows: already completed for {version} — skipped (one-time per-version migration)"}' },
-  { name = "wake-monitor", enabled = true, key = "wakeMonitor", fn = "wakeMonitorPostUpdate", budget = false, gate = true, files = ["hooks/lib/devswarm-detect.js"], state = [], passes = [], gate_json = '{"attempted":false,"shipped":false,"live":false,"detail":"not a DevSwarm session — wake-monitor skipped (gate closed)"}', done_json = '' },
+  { name = "wake-monitor", enabled = true, key = "wakeMonitor", fn = "", native = "wake_monitor", fallback = "wakeMonitorPostUpdate", budget = false, gate = true, files = ["hooks/lib/devswarm-detect.js"], state = [], passes = [], gate_json = '{"attempted":false,"shipped":false,"live":false,"detail":"not a DevSwarm session — wake-monitor skipped (gate closed)"}', done_json = '' },
   { name = "codex-graphify-hooks-migrate", enabled = true, key = "codexGraphifyHooksMigrate", fn = "", native = "codex_graphify", budget = false, gate = false, files = [], state = [], passes = [], gate_json = '', done_json = '' },
 ]
 
@@ -271,3 +271,55 @@ value = " ({n} target error(s), fail-open)"
 [update_post.node_test_env]
 doc = "Set by the Node test runner; a store repair is then left to its Node stage (child-sender-labels refuses to run without an explicit home under it)."
 value = "NODE_TEST_CONTEXT"
+
+[update_post.wake_watcher_rel]
+doc = "The mailbox wake watcher script, relative to the plugin dir. The wake-monitor stage only checks that it is there and names its exports; it never runs it, arms it or touches its lock."
+value = "companion/lib/devswarm-wake-watch.js"
+
+[update_post.wake_exports]
+doc = """The exports the wake-monitor stage needs of the watcher script. DOCUMENTED DIFFERENCE FROM NODE (the only one): `wakeMonitorPostUpdate` decides `shipped` by loading the script with require(); the engine runs no Node and decides it by the script being readable and naming every export listed here. The two answers differ only for a script that names all of them yet does not load (a syntax error): Node reports shipped:false with its load-error detail and stops before the state directory (no stateDirEnsured member, no directory made); the engine reports shipped:true and goes on."""
+value = ["resolveIdentity", "lockPathFor"]
+
+[update_post.wake_state_dir]
+doc = "The directory (under the DevSwarm state directory) the wake-monitor stage makes sure exists, create-only: where the watcher keeps its seen-cursor files."
+value = "wake"
+
+[update_post.wake_state_ready]
+doc = "The wake-monitor no-identity detail's word for a state directory that exists."
+value = "ready"
+
+[update_post.wake_state_missing]
+doc = "The same word for a state directory that could not be made."
+value = "NOT ensured"
+
+[update_post.wake_arm_cmd]
+doc = "How to arm the watcher by hand (an agent-only tool; no hook can). Placeholder: watcher (the script path)."
+value = "call the `Monitor` tool with command `node {watcher}`, arming it with persistent: true if your Monitor tool supports that field \u2014 otherwise set timeout_ms to its maximum and re-arm when the tool emits its final/expired event (never run two watchers; the watcher's own lock also guards this, and the cron job stays the fallback either way) (or run that command yourself in a background terminal)"
+
+[update_post.wake_no_detect]
+doc = "The wake-monitor answer when the DevSwarm detection file of the plugin is missing. Placeholder: dir (the plugin dir)."
+value = "wake-monitor skipped: expected plugin file not found under {dir}"
+
+[update_post.wake_no_watcher]
+doc = "The wake-monitor answer when the watcher script is missing. Placeholder: watcher."
+value = "wake-monitor NOT shipped: watcher script missing at {watcher} \u2014 Monitor-based idle-wake unavailable this run (cron fallback is unaffected)"
+
+[update_post.wake_no_exports]
+doc = "The wake-monitor answer when the watcher script lacks an export the stage needs."
+value = "wake-monitor NOT shipped: watcher script loaded but is missing expected exports (resolveIdentity/lockPathFor)"
+
+[update_post.wake_no_identity]
+doc = "The wake-monitor answer when no DevSwarm identity resolves for the directory. Placeholders: state (ready / NOT ensured), cwd, arm."
+value = "wake-monitor shipped (state dir {state}) \u2014 could not resolve a DevSwarm identity for {cwd}, live-check skipped. Manual arm: {arm}."
+
+[update_post.wake_live]
+doc = "The wake-monitor answer when a live process holds the watcher lock of the identity. Placeholders: role, id, pid."
+value = "wake-monitor shipped + LIVE \u2014 a watcher already holds the lock for {role} {id} (pid {pid})"
+
+[update_post.wake_idle]
+doc = "The wake-monitor answer for a Primary with no live child workspace (the watcher would exit at once). Placeholders: role, id."
+value = "wake-monitor shipped; wake watcher not needed now (no live child workspaces; the mailbox tick covers you) for {role} {id}"
+
+[update_post.wake_not_live]
+doc = "The wake-monitor answer when no watcher is live for the identity. Placeholders: role, id, arm."
+value = "wake-monitor shipped but NOT live for {role} {id} \u2014 arm it: {arm}."

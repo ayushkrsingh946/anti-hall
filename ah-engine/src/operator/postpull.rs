@@ -27,6 +27,8 @@ use crate::setup::jsfmt::js_string;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
+mod wake;
+
 fn text(key: &str) -> &'static str {
     defaults::text(key)
 }
@@ -470,6 +472,11 @@ impl Run<'_> {
         match row.get("native").and_then(defaults::V::as_str) {
             Some("settings") => return self.settings_stage(),
             Some("codex_graphify") => return self.codex_graphify_stage(),
+            Some("wake_monitor") => {
+                if let Some(v) = self.wake_monitor_stage(row) {
+                    return v;
+                }
+            }
             Some(which) if migrate::poststages::is_store_stage(which) => {
                 if let Some(v) = self.store_stage(row, which) {
                     return v;

@@ -519,6 +519,8 @@ struct Case {
     markers: bool,
     /// The anchor is the mesh id of the nested repository (a working directory only git can place).
     nested: bool,
+    /// Answer members left out of the comparison with the frozen Node result (the documented difference only), and files likewise.
+    mask: &'static [&'static str],
 }
 
 impl Case {
@@ -579,8 +581,21 @@ fn replay(c: &Case) -> (Value, World, Opt) {
     let ans = engine_answer(&w, &eo, c.key);
     assert_eq!(stage_node_calls(&w), Vec::<String>::new(), "{}/{}: the engine ran Node for the stage", c.stage, c.name);
     let got = picture(&w, ans, Some(&anchor));
+    let unmasked = |v: &Value| {
+        let mut v = v.clone();
+        if let Some(o) = v["answer"].as_object_mut() {
+            o.retain(|k, _| !c.mask.contains(&k.as_str()));
+        }
+        if !c.mask.is_empty()
+            && let Some(f) = v["files"].as_object_mut()
+        {
+            f.remove(".anti-hall/devswarm/wake/");
+        }
+        v
+    };
+    let (want_m, got_m) = (unmasked(&want), unmasked(&got));
     for k in ["answer", "stores", "files"] {
-        assert!(want[k] == got[k], "{}/{}: {k} differs from the frozen Node result\n{}", c.stage, c.name, diff(&want[k], &got[k]));
+        assert!(want_m[k] == got_m[k], "{}/{}: {k} differs from the frozen Node result\n{}", c.stage, c.name, diff(&want_m[k], &got_m[k]));
     }
     (got, w, eo)
 }
@@ -626,7 +641,7 @@ macro_rules! case {
     ($fn:ident, $stage:literal, $name:literal, $row:literal, $key:literal, $func:literal, $seed:expr, live: $live:literal, markers: $markers:literal) => {
         #[test]
         fn $fn() {
-            run_case(&Case { stage: $stage, name: $name, row: $row, key: $key, func: $func, seed: $seed, live: $live, markers: $markers, nested: false });
+            run_case(&Case { stage: $stage, name: $name, row: $row, key: $key, func: $func, seed: $seed, live: $live, markers: $markers, nested: false, mask: &[] });
         }
     };
 }
@@ -677,7 +692,7 @@ fn marker_of(w: &World) -> Option<String> {
 /// A store with data but no marker is settled as sqlite and pinned by a read-write open, like Node; a preview (read-only open) pins nothing.
 #[test]
 fn a_store_without_a_marker_is_adopted_as_sqlite_and_pinned_like_node() {
-    let (_, w, o) = replay(&Case { stage: "reader-floor-repair", name: "no_marker", row: "reader-floor-repair", key: "readerFloorRepair", func: "readerFloorRepairPostUpdate", seed: seed_floors_no_marker, live: true, markers: false, nested: false });
+    let (_, w, o) = replay(&Case { stage: "reader-floor-repair", name: "no_marker", row: "reader-floor-repair", key: "readerFloorRepair", func: "readerFloorRepairPostUpdate", seed: seed_floors_no_marker, live: true, markers: false, nested: false, mask: &[] });
     assert_eq!(marker_of(&w).as_deref(), Some("sqlite"));
     assert_eq!(stage_node_calls(&w), Vec::<String>::new());
     let again = engine_answer(&w, &o, "readerFloorRepair");
@@ -686,13 +701,13 @@ fn a_store_without_a_marker_is_adopted_as_sqlite_and_pinned_like_node() {
 
 #[test]
 fn a_preview_of_a_store_without_a_marker_writes_no_marker() {
-    let (_, w, _) = replay(&Case { stage: "reader-floor-repair", name: "no_marker_dry", row: "reader-floor-repair", key: "readerFloorRepair", func: "readerFloorRepairPostUpdate", seed: seed_floors_no_marker, live: false, markers: false, nested: false });
+    let (_, w, _) = replay(&Case { stage: "reader-floor-repair", name: "no_marker_dry", row: "reader-floor-repair", key: "readerFloorRepair", func: "readerFloorRepairPostUpdate", seed: seed_floors_no_marker, live: false, markers: false, nested: false, mask: &[] });
     assert_eq!(marker_of(&w), None);
 }
 
 #[test]
 fn split_merge_pins_a_store_without_a_marker_even_in_a_preview_like_node() {
-    let (_, w, _) = replay(&Case { stage: "merge-split-backend-stores", name: "no_marker", row: "merge-split-backend-stores", key: "mergeSplitBackendStores", func: "mergeSplitBackendStoresPostUpdate", seed: seed_not_split_no_marker, live: false, markers: false, nested: false });
+    let (_, w, _) = replay(&Case { stage: "merge-split-backend-stores", name: "no_marker", row: "merge-split-backend-stores", key: "mergeSplitBackendStores", func: "mergeSplitBackendStoresPostUpdate", seed: seed_not_split_no_marker, live: false, markers: false, nested: false, mask: &[] });
     assert_eq!(marker_of(&w).as_deref(), Some("sqlite"));
 }
 
@@ -727,7 +742,7 @@ fn a_stage_switched_off_reports_itself_skipped_and_touches_nothing() {
     let out = run_engine(&w, &o, &["--post-pull-only"]);
     let status: Value = serde_json::from_str(out.stdout.lines().next().unwrap()).unwrap();
     let status = &status["status"];
-    for (key, name) in [("readerCursorsImport", "reader-cursors-import"), ("readerFloorRepair", "reader-floor-repair"), ("dualPartitionAcks", "dual-partition-acks"), ("promoteUnclaimed", "promote-unclaimed"), ("cursorHygiene", "cursor-hygiene"), ("mergeSplitBackendStores", "merge-split-backend-stores"), ("childSenderLabels", "child-sender-labels"), ("ownerKeyMigrate", "owner-key-migrate"), ("appArchivedMarkers", "app-archived-markers"), ("reRetireResurrected", "re-retire-resurrected")] {
+    for (key, name) in [("readerCursorsImport", "reader-cursors-import"), ("readerFloorRepair", "reader-floor-repair"), ("dualPartitionAcks", "dual-partition-acks"), ("promoteUnclaimed", "promote-unclaimed"), ("cursorHygiene", "cursor-hygiene"), ("mergeSplitBackendStores", "merge-split-backend-stores"), ("childSenderLabels", "child-sender-labels"), ("ownerKeyMigrate", "owner-key-migrate"), ("appArchivedMarkers", "app-archived-markers"), ("reRetireResurrected", "re-retire-resurrected"), ("wakeMonitor", "wake-monitor")] {
         let a = &status[key];
         assert_eq!(a["attempted"], json!(false), "{key}: {a}");
         assert_eq!(a["disabled"], json!(true), "{key}: {a}");
@@ -1045,7 +1060,7 @@ fn seed_dual_nested(home: &Path) {
 }
 
 fn nested_case() -> Case {
-    Case { stage: "dual-partition-acks", name: "nested_repo", row: "dual-partition-acks", key: "dualPartitionAcks", func: "dualPartitionAcksPostUpdate", seed: seed_dual_nested, live: true, markers: false, nested: true }
+    Case { stage: "dual-partition-acks", name: "nested_repo", row: "dual-partition-acks", key: "dualPartitionAcks", func: "dualPartitionAcksPostUpdate", seed: seed_dual_nested, live: true, markers: false, nested: true, mask: &[] }
 }
 
 /// A worktree nested in another checkout is classified by git as Node does: the stage answers natively, equal to the frozen Node run
@@ -1318,5 +1333,100 @@ fn the_resurrected_report_removes_nothing() {
     assert_eq!(before["stores"], after["stores"], "the report changed a store");
     for f in before["files"].as_object().unwrap().keys() {
         assert!(after["files"].get(f).is_some(), "file {f} vanished");
+    }
+}
+
+
+// ---- wake-monitor (roadmap #61 G3) -----------------------------------------------------------------------------------------------
+//
+// The one documented difference from Node: `wakeMonitorPostUpdate` decides `shipped` by loading the watcher script with require();
+// the engine runs no Node and decides it by the script being present and naming both exports it needs (`resolveIdentity`,
+// `lockPathFor`). They differ only for a script that names both exports yet does not load (a syntax error): Node answers
+// shipped:false with its load-error detail and stops before the state directory; the engine answers shipped:true and goes on.
+// So `unloadable_watcher` leaves out exactly that branch: the answer members `shipped`, `detail` and `stateDirEnsured`, and the
+// `.anti-hall/devswarm/wake/` directory the engine goes on to make. Everything else is compared.
+
+const WATCHER_REL: &str = ".claude/plugins/marketplaces/anti-hall/plugins/anti-hall/companion/lib/devswarm-wake-watch.js";
+
+/// A registered workspace whose worktree is the working directory (the stage resolves its identity from it).
+fn wake_workspace(home: &Path) {
+    put(home, ".anti-hall/devswarm/workspaces/ws-wake.json", &format!(r#"{{"id":"ws-wake","worktreePath":"{}","sessionId":"s-wake"}}"#, home.display()));
+}
+
+fn wake_lock(home: &Path, pid: i64) {
+    put(home, ".anti-hall/devswarm/locks/wake-watch-ws-wake.lock", &format!(r#"{{"pid":{pid},"ts":{FAR_FUTURE}}}"#));
+}
+
+fn seed_wake_unresolved(_: &Path) {}
+
+fn seed_wake_idle(home: &Path) {
+    wake_workspace(home);
+}
+
+/// Pid 1 always exists (and answers EPERM to a probe from another user, which Node also reads as alive).
+fn seed_wake_live(home: &Path) {
+    wake_workspace(home);
+    wake_lock(home, 1);
+}
+
+fn seed_wake_dead(home: &Path) {
+    wake_workspace(home);
+    wake_lock(home, 2_147_483_000);
+}
+
+fn seed_wake_no_exports(home: &Path) {
+    wake_workspace(home);
+    put(home, WATCHER_REL, "module.exports = {};\n");
+}
+
+fn seed_wake_missing(home: &Path) {
+    wake_workspace(home);
+    let p = home.join(WATCHER_REL);
+    fs::rename(&p, p.with_extension("js.moved")).unwrap();
+}
+
+fn seed_wake_unloadable(home: &Path) {
+    wake_workspace(home);
+    put(home, WATCHER_REL, "module.exports = { resolveIdentity: 1, lockPathFor: 1 };\n)(\n");
+}
+
+case!(wake_monitor_without_an_identity_reports_shipped_and_asks_for_a_manual_arm, "wake-monitor", "unresolved", "wake-monitor", "wakeMonitor", "wakeMonitorPostUpdate", seed_wake_unresolved, live: true, markers: false);
+case!(wake_monitor_not_live_names_the_arm_command, "wake-monitor", "not_live", "wake-monitor", "wakeMonitor", "wakeMonitorPostUpdate", seed_wake_idle, live: true, markers: false);
+case!(wake_monitor_sees_a_live_watcher_lock, "wake-monitor", "live", "wake-monitor", "wakeMonitor", "wakeMonitorPostUpdate", seed_wake_live, live: true, markers: false);
+case!(wake_monitor_ignores_a_lock_of_a_dead_process, "wake-monitor", "dead_lock", "wake-monitor", "wakeMonitor", "wakeMonitorPostUpdate", seed_wake_dead, live: true, markers: false);
+case!(wake_monitor_reports_a_watcher_without_its_exports_as_not_shipped, "wake-monitor", "no_exports", "wake-monitor", "wakeMonitor", "wakeMonitorPostUpdate", seed_wake_no_exports, live: true, markers: false);
+case!(wake_monitor_reports_a_missing_watcher_as_not_shipped, "wake-monitor", "missing_watcher", "wake-monitor", "wakeMonitor", "wakeMonitorPostUpdate", seed_wake_missing, live: true, markers: false);
+case!(wake_monitor_runs_the_same_under_the_ingest_dry_run_switch, "wake-monitor", "dry_run_switch", "wake-monitor", "wakeMonitor", "wakeMonitorPostUpdate", seed_wake_live, live: false, markers: false);
+
+/// The documented difference: everything but the branch a non-loading watcher takes equals the frozen Node result; that branch is
+/// Node's load-failure answer on one side and the engine's presence-and-exports answer on the other.
+#[test]
+fn wake_monitor_differs_from_node_only_in_shipped_for_a_watcher_that_does_not_load() {
+    let c = Case { stage: "wake-monitor", name: "unloadable_watcher", row: "wake-monitor", key: "wakeMonitor", func: "wakeMonitorPostUpdate", seed: seed_wake_unloadable, live: true, markers: false, nested: false, mask: &["shipped", "detail", "stateDirEnsured"] };
+    let (got, _, _) = replay(&c);
+    let want: Value = serde_json::from_str(&fs::read_to_string(fixture_path(c.stage, c.name)).unwrap()).unwrap();
+    assert_eq!(want["answer"]["shipped"], json!(false), "Node reads a script that does not load as not shipped");
+    assert!(want["answer"]["detail"].as_str().unwrap().contains("failed to load"), "{want}");
+    assert_eq!(got["answer"]["shipped"], json!(true), "the engine decides shipped without loading the script");
+}
+
+/// The stage arms nothing and removes nothing: no lock is written, no workspace or lock file goes, no Node runs.
+#[test]
+fn wake_monitor_arms_nothing_deletes_nothing_and_runs_no_node() {
+    let o = Opt { ds: true, no_upstream_move: true, live: true, no_node: true, stage_only: Some("wake-monitor"), ..Opt::default() };
+    let w = world(&o);
+    seed_wake_live(&w.home);
+    let lock = w.home.join(".anti-hall/devswarm/locks/wake-watch-ws-wake.lock");
+    let before = fs::read(&lock).unwrap();
+    let before_tree = tree(&w.home);
+    let ans = engine_answer(&w, &o, "wakeMonitor");
+    assert_eq!(ans["live"], json!(true), "{ans}");
+    assert_eq!(stage_node_calls(&w), Vec::<String>::new());
+    assert_eq!(fs::read(&lock).unwrap(), before, "the lock was rewritten");
+    let after_tree = tree(&w.home);
+    let new: Vec<&String> = after_tree.keys().filter(|k| !before_tree.contains_key(*k)).filter(|k| !k.starts_with(".anti-hall/ah-engine") && !k.starts_with(".anti-hall/logs") && !k.starts_with(".anti-hall/state")).collect();
+    assert_eq!(new, vec![".anti-hall/devswarm/wake/"], "only the watcher state directory is created");
+    for k in before_tree.keys().filter(|k| !k.starts_with(".anti-hall/ah-engine") && !k.starts_with(".anti-hall/logs")) {
+        assert!(after_tree.contains_key(k), "{k} vanished");
     }
 }
