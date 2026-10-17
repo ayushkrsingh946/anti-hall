@@ -275,7 +275,6 @@ Every `AH_ENGINE_*` variable the engine or its wrappers read. A variable that ov
 | `AH_ENGINE_WRAPPER_DIAG` |  | Test-only: absolute path of a file the hook wrapper appends its diagnostic lines to. Honored only with AH_WRAPPER_TEST=1. Test-only: environment variable naming a file the launcher appends its diagnostic lines to (an absolute path). |
 | `AH_ENGINE_WRITE_MS` | `daemon.write_ms` | Time allowed to write a reply. |
 | `AH_ENGINE_WRITE_QUEUE` | `storage.write_queue` | Writes that may wait for the writer thread; beyond this a write is refused as busy (the client retries, then spools). |
-| `ANTIHALL_DOCTOR_LEGACY_STORES_REPORT` | `doctor.legacy_stores_report` | 1 (the default): the doctor warns about DevSwarm stores on the journal backend or split between a journal and SQLite, which the engine does not support (the Node tooling serves them). 0: no such warning. |
 
 
 ## Socket protocol
@@ -4603,7 +4602,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `doctor.kind_unknown` | `unknown` |  |  | The kind of a unit whose name is in no known shape (it is never touched). |
 | `doctor.launchd_dir` | `Library, LaunchAgents` |  |  | The user LaunchAgents directory, as path segments under the home directory. |
 | `doctor.leaks_examples` | `5` |  |  | How many leaked stores the report names. |
-| `doctor.legacy_stores_report` | `1` | `ANTIHALL_DOCTOR_LEGACY_STORES_REPORT` |  | 1 (the default): the doctor warns about DevSwarm stores on the journal backend or split between a journal and SQLite, which the engine does not support (the Node tooling serves them). 0: no such warning. |
+| `doctor.legacy_stores_report` | `1` |  |  | 1 (the default): the doctor warns about DevSwarm stores on the journal backend or split between a journal and SQLite, which the engine does not support (the Node tooling serves them). 0: no such warning. |
 | `doctor.linux_name` | `linux` |  |  | The OS name the engine and the release assets use for Linux. |
 | `doctor.lock_dir` | `locks` |  |  | The directory of the ingest daemons' lock files under the DevSwarm directory. |
 | `doctor.lock_file` | `ah-engine.lock` |  |  | The plugin's pin of the engine release, relative to the plugin root. |
