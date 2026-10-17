@@ -576,6 +576,9 @@ function reclaimIngestLocks(opts) {
     push('reclaim-reinstall', 'install-ingest', 'skipped', 'nothing was reclaimed for this worktree — reinstall not triggered (never thrash an already-clean/healthy daemon)');
   } else if (!currentWorktree) {
     push('reclaim-reinstall', 'install-ingest', 'skipped', 'cwd is not inside a resolvable git worktree — cannot reinstall from here');
+  } else if ((() => { try { const h = ingestHealthMod(); return typeof h.engineOwnsIngest === 'function' && h.engineOwnsIngest(home); } catch (_) { return false; } })()) {
+    // ENGINE OWNS INGEST (live 2026-10-16): the engine takes the reclaimed lock; no Node unit.
+    push('reclaim-reinstall', 'install-ingest', 'skipped', 'the anti-hall engine owns the ingest drain (devswarm/ingest-owner.json) — lock reclaimed, no Node ingest unit reinstalled');
   } else if (dryRun) {
     push('reclaim-reinstall', 'install-ingest', 'skipped', '[dry-run] would (re)install the ingest daemon after reclaiming its lock');
   } else {
@@ -1599,8 +1602,16 @@ function runRepairs(opts) {
   }
 
   // --- Ingest daemon: GATED (install / wrong-path rebind / stale-script) ----
+  // ENGINE OWNS INGEST (live 2026-10-16): while ah-engine's ownership marker says
+  // engine, this pass installs, rebinds and restarts no Node ingest unit — a
+  // reinstall here would put a second consumer in front of the engine and undo
+  // a retirement (an absent unit is exactly what a retired one looks like).
+  let engineOwned = false;
+  try { const h = ingestHealthMod(); engineOwned = typeof h.engineOwnsIngest === 'function' && h.engineOwnsIngest(home); } catch (_) { engineOwned = false; }
   if (platform === 'win32') {
     push('ingest', 'install-ingest', 'skipped', 'Windows: ingest daemon has no built-in scheduler (documented no-op)');
+  } else if (engineOwned) {
+    push('ingest', 'install-ingest', 'skipped', 'the anti-hall engine owns the ingest drain (devswarm/ingest-owner.json) — no Node ingest unit is installed, rebound or restarted');
   } else {
     try {
       const read = readInstalledIngestWorkingDir({ home, platform, worktree: currentWorktree });
@@ -1732,8 +1743,22 @@ function runRepairs(opts) {
           : cls === 'unstable-script' ? 'ingest daemon ExecStart script is not the current stable build (' + (read.scriptPath || 'unset') + ' — pinned to an old/relocatable path)'
           : cls === 'stale-script' ? 'ingest daemon ExecStart script is missing (' + (read.scriptPath || 'unset') + ')'
           : 'ingest daemon is installed but NOT ALIVE (stale heartbeat / lock not held by a live process — WorkingDirectory ' + read.workingDir + ')';
+        let unregistered = false;
+        if (cls === 'absent') {
+          // UNREGISTERED PROJECT (live 2026-10-16): a first install only for a
+          // project a registered workspace descriptor names — never a scratch
+          // clone or other checkout a session happened to run doctor from.
+          try {
+            const { repoKeyForWorktree } = repokeyMod();
+            const key = currentWorktree && typeof repoKeyForWorktree === 'function' ? repoKeyForWorktree(currentWorktree) : null;
+            const h = ingestHealthMod();
+            unregistered = typeof h.projectRegistered === 'function' && !h.projectRegistered(home, key);
+          } catch (_) { unregistered = false; }
+        }
         if (!gateOpen) {
           push('ingest', 'install-ingest', 'gated', reason + '. ' + gatedHint(CMD_INGEST));
+        } else if (unregistered) {
+          push('ingest', 'install-ingest', 'skipped', reason + ' — not a registered DevSwarm project (no workspace descriptor names it), so no ingest daemon is installed for it');
         } else if (dryRun) {
           let wt = cwd;
           try { const { resolveWorktree } = ingestConst(); wt = resolveWorktree(cwd) || cwd; } catch (_) {}

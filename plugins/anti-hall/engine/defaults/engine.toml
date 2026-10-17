@@ -344,6 +344,38 @@ value = "narenas:1,dirty_decay_ms:0,muzzy_decay_ms:0"
 doc = "Environment variables the allocator reads its tuning from (the crate's prefixed name and the plain one)."
 value = ["_RJEM_MALLOC_CONF", "MALLOC_CONF"]
 
+[daemon.spawn_env_allow]
+doc = "The only environment variables the daemon (`ah-engine serve`) is started with; everything else of the hook that happened to start it is dropped. A daemon outlives the session that spawned it and serves every later one, so a per-session value left in its environment (the session id, the DevSwarm workspace and role variables, `CLAUDE_PROJECT_DIR`, the git object-store variables of the hook's repository) would be read for all of them: the first session to spawn it would own it. Per-session values reach the checks only with each request (`request_env.allow`). What is kept is what the daemon and the jobs and tools it starts need as the user: the account and search path (HOME, USER, LOGNAME, SHELL, PATH, the temp directory, locale, TZ, XDG_*), the user's git and GitHub credentials (SSH_AUTH_SOCK, GH_TOKEN, GITHUB_TOKEN, GH_HOST, GH_CONFIG_DIR), the engine's own tunables (AH_ENGINE_*, the allocator tuning variables), the plugin root the daemon loads its files from, the user's Jev settings and keys (ANTIHALL_JEV*, CLAUDE_PLUGIN_OPTION_JEV_*, the gateway keys), and the user-level DevSwarm and maintenance tunables. A trailing `*` matches a prefix."
+value = ["HOME", "USER", "LOGNAME", "SHELL", "PATH", "TMPDIR", "TMP", "TEMP", "LANG", "LC_*", "TZ", "XDG_*", "SSH_AUTH_SOCK", "GH_TOKEN", "GITHUB_TOKEN", "GH_HOST", "GH_CONFIG_DIR", "AH_ENGINE_*", "_RJEM_MALLOC_CONF", "MALLOC_CONF", "CLAUDE_PLUGIN_ROOT", "PLUGIN_ROOT", "ANTIHALL_JEV*", "CLAUDE_PLUGIN_OPTION_JEV_*", "AI_GATEWAY_API_KEY", "TYPESAFE_API_KEY", "ANTHROPIC_API_KEY", "ANTIHALL_DEVSWARM_*", "ANTIHALL_RECONCILE_*", "ANTIHALL_ROSTER_*", "ANTIHALL_BROADCAST_*", "ANTIHALL_MARKETPLACE_DIR", "ANTIHALL_INGEST_DRY_RUN", "ANTIHALL_TEST_*", "ANTIHALL_ALLOW_REAL_HOME_TEST", "ANTIHALL_UNITS_ALLOW_TMP_HOME", "ANTI_HALL_LOG_DIR", "MCP_REAP_*"]
+
+[daemon.spawn_env_deny]
+doc = "Variables the daemon never inherits even when `daemon.spawn_env_allow` matches them by prefix: the ones that name the session, the role or the DevSwarm workspace of whoever started it. Deny wins."
+value = ["ANTIHALL_ROLE", "ANTIHALL_SESSION_ID", "ANTIHALL_CALLER", "ANTIHALL_DEVSWARM_SOURCE_BRANCH", "ANTIHALL_JUDGE_CHILD", "ANTIHALL_WAKE_WATCH_HANDED_OFF"]
+
+[daemon.spawn_cwd_fallback]
+doc = "The working directory of a daemon whose starter has no usable home directory. Otherwise it starts in the home directory: the directory of the hook that spawned it can be a workspace's worktree that is archived and removed while the daemon, and every job it starts, keeps running."
+value = "/"
+
+[daemon.malloc_decay_keys]
+doc = "The decay settings of `daemon.malloc_conf` that a daemon started without the tuning in its environment (a launchd or systemd unit, a replay or test driver) applies to the running allocator; each is also the name of the allocator control under `arenas.` and `arena.<all>.`. `narenas` is not among them: it cannot change once the allocator runs."
+value = ["dirty_decay_ms", "muzzy_decay_ms"]
+
+[daemon.malloc_decay_kind]
+doc = "Event-log kind of the line written when the daemon applies (or cannot apply) the allocator decay settings at start."
+value = "malloc_decay"
+
+[daemon.malloc_decay_why_system]
+doc = "Reason logged when the decay settings are not applied because the system allocator is active."
+value = "the system allocator is active"
+
+[daemon.malloc_decay_why_none]
+doc = "Reason logged when `daemon.malloc_conf` holds none of `daemon.malloc_decay_keys`."
+value = "daemon.malloc_conf holds no decay setting"
+
+[daemon.malloc_decay_why_error]
+doc = "Reason logged when the allocator refused a decay setting. Placeholders: {key}, {rc} (the allocator's error number)."
+value = "the allocator refused {key} (error {rc})"
+
 [daemon.rss_check_ms]
 doc = "How often the watchdog samples resident memory."
 value = 10000
@@ -900,6 +932,10 @@ doc = "A per-project operation on hot.db; the daemon derives the partition from 
 value = { request = "P <cwd>\n[W <write-id>\n]<put|take|len|set|setex|get> [args]", reply = "OK <value> | ERR <reason> | BUSY" }
 
 # ---- the environment a request carries (D76) -------------------------------------------------------------
+
+[request_env.peer_pid_key]
+doc = "The name under which a daemon request's sender pid (its socket peer; 0 when the socket did not say) reaches the checks. Not on the allowlist, so no client can set it; host functions that walk the process ancestry (the DevSwarm reader nonce) start there. Absent in a one-shot `ah-engine check`, which starts at itself."
+value = "AH_ENGINE_REQUEST_PEER_PID"
 
 [request_env.allow]
 doc = "The environment variables the client forwards with every request, and the only ones the daemon evaluates a check with (never its own environment). A trailing `*` matches a prefix. PATH is read by scan-throttle. DISABLE_ANTIHALL_DEVSWARM and DEVSWARM_REPO_ID decide whether DevSwarm is active, CLAUDE_CONFIG_DIR locates the host's transcripts and NODE_TEST_CONTEXT marks a test run (inbox-read-guard, orch-on-spawn, verify-first-orch). DEVSWARM_SOURCE_BRANCH (non-empty in a DevSwarm child workspace) is read by verify-first-subagent. verify-first also reads DEVSWARM_REPO_ID, DEVSWARM_SOURCE_BRANCH and DISABLE_ANTIHALL_DEVSWARM to see whether the session could be a DevSwarm Primary. DEVSWARM_SOURCE_BRANCH also marks a DevSwarm child workspace for ask-guard. DEVSWARM_REPO_ID, DEVSWARM_SOURCE_BRANCH and DISABLE_ANTIHALL_DEVSWARM are also read by the DevSwarm prompt gates (devswarm-parent-inbox, devswarm-child-turn). DEVSWARM_BUILDER_ID and DEVSWARM_AI_AGENT (with the repo id, the source branch and the DISABLE_ANTIHALL_DEVSWARM kill switch) are read by the devswarm-child-role and devswarm-parent-gate checks. DEVSWARM_BUILDER_NAME is written into the heartbeat of devswarm-child-turn. CLAUDE_PLUGIN_OPTION_* carry the plugin options the guards' switch chain reads. The rest are what the git check needs to see the client's git, never the daemon's: the `gitcache.bypass_env` names, XDG_CONFIG_HOME (locates git's config), the GIT_CONFIG_* variables (GIT_CONFIG_COUNT with its KEY_n/VALUE_n pairs travel together, since git exits 128 on a COUNT without its KEY_0; PARAMETERS and NOSYSTEM likewise), GIT_EXEC_PATH (locates git's helpers) and the object-store variables GIT_OBJECT_DIRECTORY, GIT_ALTERNATE_OBJECT_DIRECTORIES and GIT_NO_REPLACE_OBJECTS. LANG and LC_* are not forwarded: the git calls discard stderr and read only config data from stdout. TZ decides the local calendar date and local-time date strings of the handover and Codex checks, and TMPDIR, TMP and TEMP locate the session scratchpad the Codex nudge exempts, and decide where `os.tmpdir()` points in the task checks (scratch paths do not count as work). DISABLE_OMC and OMC_SKIP_HOOKS are the oh-my-claudecode kill switches task-guard reads before it steps aside for an OMC loop."

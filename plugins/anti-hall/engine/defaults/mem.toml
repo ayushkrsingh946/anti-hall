@@ -36,6 +36,12 @@ value = 60000
 min = 0
 unit = "ms"
 
+[mem.ledger_skew_bytes]
+doc = "Slack in the memory ledger's invariant (the named holders must fit inside the counted Rust heap): the holders and the heap are read a few microseconds apart while other threads allocate, so a holder total up to this much over the heap is not reported as an overcount."
+value = 262144
+min = 0
+unit = "bytes"
+
 [mem.regex_soft_bytes]
 doc = "Estimated bytes of compiled regular expressions the shared `ah.re.*` cache may hold before it evicts the least recently used down to its low-water mark (an entry weighs script.regex_entry_base_bytes plus script.regex_bytes_per_src_byte per byte of its translated source). The shipped checks reach about 47 distinct patterns on a short run (7.3 MB estimated, up to 5.3 MB measured on 4 workers) and more across a real day; at 8 MiB the working set did not fit and the cache evicted and recompiled in a cycle (live20.1: 16 evictions in 7 h, one every ~30 min, bursts under load). 16 MiB keeps them all."
 value = 16777216
@@ -114,6 +120,24 @@ value = 80
 min = 1
 max = 100
 
+[mem.evidence_walk_soft_bytes]
+doc = "Bytes of kept evidence walks (the claim ledger's joined evidence text) held before the least recently used are dropped down to the low-water mark."
+value = 12582912
+min = 4096
+unit = "bytes"
+
+[mem.evidence_walk_hard_bytes]
+doc = "Bytes of kept evidence walks at which an insert is refused and the cache is recycled; the worker thread still keeps its one walk, so the check never defers for it."
+value = 25165824
+min = 4096
+unit = "bytes"
+
+[mem.evidence_walk_low_water_pct]
+doc = "Percent of mem.evidence_walk_soft_bytes the kept evidence walks are evicted down to when the soft limit is reached."
+value = 80
+min = 1
+max = 100
+
 [mem.tasks_cache_soft_bytes]
 doc = "Bytes of kept transcript task lines held before the least recently used are dropped down to the low-water mark."
 value = 6291456
@@ -154,6 +178,24 @@ max = 100
 doc = "Transcript-tail answers the cache keeps at most; past it the least recently used is dropped first."
 value = 256
 min = 1
+
+[mem.jev_review_scan_soft_bytes]
+doc = "Bytes one scan of the Jev decision log (the SessionStart review reminder, `jev-setup review-due`) may hold before the soft trip is logged: the line being read plus the per-integration totals. The scan streams the log, so a decision row (under 1 KB) and a few integrations stay far below this."
+value = 262144
+min = 4096
+unit = "bytes"
+
+[mem.jev_review_scan_hard_bytes]
+doc = "Bytes one scan of the Jev decision log may hold; a line or total past it stops the scan and the review state counts as unusable (no reminder this time), so a corrupt or runaway log never costs the daemon more than this."
+value = 1048576
+min = 4096
+unit = "bytes"
+
+[mem.jev_review_scan_low_water_pct]
+doc = "Percent of mem.jev_review_scan_soft_bytes at which a scan's soft trip re-arms."
+value = 80
+min = 1
+max = 100
 
 [mem.spawn_probe_soft_bytes]
 doc = "Bytes of kept spawn-probe answers (`spawnProbeCached`) held before the least recently used are dropped down to the low-water mark."

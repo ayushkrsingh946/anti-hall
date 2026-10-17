@@ -186,18 +186,41 @@ function fromInstalledJson() {
     const data = JSON.parse(fs.readFileSync(p, "utf8"));
     const reg = (data && typeof data === "object" && data.plugins && typeof data.plugins === "object")
       ? data.plugins : data;
-    const entry = reg && reg["anti-hall@anti-hall"];
-    let pick = null;
-    if (Array.isArray(entry)) {
-      pick = entry.find(function (e) { return e && e.scope === "user" && typeof e.installPath === "string"; })
-        || entry.find(function (e) { return e && e.scope === "project" && typeof e.installPath === "string"; })
-        || entry.find(function (e) { return e && typeof e.installPath === "string"; });
-    } else if (entry && typeof entry === "object" && typeof entry.installPath === "string") {
-      pick = entry;
-    }
-    if (pick) {
-      const target = path.join.apply(path, [pick.installPath].concat(SEGMENTS));
-      if (fileExists(target)) return target;
+    // The ENABLED install wins: installed_plugins.json may register several anti-hall@* keys, and only the one
+    // enabledPlugins marks true is the one the harness runs. anti-hall@anti-hall is the fallback only when none is enabled.
+    let on = {};
+    try { on = JSON.parse(fs.readFileSync(path.join(home, ".claude", "settings.json"), "utf8")).enabledPlugins || {}; } catch (_) {}
+    let keys = Object.keys(reg || {}).filter(function (k) { return k.indexOf("anti-hall@") === 0 && on[k] === true; });
+    const choice = keys.length ? "enabled" : "fallback";
+    if (!keys.length) keys = ["anti-hall@anti-hall"];
+    for (const key of keys) {
+      const entry = reg && reg[key];
+      let pick = null;
+      if (Array.isArray(entry)) {
+        pick = entry.find(function (e) { return e && e.scope === "user" && typeof e.installPath === "string"; })
+          || entry.find(function (e) { return e && e.scope === "project" && typeof e.installPath === "string"; })
+          || entry.find(function (e) { return e && typeof e.installPath === "string"; });
+      } else if (entry && typeof entry === "object" && typeof entry.installPath === "string") {
+        pick = entry;
+      }
+      if (pick) {
+        const target = path.join.apply(path, [pick.installPath].concat(SEGMENTS));
+        if (fileExists(target)) {
+          try {
+            fs.mkdirSync(path.join(home, ".anti-hall", "ah-engine"), { recursive: true });
+            const logFile = path.join(home, ".anti-hall", "ah-engine", "launcher-choice.log");
+            let last = "";
+            try { last = fs.readFileSync(logFile, "utf8").trimEnd().split("\n").pop() || ""; } catch (_) {}
+            let prev = null;
+            try { prev = JSON.parse(last); } catch (_) {}
+            // one line per CHANGE of choice, so the log stays bounded
+            if (!prev || prev.choice !== choice || prev.key !== key) {
+              fs.appendFileSync(logFile, JSON.stringify({ ts: Date.now(), choice: choice, key: key }) + "\n");
+            }
+          } catch (_) {}
+          return target;
+        }
+      }
     }
   } catch (_) { /* fall through */ }
   return null;
@@ -595,6 +618,94 @@ value = "INSPECT the unread backlog via `devswarm.js inbox peek-primary <id>` (r
 doc = "The closing sentence of the reason."
 value = "If this is intentional, say so explicitly. Escape hatch: the user may direct a skip via ~/.anti-hall/skip.json (\"devswarm-parent-gate\")."
 
+[devswarm_role.pg_q_max_shown]
+doc = "Unanswered questions named (asker and age) in the reason and its question escalation before the rest is counted (buildUnansweredSegment)."
+value = 5
+
+[devswarm_role.pg_q_sep]
+doc = "The separator between the questions named in the reason and in the question escalation."
+value = "; "
+
+[devswarm_role.pg_q_item]
+doc = "One unanswered question in the reason: {from} (the asker), {age} (its approximate age)."
+value = "{from} ({age})"
+
+[devswarm_role.pg_q_unanswered]
+doc = "The unanswered-questions segment of the reason (buildUnansweredSegment): {s} (the plural mark), {items}, {more}."
+value = "UNANSWERED QUESTION{s} — {items}{more}: reading it via `inbox read-primary` (and running its `ackCommand`) is NOT sufficient to clear this. You must DECIDE from context and REPLY: `send --to <id> --message-file <path>` (or --message-stdin). "
+
+[devswarm_role.pg_q_plural]
+doc = "The plural mark of the unanswered-questions segment when more than one question is unanswered."
+value = "S"
+
+[devswarm_role.pg_q_unknown_sender]
+doc = "The asker named for a question that carries no sender."
+value = "unknown sender"
+
+[devswarm_role.pg_q_truncated]
+doc = "The truncated-question-list segment of the reason (buildTruncatedSegment): {kept}, {dropped}, {cap} from the summary's pendingQuestionsTruncated."
+value = "PENDING QUESTIONS LIST TRUNCATED — {kept} sender(s) shown, {dropped} more sender(s) with an unanswered question are NOT shown (cap {cap}). The true unanswered count is HIGHER than what this message can list. This is not resolvable by replying to only the senders named below — check `devswarm.js inbox read-primary` (read-only; its `ackCommand` acks) / registry state directly. "
+
+[devswarm_role.pg_q_truncated_unknown]
+doc = "The figure shown in the truncated segment for a count the summary does not carry as a finite number."
+value = "?"
+
+[devswarm_role.pg_q_informational]
+doc = "The retired-sender segment of the reason (buildInformationalSegment): {ids}, the distinct senders."
+value = "INFORMATIONAL — question from retired sender {ids} — no repliable target; inspect with `inbox messages <id>`, ack with `inbox ack <id> --ack-as-owner` after reading (use the sender id above as <id>). This is NOT counted in the unanswered figures above and never blocks on its own. "
+
+[devswarm_role.pg_q_informational_sep]
+doc = "The separator between the retired senders named in the informational segment."
+value = ", "
+
+[devswarm_role.pg_q_escalation]
+doc = "The question-ceiling escalation text (buildReason with qEscalateTimes): {what}, {times}."
+value = "Escalation: {what} has forced-blocked this Stop {times} times with no reply sent — a human should look. This will not repeat automatically after this message (the question itself is still tracked and unresolved). Escape hatch: the user may direct a skip via ~/.anti-hall/skip.json (\"devswarm-parent-gate\")."
+
+[devswarm_role.pg_q_escalation_truncated]
+doc = "What the question escalation names when the question list is truncated."
+value = "a truncated set of unanswered questions"
+
+[devswarm_role.pg_q_escalation_from]
+doc = "What the question escalation names otherwise: {who} (the askers), {more}."
+value = "unanswered question(s) from {who}{more}"
+
+[devswarm_role.pg_q_sig_field_sep]
+doc = "The character code of the separator between a question's sender and time in the question-set signature (qSig): NUL."
+value = 0
+
+[devswarm_role.pg_q_sig_row_sep]
+doc = "The character code of the separator between the questions of the question-set signature (qSig): the unit separator."
+value = 31
+
+[devswarm_role.pg_age_unknown]
+doc = "The age of a question whose time is not a finite past time (approxAge)."
+value = "unknown age"
+
+[devswarm_role.pg_age_under_min]
+doc = "The age of a question under a minute old (approxAge)."
+value = "<1m ago"
+
+[devswarm_role.pg_age_min]
+doc = "The age of a question under an hour old: {n} minutes (approxAge)."
+value = "{n}m ago"
+
+[devswarm_role.pg_age_hour]
+doc = "The age of a question under a day old: {n} hours (approxAge)."
+value = "{n}h ago"
+
+[devswarm_role.pg_age_day]
+doc = "The age of an older question: {n} days (approxAge)."
+value = "{n}d ago"
+
+[devswarm_role.pg_min_per_hour]
+doc = "Minutes in an hour (approxAge)."
+value = 60
+
+[devswarm_role.pg_hour_per_day]
+doc = "Hours in a day (approxAge)."
+value = 24
+
 [devswarm_role.pg_reason_labels]
 doc = "The label of each unknown-inbox reason (reasonLabel)."
 value = { "no-inbox-path" = "descriptor has no inboxPath", "no-cursor-path" = "descriptor has no cursorPath", "inbox-missing" = "inbox file missing", "inbox-unreadable" = "inbox file unreadable", "cursor-missing" = "cursor file missing", "cursor-unreadable" = "cursor unreadable/corrupt", "cursor-invalid" = "cursor value invalid", "own-summary-unreadable" = "own-summary unreadable/corrupt", "own-cache-stale" = "own-summary cache predates this reader's live position (live recheck unresolved)", "read-threw" = "inbox read raised an error", "store-read-error" = "mesh store unreadable (unread count UNKNOWN)", "reader-cursors-unreadable" = "read positions (reader_cursors) unreadable (unread count UNKNOWN)", "store-read-threw" = "mesh store read raised an error (unread count UNKNOWN)" }
@@ -678,3 +789,109 @@ value = 3
 [devswarm_role.pg_broadcast_fields]
 doc = "The row fields any of which naming the broadcast type marks a broadcast row (isBroadcastRow)."
 value = ["mtype", "type", "kind"]
+
+[devswarm_role.pg_dir_stray_seen]
+doc = "The straying warnings each Primary session was already shown (stray-seen/<sha1(session)>.json), under the DevSwarm directory."
+value = "stray-seen"
+
+[devswarm_role.pg_stray_seen_hash_len]
+doc = "Hex characters of the session hash that name a stray-seen file."
+value = 16
+min = 1
+max = 40
+
+[devswarm_role.pg_stray_seen_max]
+doc = "Most shown straying warnings a stray-seen file keeps (the oldest go first)."
+value = 200
+min = 1
+max = 100000
+
+[devswarm_role.pg_stray_seen_sep]
+doc = "Joins a straying signal's key and episode number in its shown-set key."
+value = "#"
+
+[devswarm_role.pg_stray_seen_jev]
+doc = "Ends a shown-set key whose warning carries Jev notes (a Jev note arriving later shows the warning once more)."
+value = "#jev"
+
+[devswarm_role.pg_stray_no_session]
+doc = "The session text hashed into the stray-seen file name when the Stop payload has no session id."
+value = "no-session"
+
+[devswarm_role.pg_stray_line_max]
+doc = "Straying warnings named on the one advisory line; the rest are counted (devswarm-supervision.js LINE_MAX_ENTRIES)."
+value = 3
+min = 1
+max = 100
+
+[devswarm_role.pg_stray_head]
+doc = "Starts the straying advisory line."
+value = "⚠️ anti-hall · devswarm-straying: "
+
+[devswarm_role.pg_stray_step]
+doc = "Between a warned workspace's title and its step number on the straying line."
+value = ": step "
+
+[devswarm_role.pg_stray_join]
+doc = "Joins the warnings on the straying line, and the Jev notes of one warning."
+value = "; "
+
+[devswarm_role.pg_stray_jev_open]
+doc = "Opens the Jev notes of a straying warning."
+value = " (Jev: "
+
+[devswarm_role.pg_stray_jev_close]
+doc = "Closes the Jev notes of a straying warning."
+value = ")"
+
+[devswarm_role.pg_stray_more_open]
+doc = "Opens the count of straying warnings past the line's cap."
+value = " (+"
+
+[devswarm_role.pg_stray_more_close]
+doc = "Closes the count of straying warnings past the line's cap."
+value = " more)"
+
+[devswarm_role.pg_stray_tail]
+doc = "Ends the straying advisory line."
+value = " — advisory (Jev notes are recommendations; your call); `devswarm.js correct <id>` sends the correction."
+
+[devswarm_role.pg_kind_wakepath]
+doc = "The block kind of the clean pass's mailbox-wake block (its loop-state signature is the hashed prefix and this kind)."
+value = "wakepath"
+
+[devswarm_role.pg_own_unread]
+doc = "The reason segment for the Primary's own unread mail. Placeholders: {n}, {id}."
+value = "YOU (the Primary) have {n} unread parent/peer message(s) — STOP and read them FIRST via `devswarm.js inbox read-primary {id}` (read-only; after handling, run the `ackCommand` it returns). "
+
+[devswarm_role.pg_live_resolved]
+doc = "Marks an own count the gate re-read live from this reader's own position in the store."
+value = "live-resolved"
+
+[devswarm_role.pg_urgent_levels]
+doc = "The summary entry urgencies (`urgencyMax`) that put the urgent prefix on the Primary's own-unread segment."
+value = ["urgent", "high"]
+
+[devswarm_role.pg_urgent_prefix]
+doc = "Put before the Primary's own-unread segment when its urgency is one of pg_urgent_levels."
+value = "URGENT — "
+
+[devswarm_role.pg_own_stale]
+doc = "The own-summary segment when the cached summary predates this reader's live position and the live recheck could not settle it: {id}."
+value = "YOUR OWN inbound status could not be confirmed: the cached summary predates this reader's live read position (own cursor caught up to or past what the summary last recorded), and a live recheck did not resolve it — treat this as UNKNOWN, not \"no messages\". Check explicitly via `devswarm.js inbox count {id}` or `devswarm.js inbox read-primary {id}` (then its `ackCommand`) before assuming there is nothing pending. "
+
+[devswarm_role.pg_set_drain_ttl]
+doc = "Setting devswarm.drainTtlMs: milliseconds an in-flight drain marker stays fresh (devswarm-drain-marker.js). The engine answers only while it is unset, with this default."
+value = { section = "devswarm", key = "drainTtlMs", env = "ANTIHALL_DEVSWARM_DRAIN_TTL_MS", option = "", default = 600000 }
+
+[devswarm_role.pg_drain_tag]
+doc = "A first reason line that already carries this tag gets no drain-notice prefix."
+value = " anti-hall · "
+
+[devswarm_role.pg_drain_prefix]
+doc = "Put before the first reason line of the drain notice (stderr) unless it carries pg_drain_tag."
+value = "⚠️ anti-hall · devswarm-parent-gate: "
+
+[devswarm_role.pg_drain_suffix]
+doc = "Ends the drain notice: the Stop is not blocked while this session's drain marker is fresh."
+value = " — not blocking (in-flight drain marker fresh for this session)\n"

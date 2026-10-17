@@ -35,6 +35,7 @@ struct Rx {
     vprefix: Regex,
     confirm: Regex,
     failed: Regex,
+    available: Regex,
     offline: Regex,
     v_strip: Regex,
 }
@@ -52,6 +53,7 @@ impl Rx {
             vprefix: rx("update.version_prefix_re")?,
             confirm: rx("update.confirm_re")?,
             failed: rx("update.failed_re")?,
+            available: rx("update.available_re")?,
             offline: Regex::new(&offline).map_err(|e| format!("update.offline_patterns: {e}"))?,
             v_strip: rx("update.v_strip_re")?,
         })
@@ -64,6 +66,7 @@ pub(super) struct Paths {
     override_ignored: String,
     cache_root: String,
     installed_json: String,
+    settings_json: String,
     plugin_json: String,
     changelog: String,
     pub(super) plugin_src: String,
@@ -86,6 +89,7 @@ fn resolve_paths(env: &Env, home: &str) -> Paths {
         override_ignored,
         cache_root: join(&plugins_root, t("update.cache_rel")),
         installed_json: join(&plugins_root, t("update.installed_json")),
+        settings_json: resolve_abs(&join(&plugins_root, t("update.settings_rel"))),
         plugin_json: join(&plugin_src, t("update.plugin_json_rel")),
         changelog: join(&marketplace, t("update.changelog_file")),
         plugin_src,
@@ -146,7 +150,8 @@ fn compare(rx: &Rx, a: &str, b: &str) -> i32 {
     0
 }
 
-fn version_from_installed_json(rx: &Rx, path: &str) -> Option<String> {
+/// The version the registry records for the ENABLED anti-hall install (the pin only when none is enabled; #216).
+fn version_from_installed_json(rx: &Rx, path: &str, settings_path: &str) -> Option<String> {
     let data = read_json(path)?;
     if !matches!(data, J::Obj(_) | J::Arr(_)) {
         return None;
@@ -155,7 +160,9 @@ fn version_from_installed_json(rx: &Rx, path: &str) -> Option<String> {
         Some(p @ (J::Obj(_) | J::Arr(_))) => p,
         _ => &data,
     };
-    match reg.get("anti-hall@anti-hall")? {
+    let settings = read_json(settings_path);
+    let (keys, _) = crate::install::select_keys(reg, settings.as_ref());
+    keys.iter().find_map(|key| match reg.get(key)? {
         J::Arr(entries) => {
             let valid: Vec<&J> = entries.iter().filter(|e| matches!(e, J::Obj(_)) && semver_opt(rx, str_of(e.get("version")))).collect();
             let scoped = |s: &str| valid.iter().find(|e| str_of(e.get("scope")) == Some(s));
@@ -165,7 +172,7 @@ fn version_from_installed_json(rx: &Rx, path: &str) -> Option<String> {
         J::Str(s) => is_semver(rx, s).then(|| s.clone()),
         e @ J::Obj(_) => str_of(e.get("version")).filter(|v| is_semver(rx, v)).map(str::to_string),
         _ => None,
-    }
+    })
 }
 
 fn newest_cache_version(rx: &Rx, root: &str) -> Option<String> {
@@ -188,43 +195,17 @@ fn version_from_marketplace(rx: &Rx, path: &str) -> Option<String> {
 /// The higher of the registry's version and the newest cache directory's; the marketplace manifest only when neither reads.
 fn resolve_installed(rx: &Rx, paths: &Paths) -> Option<String> {
     let cache = newest_cache_version(rx, &paths.cache_root);
-    let json = version_from_installed_json(rx, &paths.installed_json);
+    let json = version_from_installed_json(rx, &paths.installed_json, &paths.settings_json);
     if let (Some(c), Some(j)) = (&cache, &json) {
         return Some(if compare(rx, c, j) >= 0 { c.clone() } else { j.clone() });
     }
     cache.or(json).or_else(|| version_from_marketplace(rx, &paths.plugin_json))
 }
 
-/// What the wake watcher needs of `update.js`: the versions it knows of (`versionFromInstalledJson`, `newestCacheVersion`,
-/// `versionFromMarketplace`) and where the cache lives. Pure reads; `None` when the patterns do not compile.
-pub(crate) struct KnownVersions {
-    /// The version the harness registry names.
-    pub registry: Option<String>,
-    /// The newest version cache directory.
-    pub cache: Option<String>,
-    /// The version in the marketplace clone's manifest.
-    pub marketplace: Option<String>,
-    /// The cache root (`<plugins>/cache/anti-hall/anti-hall`).
-    pub cache_root: String,
-}
-
 /// The compiled patterns for the active defaults (`None` when they do not compile).
 fn cached_rx() -> Option<std::sync::Arc<Rx>> {
     static RX: defaults::Cache<Option<std::sync::Arc<Rx>>> = defaults::Cache::new();
     (*RX.get_or_init(|| Rx::new().ok().map(std::sync::Arc::new))).clone()
-}
-
-/// The versions `checkStaleVersion` of the wake watcher compares (`update.js` `resolvePaths` and the three readers).
-pub(crate) fn known_versions(env: &Env, home: &str) -> Option<KnownVersions> {
-    let rx = cached_rx()?;
-    let rx = &*rx;
-    let paths = resolve_paths(env, home);
-    Some(KnownVersions {
-        registry: version_from_installed_json(rx, &paths.installed_json),
-        cache: newest_cache_version(rx, &paths.cache_root),
-        marketplace: version_from_marketplace(rx, &paths.plugin_json),
-        cache_root: paths.cache_root,
-    })
 }
 
 /// `isSemver(v)` of `update.js`.
@@ -240,7 +221,7 @@ pub(crate) fn compare_versions(a: &str, b: &str) -> i32 {
 /// The registry and the cache both read, and disagree.
 fn installed_version_lag(rx: &Rx, paths: &Paths) -> Option<(String, String)> {
     let cache = newest_cache_version(rx, &paths.cache_root)?;
-    let json = version_from_installed_json(rx, &paths.installed_json)?;
+    let json = version_from_installed_json(rx, &paths.installed_json, &paths.settings_json)?;
     (compare(rx, &cache, &json) != 0).then_some((json, cache))
 }
 
@@ -558,7 +539,7 @@ fn run_core(rx: &Rx, env: &Env, home: &str, paths: &Paths, skip_pull: bool) -> C
     }
     let inst = installed.clone().unwrap_or_default();
     let updated = latest.as_deref().is_some_and(|l| compare(rx, &inst, l) < 0);
-    let reg_version = version_from_installed_json(rx, &paths.installed_json);
+    let reg_version = version_from_installed_json(rx, &paths.installed_json, &paths.settings_json);
     let quiet = stage_quiet(env, home);
     let name = t("update_msg.stage_harness");
     if !quiet {
@@ -690,6 +671,8 @@ fn render_human(rx: &Rx, status: &J, changelog: &str) -> String {
         (t("update_human.icon_failed"), t("update_human.state_failed").to_string())
     } else if updated {
         (t("update_human.icon_updated"), defaults::render("update_human.state_updated", &[("latest", &latest_head)]))
+    } else if rx.available.is_match(&action) {
+        (t("update_human.icon_updated"), defaults::render("update_human.state_available", &[("latest", &latest_head)]))
     } else {
         (t("update_human.icon_ok"), t("update_human.state_ok").to_string())
     };
@@ -753,4 +736,31 @@ fn go(p: &Parsed) -> Result<i32, String> {
     }
     out(&format!("{}\n{}\n", stringify(&status), render_human(&rx, &status, &core.changelog)))?;
     Ok(i32::from(core.stop))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// #216: the registry version is the ENABLED install's, not the `anti-hall@anti-hall` pin's. A scratch home only.
+    #[test]
+    fn the_registered_version_is_the_enabled_installs() {
+        let dir = std::env::temp_dir().join(format!("ah-update-enabled-{}", std::process::id()));
+        let plugins = dir.join(".claude/plugins");
+        std::fs::create_dir_all(&plugins).unwrap();
+        let reg = plugins.join("installed_plugins.json");
+        let settings = dir.join(".claude/settings.json");
+        std::fs::write(
+            &reg,
+            r#"{"version":2,"plugins":{"anti-hall@anti-hall":[{"scope":"user","version":"0.300.2"}],"anti-hall@anti-hall-engine-live":[{"scope":"user","version":"0.300.1"}]}}"#,
+        )
+        .unwrap();
+        std::fs::write(&settings, r#"{"enabledPlugins":{"anti-hall@anti-hall":false,"anti-hall@anti-hall-engine-live":true}}"#).unwrap();
+        let rx = Rx::new().unwrap();
+        let (r, s) = (reg.to_string_lossy().into_owned(), settings.to_string_lossy().into_owned());
+        assert_eq!(version_from_installed_json(&rx, &r, &s).as_deref(), Some("0.300.1"));
+        std::fs::write(&settings, r#"{"enabledPlugins":{}}"#).unwrap();
+        assert_eq!(version_from_installed_json(&rx, &r, &s).as_deref(), Some("0.300.2"), "none enabled -> the pin");
+        std::fs::remove_dir_all(&dir).ok();
+    }
 }

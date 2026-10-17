@@ -7,6 +7,10 @@
 //! |---|---|
 //! | `reNumbers(src, flags, text, strip)` | the distinct finite numbers the matches of a regex spell, sorted ascending (`strip`: characters removed from a match before it is read as a number, such as thousands separators): see [`re_numbers`] |
 //! | `transcriptEvidence(path, window)` | the text evidence of the last `window` bytes of a transcript, record by record, in order: see [`evidence`] |
+//! | `transcriptEvidenceWalk(path, window, payload)` | the claim ledger's walk of that evidence done in the engine (merge of one message's text, payload skip, join): small facts back, the two big texts kept: see [`super::evidence_walk::evidence_walk`] |
+//! | `transcriptWalkHas(which, needle)` | is `needle` in the evidence (`"evidence"`) or the evidence with the last reply (`"withLast"`) of this thread's last walk: see [`super::evidence_walk::walk_has`] |
+//! | `transcriptWalkNumbers(which, src, flags, strip)` | `reNumbers` over that text: see [`super::evidence_walk::walk_numbers`] |
+//! | `toolUseScan(path, window, needles, keys)` | the tasklist guard's tool uses of the lines of the last `window` bytes that hold a needle, cut down to `[name, file_path, command]` per entry, in order: see [`super::tool_use_scan::tool_use_scan`] |
 //! | `transcriptTeammates(path, tail)` | the named in-process teammates the last `tail` bytes show finished but never stopped, with when each went idle: see [`teammates`] |
 //! | `transcriptCodexAgents(path, tail)` | the Codex `multi_agent_v1` agents a rollout tail shows finished but never closed: see [`codex_agents`] |
 // Discard triage (E3): every `.ok()` / `unwrap_or_default()` in this file is a deliberate keep, for these reasons:
@@ -63,8 +67,7 @@ pub fn evidence(path: &str, window: f64) -> String {
     if !path.starts_with('/') {
         return unsure();
     }
-    let cap = defaults::num("transcript.evidence_max_bytes");
-    let w = if window.is_finite() && window > 0.0 { (window as u64).min(cap) } else { cap };
+    let w = window_bytes(window);
     // a transcript followed by earlier calls answers by reading only what was appended since (and the same bytes as below)
     if let Some(answer) = super::evidence_cache::cached(path, w) {
         return answer;
@@ -72,13 +75,43 @@ pub fn evidence(path: &str, window: f64) -> String {
     evidence_uncached(path, w)
 }
 
-/// What one transcript line adds to the evidence: its items as compact JSON (comma separated, no brackets) and the characters of
-/// text they hold.
+/// One evidence item: `kind` is `p`, `r`, `a`, `i` or `t` (see [`evidence`]); `id` is the message id of a `t` item.
+#[derive(Clone)]
+pub(super) struct Item {
+    pub kind: char,
+    pub text: String,
+    pub id: Option<String>,
+}
+
+impl Item {
+    /// The item as the compact JSON array [`evidence`] answers with: `["p","text"]`, `["t","text","id"|null]`.
+    pub(super) fn json(&self) -> String {
+        let k = self.kind.to_string();
+        if self.kind == 't' { json!([k, self.text, self.id]).to_string() } else { json!([k, self.text]).to_string() }
+    }
+
+    /// Bytes the item holds in memory (text plus the fixed part), for the caches' weight.
+    pub(super) fn weight(&self) -> usize {
+        self.text.len() + self.id.as_ref().map_or(0, String::len) + std::mem::size_of::<Item>()
+    }
+}
+
+/// What one transcript line adds to the evidence: its items and the characters of text they hold.
 pub(super) struct LineEv {
-    /// The items of the line, `["p","text"]` and the like, joined with commas.
-    pub json: String,
+    pub items: Vec<Item>,
     /// The bytes of text the items hold (the sum the `transcript.evidence_max_chars` cap is read against).
     pub chars: usize,
+}
+
+/// The items of a line as compact JSON, comma separated with no brackets (the form [`answer`] joins).
+pub(super) fn items_json(items: &[Item]) -> String {
+    items.iter().map(Item::json).collect::<Vec<_>>().join(",")
+}
+
+/// The window `evidence` reads for a requested size: the request (or the cap when it is not a positive number), at most the cap.
+pub(super) fn window_bytes(window: f64) -> u64 {
+    let cap = defaults::num("transcript.evidence_max_bytes");
+    if window.is_finite() && window > 0.0 { (window as u64).min(cap) } else { cap }
 }
 
 /// The evidence of one line (no trailing `\r`): `Ok(None)` when it adds nothing, `Err(())` when only JavaScript can read it
@@ -92,11 +125,11 @@ pub(super) fn line_items(line: &str) -> Result<Option<LineEv>, ()> {
     if !e.is_object() && !e.is_array() {
         return Ok(None);
     }
-    let mut items: Vec<Value> = Vec::new();
+    let mut items: Vec<Item> = Vec::new();
     let mut chars = 0usize;
-    let mut push = |v: Value, text: &str| {
+    let mut push = |kind: char, text: String, id: Option<String>| {
         chars += text.len();
-        items.push(v);
+        items.push(Item { kind, text, id });
     };
     let message = prop(&e, "message").filter(|m| truthy(m));
     let role_v = prop(&e, "type").filter(|t| truthy(t)).or_else(|| message.and_then(|m| prop(m, "role")));
@@ -107,38 +140,30 @@ pub(super) fn line_items(line: &str) -> Result<Option<LineEv>, ()> {
         let results: Vec<&Value> =
             blocks.iter().filter(|b| truthy(b) && prop(b, "type").and_then(Value::as_str) == Some(defaults::text("transcript.ev_type_tool_result"))).collect();
         if results.is_empty() {
-            let t = as_text(content);
-            push(json!(["p", t]), &t);
+            push('p', as_text(content), None);
         } else {
             for r in &results {
-                let t = as_text(prop(r, "content"));
-                push(json!(["r", t]), &t);
+                push('r', as_text(prop(r, "content")), None);
             }
             if let Some(u) = prop(&e, "toolUseResult") {
-                let t = as_text(Some(u));
-                push(json!(["r", t]), &t);
+                push('r', as_text(Some(u)), None);
             }
         }
     } else if role == defaults::text("transcript.ev_role_attachment") {
-        let t = as_text(prop(&e, "attachment"));
-        push(json!(["a", t]), &t);
+        push('a', as_text(prop(&e, "attachment")), None);
     } else if role == defaults::text("transcript.ev_role_assistant") {
         for b in blocks {
             if truthy(b) && prop(b, "type").and_then(Value::as_str) == Some(defaults::text("transcript.ev_type_tool_use")) {
-                let t = as_text(prop(b, "input"));
-                push(json!(["i", t]), &t);
+                push('i', as_text(prop(b, "input")), None);
             }
         }
         let text = text_blocks(content);
         if !js_trim(&text).is_empty() {
             let id = message.and_then(|m| prop(m, "id")).and_then(Value::as_str).map(str::to_string);
-            push(json!(["t", text, id]), &text);
+            push('t', text, id);
         }
     }
-    if items.is_empty() {
-        return Ok(Some(LineEv { json: String::new(), chars }));
-    }
-    Ok(Some(LineEv { json: items.iter().map(Value::to_string).collect::<Vec<_>>().join(","), chars }))
+    Ok(Some(LineEv { items, chars }))
 }
 
 /// `evidence` read straight from the file: the last `w` bytes, every line, no memory of earlier calls.
@@ -152,8 +177,8 @@ pub(super) fn evidence_uncached(path: &str, w: u64) -> String {
             Ok(None) => continue,
             Ok(Some(l)) => {
                 chars += l.chars;
-                if !l.json.is_empty() {
-                    items.push(l.json);
+                if !l.items.is_empty() {
+                    items.push(items_json(&l.items));
                 }
             }
         }
@@ -235,6 +260,8 @@ pub fn re_numbers(src: &str, flags: &str, text: &str, strip: &str) -> rquickjs::
 pub fn install<'a>(c: &Ctx<'a>, h: &Object<'a>) -> rquickjs::Result<()> {
     h.set("reNumbers", Function::new(c.clone(), |src: String, flags: String, text: String, strip: String| re_numbers(&src, &flags, &text, &strip))?)?;
     h.set("transcriptEvidence", Function::new(c.clone(), |p: String, w: f64| evidence(&p, w))?)?;
+    super::evidence_walk::install(c, h)?;
+    super::tool_use_scan::install(c, h)?;
     h.set("transcriptTeammates", Function::new(c.clone(), |p: String, t: f64| teammates(&p, t))?)?;
     h.set("transcriptCodexAgents", Function::new(c.clone(), |p: String, t: f64| codex_agents(&p, t))?)?;
     Ok(())

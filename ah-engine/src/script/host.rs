@@ -1057,6 +1057,7 @@ pub fn install(c: &Ctx<'_>) -> rquickjs::Result<()> {
     h.set("turnText", Function::new(c.clone(), |p: String, max: f64, hint: String| turn_text(&p, max.max(0.0) as u64, &hint))?)?;
     super::host_io::install(c, &h)?;
     super::host_b3::install(c, &h)?;
+    super::host_shell::install(c, &h)?;
     super::host_d::install(c, &h)?;
     super::host_mesh::install(c, &h)?;
     super::host_childturn::install(c, &h)?;

@@ -16,7 +16,7 @@ doc = "The words of devswarm_ingest.mode, in the order witness, engine."
 value = ["witness", "engine"]
 
 [devswarm_ingest.projects]
-doc = "Extra projects to drain, as paths of a git repository separated by the character in projects_separator (any worktree of it will do). Projects with a fresh Node ingest heartbeat and the ones an earlier run remembered are drained too."
+doc = "Extra projects to drain, as paths of a git repository separated by the character in projects_separator (any worktree of it will do). Projects of registered DevSwarm workspaces, projects with a fresh Node ingest heartbeat and the ones an earlier run remembered are drained too (those three only when they qualify, see require_registered)."
 value = ""
 
 [devswarm_ingest.projects_separator]
@@ -26,6 +26,28 @@ value = ":"
 [devswarm_ingest.remembered]
 doc = "The projects the engine has drained or found, a JSON list of paths, in the engine state directory. Nothing is ever removed from it."
 value = "devswarm-ingest-projects.json"
+
+[devswarm_ingest.require_registered]
+doc = "Drain only projects that DevSwarm registered: a project qualifies when a workspace descriptor (devswarm/workspaces/*.json) carries its repo key. A scratch clone, a plugin checkout or any other git directory an agent happened to work in never qualifies. Paths in devswarm_ingest.projects always qualify. The registered workspaces' worktrees are also a discovery source, so a new project is drained by the engine without a Node ingest unit."
+value = true
+
+[devswarm_ingest.owner_file]
+doc = "The ownership marker the engine writes in the DevSwarm state directory (devswarm/<this>): {owner, pid, ts, validForMs}. owner is a word of devswarm_ingest.mode_words. The Node ingest installer, the devswarm.js self-heal, doctor --repair and the update heal read it and install or heal no Node ingest unit while owner is engine and ts is younger than validForMs."
+value = "ingest-owner.json"
+
+[devswarm_ingest.owner_refresh_ms]
+doc = "How often the engine rewrites the ownership marker while it owns the drain."
+value = 60000
+min = 1000
+max = 86400000
+unit = "ms"
+
+[devswarm_ingest.owner_valid_ms]
+doc = "How long the ownership marker stays valid after its last write (written into the marker as validForMs). It spans engine restarts, so a restart window never lets Node reinstall a retired unit; an engine that is gone for longer hands installs back to Node."
+value = 3600000
+min = 60000
+max = 604800000
+unit = "ms"
 
 [devswarm_ingest.discover_ms]
 doc = "How often the engine looks for projects it does not drain yet."
@@ -629,3 +651,40 @@ value = "monitor spawn failing with a CONFIGURATION error ({code}): {error} - {n
 [devswarm_ingest.msg_log_recovered]
 doc = "The log line when the monitor works again after configuration failures. {n}."
 value = "monitor spawn recovered after {n} consecutive configuration failure(s)"
+
+[devswarm_ingest.drop_reason_defer]
+doc = "The drop reason when the identity resolver cannot tell the project's repository without git (detail: the deferral code, e.g. git-superproject)."
+value = "identity-deferred"
+
+[devswarm_ingest.drop_reason_non_git]
+doc = "The drop reason for a path that is not in a git repository or no longer exists (detail: the kind the resolver reported)."
+value = "not-a-repository"
+
+[devswarm_ingest.drop_reason_no_main]
+doc = "The drop reason when the repository's main worktree is not an existing directory (detail: that path)."
+value = "main-worktree-missing"
+
+[devswarm_ingest.drop_reason_no_key]
+doc = "The drop reason when the resolver gave no repo key."
+value = "no-repo-key"
+
+[devswarm_ingest.drop_reason_primary_id]
+doc = "The drop reason when the Primary's workspace id could not be derived (detail: the resolver's code)."
+value = "primary-id-error"
+
+[devswarm_ingest.drop_reason_unregistered]
+doc = "The drop reason for a project no workspace descriptor names while devswarm_ingest.require_registered is on (detail: its repo key)."
+value = "not-registered"
+
+[devswarm_ingest.msg_project_dropped]
+doc = "The log line when a path found as a project is not drained, written once per (path, reason). {path} {reason} {detail}."
+value = "ingest project skipped: path={path}, reason={reason}, detail={detail}"
+
+[devswarm_ingest.drop_log_max_paths]
+doc = "Most paths whose last drop reason is remembered (the once-per-reason memory); past it the memory starts over, which can repeat a line."
+value = 1024
+min = 1
+
+[metric.ingest_drops]
+doc = "Paths found as ingest projects that were not drained, counted when the reason is first seen or changes, by reason."
+value = { kind = "counter", unit = "paths", labels = ["reason"] }

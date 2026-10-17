@@ -126,7 +126,16 @@ function skipCmd(k) {
 
 const CMDSUBST_SENTINEL = '\x00CMDSUBST\x00';
 
+// tokenize and splitSegments are pure in their argument and the scan asks for the same segments again and again (aliases, backstops,
+// runners, shell definitions): the answers are kept for the call (decide clears them) and a copy is handed out, because a caller
+// replaces elements of what it gets.
+var TOK_MEMO = new Map(), SEG_MEMO = new Map();
 function tokenize(segment) {
+  let r = TOK_MEMO.get(segment);
+  if (r === undefined) { r = tokenizeUncached(segment); TOK_MEMO.set(segment, r); }
+  return r.slice();
+}
+function tokenizeUncached(segment) {
   const tokens = [];
   let cur = '', curHasUnquoted = false, started = false, tokStart = -1, i = 0;
   const n = segment.length;
@@ -186,6 +195,11 @@ function isBraceGroupWord(cur, c, c2) {
 }
 
 function splitSegments(cmd) {
+  let r = SEG_MEMO.get(cmd);
+  if (r === undefined) { r = splitSegmentsUncached(cmd); SEG_MEMO.set(cmd, r); }
+  return r.slice();
+}
+function splitSegmentsUncached(cmd) {
   const segments = [];
   let cur = '', i = 0, inSingle = false, inDouble = false;
   const n = cmd.length;
@@ -2537,6 +2551,9 @@ function looksLikeFileWriteShape(cmd) {
 }
 
 function decide(p, opts, event) {
+  try { return decideScan(p, opts, event); } finally { TOK_MEMO.clear(); SEG_MEMO.clear(); }
+}
+function decideScan(p, opts, event) {
   if (event !== 'PreToolUse' || !p || p.tool_name !== 'Bash') return null;
   const ti = p.tool_input;
   if (!ti || typeof ti !== 'object' || typeof ti.command !== 'string') return null;

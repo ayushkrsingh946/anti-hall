@@ -545,11 +545,13 @@ pub(crate) fn resolve_archive_id(inv: &Inv, raw: &str, unarchiving: bool) -> R<R
     let root = devswarm_root(&inv.home);
     let file = format!("{raw}{}", defaults::text("mesh_write.json_suffix"));
     if lstat_exists(&root.join(defaults::text("mesh_write.dir_workspaces")).join(&file)) {
+        note_ref("mesh_write.ref_outcome_exact");
         return Ok(Resolved::Id(raw.to_string()));
     }
     let adir = root.join(defaults::text("mesh_write.dir_archived"));
     // checkedArchivedDir: a directory that is not a plain directory is an error Node reports as "not found"
     if std::fs::symlink_metadata(&adir).is_ok_and(|m| m.is_dir() && !m.file_type().is_symlink()) && lstat_exists(&adir.join(&file)) {
+        note_ref("mesh_write.ref_outcome_exact");
         return Ok(Resolved::Id(raw.to_string()));
     }
     let Some(worktree) = ident::resolve_caller_worktree(&inv.cwd)? else { return defer("no-worktree") };
@@ -580,14 +582,29 @@ pub(crate) fn resolve_archive_id(inv: &Inv, raw: &str, unarchiving: bool) -> R<R
         hits.sort();
         match hits.len() {
             0 => {}
-            1 => return Ok(Resolved::Id(hits.remove(0))),
-            _ => return Ok(Resolved::Ambiguous(defaults::text("devswarm_cli.msg_ambig_archived"), hits)),
+            1 => {
+                note_ref("mesh_write.ref_outcome_prefix");
+                return Ok(Resolved::Id(hits.remove(0)));
+            }
+            _ => {
+                note_ref("mesh_write.ref_outcome_ambiguous");
+                return Ok(Resolved::Ambiguous(defaults::text("devswarm_cli.msg_ambig_archived"), hits));
+            }
         }
     }
+    // an exact id outranks a longer id that merely starts with it
+    if cands.iter().any(|k| k.as_str() == raw) {
+        note_ref("mesh_write.ref_outcome_exact");
+        return Ok(Resolved::Id(raw.to_string()));
+    }
     match cands.len() {
-        1 => return Ok(Resolved::Id(cands[0].clone())),
+        1 => {
+            note_ref("mesh_write.ref_outcome_prefix");
+            return Ok(Resolved::Id(cands[0].clone()));
+        }
         0 => {}
         _ => {
+            note_ref("mesh_write.ref_outcome_ambiguous");
             return Ok(Resolved::Ambiguous(defaults::text("devswarm_cli.msg_ambig_prefix"), cands.into_iter().cloned().collect()));
         }
     }
@@ -601,10 +618,24 @@ pub(crate) fn resolve_archive_id(inv: &Inv, raw: &str, unarchiving: bool) -> R<R
     }
     mesh.sort();
     match mesh.len() {
-        0 => Ok(Resolved::Id(raw.to_string())),
-        1 => Ok(Resolved::Id(mesh.remove(0))),
-        _ => Ok(Resolved::Ambiguous(defaults::text("devswarm_cli.msg_ambig_mesh"), mesh)),
+        0 => {
+            note_ref("mesh_write.ref_outcome_none");
+            Ok(Resolved::Id(raw.to_string()))
+        }
+        1 => {
+            note_ref("mesh_write.ref_outcome_mesh");
+            Ok(Resolved::Id(mesh.remove(0)))
+        }
+        _ => {
+            note_ref("mesh_write.ref_outcome_ambiguous");
+            Ok(Resolved::Ambiguous(defaults::text("devswarm_cli.msg_ambig_mesh"), mesh))
+        }
     }
+}
+
+/// Count how a workspace reference resolved (`mesh_ref_resolved`, labelled by outcome).
+pub(crate) fn note_ref(outcome_key: &str) {
+    crate::metrics::bump("mesh_ref_resolved", &[("outcome", defaults::text(outcome_key))]);
 }
 
 fn mesh_rows(rows: &[Row], mesh_id: &str) -> R<Vec<Row>> {

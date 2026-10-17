@@ -62,11 +62,18 @@ function writeName(home, id, name, now) {
   }
 }
 
+// Mirrors devswarm_cli.app_short_id / app_short_id_mesh_prefix in the engine defaults.
+const SHORT_ID_LEN = 8;
+const MESH_ID_PREFIX = 'primary-';
+
 // shortId(id) -> the first 8 chars of the id (UUID short form), or the bare
-// id verbatim when it is 8 chars or shorter. Never throws.
+// id verbatim when it is 8 chars or shorter. A mesh id (`primary-<hash>`) keeps
+// its prefix plus 8 hash chars, so the short form still names it (GH #203).
+// Never throws.
 function shortId(id) {
   const s = (typeof id === 'string') ? id : String(id == null ? '' : id);
-  return s.length > 8 ? s.slice(0, 8) : s;
+  const keep = s.startsWith(MESH_ID_PREFIX) ? MESH_ID_PREFIX.length + SHORT_ID_LEN : SHORT_ID_LEN;
+  return s.length > keep ? s.slice(0, keep) : s;
 }
 
 // displayName(id, name) -> "name (shortid)" when a name is known, else the

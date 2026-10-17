@@ -158,6 +158,20 @@ pub fn branch_sender(registry: &[(String, String)], branch: &str) -> Option<Stri
     if hits.len() == 1 { Some(hits[0].clone()) } else { None }
 }
 
+/// The sender of a message whose branch names no registered workspace: a child's queue is the Primary's outbound (`pull` stamps
+/// the Primary's id the same way), so it is the one registered Primary. The Primary's own queue carries the children's notices,
+/// and two Primaries are ambiguous: neither is guessed.
+pub fn fallback_sender(registry: &[(String, String)], workspace_id: &str) -> Option<String> {
+    let prefix = defaults::text("mesh_write.primary_prefix");
+    if workspace_id.starts_with(prefix) {
+        return None;
+    }
+    let mut hits: Vec<&String> = registry.iter().map(|(id, _)| id).filter(|id| id.starts_with(prefix)).collect();
+    hits.sort();
+    hits.dedup();
+    if hits.len() == 1 { Some(hits[0].clone()) } else { None }
+}
+
 /// `branchOfDoneBody(body)`: the branch a `DONE: <branch> ...` body names (the word after the prefix, which must be followed by
 /// whitespace), else `None`.
 pub fn done_branch(body: &str) -> Option<String> {
@@ -213,8 +227,23 @@ pub fn ingest_payload(store: &MeshStore, home: &Path, workspace_id: &str, raw: &
     if !rows.is_empty() {
         // sender: the registry row checked out under the message's branch (a native message names only its branch)
         let registry = registry_pairs(store.reader());
+        let mut fallbacks = 0_usize;
         for (r, m) in rows.iter_mut().zip(&batch.messages) {
             r.sender = field(m, defaults::text("devswarm_ingest.from_branch_key")).and_then(|b| branch_sender(&registry, &b));
+            if r.sender.is_none() {
+                r.sender = fallback_sender(&registry, workspace_id);
+                fallbacks += usize::from(r.sender.is_some());
+            }
+        }
+        if fallbacks > 0 {
+            crate::metrics::bump("mesh_sender_fallback", &[("where", defaults::text("mesh_write.sender_fallback_ingest"))]);
+            super::drain::log_line(
+                home,
+                &defaults::render(
+                    "mesh_write.msg_sender_fallback",
+                    &[("where", &defaults::text("mesh_write.sender_fallback_ingest")), ("id", &workspace_id), ("n", &fallbacks)],
+                ),
+            );
         }
     }
     let mut inserted = 0;
@@ -290,6 +319,35 @@ mod tests {
         let sender = |needle: &str| rows.iter().find(|m| m["body"].as_str().is_some_and(|b| b.contains(needle))).map(|m| m["sender"].clone());
         assert_eq!(sender("fix/foo"), Some(serde_json::json!("c1")));
         assert_eq!(sender("fix/ghost"), Some(serde_json::Value::Null), "an unregistered branch stays unattributed");
+        crate::discard::harmless(std::fs::remove_dir_all(dir)); // keep: test cleanup; an absent directory is the goal state
+    }
+
+    #[test]
+    fn a_child_queue_message_from_no_known_branch_is_the_primarys() {
+        // #181: a poke whose fromBranch is "main" names no registered checkout; a child's queue is the Primary's outbound
+        let r: Vec<(String, String)> = vec![("c1".into(), "/x/c1".into()), ("primary-aaaa1111".into(), "/x/repo".into())];
+        assert_eq!(fallback_sender(&r, "c1").as_deref(), Some("primary-aaaa1111"));
+        assert_eq!(fallback_sender(&r, "primary-aaaa1111"), None, "the Primary's own queue carries the children's notices: no guess");
+        let two: Vec<(String, String)> = vec![("primary-aaaa1111".into(), "/x/a".into()), ("primary-bbbb2222".into(), "/x/b".into())];
+        assert_eq!(fallback_sender(&two, "c1"), None, "two Primaries: never a guess");
+        assert_eq!(fallback_sender(&[], "c1"), None);
+    }
+
+    #[test]
+    fn an_ingested_poke_from_main_carries_the_primary_as_sender() {
+        let dir = std::env::temp_dir().join(format!("ah-import-fallback-{}", std::process::id()));
+        crate::discard::harmless(std::fs::remove_dir_all(&dir)); // keep: cleanup that raced; an absent directory is the goal state
+        std::fs::create_dir_all(&dir).unwrap();
+        let st = MeshStore::open(&dir.join("devswarm.db")).unwrap();
+        for (id, wt) in [("primary-aaaa1111", "/w/repo"), ("c1", "/x/repos/0/ab/fix-foo")] {
+            let row = RegistryRow { id: id.into(), worktree_path: Some(wt.into()), session_id: None, inbox_path: None, cursor_path: None, nudge_command: None };
+            st.upsert_registry(&row, 1, |a, b| a == b).unwrap();
+        }
+        let raw = r#"[{"fromBranch":"main","message":"poke","createdAt":"2026-01-01T00:00:00Z"}]"#;
+        let done = ingest_payload(&st, &dir, "c1", raw, 1).unwrap();
+        assert_eq!(done.inserted, 1);
+        let rows = st.reader().last_messages("c1", 5).unwrap();
+        assert_eq!(rows[0]["sender"], serde_json::json!("primary-aaaa1111"), "the row is attributed, not NULL");
         crate::discard::harmless(std::fs::remove_dir_all(dir)); // keep: test cleanup; an absent directory is the goal state
     }
 }

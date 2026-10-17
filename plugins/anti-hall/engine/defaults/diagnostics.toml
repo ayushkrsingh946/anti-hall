@@ -166,3 +166,27 @@ unit = "MB"
 [files.debug_log]
 doc = "Debug log file name (state directory): one NDJSON line per debug event, written only in debug mode."
 value = "debug.ndjson"
+
+[diagnostics.mem_log_checks_cap]
+doc = "Most checks whose per-call memory (`check_mem`: check, peak, allocated bytes) one request line of the memory log lists; further checks of the same request are left off the line."
+value = 64
+min = 1
+
+[diagnostics.check_mem]
+doc = "Measure the bytes each check allocates (total, peak growth, kept) from per-thread counters in the counting allocator. Off also stops the counting in the allocator. Cost is a few nanoseconds per allocation."
+value = true
+
+[diagnostics.check_mem_sample_every]
+doc = "Measure every Nth check call (1 = every call). Raise it only if the measured cost of the per-thread counters becomes a problem."
+value = 1
+min = 1
+
+[diagnostics.tally_soft_keys]
+doc = "Soft limit on the labelled work counters `status --threads` carries (and on exited-thread names): past it every further new key adds one to `tally_soft_hits`."
+value = 64
+min = 8
+
+[diagnostics.tally_hard_keys]
+doc = "Hard limit on the labelled work counters (and on exited-thread names): a new key past it is dropped and counted in `tally_dropped`; the existing keys keep counting."
+value = 256
+min = 16

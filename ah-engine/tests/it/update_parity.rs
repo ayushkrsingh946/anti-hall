@@ -25,7 +25,7 @@ fn repo() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf()
 }
 
-fn plugin() -> PathBuf {
+pub(super) fn plugin() -> PathBuf {
     repo().join("plugins/anti-hall")
 }
 
@@ -69,48 +69,52 @@ fn changelog(top: &str) -> String {
 
 /// What a scenario changes in the standard world.
 #[derive(Clone, Default)]
-struct Opt {
+pub(super) struct Opt {
     /// `claude` exits non-zero with this on stderr.
-    claude_fails: bool,
+    pub(super) claude_fails: bool,
     /// `claude` prints a confirmation request.
-    claude_confirms: bool,
+    pub(super) claude_confirms: bool,
     /// Origin does not move (the clone is already at the latest).
-    no_upstream_move: bool,
+    pub(super) no_upstream_move: bool,
     /// A local change in the clone.
-    dirty: bool,
+    pub(super) dirty: bool,
     /// A local commit the origin does not have, plus an origin commit: diverged.
-    diverged: bool,
+    pub(super) diverged: bool,
     /// The origin is gone.
-    offline: bool,
+    pub(super) offline: bool,
     /// git cannot resolve the remote host (a shim on the PATH answers pull and fetch like that).
-    net_down: bool,
+    pub(super) net_down: bool,
     /// No cache directory, no registry file.
-    unknown_installed: bool,
+    pub(super) unknown_installed: bool,
     /// The registry says this while the cache says V1.
-    registry: Option<&'static str>,
+    pub(super) registry: Option<&'static str>,
     /// An invalid `ANTIHALL_MARKETPLACE_DIR`.
-    bad_override: bool,
+    pub(super) bad_override: bool,
     /// No cache root at all.
-    no_cache_root: bool,
+    pub(super) no_cache_root: bool,
     /// A DevSwarm session (`DEVSWARM_REPO_ID` set): the DevSwarm-only stages are not gated off.
-    ds: bool,
+    pub(super) ds: bool,
     /// Every one-time stage already stamped complete for the version the update lands on.
-    markers: bool,
+    pub(super) markers: bool,
     /// `ANTIHALL_UPDATE_POSTPULL_BUDGET_MS`.
-    budget: Option<&'static str>,
+    pub(super) budget: Option<&'static str>,
     /// Jev is on and a Jev key file exists: the one-time legacy key opt-in has work to do.
-    jev_key: bool,
+    pub(super) jev_key: bool,
     /// The home's Codex hooks.json still registers a retired graphify script.
-    graphify: bool,
+    pub(super) graphify: bool,
     /// The engine runs with no usable Node: `node` on the PATH and `AH_ENGINE_NODE` are a shim that records the call and fails.
-    no_node: bool,
+    pub(super) no_node: bool,
+    /// The ingest dry-run switch is NOT set: the store stages do their work.
+    pub(super) live: bool,
+    /// Only this stage of the post-pull table runs (every other row of the world's plugin copy is `enabled = false`).
+    pub(super) stage_only: Option<&'static str>,
 }
 
-struct World {
-    root: PathBuf,
-    home: PathBuf,
-    mp: PathBuf,
-    bin: PathBuf,
+pub(super) struct World {
+    pub(super) root: PathBuf,
+    pub(super) home: PathBuf,
+    pub(super) mp: PathBuf,
+    pub(super) bin: PathBuf,
 }
 
 impl Drop for World {
@@ -121,7 +125,7 @@ impl Drop for World {
     }
 }
 
-fn world(o: &Opt) -> World {
+pub(super) fn world(o: &Opt) -> World {
     let root = std::env::temp_dir().join(format!("ah-operator-parity-{}-{}", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
     let (home, bin, origin, seed) = (root.join("home"), root.join("bin"), root.join("origin.git"), root.join("seed"));
     for d in [&home, &bin, &seed] {
@@ -190,6 +194,16 @@ fn world(o: &Opt) -> World {
         put(&root, "no-node/node", shim);
         fs::set_permissions(root.join("no-node/node"), fs::Permissions::from_mode(0o755)).unwrap();
     }
+    if let Some(only) = o.stage_only {
+        let toml = mp.join("plugins/anti-hall/engine/defaults/update_post.toml");
+        if let Some(over) = std::env::var_os("AH_STAGE_TEST_TOML") {
+            fs::copy(over, &toml).unwrap(); // a control run against another stage table
+        }
+        let text = fs::read_to_string(&toml).unwrap();
+        let keep = format!("{{ name = \"{only}\", enabled = true,");
+        let off: Vec<String> = text.lines().map(|l| if l.starts_with("  { name = \"") && !l.contains(&keep) { l.replacen("enabled = true", "enabled = false", 1) } else { l.to_string() }).collect();
+        fs::write(&toml, off.join("\n") + "\n").unwrap();
+    }
     let claude = if o.claude_fails {
         "#!/bin/sh\necho 'boom: registry locked' >&2\nexit 3\n"
     } else if o.claude_confirms {
@@ -211,15 +225,18 @@ fn world(o: &Opt) -> World {
     World { root, home, mp, bin }
 }
 
-struct Out {
-    stdout: String,
-    stderr: String,
-    code: i32,
+pub(super) struct Out {
+    pub(super) stdout: String,
+    pub(super) stderr: String,
+    pub(super) code: i32,
 }
 
-fn envs(cmd: &mut Command, w: &World, o: &Opt) {
+pub(super) fn envs(cmd: &mut Command, w: &World, o: &Opt) {
     let path = format!("{}:{}", w.bin.display(), std::env::var("PATH").unwrap());
-    cmd.env_clear().env("PATH", path).env("HOME", &w.home).env("ANTIHALL_INGEST_DRY_RUN", "1").env("GIT_CONFIG_GLOBAL", "/dev/null");
+    cmd.env_clear().env("PATH", path).env("HOME", &w.home).env("GIT_CONFIG_GLOBAL", "/dev/null");
+    if !o.live {
+        cmd.env("ANTIHALL_INGEST_DRY_RUN", "1");
+    }
     // the Node script has no units heal: the comparison runs have the engine's stage off, `update_heals_the_units` has it on
     cmd.env("ANTIHALL_UNITS_HEAL", "off");
     let ov = if o.bad_override { w.root.join("nope").to_string_lossy().into_owned() } else { w.mp.to_string_lossy().into_owned() };
@@ -245,7 +262,7 @@ fn defaults_keys() -> Vec<String> {
     keys
 }
 
-fn finish(o: std::process::Output) -> Out {
+pub(super) fn finish(o: std::process::Output) -> Out {
     Out {
         stdout: String::from_utf8_lossy(&o.stdout).into_owned(),
         stderr: String::from_utf8_lossy(&o.stderr).into_owned(),
@@ -253,17 +270,20 @@ fn finish(o: std::process::Output) -> Out {
     }
 }
 
-fn run_node(w: &World, o: &Opt, args: &[&str]) -> Out {
+pub(super) fn run_node(w: &World, o: &Opt, args: &[&str]) -> Out {
     let mut cmd = Command::new("node");
     cmd.arg(plugin().join("skills/update/scripts/update.js")).args(args).current_dir(&w.home);
     envs(&mut cmd, w, o);
     finish(cmd.output().unwrap())
 }
 
-fn run_engine(w: &World, o: &Opt, args: &[&str]) -> Out {
+pub(super) fn run_engine(w: &World, o: &Opt, args: &[&str]) -> Out {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_ah-engine"));
     cmd.arg("update").args(args).current_dir(&w.home);
     envs(&mut cmd, w, o);
+    if o.stage_only.is_some() {
+        cmd.env("AH_ENGINE_PLUGIN_ROOT", w.mp.join("plugins/anti-hall"));
+    }
     if o.no_node {
         let shim = w.root.join("no-node");
         cmd.env("PATH", format!("{}:{}:{}", shim.display(), w.bin.display(), std::env::var("PATH").unwrap())).env("AH_ENGINE_NODE", shim.join("node"));
@@ -272,7 +292,7 @@ fn run_engine(w: &World, o: &Opt, args: &[&str]) -> Out {
 }
 
 /// What the Node shim recorded (empty: nothing tried to run Node).
-fn node_calls(w: &World) -> String {
+pub(super) fn node_calls(w: &World) -> String {
     fs::read_to_string(w.root.join("node-calls.log")).unwrap_or_default()
 }
 
@@ -291,19 +311,19 @@ const GRAPHIFY: &str = r#"{
 }
 "#;
 
-fn norm(text: &str, w: &World) -> String {
+pub(super) fn norm(text: &str, w: &World) -> String {
     let canon = fs::canonicalize(&w.root).unwrap();
     text.replace(canon.to_string_lossy().as_ref(), "{ROOT}").replace(w.root.to_string_lossy().as_ref(), "{ROOT}")
 }
 
-fn clock(text: &str) -> String {
+pub(super) fn clock(text: &str) -> String {
     let re = regex::Regex::new(r#"("completedTs"|"at"|"ts"|"startedAt"|"lastRun"|"time"):\s*\d{10,}"#).unwrap();
     let re2 = regex::Regex::new(r"\.corrupt-\d+|\.bak-[0-9TZ-]+").unwrap();
     let re3 = regex::Regex::new(r#""ts":"[0-9T:.Z-]+"|"pid":\d+"#).unwrap();
     re3.replace_all(&re2.replace_all(&re.replace_all(text, r#"$1:0"#), ".X"), "\"X\":0").into_owned()
 }
 
-fn tree(root: &Path) -> BTreeMap<String, String> {
+pub(super) fn tree(root: &Path) -> BTreeMap<String, String> {
     fn walk(base: &Path, dir: &Path, out: &mut BTreeMap<String, String>) {
         let Ok(rd) = fs::read_dir(dir) else { return };
         for e in rd.flatten() {
@@ -417,13 +437,96 @@ fn parity(name: &str, o: &Opt, args: &[&str]) -> String {
         fs::read(b.home.join(".claude/plugins/installed_plugins.json")).ok(),
         "{name}: registry"
     );
+    if args == ["--check"] && std::env::var_os("AH_RECORD_UPDATE_FIXTURES").is_some() && !name.starts_with("nn_") {
+        record_fixture(name, &node, &a);
+    }
     ns
+}
+
+// ---- frozen `--check` fixtures (roadmap #61): the Node oracle's recorded answer, replayed against the engine alone ----------
+
+/// The plugin copy inside the marketplace clone is the repo's live plugin tree (it changes with every commit), so a frozen
+/// snapshot leaves it out; the clone's other files (CHANGELOG.md) and everything else under the home are kept.
+const VOLATILE_PREFIX: &str = ".claude/plugins/marketplaces/anti-hall/plugins/";
+
+fn fixture_path(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/update_check").join(format!("{name}.json"))
+}
+
+/// exit, stdout, stderr (without the `[update]` progress lines) and every file under the home, all through the parity
+/// comparison's own normalisers (`norm`, `clock`, `no_progress`), minus `VOLATILE_PREFIX`.
+fn snapshot(out: &Out, w: &World) -> serde_json::Value {
+    let files: BTreeMap<String, String> =
+        tree(&w.home).into_iter().filter(|(k, _)| !k.starts_with(VOLATILE_PREFIX)).map(|(k, v)| (k, norm(&v, w))).collect();
+    serde_json::json!({
+        "exit": out.code,
+        "stdout": norm(&out.stdout, w),
+        "stderr": norm(&no_progress(&out.stderr), w),
+        "files": files,
+    })
+}
+
+fn record_fixture(name: &str, node: &Out, w: &World) {
+    let p = fixture_path(name);
+    fs::create_dir_all(p.parent().unwrap()).unwrap();
+    fs::write(p, format!("{}\n", serde_json::to_string_pretty(&snapshot(node, w)).unwrap())).unwrap();
+}
+
+/// Engine only, with no usable Node on the PATH, on the same seeded home; must equal the recorded Node answer.
+fn frozen(name: &str, o: &Opt) {
+    let o = Opt { no_node: true, ..o.clone() };
+    let want: serde_json::Value = serde_json::from_str(&fs::read_to_string(fixture_path(name)).unwrap_or_else(|e| panic!("{name}: no fixture ({e}); record with AH_RECORD_UPDATE_FIXTURES=1"))).unwrap();
+    let w = world(&o);
+    let out = run_engine(&w, &o, &["--check"]);
+    assert_eq!(node_calls(&w), "", "{name}: the engine tried to run Node");
+    let got = snapshot(&out, &w);
+    for k in ["exit", "stdout", "stderr"] {
+        assert_eq!(want[k], got[k], "{name}: {k} differs from the frozen Node answer");
+    }
+    assert_eq!(want["files"], got["files"], "{name}: files differ from the frozen Node answer");
+}
+
+#[test]
+fn frozen_check_check_available() {
+    frozen("check_available", &Opt::default());
+}
+
+#[test]
+fn frozen_check_check_current() {
+    frozen("check_current", &Opt { no_upstream_move: true, ..Opt::default() });
+}
+
+#[test]
+fn frozen_check_check_lag() {
+    frozen("check_lag", &Opt { registry: Some("0.0.9"), no_upstream_move: true, ..Opt::default() });
+}
+
+#[test]
+fn frozen_check_check_offline() {
+    frozen("check_offline", &Opt { offline: true, ..Opt::default() });
+}
+
+#[test]
+fn frozen_check_check_unknown() {
+    frozen("check_unknown", &Opt { unknown_installed: true, ..Opt::default() });
+}
+
+#[test]
+fn frozen_check_bad_override() {
+    frozen("bad_override", &Opt { bad_override: true, ..Opt::default() });
+}
+
+#[test]
+fn frozen_check_check_net_down() {
+    frozen("check_net_down", &Opt { net_down: true, ..Opt::default() });
 }
 
 #[test]
 fn check_update_available() {
     let out = parity("check_available", &Opt::default(), &["--check"]);
     assert!(out.contains("update available (0.1.0"), "{out}");
+    let head = out.lines().nth(1).unwrap_or_default();
+    assert!(!head.contains("already up to date") && head.contains("v0.2.0 available"), "headline must match the state: {head}");
 }
 
 #[test]

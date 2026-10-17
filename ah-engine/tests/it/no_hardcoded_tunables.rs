@@ -68,6 +68,7 @@ const ALLOW: &[(&str, &str, &str)] = &[
         "AH_ENGINE_ALLOCATOR",
         "the allocator selector env name must be read with libc getenv before defaults can be loaded, because loading defaults allocates",
     ),
+    ("src/memstat.rs", "static TL_", "per-thread byte counters initialised to zero (the allocator cannot allocate or read the config): state, not tunables"),
     ("src/main.rs", "static ALLOC", "the global allocator item: a language construct, not a value"),
     ("src/memdiag.rs", "static ON", "a thread-local flag initialised off: state, not a tunable"),
     (
@@ -78,9 +79,11 @@ const ALLOW: &[(&str, &str, &str)] = &[
     ("src/memdiag.rs", "static ARRIVED", "a condition variable the snapshot waits on: a language construct, not a value"),
     ("src/memdiag.rs", "static REPORTED", "a thread-local marker initialised to zero (which snapshot this worker already answered): state, not a tunable"),
     ("src/script/tasks_cache.rs", "let mut b = [0u8; 1]", "a one-byte read buffer for the byte before a window start: structural, not a tunable"),
+    ("src/script/evidence_walk.rs", "static MINE", "a thread-local handle initialised to zero (the walk this worker made last): state, not a tunable"),
     ("src/load.rs", "static SCAN_BYTES", "a thread-local counter initialised to zero: state, not a tunable"),
     ("src/load.rs", "static CHECK_SCAN_BYTES", "a thread-local counter initialised to zero: state, not a tunable"),
     ("src/load.rs", "static CHECK_CPU_US", "a thread-local counter initialised to zero: state, not a tunable"),
+    ("src/load.rs", "static CHECK_MEM", "a thread-local note initialised to none: state, not a tunable"),
     ("src/load.rs", "static NOTES", "a thread-local list initialised empty: state, not a tunable"),
     ("src/load.rs", "static TRANSCRIPT_SIZE", "a thread-local slot initialised empty: state, not a tunable"),
     ("src/load.rs", "static REQUEST", "a thread-local slot initialised empty: state, not a tunable"),
@@ -95,6 +98,7 @@ const ALLOW: &[(&str, &str, &str)] = &[
     ),
     ("src/checks/scripted.rs", "const fn new(", "the constructor signature of the registry identity above"),
     ("src/script/mod.rs", "static POOL", "a thread-local slot for the worker's interpreter, initialised empty: state, not a tunable"),
+    ("src/script/mod.rs", "static POLLS", "a thread-local count of the interpreter's interrupt polls, starting at the type's default: state, not a tunable"),
     ("src/script/host.rs", "static CLOCK", "a thread-local clock override slot initialised empty (tests inject time): state, not a tunable"),
     (
         "src/script/host.rs",
@@ -142,6 +146,7 @@ const ALLOW: &[(&str, &str, &str)] = &[
     ("src/script/host_childturn.rs", "static PLANNED", "a thread-local slot for the registration the call planned, initialised empty: state, not a tunable"),
     ("src/script/host_parentinbox.rs", "static SNAP", "a thread-local slot for the app database snapshot the call read, initialised empty: state, not a tunable"),
     ("src/script/host.rs", "static CALL", "a thread-local slot for the request state of one script call, initialised empty: state, not a tunable"),
+    ("src/daemon.rs", "static REQUEST_PEER", "a thread-local slot for the socket peer of the request being served, initialised empty: state, not a tunable"),
     ("src/mem/registry.rs", "pub const fn new(", "the constructor signature of a holder's identity (its config keys are the arguments)"),
     ("src/mem/registry.rs", "pub const fn with_entries(", "the constructor signature of a holder's identity"),
     (
@@ -156,6 +161,7 @@ const ALLOW: &[(&str, &str, &str)] = &[
     ("src/mem/mod.rs", "static LEAKED", "a byte counter initialised to zero: state, not a tunable"),
     ("src/watch/kq.rs", "const FFLAGS", "the kqueue vnode event flags the backend subscribes to: a kernel protocol constant, not a tunable"),
     ("src/watch/kq.rs", "const GONE", "the kqueue vnode event flags that mean the file went away: a kernel protocol constant, not a tunable"),
+    ("src/devswarm_rt/sources.rs", "static WHERE", "a thread-local slot initialised empty (which code path and cause the probe reads of this thread are attributed to): state, not a tunable"),
     ("src/deadline.rs", "static REQ", "a thread-local slot initialised empty (the request being served): state, not a tunable"),
     ("src/deadline.rs", "static EVENT", "a thread-local slot initialised empty (the hook event of the request being served): state, not a tunable"),
     ("src/deadline.rs", "static STAGED", "a thread-local list initialised empty (the state writes a request staged): state, not a tunable"),

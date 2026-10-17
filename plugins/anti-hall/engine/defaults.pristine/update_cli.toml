@@ -36,6 +36,10 @@ value = "cache/anti-hall/anti-hall"
 doc = "The harness-owned registry of installed plugins under the plugins root. `update` reads it and never writes it."
 value = "installed_plugins.json"
 
+[update.settings_rel]
+doc = "The user's harness settings file, relative to the plugins root: its `enabledPlugins` says which registered install is the enabled one."
+value = "../settings.json"
+
 [update.plugin_src_rel]
 doc = "The plugin directory inside the marketplace clone."
 value = "plugins/anti-hall"
@@ -182,6 +186,10 @@ value = "(?i)accept-command|sha256"
 [update.confirm_shown]
 doc = "How many UTF-16 units of that reply are shown."
 value = 300
+
+[update.available_re]
+doc = "The start of a `--check` status action that says a newer version exists; the human summary headline then reads as available, not up to date."
+value = "^update available \\("
 
 [update.failed_re]
 doc = "The words in a status action that make the human summary read as a failure."
@@ -338,6 +346,10 @@ value = "not updated"
 [update_human.state_updated]
 doc = "Head state."
 value = "updated to v{latest}"
+
+[update_human.state_available]
+doc = "Head state: `--check` found a newer version."
+value = "v{latest} available"
 
 [update_human.state_ok]
 doc = "Head state."

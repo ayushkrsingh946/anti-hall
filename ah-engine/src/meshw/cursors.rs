@@ -123,7 +123,7 @@ fn parse_reader(reader: &str) -> Option<(i64, f64)> {
 }
 
 /// `provablyEnded(reader, procTable)`: true only on proof (see the module header); everything uncertain is live.
-fn provably_ended(reader: &str, table: &ProcTable) -> bool {
+pub(crate) fn provably_ended(reader: &str, table: &ProcTable) -> bool {
     let Some((pid, start_ms)) = parse_reader(reader) else { return false };
     match table.get(&pid) {
         None => {
@@ -149,7 +149,7 @@ pub(crate) fn is_retired(r: &CursorRow) -> bool {
 }
 
 /// `liveMinRow(rows, ns)`: the declared, non-retired row with the lowest value (the first on a tie).
-fn live_min<'a>(rows: &'a [CursorRow], ns: &str) -> Option<&'a CursorRow> {
+pub(crate) fn live_min<'a>(rows: &'a [CursorRow], ns: &str) -> Option<&'a CursorRow> {
     let mut best: Option<&CursorRow> = None;
     for r in rows {
         if r.ns != ns || r.reader == defaults::text("mesh_write.floor_reader") || is_retired(r) {
@@ -162,7 +162,7 @@ fn live_min<'a>(rows: &'a [CursorRow], ns: &str) -> Option<&'a CursorRow> {
     best
 }
 
-fn row_of<'a>(rows: &'a [CursorRow], ns: &str, reader: &str) -> Option<&'a CursorRow> {
+pub(crate) fn row_of<'a>(rows: &'a [CursorRow], ns: &str, reader: &str) -> Option<&'a CursorRow> {
     rows.iter().find(|r| r.ns == ns && r.reader == reader)
 }
 
@@ -331,7 +331,7 @@ pub(crate) fn ack_to(p: &Path, target: f64) -> std::io::Result<()> {
 
 /// `dualWrite` for the store namespace: one release of legacy projection after the commit, best effort and upward only
 /// (the shared cursor file, then the `cursors` table).
-fn dual_write(st: &MeshStore, home: &Path, partition: &str, ns: &str, floor: i64) {
+pub(crate) fn dual_write(st: &MeshStore, home: &Path, partition: &str, ns: &str, floor: i64) {
     if floor <= 0 || ns != defaults::text("mesh_write.ns_store") {
         return;
     }
@@ -351,8 +351,8 @@ fn dual_write(st: &MeshStore, home: &Path, partition: &str, ns: &str, floor: i64
 pub struct LogRec<'a> {
     /// The partition.
     pub id: &'a str,
-    /// Who asked.
-    pub caller_id: &'a str,
+    /// Who asked (`None`: the record carries no caller).
+    pub caller_id: Option<&'a str>,
     /// The journal namespace.
     pub ns: &'a str,
     /// The floor before.
@@ -401,7 +401,7 @@ pub fn log_cursor_write(home: &Path, r: &LogRec<'_>) {
     o.put("ts", n(common::now_ms() as f64))
         .put("id", s(r.id))
         .put("partition", s(r.id))
-        .put("callerId", s(r.caller_id))
+        .put("callerId", s_or_null(r.caller_id))
         .put("ns", s(r.ns))
         .put("from", num_or_null(r.from.map(|x| x as f64)))
         .put("to", num_or_null(r.to))

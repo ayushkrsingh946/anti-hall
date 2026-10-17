@@ -65,11 +65,7 @@ fn run(mut cmd: Command, home: &Path, cwd: &Path, extra: &[(&str, &str)], stdin:
         .env("CLAUDE_PLUGIN_ROOT", plugin_src())
         .env("ANTIHALL_INGEST_DRY_RUN", "1")
         .env("AH_ENGINE_SHADOW_RATE_STATUSLINE", "0")
-        .env("AH_ENGINE_SHADOW_RATE_SETTINGS", "0")
-        .env("AH_ENGINE_SHADOW_RATE_DEFECT", "0")
         .env("AH_ENGINE_SHADOW_RATE_PHASE", "0")
-        .env("AH_ENGINE_SHADOW_RATE_INSTALL", "0")
-        .env("AH_ENGINE_SHADOW_RATE_UNINSTALL", "0")
         // the Node installer writes the Node-only command; the engine's installer writes the launcher form unless told otherwise
         .env("ANTIHALL_STATUSLINE_NODE_ONLY", "1")
         .current_dir(cwd)

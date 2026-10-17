@@ -951,3 +951,39 @@ fn the_soft_wall_is_a_per_event_table_and_logs_the_wall_time() {
         "{log}"
     );
 }
+
+#[test]
+fn plugin_root_reaches_the_engine_in_canonical_form() {
+    // #64: the hook client's defaults cache holds ONE plugin root; two spellings of the same root (the shim's fork-free
+    // `<hooks>/..` and a resolved path) would make every other call miss the cache and re-parse every TOML file
+    let env = Env::new("canon");
+    let seen = env.path("root");
+    let e = env.script(
+        "root.sh",
+        &format!(
+            "cat >/dev/null\nprintf '%s' \"$AH_ENGINE_PLUGIN_ROOT\" >{}\nexit 0",
+            seen.display()
+        ),
+    );
+    let spelled = format!("{}/hooks/..", env.root.display());
+    let mut c = std::process::Command::new(env!("CARGO_BIN_EXE_ah-hook"));
+    c.env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .env("HOME", &env.home)
+        .env("AH_WRAPPER_TEST", "1")
+        .env("AH_HOOK_TIMEOUT_MS", "8000")
+        .env("AH_ENGINE_BIN", &e)
+        .args(["PostToolUse", "--plugin-root", &spelled]); // not a guard event: no cold-start wait for a daemon
+    let o = env.run_with(c, |mut si| {
+        let _ = si.write_all(PAYLOAD);
+    });
+    assert_eq!(o.code, 0, "{}", o.err);
+    let want = std::fs::canonicalize(&env.root).unwrap();
+    assert_eq!(
+        env.read("root"),
+        want.display().to_string(),
+        "stderr: {} log: {}",
+        o.err,
+        env.log()
+    );
+}

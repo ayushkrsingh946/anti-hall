@@ -172,6 +172,26 @@ test('D13: inbox tick with NO prior heartbeat writes an honestly-empty one (matc
   } finally { rm(home); rm(repo); }
 });
 
+// GH #181 (watcher false negatives). Engine twin: ah-engine/src/meshw/watcher.rs `a_lock_of_another_row_on_the_same_checkout_arms_the_workspace`.
+test('#181: a --child tick counts the live lock of another row on the SAME checkout as the armed watcher (as a plain tick does)', () => {
+  const home = tmpHome();
+  const repo = makeGitRepo('a');
+  try {
+    register(home, repo, 'w1');
+    // a second registered row of the same checkout (the DevSwarm app's own row id), and the Monitor's lock under THAT id
+    const wsDir = path.join(home, '.anti-hall', 'devswarm', 'workspaces');
+    fs.mkdirSync(wsDir, { recursive: true });
+    fs.writeFileSync(path.join(wsDir, 'w2.json'), JSON.stringify({ id: 'w2', worktreePath: repo, sessionId: 's-w2' }));
+    const lockPath = lockPathFor(home, 'w2');
+    fs.mkdirSync(path.dirname(lockPath), { recursive: true });
+    fs.writeFileSync(lockPath, JSON.stringify({ pid: process.pid, ts: Date.now() }));
+    const plain = cli.run(['inbox', 'tick', 'w1'], ctx(home, { cwd: repo })).result;
+    assert.strictEqual(plain.watcherArmed, true, 'sanity: the plain tick already matches by checkout');
+    const child = cli.run(['inbox', 'tick', 'w1', '--child'], ctx(home, { cwd: repo, env: { PATH: os.tmpdir() } })).result;
+    assert.strictEqual(child.watcherArmed, true, '--child must use the same check');
+  } finally { rm(home); rm(repo); }
+});
+
 test('D13: --child runs pull first (native queue import), same as the child branch of the drain', () => {
   const home = tmpHome();
   const repo = makeGitRepo('a');

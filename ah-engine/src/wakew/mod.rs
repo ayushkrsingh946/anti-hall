@@ -78,8 +78,6 @@ struct Shared {
     state: State,
     lock: Option<Held>,
     cleaned: bool,
-    /// The pid of a handed-off successor: signals are forwarded to it instead of ending this process.
-    child: Option<i32>,
 }
 
 type Cell = Arc<Mutex<Shared>>;
@@ -141,12 +139,6 @@ fn install_signals(c: &Cell) {
             }
             if n <= 0 {
                 return;
-            }
-            let child = locked(&c).child;
-            if let Some(pid) = child {
-                // SAFETY: forwards the signal we received to the successor we started.
-                unsafe { libc::kill(pid, i32::from(b)) };
-                continue;
             }
             cleanup(&c, false);
             std::process::exit(0);
@@ -317,7 +309,6 @@ fn run_armed(p: &Proc, a: Armed, start_ppid: i32) -> i32 {
         state: state.clone(),
         lock: Some(held),
         cleaned: false,
-        child: None,
     }));
     install_signals(&cell);
     let poll = Duration::from_millis(p.poll_ms());
@@ -497,12 +488,12 @@ impl Run<'_> {
         let (p, a) = (self.p, self.a);
         let s = stale::check(p, self.own_version.as_deref())?;
         let role = a.id.role();
-        if let Some(script) = s.script.as_ref() {
-            let script_s = script.to_string_lossy().into_owned();
+        if let Some(root) = s.root.as_ref() {
+            let script_s = s.script.to_string_lossy().into_owned();
             let stamp = p.env.get(text("wake_watch.env_handoff")).map(String::as_str);
             let own = self.own_version.clone().unwrap_or_default();
             if stale::can_handoff(&own, &s.newest, stamp) {
-                return Some(self.handoff(&s, &script_s));
+                return Some(self.handoff(&s, root, &script_s));
             }
             // the guards refused the handoff: the original print-the-re-arm-line-and-exit
             emit(&stale::stale_line(role, &a.id.id, self.own_version.as_deref(), &s.newest, &script_s));
@@ -518,40 +509,33 @@ impl Run<'_> {
         None
     }
 
-    /// `attemptHandoff`: release the lock, start the newer build's watcher with our stdio, mirror its exit.
-    fn handoff(&mut self, s: &stale::Stale, script: &str) -> Flow {
+    /// `attemptHandoff`: release the lock and replace this process with the engine running the newer build's plugin root
+    /// (same pid, same stdio, no interpreter and no second process). The successor takes the lock itself. If the exec fails
+    /// the lock is already gone, so the refusal line is printed and the watcher ends: never a silent stale watcher.
+    fn handoff(&mut self, s: &stale::Stale, root: &Path, script: &str) -> Flow {
+        use std::os::unix::process::CommandExt;
         let role = self.a.id.role();
         // the successor takes the lock itself, so there is never a moment two processes believe they hold it
         if let Some(l) = locked(self.cell).lock.take() {
             l.release();
         }
-        let mut cmd = std::process::Command::new(text("wake_watch.node_bin"));
-        cmd.arg(script).env(text("wake_watch.env_handoff"), &s.newest);
-        match cmd.spawn() {
-            Ok(mut child) => {
-                locked(self.cell).child = i32::try_from(child.id()).ok();
-                // the successor owns the lock and the cursors now: ours are stale and must never overwrite its fresher ones
-                cleanup(self.cell, true);
-                emit(&stale::handoff_line(&s.newest, s.registered, s.registered_version.as_deref()));
-                let code = match child.wait() {
-                    Ok(st) => exit_code_of(&st),
-                    Err(_) => 1,
-                };
-                Flow::Stop(code)
-            }
-            Err(_) => {
-                cleanup(self.cell, true);
-                emit(&stale::stale_line(role, &self.a.id.id, self.own_version.as_deref(), &s.newest, script));
-                Flow::Stop(1)
-            }
-        }
+        let Ok(exe) = std::env::current_exe() else {
+            emit(&stale::stale_line(role, &self.a.id.id, self.own_version.as_deref(), &s.newest, script));
+            cleanup(self.cell, false);
+            return Flow::Stop(0);
+        };
+        // the successor owns the lock and the cursors now: ours are stale and must never overwrite its fresher ones
+        cleanup(self.cell, true);
+        emit(&stale::handoff_line(&s.newest, s.registered, s.registered_version.as_deref()));
+        let mut cmd = std::process::Command::new(exe);
+        cmd.args(std::env::args().skip(1))
+            .env(text("wake_watch.env_handoff"), &s.newest)
+            .env(defaults::env_name("plugin_root"), root);
+        let err = cmd.exec(); // only returns on failure
+        diag(&format!("{err}\n"));
+        emit(&stale::stale_line(role, &self.a.id.id, self.own_version.as_deref(), &s.newest, script));
+        Flow::Stop(1)
     }
-}
-
-/// `handoffExitCode`: the child's own code, or 128 + the signal number.
-fn exit_code_of(st: &std::process::ExitStatus) -> i32 {
-    use std::os::unix::process::ExitStatusExt;
-    st.code().or_else(|| st.signal().map(|s| 128 + s)).unwrap_or(0)
 }
 
 /// The verb. `rest` is what follows `wake-watch` on the command line.

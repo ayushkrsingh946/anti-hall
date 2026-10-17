@@ -331,6 +331,14 @@ function makeGitRepo(tag) {
 }
 const ACTIVE_ENV = { DEVSWARM_REPO_ID: 'repo-1' };
 
+// A registered workspace descriptor naming repoKey: since 2026-10-16 only a
+// registered project qualifies for an automatic (selfHeal) ingest install.
+function registerProject(home, repoKey) {
+  const dir = path.join(home, '.anti-hall', 'devswarm', 'workspaces');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'primary-' + repoKey + '.json'), JSON.stringify({ id: 'primary-' + repoKey, repoKey, worktreePath: '/x', sessionId: 's' }));
+}
+
 test('selfHeal: healthy daemon -> daemonHealthy:true, no spawn attempted', () => {
   const home = tmpHome();
   const repo = makeGitRepo('healthy');
@@ -358,6 +366,7 @@ test('selfHeal: stale + gated (DevSwarm active + resolved worktree) + cooldown e
   const home = tmpHome();
   const repo = makeGitRepo('stale-gated');
   try {
+    registerProject(home, 'proj-y');
     let spawned = 0;
     const ctx = {
       home, env: ACTIVE_ENV, cwd: repo, now: Date.now(),
@@ -380,6 +389,7 @@ test('selfHeal: a SECOND stale send within the cooldown window -> no re-spawn', 
   const home = tmpHome();
   const repo = makeGitRepo('cooldown');
   try {
+    registerProject(home, 'proj-z');
     let spawned = 0;
     const now = Date.now();
     const ctx = (at) => ({
@@ -487,6 +497,7 @@ test('withSelfHeal: merges heal fields onto the action result without clobbering
   const home = tmpHome();
   const repo = makeGitRepo('with-heal');
   try {
+    registerProject(home, 'proj-t');
     const ctx = {
       home, env: ACTIVE_ENV, cwd: repo, now: Date.now(),
       io: {
@@ -597,6 +608,7 @@ test('selfHeal: stale + job DISABLED in launchd -> NO installer spawn, daemonDis
   const home = tmpHome();
   const repo = makeGitRepo('disabled');
   try {
+    registerProject(home, 'proj-d');
     let spawned = 0;
     const runs = [];
     const ctx = {

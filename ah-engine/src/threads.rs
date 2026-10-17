@@ -23,6 +23,59 @@ pub struct ThreadCpu {
     pub cpu_us: u64,
 }
 
+fn lk<T>(m: &'static std::sync::Mutex<T>) -> std::sync::MutexGuard<'static, T> {
+    m.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Per thread name: how many threads of that name ended, and the CPU they used over their whole life (microseconds).
+static EXITED: std::sync::Mutex<std::collections::BTreeMap<String, (u64, u64)>> = std::sync::Mutex::new(std::collections::BTreeMap::new());
+/// Labelled work counters (`site.cause.cached`-style keys) the subsystems add to; they surface in [`work`].
+static TALLY: std::sync::Mutex<std::collections::BTreeMap<String, u64>> = std::sync::Mutex::new(std::collections::BTreeMap::new());
+
+/// Add `n` to the work counter `key` (a few counters per reconcile, never one per event).
+pub fn tally(key: &str, n: u64) {
+    let mut t = lk(&TALLY);
+    if let Some(v) = t.get_mut(key) {
+        *v += n;
+        return;
+    }
+    let (soft, hard) = (crate::defaults::num("diagnostics.tally_soft_keys") as usize, crate::defaults::num("diagnostics.tally_hard_keys") as usize);
+    if t.len() >= hard {
+        *t.entry("tally_dropped".to_string()).or_insert(0) += 1; // the hard limit: the key is not kept, the loss is counted
+        return;
+    }
+    if t.len() >= soft {
+        *t.entry("tally_soft_hits".to_string()).or_insert(0) += 1; // the soft limit: kept, and counted
+    }
+    t.insert(key.to_string(), n);
+}
+
+/// Spawn a named thread that records its CPU time under its name when `f` returns: short-lived threads are gone from [`snapshot`]
+/// by the time a window ends, so without this their CPU is invisible.
+pub fn spawn_named<F, T>(name: String, f: F) -> std::io::Result<std::thread::JoinHandle<T>>
+where
+    F: FnOnce() -> T + Send + 'static,
+    T: Send + 'static,
+{
+    let key = name.clone();
+    std::thread::Builder::new().name(name).spawn(move || {
+        let out = f();
+        let e = &mut *lk(&EXITED);
+        // bounded like the work counters: past the hard limit a new name is not kept (its CPU stays in the process total)
+        if e.contains_key(&key) || e.len() < crate::defaults::num("diagnostics.tally_hard_keys") as usize {
+            let row = e.entry(key).or_insert((0, 0));
+            row.0 += 1;
+            row.1 += crate::limits::thread_cpu_us();
+        }
+        out
+    })
+}
+
+/// The exited-thread totals so far, by thread name: `(threads ended, CPU microseconds)`.
+pub fn exited() -> std::collections::BTreeMap<String, (u64, u64)> {
+    lk(&EXITED).clone()
+}
+
 /// Every thread of this process now.
 pub fn snapshot() -> Vec<ThreadCpu> {
     os::snapshot()
@@ -126,6 +179,9 @@ pub fn work() -> Value {
     for (k, v) in crate::dswire::watching::work::snapshot() {
         m.insert(format!("dswire_{k}"), json!(v));
     }
+    for (k, v) in lk(&TALLY).iter() {
+        m.insert(k.clone(), json!(v));
+    }
     m.insert("dswire_reconciles".into(), json!(crate::dswire::global().map_or(0, |w| w.reconciles())));
     m.insert("probe_files_read".into(), json!(crate::devswarm_rt::sources::PROBE_FILES_READ.load(Relaxed)));
     m.insert("probe_cache_hits".into(), json!(crate::devswarm_rt::sources::PROBE_CACHE_HITS.load(Relaxed)));
@@ -139,7 +195,8 @@ pub fn work() -> Value {
 /// The daemon's answer: the time, every thread's CPU so far, and the work counters.
 pub fn snapshot_json() -> Value {
     let threads: Vec<Value> = snapshot().into_iter().map(|t| json!({"tid": t.tid, "name": t.name, "cpu_us": t.cpu_us})).collect();
-    json!({"pid": std::process::id(), "at_ms": crate::health::now_ms(), "threads": threads, "work": work()})
+    let exited: serde_json::Map<String, Value> = exited().into_iter().map(|(n, (c, us))| (n, json!({"exits": c, "cpu_us": us}))).collect();
+    json!({"pid": std::process::id(), "at_ms": crate::health::now_ms(), "threads": threads, "exited": exited, "work": work()})
 }
 
 /// The report from two snapshots `a` (earlier) and `b`: per thread and per thread name the CPU % of one core over the window,
@@ -171,12 +228,27 @@ pub fn report(a: &Value, b: &Value, wall_us: u64) -> Value {
         (k.to_string(), json!(round(d as f64 * 1e6 / wall)))
     };
     let work: serde_json::Map<String, Value> = b["work"].as_object().map(|m| m.iter().map(|(k, v)| rate(k, v)).collect()).unwrap_or_default();
+    // threads that ended: their CPU is the difference of the totals (a live thread's CPU is in `by_name`)
+    let gone = |v: &Value, n: &str, k: &str| v.get("exited").and_then(|e| e.get(n)).and_then(|e| e.get(k)).and_then(Value::as_u64).unwrap_or(0);
+    let mut exited_by_name: Vec<(String, u64, f64, u64)> = b["exited"]
+        .as_object()
+        .map(|m| {
+            m.keys()
+                .map(|n| {
+                    let us = gone(b, n, "cpu_us").saturating_sub(gone(a, n, "cpu_us"));
+                    (n.clone(), gone(b, n, "exits").saturating_sub(gone(a, n, "exits")), 100.0 * us as f64 / wall, us / 1000)
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    exited_by_name.sort_by(|x, y| y.2.total_cmp(&x.2));
     json!({
         "running": true,
         "pid": b["pid"],
         "window_ms": wall_us / 1000,
         "cpu_pct_total": round(rows.iter().map(|r| r.2).sum()),
         "by_name": by_name.iter().map(|(n, p, c)| json!({"name": n, "threads": c, "cpu_pct": round(*p)})).collect::<Vec<_>>(),
+        "exited_by_name": exited_by_name.iter().map(|(n, c, p, ms)| json!({"name": n, "exits": c, "cpu_pct": round(*p), "cpu_ms": ms, "cpu_total_ms": gone(b, n, "cpu_us") / 1000})).collect::<Vec<_>>(),
         "threads": rows.iter().map(|(n, t, p, c)| json!({"name": n, "tid": t, "cpu_pct": round(*p), "cpu_total_ms": c / 1000})).collect::<Vec<_>>(),
         "work_per_s": work,
         "work_total": b["work"],
@@ -211,6 +283,32 @@ mod tests {
         let spin = r["by_name"].as_array().unwrap().iter().find(|t| t["name"] == "ah-test-spin").cloned().unwrap_or(Value::Null);
         assert!(spin["cpu_pct"].as_f64().unwrap_or(0.0) > 30.0, "the spinning thread is busy: {r}");
         assert!(r["work_per_s"].is_object());
+    }
+
+    #[test]
+    fn an_exited_thread_keeps_its_cpu_under_its_name() {
+        let a = snapshot_json();
+        let t0 = std::time::Instant::now();
+        for _ in 0..3 {
+            spawn_named("ah-test-brief".into(), || {
+                let mut x = 0u64;
+                let t = std::time::Instant::now();
+                while t.elapsed() < std::time::Duration::from_millis(40) {
+                    x = std::hint::black_box(x.wrapping_add(1));
+                }
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+        }
+        let b = snapshot_json();
+        let r = report(&a, &b, t0.elapsed().as_micros() as u64);
+        let row = r["exited_by_name"].as_array().unwrap().iter().find(|t| t["name"] == "ah-test-brief").cloned().unwrap_or(Value::Null);
+        assert_eq!(row["exits"], json!(3), "{r}");
+        assert!(row["cpu_pct"].as_f64().unwrap_or(0.0) > 30.0, "three 40 ms spinners over ~120 ms of wall are mostly CPU: {r}");
+        assert!(row["cpu_ms"].as_u64().unwrap_or(0) > 0, "the exited threads' cumulative CPU is reported in ms, not only as a window percentage: {r}");
+        tally("test_tally", 2);
+        assert_eq!(work()["test_tally"], json!(2));
     }
 
     #[cfg(not(target_os = "macos"))]

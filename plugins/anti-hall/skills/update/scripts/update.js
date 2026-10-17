@@ -34,6 +34,7 @@
 
 const fs = require('fs');
 const { readOnlyGitEnv } = require('../../../hooks/lib/git-env.js');
+const enabledInstall = require('../../../hooks/lib/enabled-install.js');
 const path = require('path');
 const os = require('os');
 const { execFileSync, spawnSync } = require('child_process');
@@ -173,19 +174,27 @@ function compareVersions(a, b) {
 function versionFromInstalledJson(installedJsonPath) {
   const data = readJsonBounded(installedJsonPath);
   if (!data || typeof data !== 'object') return null;
-  // v2: registry under .plugins; legacy: key at top level.
-  const reg = (data.plugins && typeof data.plugins === 'object') ? data.plugins : data;
-  const entry = reg['anti-hall@anti-hall'];
-  if (Array.isArray(entry)) {
-    const valid = entry.filter(e => e && typeof e === 'object' && isSemver(e.version));
-    const pick =
-      valid.find(e => e.scope === 'user') ||
-      valid.find(e => e.scope === 'project') ||
-      valid[0];
-    return pick ? pick.version : null;
+  // v2: registry under .plugins; legacy: key at top level. The ENABLED anti-hall@* install is the one whose version
+  // counts (#216); anti-hall@anti-hall only when none is enabled. settings.json sits one level above plugins/.
+  const sel = enabledInstall.load({
+    registryPath: installedJsonPath,
+    settingsPath: path.join(path.dirname(installedJsonPath), '..', 'settings.json'),
+  });
+  for (const key of sel.keys) {
+    const entry = sel.reg[key];
+    if (Array.isArray(entry)) {
+      const valid = entry.filter(e => e && typeof e === 'object' && isSemver(e.version));
+      const pick =
+        valid.find(e => e.scope === 'user') ||
+        valid.find(e => e.scope === 'project') ||
+        valid[0];
+      if (pick) return pick.version;
+    } else if (typeof entry === 'string') {
+      if (isSemver(entry)) return entry;
+    } else if (entry && typeof entry === 'object' && isSemver(entry.version)) {
+      return entry.version;
+    }
   }
-  if (typeof entry === 'string') return isSemver(entry) ? entry : null;
-  if (entry && typeof entry === 'object' && isSemver(entry.version)) return entry.version;
   return null;
 }
 
@@ -940,6 +949,14 @@ function inspectInstalledIngest(opts) {
     if (typeof isDevswarmActive !== 'function' || !isDevswarmActive(env)) {
       return gate('not a DevSwarm session — ingest heal skipped (gate closed)');
     }
+    // ENGINE OWNS INGEST (live 2026-10-16): no Node ingest unit is healed or
+    // re-baked while ah-engine's ownership marker says engine.
+    try {
+      const h = require(path.join(paths.pluginSrcDir, 'companion', 'lib', 'ingest-health.js'));
+      if (typeof h.engineOwnsIngest === 'function' && h.engineOwnsIngest(home)) {
+        return gate('the anti-hall engine owns the ingest drain — Node ingest heal skipped (gate closed)');
+      }
+    } catch (_) { /* fail-open: the pre-fix behaviour */ }
     const worktree = typeof installIngest.resolveWorktree === 'function' ? installIngest.resolveWorktree(cwd) : null;
     if (!worktree) {
       return gate('cwd is not a git worktree — ingest heal skipped (gate closed)');
@@ -3588,8 +3605,9 @@ function main() {
 function renderHuman(status, changelog) {
   const lines = [];
   const failed = /\bSTOP\b|dirty|diverged|failed|error/i.test(String(status.action || ''));
-  lines.push((failed ? '\u274C' : status.updated ? '\u2B06\uFE0F' : '\u2705') + ' anti-hall \u00B7 update: ' +
-    (failed ? 'not updated' : status.updated ? 'updated to v' + (status.latest || '?') : 'already up to date'));
+  const available = !failed && !status.updated && /^update available \(/.test(String(status.action || ''));
+  lines.push((failed ? '\u274C' : available || status.updated ? '\u2B06\uFE0F' : '\u2705') + ' anti-hall \u00B7 update: ' +
+    (failed ? 'not updated' : status.updated ? 'updated to v' + (status.latest || '?') : available ? 'v' + (status.latest || '?') + ' available' : 'already up to date'));
   lines.push('  installed: ' + (status.installed || '(unknown)'));
   lines.push('  latest:    ' + (status.latest || '(unknown)'));
   lines.push('  updated:   ' + status.updated + (status.cacheSynced ? ' (cache synced)' : ''));

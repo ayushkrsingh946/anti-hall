@@ -1044,7 +1044,7 @@ function piCrossLinked(a, b) {
 
 // `recipientFamilyIds(recipientId, rows)`.
 function piRecipientFamily(recipientId, rows) {
-  var out = {};
+  var out = Object.create(null);
   if (recipientId == null || String(recipientId) === '') return out;
   var rid = String(recipientId);
   out[rid] = true;
@@ -1057,7 +1057,7 @@ function piRecipientFamily(recipientId, rows) {
 
 // `collapseFamilies(descriptors, { resolve })`.
 function piFamilies(rows, resolve) {
-  var cache = {}, groups = {}, order = [];
+  var cache = Object.create(null), groups = Object.create(null), order = [];
   rows.forEach(function (d) {
     if (!d) return;
     var key = null, wt = d.worktreePath;

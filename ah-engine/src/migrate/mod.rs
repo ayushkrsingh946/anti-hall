@@ -14,7 +14,12 @@
 //! journal stores, the workspace registry and descriptors) are not in the engine yet: while any of those directories holds an
 //! entry, such a step reports `skipped`, says it is left to the Node doctor, and does not stamp its marker, so the Node doctor
 //! still does it. With no DevSwarm state they report exactly what Node reports ("nothing to migrate") and stamp.
+pub mod childlabels;
 pub mod cli;
+pub mod cursorhyg;
+pub mod poststages;
+pub mod promote;
+pub mod readercur;
 pub mod settings;
 pub mod state;
 pub mod sweeps;

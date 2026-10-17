@@ -9,7 +9,7 @@ const assert = require('node:assert');
 const ops = require('../harness/ops.js');
 const storeLib = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
 const ingest = require('../../plugins/anti-hall/companion/devswarm-ingest.js');
-const { resolveBranchSender, branchOfDoneBody } = require('../../plugins/anti-hall/companion/lib/devswarm-branch-sender.js');
+const { resolveBranchSender, branchOfDoneBody, fallbackSender } = require('../../plugins/anti-hall/companion/lib/devswarm-branch-sender.js');
 
 const T0 = 1_700_000_000_000;
 let HAS_SQLITE = true;
@@ -72,5 +72,70 @@ test('read-primary attributes a LEGACY null-sender DONE row from its branch at r
     const by = (re) => r.messages.find((m) => re.test(m.body));
     assert.strictEqual(by(/wt\/r1/).from, 'r1');
     assert.strictEqual(by(/wt\/ghost/).from, null, 'unknown branch: the legacy null is kept for consumers');
+  } finally { fx.cleanup(); }
+});
+
+// GH #181 (null senders). Engine twins: ah-engine/src/dssup/ingest/import.rs `a_child_queue_message_from_no_known_branch_is_the_primarys`,
+// `an_ingested_poke_from_main_carries_the_primary_as_sender`.
+test('fallbackSender: a child queue is the one registered Primary\'s outbound; the Primary queue and two Primaries stay null', () => {
+  const rows = [{ id: 'c1', worktreePath: '/x/c1' }, { id: 'primary-aaaa1111', worktreePath: '/x/repo' }];
+  assert.strictEqual(fallbackSender(rows, 'c1'), 'primary-aaaa1111');
+  assert.strictEqual(fallbackSender(rows, 'primary-aaaa1111'), null);
+  assert.strictEqual(fallbackSender(rows.concat([{ id: 'primary-bbbb2222', worktreePath: '/x/other' }]), 'c1'), null, 'two Primaries: never a guess');
+  assert.strictEqual(fallbackSender([], 'c1'), null);
+});
+
+(HAS_SQLITE ? test : test.skip)('ingestPayload attributes a poke from an unregistered branch to the Primary', () => {
+  const fx = ops.makeMeshFixture(['r1', 'r2'], 'branchsender-fallback');
+  try {
+    ops.opRegister(fx, 'r1', T0);
+    ops.opRegister(fx, 'r2', T0 + 1);
+    const s = storeLib.openStore({ home: fx.home, hash: fx.repoKey, backend: 'sqlite' });
+    try {
+      s.upsertRegistry({ id: 'r2', worktreePath: fx.readers.r2, sessionId: 's-r2', inboxPath: null, cursorPath: null, nudgeCommand: null });
+      s.upsertRegistry({ id: 'primary-aaaa1111', worktreePath: fx.readers.r1, sessionId: 's-p', inboxPath: null, cursorPath: null, nudgeCommand: null });
+      const raw = JSON.stringify([{ fromBranch: 'main', toBranch: 'wt/r2', message: 'poke', createdAt: '2026-01-01T00:00:00Z' }]);
+      assert.strictEqual(ingest.ingestPayload(s, raw, { workspaceId: 'r2', home: fx.home }).inserted, 1);
+      assert.strictEqual(s.listMessages('r2')[0].sender, 'primary-aaaa1111');
+    } finally { s.close(); }
+  } finally { fx.cleanup(); }
+});
+
+// GH #181 (null senders, read side). Engine twin: ah-engine/src/meshw/readprimary.rs `an_ndjson_line_names_its_own_sender`.
+test('read-primary prefers the NDJSON line\'s own sender over its fromBranch', () => {
+  const fx = ops.makeMeshFixture(['r1', 'r2'], 'branchsender-line');
+  try {
+    ops.opRegister(fx, 'r1', T0);
+    ops.opRegister(fx, 'r2', T0 + 1);
+    const fs = require('node:fs');
+    const path = require('node:path');
+    const ip = ops.inboxPath(fx, 'r2');
+    fs.mkdirSync(path.dirname(ip), { recursive: true });
+    fs.writeFileSync(ip, JSON.stringify({ _h: 'native:line1', fromBranch: 'main', message: 'poke', createdAt: T0 + 2, status: null, sender: 'P' }) + '\n');
+    fs.mkdirSync(path.dirname(ops.cursorPath(fx, 'r2')), { recursive: true });
+    fs.writeFileSync(ops.cursorPath(fx, 'r2'), '0');
+    const r = ops.cli.run(['inbox', 'read-primary', 'r2'], ops.baseCtx(fx, 'r2', T0 + 4, { instanceNonce: 'h:4242:1700000000000' })).result;
+    assert.strictEqual(r.ok, true, JSON.stringify(r));
+    const m = r.messages.find((x) => x.body === 'poke');
+    assert.ok(m, JSON.stringify(r.messages));
+    assert.strictEqual(m.from, 'P', 'the line carries the resolved sender; "main" is only its branch');
+  } finally { fx.cleanup(); }
+});
+
+test('read-primary attributes an existing NULL-sender row in a child partition to the Primary at read time (nothing rewritten)', () => {
+  const fx = ops.makeMeshFixture(['r1', 'r2'], 'branchsender-null-row');
+  try {
+    ops.opRegister(fx, 'r1', T0);
+    ops.opRegister(fx, 'r2', T0 + 1);
+    const s = storeLib.openStore({ home: fx.home, hash: fx.repoKey, backend: 'journal' });
+    try {
+      s.upsertRegistry({ id: 'primary-aaaa1111', worktreePath: fx.readers.r1, sessionId: 's-p', inboxPath: null, cursorPath: null, nudgeCommand: null });
+      s.appendMessage({ workspaceId: 'r2', ts: T0 + 2, hash: 'native:null1', body: 'poke from main' });
+    } finally { s.close(); }
+    const r = ops.cli.run(['inbox', 'read-primary', 'r2'], ops.baseCtx(fx, 'r2', T0 + 4, { instanceNonce: 'h:4242:1700000000000' })).result;
+    assert.strictEqual(r.ok, true, JSON.stringify(r));
+    const m = r.messages.find((x) => x.body === 'poke from main');
+    assert.strictEqual(m.from, 'primary-aaaa1111');
+    assert.strictEqual(m.sender, null, 'the stored row is not rewritten');
   } finally { fx.cleanup(); }
 });

@@ -41,6 +41,11 @@ fn fixture(seed: &dyn Fn(&Path, &Path)) -> Fx {
     fs::create_dir_all(&home).unwrap();
     fs::create_dir_all(&cwd).unwrap();
     assert!(home.starts_with(std::env::temp_dir()), "a fixture home is always under the temp dir, never the real home");
+    // Node is no fallback (#66): the doctor fails without a working engine, so both doctors get one, as in doctor_scenarios.rs
+    let bin = home.join(".anti-hall/ah-engine/bin/ah-engine");
+    fs::create_dir_all(bin.parent().unwrap()).unwrap();
+    fs::write(&bin, "#!/bin/sh\n[ \"$1\" = version ] && echo 0.1.0\nexit 0\n").unwrap();
+    fs::set_permissions(&bin, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
     seed(&home, &cwd);
     Fx { root, home, cwd }
 }
@@ -148,8 +153,10 @@ fn compare(name: &str, node: &str, rust: &str, fx: (&Fx, &Fx)) {
     assert_eq!(nr.0, rr.0, "{name}: repair heading");
     assert!(!rr.1.is_empty());
     // except the install-health repairs only the engine doctor has (the Node doctor has no such check): they are covered in doctor_scenarios.rs
-    let engine_only = ["state-dir-create", "state-dir-private", "engine-binary-exec", "engine-binary-quarantine", "config-heal"];
-    for line in rr.1.iter().filter(|l| !engine_only.iter().any(|id| l.contains(&format!(" {id}:")))) {
+    let engine_only = ["state-dir-create", "state-dir-private", "engine-binary-exec", "engine-binary-quarantine", "config-heal", "units-heal"];
+    // (units-heal also prints unindented `run launchctl ...` continuation rows naming the engine's unit file)
+    let engine_unit = |l: &str| l.contains("com.anti-hall.engine.");
+    for line in rr.1.iter().filter(|l| !engine_only.iter().any(|id| l.contains(&format!(" {id}:"))) && !engine_unit(l)) {
         assert!(nr.1.contains(line), "{name}: the engine's repair row is not a Node row: {line}\nnode rows: {:#?}", nr.1);
     }
     // the engine's report is complete for what it claims
@@ -272,37 +279,15 @@ fn both(seed: &dyn Fn(&Path, &Path), needles: &[&str]) -> (Vec<String>, Vec<Stri
     (pick(&norm(&node, &a), needles), pick(&norm(&rust, &b), needles))
 }
 
-fn script(dir: &Path, name: &str, body: &str) -> String {
-    put(dir, name, body);
-    dir.join(name).to_string_lossy().into_owned()
-}
-
 #[test]
 fn the_statusline_render_check_reads_the_two_lines_the_same_way() {
     let needles = ["statusline renders", "statusline rendered", "statusline.js", "statusline-rich.js", "dispatcher missing"];
     let (n, r) = both(&|_, _| {}, &needles);
+    // a deliberate difference (#66): the engine doctor starts no Node, so it no longer syntax-checks the renderer with `node --check`
+    let n: Vec<String> = n.into_iter().map(|l| l.replace(" present, syntax valid", " present")).collect();
     assert_eq!(n, r);
     assert!(r.iter().any(|l| l.contains("statusline renders 2 lines")), "{r:?}");
-    assert!(r.iter().any(|l| l.contains("statusline-rich.js (line-1 renderer) present, syntax valid")), "{r:?}");
-    // the stand-in script path of the test override: one line, a failure, a hang, a missing script
-    let tmp = std::env::temp_dir().join(format!("ah-sl-standin-{}", std::process::id()));
-    let one = script(&tmp, "one.js", "process.stdin.resume();process.stdin.on('end',()=>console.log('only'));");
-    let fail = script(&tmp, "fail.js", "process.exit(3);");
-    let hang = script(&tmp, "hang.js", "setInterval(()=>{},1000);");
-    let two = script(&tmp, "two.js", "process.stdin.resume();process.stdin.on('end',()=>console.log('a\\nb'));");
-    let cases = [
-        ("one line", vec![("ANTIHALL_DOCTOR_SL_SCRIPT", one.as_str())], "rendered only 1 line"),
-        ("failure", vec![("ANTIHALL_DOCTOR_SL_SCRIPT", fail.as_str())], "produced no output (exit 3)"),
-        ("hang", vec![("ANTIHALL_DOCTOR_SL_SCRIPT", hang.as_str()), ("ANTIHALL_DOCTOR_SL_TIMEOUT_MS", "400")], "timed out under load"),
-        ("two lines", vec![("ANTIHALL_DOCTOR_SL_SCRIPT", two.as_str())], "statusline renders 2 lines"),
-        ("missing", vec![("ANTIHALL_DOCTOR_SL_SCRIPT", "/nonexistent/sl.js")], "dispatcher missing"),
-    ];
-    for (name, vars, want) in cases {
-        let (n, r) = with_env(&vars, || both(&|_, _| {}, &needles));
-        assert_eq!(n, r, "{name}");
-        assert!(r.iter().any(|l| l.contains(want)), "{name}: {r:?}");
-    }
-    fs::remove_dir_all(&tmp).ok();
+    assert!(r.iter().any(|l| l.contains("statusline-rich.js (line-1 renderer) present")), "{r:?}");
 }
 
 fn omc_seed(home: &Path, cwd: &Path, state: Option<&str>) {
@@ -653,10 +638,14 @@ fn the_devswarm_section_is_silent_when_dormant_and_runs_the_four_hook_tests_when
         put(home, ".anti-hall/devswarm/cron-missing-warned.jsonl", "{}\n");
     };
     let (n, r) = both(&seed, &needles);
+    // a deliberate difference (#66): the engine has no native devswarm-child-gate self-test, so it reports that check as deferred
+    // (a warning) where Node prints the pass line; every other line is the same text
+    let n: Vec<String> = n.into_iter().filter(|l| !l.contains("devswarm-child-gate forces")).collect();
     assert_eq!(n, r);
+    let (_, rust_all) = run_rust(&fixture(&seed), &["--dry-run"]);
+    assert!(rust_all.contains("devswarm-child-gate: the engine does not decide this self-test"), "{rust_all}");
     for want in [
         "devswarm-child-turn writes",
-        "devswarm-child-gate forces",
         "devswarm-parent-gate blocks",
         "cron ticks that found mail while a watcher was armed: 2",
         "wake-watch idle-skips: 2",
@@ -667,6 +656,7 @@ fn the_devswarm_section_is_silent_when_dormant_and_runs_the_four_hook_tests_when
     }
     // a Primary session (DevSwarm environment, no descriptors) is active too
     let (n, r) = with_env(&[("DEVSWARM_REPO_ID", "repo-x")], || both(&|_, _| {}, &needles));
+    let n: Vec<String> = n.into_iter().filter(|l| !l.contains("devswarm-child-gate forces")).collect();
     assert_eq!(n, r);
     assert!(!r.is_empty());
 }

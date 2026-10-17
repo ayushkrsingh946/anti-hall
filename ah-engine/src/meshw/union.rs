@@ -64,9 +64,9 @@ fn floor_index(x: f64) -> usize {
 }
 
 /// `String(readFileSync(path, 'utf8')).split('\n').filter((l) => l.trim() !== '')`; `None` when the file cannot be read.
-pub fn non_empty_lines(path: &str) -> Option<Vec<String>> {
-    let bytes = std::fs::read(path).ok()?;
-    Some(lines_of(&String::from_utf8_lossy(&bytes)))
+/// A FIFO, device or file over the cap defers ([`ident::read_bounded`]).
+pub fn non_empty_lines(path: &str) -> R<Option<Vec<String>>> {
+    Ok(ident::read_bounded(Path::new(path))?.map(|bytes| lines_of(&String::from_utf8_lossy(&bytes))))
 }
 
 fn lines_of(text: &str) -> Vec<String> {
@@ -75,7 +75,7 @@ fn lines_of(text: &str) -> Vec<String> {
 
 /// Why an NDJSON cursor file does not give a position (`unreadBacklog`'s `known: false`).
 pub fn cursor_position(path: &str) -> R<Option<f64>> {
-    let Ok(bytes) = std::fs::read(path) else { return Ok(None) };
+    let Some(bytes) = ident::read_bounded(Path::new(path))? else { return Ok(None) };
     let text = String::from_utf8_lossy(&bytes).into_owned();
     let raw = js_trim(&text);
     let c = if !raw.is_empty() && raw.bytes().all(|b| b.is_ascii_digit()) {
@@ -183,7 +183,10 @@ fn line_ts(line: &str) -> Option<f64> {
 /// `unionUnread(opts)` for an NDJSON inbox plus a store partition read at the given bases.
 pub fn union_unread(i: &UnionIn<'_>) -> R<Union> {
     // readUnread / unreadBacklog: the lines are only known when the inbox and its cursor file both read
-    let all = i.inbox.and_then(non_empty_lines);
+    let all = match i.inbox {
+        Some(p) => non_empty_lines(p)?,
+        None => None,
+    };
     let position = match (&all, i.cursor_file) {
         (Some(_), Some(c)) => cursor_position(c)?,
         _ => None,
@@ -242,7 +245,10 @@ pub fn union_unread(i: &UnionIn<'_>) -> R<Union> {
 /// `unionUnread`'s merged `total` over the whole history: the NDJSON lines plus the store rows no line covers (by hash,
 /// else by body). Only a read that reports `total` needs it.
 pub fn merged_total(i: &UnionIn<'_>) -> R<usize> {
-    let all = i.inbox.and_then(non_empty_lines).unwrap_or_default();
+    let all = match i.inbox {
+        Some(p) => non_empty_lines(p)?.unwrap_or_default(),
+        None => Vec::new(),
+    };
     let Some(reader) = i.store else { return Ok(all.len()) };
     let hashes = line_hashes(&all, i.id, 0)?;
     let mut rows: Vec<Value> = Vec::new();
@@ -279,6 +285,96 @@ pub fn floor_bases(reader: &MeshReader, home: &Path, partition: &str, cursor_pat
     Ok((store, nd.max(distinct)))
 }
 
+/// What [`unread_for`] reports: the union, the bases it was read at, and how many unread rows the caller's own family sent.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Unread {
+    /// The unread union at the bases (every row, own sends included: the lists an ack walks stay contiguous).
+    pub union: Union,
+    /// The unread count of the mail others sent: `union.unread` without the rows the recipient's family sent.
+    pub unread: usize,
+    /// Unread rows the family sent (already out of `unread`).
+    pub own_excluded: usize,
+    /// The store read base.
+    pub store_base: f64,
+    /// The NDJSON read base.
+    pub nd_base: f64,
+}
+
+/// The ONE unread count of a partition for a reader: the floor rows, then the reader's own rows ([`read_bases`]), the loss-free
+/// union at those bases, and the count without the mail the recipient's own identity family sent. Tick, read-primary, the
+/// summary and the statusline all count through here, so they cannot disagree (Node: `countFor` plus `recipientFamilyIds`).
+#[allow(clippy::too_many_arguments)]
+pub fn unread_for(
+    reader: &MeshReader,
+    home: &Path,
+    id: &str,
+    inbox: Option<&str>,
+    cursor_file: Option<&str>,
+    me: Option<&str>,
+    family: &HashSet<String>,
+    now: i64,
+) -> R<Unread> {
+    let (store_base, nd_base) = read_bases(reader, home, id, cursor_file, me)?;
+    unread_at(reader, id, inbox, cursor_file, (store_base, nd_base), family, now)
+}
+
+/// [`unread_for`] at bases the caller already settled (the summary's floor view, which has its own legacy-floor fallback).
+pub fn unread_at(
+    reader: &MeshReader,
+    id: &str,
+    inbox: Option<&str>,
+    cursor_file: Option<&str>,
+    (store_base, nd_base): (f64, f64),
+    family: &HashSet<String>,
+    now: i64,
+) -> R<Unread> {
+    let union = union_unread(&UnionIn { inbox, cursor_file, id, store: Some(reader), store_base, nd_base, now })?;
+    let own_nd = union.nd_unread_lines.iter().filter(|l| line_sender(l).is_some_and(|s| family.contains(&s))).count();
+    let own_store = union.store_only_unread.iter().filter(|r| r.get("sender").and_then(Value::as_str).is_some_and(|s| family.contains(s))).count();
+    let own_excluded = own_nd + own_store;
+    Ok(Unread { unread: union.unread - own_excluded, own_excluded, union, store_base, nd_base })
+}
+
+/// `positions()`: the floor rows, then the reader's own rows when `me` is a declared reader: `(store base, nd base)`.
+pub fn read_bases(reader: &MeshReader, home: &Path, id: &str, cursor_file: Option<&str>, me: Option<&str>) -> R<(f64, f64)> {
+    let (mut store_base, mut nd_base) = floor_bases(reader, home, id, cursor_file)?;
+    if let Some(me) = me {
+        let rows = reader.reader_cursors(id).map_err(|e| Defer(format!("cursor-rows:{e}")))?;
+        let own = |ns: &str| rows.iter().find(|r| r["ns"] == ns && r["reader"] == me).and_then(|r| r["value"].as_f64());
+        if let Some(v) = own(defaults::text("mesh_write.cursor_ns_store")) {
+            store_base = v;
+        }
+        if let Some(v) = own(defaults::text("mesh_write.cursor_ns_nd")) {
+            nd_base = v;
+        }
+    }
+    Ok((store_base, nd_base))
+}
+
+/// The `sender` an NDJSON line carries (the id `pull` resolved), when it names one.
+pub fn line_sender(line: &str) -> Option<String> {
+    match OVal::parse(line)?.get(defaults::text("mesh_write.ndjson_sender_field")) {
+        Some(OVal::Str(s)) if !s.is_empty() => Some(s.clone()),
+        _ => None,
+    }
+}
+
+/// `recipientFamilyIds(recipientId, rows)` on `(id, sessionId)` pairs: the recipient and every row cross-linked to it.
+pub fn family_ids(rid: &str, rows: &[(String, Option<String>)]) -> HashSet<String> {
+    let mut out = HashSet::new();
+    if rid.is_empty() {
+        return out;
+    }
+    out.insert(rid.to_string());
+    let my_sess = rows.iter().find(|(id, _)| id == rid).and_then(|(_, s)| s.as_deref());
+    for (id, sess) in rows {
+        if crate::meshw::summary::cross_linked(rid, my_sess, id, sess.as_deref()) {
+            out.insert(id.clone());
+        }
+    }
+    out
+}
+
 /// Where a partition's reads go: its repo key's store directory.
 pub fn store_dir(home: &Path, repo_key: &str) -> std::path::PathBuf {
     devswarm_root(home).join(defaults::text("mesh_write.dir_store")).join(repo_key)
@@ -299,6 +395,68 @@ pub fn path_field(d: &OVal, key: &str) -> R<Option<String>> {
 mod tests {
     use super::*;
     use rusqlite::{Connection, params};
+
+    /// Runs `f` on a thread and returns its answer, failing when it takes longer than the bound (a read that blocks on a FIFO).
+    fn within<T: Send + 'static>(what: &str, f: impl FnOnce() -> T + Send + 'static) -> T {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || crate::discard::harmless(tx.send(f())));
+        rx.recv_timeout(std::time::Duration::from_secs(10)).unwrap_or_else(|_| panic!("{what}: still blocked after 10 s"))
+    }
+
+    fn scratch(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("ah-union-bounded-{}-{tag}", std::process::id()));
+        crate::discard::harmless(std::fs::remove_dir_all(&dir)); // keep: an absent directory is the goal state
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn fifo(p: &std::path::Path) {
+        let c = std::ffi::CString::new(p.to_string_lossy().as_bytes()).unwrap();
+        // SAFETY: `c` is a NUL-terminated path that outlives the call; mkfifo only creates the node.
+        assert_eq!(unsafe { libc::mkfifo(c.as_ptr(), 0o600) }, 0, "mkfifo");
+    }
+
+    #[test]
+    fn a_fifo_inbox_or_cursor_defers_at_once_instead_of_blocking() {
+        let dir = scratch("fifo");
+        let (inbox, cursor) = (dir.join("in.ndjson"), dir.join("cur.json"));
+        fifo(&inbox);
+        fifo(&cursor);
+        let (i, c) = (inbox.to_string_lossy().into_owned(), cursor.to_string_lossy().into_owned());
+        let (i2, c2) = (i.clone(), c.clone());
+        assert!(within("non_empty_lines", move || non_empty_lines(&i2).is_err()));
+        assert!(within("cursor_position", move || cursor_position(&c2).is_err()));
+        let got = within("union_unread", move || {
+            union_unread(&UnionIn { inbox: Some(&i), cursor_file: Some(&c), id: "w", store: None, store_base: 0.0, nd_base: 0.0, now: 0 }).is_err()
+        });
+        assert!(got, "a FIFO inbox defers");
+        crate::discard::harmless(std::fs::remove_dir_all(&dir)); // keep: cleanup of a scratch directory
+    }
+
+    #[test]
+    fn a_file_over_the_cap_defers_without_being_read_and_a_directory_is_absent() {
+        let dir = scratch("big");
+        let big = dir.join("in.ndjson");
+        std::fs::File::create(&big).unwrap().set_len(defaults::num("mesh_write.file_read_max_bytes") + 1).unwrap();
+        let b = big.to_string_lossy().into_owned();
+        assert!(within("oversize", move || non_empty_lines(&b).is_err() && cursor_position(&b).is_err()));
+        std::fs::create_dir_all(dir.join("d")).unwrap();
+        assert_eq!(non_empty_lines(&dir.join("d").to_string_lossy()), Ok(None), "a directory reads as Node's caught EISDIR");
+        assert_eq!(non_empty_lines(&dir.join("none").to_string_lossy()), Ok(None));
+        crate::discard::harmless(std::fs::remove_dir_all(&dir)); // keep: cleanup of a scratch directory
+    }
+
+    #[test]
+    fn a_fifo_session_record_does_not_block_the_reader_nonce_walk() {
+        let home = scratch("nonce");
+        let sess = home.join(defaults::text("mesh_write.claude_dir")).join(defaults::text("mesh_write.sessions_dir"));
+        std::fs::create_dir_all(&sess).unwrap();
+        let me = i64::from(std::process::id());
+        fifo(&sess.join(format!("{me}{}", defaults::text("mesh_write.json_suffix"))));
+        let h = home.clone();
+        within("reader_nonce_from", move || ident::reader_nonce_from(&h, me));
+        crate::discard::harmless(std::fs::remove_dir_all(&home)); // keep: cleanup of a scratch directory
+    }
 
     /// A scratch inbox (one `_h` line per hash), a cursor file and a store holding one row per hash.
     fn fixture(tag: &str, hashes: &[&str], cursor: usize) -> (std::path::PathBuf, MeshReader, String, String) {
@@ -347,6 +505,59 @@ mod tests {
         let u = run(&r, &inbox, &cur, 2.0, 0.0);
         assert_eq!((u.nd_skipped, u.nd_unread_lines.len(), u.unread), (2, 1, 1));
         assert_eq!(u.nd_skipped + u.nd_unread_lines.len(), 3, "the ack target is the total");
+        crate::discard::harmless(std::fs::remove_dir_all(dir)); // keep: test cleanup; an absent directory is the goal state
+    }
+
+    /// A store partition "w" holding one row per sender (`None` = NULL sender) and `#floor` rows at `floor`, plus extra reader rows
+    /// `(reader, store position)`. No NDJSON inbox.
+    fn senders_fixture(tag: &str, senders: &[Option<&str>], floor: i64, readers: &[(&str, i64)]) -> (std::path::PathBuf, MeshReader) {
+        let dir = std::env::temp_dir().join(format!("ah-union-for-{}-{tag}", std::process::id()));
+        crate::discard::harmless(std::fs::remove_dir_all(&dir)); // keep: cleanup that raced; an absent directory is the goal state
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = dir.join("devswarm.db");
+        let c = Connection::open(&db).unwrap();
+        c.execute_batch("CREATE TABLE messages (id INTEGER PRIMARY KEY AUTOINCREMENT, workspace_id TEXT NOT NULL, ts INTEGER NOT NULL, hash TEXT, body TEXT, sender TEXT, recipient TEXT, mtype TEXT, urgency TEXT, is_heartbeat INTEGER, needs_reply INTEGER, orig_hash TEXT, instance_nonce TEXT, seq INTEGER, UNIQUE(hash)); CREATE TABLE reader_cursors (partition TEXT NOT NULL, ns TEXT NOT NULL, reader TEXT NOT NULL, value INTEGER NOT NULL, retired_line INTEGER, updated_at INTEGER NOT NULL, PRIMARY KEY (partition, ns, reader));").unwrap();
+        for (i, s) in senders.iter().enumerate() {
+            c.execute(
+                "INSERT INTO messages (workspace_id, ts, hash, body, sender, seq) VALUES ('w', ?1, ?2, 'm', ?3, ?4)",
+                params![i as i64, format!("h{i}"), s, i as i64 + 1],
+            )
+            .unwrap();
+        }
+        let ns_store = defaults::text("mesh_write.cursor_ns_store");
+        let ns_nd = defaults::text("mesh_write.cursor_ns_nd");
+        let floor_reader = defaults::text("mesh_write.floor_reader");
+        for ns in [ns_store, ns_nd] {
+            c.execute("INSERT INTO reader_cursors VALUES ('w', ?1, ?2, ?3, NULL, 0)", params![ns, floor_reader, if ns == ns_store { floor } else { 0 }])
+                .unwrap();
+        }
+        for (reader, pos) in readers {
+            c.execute("INSERT INTO reader_cursors VALUES ('w', ?1, ?2, ?3, NULL, 0)", params![ns_store, reader, pos]).unwrap();
+        }
+        drop(c);
+        (dir, MeshReader::open(&db).unwrap())
+    }
+
+    #[test]
+    fn the_unread_the_caller_has_read_is_zero_even_when_a_lagging_reader_holds_the_floor() {
+        // #181: 3 messages, `#floor` 1 (reader B lags), reader A read all 3: A's unread is 0, the floor view still says 2
+        let (dir, r) = senders_fixture("lag", &[None, None, None], 1, &[("h:1:1", 3), ("h:2:2", 1)]);
+        let home = dir.clone();
+        let none = HashSet::new();
+        let a = unread_for(&r, &home, "w", None, None, Some("h:1:1"), &none, 1).unwrap();
+        assert_eq!((a.store_base, a.unread), (3.0, 0), "A has read everything");
+        let floor_view = unread_for(&r, &home, "w", None, None, None, &none, 1).unwrap();
+        assert_eq!((floor_view.store_base, floor_view.unread), (1.0, 2), "no caller reader: the floor view");
+        crate::discard::harmless(std::fs::remove_dir_all(dir)); // keep: test cleanup; an absent directory is the goal state
+    }
+
+    #[test]
+    fn mail_the_recipients_own_family_sent_is_not_unread() {
+        // #181: P's own send and a family alias's send are not inbound; another sender and a NULL sender are
+        let (dir, r) = senders_fixture("own", &[Some("P"), Some("alias"), Some("other"), None], 0, &[]);
+        let family: HashSet<String> = ["P", "alias"].iter().map(|s| s.to_string()).collect();
+        let u = unread_for(&r, &dir, "w", None, None, None, &family, 1).unwrap();
+        assert_eq!((u.unread, u.own_excluded, u.union.unread), (2, 2, 4), "other + NULL count; the union keeps every row");
         crate::discard::harmless(std::fs::remove_dir_all(dir)); // keep: test cleanup; an absent directory is the goal state
     }
 }

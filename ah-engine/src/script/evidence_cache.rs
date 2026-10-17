@@ -9,7 +9,7 @@
 //! `transcript.evidence_cache_entry_max_bytes`, all together under the `mem.evidence_cache_*` limits, and an entry unused for
 //! `transcript.evidence_cache_idle_ms` goes. Nothing here is the source of truth: the file is. A cache that cannot answer (the
 //! feature off, a file that cannot be read) hands the call to the plain reader, so a failure here is slower, never different.
-use super::host_ts::{LineEv, answer, line_items, unsure};
+use super::host_ts::{Item, LineEv, answer, items_json, line_items, unsure};
 use crate::defaults;
 use crate::mem::{BoundedCache, Spec};
 use std::collections::VecDeque;
@@ -18,9 +18,9 @@ use std::sync::OnceLock;
 
 /// One complete line of the transcript: where it starts, what it contributes, and whether only JavaScript can read it.
 #[derive(Clone)]
-struct Line {
+pub(super) struct Line {
     start: u64,
-    json: String,
+    pub(super) items: Vec<Item>,
     chars: usize,
     unsure: bool,
 }
@@ -86,14 +86,14 @@ fn make_line(start: u64, bytes: &[u8]) -> Line {
     let text = crate::checks::guardkit::text::lossy_owned(bytes.to_vec());
     let line = text.strip_suffix('\r').unwrap_or(&text);
     match line_items(line) {
-        Err(()) => Line { start, json: String::new(), chars: 0, unsure: true },
-        Ok(None) => Line { start, json: String::new(), chars: 0, unsure: false },
-        Ok(Some(LineEv { json, chars })) => Line { start, json, chars, unsure: false },
+        Err(()) => Line { start, items: Vec::new(), chars: 0, unsure: true },
+        Ok(None) => Line { start, items: Vec::new(), chars: 0, unsure: false },
+        Ok(Some(LineEv { items, chars })) => Line { start, items, chars, unsure: false },
     }
 }
 
 fn weight(k: &Kept) -> usize {
-    k.lines.iter().map(|l| l.json.len() + std::mem::size_of::<Line>()).sum::<usize>() + std::mem::size_of::<Kept>()
+    k.lines.iter().map(|l| l.items.iter().map(Item::weight).sum::<usize>() + std::mem::size_of::<Line>()).sum::<usize>() + std::mem::size_of::<Kept>()
 }
 
 /// Why a kept entry cannot serve a window starting at `fls`, or `None` when it can.
@@ -115,28 +115,41 @@ fn miss_reason(k: &Kept, f: &std::fs::File, m: &std::fs::Metadata, fls: u64) -> 
 /// The answer for the last `w` bytes of `path`, from the kept lines plus what was appended; `None` when the call is left to the
 /// plain reader (the cache is off, or the file cannot be read here).
 pub(super) fn cached(path: &str, w: u64) -> Option<String> {
+    with_lines(path, w, |lines, truncated, bad| {
+        if bad {
+            return unsure();
+        }
+        let items: Vec<String> = lines.iter().filter(|l| !l.items.is_empty()).map(|l| items_json(&l.items)).collect();
+        answer(&items, truncated)
+    })
+}
+
+/// Hand `f` the lines of the last `w` bytes of `path` (the kept ones plus what was appended, the unfinished last line included),
+/// whether the window cut the file, and whether the evidence is `unsure` (a line only JavaScript reads, or more text than
+/// `transcript.evidence_max_chars`). `None` when the cache is off or cannot read the file here: the caller reads the window plainly.
+pub(super) fn with_lines<R>(path: &str, w: u64, f: impl FnOnce(&[&Line], bool, bool) -> R) -> Option<R> {
     if defaults::num("transcript.evidence_cache_max_paths") == 0 {
         return None;
     }
-    let f = std::fs::File::open(path).ok()?;
-    let m = f.metadata().ok()?;
+    let file = std::fs::File::open(path).ok()?;
+    let m = file.metadata().ok()?;
     if !m.is_file() {
         return None;
     }
     let size = m.len();
     let truncated = size > w;
     let fls = if truncated {
-        match first_line_start(&f, size - w, size)? {
+        match first_line_start(&file, size - w, size)? {
             Some(s) => s,
             // the window holds no newline: its one piece is the cut first line, which is dropped
-            None => return Some(answer::<&str>(&[], true)),
+            None => return Some(f(&[], true, false)),
         }
     } else {
         0
     };
     let key = path.to_string();
     let mut k = match cache().remove(&key) {
-        Some(k) => match miss_reason(&k, &f, &m, fls) {
+        Some(k) => match miss_reason(&k, &file, &m, fls) {
             None => {
                 crate::load::note_count("evidence_cache", "result", if size == k.parsed_to { "hit" } else { "extend" });
                 k
@@ -159,7 +172,7 @@ pub(super) fn cached(path: &str, w: u64) -> Option<String> {
     k.base = fls;
     // read what was appended: the complete lines are kept, a last line without its newline is read now and again next time
     let mut buf = vec![0u8; (size - k.parsed_to) as usize];
-    f.read_exact_at(&mut buf, k.parsed_to).ok()?;
+    file.read_exact_at(&mut buf, k.parsed_to).ok()?;
     crate::load::note_scan(buf.len() as u64);
     let mut at = 0usize;
     while let Some(i) = buf.get(at..).and_then(|r| r.iter().position(|b| *b == b'\n')) {
@@ -169,25 +182,23 @@ pub(super) fn cached(path: &str, w: u64) -> Option<String> {
         at += i + 1;
     }
     let pending = (at < buf.len()).then(|| make_line(k.parsed_to, buf.get(at..).unwrap_or_default()));
-    // the answer: every line of the window, the unfinished one last
+    // the window: every line, the unfinished one last
     let max_chars = defaults::num("transcript.evidence_max_chars") as f64;
     let mut chars = 0usize;
     let mut bad = false;
-    let mut items: Vec<&str> = Vec::new();
+    let mut all: Vec<&Line> = Vec::with_capacity(k.lines.len() + 1);
     for l in k.lines.iter().chain(pending.iter()) {
         bad |= l.unsure;
         chars += l.chars;
-        if !l.json.is_empty() {
-            items.push(&l.json);
-        }
+        all.push(l);
     }
-    let out = if bad || chars as f64 > max_chars { unsure() } else { answer(&items, truncated) };
+    let out = f(&all, truncated, bad || chars as f64 > max_chars);
     // keep it for the next call, with a digest of both ends
     let fp = defaults::num("transcript.evidence_fingerprint_bytes").max(1);
     let n = fp.min(k.parsed_to - k.base);
     let w_bytes = weight(&k);
     if w_bytes as u64 <= defaults::num("transcript.evidence_cache_entry_max_bytes")
-        && let (Some(head), Some(back)) = (digest_at(&f, k.base, n), digest_at(&f, k.parsed_to - n, n))
+        && let (Some(head), Some(back)) = (digest_at(&file, k.base, n), digest_at(&file, k.parsed_to - n, n))
     {
         k.head = head;
         k.back = back;
@@ -196,6 +207,33 @@ pub(super) fn cached(path: &str, w: u64) -> Option<String> {
         cache().insert_with_ttl(key, k, w_bytes, exp);
     }
     Some(out)
+}
+
+/// Like [`with_lines`], but a cache that cannot serve the call reads the window plainly (as [`super::host_ts::evidence_uncached`]
+/// does, line by line, nothing kept); `None` only when the transcript cannot be read at all.
+pub(super) fn with_window<R>(path: &str, w: u64, f: impl FnOnce(&[&Line], bool, bool) -> R) -> Option<R> {
+    // the closure moves into whichever path answers; the cache path hands it back through the Option when it does not
+    let mut f = Some(f);
+    if let Some(r) = with_lines(path, w, |l, t, b| f.take().map(|f| f(l, t, b))) {
+        return r;
+    }
+    let f = f.take()?;
+    let tail = crate::checks::replykit::io::read_window(path, w)?;
+    let mut lines: Vec<Line> = Vec::new();
+    let mut bad = false;
+    let mut chars = 0usize;
+    for line in crate::checks::replykit::transcript::tail_lines(&tail) {
+        match line_items(line) {
+            Err(()) => bad = true,
+            Ok(None) => {}
+            Ok(Some(LineEv { items, chars: c })) => {
+                chars += c;
+                lines.push(Line { start: 0, items, chars: c, unsure: false });
+            }
+        }
+    }
+    let refs: Vec<&Line> = lines.iter().collect();
+    Some(f(&refs, tail.truncated, bad || chars as f64 > defaults::num("transcript.evidence_max_chars") as f64))
 }
 
 /// (entries kept, their estimated bytes) for the memory snapshot.
