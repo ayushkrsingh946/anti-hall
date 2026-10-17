@@ -472,6 +472,7 @@ impl Shared {
             "rules": {"version": rules.version, "count": rules.rules.len(), "fingerprint": format!("{:016x}", rules.fingerprint())},
             "summary": self.telemetry.headline(),
             "phases": phases_json(&self.telemetry),
+            "cpu": cpu_json(&self.telemetry),
             "wire": self.telemetry.with_metrics(|m| {
                 let c = |k: &str| m.counter("wire_events", &[("kind", defaults::text(k))]);
                 serde_json::json!({
@@ -531,14 +532,55 @@ pub fn phases_json(t: &crate::telemetry::Telemetry) -> serde_json::Value {
         }
     }
     for c in snap.get("counters").and_then(serde_json::Value::as_array).into_iter().flatten() {
-        if c.get("name").and_then(serde_json::Value::as_str) == Some("check_mem_retained_bytes")
-            && let Some(o) = checks.entry(label(c, "check")).or_insert_with(|| serde_json::json!({})).as_object_mut()
-        {
-            o.insert("mem_retained_bytes".to_string(), field(c, "value"));
+        let key = match c.get("name").and_then(serde_json::Value::as_str) {
+            Some("check_mem_retained_bytes") => "mem_retained_bytes",
+            Some("check_cpu_us") => "cpu_us_total",
+            _ => continue,
+        };
+        if let Some(o) = checks.entry(label(c, "check")).or_insert_with(|| serde_json::json!({})).as_object_mut() {
+            o.insert(key.to_string(), field(c, "value"));
+        }
+    }
+    // CPU per call = total / calls (the latency histogram's count is the number of calls)
+    for row in checks.values_mut().filter_map(serde_json::Value::as_object_mut) {
+        if let (Some(total), Some(calls)) = (row.get("cpu_us_total").and_then(serde_json::Value::as_u64), row.get("count").and_then(serde_json::Value::as_u64)) {
+            row.insert("cpu_us_per_call".to_string(), serde_json::json!(total.checked_div(calls).unwrap_or(0)));
         }
     }
     out.insert("checks".to_string(), serde_json::Value::Object(checks));
     serde_json::Value::Object(out)
+}
+
+/// Where the engine's CPU goes, for `status --json`: `by_event` (hook calls and the checks' CPU per hook event) and `top_checks`
+/// (the `telemetry.top_checks` checks that spent the most CPU, with calls and CPU per call).
+pub fn cpu_json(t: &crate::telemetry::Telemetry) -> serde_json::Value {
+    let snap = t.with_metrics(|m| m.snapshot(""));
+    let label = |c: &serde_json::Value, k: &str| c.get("labels").and_then(|l| l.get(k)).and_then(serde_json::Value::as_str).unwrap_or_default().to_string();
+    let value = |c: &serde_json::Value| c.get("value").and_then(serde_json::Value::as_u64).unwrap_or(0);
+    let mut by_event = std::collections::BTreeMap::<String, (u64, u64)>::new();
+    let (mut cpu, mut calls) = (std::collections::BTreeMap::<String, u64>::new(), std::collections::BTreeMap::<String, u64>::new());
+    for c in snap.get("counters").and_then(serde_json::Value::as_array).into_iter().flatten() {
+        match c.get("name").and_then(serde_json::Value::as_str) {
+            Some("hook_calls") => by_event.entry(label(c, "event")).or_default().0 += value(c),
+            Some("event_check_cpu_us") => by_event.entry(label(c, "event")).or_default().1 += value(c),
+            Some("check_cpu_us") => *cpu.entry(label(c, "check")).or_default() += value(c),
+            Some("check_calls") => *calls.entry(label(c, "check")).or_default() += value(c),
+            _ => {}
+        }
+    }
+    let mut top: Vec<(String, u64)> = cpu.into_iter().collect();
+    top.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    let top: Vec<serde_json::Value> = top
+        .into_iter()
+        .take(defaults::num("telemetry.top_checks") as usize)
+        .map(|(check, total)| {
+            let n = calls.get(&check).copied().unwrap_or(0);
+            serde_json::json!({"check": check, "calls": n, "cpu_us_total": total, "cpu_us_per_call": total.checked_div(n).unwrap_or(0)})
+        })
+        .collect();
+    let by_event: serde_json::Map<String, serde_json::Value> =
+        by_event.into_iter().map(|(e, (n, us))| (e, serde_json::json!({"calls": n, "cpu_us_total": us}))).collect();
+    serde_json::json!({"by_event": by_event, "top_checks": top})
 }
 
 /// Pure-ish request handler (no socket I/O) so it is unit-testable.
@@ -628,7 +670,7 @@ struct DaemonObserver<'a> {
 
 /// What a check that just finished read and noted (task #66 step 0): its transcript bytes and latency by transcript size class,
 /// and the counted events it noted (a kept-walk hit or the reason it missed).
-pub fn observe_check_cost(t: &Telemetry, check: &str, micros: u64) {
+pub fn observe_check_cost_in(t: &Telemetry, event: &str, check: &str, micros: u64) {
     let bytes = crate::load::take_check_scan();
     let cpu = crate::load::take_check_cpu();
     let mem = crate::load::take_check_mem();
@@ -638,6 +680,7 @@ pub fn observe_check_cost(t: &Telemetry, check: &str, micros: u64) {
         let l = [("check", check), ("size", size.as_str())];
         m.add("check_bytes_read", &l, bytes);
         m.add("check_cpu_us", &[("check", check)], cpu);
+        m.add("event_check_cpu_us", &[("event", event)], cpu);
         if let Some(d) = mem {
             m.observe_bytes("check_mem_peak_bytes", &[("check", check)], d.peak);
             m.observe_bytes("check_mem_alloc_bytes", &[("check", check)], d.alloc);
@@ -655,7 +698,7 @@ pub fn observe_check_cost(t: &Telemetry, check: &str, micros: u64) {
 impl crate::hookio::Observer for DaemonObserver<'_> {
     fn check(&self, check: &str, rule_id: &str, verdict: &crate::checks::Verdict, micros: u64) {
         crate::memdiag::note_check(check);
-        observe_check_cost(self.t, check, micros);
+        observe_check_cost_in(self.t, self.event, check, micros);
         self.t.observe_check_in(self.event, check, rule_id, verdict, micros, self.project);
     }
 
@@ -866,7 +909,7 @@ fn dispatch(body: &str, sh: &Shared, cfg: &Config) -> Reply {
         let answer = if v == Verdict::Defer { "defer" } else { "decided" };
         sh.telemetry.with_metrics(|m| m.inc("dispatch_checks", &[("event", meta.event.as_str()), ("check", check), ("answer", answer)]));
         crate::memdiag::note_check(check);
-        observe_check_cost(&sh.telemetry, check, micros);
+        observe_check_cost_in(&sh.telemetry, &meta.event, check, micros);
         checks_us.set(checks_us.get().saturating_add(micros));
         sh.telemetry.observe_check(check, &e.id, &v, micros, &phash);
     };

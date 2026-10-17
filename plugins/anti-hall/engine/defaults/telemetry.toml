@@ -18,6 +18,11 @@ unit = "bytes"
 doc = "The metric unit that makes a histogram use the byte buckets (`telemetry.byte_buckets_bytes`) instead of the latency buckets."
 value = "bytes"
 
+[telemetry.top_checks]
+doc = "How many checks `status --json` lists in `cpu.top_checks`, the ones that spent the most CPU (with calls and CPU per call)."
+value = 5
+min = 1
+
 [telemetry.max_series]
 doc = "Most distinct label combinations kept per metric; further combinations keep the labels named in overflow_keep_labels (up to max_series_kept) and collapse the rest into one overflow value."
 value = 128
@@ -313,6 +318,10 @@ value = { kind = "counter", unit = "lookups", labels = ["reason"] }
 [metric.check_cpu_us]
 doc = "CPU time (microseconds, the worker thread's own) spent inside each built-in check, by check: the sum over its calls. Divide by `check_calls` for the mean; wall time is `check_latency_us`."
 value = { kind = "counter", unit = "us", labels = ["check"] }
+
+[metric.event_check_cpu_us]
+doc = "CPU time (microseconds, the worker thread's own) spent inside built-in checks while serving each hook event: the sum over every check call of that event (`status --json` `cpu.by_event`)."
+value = { kind = "counter", unit = "us", labels = ["event"] }
 
 [metric.check_mem_peak_bytes]
 doc = "The most one call of a built-in check (and its script) grew the heap above where the call started, in bytes, by check: a histogram whose max is the check's worst call. Counted from per-thread counters in the allocator (`diagnostics.check_mem`)."

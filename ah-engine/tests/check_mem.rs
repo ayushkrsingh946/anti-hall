@@ -40,7 +40,7 @@ fn run_hog_and_observe(t: &telemetry::Telemetry) {
     let subject = Subject { event: "PreToolUse", tool: Some("Bash"), cwd: None, tool_input: &Value::Null, prompt: None };
     let v = run_env_guarded(&Hog, &subject, &json!({}), &json!({}), &env);
     assert!(matches!(v, Some(Verdict::Allow)));
-    daemon::observe_check_cost(t, "mem-test-hog", 10);
+    daemon::observe_check_cost_in(t, "PreToolUse", "mem-test-hog", 10);
 }
 
 #[test]
