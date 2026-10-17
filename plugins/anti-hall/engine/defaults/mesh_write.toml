@@ -1727,6 +1727,10 @@ value = "store"
 doc = "The NDJSON line's sender field."
 value = "fromBranch"
 
+[mesh_write.ndjson_sender_field]
+doc = "The NDJSON line's resolved-sender field (the workspace id `pull` wrote: the registry row of the line's branch, else the Primary)."
+value = "sender"
+
 [mesh_write.ndjson_message_field]
 doc = "The NDJSON line's body field."
 value = "message"
@@ -2014,3 +2018,27 @@ max = 65536
 doc = "Largest mesh file a read through a path from a descriptor or a session record may take (a durable inbox, a cursor file, a harness session record). A larger file, and anything that is no regular file (a FIFO, socket or device, whose read could block a worker for good), is not read: the hook's answer goes to Node."
 value = 16777216
 min = 1024
+
+[metric.mesh_own_sends_excluded]
+doc = "Counts that left out unread rows the recipient's own identity family sent (an own send is not inbound mail)."
+value = { kind = "counter", unit = "counts", labels = [] }
+
+[mesh_write.sender_fallback_ingest]
+doc = "The `where` label and log word of a sender taken from the Primary because the message's branch named no registered workspace (ingest)."
+value = "ingest"
+
+[mesh_write.sender_fallback_read]
+doc = "The `where` label and log word of a sender taken from a fallback at read time (the NDJSON line's own sender, or the Primary for a NULL store row)."
+value = "read"
+
+[mesh_write.msg_sender_fallback]
+doc = "The log line when a message got its sender from a fallback instead of its own branch. {where} {id} (the partition) {n} (messages)."
+value = "mesh sender fallback: where={where}, partition={id}, messages={n}"
+
+[metric.mesh_sender_fallback]
+doc = "Messages whose sender came from a fallback instead of the message's own branch, by where: ingest (a child's queue: the Primary), read (the NDJSON line's own sender, or the Primary for a NULL store row)."
+value = { kind = "counter", unit = "messages", labels = ["where"] }
+
+[metric.mesh_watcher_matched_by_checkout]
+doc = "Watcher-live checks answered by another row's lock on the same checkout because the workspace's own id had no live lock."
+value = { kind = "counter", unit = "checks", labels = [] }

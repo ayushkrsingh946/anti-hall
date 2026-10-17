@@ -41,4 +41,19 @@ function branchOfDoneBody(body) {
   return m ? m[1] : null;
 }
 
-module.exports = { resolveBranchSender, branchOfDoneBody, dirNameOfBranch };
+// fallbackSender(registryRows, workspaceId) -> id | null. A message whose branch names no registered workspace: a child's
+// queue is the Primary's outbound (pull stamps the Primary's id the same way), so it is the ONE registered Primary. The
+// Primary's own queue carries the children's notices, and two Primaries are ambiguous: neither is guessed (#181).
+const PRIMARY_PREFIX = 'primary-';
+function fallbackSender(registryRows, workspaceId) {
+  try {
+    if (String(workspaceId == null ? '' : workspaceId).startsWith(PRIMARY_PREFIX) || !Array.isArray(registryRows)) return null;
+    const hits = new Set();
+    for (const r of registryRows) {
+      if (r && r.id != null && String(r.id).startsWith(PRIMARY_PREFIX)) hits.add(String(r.id));
+    }
+    return hits.size === 1 ? Array.from(hits)[0] : null;
+  } catch (_) { return null; }
+}
+
+module.exports = { resolveBranchSender, branchOfDoneBody, dirNameOfBranch, fallbackSender };
