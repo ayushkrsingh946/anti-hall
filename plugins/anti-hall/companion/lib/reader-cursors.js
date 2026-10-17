@@ -371,6 +371,11 @@ function positions(store, opts) {
     floor[ns] = f ? Math.max(f.value, distinctNdFloor(o.home, partition, cp)) : legacyNdFloor(cp);
   }
   const out = { floor, rows, view: 'floor', store: floor.store, nd: floor.nd };
+  if (o.liveBase) { // the roster's base (liveBaseOf): a position per namespace, the floor where the namespace has no live row
+    if (o.liveBase.store != null) out.store = o.liveBase.store;
+    if (o.liveBase.nd != null) out.nd = o.liveBase.nd;
+    out.view = 'live-min';
+  }
   if (reader) {
     const s = rowOf(rows, 'store', reader);
     const n = rowOf(rows, 'nd', reader);
@@ -437,20 +442,14 @@ function countFor(store, opts) {
   return res;
 }
 
-// ownerOf(rows) -> { reader, store, nd } | null. A workspace's OWN read position: the LATEST live declared reader row of its
-// partition (highest updatedAt over both namespaces, then the higher value), with that reader's position per namespace (null where it
-// has no row). '#floor' and retired rows are not readers. null when the partition has no reader row (the caller falls back to the
-// floor). The roster/summary counts unread from here so it reports what `inbox tick` reports for the same workspace (#181).
-function ownerOf(rows) {
-  let best = null;
-  for (const r of rows || []) {
-    if (!r || r.reader === FLOOR || isRetired(r) || !Number.isFinite(r.value)) continue;
-    const at = Number.isFinite(r.updatedAt) ? r.updatedAt : 0;
-    if (!best || at > best.at || (at === best.at && r.value > best.value)) best = { at, value: r.value, reader: r.reader };
-  }
-  if (!best) return null;
-  const pos = (ns) => { const r = rowOf(rows, ns, best.reader); return r && Number.isFinite(r.value) ? r.value : null; };
-  return { reader: best.reader, store: pos('store'), nd: pos('nd') };
+// liveBaseOf(rows) -> { store, nd } | null. The roster/summary read base of a partition: per namespace the MINIMUM position over its
+// LIVE declared reader rows (liveMinRow: not '#floor', not retired), computed at read time — never the stored '#floor', which a dead
+// or stale reader can hold back (the phantom unread of #181). A namespace with no live row is null (the caller falls back to the floor there); null when the partition has no live
+// reader row at all.
+function liveBaseOf(rows) {
+  const at = (ns) => { const r = liveMinRow(rows || [], ns); return r && Number.isFinite(r.value) ? r.value : null; };
+  const base = { store: at('store'), nd: at('nd') };
+  return base.store === null && base.nd === null ? null : base;
 }
 
 // familyOf(store, partition) -> Set of ids that are the partition's recipient itself or cross-linked to it
@@ -863,7 +862,7 @@ module.exports = {
   FLOOR, NAMESPACES, RETIRE_PIN_AGE_MS, PID_REUSE_MARGIN_MS,
   readerKey, parseReader, provablyEnded, psSnapshot, defaultProcTable,
   legacyStoreFloor, legacyNdFloor, legacyShortFor, liveHarnessReaders, importPlan,
-  positions, baseFor, floorOf, countFor, familyOf, ownerOf,
+  positions, baseFor, floorOf, countFor, familyOf, liveBaseOf,
   importLegacy, declare, ackFor, raiseAllLossFree, raiseFloorBounded, retireEnded, repairPinnedFloors,
   isRetired, liveMinRow,
 };

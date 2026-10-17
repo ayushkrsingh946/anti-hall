@@ -351,31 +351,31 @@ pub fn read_bases(reader: &MeshReader, home: &Path, id: &str, cursor_file: Optio
     Ok((store_base, nd_base))
 }
 
-/// One workspace's own read position (`ownerPositions` in reader-cursors.js): the LATEST live declared reader row of its
-/// partition (the highest `updatedAt` over both namespaces, then the higher value), with that reader's position per namespace.
-/// A retired row (`value <= retiredLine`) and the `#floor` row are not readers. `None` when the partition has no reader row.
+/// The roster/summary read base of a partition (`liveBaseOf` in reader-cursors.js): per namespace the MINIMUM position over its LIVE
+/// declared reader rows (`live_min`: not `#floor`, not retired), computed at read time. The stored `#floor` is never used: a dead or
+/// stale reader can hold it back (the phantom unread of #181). `None` when the partition has no live reader row in either namespace.
 #[derive(Debug, Clone, PartialEq)]
-pub struct Owner {
-    /// The harness identity of the row.
-    pub reader: String,
-    /// Its store position, when it has a store row.
+pub struct LiveBase {
+    /// The least-advanced live reader's store position, when it has a store row.
     pub store: Option<f64>,
-    /// Its NDJSON position, when it has an NDJSON row.
+    /// The least-advanced live reader's NDJSON position, when it has an NDJSON row.
     pub nd: Option<f64>,
 }
 
-/// [`Owner`] over the raw `reader_cursors` rows of a partition.
-pub fn owner_of(rows: &[Value]) -> Option<Owner> {
+/// [`LiveBase`] over the raw `reader_cursors` rows of a partition.
+pub fn live_base_of(rows: &[Value]) -> Option<LiveBase> {
     let floor = defaults::text("mesh_write.floor_reader");
-    let live = |r: &&Value| {
-        let (v, line) = (r["value"].as_f64(), r["retiredLine"].as_f64());
-        r["reader"].as_str().is_some_and(|x| x != floor) && v.is_some() && !matches!((v, line), (Some(v), Some(l)) if v <= l)
+    let at = |ns: &str| {
+        rows.iter()
+            .filter(|r| r["ns"] == ns && r["reader"].as_str().is_some_and(|x| x != floor))
+            .filter_map(|r| {
+                let (v, line) = (r["value"].as_f64()?, r["retiredLine"].as_f64());
+                (!line.is_some_and(|l| v <= l)).then_some(v)
+            })
+            .reduce(f64::min)
     };
-    let key = |r: &Value| (r["updatedAt"].as_f64().unwrap_or(0.0), r["value"].as_f64().unwrap_or(0.0));
-    let best = rows.iter().filter(live).max_by(|a, b| key(a).partial_cmp(&key(b)).unwrap_or(std::cmp::Ordering::Equal))?;
-    let reader = best["reader"].as_str()?.to_string();
-    let at = |ns: &str| rows.iter().find(|r| r["ns"] == ns && r["reader"] == reader.as_str()).and_then(|r| r["value"].as_f64());
-    Some(Owner { store: at(defaults::text("mesh_write.cursor_ns_store")), nd: at(defaults::text("mesh_write.cursor_ns_nd")), reader })
+    let base = LiveBase { store: at(defaults::text("mesh_write.cursor_ns_store")), nd: at(defaults::text("mesh_write.cursor_ns_nd")) };
+    (base.store.is_some() || base.nd.is_some()).then_some(base)
 }
 
 /// The `sender` an NDJSON line carries (the id `pull` resolved), when it names one.
@@ -589,21 +589,20 @@ mod tests {
     }
 
     #[test]
-    fn the_owner_is_the_latest_live_reader_row_and_a_retired_or_floor_row_is_none() {
-        // #181: 3 messages, `#floor` 1, reader A (latest) at 3, a lagging reader B at 1: the owner is A
+    fn the_live_base_is_the_least_advanced_live_reader_and_a_retired_or_floor_row_is_none() {
+        // #181: 3 messages, `#floor` 1, live readers at 3 and 1: the base is 1 (nothing a live reader has not read is hidden)
         let (dir, r) = senders_fixture("owner", &[None, None, None], 1, &[("h:1:1", 3, 10), ("h:2:2", 1, 5)]);
         let rows = r.reader_cursors("w").unwrap();
-        let o = owner_of(&rows).unwrap();
-        assert_eq!((o.reader.as_str(), o.store, o.nd), ("h:1:1", Some(3.0), None));
+        assert_eq!(live_base_of(&rows).unwrap().store, Some(1.0));
         let floor_only: Vec<Value> = rows.iter().filter(|x| x["reader"] == "#floor").cloned().collect();
-        assert_eq!(owner_of(&floor_only), None, "no reader row: the floor is not an owner");
+        assert_eq!(live_base_of(&floor_only), None, "no reader row: the floor is not a reader");
         let mut retired = rows.clone();
         for x in &mut retired {
-            if x["reader"] == "h:1:1" {
-                x["retiredLine"] = serde_json::json!(3);
+            if x["reader"] == "h:2:2" {
+                x["retiredLine"] = serde_json::json!(1);
             }
         }
-        assert_eq!(owner_of(&retired).unwrap().reader, "h:2:2", "a retired row is not live");
+        assert_eq!(live_base_of(&retired).unwrap().store, Some(3.0), "a retired row is not live");
         crate::discard::harmless(std::fs::remove_dir_all(dir)); // keep: test cleanup; an absent directory is the goal state
     }
 }

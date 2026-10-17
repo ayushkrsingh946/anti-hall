@@ -2092,7 +2092,7 @@ doc = "Reads of a file named by a descriptor that were skipped because it is no 
 value = { kind = "counter", unit = "reads", labels = ["site", "reason"] }
 
 [metric.mesh_summary_owner_fallback]
-doc = "Roster/summary rows counted from the shared floor because the workspace's partition has no live reader row."
+doc = "Roster/summary rows counted from the shared floor because the workspace's partition has no live reader row (the base is the least-advanced live reader otherwise)."
 value = { kind = "counter", unit = "rows", labels = [] }
 
 [mesh_write.fifo_test_bound_ms]

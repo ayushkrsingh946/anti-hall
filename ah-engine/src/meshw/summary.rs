@@ -654,9 +654,9 @@ pub fn compute(st: &MeshStore, inv: &Inv, touched: Option<&str>) -> R<OVal> {
         }
         let total = st.reader().message_count(&d.id).or_else(|e| err("count", e))? as f64;
         let floor = floor_of(st, &mut cur, home, &d.id, false)?;
-        // #181: a workspace's unread is counted from its OWN reader (the latest live reader row of its partition), the same
-        // position `inbox tick` reports; only a partition with no reader row falls back to the shared floor
-        let owner = crate::meshw::union::owner_of(&st.reader().reader_cursors(&d.id).or_else(|e| err("reader-cursors", e))?);
+        // #181: the roster counts from the least-advanced LIVE reader of the partition (computed now, never the stored floor a dead
+        // reader can hold back), so no live reader's unread is hidden; a partition with no live reader row falls back to the floor
+        let owner = crate::meshw::union::live_base_of(&st.reader().reader_cursors(&d.id).or_else(|e| err("reader-cursors", e))?);
         if owner.is_none() {
             crate::metrics::bump("mesh_summary_owner_fallback", &[]);
         }
@@ -1054,8 +1054,8 @@ mod tests {
     }
 
     /// A scratch store holding workspace "X" with three directs from "other", `#floor` at 1 and the given store reader rows
-    /// `(reader, position, updated_at)`; the summary row of X.
-    fn summary_row_of_x(tag: &str, readers: &[(&str, i64, i64)]) -> (i64, i64) {
+    /// `(reader, position, retired_line)`; the summary row of X.
+    fn summary_row_of_x(tag: &str, readers: &[(&str, i64, Option<i64>)]) -> (i64, i64) {
         use crate::meshw::store::{CursorPut, RegistryRow};
         let dir = std::env::temp_dir().join(format!("ah-summary-owner-{}-{tag}", std::process::id()));
         crate::discard::harmless(std::fs::remove_dir_all(&dir)); // keep: cleanup that raced; an absent directory is the goal state
@@ -1067,16 +1067,16 @@ mod tests {
         for i in 0..3 {
             st.append_message_from("X", 1_700_000_000_000 + i, Some(&format!("h{i}")), "m", Some("other")).unwrap();
         }
-        let put = |ns: &str, reader: &str, value: i64, at: i64| CursorPut {
+        let put = |ns: &str, reader: &str, value: i64, retired_line: Option<i64>| CursorPut {
             partition: "X".into(),
             ns: ns.into(),
             reader: reader.into(),
             value,
-            retired_line: None,
-            updated_at: at,
+            retired_line: retired_line.map(Some),
+            updated_at: 1,
         };
-        let mut puts = vec![put("store", "#floor", 1, 1), put("nd", "#floor", 0, 1)];
-        puts.extend(readers.iter().map(|(r, v, at)| put("store", r, *v, *at)));
+        let mut puts = vec![put("store", "#floor", 1, None), put("nd", "#floor", 0, None)];
+        puts.extend(readers.iter().map(|(r, v, line)| put("store", r, *v, *line)));
         st.reader_cursor_txn(&puts).unwrap();
         let inv = Inv {
             home: dir.clone(),
@@ -1099,9 +1099,11 @@ mod tests {
     }
 
     #[test]
-    fn a_workspace_is_counted_from_its_own_reader_not_from_a_lagging_one_holding_the_floor() {
-        // #181: 3 messages, `#floor` 1 (reader B lags), reader A (latest) read all 3: X's unread is 0, as `inbox tick` says
-        assert_eq!(summary_row_of_x("lag", &[("h:1:1", 3, 10), ("h:2:2", 1, 5)]), (0, 3));
+    fn the_roster_counts_from_the_least_advanced_live_reader_never_a_dead_ones_floor() {
+        // #181: 3 messages, stored `#floor` 1 held by a RETIRED reader, the live reader X read all 3: no phantom unread
+        assert_eq!(summary_row_of_x("dead", &[("h:1:1", 3, None), ("h:2:2", 1, Some(1))]), (0, 3));
+        // two LIVE readers at 3 and 1: the lagging one's 2 unread are not hidden
+        assert_eq!(summary_row_of_x("live", &[("h:1:1", 3, None), ("h:2:2", 1, None)]), (2, 1));
         // no reader row: the floor is the fallback
         assert_eq!(summary_row_of_x("floor", &[]), (2, 1));
     }

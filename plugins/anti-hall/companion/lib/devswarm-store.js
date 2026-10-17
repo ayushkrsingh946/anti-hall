@@ -2570,11 +2570,11 @@ function ndjsonHasUnread(d, F, ndFloor) {
 // unionUnreadFor(d, store, F, home) — the summary is the FLOOR view by definition:
 // reader_cursors.countFor with reader null. Returns null when unknown/unavailable
 // (the caller then keeps its store-only count and reports the row unknown).
-function unionUnreadFor(d, store, F, home, reader) {
+function unionUnreadFor(d, store, F, home, liveBase) {
   if (!d) return null;
   let rc;
   try { rc = require('./reader-cursors.js'); } catch (_) { return null; }
-  const u = rc.countFor(store, { reader: reader || null, partition: d.id, inboxPath: d.inboxPath || null, cursorPath: d.cursorPath || null, home, fsi: F, excludeFamily: true });
+  const u = rc.countFor(store, { reader: null, liveBase: liveBase || null, partition: d.id, inboxPath: d.inboxPath || null, cursorPath: d.cursorPath || null, home, fsi: F, excludeFamily: true });
   return u && !u.unknown ? u : null;
 }
 
@@ -2589,11 +2589,11 @@ function floorFor(store, id, home, ns) {
   catch (_) { return null; }
 }
 
-// ownerFor(store, id) -> { reader, store, nd } | null: the workspace's own read position (reader-cursors.ownerOf), or null when it has
-// no live reader row (or the table cannot be read) — the caller then counts from the shared floor.
-function ownerFor(store, id) {
+// liveBaseFor(store, id) -> { store, nd } | null: the partition's roster read base (reader-cursors.liveBaseOf: the least-advanced LIVE
+// reader per namespace), or null when it has no live reader row (or the table cannot be read) — the caller then counts from the floor.
+function liveBaseFor(store, id) {
   try {
-    return require('./reader-cursors.js').ownerOf(store.readerCursorRows(id));
+    return require('./reader-cursors.js').liveBaseOf(store.readerCursorRows(id));
   } catch (_) { return null; }
 }
 
@@ -2713,10 +2713,10 @@ function computeSummary(store, opts) {
     const total = store.messageCount(d.id);
     const floor = floorFor(store, d.id, home);
     const unreadUnknown = floor === null;
-    // #181: a workspace's unread is counted from its OWN reader (the latest live reader row of its partition) — the position
-    // `inbox tick` reports for it — and only a partition with no reader row falls back to the shared floor
-    const owner = unreadUnknown ? null : ownerFor(store, d.id);
-    const cursor = unreadUnknown ? 0 : (owner && owner.store !== null ? owner.store : floor);
+    // #181: the roster counts from the least-advanced LIVE reader of the partition (computed now, never the stored floor a dead reader can
+    // hold back), so no live reader's unread is hidden; a partition with no live reader row falls back to the shared floor
+    const live = unreadUnknown ? null : liveBaseFor(store, d.id);
+    const cursor = unreadUnknown ? 0 : (live && live.store !== null ? live.store : floor);
     // UNREAD UNIFICATION (defect 8f2aec40e2ff, P1). `total - cursor` counts ONLY
     // the store side. The parent Stop gate, liveness.js and the `inbox count`
     // CLI all count the LOSS-FREE UNION (durable-NDJSON unread ∪ store-only
@@ -2748,9 +2748,9 @@ function computeSummary(store, opts) {
     // PERF BOUND (Round 13 item 5): pay for the union ONLY when the NDJSON side
     // actually has unread lines to merge — see ndjsonHasUnread's header for why
     // an empty tail makes the union provably equal to `total - cursor`.
-    if ((d.inboxPath || d.cursorPath) && ndjsonHasUnread(d, F, owner && owner.nd !== null ? owner.nd : (floorFor(store, d.id, home, 'nd') || 0))) {
+    if ((d.inboxPath || d.cursorPath) && ndjsonHasUnread(d, F, live && live.nd !== null ? live.nd : (floorFor(store, d.id, home, 'nd') || 0))) {
       try {
-        const u = unionUnreadFor(d, store, F, home, owner && owner.reader);
+        const u = unionUnreadFor(d, store, F, home, live);
         if (u && Number.isFinite(u.unread)) {
           unread = Math.max(0, Number.isFinite(u.unreadAll) ? u.unreadAll : u.unread); // `unread` stays inclusive; directUnread leaves own sends out
           if (Number.isFinite(u.ownExcluded)) ownUnreadFromUnion = u.ownExcluded;

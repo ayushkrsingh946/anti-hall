@@ -1,7 +1,7 @@
 'use strict';
-// GH #181 follow-up 1: the roster/summary counts a workspace's unread from that workspace's OWN reader (the latest live reader row of
-// its partition), so its row says what `inbox tick` says for it; the shared #floor is only the fallback for a partition with no reader
-// row. Engine twin: ah-engine/src/meshw/union.rs `the_owner_is_the_latest_live_reader_row_...` + summary.rs.
+// GH #181 follow-up 1: the roster/summary base of a partition is the MINIMUM position over its LIVE (non-retired) reader rows, computed at
+// read time; the stored #floor (which a dead reader can hold back) is only the fallback for a partition with no live reader row.
+// Engine twin: ah-engine/src/meshw/union.rs `the_live_base_is_...` + summary.rs.
 
 require('../helpers/isolate-home.js'); // HOME -> empty temp dir: this file reads home-dir state
 const { test } = require('node:test');
@@ -32,14 +32,21 @@ function seed(tag, readers) {
 }
 const row = (sum) => sum.workspaces.X;
 
-test('a workspace is counted from its own reader, not from a lagging reader that holds the floor', () => {
-  const { home, s } = seed('lag', [{ reader: 'h:1:1', value: 3, updatedAt: 10 }, { reader: 'h:2:2', value: 1, updatedAt: 5 }]);
+test('the roster does not count from a floor a dead (retired) reader holds back', () => {
+  const { home, s } = seed('dead', [{ reader: 'h:1:1', value: 3, updatedAt: 10 }, { reader: 'h:2:2', value: 1, retiredLine: 1, updatedAt: 5 }]);
   try {
     const sum = storeLib.computeSummary(s, { home, workspaceId: 'X' });
-    assert.strictEqual(row(sum).unread, 0, 'X read all 3 (its latest reader is at 3); the floor (1) belongs to the lagging reader');
+    assert.strictEqual(row(sum).unread, 0, 'the only live reader read all 3; the stored floor (1) belongs to the dead one');
     assert.strictEqual(row(sum).cursor, 3);
-    const own = rc.countFor(s, { reader: 'h:1:1', partition: 'X', home, excludeFamily: true });
-    assert.strictEqual(row(sum).unread, own.unread, 'roster unread == what `inbox tick` reports for the same reader');
+  } finally { s.close(); fs.rmSync(home, { recursive: true, force: true }); }
+});
+
+test('two live readers: the roster shows the least-advanced one (nothing hidden)', () => {
+  const { home, s } = seed('live', [{ reader: 'h:1:1', value: 3, updatedAt: 10 }, { reader: 'h:2:2', value: 1, updatedAt: 5 }]);
+  try {
+    const sum = storeLib.computeSummary(s, { home, workspaceId: 'X' });
+    assert.strictEqual(row(sum).unread, 2);
+    assert.strictEqual(row(sum).cursor, 1);
   } finally { s.close(); fs.rmSync(home, { recursive: true, force: true }); }
 });
 
@@ -52,9 +59,9 @@ test('a partition with no reader row falls back to the floor', () => {
   } finally { s.close(); fs.rmSync(home, { recursive: true, force: true }); }
 });
 
-test('a retired reader row is not the owner', () => {
+test('a retired reader row is not live', () => {
   const { home, s } = seed('retired', [{ reader: 'h:1:1', value: 3, retiredLine: 3, updatedAt: 10 }, { reader: 'h:2:2', value: 2, updatedAt: 5 }]);
   try {
-    assert.strictEqual(row(storeLib.computeSummary(s, { home, workspaceId: 'X' })).unread, 1, 'counted from the live reader at 2');
+    assert.strictEqual(row(storeLib.computeSummary(s, { home, workspaceId: 'X' })).unread, 1, 'counted from the live reader at 2 (h:1:1 retired)');
   } finally { s.close(); fs.rmSync(home, { recursive: true, force: true }); }
 });
