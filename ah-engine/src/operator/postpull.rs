@@ -175,7 +175,24 @@ impl Run<'_> {
         J::Obj(o)
     }
 
+    /// The engine owns the ingest daemons (`devswarm_ingest.mode` is engine: its drain runs in the daemon and `units heal`, the next
+    /// stage of the update, retires the Node ingest units), so re-baking a Node unit would only resurrect what is retired. Switchable
+    /// with `update_post.ingest_native`; witness mode (the Node daemons drain) keeps the Node functions.
+    fn engine_owns_ingest(&self) -> bool {
+        defaults::num("update_post.ingest_native") == 1 && crate::setup::units::engine_runs(text("units.duty_ingest"))
+    }
+
     fn ingest(&self) -> J {
+        if self.engine_owns_ingest() {
+            let key = if !self.synced {
+                "update_post.ingest_idle_json"
+            } else if !self.active() {
+                "update_post.ingest_gate_json"
+            } else {
+                "update_post.ingest_engine_json"
+            };
+            return parse_json(text(key));
+        }
         let files = defaults::list("update_post.ingest_files");
         let heal = || self.node_stage("ingest heal", text("update_post.ingest_heal_fn"), self.version_opts());
         if self.files_there(&files) && !self.active() {

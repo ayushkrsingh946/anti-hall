@@ -109,6 +109,14 @@ value = '{"attempted":false,"healed":false,"detail":"not a DevSwarm session — 
 doc = "The ingest heal answer when nothing was synced and the unit does not need healing."
 value = '{"attempted":false,"healed":false,"detail":"no cache sync this run and the installed ingest unit classifies ok — nothing to heal"}'
 
+[update_post.ingest_native]
+doc = "1 (the default): while the engine owns the DevSwarm ingest daemons (devswarm_ingest.mode = engine) the ingest heal step answers by itself and never runs Node or re-installs a Node unit (units heal retires those). 0: always ask the Node functions."
+value = 1
+
+[update_post.ingest_engine_json]
+doc = "The ingest heal answer in a DevSwarm session while the engine owns the ingest daemons (nothing is re-installed)."
+value = '{"attempted":false,"healed":false,"detail":"ingest is drained by the engine (devswarm_ingest.mode = engine) - no Node ingest daemon to heal"}'
+
 [update_post.deferred_json]
 doc = "A stage deferred by the overall post-pull budget. Placeholders: name, budget."
 value = '{"attempted":false,"deferred":true,"detail":"{name}: deferred — overall post-pull budget ({budget}ms) exhausted before this stage started; it runs on the NEXT update/doctor pass (idempotent/resumable, nothing lost)"}'

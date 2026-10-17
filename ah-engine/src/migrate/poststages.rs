@@ -52,7 +52,7 @@ pub(crate) fn run(ctx: &Ctx, which: &str, dry: bool) -> Option<Tally> {
         "cursor_hygiene" => Some(super::cursorhyg::run(ctx)),
         "merge_split_backend_stores" => merge_split(ctx),
         _ => {
-            let hashes = stores(ctx)?;
+            let hashes = stores(ctx, dry)?;
             let mut cx = Cx::new(&ctx.home);
             let t = match which {
                 "reader_cursors_import" => reader_cursors_import(ctx, &mut cx, &hashes, dry),
@@ -71,21 +71,23 @@ pub(crate) fn run(ctx: &Ctx, which: &str, dry: bool) -> Option<Tally> {
     t
 }
 
-/// `store.listStoreHashes(home)`, when the engine can open every one of them as Node would.
-fn stores(ctx: &Ctx) -> Option<Vec<String>> {
+/// `store.listStoreHashes(home)`, when the engine can open every one of them as Node would. A store with no readable `BACKEND` marker
+/// (made before the marker existed) and a non-empty `devswarm.db` is sqlite to Node's `resolveStoreBackend` (`inferBackendFromDisk`),
+/// which also writes the marker unless the open is read-only (`dry`); the engine does the same and never touches the data.
+fn stores(ctx: &Ctx, dry: bool) -> Option<Vec<String>> {
     let forced = ctx.env.get(defaults::text("mesh_write.env_store_backend")).map(|s| s.trim().to_lowercase()).unwrap_or_default();
     if !forced.is_empty() && forced != defaults::text("mesh.backend_sqlite") {
         return None;
     }
     let hashes = list_store_hashes(ctx);
-    hashes.iter().all(|h| rc::sqlite_store(Path::new(&ctx.home), h)).then_some(hashes)
+    hashes.iter().all(|h| rc::sqlite_store(Path::new(&ctx.home), h) || rc::adopt_legacy_marker(Path::new(&ctx.home), h, dry)).then_some(hashes)
 }
 
 /// `mergeSplitBackendStoresAllStores(home)`: a sqlite-backed store is SPLIT when its `journal/` directory also holds a `.ndjson` segment.
 /// Merging the two sides (the journal backend's reader, the dedupe, the registry union, the rewrite of the summary) is Node's, so a split
 /// store hands the whole run to Node before anything is written; with no split store Node writes nothing and counts nothing.
 fn merge_split(ctx: &Ctx) -> Option<Tally> {
-    let hashes = stores(ctx)?;
+    let hashes = stores(ctx, false)?; // Node opens the stores read-write here whatever the dry-run switch says
     for hash in &hashes {
         let dir = rc::store_dir(Path::new(&ctx.home), hash).join(defaults::text("update_post.journal_dir"));
         let segments = std::fs::read_dir(dir).is_ok_and(|rd| rd.flatten().any(|e| e.file_name().to_string_lossy().ends_with(defaults::text("mesh_write.ndjson_suffix"))));

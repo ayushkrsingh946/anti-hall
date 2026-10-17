@@ -537,9 +537,9 @@ impl Case {
     }
 }
 
-/// What the replay's `node` shim logged, besides the ingest probe every DevSwarm run makes (it is not a stage).
+/// What the replay's `node` shim logged, besides (the engine owns ingest by default, so no ingest probe is made).
 fn stage_node_calls(w: &World) -> Vec<String> {
-    node_calls(w).lines().filter(|l| !l.contains("ingestUnitNeedsHeal")).map(str::to_string).collect()
+    node_calls(w).lines().map(str::to_string).collect()
 }
 
 /// Record (when asked) and replay one scenario; returns the replay world's picture and the world, for follow-up checks.
@@ -643,6 +643,43 @@ case!(child_labels_already_done_is_skipped, "child-sender-labels", "already_done
 
 case!(promote_turns_a_marker_into_the_heartbeat_session, "promote-unclaimed", "bad_state", "promote-unclaimed", "promoteUnclaimed", "promoteUnclaimedPostUpdate", seed_promote, live: true, markers: false);
 case!(promote_ignores_the_ingest_dry_run_switch_like_node, "promote-unclaimed", "dry_run_switch", "promote-unclaimed", "promoteUnclaimed", "promoteUnclaimedPostUpdate", seed_promote, live: false, markers: false);
+
+/// An earlier build's store: sqlite data and no `BACKEND` marker (Node's `resolveStoreBackend` infers sqlite from the database file).
+fn seed_floors_no_marker(home: &Path) {
+    seed_floors(home);
+    fs::remove_file(ds(home).join("store").join(STORE).join("BACKEND")).unwrap();
+}
+
+fn seed_not_split_no_marker(home: &Path) {
+    seed_not_split(home);
+    fs::remove_file(ds(home).join("store").join(STORE).join("BACKEND")).unwrap();
+}
+
+fn marker_of(w: &World) -> Option<String> {
+    fs::read_to_string(ds(&w.home).join("store").join(STORE).join("BACKEND")).ok().map(|s| s.trim().to_string())
+}
+
+/// A store with data but no marker is settled as sqlite and pinned by a read-write open, like Node; a preview (read-only open) pins nothing.
+#[test]
+fn a_store_without_a_marker_is_adopted_as_sqlite_and_pinned_like_node() {
+    let (_, w, o) = replay(&Case { stage: "reader-floor-repair", name: "no_marker", row: "reader-floor-repair", key: "readerFloorRepair", func: "readerFloorRepairPostUpdate", seed: seed_floors_no_marker, live: true, markers: false });
+    assert_eq!(marker_of(&w).as_deref(), Some("sqlite"));
+    assert_eq!(stage_node_calls(&w), Vec::<String>::new());
+    let again = engine_answer(&w, &o, "readerFloorRepair");
+    assert_eq!(again["skippedAlreadyDone"], json!(true), "{again}");
+}
+
+#[test]
+fn a_preview_of_a_store_without_a_marker_writes_no_marker() {
+    let (_, w, _) = replay(&Case { stage: "reader-floor-repair", name: "no_marker_dry", row: "reader-floor-repair", key: "readerFloorRepair", func: "readerFloorRepairPostUpdate", seed: seed_floors_no_marker, live: false, markers: false });
+    assert_eq!(marker_of(&w), None);
+}
+
+#[test]
+fn split_merge_pins_a_store_without_a_marker_even_in_a_preview_like_node() {
+    let (_, w, _) = replay(&Case { stage: "merge-split-backend-stores", name: "no_marker", row: "merge-split-backend-stores", key: "mergeSplitBackendStores", func: "mergeSplitBackendStoresPostUpdate", seed: seed_not_split_no_marker, live: false, markers: false });
+    assert_eq!(marker_of(&w).as_deref(), Some("sqlite"));
+}
 
 // ---- fallback, the switch, nothing deleted -------------------------------------------------------------------------------------
 
@@ -831,4 +868,108 @@ fn child_label_repairs_are_left_to_the_node_function_untouched() {
         let after = picture(&w, Value::Null, None);
         assert_eq!(before, after, "the engine changed a store it handed to Node");
     }
+}
+
+// ---- ingest heal: the engine owns the ingest daemons (roadmap #61, G2 part D) ------------------------------------------------
+
+const STALE_PLIST: &str = "<?xml version=\"1.0\"?><plist><dict><key>WorkingDirectory</key><string>/nonexistent/gone</string><key>ProgramArguments</key><array><string>/usr/bin/node</string><string>/nonexistent/gone/devswarm-ingest.js</string></array></dict></plist>";
+const STALE_SERVICE: &str = "[Service]\nWorkingDirectory=/nonexistent/gone\nExecStart=\"/usr/bin/node\" \"/nonexistent/gone/devswarm-ingest.js\"\n";
+const UNIT_FILES: [&str; 2] = ["Library/LaunchAgents/com.anti-hall.devswarm-ingest.plist", ".config/systemd/user/anti-hall-devswarm-ingest.service"];
+
+/// A stale Node ingest unit (its baked directory is gone) on both platforms.
+fn seed_stale_unit(home: &Path) {
+    put(home, UNIT_FILES[0], STALE_PLIST);
+    put(home, UNIT_FILES[1], STALE_SERVICE);
+}
+
+fn unit_bytes(home: &Path) -> Vec<Vec<u8>> {
+    UNIT_FILES.iter().map(|f| fs::read(home.join(f)).unwrap()).collect()
+}
+
+fn ingest_opt(ds: bool) -> Opt {
+    Opt { ds, no_upstream_move: true, live: true, no_node: true, stage_only: Some("none"), ..Opt::default() }
+}
+
+fn ingest_fixture(name: &str) -> PathBuf {
+    fixture_path("ingest-heal", name)
+}
+
+/// Record (when asked) Node's `ingestHeal` answer of a post-pull-only run on the seeded world, then replay the engine against it.
+fn ingest_case(name: &str, ds: bool, seed: fn(&Path)) -> (World, Opt) {
+    if recording() {
+        let o = Opt { no_node: false, stage_only: None, ..ingest_opt(ds) };
+        let a = world(&o);
+        seed(&a.home);
+        let out = super::update_parity::run_node(&a, &o, &["--post-pull-only"]);
+        let st: Value = serde_json::from_str(out.stdout.lines().next().unwrap()).unwrap();
+        let p = ingest_fixture(name);
+        fs::create_dir_all(p.parent().unwrap()).unwrap();
+        fs::write(p, format!("{}\n", serde_json::to_string_pretty(&st["status"]["ingestHeal"]).unwrap())).unwrap();
+    }
+    let want: Value = serde_json::from_str(&fs::read_to_string(ingest_fixture(name)).unwrap_or_else(|e| panic!("ingest-heal/{name}: no fixture ({e})"))).unwrap();
+    let o = ingest_opt(ds);
+    let w = world(&o);
+    seed(&w.home);
+    let got = engine_answer(&w, &o, "ingestHeal");
+    assert_eq!(got, want, "ingest-heal/{name}: differs from the frozen Node answer");
+    assert_eq!(node_calls(&w), "", "ingest-heal/{name}: the engine ran Node");
+    (w, o)
+}
+
+fn seed_none(_: &Path) {}
+
+#[test]
+fn ingest_outside_a_devswarm_session_is_the_node_answer() {
+    ingest_case("no_session", false, seed_stale_unit);
+}
+
+#[test]
+fn ingest_with_no_unit_is_the_node_answer_without_running_node() {
+    ingest_case("no_unit", true, seed_none);
+}
+
+#[test]
+fn ingest_with_a_stale_unit_outside_a_worktree_is_the_node_answer() {
+    let (w, o) = ingest_case("stale_unit_no_worktree", true, seed_stale_unit);
+    let before = unit_bytes(&w.home);
+    assert_eq!(engine_answer(&w, &o, "ingestHeal")["attempted"], json!(false)); // a second run: the same, nothing touched
+    assert_eq!(before, unit_bytes(&w.home));
+}
+
+/// Node would re-install the stale unit here (the one place the engine deliberately differs): `devswarm_ingest.mode` is `engine` by
+/// default, so the engine drains and `units heal` retires the Node unit; re-baking it would resurrect it. No Node, no unit touched.
+#[test]
+fn ingest_with_a_stale_unit_in_a_worktree_is_not_reinstalled_while_the_engine_owns_ingest() {
+    let o = ingest_opt(true);
+    let w = world(&o);
+    seed_stale_unit(&w.home);
+    assert!(Command::new("git").args(["init", "-q"]).current_dir(&w.home).status().unwrap().success());
+    let before = unit_bytes(&w.home);
+    for _ in 0..2 {
+        let ans = engine_answer(&w, &o, "ingestHeal");
+        assert_eq!(ans["attempted"], json!(false), "{ans}");
+        assert_eq!(ans["healed"], json!(false), "{ans}");
+        assert_eq!(node_calls(&w), "", "the engine ran Node");
+    }
+    assert_eq!(before, unit_bytes(&w.home), "a unit file was changed");
+}
+
+/// Witness mode (the Node daemons drain) and `ingest_native = 0` both leave the stage to the Node functions.
+#[test]
+fn ingest_is_left_to_node_in_witness_mode_and_when_switched_off() {
+    let o = ingest_opt(true);
+    let w = world(&o);
+    put(&w.home, ".anti-hall/settings.json", r#"{"devswarm_ingest":{"mode":"witness"}}"#);
+    engine_answer(&w, &o, "ingestHeal");
+    assert!(node_calls(&w).contains("ingestUnitNeedsHeal"), "witness mode did not ask Node: {}", node_calls(&w));
+    let w = world(&o);
+    let toml = w.mp.join("plugins/anti-hall/engine/defaults/update_post.toml");
+    let text = fs::read_to_string(&toml).unwrap();
+    let at = text.find("[update_post.ingest_native]").expect("the switch is in the table");
+    let (head, tail) = text.split_at(at);
+    let off = format!("{head}{}", tail.replacen("value = 1", "value = 0", 1));
+    assert_ne!(text, off);
+    fs::write(&toml, off).unwrap();
+    engine_answer(&w, &o, "ingestHeal");
+    assert!(node_calls(&w).contains("ingestUnitNeedsHeal"), "the switch did not hand the stage to Node: {}", node_calls(&w));
 }

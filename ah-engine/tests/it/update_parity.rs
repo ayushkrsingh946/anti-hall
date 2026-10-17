@@ -270,7 +270,7 @@ pub(super) fn finish(o: std::process::Output) -> Out {
     }
 }
 
-fn run_node(w: &World, o: &Opt, args: &[&str]) -> Out {
+pub(super) fn run_node(w: &World, o: &Opt, args: &[&str]) -> Out {
     let mut cmd = Command::new("node");
     cmd.arg(plugin().join("skills/update/scripts/update.js")).args(args).current_dir(&w.home);
     envs(&mut cmd, w, o);
