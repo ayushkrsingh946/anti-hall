@@ -1703,7 +1703,8 @@ fn sto_01_journal_and_split_stores_are_reported_as_unsupported_legacy() {
     let mut c = Command::new(BIN);
     c.arg("doctor").arg("--check").arg("--plugin-root").arg(&sc.plugin);
     sc.env(&mut c);
-    c.env("ANTIHALL_DOCTOR_LEGACY_STORES_REPORT", "0");
+    // the key has no env override: the owner's settings.json switches it off
+    sc.put(".anti-hall/settings.json", br#"{"doctor":{"legacy_stores_report":0}}"#);
     let off = sc.finish(c);
     off.lacks("legacy journal backend");
 }

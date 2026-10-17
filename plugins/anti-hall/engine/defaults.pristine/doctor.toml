@@ -2214,7 +2214,6 @@ value = "the engine failed open {n} times in the last {window}s (most often {top
 [doctor.legacy_stores_report]
 doc = "1 (the default): the doctor warns about DevSwarm stores on the journal backend or split between a journal and SQLite, which the engine does not support (the Node tooling serves them). 0: no such warning."
 value = 1
-env = "ANTIHALL_DOCTOR_LEGACY_STORES_REPORT"
 min = 0
 max = 1
 
