@@ -122,13 +122,11 @@ fn resolve_send_target(inv: &Inv, rows: &[Row], arg: &str) -> R<Resolved> {
                 return Ok(Resolved::from_row(by_mesh));
             }
             // a descriptor id (the app uuid) whose worktree derives to a registered mesh label routes to that row
-            if let Some(mesh) = descriptor_mesh_id(&inv.home, arg)? {
-                if mesh != arg {
-                    if let Some(row) = resolve_mesh_target(rows, Some(&mesh))? {
-                        note_ref("mesh_write.ref_outcome_mesh");
-                        return Ok(Resolved::Row(row));
-                    }
-                }
+            if let Some(mesh) = descriptor_mesh_id(&inv.home, arg)?.filter(|m| m != arg)
+                && let Some(row) = resolve_mesh_target(rows, Some(&mesh))?
+            {
+                note_ref("mesh_write.ref_outcome_mesh");
+                return Ok(Resolved::Row(row));
             }
             if retired_redirect_exists(inv, arg) {
                 return defer("retired-redirect"); // one hop through a fold-time redirect is Node's
