@@ -7800,6 +7800,11 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 
 | Key | Default | Env override | Unit | What it is |
 |---|---|---|---|---|
+| `devswarm_sup.act_block_outcomes` | `refused` |  |  | The outcome words that count as a refusal (block) in an act telemetry event of the supervisor (a recover request the engine refused). |
+| `devswarm_sup.act_duty` | `duty-{duty}` |  |  | The action word of the act telemetry event of one duty's tick outcome ({duty} = the duty name). |
+| `devswarm_sup.act_recover_reasons` | `7 entries` |  |  | The reason word of the act telemetry event for each way a recover request is refused (caller, id, request, duplicate, descriptor, max, rollback_no_node). |
+| `devswarm_sup.act_skip_outcomes` | `skipped` |  |  | The outcome words that count as a skip (not applicable, nothing done) in an act telemetry event of the supervisor; a word in action_success is an allow, one in act_block_outcomes a block, any other an error. |
+| `devswarm_sup.act_witness_mismatch` | `witness-mismatch` |  |  | The reason word of the mistake telemetry event for a duty whose Node witness disagreed with what the engine did. |
 | `devswarm_sup.action_feature` | `devswarm-supervisor` |  |  | The feature name of the supervisor's action lines. |
 | `devswarm_sup.action_kind` | `action` |  |  | The kind of an action line of the action ledger. |
 | `devswarm_sup.action_log` | `.anti-hall/logs/devswarm-sup-actions.ndjson` |  |  | The action ledger of the supervisor, one JSON line per action it took (kind = action_kind: feature, action, target, inputs, outcome, reason, latency_ms, action_id) and per mistake signal found later (kind = mistake_kind, naming the action_id), relative to the home directory. Each line also goes to telemetry as a `cmd` event (h = the action, e = the outcome), counted in `ah-engine telemetry summary` under detail.cmd. |
@@ -8018,7 +8023,6 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_sup.lv_urgency_fields` | `urgencyMax, broadcastUrgencyMax` |  |  | The summary entry fields holding the highest unread urgency, direct then broadcast (readMeshUrgency). |
 | `devswarm_sup.lv_urgent_tiers` | `high, urgent` |  |  | The urgency words that force a parent notice for a stale workspace at once (Node URGENT_TIERS). |
 | `devswarm_sup.lv_witness_max_ids` | `500` |  |  | Most workspaces one witness comparison covers (the oldest verdicts first); a sweep with more is sampled, never skipped whole. |
-| `devswarm_sup.mistake_command` | `dssup-mistake` |  |  | The telemetry `cmd` h of a mistake signal (e = the action word it is about). An escalation notice is a mistake when the escalated workspace later turns out to have a live session (the `cleared` line of the recovery log). |
 | `devswarm_sup.mistake_kind` | `mistake` |  |  | The kind of a mistake line of the action ledger. |
 | `devswarm_sup.mode` | `engine` |  |  | Who owns the supervisor duties: engine (the default: the engine's scheduler runs them, poke and escalate follow; while a Node supervisor job is still installed and running the engine stands down, so there is never a second actor) \| witness (the Node supervisor job does; the engine runs none of them). Anything else reads as witness, so a typo never starts a second actor. The engine never edits any settings file or any launchd / systemd unit. |
 | `devswarm_sup.mode_words` | `witness, engine` |  |  | The words of devswarm_sup.mode, in the order witness, engine. |

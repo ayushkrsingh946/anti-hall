@@ -17,8 +17,14 @@ use crate::dsact::runner::Runner;
 use serde_json::{Value, json};
 use std::path::Path;
 
-fn refuse(why: String) -> (Value, i32) {
-    (json!({"outcome": "refused", "why": why}), defaults::num("devswarm_wire.usage_exit") as i32)
+/// A refused request: `code` names the way (a key of `devswarm_sup.act_recover_reasons`), `why` is the text the caller gets.
+struct Refusal {
+    code: &'static str,
+    why: String,
+}
+
+fn refuse(code: &'static str, why: String) -> Refusal {
+    Refusal { code, why }
 }
 
 fn ledger(state_dir: &Path) -> std::path::PathBuf {
@@ -43,19 +49,35 @@ pub struct Place<'a> {
 
 /// Run the recovery request. Returns the report and the exit code (0 when the run was handled, whatever the outcome Node reports).
 pub fn run(at: &Place, st: &Settings, runner: &dyn Runner, id: &str, request: &str, now: i64) -> (Value, i32) {
+    let t0 = std::time::Instant::now();
+    let (report, code) = match decide(at, st, runner, id, request, now) {
+        Ok(done) => done,
+        Err(r) => {
+            let reason = defaults::raw("devswarm_sup.act_recover_reasons").str_field(r.code);
+            super::tick::emit_act(at.home, defaults::text("devswarm_sup.recover_duty"), id, "refused", reason, t0.elapsed().as_millis() as u64, request);
+            (json!({"outcome": "refused", "why": r.why}), defaults::num("devswarm_wire.usage_exit") as i32)
+        }
+    };
+    if report["outcome"] == "handled" {
+        super::tick::emit_act(at.home, defaults::text("devswarm_sup.recover_duty"), id, "ran", "", t0.elapsed().as_millis() as u64, request);
+    }
+    (report, code)
+}
+
+fn decide(at: &Place, st: &Settings, runner: &dyn Runner, id: &str, request: &str, now: i64) -> Result<(Value, i32), Refusal> {
     let Place { home, state_dir, .. } = *at;
     let caller = st.env.get(defaults::text("devswarm_act.caller_env")).cloned().unwrap_or_default();
     if !caller.is_empty() && caller != defaults::text("devswarm_act.interactive_caller") {
-        return refuse(defaults::render("devswarm_sup.msg_recover_caller", &[("caller", &caller)]));
+        return Err(refuse("caller", defaults::render("devswarm_sup.msg_recover_caller", &[("caller", &caller)])));
     }
     if id.is_empty() || !crate::meshw::idlock::is_safe_id(id) {
-        return refuse(defaults::text("devswarm_sup.msg_recover_id").into());
+        return Err(refuse("id", defaults::text("devswarm_sup.msg_recover_id").into()));
     }
     if request.is_empty() {
-        return refuse(defaults::text("devswarm_sup.msg_recover_request").into());
+        return Err(refuse("request", defaults::text("devswarm_sup.msg_recover_request").into()));
     }
     if already_ran(state_dir, request) {
-        return refuse(defaults::render("devswarm_sup.msg_recover_duplicate", &[("request", &request)]));
+        return Err(refuse("duplicate", defaults::render("devswarm_sup.msg_recover_duplicate", &[("request", &request)])));
     }
     let keys = defaults::raw("devswarm_sup.recover_descriptor_keys");
     let desc: Option<Value> = std::fs::read_to_string(super::root(home).join(defaults::text("mesh_write.dir_workspaces")).join(format!("{id}.json")))
@@ -63,7 +85,7 @@ pub fn run(at: &Place, st: &Settings, runner: &dyn Runner, id: &str, request: &s
         .and_then(|t| serde_json::from_str(&t).ok());
     let has = |k: &str| desc.as_ref().and_then(|d| d.get(keys.str_field(k))).and_then(Value::as_str).is_some_and(|s| !s.is_empty());
     if !has("worktree") || !has("session") {
-        return refuse(defaults::render("devswarm_sup.msg_recover_descriptor", &[("id", &id)]));
+        return Err(refuse("descriptor", defaults::render("devswarm_sup.msg_recover_descriptor", &[("id", &id)])));
     }
     let done = super::verdict::path(home, id)
         .and_then(|p| std::fs::read_to_string(p).ok())
@@ -72,18 +94,18 @@ pub fn run(at: &Place, st: &Settings, runner: &dyn Runner, id: &str, request: &s
         .unwrap_or(0);
     let max = setting(st, "devswarm_sup.set_max_recoveries").as_u64().unwrap_or_default(); // keep: the shipped default always resolves; zero would refuse every recovery
     if done >= max {
-        return refuse(defaults::render("devswarm_sup.msg_recover_max", &[("id", &id), ("n", &done), ("max", &max)]));
+        return Err(refuse("max", defaults::render("devswarm_sup.msg_recover_max", &[("id", &id), ("n", &done), ("max", &max)])));
     }
     // the rollback lever (`node_duties` names recover) hands the kill to Node's own CLI; on a machine with no Node the engine
     // does NOT fall back to its own kill (the owner asked for it not to signal): it refuses before anything is recorded or touched
     let rollback = defaults::list("devswarm_sup.node_duties").contains(&defaults::text("devswarm_sup.recover_duty"));
     if rollback && !node_available(st) {
-        return refuse(defaults::text("devswarm_sup.msg_recover_rollback_no_node").into());
+        return Err(refuse("rollback_no_node", defaults::text("devswarm_sup.msg_recover_rollback_no_node").into()));
     }
     // the request is recorded BEFORE the run: a run that dies half way is never repeated by the same request
     crate::dsact::exec::append_line(&ledger(state_dir), &json!({"ts": now, "request": request, "id": id}));
     if rollback {
-        return run_node(at, st, runner, id, request, now);
+        return Ok(run_node(at, st, runner, id, request, now));
     }
     let desc = desc.unwrap_or(Value::Null);
     let wt = desc.get(keys.str_field("worktree")).and_then(Value::as_str).unwrap_or_default();
@@ -97,6 +119,9 @@ pub fn run(at: &Place, st: &Settings, runner: &dyn Runner, id: &str, request: &s
     // the Node witness: Node's own (read-only) target lookup on the same process table, compared with the engine's. It never acts;
     // when the engine would signal a process that Node does not confirm, the engine stands down instead (never weaker than Node).
     let seen = witness(at, st, runner, wt, session, &target, now);
+    if seen == Some(false) {
+        super::tick::emit_mistake(home, defaults::text("devswarm_sup.recover_duty"), id, defaults::text("devswarm_sup.act_witness_mismatch"), request);
+    }
     let target = match (&target, seen) {
         (super::kill::Target::One { .. }, Some(false)) if defaults::num("devswarm_sup.recover_witness_veto") == 1 => {
             super::kill::Target::Ambiguous { reason: defaults::text("devswarm_sup.kill_witness_disagrees").to_string(), candidates: vec![] }
@@ -106,7 +131,7 @@ pub fn run(at: &Place, st: &Settings, runner: &dyn Runner, id: &str, request: &s
     let grace = setting(st, "devswarm_sup.set_grace_sec").as_u64().unwrap_or_default().max(1) * 1000; // keep: the shipped default always resolves
     let job = super::kill::Job { home, id, descriptor: &desc, now, max_recoveries: max, grace_ms: grace, allow_interactive: true };
     let result = super::kill::recover(&sys, &job, &target);
-    (json!({"outcome": "handled", "id": id, "request": request, "target": target.to_json(wt), "result": result}), 0)
+    Ok((json!({"outcome": "handled", "id": id, "request": request, "target": target.to_json(wt), "result": result}), 0))
 }
 
 /// Whether the Node executable of the rollback can be found (an absolute `node_bin`, or one on the caller's PATH).

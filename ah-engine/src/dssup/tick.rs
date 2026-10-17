@@ -193,8 +193,18 @@ fn timed_duty(name: &str, ctx: &Ctx, runner: &dyn Runner) -> (Value, Option<supe
             (rec, job)
         }
     };
+    let ms = t.elapsed().as_millis() as u64;
+    emit_act(
+        ctx.home,
+        &defaults::render("devswarm_sup.act_duty", &[("duty", &name)]),
+        "",
+        rec["outcome"].as_str().unwrap_or_default(),
+        rec["gate"].as_str().unwrap_or_default(),
+        ms,
+        "",
+    );
     if let Some(o) = rec.as_object_mut() {
-        o.insert("ms".into(), json!(t.elapsed().as_millis() as u64));
+        o.insert("ms".into(), json!(ms));
         o.insert("cpuMs".into(), json!(crate::limits::thread_cpu_us().saturating_sub(cpu) / 1000));
     }
     (rec, job)
@@ -321,11 +331,9 @@ pub fn action_id(action: &str, target: &str, now: i64) -> String {
     format!("{action}:{target}:{now}")
 }
 
-/// One telemetry `cmd` event. For the process's own home it goes the usual way (the daemon's recorder, else the inbox); for any
-/// other home (a scratch home) it goes to the inbox under that home, so a run on a scratch home never writes the real state.
-fn telemetry(home: &Path, command: &str, sub: &str, ok: bool, latency_ms: u64) {
-    let tok = |s: &str| crate::telemetry::event::Token::sanitize(s).as_str().to_string();
-    let ev = crate::telemetry::emit::command_run(&tok(command), &tok(sub), if ok { 0 } else { 1 }, latency_ms.saturating_mul(1000), u64::from(ok));
+/// One telemetry event. For the process's own home it goes the usual way (the daemon's recorder, else the inbox); for any other
+/// home (a scratch home) it goes to the inbox under that home, so a run on a scratch home never writes the real state.
+fn emit_event(home: &Path, ev: crate::telemetry::event::Event) {
     if crate::defaults::env_var("home").is_some_and(|h| Path::new(&h) == home) {
         crate::telemetry::emit::event(ev);
     } else {
@@ -334,29 +342,78 @@ fn telemetry(home: &Path, command: &str, sub: &str, ok: bool, latency_ms: u64) {
     }
 }
 
-/// Record one action: a line of the action ledger (`devswarm_sup.action_log`) and a telemetry `cmd` event (h = the action, e =
-/// the outcome; an outcome outside `devswarm_sup.action_success` counts as an error). Returns the action id.
+/// The telemetry outcome of an outcome word: a success word is Allow, a refusal word Block, a not-applicable word Skip, and any
+/// other (a notice that had to be parked, a write that failed, a duty that failed) Error.
+fn act_outcome(word: &str) -> crate::telemetry::event::Outcome {
+    use crate::telemetry::event::Outcome;
+    let is = |key: &str| defaults::list(key).contains(&word);
+    if is("devswarm_sup.action_success") {
+        Outcome::Allow
+    } else if is("devswarm_sup.act_block_outcomes") {
+        Outcome::Block
+    } else if is("devswarm_sup.act_skip_outcomes") {
+        Outcome::Skip
+    } else {
+        Outcome::Error
+    }
+}
+
+/// One supervisor `act` telemetry event (the shared act schema, feature `devswarm_sup.action_feature`).
+pub fn emit_act(home: &Path, action: &str, target: &str, outcome: &str, reason: &str, latency_ms: u64, action_id: &str) {
+    let tok = crate::actlog::token;
+    let rec = crate::telemetry::emit::ActRec {
+        feature: &tok(defaults::text("devswarm_sup.action_feature")),
+        action: &tok(action),
+        outcome: act_outcome(outcome),
+        latency_ms,
+        target: &tok(target),
+        inputs: "",
+        reason: &tok(reason),
+        action_id: &tok(action_id),
+    };
+    emit_event(home, crate::telemetry::emit::act_call(&rec));
+}
+
+/// One supervisor `mistake` telemetry event about `action` (a wrong decision found later: a witness that disagrees, an escalated
+/// workspace that turned out to be live). `reason` is a stable word, never text.
+pub fn emit_mistake(home: &Path, action: &str, target: &str, reason: &str, action_id: &str) {
+    let tok = crate::actlog::token;
+    let rec = crate::telemetry::emit::ActRec {
+        feature: &tok(defaults::text("devswarm_sup.action_feature")),
+        action: &tok(action),
+        outcome: crate::telemetry::event::Outcome::Advise,
+        latency_ms: 0,
+        target: &tok(target),
+        inputs: "",
+        reason: &tok(reason),
+        action_id: &tok(action_id),
+    };
+    emit_event(home, crate::telemetry::emit::mistake_call(&rec));
+}
+
+/// Record one action: a line of the action ledger (`devswarm_sup.action_log`) and a telemetry `act` event (an outcome outside
+/// `devswarm_sup.action_success` counts as an error, or a skip / block per `act_skip_outcomes` / `act_block_outcomes`). Returns
+/// the action id.
 pub fn record_action(home: &Path, a: &Action) -> String {
     let id = action_id(a.action, a.target, a.now);
-    let ok = defaults::list("devswarm_sup.action_success").contains(&a.outcome);
     crate::dsact::exec::append_line(
         &home.join(defaults::text("devswarm_sup.action_log")),
         &json!({"ts": a.now, "kind": defaults::text("devswarm_sup.action_kind"), "feature": defaults::text("devswarm_sup.action_feature"), "action": a.action,
             "target": a.target, "inputs": a.inputs, "outcome": a.outcome, "reason": a.reason, "latency_ms": a.latency_ms, "action_id": id}),
     );
-    telemetry(home, a.action, a.outcome, ok, a.latency_ms);
+    emit_act(home, a.action, a.target, a.outcome, a.reason, a.latency_ms, &id);
     id
 }
 
 /// Record a mistake signal for an earlier action (`action_id`): a ledger line of kind `devswarm_sup.mistake_kind` and a telemetry
-/// `cmd` event (h = `devswarm_sup.mistake_command`, e = the action word).
+/// `mistake` event.
 pub fn record_mistake(home: &Path, action: &str, action_id: &str, why: &str, now: i64) {
     crate::dsact::exec::append_line(
         &home.join(defaults::text("devswarm_sup.action_log")),
         &json!({"ts": now, "kind": defaults::text("devswarm_sup.mistake_kind"), "feature": defaults::text("devswarm_sup.action_feature"), "action": action,
             "action_id": action_id, "reason": why}),
     );
-    telemetry(home, defaults::text("devswarm_sup.mistake_command"), action, true, 0);
+    emit_mistake(home, action, "", why, action_id);
 }
 
 /// The newest action line of the ledger for `target` with one of `actions`: `(action, action_id)`.
