@@ -7,17 +7,20 @@
 // the one running (stop-version-gate: nothing said, nothing written) or this exact set of agents was acked for the session
 // (stop-ack: state written, nothing said). Every Stop is decided here except a relative HOME (logged defer to the Node twin): a relative transcript or output path is opened
 // from the hook process's directory (hookProc), an input the interpreter cannot read as V8 does (a transcript line, a heartbeat, the
-// state or ack file over the read cap or too deep to parse) takes the silent_nudge.unsure_quiet policy, and each such case is logged
-// (silent_nudge.unsure_log_kind). Keys and texts: agent_controls.toml (silent_nudge.*, agent_scan.*).
+// state or ack file over the read cap or too deep to parse) is never answered more weakly than Node would: a Stop defers to the Node twin (silent_nudge.unsure_quiet off, the
+// default) or says nothing (on), and each such case is logged (silent_nudge.unsure_log_kind). Keys and texts: agent_controls.toml (silent_nudge.*, agent_scan.*).
 'use strict';
 
 function snNum(v) { return typeof v === 'number' && isFinite(v); }
 
-// Log an input this script cannot read exactly as Node does; true when the policy (silent_nudge.unsure_quiet) says nothing for this Stop,
-// false when the input counts as absent.
-function snUnsure(why) {
+// Log an input this script cannot read exactly as Node does. A Stop (canDefer) with silent_nudge.unsure_quiet off throws SN_DEFER, caught
+// in decide before any state write: the Node twin decides. Otherwise returns true: the caller says nothing (the engine-only
+// UserPromptSubmit advisory has no twin and always stays quiet).
+var SN_DEFER = { defer: true };
+function snUnsure(why, canDefer) {
   ah.log(ah.cfg('silent_nudge.unsure_log_kind'), why);
-  return ah.cfg('silent_nudge.unsure_quiet') === true;
+  if (canDefer && ah.cfg('silent_nudge.unsure_quiet') !== true) throw SN_DEFER;
+  return true;
 }
 
 // A JSON array member of the state read the way Node's Object.keys reads it: an object keyed by the indices.
@@ -35,12 +38,12 @@ function snFromOtherSession(outputFile, session) {
   return parts[n - 3].length === ah.cfgNum('silent_nudge.session_id_len') && parts[n - 3] !== session;
 }
 
-function snCandidates(p, home, now, threshold, session) {
+function snCandidates(p, home, now, threshold, session, canDefer) {
   var out = [], transcript = typeof p.transcript_path === 'string' ? p.transcript_path : '';
   if (transcript) {
     transcript = hookProc.open(p, transcript); // Node reads a relative path from its own directory, the payload's cwd
     var scan = ah.transcript.agentScan(transcript, ah.cfgNum('silent_nudge.scan_bytes'));
-    if (scan !== null && scan.unsure) { if (snUnsure('transcript')) return null; scan = null; }
+    if (scan !== null && scan.unsure) { snUnsure('transcript', canDefer); return null; }
     if (scan !== null) {
       var terminal = {};
       scan.terminal.forEach(function (id) { terminal[id] = true; });
@@ -88,7 +91,7 @@ function snCandidates(p, home, now, threshold, session) {
     var txt = ah.fs.readText(home + '/' + ah.cfg('silent_nudge.agents_dir') + '/' + f);
     if (txt === null) continue;
     var r = jx.parse(txt);
-    if (r.unsure) { if (snUnsure('heartbeat')) return null; continue; }
+    if (r.unsure) { snUnsure('heartbeat', canDefer); return null; }
     if (r.invalid || !jx.isObj(r.v)) continue;
     var d = r.v;
     if (typeof d.id !== 'string' || !d.id || typeof d.status !== 'string') continue;
@@ -106,14 +109,14 @@ function snCandidates(p, home, now, threshold, session) {
 }
 
 // {nudged: {key: snapshot}, ever: {key: time}} of the state file (an array member: JavaScript reads its indices as keys); null when
-// the file cannot be read as Node reads it and the policy says nothing for this Stop.
+// the file cannot be read as Node reads it and unsure_quiet says nothing for this Stop (off: snUnsure throws the defer).
 function snState(path) {
   var empty = { nudged: {}, ever: {} };
   var f = jx.read(path);
-  if (f.big) return snUnsure('state_big') ? null : empty;
+  if (f.big) { snUnsure('state_big', true); return null; }
   if (f.text === undefined) return empty;
   var r = jx.parse(f.text);
-  if (r.unsure) return snUnsure('state_parse') ? null : empty;
+  if (r.unsure) { snUnsure('state_parse', true); return null; }
   if (r.invalid || !jx.isObj(r.v)) return empty;
   var out = {};
   var keys = ['nudged', 'ever'];
@@ -157,8 +160,8 @@ function snStuckAdvisory(p) {
   var session = typeof p.session_id === 'string' ? p.session_id : '';
   var minutes = Math.max(1, ah.settings.num('procwatch.stuck_minutes'));
   var now = ah.clock.now();
-  // a transcript or heartbeat this scan cannot read exactly is no warning (silent_nudge.unsure_quiet on: no warning; off: that source is skipped)
-  var cands = snCandidates(p, home, now, minutes * 60000, session);
+  // a transcript or heartbeat this scan cannot read exactly is no warning, whatever silent_nudge.unsure_quiet says (no Node twin to defer to)
+  var cands = snCandidates(p, home, now, minutes * 60000, session, false);
   if (cands === null || cands.length === 0) return 'allow';
   var rel = ah.cfg('paths.base_dir') + '/' + ah.cfg('paths.state_dir') + '/' + ah.cfg('procwatch.stuck_state_file');
   var nowS = Math.floor(now / 1000), last = {};
@@ -183,7 +186,12 @@ function snStuckAdvisory(p) {
   return { advisory: text.advisoryJson(ah.cfg('procwatch.stuck_event'), msg) };
 }
 
+// A Stop whose input is unreadable as V8 reads it defers (SN_DEFER thrown before any state write) unless unsure_quiet is on.
 function decide(p, opts) {
+  try { return snDecide(p, opts); } catch (e) { if (e === SN_DEFER) return 'defer'; throw e; }
+}
+
+function snDecide(p, opts) {
   if (ah.env.get(ah.cfg('silent_nudge.judge_child_env')) === ah.cfg('silent_nudge.judge_child_value')) return 'allow';
   if (p !== null && typeof p === 'object' && p[ah.cfg('procwatch.f_event')] === ah.cfg('procwatch.stuck_event')) return snStuckAdvisory(p);
   // Node: HOME || USERPROFILE (an empty one falls through), and no nudge without either. A relative one names a directory of the hook
@@ -199,7 +207,7 @@ function decide(p, opts) {
   var minutes = ah.settings.num('silent_nudge.min_setting');
   if (!isFinite(minutes) || minutes < 1) minutes = ah.cfgNum('silent_nudge.min_default');
   var threshold = minutes * 60000, now = ah.clock.now();
-  var candidates = snCandidates(p, home, now, threshold, session);
+  var candidates = snCandidates(p, home, now, threshold, session, true);
   if (candidates === null || candidates.length === 0) return 'allow';
   var stateRel = ah.cfg('silent_nudge.state_file');
   var state = snState(home + '/' + stateRel);
@@ -246,10 +254,10 @@ function decide(p, opts) {
   var acked = false;
   if (session && ah.settings.bool('silent_nudge.ack_setting')) {
     var a = jx.read(snAckPath(home, session));
-    if (a.big && snUnsure('ack_big')) return 'allow';
+    if (a.big) { snUnsure('ack_big', true); return 'allow'; }
     if (a.text !== undefined) {
       var ar = jx.parse(a.text);
-      if (ar.unsure && snUnsure('ack_parse')) return 'allow';
+      if (ar.unsure) { snUnsure('ack_parse', true); return 'allow'; }
       acked = !ar.invalid && !ar.unsure && jx.isObj(ar.v) && snNum(ar.v[ackKey]) && ar.v[ackKey] > 0;
     }
   }

@@ -961,29 +961,34 @@ fn silent_corpus() -> Vec<Sc> {
     add(sc("state-nudged-null-members", h, stop_payload_for(json!("s1")))
         .transcript(&stale_run("01"))
         .file(".anti-hall/silent-agent-nudge-state.json", "{\"nudged\":null,\"everNudged\":5}"));
-    // C1 (#68): inputs the interpreter cannot read as V8 does take silent_nudge.unsure_quiet (default on): nothing said, nothing
-    // written. Node reads them and nudges; the engine's policy answer is pinned here.
+    // C1 (#68), never weaker than Node: inputs the interpreter cannot read as V8 does (nested >~100k, over the read cap) are a logged defer
+    // to the Node twin (silent_nudge.unsure_quiet off, the default); Node reads them and nudges. The same Codex payload defers too.
     let deep = |d: usize| format!("{}{}", "[".repeat(d), "]".repeat(d));
-    add(sc("state-too-deep-native-quiet", h, stop_payload_for(json!("s1")))
+    add(sc("state-too-deep-defers-to-node", h, stop_payload_for(json!("s1")))
         .transcript(&stale_run("01"))
         .file(".anti-hall/silent-agent-nudge-state.json", &format!("{{\"nudged\":{},\"everNudged\":{{}}}}", deep(100_000)))
-        .quiet());
-    add(sc("state-over-read-cap-native-quiet", h, stop_payload_for(json!("s1")))
+        .defers());
+    add(sc("state-over-read-cap-defers-to-node", h, stop_payload_for(json!("s1")))
         .transcript(&stale_run("01"))
         .file(".anti-hall/silent-agent-nudge-state.json", &json!({"nudged": {}, "everNudged": {}, "pad": "x".repeat(4_300_000)}).to_string())
-        .quiet());
-    add(sc("heartbeat-too-deep-native-quiet", h, stop_payload_for(json!("s1")))
+        .defers());
+    add(sc("heartbeat-too-deep-defers-to-node", h, stop_payload_for(json!("s1")))
         .transcript(&stale_run("01"))
         .file(".anti-hall/agents/deep.json", &deep(100_000))
-        .quiet());
-    add(sc("ack-too-deep-native-quiet", h, stop_payload_for(json!("s1")))
+        .defers());
+    add(sc("ack-too-deep-defers-to-node", h, stop_payload_for(json!("s1")))
         .transcript(&stale_run("01"))
         .file(".anti-hall/stop-ack/stop-ack-s1.json", &deep(100_000))
-        .quiet());
-    add(sc("ack-over-read-cap-native-quiet", h, stop_payload_for(json!("s1")))
+        .defers());
+    add(sc("ack-over-read-cap-defers-to-node", h, stop_payload_for(json!("s1")))
         .transcript(&stale_run("01"))
         .file(".anti-hall/stop-ack/stop-ack-s1.json", &json!({"pad": "x".repeat(4_300_000)}).to_string())
-        .quiet());
+        .defers());
+    let mut codex_deep = stop_payload_for(json!("s1"));
+    codex_deep["turn_id"] = json!("t");
+    add(sc("codex-state-too-deep-defers-to-node", h, codex_deep).transcript(&stale_run("01"))
+        .file(".anti-hall/silent-agent-nudge-state.json", &format!("{{\"nudged\":{},\"everNudged\":{{}}}}", deep(100_000)))
+        .defers());
     // never weaker than Node: a relative HOME names a directory the engine cannot see, so the Node twin decides (Claude + Codex)
     add(old(sc("relative-home-defers-to-node", h, stop_payload_for(json!("s1"))).transcript(&stale_run("01")), "01").env("HOME", "relative").defers());
     let mut codex_stop = stop_payload_for(json!("s1"));
@@ -1138,12 +1143,13 @@ fn silent_corpus() -> Vec<Sc> {
         ),
         "01",
     ));
-    add(sc("lone-surrogate-line-native-quiet", h, stop_payload_for(json!("s1")))
+    // a transcript line the interpreter cannot hold (lone surrogate) is an unsure scan: a logged defer, never weaker than Node
+    add(sc("lone-surrogate-line-defers-to-node", h, stop_payload_for(json!("s1")))
         .transcript(
             &[stale_run("01"), vec![format!("{{\"type\":\"user\",\"message\":{{\"content\":\"tool_result \\ud800\"}},\"timestamp\":\"{}\"}}", ago(1.0))]]
                 .concat(),
         )
-        .quiet());
+        .defers());
     add(old(sc("payload-array-still-evaluated", h, json!([])), "01"));
     add(sc("payload-string", h, json!("x")));
     add(sc("malformed-stdin-defers-to-node", h, json!({})).raw("{nope").defers());
