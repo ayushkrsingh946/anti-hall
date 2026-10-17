@@ -27,6 +27,7 @@ use crate::setup::jsfmt::js_string;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
+mod recon;
 mod wake;
 
 fn text(key: &str) -> &'static str {
@@ -466,6 +467,12 @@ impl Run<'_> {
         if row.get("empty_when").is_some()
             && !self.env.get(text("update_post.node_test_env")).is_some_and(|v| !v.is_empty())
             && let Some(v) = self.empty_store_stage(row)
+        {
+            return v;
+        }
+        if row.get("recon").is_some()
+            && self.files_there(&files)
+            && let Some(v) = self.recon_stage(row, deadline)
         {
             return v;
         }

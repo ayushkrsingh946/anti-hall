@@ -968,3 +968,15 @@ doc = "How many of the sampled unhealable orphans a stage detail names (Node: sl
 value = 5
 min = 0
 max = 1000
+
+[devswarm_recon.marker_archived_rows]
+doc = "The key in update-sweep-state.json that stamps the archived registry-row half of fold-archived-rows done for a version."
+value = "foldArchivedRows"
+
+[devswarm_recon.marker_archived_family]
+doc = "The key in update-sweep-state.json that stamps the twin-descriptor half of fold-archived-rows done for a version."
+value = "foldArchivedFamilyDescriptors"
+
+[devswarm_recon.reason_no_project]
+doc = "The reason `reconcile` gives (and logs) for a working directory that is not inside a project."
+value = "no-project"

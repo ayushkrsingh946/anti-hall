@@ -71,7 +71,7 @@ You need **Node.js 22 or newer** on your `PATH` (`node --version`) for now (no l
 
     ```bash
     git clone https://github.com/talas9/anti-hall.git
-    node anti-hall/plugins/anti-hall/codex/install-codex.js --global
+    ~/.anti-hall/ah-engine/bin/ah-engine install-codex --global
     ```
 
 Then add `.anti-hall/` to your project's `.gitignore`, because anti-hall keeps per-project

@@ -421,7 +421,7 @@ pub fn run(ctx: &Ctx, runner: &dyn Runner, stage: &str, hooks: &Hooks) -> Option
     let budget = budget_ms(ctx);
     let w = Walk { ctx, runner, hooks, stage, deadline_ms: ctx.now + budget as i64, timeout_ms };
     if stage == defaults::text("devswarm_recon.stage_archived") {
-        return Some(archived(&w, budget));
+        return Some(archived(&w, budget, None));
     }
     let key = defaults::raw("devswarm_sup.ds_stage_keys").get(stage).and_then(crate::defaults::V::as_str)?;
     let state = read_state(ctx.home);
@@ -430,6 +430,54 @@ pub fn run(ctx: &Ctx, runner: &dyn Runner, stage: &str, hooks: &Hooks) -> Option
         _ => return None,
     };
     let Items::List(items) = sweep_items_for(&state, key, &version) else { return None };
+    Some(walk(&w, Some((key, &version, &state)), &items, budget))
+}
+
+/// What the update's wrapper hands a store stage (`foldAllStoresPostUpdate` and its siblings): the new version, the stores to walk
+/// when nothing is pending (the shared listing, smallest store first), the stage's own sweep budget and the cap the overall post-pull
+/// budget puts on every store's deadline.
+pub struct UpdateRun<'a> {
+    /// The new version; `None`: nothing is stamped and nothing is resumed (the wrapper's `version = null`).
+    pub version: Option<&'a str>,
+    /// `fullEnumerate()`: the stores of a first run at this version.
+    pub hashes: Vec<String>,
+    /// `sweepBudgetMs(env)`.
+    pub budget_ms: f64,
+    /// `postPullDeadline`, epoch ms.
+    pub deadline_cap: Option<i64>,
+}
+
+/// The update's store stages run natively behind the same switch as the supervisor's (`devswarm_sup.sweep_tail_mode`): the
+/// `sweepItemsFor` of the wrapper (a prior partial run's list, else the enumeration), the throttled walk, `recordSweepResult` and
+/// `recordRun`. `None`: Node's stage function runs whole (not engine mode, an unknown stage, a stage already stamped).
+pub fn run_update(ctx: &Ctx, runner: &dyn Runner, stage: &str, hooks: &Hooks, up: &UpdateRun) -> Option<StageOut> {
+    if !archive::engine_mode(ctx.st) {
+        return None;
+    }
+    let timeout_ms = defaults::raw("devswarm_sup.duty.deferred").get("timeout_ms").and_then(crate::defaults::V::as_integer).unwrap_or(0).max(1) as u64;
+    let own = ctx.now + up.budget_ms as i64;
+    let deadline_ms = up.deadline_cap.map_or(own, |c| own.min(c));
+    let w = Walk { ctx, runner, hooks, stage, deadline_ms, timeout_ms };
+    if stage == defaults::text("devswarm_recon.stage_archived") {
+        return Some(archived(&w, up.budget_ms, Some(up)));
+    }
+    let key = defaults::raw("devswarm_sup.ds_stage_keys").get(stage).and_then(crate::defaults::V::as_str)?;
+    let state = read_state(ctx.home);
+    let Some(version) = up.version.filter(|v| !v.is_empty()) else {
+        return Some(walk(&w, None, &up.hashes, up.budget_ms));
+    };
+    let items = match sweep_items_for(&state, key, version) {
+        Items::Skip => return None,
+        Items::Enumerate => up.hashes.clone(),
+        Items::List(l) => l,
+    };
+    Some(walk(&w, Some((key, version, &state)), &items, up.budget_ms))
+}
+
+/// The walk of a store stage over `items` (the stage function's `runThrottledSweep`), then the marker (`record`: the stage's key,
+/// the version and the state read before the walk; `None`: nothing is stamped), then the stage's answer.
+fn walk(w: &Walk, record: Option<(&str, &str, &OVal)>, items: &[String], budget: f64) -> StageOut {
+    let (ctx, hooks, stage) = (w.ctx, w.hooks, w.stage);
     let yield_ms = defaults::num("devswarm_recon.stage_yield_ms");
     let start = Instant::now();
     let mut acc = Acc::default();
@@ -461,7 +509,9 @@ pub fn run(ctx: &Ctx, runner: &dyn Runner, stage: &str, hooks: &Hooks) -> Option
     } else {
         (acc.errors == 0.0, 0.0, 0.0)
     };
-    record_sweep_result(ctx, &state, key, &version, &processed, &remaining, exhausted, clean, pending_rows, forward_failed);
+    if let Some((key, version, state)) = record {
+        record_sweep_result(ctx, state, key, version, &processed, &remaining, exhausted, clean, pending_rows, forward_failed);
+    }
     (hooks.at)(&format!("stage:{stage}:record:after"));
     let n_stores = fmt_n(processed.len() as f64);
     let tail = |detail: &mut String| {
@@ -539,7 +589,7 @@ pub fn run(ctx: &Ctx, runner: &dyn Runner, stage: &str, hooks: &Hooks) -> Option
         json!({"attempted": true, "checked": jn(acc.checked), "healed": jn(acc.healed), "rehomed": jn(acc.rehomed), "errors": jn(acc.errors), "stores": acc.stores,
             "budgetExhausted": exhausted, "pending": remaining.len(), "detail": d})
     };
-    Some(StageOut { result, items: records, budget_ms: budget })
+    StageOut { result, items: records, budget_ms: budget }
 }
 
 // ---- fold-archived-rows -----------------------------------------------------------------------------------------------------
@@ -564,15 +614,24 @@ fn half(w: &Walk, label: &str, plan: crate::meshw::ident::R<archive::Plan>, reco
     r
 }
 
-/// `foldArchivedRowsPostUpdate` with no version: both halves run, nothing is stamped, the resume markers (written by the folds
-/// themselves) drive the next pass.
-fn archived(w: &Walk, budget: f64) -> StageOut {
+/// `foldArchivedRowsPostUpdate`. With no version (`up` is `None`, or it carries none) both halves run and nothing is stamped, the
+/// resume markers (written by the folds themselves) drive the next pass. With the update's version a half whose one-time marker is
+/// already stamped is not run (its counts are zero), and each half that ran is stamped by `recordRun` when the one completeness
+/// predicate says it is done: `foldArchivedRows` for the rows, `foldArchivedFamilyDescriptors` for the twin descriptors.
+fn archived(w: &Walk, budget: f64, up: Option<&UpdateRun>) -> StageOut {
     let ctx = w.ctx;
     let stage = w.stage;
+    let version = up.and_then(|u| u.version).filter(|v| !v.is_empty());
+    let stamped = |key: &str| {
+        let state = read_state(ctx.home);
+        version.is_some_and(|v| matches!(state.get(key).and_then(|e| e.get("completedVersion")), Some(OVal::Str(c)) if c == v))
+    };
+    let (rows_key, fam_key) = (defaults::text("devswarm_recon.marker_archived_rows"), defaults::text("devswarm_recon.marker_archived_family"));
+    let (rows_done, fam_done) = (stamped(rows_key), stamped(fam_key));
     let mut records = Vec::new();
     let deadline = Some(w.deadline_ms);
     (w.hooks.at)(&format!("stage:{stage}:rows:before"));
-    let r = half(w, "rows", archive::fold_archived_rows(ctx.home, ctx.now, deadline), &mut records);
+    let r = if rows_done { json!({}) } else { half(w, "rows", archive::fold_archived_rows(ctx.home, ctx.now, deadline), &mut records) };
     (w.hooks.at)(&format!("stage:{stage}:rows:after"));
     if r.get("threw") == Some(&Value::Bool(true)) {
         let d = defaults::render("devswarm_recon.d_raised", &[("stage", &stage), ("error", &js_text(&r["error"]))]);
@@ -589,21 +648,31 @@ fn archived(w: &Walk, budget: f64) -> StageOut {
             ));
         }
     };
-    why_not("devswarm_recon.label_rows", &r);
+    if !rows_done {
+        if let Some(v) = version {
+            record_run(ctx, rows_key, v, &r);
+        }
+        why_not("devswarm_recon.label_rows", &r);
+    }
     (w.hooks.at)(&format!("stage:{stage}:family:before"));
-    let fr = half(w, "family", archive::fold_archived_family(ctx.home, ctx.now, deadline), &mut records);
+    let fr = if fam_done { None } else { Some(half(w, "family", archive::fold_archived_family(ctx.home, ctx.now, deadline), &mut records)) };
     (w.hooks.at)(&format!("stage:{stage}:family:after"));
-    let (fam_retired, fam_left, fam_errors, fam_ok) = if fr.get("threw") == Some(&Value::Bool(true)) {
-        (0.0, 0.0, 1.0, false)
-    } else {
-        let fr = if fr.is_null() { json!({}) } else { fr };
-        why_not("devswarm_recon.label_twins", &fr);
-        (
-            fr.get("retired").and_then(Value::as_array).map_or(0.0, |a| a.len() as f64),
-            fr.get("left").and_then(Value::as_array).map_or(0.0, |a| a.len() as f64),
-            js_num(fr.get("errors")),
-            fr.get("ok") != Some(&Value::Bool(false)),
-        )
+    let (fam_retired, fam_left, fam_errors, fam_ok) = match fr {
+        None => (0.0, 0.0, 0.0, true),
+        Some(fr) if fr.get("threw") == Some(&Value::Bool(true)) => (0.0, 0.0, 1.0, false),
+        Some(fr) => {
+            let fr = if fr.is_null() { json!({}) } else { fr };
+            if let Some(v) = version {
+                record_run(ctx, fam_key, v, &fr);
+            }
+            why_not("devswarm_recon.label_twins", &fr);
+            (
+                fr.get("retired").and_then(Value::as_array).map_or(0.0, |a| a.len() as f64),
+                fr.get("left").and_then(Value::as_array).map_or(0.0, |a| a.len() as f64),
+                js_num(fr.get("errors")),
+                fr.get("ok") != Some(&Value::Bool(false)),
+            )
+        }
     };
     let retired = r.get("retired").and_then(Value::as_array).map_or(0.0, |a| a.len() as f64);
     let left = r.get("left").and_then(Value::as_array).map_or(0.0, |a| a.len() as f64);

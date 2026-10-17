@@ -73,6 +73,8 @@ fn init_env() -> String {
         // SAFETY: set once, before anything in this process reads these variables
         unsafe {
             std::env::set_var("PATH", &path);
+            // the hivecontrol guard (src/hcguard.rs) only lets a stub run from a scratch root; this one lives under ~/.anti-hall/scratch
+            std::env::set_var("AH_HC_STUB_DIR", dir.parent().unwrap());
             std::env::set_var("ANTIHALL_DEVSWARM_APP_DB", "off");
             std::env::set_var("ANTIHALL_INGEST_DRY_RUN", "1");
             std::env::set_var("AH_ENGINE_PLUGIN_ROOT", plugin_root());

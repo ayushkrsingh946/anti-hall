@@ -35,11 +35,11 @@ has an on/off switch there; `settings.js show` lists the few parts that have non
 === "The command line"
 
     ```bash
-    node plugins/anti-hall/scripts/settings.js show                      # common settings, one table per section
-    node plugins/anti-hall/scripts/settings.js show --section jev --all  # one section, with advanced settings
-    node plugins/anti-hall/scripts/settings.js get autoHandover.pct
-    node plugins/anti-hall/scripts/settings.js set limitConserve.threshold 90
-    node plugins/anti-hall/scripts/settings.js reset limitConserve.threshold
+    ~/.anti-hall/ah-engine/bin/ah-engine settings show                      # common settings, one table per section
+    ~/.anti-hall/ah-engine/bin/ah-engine settings show --section jev --all  # one section, with advanced settings
+    ~/.anti-hall/ah-engine/bin/ah-engine settings get autoHandover.pct
+    ~/.anti-hall/ah-engine/bin/ah-engine settings set limitConserve.threshold 90
+    ~/.anti-hall/ah-engine/bin/ah-engine settings reset limitConserve.threshold
     ```
 
     Every command takes `--json` for scripts.

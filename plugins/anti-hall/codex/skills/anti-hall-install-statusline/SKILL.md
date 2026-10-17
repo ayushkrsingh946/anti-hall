@@ -33,13 +33,13 @@ Codex/OMX `[tui].status_line` uses documented built-in footer item IDs, not a co
 - phase/progress state writer:
 
 ```bash
-node "$ANTI_HALL_ROOT/statusline/phase.js"
+~/.anti-hall/ah-engine/bin/ah-engine phase
 ```
 
 - statusline renderer smoke check:
 
 ```bash
-node "$ANTI_HALL_ROOT/statusline/statusline.js"
+echo '{}' | ~/.anti-hall/ah-engine/bin/ah-engine statusline
 ```
 
 - OMX HUD/statusline built-ins through `omx hud` and `[tui].status_line`

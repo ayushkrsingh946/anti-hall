@@ -6,19 +6,19 @@ Claude Code plugin files.
 Install project-local Codex hooks:
 
 ```bash
-node plugins/anti-hall/codex/install-codex.js
+~/.anti-hall/ah-engine/bin/ah-engine install-codex
 ```
 
 Install global Codex hooks:
 
 ```bash
-node plugins/anti-hall/codex/install-codex.js --global
+~/.anti-hall/ah-engine/bin/ah-engine install-codex --global
 ```
 
 Dry-run:
 
 ```bash
-node plugins/anti-hall/codex/install-codex.js --dry-run
+~/.anti-hall/ah-engine/bin/ah-engine install-codex --dry-run
 ```
 
 ### Enable Jev

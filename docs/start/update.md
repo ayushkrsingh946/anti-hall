@@ -44,7 +44,7 @@ since your install are registered too. It is safe to re-run: it replaces its own
 in `hooks.json` and leaves your other hooks alone.
 
 ```bash
-node /path/to/anti-hall/plugins/anti-hall/codex/install-codex.js --global
+~/.anti-hall/ah-engine/bin/ah-engine install-codex --global
 ```
 
 ## After an update

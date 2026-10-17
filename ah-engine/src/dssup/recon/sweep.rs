@@ -473,7 +473,21 @@ pub fn cmd_reconcile(ctx: &Ctx, runner: &dyn Runner, cwd: &str, o: &Opts, hooks:
 
 fn reconcile(ctx: &Ctx, runner: &dyn Runner, cwd: &str, o: &Opts, hooks: &Hooks) -> R<ProjectEnd> {
     let home = ctx.home;
-    let Some(repo_key) = ident::repo_key_for_worktree(cwd)? else { return Ok(ProjectEnd::Result(json!({"ok": false, "reason": "no-project"}))) };
+    let Some(repo_key) = ident::repo_key_for_worktree(cwd)? else {
+        // `run()` logs a result that is not ok, a directory that is no project included
+        let inv = Inv {
+            home: home.to_path_buf(),
+            env: pull::sweep_env(&ctx.st.env, home),
+            cwd: cwd.to_string(),
+            now: ctx.now,
+            stdin: None,
+            write_home: home.to_path_buf(),
+            store_override: None,
+        };
+        let why = defaults::text("devswarm_recon.reason_no_project");
+        crate::meshw::clog::refusal(&inv, defaults::text("devswarm_recon.action_reconcile"), None, None, why, Some(why));
+        return Ok(ProjectEnd::Result(json!({"ok": false, "reason": why})));
+    };
     // GH1: a stranded child of this project is Node's to re-home before the listing
     if stranded_exists(home, &repo_key)? {
         return defer("rehome-stranded");

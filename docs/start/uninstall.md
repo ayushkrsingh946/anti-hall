@@ -12,7 +12,7 @@ still has an anti-hall `statusLine`, do this first while the plugin files are st
 there. Run this from the plugin directory:
 
 ```bash
-node statusline/uninstall-statusline.js
+~/.anti-hall/ah-engine/bin/ah-engine uninstall-statusline
 ```
 
 It puts back the previous `statusLine` when a saved base command exists, otherwise it
@@ -38,13 +38,12 @@ write or upgrade `statusLine`.
 
 ## 3. Remove optional companions (if you installed them)
 
-These background helpers are only present if you ran their installers. Run the uninstall
-from `plugins/anti-hall/companion/` in a clone, or from the plugin directory:
+These background helpers are only present if you installed them:
 
 ```bash
-node install-reaper.js --uninstall                # MCP orphan reaper
-node install-devswarm-supervisor.js --uninstall   # DevSwarm liveness supervisor
-node install-devswarm-ingest.js --uninstall       # DevSwarm ingest daemon
+~/.anti-hall/ah-engine/bin/ah-engine units status      # lists the engine unit and any old Node reaper/supervisor/ingest units
+~/.anti-hall/ah-engine/bin/ah-engine units heal        # retires the old Node units (moved aside, never deleted)
+~/.anti-hall/ah-engine/bin/ah-engine units uninstall   # unloads the engine unit
 ```
 
 ## 4. Your data

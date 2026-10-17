@@ -34,8 +34,8 @@ These are background helpers you install yourself; nothing installs them for you
 
 | Companion | What it does | Install from `plugins/anti-hall/companion/` |
 |---|---|---|
-| Liveness supervisor | Checks every 90 seconds for stuck workspaces and nudges them. | `node install-devswarm-supervisor.js` |
-| Ingest daemon | Reads DevSwarm's workspace messages continuously and files them into anti-hall's message store. | `node install-devswarm-ingest.js` |
+| Liveness supervisor | Checks every 90 seconds for stuck workspaces and nudges them. | `~/.anti-hall/ah-engine/bin/ah-engine units install` |
+| Ingest daemon | Reads DevSwarm's workspace messages continuously and files them into anti-hall's message store. | `~/.anti-hall/ah-engine/bin/ah-engine units install` |
 
 They run as a launchd agent on macOS, or a systemd user unit on Linux (cron when `systemctl` is missing). Uninstall with
 `--uninstall` ([Uninstall](../start/uninstall.md#3-remove-optional-companions-if-you-installed-them)).
