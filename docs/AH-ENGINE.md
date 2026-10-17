@@ -1804,3 +1804,5 @@ mismatch is fixed in Rust, never by changing the guard (D31).
 **Is it on?** It is used whenever its binary is installed at `~/.anti-hall/ah-engine/bin/ah-engine`, which the plugin's bootstrap does
 once a release pins one in `ah-engine.lock`. With no binary, or after opting out of the bootstrap and removing it, the Node hooks run as before
 ([Rollback](#install-go-live-and-rollback)). `ah-engine status --json` and `ah-engine telemetry summary` show what it is doing.
+
+**Descriptor reads are bounded (`ident::read_bounded` / `read_or_skip`).** A file a descriptor or receipt names (inbox, cursor file, workspace descriptor, read receipt) is never read when it is no regular file (a FIFO, socket or device would block the verb for good) or is over `mesh_write.file_read_max_bytes`. The verbs that carry on without the file skip it, count `mesh_descriptor_read_skipped` (labels `site`, `reason`) and log the site and reason; a pull whose inbox is no regular file refuses the append instead of blocking on it.

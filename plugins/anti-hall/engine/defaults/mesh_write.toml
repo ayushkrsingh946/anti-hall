@@ -2066,3 +2066,34 @@ value = { kind = "counter", unit = "references", labels = ["outcome"] }
 [metric.mesh_watcher_matched_by_checkout]
 doc = "Watcher-live checks answered by another row's lock on the same checkout because the workspace's own id had no live lock."
 value = { kind = "counter", unit = "checks", labels = [] }
+
+[mesh_write.msg_descriptor_read_skipped]
+doc = "The log line when a file named by a descriptor (or a receipt) was not read because it is no regular file or is over the read cap. {site} {reason} {path}."
+value = "mesh read skipped: site={site}, reason={reason}, path={path}"
+
+[mesh_write.site_read_cursor]
+doc = "The `site` label of a skipped read of a cursor file (the NDJSON read position)."
+value = "read-cursor"
+
+[mesh_write.site_pull_inbox]
+doc = "The `site` label of a skipped read of a durable inbox that a pull was about to append to."
+value = "pull-inbox"
+
+[mesh_write.site_pull_descriptor]
+doc = "The `site` label of a skipped read of a workspace descriptor by a pull."
+value = "pull-descriptor"
+
+[mesh_write.site_receipt]
+doc = "The `site` label of a skipped read of a read receipt."
+value = "read-receipt"
+
+[metric.mesh_descriptor_read_skipped]
+doc = "Reads of a file named by a descriptor that were skipped because it is no regular file (a FIFO, socket or device) or is over the read cap, by site and reason."
+value = { kind = "counter", unit = "reads", labels = ["site", "reason"] }
+
+[mesh_write.fifo_test_bound_ms]
+doc = "How long a test waits for a read of a FIFO before it calls the read blocked."
+value = 10000
+unit = "ms"
+min = 100
+max = 600000

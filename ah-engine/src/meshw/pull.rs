@@ -569,9 +569,11 @@ pub(crate) struct Ingested {
 }
 
 /// The hashes the inbox already holds (`collectExistingHashes`): the embedded content hash of each line; a torn line is skipped.
-fn inbox_hashes(inbox: &Path) -> std::collections::HashSet<String> {
+/// `Err` for an inbox that is no regular file (a FIFO would block the append that follows) or is over the read cap.
+fn inbox_hashes(inbox: &Path) -> Result<std::collections::HashSet<String>, String> {
     let mut seen = std::collections::HashSet::<String>::new();
-    if let Ok(bytes) = std::fs::read(inbox) {
+    let bytes = ident::read_bounded(inbox).map_err(|e| e.0)?;
+    if let Some(bytes) = bytes {
         for line in String::from_utf8_lossy(&bytes).split('\n') {
             let t = js_trim(line);
             if t.is_empty() {
@@ -585,7 +587,7 @@ fn inbox_hashes(inbox: &Path) -> std::collections::HashSet<String> {
             }
         }
     }
-    seen
+    Ok(seen)
 }
 
 /// One batch against the hashes already seen: the lines to append and the counts (a message already seen, in the inbox or earlier
@@ -628,7 +630,7 @@ fn batch_lines(p: &Plan, batch: &import::Batch, seen: &mut std::collections::Has
 /// What ingesting `raws` in order (the open batches, then the new one) would make of the LAST one: its imported and duplicate
 /// counts and the number of messages it parsed, without writing.
 pub(crate) fn preview(p: &Plan, raws: &[&str]) -> (usize, usize, usize) {
-    let mut seen = inbox_hashes(&p.inbox);
+    let mut seen = inbox_hashes(&p.inbox).unwrap_or_default();
     let mut last = (0, 0, 0);
     for raw in raws {
         let batch = import::parse_batch(raw);
@@ -647,7 +649,10 @@ pub(crate) fn store_feed_left(inv: &Inv, p: &Plan, raw: &str) -> bool {
 /// hash) and fsync it, then the best-effort store feed. `Err` when the durable append fails (the WAL entry then stays pending).
 fn ingest_raw(inv: &Inv, p: &Plan, raw: &str, at: &dyn Fn(&str)) -> Result<Ingested, String> {
     let batch = import::parse_batch(raw);
-    let mut seen = inbox_hashes(&p.inbox);
+    let mut seen = inbox_hashes(&p.inbox).map_err(|why| {
+        crate::metrics::bump("mesh_descriptor_read_skipped", &[("site", defaults::text("mesh_write.site_pull_inbox")), ("reason", why.as_str())]);
+        why
+    })?;
     let (lines, imported, duplicate) = batch_lines(p, &batch, &mut seen);
     // DURABLE append precedes the WAL `done`: one append of the whole batch, a leading newline after a torn tail, then the fsync
     if !lines.is_empty() {
@@ -801,16 +806,16 @@ pub(crate) fn capture_fresh(inv: &Inv, p: &Plan, worktree: &str, at: &dyn Fn(&st
     Fresh::Read { native, ok: r.ok, entry, wal_error, raw: r.raw }
 }
 
+/// The workspace descriptor `<id>.json`, parsed; `None` when it is absent, unparsable or a file a read must not touch.
+fn read_descriptor(home: &Path, id: &str) -> Option<OVal> {
+    let file = devswarm_root(home).join(defaults::text("mesh_write.dir_workspaces")).join(format!("{id}{}", defaults::text("mesh_write.json_suffix")));
+    ident::read_or_skip(&file, defaults::text("mesh_write.site_pull_descriptor")).and_then(|b| OVal::parse(&String::from_utf8_lossy(&b)))
+}
+
 fn pull_locked(inv: &Inv, p: &Plan) -> Outcome {
     let blocked = Outcome { wal_blocked: true };
     // the descriptor is read again, as Node does (the ensure has written it)
-    let Some(desc) = std::fs::read(devswarm_root(&inv.home).join(defaults::text("mesh_write.dir_workspaces")).join(format!(
-        "{}{}",
-        p.id,
-        defaults::text("mesh_write.json_suffix")
-    )))
-    .ok()
-    .and_then(|b| OVal::parse(&String::from_utf8_lossy(&b))) else {
+    let Some(desc) = read_descriptor(&inv.home, &p.id) else {
         return Outcome::default();
     };
     let worktree = field_str(&desc, defaults::text("mesh_write.field_worktree_path")).unwrap_or_else(|| p.cwd.clone());
@@ -889,4 +894,25 @@ fn pull_locked(inv: &Inv, p: &Plan) -> Outcome {
         );
     }
     Outcome { wal_blocked: wal_error }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::meshw::ident::fifo_kit::*;
+
+    #[test]
+    fn a_fifo_inbox_or_descriptor_returns_at_once_instead_of_blocking() {
+        let dir = scratch("pull");
+        let inbox = dir.join("in.ndjson");
+        fifo(&inbox);
+        let i = inbox.clone();
+        assert!(within("inbox_hashes", move || inbox_hashes(&i).is_err()), "a FIFO inbox is refused, not read and not appended to");
+        let home = dir.join("home");
+        let ws = devswarm_root(&home).join(defaults::text("mesh_write.dir_workspaces"));
+        std::fs::create_dir_all(&ws).unwrap();
+        fifo(&ws.join("w1.json"));
+        assert!(within("read_descriptor", move || read_descriptor(&home, "w1").is_none()));
+        crate::discard::harmless(std::fs::remove_dir_all(dir)); // keep: cleanup of a scratch directory
+    }
 }
