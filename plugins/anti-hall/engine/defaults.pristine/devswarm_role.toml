@@ -186,18 +186,34 @@ function fromInstalledJson() {
     const data = JSON.parse(fs.readFileSync(p, "utf8"));
     const reg = (data && typeof data === "object" && data.plugins && typeof data.plugins === "object")
       ? data.plugins : data;
-    const entry = reg && reg["anti-hall@anti-hall"];
-    let pick = null;
-    if (Array.isArray(entry)) {
-      pick = entry.find(function (e) { return e && e.scope === "user" && typeof e.installPath === "string"; })
-        || entry.find(function (e) { return e && e.scope === "project" && typeof e.installPath === "string"; })
-        || entry.find(function (e) { return e && typeof e.installPath === "string"; });
-    } else if (entry && typeof entry === "object" && typeof entry.installPath === "string") {
-      pick = entry;
-    }
-    if (pick) {
-      const target = path.join.apply(path, [pick.installPath].concat(SEGMENTS));
-      if (fileExists(target)) return target;
+    // The ENABLED install wins: installed_plugins.json may register several anti-hall@* keys, and only the one
+    // enabledPlugins marks true is the one the harness runs. anti-hall@anti-hall is the fallback only when none is enabled.
+    let on = {};
+    try { on = JSON.parse(fs.readFileSync(path.join(home, ".claude", "settings.json"), "utf8")).enabledPlugins || {}; } catch (_) {}
+    let keys = Object.keys(reg || {}).filter(function (k) { return k.indexOf("anti-hall@") === 0 && on[k] === true; });
+    const choice = keys.length ? "enabled" : "fallback";
+    if (!keys.length) keys = ["anti-hall@anti-hall"];
+    for (const key of keys) {
+      const entry = reg && reg[key];
+      let pick = null;
+      if (Array.isArray(entry)) {
+        pick = entry.find(function (e) { return e && e.scope === "user" && typeof e.installPath === "string"; })
+          || entry.find(function (e) { return e && e.scope === "project" && typeof e.installPath === "string"; })
+          || entry.find(function (e) { return e && typeof e.installPath === "string"; });
+      } else if (entry && typeof entry === "object" && typeof entry.installPath === "string") {
+        pick = entry;
+      }
+      if (pick) {
+        const target = path.join.apply(path, [pick.installPath].concat(SEGMENTS));
+        if (fileExists(target)) {
+          try {
+            fs.mkdirSync(path.join(home, ".anti-hall", "ah-engine"), { recursive: true });
+            fs.appendFileSync(path.join(home, ".anti-hall", "ah-engine", "launcher-choice.log"),
+              JSON.stringify({ ts: Date.now(), choice: choice, key: key }) + "\n");
+          } catch (_) {}
+          return target;
+        }
+      }
     }
   } catch (_) { /* fall through */ }
   return null;
