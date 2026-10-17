@@ -7229,6 +7229,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `update_post.promote_event_op` | `unclaimed-session-promoted` |  |  | The `op` of the central log line written for a promoted session (identity.js promoteUnclaimedSession). |
 | `update_post.promote_verb` | `promote-unclaimed` |  |  | The verb named in the engine log when the summary refresh after a promotion fails. |
 | `update_post.recon_also_skipped` | ` (also skipped {n} archived worktree(s))` |  |  | The reconcile failure suffix naming the skipped archived worktrees. Placeholder: n. |
+| `update_post.recon_benign_flags` | `ok, locked, hivecontrolMissing, worktreeMissing, skipped, nativeTimeout` |  |  | The members of one reconcile target's result that make a not-ok target benign (not named in the failure detail): it was ok, locked, had no hivecontrol or worktree, was skipped as archived, or its native read timed out. |
 | `update_post.recon_done` | `reconciled {n} worktree(s){skipped}{timeouts} — imported {imported} message(s...` |  |  | The reconcile detail on success. Placeholders: n, skipped, timeouts, imported. |
 | `update_post.recon_failed` | `reconcile failed: {why}{also}` |  |  | The reconcile detail when it failed. Placeholders: why, also. |
 | `update_post.recon_fold` | `fold` |  |  | The `recon` kind of the stage that folds the working directory's project (`fold`); its engine switch is devswarm_sup.sweep_tail_mode, like the other four. |
@@ -7236,12 +7237,15 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `update_post.recon_max_listed` | `5` |  |  | How many failing worktrees the reconcile failure detail names (update.js MAX_LISTED). |
 | `update_post.recon_more` | ` (+{n} more)` |  |  | The reconcile failure suffix when more worktrees failed than are named. Placeholder: n. |
 | `update_post.recon_nested` | `2 entries` |  |  | The member order of the objects nested in the answers of the engine-run reconcile-family stages, by the member they sit under (the script's own order). |
+| `update_post.recon_note_fold` | `fold handed to Node: {verdict} {deferred}` |  |  | The event-log note when the fold port hands the project to Node. Placeholders: verdict, deferred. |
+| `update_post.recon_note_reconcile` | `reconcile handed to Node: {why}` |  |  | The event-log note when the reconcile port hands the project to Node. Placeholder: why. |
 | `update_post.recon_reconcile` | `reconcile` |  |  | The `recon` kind of the stage that drains the project's worktrees (`reconcile`); its engine switch is devswarm_sup.reconcile_mode. |
 | `update_post.recon_reconcile_mode_key` | `devswarm_sup.reconcile_mode` |  |  | The setting that says who runs the reconcile stage: node (default) or engine. |
 | `update_post.recon_row` | `{id}: {error}` |  |  | One failing worktree in the reconcile failure detail. Placeholders: id, error. |
 | `update_post.recon_row_sep` | `; ` |  |  | The separator between the failing worktrees of the reconcile failure detail. |
 | `update_post.recon_skipped` | `, skipped {n} (archived)` |  |  | The reconcile success suffix naming the skipped archived worktrees. Placeholder: n. |
 | `update_post.recon_timeouts` | `, skipped {n} (native unavailable: timeout)` |  |  | The reconcile success suffix naming the worktrees whose native read timed out. Placeholder: n. |
+| `update_post.recon_undefined` | `undefined` |  |  | How a target without an id reads in the reconcile failure detail (JavaScript's text of a missing value). |
 | `update_post.recon_unknown` | `unknown error` |  |  | The reconcile failure detail when nothing names a cause. |
 | `update_post.sessions_rel` | `.claude/sessions` |  |  | The harness session files, relative to the home directory (`<pid>.json`: pid, startedAt, cwd). |
 | `update_post.settings_note` | ` \| {id} {status}: {msg}` |  |  | Appended to the settings-migrate detail for the legacy key opt-in and the triage cache repair when they did not just skip. Placeholders: id, status, msg. |

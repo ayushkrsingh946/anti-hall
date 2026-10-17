@@ -178,7 +178,7 @@ impl Run<'_> {
         let result = match sweep::cmd_reconcile(ctx, runner, &cwd, &sweep::Opts::real(), hooks) {
             sweep::ProjectEnd::Result(v) => v,
             sweep::ProjectEnd::Node(why) => {
-                crate::discard::note("update_post_note", &format!("reconcile handed to Node: {why}"));
+                crate::discard::note("update_post_note", &defaults::render("update_post.recon_note_reconcile", &[("why", &why)]));
                 return None;
             }
         };
@@ -255,7 +255,7 @@ impl Run<'_> {
         let repo_key = crate::meshw::ident::repo_key_for_worktree(&cwd).ok().flatten()?;
         let end = crate::dssup::recon::fold::run(ctx, runner, &repo_key, hooks).ok()?;
         if end.verdict != crate::dssup::recon::gate::Verdict::Agreed || !end.deferred.is_empty() {
-            crate::discard::note("update_post_note", &format!("fold handed to Node: {:?} {:?}", end.verdict, end.deferred));
+            crate::discard::note("update_post_note", &defaults::render("update_post.recon_note_fold", &[("verdict", &format!("{:?}", end.verdict)), ("deferred", &format!("{:?}", end.deferred))]));
             return None;
         }
         let r = &end.result;

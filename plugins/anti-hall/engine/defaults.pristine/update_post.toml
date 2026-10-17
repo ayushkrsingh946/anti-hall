@@ -420,3 +420,11 @@ value = ["ok", "locked", "hivecontrolMissing", "worktreeMissing", "skipped", "na
 [update_post.recon_undefined]
 doc = "How a target without an id reads in the reconcile failure detail (JavaScript's text of a missing value)."
 value = "undefined"
+
+[update_post.recon_note_reconcile]
+doc = "The event-log note when the reconcile port hands the project to Node. Placeholder: why."
+value = "reconcile handed to Node: {why}"
+
+[update_post.recon_note_fold]
+doc = "The event-log note when the fold port hands the project to Node. Placeholders: verdict, deferred."
+value = "fold handed to Node: {verdict} {deferred}"
