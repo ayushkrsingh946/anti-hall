@@ -83,7 +83,7 @@ fn exists(p: &str) -> bool {
 }
 
 fn read_json(p: &str) -> Result<Option<OVal>, No> {
-    let Ok(bytes) = std::fs::read(p) else { return Ok(None) };
+    let Some(bytes) = ident::read_bounded(Path::new(p)).map_err(|_| No)? else { return Ok(None) };
     let Ok(text) = String::from_utf8(bytes) else { return Err(No) };
     match OVal::parse(&text) {
         Some(v) => Ok(Some(v)),
@@ -151,7 +151,10 @@ fn own_nonce(st: &Settings) -> Result<Option<String>, No> {
 /// `readUnread` when there is no store): `{state: "nd", unread, known}` (no project key or no store: the inbox and its cursor file
 /// alone) or `{state: "ok", unread, known, age}`. `known`: the inbox and its cursor file both read (`readUnread`'s `known`).
 fn count_for(st: &Settings, key: Option<&str>, id: &str, inbox: Option<&str>, cursor: Option<&str>, now: f64) -> Result<Value, No> {
-    let lines = inbox.and_then(crate::meshw::union::non_empty_lines);
+    let lines = match inbox {
+        Some(p) => crate::meshw::union::non_empty_lines(p).map_err(|_| No)?,
+        None => None,
+    };
     let position = match (&lines, cursor) {
         (Some(_), Some(c)) => crate::meshw::union::cursor_position(c).map_err(|_| No)?,
         _ => None,
@@ -181,16 +184,20 @@ fn floor_positions(store: &crate::mesh::MeshReader, home: &str, partition: &str,
     let (own_store, own_nd) = (own_of(defaults::text("mesh_write.cursor_ns_store")), own_of(defaults::text("mesh_write.cursor_ns_nd")));
     let row_of = |ns: &str| rows.iter().find(|r| r["ns"] == ns && r["reader"] == floor).and_then(|r| r["value"].as_f64());
     let cursors = format!("{}/{}", devswarm_dir(home), defaults::text("devswarm_role.pg_dir_cursors"));
-    let read_cursor = |p: &str| crate::meshw::cursors::read_cursor(Path::new(p));
+    // a cursor file that is a FIFO or device, or over the cap, has no exact answer here (a read could block the worker)
+    let read_cursor = |p: &str| -> Result<f64, No> {
+        ident::read_bounded(Path::new(p)).map_err(|_| No)?;
+        Ok(crate::meshw::cursors::read_cursor(Path::new(p)))
+    };
     let legacy_safe = safe_id(partition) && !partition.contains('#') && !partition.contains(".seen-");
     let store_floor = match row_of(defaults::text("mesh_write.cursor_ns_store")) {
         Some(v) => v,
         None => {
             let base_file = format!("{cursors}/{partition}{}", defaults::text("devswarm_role.pg_base_suffix"));
             let baseline = if legacy_safe && exists(&base_file) {
-                read_cursor(&base_file)
+                read_cursor(&base_file)?
             } else {
-                let json = read_cursor(&format!("{cursors}/{partition}.json"));
+                let json = read_cursor(&format!("{cursors}/{partition}.json"))?;
                 let row = store.cursor(partition).map_err(|_| No)? as f64;
                 json.max(row)
             };
@@ -200,7 +207,7 @@ fn floor_positions(store: &crate::mesh::MeshReader, home: &str, partition: &str,
                 for n in names(&cursors).unwrap_or_default() {
                     let Some(short) = n.strip_prefix(&prefix).and_then(|x| x.strip_suffix(".json")) else { continue };
                     if short.len() == 6 && short.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
-                        let v = read_cursor(&format!("{cursors}/{n}"));
+                        let v = read_cursor(&format!("{cursors}/{n}"))?;
                         min = Some(min.map_or(v, |m: f64| m.min(v)));
                     }
                 }
@@ -226,13 +233,16 @@ fn floor_positions(store: &crate::mesh::MeshReader, home: &str, partition: &str,
                     if ident::resolve_abs(c) == ident::resolve_abs(&format!("{cursors}/{partition}.json")) {
                         0.0
                     } else {
-                        read_cursor(c)
+                        read_cursor(c)?
                     }
                 }
             };
             v.max(distinct)
         }
-        None => cp.as_deref().map_or(0.0, read_cursor),
+        None => match cp.as_deref() {
+            Some(c) => read_cursor(c)?,
+            None => 0.0,
+        },
     };
     Ok((own_store.unwrap_or(store_floor), own_nd.unwrap_or(nd_floor)))
 }

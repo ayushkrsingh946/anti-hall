@@ -2009,3 +2009,8 @@ doc = "Most nested checkouts whose superproject answer is kept at once (expired 
 value = 256
 min = 1
 max = 65536
+
+[mesh_write.file_read_max_bytes]
+doc = "Largest mesh file a read through a path from a descriptor or a session record may take (a durable inbox, a cursor file, a harness session record). A larger file, and anything that is no regular file (a FIFO, socket or device, whose read could block a worker for good), is not read: the hook's answer goes to Node."
+value = 16777216
+min = 1024

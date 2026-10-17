@@ -147,9 +147,21 @@ function cgConsume(ctx, kinds, cap) {
     counts[k] += 1;
     buckets[cgKey(ctx, k)] = { count: counts[k], lastAt: ctx.now };
   });
-  cgPut(ctx, cgPolicyRel(ctx), JSON.stringify(buckets));
-  ctx.consumed = cgPolicyRel(ctx);
-  return { block: true, persisted: true };
+  // Node persists the budget at once and its answer depends on that write, so it is made here; every caller has finished the reads
+  // that could still defer before it consumes
+  var rel = cgPolicyRel(ctx), body = JSON.stringify(buckets);
+  var before = Object.prototype.hasOwnProperty.call(ctx.files, rel) ? ctx.files[rel] : null;
+  ah.commit();
+  if (ah.state.writeAtomic(rel, body)) { cgForget(ctx, rel); return { block: true, persisted: true }; }
+  // the disk refused: no block, and the budget file as an earlier clear of this run left it (Node wrote that one first)
+  if (before === null || ah.state.writeAtomic(rel, before)) cgForget(ctx, rel);
+  return { block: false, persisted: false };
+}
+
+// A planned write that has been made (or can no longer be made): later reads go to the disk.
+function cgForget(ctx, rel) {
+  delete ctx.files[rel];
+  ctx.order = ctx.order.filter(function (r) { return r !== rel; });
 }
 
 // `clear(home, sessionId, hook, kinds?)`.
@@ -325,7 +337,15 @@ function cgNative(ctx) {
   if (path === null || path === '') throw meshDefer;
   var dirs = path.split(':');
   if (dirs.some(function (d) { return d === '' || d.charAt(0) !== '/'; })) throw meshDefer;
-  if (!dirs.some(function (d) { return ah.fs.isFile(d + '/' + prog); })) { ctx.native = 'absent'; return ctx.native; }
+  var found = false;
+  for (var i = 0; i < dirs.length && !found; i++) {
+    var c = dirs[i] + '/' + prog;
+    if (ah.fs.lstat(c) === null) continue;
+    // a candidate that is there but no regular file (a directory, a dangling link): Node's spawn reads it as EACCES, an unknown count
+    if (!ah.fs.isFile(c)) throw meshDefer;
+    found = true;
+  }
+  if (!found) { ctx.native = 'absent'; return ctx.native; }
   var r = ah.exec(prog, ah.cfg('devswarm_gates.cg_probe_args'), { timeoutMs: ah.cfgNum('devswarm_gates.cg_probe_timeout_ms') });
   if (r === null || r.truncated) throw meshDefer;
   var n = null;
@@ -383,7 +403,7 @@ function cgCronWarn(ctx) {
   return text.render(ah.cfg('devswarm_gates.cg_cron_missing_hb'), { m: String(Math.round(hbAge / perMin)) }) + cgWakeLine(ctx.l);
 }
 
-// `recordCronMissingWarn`: one `{ts}` line appended, the file capped to its newest lines.
+// `recordCronMissingWarn`: one `{ts}` line appended, the file capped to its newest lines ({rel, body}, read before the budget write).
 function cgCronMetric(ctx) {
   var rel = cgDirRel() + '/' + ah.cfg('devswarm_gates.cg_cron_metric_file');
   var r = cgRead(ctx, rel);
@@ -392,7 +412,7 @@ function cgCronMetric(ctx) {
   lines.push(JSON.stringify({ ts: ctx.now }));
   var cap = ah.cfgNum('devswarm_gates.cg_cron_metric_cap');
   if (lines.length > cap) lines = lines.slice(lines.length - cap);
-  cgPut(ctx, rel, lines.join('\n') + '\n');
+  return { rel: rel, body: lines.join('\n') + '\n' };
 }
 
 // The session key: session_id, else a hash of the transcript path, else `unknown`.
@@ -411,7 +431,7 @@ function cgSession(p) {
 }
 
 function cgGate(p, root, l) {
-  var ctx = { p: p, l: l, home: l.home, now: ah.clock.now(), files: Object.create(null), order: [], err: '', out: '', consumed: null,
+  var ctx = { p: p, l: l, home: l.home, now: ah.clock.now(), files: Object.create(null), order: [], err: '', out: '',
     nodeRoot: dwNodeRoot(root), key: undefined, durable: undefined, native: undefined };
   if (ctx.nodeRoot === null) throw meshDefer;
   if (!cgCorroborated(ctx)) return ctx;
@@ -444,8 +464,9 @@ function cgGate(p, root, l) {
 
   var cronWarn = cgCronWarn(ctx), kCron = ah.cfg('devswarm_gates.cg_kind_cron');
   if (cronWarn !== null) {
+    var metric = cgCronMetric(ctx);
     if (cgConsume(ctx, [kCron], MAX).block) {
-      cgCronMetric(ctx);
+      cgPut(ctx, metric.rel, metric.body);
       state.lastCheckAt = ctx.now;
       cgWriteState(ctx, state);
       ctx.out = cgFrame(cronWarn, ctx);
@@ -494,7 +515,7 @@ function cgGate(p, root, l) {
   }
   var decision = cgConsume(ctx, kinds, nativeOnlyUnknown ? 1 : MAX);
   if (!decision.block) {
-    if (!state.lifetimeCapLogged) {
+    if (decision.persisted && !state.lifetimeCapLogged) {
       cgWriteState(ctx, Object.assign({}, state, { lifetimeCapLogged: true }));
       ctx.err += text.render(ah.cfg('devswarm_gates.cg_err_cap'), { max: String(MAX), sid: JSON.stringify(ctx.sid) });
     } else cgWriteState(ctx, state);
@@ -514,16 +535,11 @@ function cgGate(p, root, l) {
   return ctx;
 }
 
-// Apply what the gate decided, only once nothing can defer any more. A stop-policy budget the disk refuses to record is Node's
-// fail-open: no block (and the gate's state file as the allow path writes it).
+// Apply the remaining planned writes, once nothing can defer any more (a stop-policy budget is written where it is consumed).
 function cgApply(ctx) {
   if (ctx.order.length) ah.commit();
-  var out = ctx.out;
-  for (var i = 0; i < ctx.order.length; i++) {
-    var rel = ctx.order[i];
-    if (!ah.state.writeAtomic(rel, ctx.files[rel]) && rel === ctx.consumed) out = '';
-  }
-  return out === '' && ctx.err === '' ? 'allow' : { exact: { code: 0, out: out, err: ctx.err } };
+  ctx.order.forEach(function (rel) { ah.state.writeAtomic(rel, ctx.files[rel]); });
+  return ctx.out === '' && ctx.err === '' ? 'allow' : { exact: { code: 0, out: ctx.out, err: ctx.err } };
 }
 
 function decide(p, opts, event) {

@@ -1196,6 +1196,8 @@ struct Cx {
     store: Option<(u32, u32)>,
     /// A fake `hivecontrol` first on the PATH: (its stdout, its exit code).
     hc: Option<(&'static str, i32)>,
+    /// A directory named `hivecontrol` first on the PATH (Node's spawn reads it as EACCES: an unknown count).
+    hc_dir: bool,
     /// The payload text (`{cwd}`, `{now}` filled in); None: a plain event of the hook in the checkout.
     payload: Option<String>,
     expect: Option<&'static str>,
@@ -1218,6 +1220,7 @@ fn cx(name: &'static str, hook: &'static str, steps: &[PgWant]) -> Cx {
         desc: hook != RT,
         store: None,
         hc: None,
+        hc_dir: false,
         payload: None,
         expect: None,
         agents: hook == CG,
@@ -1249,6 +1252,10 @@ impl Cx {
         self.hc = Some((out, code));
         self
     }
+    fn hc_dir(mut self) -> Cx {
+        self.hc_dir = true;
+        self
+    }
     fn payload(mut self, p: &str) -> Cx {
         self.payload = Some(p.to_string());
         self
@@ -1263,9 +1270,11 @@ impl Cx {
     }
 }
 
-/// Clock readings (13-digit runs) are each side's own: masked in every file. SQLite sidecars are not data.
+/// Clock readings (13-digit runs) are each side's own: masked in every file. SQLite sidecars are not data, nor is the temporary file
+/// a failed Node rename leaves under its own process id.
 fn cx_mask(mut snap: BTreeMap<String, Vec<u8>>) -> BTreeMap<String, Vec<u8>> {
-    snap.retain(|k, _| !k.ends_with("-wal") && !k.ends_with("-shm"));
+    let pid_tmp = regex::Regex::new(r"\.\d+\.tmp$").unwrap();
+    snap.retain(|k, _| !k.ends_with("-wal") && !k.ends_with("-shm") && !pid_tmp.is_match(k));
     let re = regex::Regex::new(r"\d{13}").unwrap();
     for v in snap.values_mut() {
         *v = re.replace_all(&String::from_utf8_lossy(v), "T").into_owned().into_bytes();
@@ -1301,6 +1310,11 @@ fn cx_exec(case: &Cx, agent: &str) -> CxTally {
         std::fs::write(&f, format!("#!/bin/sh\nprintf '%s\\n' '{out}'\nexit {code}\n")).unwrap();
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o755)).unwrap();
+        dirs.insert(0, bin.to_string_lossy().into_owned());
+    }
+    if case.hc_dir {
+        let bin = tmp.join("bin-dir");
+        std::fs::create_dir_all(bin.join("hivecontrol")).unwrap();
         dirs.insert(0, bin.to_string_lossy().into_owned());
     }
     let path = dirs.join(":");
@@ -1422,7 +1436,9 @@ fn cx_exec(case: &Cx, agent: &str) -> CxTally {
 
 fn cx_report(what: &str, cases: Vec<Cx>) -> CxTally {
     let (mut n, mut sum) = (0, CxTally::default());
-    for case in &cases {
+    // AH_CX_ONLY=<a,b>: run only the cases whose name holds one of them (a quick re-check; the corpus asserts then do not apply)
+    let only = std::env::var("AH_CX_ONLY").ok();
+    for case in cases.iter().filter(|c| only.as_deref().is_none_or(|o| o.split(',').any(|x| c.name.contains(x)))) {
         for agent in if case.agents { vec!["claude", "codex"] } else { vec!["claude"] } {
             let t = cx_exec(case, agent);
             n += 1;
@@ -1531,13 +1547,22 @@ fn cg_cases() -> Vec<Cx> {
         cg("cursor-missing-is-not-known", &[A]).seed(CX_DESC, r#"{"id":"b-1","worktreePath":"{wt}","inboxPath":"{home}/in.ndjson","cursorPath":"{home}/none.json"}"#).seed("in.ndjson", CX_INBOX2),
         cg("cursor-json-line", &[A]).seed("in.ndjson", CX_INBOX2).seed("cur.json", r#"{"line":2}"#),
         cg("stable-launcher-off", &[A]).env("ANTIHALL_DEVSWARM_STABLE_LAUNCHER", "0"),
+        // review fixes: a probe candidate that is no regular file; a budget the disk refuses to record (Node's fail-open)
+        cg("native-candidate-is-a-directory-defers", &[D]).hc_dir(),
+        cg("budget-unwritable-allows-and-keeps-state", &[A, A]).seed(".anti-hall/devswarm/stop-policy/s1.json/.keep", "").expect("!decision"),
+        cg("cron-budget-unwritable-falls-through", &[A])
+            .claude_only()
+            .seed(CX_TICK, r#"{"ts":{old},"unreadTotal":0,"known":true}"#)
+            .seed(".anti-hall/devswarm/stop-policy/s1.json/.keep", "")
+            .expect("!Mailbox cron missing"),
+        cg("cron-budget-unwritable-then-inbox-store", &[A]).claude_only().store(0, 2).seed(CX_TICK, r#"{"ts":{old}}"#).seed(".anti-hall/devswarm/stop-policy/s1.json/.keep", ""),
     ]
 }
 
 #[test]
 fn child_gate_answers_match_node_byte_for_byte() {
     let t = cx_report("devswarm-child-gate", cg_cases());
-    assert!(t.answered >= 100 && t.blocks >= 50 && t.stderr >= 4 && t.deferred >= 10, "the corpus shrank or stopped blocking");
+    assert!(std::env::var("AH_CX_ONLY").is_ok() || t.answered >= 100 && t.blocks >= 50 && t.stderr >= 4 && t.deferred >= 10, "the corpus shrank or stopped blocking");
 }
 
 fn cd_cases() -> Vec<Cx> {
@@ -1572,7 +1597,7 @@ fn cd_cases() -> Vec<Cx> {
 #[test]
 fn child_drain_answers_match_node_byte_for_byte() {
     let t = cx_report("devswarm-child-drain", cd_cases());
-    assert!(t.answered >= 18 && t.nudges >= 8 && t.deferred >= 1, "the corpus shrank or stopped nudging");
+    assert!(std::env::var("AH_CX_ONLY").is_ok() || t.answered >= 18 && t.nudges >= 8 && t.deferred >= 1, "the corpus shrank or stopped nudging");
 }
 
 fn rt_send(extra: &str) -> String {
@@ -1619,5 +1644,5 @@ fn rt_cases() -> Vec<Cx> {
 #[test]
 fn reply_tracker_answers_match_node_byte_for_byte() {
     let t = cx_report("devswarm-parent-reply-tracker", rt_cases());
-    assert!(t.answered >= 18 && t.deferred >= 4, "the corpus shrank");
+    assert!(std::env::var("AH_CX_ONLY").is_ok() || t.answered >= 18 && t.deferred >= 4, "the corpus shrank");
 }
