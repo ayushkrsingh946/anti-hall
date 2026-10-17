@@ -6,7 +6,7 @@
 //! Every stage is idempotent (a second run finds nothing to do), fail-open (an error is counted and the stage retries next run),
 //! and moves or marks, never deletes: a reader row is retired by marking it, a cursor only rises, a descriptor is rewritten in
 //! place. A store the engine cannot open the way Node would (no sqlite `BACKEND` marker: a journal store, a store Node would
-//! first mark), or a case only Node decides (a session working directory only git can classify), returns `None`: the stage
+//! first mark), or a case only Node decides (a working directory git cannot place: a relative path, or a git call that failed), returns `None`: the stage
 //! table's `fallback` Node function then runs the whole stage.
 use super::readercur::{self as rc, Cx, Handle};
 use super::{Ctx, list_store_hashes};
@@ -46,6 +46,11 @@ pub(crate) fn is_store_stage(which: &str) -> bool {
 
 /// Run one: `None` when Node must answer. `dry` is the ingest dry-run switch (a preview: nothing is written).
 pub(crate) fn run(ctx: &Ctx, which: &str, dry: bool) -> Option<Tally> {
+    // the git classifier is on for these post-update stages only (a nested checkout is classified as Node does, not deferred)
+    ident::with_git_classifier(|| run_stage(ctx, which, dry))
+}
+
+fn run_stage(ctx: &Ctx, which: &str, dry: bool) -> Option<Tally> {
     let home = Path::new(&ctx.home);
     let t = match which {
         "promote_unclaimed" => super::promote::promote_unclaimed(ctx),

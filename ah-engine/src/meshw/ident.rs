@@ -7,7 +7,8 @@
 //! `companion/lib/reader-identity.js` `deriveReaderNonce`.
 //!
 //! Node answers some of these by running git (`rev-parse --show-superproject-working-tree` for a checkout nested in
-//! another one). The engine never runs git here: where Node would, the answer is [`Defer`] and the verb goes to Node.
+//! another one). A hook caller never runs git here: where Node would, the answer is [`Defer`] and the verb goes to Node. Only the
+//! migrate/update post-update stages opt in ([`with_git_classifier`]) and then run the same git question Node runs.
 // Discard triage (E3): every `.ok()` / `unwrap_or_default()` in this file is a deliberate keep, for these reasons:
 // - an unreadable optional file is the same as an absent one (fail-open, as Node's try/catch)
 // - text that does not parse or decode is the absent value (Node Number()/JSON.parse catch parity)
@@ -206,6 +207,101 @@ fn has_core_worktree(gitdir: &str) -> bool {
     false
 }
 
+thread_local! {
+    /// The git classifier of the post-update stages (see [`with_git_classifier`]): off everywhere else, so a hook caller keeps deferring.
+    static GIT_CLASSIFY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// Superproject answers of one classifier scope: nested-repo root -> superproject (identity.js `superCache`, per scope).
+    static SUPER_CACHE: std::cell::RefCell<HashMap<String, Option<String>>> = std::cell::RefCell::new(HashMap::new());
+}
+
+/// Run `f` with the opt-in git classifier on (only the migrate/update post-update stages call this; never a hook): a checkout
+/// nested in another one, a linked worktree of a submodule and a `core.worktree` hop are classified as Node does
+/// (`identity.js` `gitSuperproject`, `coreWorktreeOf`, `isGitlinkPath`) instead of deferring. Off when the setting
+/// `mesh_write.git_classify_update` is 0. A git call that fails still defers (Node counts that answer as uncertain).
+pub fn with_git_classifier<T>(f: impl FnOnce() -> T) -> T {
+    struct Restore(bool);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            GIT_CLASSIFY.with(|g| g.set(self.0));
+        }
+    }
+    let on = defaults::num("mesh_write.git_classify_update") == 1;
+    let _restore = Restore(GIT_CLASSIFY.with(|g| g.replace(on)));
+    if on {
+        SUPER_CACHE.with(|c| c.borrow_mut().clear());
+    }
+    f()
+}
+
+fn git_classify() -> bool {
+    GIT_CLASSIFY.with(std::cell::Cell::get)
+}
+
+/// `coreWorktreeOf(gitdir)`: the real path of `core.worktree` in `<gitdir>/config` (resolved against the gitdir), or `None`.
+fn core_worktree_of(gitdir: &str) -> Option<String> {
+    let cfg = std::fs::read(format!("{gitdir}/{}", defaults::text("mesh_write.git_config_file"))).ok()?;
+    let cfg = String::from_utf8_lossy(&cfg);
+    let mut in_core = false;
+    for line in cfg.lines() {
+        let t = line.trim();
+        if t.starts_with('[') {
+            in_core = t == defaults::text("mesh_write.git_core_section");
+            continue;
+        }
+        if in_core
+            && let Some(rest) = t.strip_prefix(defaults::text("mesh_write.git_worktree_key"))
+            && let Some(v) = rest.trim_start().strip_prefix('=')
+        {
+            let v = v.trim();
+            return if v.is_empty() { None } else { realpath(&resolve(gitdir, v)) };
+        }
+    }
+    None
+}
+
+/// `isGitlinkPath(P, dir)`: `dir` is a submodule path declared in P's `.gitmodules` (pure fs).
+fn is_gitlink_path(p: &str, dir: &str) -> bool {
+    let Some(rel) = dir.strip_prefix(&format!("{}/", p.trim_end_matches('/'))) else { return false };
+    if rel.is_empty() {
+        return false;
+    }
+    let Ok(txt) = std::fs::read(format!("{p}/{}", defaults::text("mesh_write.gitmodules_file"))) else { return false };
+    String::from_utf8_lossy(&txt).lines().any(|l| {
+        l.trim_start()
+            .strip_prefix(defaults::text("mesh_write.gitmodules_path_key"))
+            .and_then(|r| r.trim_start().strip_prefix('='))
+            .is_some_and(|v| v.trim().trim_end_matches('/') == rel)
+    })
+}
+
+/// `gitSuperproject(dir)`: `git -C dir rev-parse --show-superproject-working-tree`, its answer's real path (`None`: no superproject).
+/// A git that cannot run, times out, fails or names an unresolvable path defers (Node reads that as an uncertain answer).
+fn git_superproject(dir: &str) -> R<Option<String>> {
+    if let Some(hit) = SUPER_CACHE.with(|c| c.borrow().get(dir).cloned()) {
+        return Ok(hit);
+    }
+    let mut cmd = std::process::Command::new(defaults::text("mesh_write.git_bin"));
+    cmd.arg("-C").arg(dir).args(defaults::list("mesh_write.git_super_args"));
+    for k in defaults::list("mesh_write.git_scrub_env") {
+        cmd.env_remove(k);
+    }
+    let out = match crate::proc::run(cmd, defaults::text("mesh_write.git_bin"), defaults::millis("mesh_write.git_spawn_timeout_ms"), defaults::millis("update.poll_ms")) {
+        Ok(o) if o.status.success() => o,
+        _ => return defer("git-superproject"),
+    };
+    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let ans = if s.is_empty() {
+        None
+    } else {
+        match realpath(&s) {
+            Some(r) => Some(r),
+            None => return defer("git-superproject"),
+        }
+    };
+    SUPER_CACHE.with(|c| c.borrow_mut().insert(dir.to_string(), ans.clone()));
+    Ok(ans)
+}
+
 fn under(child: &str, parent: &str) -> bool {
     child == parent || child.starts_with(&format!("{parent}/"))
 }
@@ -262,6 +358,7 @@ pub fn resolve_context(cwd: &str, ancestor: bool) -> R<Ctx> {
         return Ok(null_ctx(defaults::text("mesh_write.kind_non_git")));
     }
     // superOf(root, ri): Some(Some(p)) a superproject, Some(None) none, Err when only git can tell
+    let git = git_classify();
     let super_of = |root: &str, ri: &GitDir| -> R<Option<String>> {
         let Some(p) = nearest_dot_git(&dirname(root)) else { return Ok(None) };
         if p == root {
@@ -274,10 +371,14 @@ pub fn resolve_context(cwd: &str, ancestor: bool) -> R<Ctx> {
                 return Ok(Some(p));
             }
             if ri.has_commondir {
+                // a linked worktree of a submodule checked out at a gitlink path of the enclosing checkout (git classifier only)
+                if git && core_worktree_of(&ri.common).is_some() && is_gitlink_path(&p, root) {
+                    return Ok(Some(p));
+                }
                 return Ok(None);
             }
         }
-        defer("git-superproject")
+        if git { git_superproject(root) } else { defer("git-superproject") }
     };
     let mut root = t.clone();
     let t = t.clone();
@@ -285,8 +386,22 @@ pub fn resolve_context(cwd: &str, ancestor: bool) -> R<Ctx> {
     let mut depth = 0u64;
     while depth < defaults::num("mesh_write.max_submodule_hops") {
         let sp = super_of(&root, &ri)?;
-        if sp.is_none() && ri.is_file && ri.has_commondir && has_core_worktree(&ri.common) {
-            return defer("core-worktree");
+        if sp.is_none() && ri.is_file && ri.has_commondir {
+            if git {
+                // a linked worktree of a submodule: hop to the submodule checkout its common dir names when that is itself a submodule
+                let co = core_worktree_of(&ri.common).filter(|c| *c != root);
+                if let Some((co, co_info)) = co.and_then(|c| gitdir_of(&c).map(|i| (c, i)))
+                    && co_info.g == ri.common
+                    && super_of(&co, &co_info)?.is_some()
+                {
+                    root = co;
+                    ri = co_info;
+                    depth += 1;
+                    continue;
+                }
+            } else if has_core_worktree(&ri.common) {
+                return defer("core-worktree");
+            }
         }
         let Some(sp) = sp else { break };
         let Some(spi) = gitdir_of(&sp) else { break };

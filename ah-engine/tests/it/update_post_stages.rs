@@ -511,9 +511,15 @@ struct Case {
     seed: fn(&Path),
     live: bool,
     markers: bool,
+    /// The anchor is the mesh id of the nested repository (a working directory only git can place).
+    nested: bool,
 }
 
 impl Case {
+    fn anchor(&self) -> String {
+        if self.nested { nested_anchor() } else { anchor() }
+    }
+
     fn opt(&self) -> Opt {
         Opt { ds: true, no_upstream_move: true, live: self.live, ..Opt::default() }
     }
@@ -545,7 +551,7 @@ fn stage_node_calls(w: &World) -> Vec<String> {
 /// Record (when asked) and replay one scenario; returns the replay world's picture and the world, for follow-up checks.
 fn replay(c: &Case) -> (Value, World, Opt) {
     let o = c.opt();
-    let anchor = anchor();
+    let anchor = c.anchor();
     if recording() {
         let a = world(&o);
         (c.seed)(&a.home);
@@ -589,7 +595,7 @@ fn diff(want: &Value, got: &Value) -> String {
 /// A second run changes nothing: the one-time marker is stamped by the first run (or the stage is idempotent without one).
 fn second_run_is_a_no_op(c: &Case, first: &Value, w: &World, o: &Opt) {
     let again = engine_answer(w, o, c.key);
-    let pic = picture(w, again.clone(), Some(&anchor()));
+    let pic = picture(w, again.clone(), Some(&c.anchor()));
     assert_eq!(first["stores"], pic["stores"], "{}/{}: a second run changed a store", c.stage, c.name);
     let strip = |v: &Value| {
         let mut f = v["files"].as_object().unwrap().clone();
@@ -611,7 +617,7 @@ macro_rules! case {
     ($fn:ident, $stage:literal, $name:literal, $row:literal, $key:literal, $func:literal, $seed:expr, live: $live:literal, markers: $markers:literal) => {
         #[test]
         fn $fn() {
-            run_case(&Case { stage: $stage, name: $name, row: $row, key: $key, func: $func, seed: $seed, live: $live, markers: $markers });
+            run_case(&Case { stage: $stage, name: $name, row: $row, key: $key, func: $func, seed: $seed, live: $live, markers: $markers, nested: false });
         }
     };
 }
@@ -662,7 +668,7 @@ fn marker_of(w: &World) -> Option<String> {
 /// A store with data but no marker is settled as sqlite and pinned by a read-write open, like Node; a preview (read-only open) pins nothing.
 #[test]
 fn a_store_without_a_marker_is_adopted_as_sqlite_and_pinned_like_node() {
-    let (_, w, o) = replay(&Case { stage: "reader-floor-repair", name: "no_marker", row: "reader-floor-repair", key: "readerFloorRepair", func: "readerFloorRepairPostUpdate", seed: seed_floors_no_marker, live: true, markers: false });
+    let (_, w, o) = replay(&Case { stage: "reader-floor-repair", name: "no_marker", row: "reader-floor-repair", key: "readerFloorRepair", func: "readerFloorRepairPostUpdate", seed: seed_floors_no_marker, live: true, markers: false, nested: false });
     assert_eq!(marker_of(&w).as_deref(), Some("sqlite"));
     assert_eq!(stage_node_calls(&w), Vec::<String>::new());
     let again = engine_answer(&w, &o, "readerFloorRepair");
@@ -671,13 +677,13 @@ fn a_store_without_a_marker_is_adopted_as_sqlite_and_pinned_like_node() {
 
 #[test]
 fn a_preview_of_a_store_without_a_marker_writes_no_marker() {
-    let (_, w, _) = replay(&Case { stage: "reader-floor-repair", name: "no_marker_dry", row: "reader-floor-repair", key: "readerFloorRepair", func: "readerFloorRepairPostUpdate", seed: seed_floors_no_marker, live: false, markers: false });
+    let (_, w, _) = replay(&Case { stage: "reader-floor-repair", name: "no_marker_dry", row: "reader-floor-repair", key: "readerFloorRepair", func: "readerFloorRepairPostUpdate", seed: seed_floors_no_marker, live: false, markers: false, nested: false });
     assert_eq!(marker_of(&w), None);
 }
 
 #[test]
 fn split_merge_pins_a_store_without_a_marker_even_in_a_preview_like_node() {
-    let (_, w, _) = replay(&Case { stage: "merge-split-backend-stores", name: "no_marker", row: "merge-split-backend-stores", key: "mergeSplitBackendStores", func: "mergeSplitBackendStoresPostUpdate", seed: seed_not_split_no_marker, live: false, markers: false });
+    let (_, w, _) = replay(&Case { stage: "merge-split-backend-stores", name: "no_marker", row: "merge-split-backend-stores", key: "mergeSplitBackendStores", func: "mergeSplitBackendStoresPostUpdate", seed: seed_not_split_no_marker, live: false, markers: false, nested: false });
     assert_eq!(marker_of(&w).as_deref(), Some("sqlite"));
 }
 
@@ -972,4 +978,135 @@ fn ingest_is_left_to_node_in_witness_mode_and_when_switched_off() {
     fs::write(&toml, off).unwrap();
     engine_answer(&w, &o, "ingestHeal");
     assert!(node_calls(&w).contains("ingestUnitNeedsHeal"), "the switch did not hand the stage to Node: {}", node_calls(&w));
+}
+
+
+// ---- the git classifier of the post-update stages (roadmap #61 G3) ---------------------------------------------------------------
+
+fn git_in(dir: &Path, args: &[&str]) {
+    let ok = Command::new("git")
+        .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "protocol.file.allow=always"])
+        .args(args)
+        .current_dir(dir)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .status()
+        .unwrap()
+        .success();
+    assert!(ok, "git {args:?} in {}", dir.display());
+}
+
+fn scratch_dir(tag: &str) -> PathBuf {
+    let p = fs::canonicalize(std::env::temp_dir()).unwrap().join(format!("ah-g3-{tag}-{}-{}", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
+    fs::create_dir_all(&p).unwrap();
+    p
+}
+
+static INNER: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// A repository nested, untracked, inside `repo()`: its `.git` is a directory below another checkout, which only git can classify.
+fn inner() -> &'static Path {
+    INNER.get_or_init(|| {
+        let p = repo().join("inner");
+        fs::create_dir_all(&p).unwrap();
+        git_in(&p, &["init", "-q"]);
+        fs::canonicalize(p).unwrap()
+    })
+}
+
+fn nested_anchor() -> String {
+    ah_engine::meshw::ident::with_git_classifier(|| ah_engine::meshw::ident::canonical_mesh_id(&inner().to_string_lossy())).unwrap().unwrap()
+}
+
+/// `seed_dual` on a worktree nested in another checkout.
+fn seed_dual_nested(home: &Path) {
+    let st = open_store(home, STORE);
+    let (a, wt) = (nested_anchor(), inner().to_string_lossy().into_owned());
+    registry(&st, &a, Some(&wt), None);
+    registry(&st, "kid-1", Some(&wt), None);
+    for (i, h) in ["x1", "x2", "x3"].iter().enumerate() {
+        msg(&st, &a, i as i64, h, None);
+    }
+    for (i, (h, o)) in [("y1", Some("x1")), ("y2", Some("x2")), ("y3", Some("x3")), ("y4", None)].iter().enumerate() {
+        msg(&st, "kid-1", 10 + i as i64, h, *o);
+    }
+    for ns in ["store", "nd"] {
+        cur(&st, &a, ns, "#floor", if ns == "store" { 2 } else { 0 });
+        cur(&st, "kid-1", ns, "#floor", 0);
+    }
+}
+
+fn nested_case() -> Case {
+    Case { stage: "dual-partition-acks", name: "nested_repo", row: "dual-partition-acks", key: "dualPartitionAcks", func: "dualPartitionAcksPostUpdate", seed: seed_dual_nested, live: true, markers: false, nested: true }
+}
+
+/// A worktree nested in another checkout is classified by git as Node does: the stage answers natively, equal to the frozen Node run
+/// (the answer, the store, the files), runs Node for nothing, and a second run is a no-op.
+#[test]
+fn dual_acks_classify_a_nested_repository_with_git_like_node() {
+    run_case(&nested_case());
+}
+
+/// The switch `mesh_write.git_classify_update = 0` puts the case back with Node (the engine decides nothing for it, writes nothing).
+#[test]
+fn the_git_classifier_switched_off_leaves_a_nested_repository_to_node_untouched() {
+    let o = Opt { ds: true, no_upstream_move: true, live: true, no_node: true, stage_only: Some("dual-partition-acks"), ..Opt::default() };
+    let w = world(&o);
+    seed_dual_nested(&w.home);
+    let toml = w.mp.join("plugins/anti-hall/engine/defaults/mesh_write.toml");
+    let text = fs::read_to_string(&toml).unwrap();
+    let key = "[mesh_write.git_classify_update]";
+    let at = text.find(key).unwrap();
+    let off = format!("{}{}", &text[..at], text[at..].replacen("value = 1\n", "value = 0\n", 1));
+    assert_ne!(text, off);
+    fs::write(&toml, off).unwrap();
+    let before = picture(&w, Value::Null, None);
+    let ans = engine_answer(&w, &o, "dualPartitionAcks");
+    assert_eq!(ans["attempted"], json!(false), "{ans}");
+    let calls = stage_node_calls(&w);
+    assert_eq!(calls.len(), 1, "{calls:?}");
+    assert!(calls[0].contains("dualPartitionAcksPostUpdate"), "{calls:?}");
+    assert_eq!(before["stores"], picture(&w, Value::Null, None)["stores"], "the engine wrote to a store it handed to Node");
+}
+
+/// The classifier itself, on real repositories: off (a hook caller) it defers exactly as before; on (the post-update stages) it
+/// answers as `identity.js` does for an untracked nested repo, a gitlink in the parent's index, and a linked worktree of a submodule.
+#[test]
+fn the_git_classifier_is_opt_in_and_mirrors_identity_js() {
+    use ah_engine::meshw::ident::{Defer, resolve_context, with_git_classifier};
+    let s = |p: &Path| p.to_string_lossy().into_owned();
+    // 1. untracked nested repository
+    let nested = inner();
+    assert_eq!(resolve_context(&s(nested), false), Err(Defer("git-superproject".into())), "a hook caller must keep deferring");
+    let on = with_git_classifier(|| resolve_context(&s(nested), false)).unwrap();
+    assert_eq!((on.kind.as_str(), on.worktree_root.as_deref()), ("main", Some(s(nested).as_str())), "git says no superproject: the nested repo is its own root");
+    // 2. a nested repo registered as a gitlink in the parent's index: git names the parent as its superproject
+    let top = scratch_dir("gitlink");
+    git_in(&top, &["init", "-q"]);
+    let sub = top.join("sub");
+    fs::create_dir_all(&sub).unwrap();
+    git_in(&sub, &["init", "-q"]);
+    git_in(&sub, &["commit", "-q", "--allow-empty", "-m", "c"]);
+    let sha = String::from_utf8(Command::new("git").args(["rev-parse", "HEAD"]).current_dir(&sub).output().unwrap().stdout).unwrap();
+    git_in(&top, &["update-index", "--add", "--cacheinfo", &format!("160000,{},sub", sha.trim())]);
+    assert_eq!(resolve_context(&s(&sub), false), Err(Defer("git-superproject".into())));
+    let on = with_git_classifier(|| resolve_context(&s(&sub), false)).unwrap();
+    assert_eq!((on.kind.as_str(), on.worktree_root.as_deref(), on.toplevel.as_deref()), ("submodule-in-main", Some(s(&top).as_str()), Some(s(&sub).as_str())));
+    // 3. a linked worktree of an absorbed submodule, checked out beside the superproject: the core.worktree hop
+    let base = scratch_dir("subwt");
+    let (lib, sup) = (base.join("lib"), base.join("sup"));
+    for d in [&lib, &sup] {
+        fs::create_dir_all(d).unwrap();
+        git_in(d, &["init", "-q"]);
+        git_in(d, &["commit", "-q", "--allow-empty", "-m", "c"]);
+    }
+    git_in(&sup, &["submodule", "add", "-q", &s(&lib), "libsub"]);
+    git_in(&sup, &["commit", "-q", "-m", "add"]);
+    let wt = base.join("libsub-wt");
+    git_in(&sup.join("libsub"), &["worktree", "add", "-q", "--detach", &s(&wt)]);
+    let wt = fs::canonicalize(wt).unwrap();
+    assert_eq!(resolve_context(&s(&wt), false), Err(Defer("core-worktree".into())), "a hook caller must keep deferring");
+    let on = with_git_classifier(|| resolve_context(&s(&wt), false)).unwrap();
+    assert_eq!((on.kind.as_str(), on.worktree_root.as_deref()), ("submodule-in-main", Some(s(&fs::canonicalize(&sup).unwrap()).as_str())));
+    // the scope ends with the closure
+    assert_eq!(resolve_context(&s(nested), false), Err(Defer("git-superproject".into())));
 }
