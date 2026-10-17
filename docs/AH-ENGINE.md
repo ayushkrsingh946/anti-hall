@@ -1427,6 +1427,7 @@ ordinary failure):
 |---|---|---|
 | `cfg(key)`, `cfgNum(key)`, `cfgLive(key)` | a shipped defaults entry; a numeric one with its clamps; the value through the owner's editable layers (`settings.json`, `config.toml`, shipped) | `cfgLive` is cached per file stamp and defaults generation |
 | `env.get(name)`, `env.passwdHome()` | a variable of the hook's own environment (never the daemon's) | |
+| `useHome(path)` | make an absolute directory the home of the rest of the call (settings, skips, scoped state), as a Node hook whose `os.homedir()` fell back to the passwd home sees it | absolute paths only |
 | `settings.bool/enum/num/numStrict/str(key)`, `settings.skipped(guard)` | the effective value of a setting entry through the settings chain (`numStrict` drops a value below the entry's minimum, as the Node `settings.get` does; `str` is a free-text setting); an unexpired skip | |
 | `settings.bool/enum/str/num(key)`, `settings.skipped(guard)` | the effective value of a setting entry through the settings chain (`str`: the first non-empty tier, trimmed); an unexpired skip | |
 | `fs.isFile/isDir/size/readText/realpath/realpathEx` | file tests and reads (`realpathEx` tells a missing path from one that could not be examined) | reads capped by `script.read_max_bytes` |

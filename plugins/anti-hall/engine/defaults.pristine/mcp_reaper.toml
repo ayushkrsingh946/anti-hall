@@ -18,6 +18,10 @@
 doc = "One-line description of the session-end-mcp-reaper check in the generated reference."
 value = "SessionEnd sweep of orphaned MCP server processes (parent PID 1, MCP command signature, old enough, not service-managed, never test runners), with Node's selection rules and audit log; a user pattern or start time it cannot read exactly defers to Node (port of session-end-mcp-reaper.js)."
 
+[mcp_reaper.unsure_log_kind]
+doc = "Engine log kind of a session-end-mcp-reaper case the engine cannot reproduce exactly, so it defers (logged, before anything is written or signalled): relative_home, no_home, test_guard (HOME set but relative or empty, no home at all, or HOME unset with the passwd home being the real one under a spawn_ctx.test_markers variable; HOME unset otherwise adopts the passwd home as os.homedir() does), pid_range (a process id at or past hostproc.max_exact_id), ages (process ages only an ambiguous local time gives), managed (service-manager ownership the probe cannot read)."
+value = "mcp_reaper_unsure"
+
 [mcp_reaper.setting]
 doc = "Where the reaper's on/off switch is read from (maintenance.sessionEndReaper, default on; the deprecated environment alias is read too)."
 value = { section = "maintenance", key = "sessionEndReaper", env = "ANTIHALL_SESSION_END_REAPER", aliases = ["ANTI_HALL_SESSION_END_REAPER"], option = "maintenance_session_end_reaper", default = true }
