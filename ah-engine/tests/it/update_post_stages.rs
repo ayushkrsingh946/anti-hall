@@ -469,6 +469,10 @@ fn picture(w: &World, answer: Value, anchor: Option<&str>) -> Value {
         text = text.replace(&child_label(), "{CHILD_LABEL}");
     }
     if let Some(r) = REPO.get() {
+        // the repo key of the shared checkout (its name carries this process's id and a hash of its path)
+        if let Ok(Some(k)) = ah_engine::meshw::ident::repo_key_for_worktree(&r.to_string_lossy()) {
+            text = text.replace(&k, "{REPOKEY}");
+        }
         text = text.replace(r.to_string_lossy().as_ref(), "{REPO}");
     }
     let mut v: Value = serde_json::from_str(&norm(&text, w)).unwrap();

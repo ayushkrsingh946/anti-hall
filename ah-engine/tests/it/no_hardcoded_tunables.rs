@@ -43,6 +43,8 @@ const ALLOW: &[(&str, &str, &str)] = &[
         "static ALLOC",
         "the dhat allocator hook of the `diag` feature (developer diagnostics only, not compiled into a release build): a global-allocator declaration, not a tunable",
     ),
+    ("src/meshw/ident.rs", "static GIT_CLASSIFY", "the on/off scope of the post-update git classifier (initial state: off, so hook callers keep deferring); the switch itself is mesh_write.git_classify_update"),
+    ("src/meshw/ident.rs", "static SUPER_CACHE", "the empty per-scope memo of the git superproject question (cleared at the start of every classifier scope); the git call's bound is mesh_write.git_spawn_timeout_ms"),
     ("src/frame.rs", "const MAGIC", "reply frame magic: the wire format identifier"),
     ("src/frame.rs", "const END", "reply frame trailer: the wire format identifier"),
     ("src/spool.rs", "const MAGIC", "spool record magic: the on-disk spool format identifier, versioned with the format"),

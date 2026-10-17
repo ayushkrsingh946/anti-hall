@@ -274,6 +274,8 @@ Every `AH_ENGINE_*` variable the engine or its wrappers read. A variable that ov
 | `AH_ENGINE_WRAPPER_DIAG` |  | Test-only: absolute path of a file the hook wrapper appends its diagnostic lines to. Honored only with AH_WRAPPER_TEST=1. Test-only: environment variable naming a file the launcher appends its diagnostic lines to (an absolute path). |
 | `AH_ENGINE_WRITE_MS` | `daemon.write_ms` | Time allowed to write a reply. |
 | `AH_ENGINE_WRITE_QUEUE` | `storage.write_queue` | Writes that may wait for the writer thread; beyond this a write is refused as busy (the client retries, then spools). |
+| `ANTIHALL_DOCTOR_LEGACY_STORES_REPORT` | `doctor.legacy_stores_report` | 1 (the default): the doctor warns about DevSwarm stores on the journal backend or split between a journal and SQLite, which the engine does not support (the Node tooling serves them). 0: no such warning. |
+| `ANTIHALL_GIT_CLASSIFY_UPDATE` | `mesh_write.git_classify_update` | 1 (the default): the migrate/update post-update stages classify a working directory only git can place (a checkout nested in another one, a linked worktree of a submodule) by running git as identity.js does, instead of leaving the stage to Node. Never used by a hook (those keep deferring). 0: those cases go to Node. |
 
 
 ## Socket protocol
@@ -4475,12 +4477,14 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `doctor.jev_state` | `anti-hall doctor health check` |  |  | The text of the doctor's Jev test call (no user content). |
 | `doctor.jev_warn_ms` | `800` |  | ms | Latency of the doctor's Jev test call from which the report is a WARN (a slow Jev). |
 | `doctor.jev_yes` | `the text is a health check` |  |  | The yes criterion of the doctor's Jev test call. |
+| `doctor.journal_segment_ext` | `.ndjson` |  |  | The file extension of a journal backend segment inside a store's journal directory. |
 | `doctor.kind_base` | `legacy-base` |  |  | The kind of a unit whose name has no suffix. |
 | `doctor.kind_hash` | `hash` |  |  | The kind of a unit named for a worktree hash. |
 | `doctor.kind_key` | `repoKey` |  |  | The kind of a unit named for a project key. |
 | `doctor.kind_unknown` | `unknown` |  |  | The kind of a unit whose name is in no known shape (it is never touched). |
 | `doctor.launchd_dir` | `Library, LaunchAgents` |  |  | The user LaunchAgents directory, as path segments under the home directory. |
 | `doctor.leaks_examples` | `5` |  |  | How many leaked stores the report names. |
+| `doctor.legacy_stores_report` | `1` | `ANTIHALL_DOCTOR_LEGACY_STORES_REPORT` |  | 1 (the default): the doctor warns about DevSwarm stores on the journal backend or split between a journal and SQLite, which the engine does not support (the Node tooling serves them). 0: no such warning. |
 | `doctor.linux_name` | `linux` |  |  | The OS name the engine and the release assets use for Linux. |
 | `doctor.lock_dir` | `locks` |  |  | The directory of the ingest daemons' lock files under the DevSwarm directory. |
 | `doctor.lock_file` | `ah-engine.lock` |  |  | The plugin's pin of the engine release, relative to the plugin root. |
@@ -4725,6 +4729,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `doctor_msg.head_integrations` | `Integrations` |  |  | The heading of the notes about companions that are not installed (oh-my-claudecode, the Codex port). |
 | `doctor_msg.head_jev` | `Jev` |  |  | The heading of the Jev health section (shown only when Jev is enabled). |
 | `doctor_msg.head_leaks` | `leaked test-fixture stores` |  |  | The heading of the report of leaked test-fixture stores. |
+| `doctor_msg.head_legacy_stores` | `legacy DevSwarm stores (journal backend)` |  |  | The heading of the report of unsupported legacy DevSwarm stores. |
 | `doctor_msg.head_logs` | `Logs and telemetry` |  |  | Section heading. |
 | `doctor_msg.head_omc` | `OMC (oh-my-claudecode) — detected` |  |  | The heading of the oh-my-claudecode section. |
 | `doctor_msg.head_orphans` | `Orphaned launchd/systemd ingest registrations` |  |  | The heading of the report of orphaned ingest registrations. |
@@ -4760,6 +4765,8 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `doctor_msg.leak_example` | `{hash} -> {worktree}` |  |  | One leaked store. Placeholders: {hash}, {worktree}. |
 | `doctor_msg.leak_more` | `, +{n} more` |  |  | How many more leaked stores are not listed. Placeholder: {n}. |
 | `doctor_msg.leak_summary` | `(warn) leaked test-fixture stores: {count} (run doctor --repair-test-stores t...` |  |  | The leaked stores. Placeholders: {count}, {shown}, {more}. |
+| `doctor_msg.legacy_journal` | `(warn) {count} DevSwarm store(s) use the legacy journal backend, which the en...` |  |  | Stores on the journal backend. Placeholders: {count}, {shown}. |
+| `doctor_msg.legacy_split` | `(warn) {count} DevSwarm store(s) are split between the legacy journal and SQL...` |  |  | Stores split between a journal and SQLite. Placeholders: {count}, {shown}. |
 | `doctor_msg.lock_no_asset` | `the plugin's ah-engine.lock has no build for {triple}; the Node hooks stay in...` |  |  | BIN-10. Placeholder: {triple}. |
 | `doctor_msg.lock_no_version` | `the lock has no version` |  |  | The lock has no version. |
 | `doctor_msg.lock_unreadable` | `ah-engine.lock is missing or unreadable at {path} ({err}); the bootstrap cann...` |  |  | BIN-15. Placeholders: {path}, {err}. |
@@ -5381,11 +5388,18 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `mesh_write.gate_done` | `done` |  |  | The gate a child's `done` verb sets. |
 | `mesh_write.gate_merged_verified` | `merged_verified` |  |  | The report-only gate recording the merged ancestry check. |
 | `mesh_write.gate_owner` | `owner` |  |  | The journal `gate` of a cursor move of the caller's own partition. |
+| `mesh_write.git_bin` | `git` |  |  | The git program the post-update classifier runs for the superproject question. |
+| `mesh_write.git_classify_update` | `1` | `ANTIHALL_GIT_CLASSIFY_UPDATE` |  | 1 (the default): the migrate/update post-update stages classify a working directory only git can place (a checkout nested in another one, a linked worktree of a submodule) by running git as identity.js does, instead of leaving the stage to Node. Never used by a hook (those keep deferring). 0: those cases go to Node. |
 | `mesh_write.git_config_file` | `config` |  |  | A git directory's config file. |
 | `mesh_write.git_core_section` | `[core]` |  |  | The config section holding `worktree`. |
 | `mesh_write.git_modules_dir` | `modules` |  |  | Where a superproject keeps absorbed submodule git directories. |
+| `mesh_write.git_scrub_env` | `GIT_DIR, GIT_WORK_TREE, GIT_COMMON_DIR, GIT_INDEX_FILE, GIT_PREFIX` |  |  | The git location variables removed from the environment of the superproject question, so its answer derives from the directory alone (identity.js SCRUB_ENV). |
+| `mesh_write.git_spawn_timeout_ms` | `10000` |  | ms | Upper bound of one superproject question (identity.js GIT_SPAWN_TIMEOUT_MS). |
+| `mesh_write.git_super_args` | `rev-parse, --show-superproject-working-tree` |  |  | The arguments after `-C <dir>` of the superproject question (identity.js gitSuperproject). |
 | `mesh_write.git_worktree_key` | `worktree` |  |  | The `core.worktree` key (an absorbed submodule's git directory carries it; the engine then defers to Node). |
 | `mesh_write.gitdir_key` | `gitdir:` |  |  | The key of a `.git` file pointing at its git directory. |
+| `mesh_write.gitmodules_file` | `.gitmodules` |  |  | The file of a checkout declaring its submodule paths. |
+| `mesh_write.gitmodules_path_key` | `path` |  |  | The key of a submodule's path in .gitmodules. |
 | `mesh_write.hb_plan_hint` | `no step plan for {id} — run `devswarm.js plan set {id} --steps "1. …\n2. …"` ...` |  |  | The `plan.hint` of a heartbeat --step for a workspace that has no plan; `{id}` is the workspace id. |
 | `mesh_write.hb_plan_no_plan` | `no-plan` |  |  | The `plan.reason` of a heartbeat --step for a workspace that has no plan. |
 | `mesh_write.hb_urgency_default` | `low` |  |  | The urgency of a heartbeat --summary broadcast when --urgency is not given. |
@@ -7094,7 +7108,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `update_post.stage_timeout_ms` | `300000` |  |  | Upper bound of one Node stage subprocess, in ms, besides the post-pull budget plus margins. |
 | `update_post.stages` | `22 items` |  |  | The post-pull stages in the order update.js runs them. `name` is the progress name, `key` the status key, `fn` the exported Node stage function the engine runs (a bounded subprocess) when it cannot answer the stage itself. `budget`: the overall post-pull budget defers the stage. `files`: plugin files the stage needs (relative to the plugin dir); if one is missing Node answers. `gate`: the stage is DevSwarm-session-only; `gate_json` is the answer with the gate closed. `state`: keys of update-sweep-state.json that must all hold completedVersion == the new version for the one-time stage to be done; `done_json` is the answer then (`{version}` in its detail). `passes`: the options handed to the Node function (`version`, `hashes` = the store hashes ordered smallest first, `deadline` = the post-pull deadline). `enabled`: false makes the stage report itself skipped (`disabled_json`) without running anything (read on every run). `fallback`: the Node stage function the engine runs when its native port cannot answer (a store it cannot open the way Node does, a case only Node decides). `done`, `out`, `detail`, `detail_dry`, `errors_text`, `left_text`: the shape of a native store stage's answer (`done` names the count the detail's `{done}` shows, outside and inside the dry-run preview). `native`: the engine answers the stage itself, no Node (`reader_cursors_import`, `reader_floor_repair`, `dual_partition_acks`, `promote_unclaimed`, `cursor_hygiene`, `merge_split_backend_stores`, `child_sender_labels`: the store stages; `reply_state`, `gate_intents`, `auto_archived`: the state-file migrations of migrate-state.js, shaped by `label`/`out`/`already`/`detail` exactly as update.js shapes them; `settings`: the settings forward-migration, the one-time legacy Jev key opt-in and the Jev triage cache repair; `codex_graphify`: the Codex hooks.json graphify-group cleanup). `empty_when`: a store repair the engine answers itself when the machine has nothing for it to walk (`no_stores`: no DevSwarm store directory; `no_app_db`: no readable DevSwarm app database), with `empty_json` (`empty_dry_json` under the ingest dry-run switch) and the completion stamp the Node pass writes then (the first `state` key); otherwise the Node function runs. |
 | `update_post.status_order` | `23 items` |  |  | The order of the stage keys in the status object (the script's object literal; it differs from the order the stages run in). |
-| `update_post.store_stages` | `7 items` |  |  | The `native` words of the store stages answered by src/migrate/poststages.rs (the DevSwarm store repairs of devswarm-lib). |
+| `update_post.store_stages` | `10 items` |  |  | The `native` words of the store stages answered by src/migrate/poststages.rs (the DevSwarm store repairs of devswarm-lib). |
 
 ### handovers.toml / handovers
 
