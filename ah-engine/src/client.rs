@@ -24,6 +24,14 @@ use std::time::{Duration, Instant};
 thread_local! {
     static LAST_NON_OK_REPLY: Cell<bool> = const { Cell::new(false) };
     static LAST_UNAVAILABLE: Cell<bool> = const { Cell::new(false) };
+    /// Set by the dispatcher for a guard event (dispatch.guard_events): such a call waits for a starting daemon.
+    static GUARD_CALL: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Mark the calls this thread makes next as a guard event's (or not): a guard call that finds no daemon waits for one to start
+/// (`client.cold_guard_wait_ms`) instead of answering nothing; prompts and advisories never wait.
+pub(crate) fn set_guard_call(on: bool) {
+    GUARD_CALL.set(on);
 }
 
 pub(crate) fn take_non_ok_reply() -> bool {
@@ -520,6 +528,10 @@ pub fn spawn_daemon() -> Option<std::process::Child> {
         }
     };
     let mut cmd = Command::new(exe);
+    // A daemon serves every later session, so it starts from the allowlisted part of this environment and from the home
+    // directory, never the starting hook's own (the daemon drops the rest itself too, see `daemonenv`; doing it here as well
+    // keeps the process image, as `ps` shows it, free of the session's values).
+    cmd.env_clear().envs(std::env::vars().filter(|(k, _)| crate::daemonenv::kept(k))).current_dir(crate::daemonenv::cwd(defaults::env_var("home").map(PathBuf::from)));
     // The allocator is chosen before the daemon's first allocation, so the configured one travels in its environment.
     let alloc_env = defaults::text("diagnostics.allocator_env");
     if std::env::var_os(alloc_env).is_none() {
@@ -655,40 +667,126 @@ fn attempt_with(payload: &[u8], cfg: &ClientConfig, have_fallback: bool, hold_wa
             None
         }
         Exch::Absent => {
-            wait_marker(false);
-            note_unavailable();
             if health::crashloop_tripped(cfg) {
+                wait_marker(false);
+                note_unavailable();
                 return None;
             }
-            let _spawn_lock = spawn_lock()?;
+            // a guard call waits only for a daemon that is really starting; with spawning disabled (no daemon will come) it keeps
+            // the unavailable contract: fail open, run no hooks
+            if !GUARD_CALL.get() || defaults::env_var("nospawn").is_some() {
+                return absent_unguarded(&sock, payload, cfg, have_fallback);
+            }
+            absent_guarded(&sock, payload, cfg, hold_wait_on_ok)
+        }
+    }
+}
+
+/// No daemon listens, spawning is allowed, and this is a guard event's call: a daemon is really starting. The call that takes the
+/// spawn lock starts it; a call that finds the lock held finds it being started by another call. Both wait for it to answer within
+/// `client.cold_guard_wait_ms` (the wait marker stays, so the wrapper's watchdog grants the slow window), then send the request once,
+/// on one connection, for what is left of the slow window (`wait_window`): one absolute budget, so the call never outlives the
+/// wrapper's watchdog. A call that gave up at once answered nothing, so every guard hook arriving while a daemon (re)started was an
+/// allow, a lost block. A start that fails (the spawn fails, or the daemon never answers in time) ends the call on the unavailable
+/// path exactly as before: fail open, the spawn failure also marks the daemon down. The request is not
+/// sent under the ack protocol: the new daemon queues the whole burst of calls that waited with it, so a request can sit
+/// unacknowledged past `wire.ack_timeout_ms`, and the ack protocol would resend it and then give up; one connection is never resent,
+/// so never judged twice.
+fn absent_guarded(sock: &Path, payload: &[u8], cfg: &ClientConfig, hold_wait_on_ok: bool) -> Option<String> {
+    let start = Instant::now();
+    // the spawn lock is held until this call's wait ends, so the calls arriving meanwhile wait instead of spawning again
+    let (spawn_guard, mut child) = match spawn_lock() {
+        Some(lock) => {
             health::log_event("client_spawn_attempt", "singleflight", "absent");
-            let Some(mut child) = spawn_daemon() else {
+            let Some(child) = spawn_daemon() else {
+                wait_marker(false);
+                note_unavailable();
                 mark_daemon_down("spawn");
                 return None;
             };
-            if have_fallback {
-                return None; // the Node hook answers this call; the daemon is up for the next one
-            }
-            let start = Instant::now();
-            let cold_wait = defaults::millis("client.cold_start_wait_ms");
-            while start.elapsed() < cold_wait {
-                if let Ok(Some(st)) = child.try_wait() {
-                    use std::os::unix::process::ExitStatusExt;
-                    if let Some(sig) = st.signal() {
-                        health::log_event("start_fail", &format!("sig{sig}"), defaults::text("msg.log_daemon_killed"));
-                        health::record_failure("start_fail", &format!("sig{sig}"), defaults::text("msg.log_daemon_killed"));
-                    }
-                    ping(&sock)?;
-                }
-                if let Exch::Reply(Kind::Ok, body) = exchange(&sock, payload, cfg.deadline) {
-                    return Some(body);
-                }
-                std::thread::sleep(defaults::millis("client.cold_start_poll_ms"));
-            }
-            health::log_event("client_down", "daemon", "cold_start");
-            None
+            (Some(lock), Some(child))
         }
+        None => (None, None),
+    };
+    let window = wait_window(cfg.deadline);
+    let cold_wait = defaults::millis("client.cold_guard_wait_ms").min(window);
+    let ctl = defaults::millis("client.ctl_timeout_ms");
+    while start.elapsed() < cold_wait {
+        if let Some(Ok(Some(st))) = child.as_mut().map(|c| c.try_wait()) {
+            use std::os::unix::process::ExitStatusExt;
+            if let Some(sig) = st.signal() {
+                health::log_event("start_fail", &format!("sig{sig}"), defaults::text("msg.log_daemon_killed"));
+                health::record_failure("start_fail", &format!("sig{sig}"), defaults::text("msg.log_daemon_killed"));
+            }
+            child = None; // it exited (another daemon holds the singleton, or it died): keep asking the socket
+        }
+        // only readiness is polled here, never longer than the budget left
+        let probe = ctl.min(cold_wait.saturating_sub(start.elapsed()));
+        let up = !probe.is_zero() && matches!(exchange(sock, b"CTL ping\n", probe), Exch::Reply(Kind::Ok, ref b) if b.starts_with("pong "));
+        if up {
+            drop(spawn_guard);
+            let left = window.saturating_sub(start.elapsed());
+            return match exchange_for(sock, payload, cfg.deadline.min(left), left, false) {
+                Exch::Reply(Kind::Ok, body) => {
+                    if !hold_wait_on_ok {
+                        wait_marker(false);
+                    }
+                    clear_daemon_down_marker();
+                    Some(body)
+                }
+                Exch::Reply(_, _) => {
+                    wait_marker(false);
+                    LAST_NON_OK_REPLY.set(true);
+                    None
+                }
+                _ => {
+                    wait_marker(false);
+                    note_unavailable();
+                    health::log_event("client_down", "daemon", "cold_start");
+                    None
+                }
+            };
+        }
+        std::thread::sleep(defaults::millis("client.cold_guard_poll_ms").min(cold_wait.saturating_sub(start.elapsed())));
     }
+    wait_marker(false);
+    note_unavailable();
+    health::log_event("client_down", "daemon", "cold_start");
+    None
+}
+
+/// No daemon listens and the call is not a guard event's: start one and answer at once (prompts and advisories never wait; with a
+/// fallback the Node hooks answer this call). A call without a fallback waits `client.cold_start_wait_ms` for the new daemon.
+fn absent_unguarded(sock: &Path, payload: &[u8], cfg: &ClientConfig, have_fallback: bool) -> Option<String> {
+    wait_marker(false);
+    note_unavailable();
+    let _spawn_lock = spawn_lock()?;
+    health::log_event("client_spawn_attempt", "singleflight", "absent");
+    let Some(mut child) = spawn_daemon() else {
+        mark_daemon_down("spawn");
+        return None;
+    };
+    if have_fallback {
+        return None; // the Node hook answers this call; the daemon is up for the next one
+    }
+    let start = Instant::now();
+    let cold_wait = defaults::millis("client.cold_start_wait_ms");
+    while start.elapsed() < cold_wait {
+        if let Ok(Some(st)) = child.try_wait() {
+            use std::os::unix::process::ExitStatusExt;
+            if let Some(sig) = st.signal() {
+                health::log_event("start_fail", &format!("sig{sig}"), defaults::text("msg.log_daemon_killed"));
+                health::record_failure("start_fail", &format!("sig{sig}"), defaults::text("msg.log_daemon_killed"));
+            }
+            ping(sock)?;
+        }
+        if let Exch::Reply(Kind::Ok, body) = exchange(sock, payload, cfg.deadline) {
+            return Some(body);
+        }
+        std::thread::sleep(defaults::millis("client.cold_start_poll_ms"));
+    }
+    health::log_event("client_down", "daemon", "cold_start");
+    None
 }
 
 /// End a hung daemon and start a new one; true once the new one is started. Single-flight (the spawn lock) and gated by the

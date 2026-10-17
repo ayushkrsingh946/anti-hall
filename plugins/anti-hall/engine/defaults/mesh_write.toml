@@ -1727,6 +1727,10 @@ value = "store"
 doc = "The NDJSON line's sender field."
 value = "fromBranch"
 
+[mesh_write.ndjson_sender_field]
+doc = "The NDJSON line's resolved-sender field (the workspace id `pull` wrote: the registry row of the line's branch, else the Primary)."
+value = "sender"
+
 [mesh_write.ndjson_message_field]
 doc = "The NDJSON line's body field."
 value = "message"
@@ -1997,31 +2001,47 @@ value = { section = "devswarm", key = "sendMultiRecipient", env = "ANTIHALL_DEVS
 doc = "`send --quiet` line of one failed recipient of a multi-recipient send. Placeholders: {to}, {why}."
 value = "ok:false -> {to}: {why}"
 
-[mesh_write.git_classify_update]
-doc = "1 (the default): the migrate/update post-update stages classify a working directory only git can place (a checkout nested in another one, a linked worktree of a submodule) by running git as identity.js does, instead of leaving the stage to Node. Never used by a hook (those keep deferring). 0: those cases go to Node."
-value = 1
-env = "ANTIHALL_GIT_CLASSIFY_UPDATE"
-min = 0
-max = 1
-
-[mesh_write.git_bin]
-doc = "The git program the post-update classifier runs for the superproject question."
-value = "git"
-
-[mesh_write.git_super_args]
-doc = "The arguments after `-C <dir>` of the superproject question (identity.js gitSuperproject)."
-value = ["rev-parse", "--show-superproject-working-tree"]
-
-[mesh_write.git_scrub_env]
-doc = "The git location variables removed from the environment of the superproject question, so its answer derives from the directory alone (identity.js SCRUB_ENV)."
-value = ["GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_PREFIX"]
-
-[mesh_write.git_spawn_timeout_ms]
-doc = "Upper bound of one superproject question (identity.js GIT_SPAWN_TIMEOUT_MS)."
-value = 10000
+[mesh_write.super_cache_ttl_ms]
+doc = "How long a superproject answer git gave for a nested checkout is reused (identity.js SUPER_CACHE_TTL_MS)."
+value = 300000
 unit = "ms"
-min = 100
-max = 600000
+min = 1000
+max = 86400000
+
+[mesh_write.super_cache_max]
+doc = "Most nested checkouts whose superproject answer is kept at once (expired entries go first, then all)."
+value = 256
+min = 1
+max = 65536
+
+[mesh_write.file_read_max_bytes]
+doc = "Largest mesh file a read through a path from a descriptor or a session record may take (a durable inbox, a cursor file, a harness session record). A larger file, and anything that is no regular file (a FIFO, socket or device, whose read could block a worker for good), is not read: the hook's answer goes to Node."
+value = 16777216
+min = 1024
+
+[metric.mesh_own_sends_excluded]
+doc = "Counts that left out unread rows the recipient's own identity family sent (an own send is not inbound mail)."
+value = { kind = "counter", unit = "counts", labels = [] }
+
+[mesh_write.sender_fallback_ingest]
+doc = "The `where` label and log word of a sender taken from the Primary because the message's branch named no registered workspace (ingest)."
+value = "ingest"
+
+[mesh_write.sender_fallback_read]
+doc = "The `where` label and log word of a sender taken from a fallback at read time (the NDJSON line's own sender, or the Primary for a NULL store row)."
+value = "read"
+
+[mesh_write.msg_sender_fallback]
+doc = "The log line when a message got its sender from a fallback instead of its own branch. {where} {id} (the partition) {n} (messages)."
+value = "mesh sender fallback: where={where}, partition={id}, messages={n}"
+
+[metric.mesh_sender_fallback]
+doc = "Messages whose sender came from a fallback instead of the message's own branch, by where: ingest (a child's queue: the Primary), read (the NDJSON line's own sender, or the Primary for a NULL store row)."
+value = { kind = "counter", unit = "messages", labels = ["where"] }
+
+[metric.mesh_watcher_matched_by_checkout]
+doc = "Watcher-live checks answered by another row's lock on the same checkout because the workspace's own id had no live lock."
+value = { kind = "counter", unit = "checks", labels = [] }
 
 [mesh_write.gitmodules_file]
 doc = "The file of a checkout declaring its submodule paths."

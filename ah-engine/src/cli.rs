@@ -201,10 +201,13 @@ pub fn run(args: &[String]) -> i32 {
     // commands that only talk to the daemon or print a version need a few settings, not the docs of all of them
     // the status line runs after every turn: like the hook client it reads the snapshot cache instead of parsing every file
     let statusline = p.command == "statusline";
-    if hook || statusline || ["version", "status", "ping", "ctl", "stop"].contains(&p.command.as_str()) {
+    // the wake watcher runs for a whole session, once per session: it reads the cache too, keeping one key at a time
+    // in memory instead of the parsed 2 MB of every file (about 40 MB resident for as long as the session lives)
+    let wake_watch = p.command == "devswarm" && p.rest.first().is_some_and(|v| v == "wake-watch");
+    if hook || statusline || wake_watch || ["version", "status", "ping", "ctl", "stop"].contains(&p.command.as_str()) {
         defaults::use_cache();
     }
-    if hook || statusline || p.command == "serve" {
+    if hook || statusline || wake_watch || p.command == "serve" {
         defaults::write_cache_on_load();
     }
     if hook {
@@ -292,6 +295,7 @@ fn run_recorded(p: &Parsed, h: Handler) -> i32 {
 }
 
 fn cmd_serve(_: &Parsed) -> i32 {
+    crate::daemonenv::sanitize(); // before any thread: the daemon serves every session, so it keeps nothing of the one that started it
     daemon::serve();
     0
 }

@@ -166,7 +166,8 @@ fn ndjson_msg(line: &str) -> R<Msg> {
         Some(v) => js_string_of(v)?,
         None => String::new(),
     };
-    let sender = match field(defaults::text("mesh_write.ndjson_from_field")) {
+    // the line's own resolved sender (pull stamps it), else its branch (a legacy line carries no sender)
+    let sender = match field(defaults::text("mesh_write.ndjson_sender_field")).or_else(|| field(defaults::text("mesh_write.ndjson_from_field"))) {
         Some(v) => Some(js_string_of(v)?),
         None => None,
     };
@@ -670,11 +671,14 @@ fn plan(inv: &Inv, a: &Args, promoted: Option<bool>) -> R<Planned> {
     let mut nd_op_target: Option<f64> = None;
     if let Some(inbox) = &inbox {
         let Some(cf) = &cursor_file else { return defer("no-cursor-path") };
-        if union::non_empty_lines(inbox).is_none() || union::cursor_position(cf)?.is_none() {
+        if union::non_empty_lines(inbox)?.is_none() || union::cursor_position(cf)?.is_none() {
             return defer("unknown-count");
         }
         let input = union::UnionIn { inbox: Some(inbox), cursor_file: Some(cf), id, store: Some(&o.reader), store_base, nd_base, now: inv.now };
-        let u = union::union_unread(&input)?;
+        let me = crate::meshw::cursors::reader_key(tick::reader_nonce_cached(&inv.home).as_deref());
+        let counted = union::unread_for(&o.reader, &inv.home, id, Some(inbox), Some(cf), me.as_deref(), &tick::family_of(id, &o.rows), inv.now)?;
+        tick::note_own_excluded(&counted);
+        let u = counted.union;
         let merged_total = union::merged_total(&input)?;
         for line in &u.nd_unread_lines {
             msgs.push(ndjson_msg(line)?);
@@ -688,7 +692,7 @@ fn plan(inv: &Inv, a: &Args, promoted: Option<bool>) -> R<Planned> {
                 if x.sort_ts == y.sort_ts { std::cmp::Ordering::Equal } else { x.sort_ts.partial_cmp(&y.sort_ts).unwrap_or(std::cmp::Ordering::Equal) }
             },
         );
-        unread_count = u.unread as f64;
+        unread_count = counted.unread as f64;
         total_out = merged_total as f64;
         let nd_cursor = floor_pos(nd_base);
         union_cursors = Some((nd_cursor, store_base));
@@ -715,8 +719,16 @@ fn plan(inv: &Inv, a: &Args, promoted: Option<bool>) -> R<Planned> {
     let mut body_bytes = 0.0;
     let registry: std::cell::OnceCell<Vec<(String, String)>> = std::cell::OnceCell::new();
     let legacy_from = |body: &str| -> Option<String> {
-        let branch = crate::dssup::ingest::import::done_branch(body)?;
-        crate::dssup::ingest::import::branch_sender(registry.get_or_init(|| crate::dssup::ingest::import::registry_pairs(&o.reader)), &branch)
+        let reg = registry.get_or_init(|| crate::dssup::ingest::import::registry_pairs(&o.reader));
+        let named = crate::dssup::ingest::import::done_branch(body).and_then(|branch| crate::dssup::ingest::import::branch_sender(reg, &branch));
+        // #181: a stored row with no sender in a child's partition is the Primary's outbound (as ingest now stamps it)
+        named.or_else(|| {
+            let fallback = crate::dssup::ingest::import::fallback_sender(reg, id);
+            if fallback.is_some() {
+                crate::metrics::bump("mesh_sender_fallback", &[("where", defaults::text("mesh_write.sender_fallback_read"))]);
+            }
+            fallback
+        })
     };
     for m in msgs {
         let (row, len) = finish(m, &legacy_from)?;
@@ -827,5 +839,20 @@ mod tests {
         assert_eq!(base36(35), "z");
         assert_eq!(base36(36), "10");
         assert_eq!(base36(1_795_000_000_000), "mwm0nk74");
+    }
+
+    fn sender_of(m: &Msg) -> Option<String> {
+        m.fields.0.iter().find(|(k, _)| k == "sender").and_then(|(_, v)| if let OVal::Str(t) = v { Some(t.clone()) } else { None })
+    }
+
+    #[test]
+    fn an_ndjson_line_names_its_own_sender() {
+        // #181: pull stamps the resolved sender; `fromBranch` is only a branch ("main" is not an addressable id)
+        let m = ndjson_msg(r#"{"_h":"h","fromBranch":"main","message":"poke","createdAt":1,"sender":"P"}"#).unwrap();
+        assert_eq!(sender_of(&m).as_deref(), Some("P"));
+        let legacy = ndjson_msg(r#"{"_h":"h","fromBranch":"fix/x","message":"m","createdAt":1}"#).unwrap();
+        assert_eq!(sender_of(&legacy).as_deref(), Some("fix/x"), "a line with no sender keeps its branch, as before");
+        let none = ndjson_msg(r#"{"_h":"h","message":"m","createdAt":1}"#).unwrap();
+        assert_eq!(sender_of(&none), None);
     }
 }

@@ -20,7 +20,7 @@
 // Discard triage (E3): every `.ok()` / `unwrap_or_default()` in this file is a deliberate keep, for these reasons:
 // - an unreadable or torn optional file is the absent one (Node: `try { JSON.parse(readFileSync(...)) } catch (_) {}`)
 use crate::checks::guardkit::ojson::{OVal, is_array_index_key};
-use crate::checks::guardkit::text::{js_number_of_str, slice_utf16};
+use crate::checks::guardkit::text::js_number_of_str;
 use crate::checks::jsport::num::to_js_string;
 use crate::defaults;
 use crate::dssup::appsync::plan::{app_sourced, dir_of, read_json_dir, wt_key};
@@ -961,9 +961,7 @@ pub fn human_text(inv: &Inv, rows: &[Obj], all: bool, now: f64) -> R<String> {
             let last = id.and_then(|i| last_outbound(&e, i));
             let name = match (field(r, "wsName"), id) {
                 (Some(OVal::Str(n)), Some(i)) if !n.is_empty() => {
-                    let width = defaults::num("devswarm_cli.app_short_id") as usize;
-                    let short = if i.encode_utf16().count() > width { slice_utf16(i, width) } else { Some(i.to_string()) };
-                    let Some(short) = short else { return defer("surrogate-cut") };
+                    let short = crate::meshw::appverbs::short(i)?;
                     tpl("devswarm_cli.rr_text_name", &[("name", n), ("short", &short)])
                 }
                 (_, Some(i)) => i.to_string(),

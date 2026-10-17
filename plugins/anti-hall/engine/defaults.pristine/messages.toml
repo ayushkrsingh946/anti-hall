@@ -381,6 +381,14 @@ value = "stat"
 doc = "Printed on stderr (exit dispatch.defer_exit) when the legacy `hook` command gets a guard event, the engine cannot answer and no Node fallback was given: the caller must run the Node hook, never take silence as an allow."
 value = "anti-hall: the engine could not answer this guard event and no Node fallback was given; run the Node hook"
 
+[msg.log_malloc_decay_applied]
+doc = "Event-log detail (kind malloc_decay) when the daemon, started without the allocator tuning in its environment, applied the decay settings of daemon.malloc_conf at runtime. Placeholder: {settings} (key=value list)."
+value = "allocator decay applied at start: {settings}"
+
+[msg.log_malloc_decay_skipped]
+doc = "Event-log detail (kind malloc_decay) when the allocator decay settings could not be applied at start; the daemon runs with the allocator's own defaults. Placeholder: {reason}."
+value = "allocator decay not applied: {reason}"
+
 [msg.log_allocator_invalid]
 doc = "Event-log detail (kind alloc_invalid) when diagnostics.allocator holds a value that is not an accepted allocator; the daemon starts with jemalloc. Placeholder: {value}."
 value = "diagnostics.allocator={value} is not an accepted allocator; using jemalloc"
@@ -554,6 +562,34 @@ value = "the run panicked and was stopped"
 [msg.schedule_failed]
 doc = "Event-log detail of a failed run. Placeholders: {job}, {detail}."
 value = "job {job} failed: {detail}"
+
+[msg.schedule_failed_no_detail]
+doc = "Detail of a failed run that gave no reason at all (never left empty in the history or the log)."
+value = "the run failed without giving a reason"
+
+[msg.schedule_no_command]
+doc = "Detail of a subprocess job with no command line to run."
+value = "the job has no command line"
+
+[msg.schedule_spawn_failed]
+doc = "Detail of a subprocess job that could not be started or read. Placeholders: {program}, {err}."
+value = "could not run {program}: {err}"
+
+[msg.schedule_exit_code]
+doc = "How a subprocess job's exit is named in its failure detail. Placeholder: {code}."
+value = "exit status {code}"
+
+[msg.schedule_exit_signal]
+doc = "How a subprocess job killed by a signal is named in its failure detail. Placeholder: {signal}."
+value = "killed by signal {signal}"
+
+[msg.schedule_exit_output]
+doc = "Failure detail of a subprocess job: its exit and the end of what it wrote (stderr, else stdout, where a --json command reports its error). Placeholders: {status}, {output}."
+value = "{status}: {output}"
+
+[msg.schedule_exit_silent]
+doc = "Failure detail of a subprocess job that wrote nothing on stderr or stdout. Placeholder: {status}."
+value = "{status}, nothing written on stderr or stdout"
 
 [msg.schedule_skipped]
 doc = "Event-log detail when a scheduled job skipped itself because there was no work. Placeholders: {job}, {detail}."

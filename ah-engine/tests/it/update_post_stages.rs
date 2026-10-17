@@ -1038,7 +1038,7 @@ fn inner() -> &'static Path {
 }
 
 fn nested_anchor() -> String {
-    ah_engine::meshw::ident::with_git_classifier(|| ah_engine::meshw::ident::canonical_mesh_id(&inner().to_string_lossy())).unwrap().unwrap()
+    ah_engine::meshw::ident::canonical_mesh_id(&inner().to_string_lossy()).unwrap().unwrap()
 }
 
 /// `seed_dual` on a worktree nested in another checkout.
@@ -1070,38 +1070,14 @@ fn dual_acks_classify_a_nested_repository_with_git_like_node() {
     run_case(&nested_case());
 }
 
-/// The switch `mesh_write.git_classify_update = 0` puts the case back with Node (the engine decides nothing for it, writes nothing).
+/// The classifier itself, on real repositories (one implementation for hooks and the post-update stages): it answers as `identity.js` does for an untracked nested repo, a gitlink in the parent's index, and a linked worktree of a submodule.
 #[test]
-fn the_git_classifier_switched_off_leaves_a_nested_repository_to_node_untouched() {
-    let o = Opt { ds: true, no_upstream_move: true, live: true, no_node: true, stage_only: Some("dual-partition-acks"), ..Opt::default() };
-    let w = world(&o);
-    seed_dual_nested(&w.home);
-    let toml = w.mp.join("plugins/anti-hall/engine/defaults/mesh_write.toml");
-    let text = fs::read_to_string(&toml).unwrap();
-    let key = "[mesh_write.git_classify_update]";
-    let at = text.find(key).unwrap();
-    let off = format!("{}{}", &text[..at], text[at..].replacen("value = 1\n", "value = 0\n", 1));
-    assert_ne!(text, off);
-    fs::write(&toml, off).unwrap();
-    let before = picture(&w, Value::Null, None);
-    let ans = engine_answer(&w, &o, "dualPartitionAcks");
-    assert_eq!(ans["attempted"], json!(false), "{ans}");
-    let calls = stage_node_calls(&w);
-    assert_eq!(calls.len(), 1, "{calls:?}");
-    assert!(calls[0].contains("dualPartitionAcksPostUpdate"), "{calls:?}");
-    assert_eq!(before["stores"], picture(&w, Value::Null, None)["stores"], "the engine wrote to a store it handed to Node");
-}
-
-/// The classifier itself, on real repositories: off (a hook caller) it defers exactly as before; on (the post-update stages) it
-/// answers as `identity.js` does for an untracked nested repo, a gitlink in the parent's index, and a linked worktree of a submodule.
-#[test]
-fn the_git_classifier_is_opt_in_and_mirrors_identity_js() {
-    use ah_engine::meshw::ident::{Defer, resolve_context, with_git_classifier};
+fn the_git_classifier_mirrors_identity_js() {
+    use ah_engine::meshw::ident::resolve_context;
     let s = |p: &Path| p.to_string_lossy().into_owned();
     // 1. untracked nested repository
     let nested = inner();
-    assert_eq!(resolve_context(&s(nested), false), Err(Defer("git-superproject".into())), "a hook caller must keep deferring");
-    let on = with_git_classifier(|| resolve_context(&s(nested), false)).unwrap();
+    let on = resolve_context(&s(nested), false).unwrap();
     assert_eq!((on.kind.as_str(), on.worktree_root.as_deref()), ("main", Some(s(nested).as_str())), "git says no superproject: the nested repo is its own root");
     // 2. a nested repo registered as a gitlink in the parent's index: git names the parent as its superproject
     let top = scratch_dir("gitlink");
@@ -1112,8 +1088,7 @@ fn the_git_classifier_is_opt_in_and_mirrors_identity_js() {
     git_in(&sub, &["commit", "-q", "--allow-empty", "-m", "c"]);
     let sha = String::from_utf8(Command::new("git").args(["rev-parse", "HEAD"]).current_dir(&sub).output().unwrap().stdout).unwrap();
     git_in(&top, &["update-index", "--add", "--cacheinfo", &format!("160000,{},sub", sha.trim())]);
-    assert_eq!(resolve_context(&s(&sub), false), Err(Defer("git-superproject".into())));
-    let on = with_git_classifier(|| resolve_context(&s(&sub), false)).unwrap();
+    let on = resolve_context(&s(&sub), false).unwrap();
     assert_eq!((on.kind.as_str(), on.worktree_root.as_deref(), on.toplevel.as_deref()), ("submodule-in-main", Some(s(&top).as_str()), Some(s(&sub).as_str())));
     // 3. a linked worktree of an absorbed submodule, checked out beside the superproject: the core.worktree hop
     let base = scratch_dir("subwt");
@@ -1128,11 +1103,8 @@ fn the_git_classifier_is_opt_in_and_mirrors_identity_js() {
     let wt = base.join("libsub-wt");
     git_in(&sup.join("libsub"), &["worktree", "add", "-q", "--detach", &s(&wt)]);
     let wt = fs::canonicalize(wt).unwrap();
-    assert_eq!(resolve_context(&s(&wt), false), Err(Defer("core-worktree".into())), "a hook caller must keep deferring");
-    let on = with_git_classifier(|| resolve_context(&s(&wt), false)).unwrap();
+    let on = resolve_context(&s(&wt), false).unwrap();
     assert_eq!((on.kind.as_str(), on.worktree_root.as_deref()), ("submodule-in-main", Some(s(&fs::canonicalize(&sup).unwrap()).as_str())));
-    // the scope ends with the closure
-    assert_eq!(resolve_context(&s(nested), false), Err(Defer("git-superproject".into())));
 }
 
 

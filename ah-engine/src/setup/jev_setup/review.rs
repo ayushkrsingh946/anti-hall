@@ -12,8 +12,10 @@ use crate::defaults;
 use crate::jev::settings::{JevSettings, Sources};
 use crate::setup::jsfmt::keys;
 use crate::setup::{out, read_capped, text_of, warn};
-use std::io::Write;
+use std::collections::HashMap;
+use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 type Obj = Vec<(String, J)>;
 
@@ -171,25 +173,101 @@ fn append_metric(home: &Path, row: Obj) {
 
 // ---- decisions -------------------------------------------------------------------------------------------------------------
 
-/// The decision rows of the log's retained generations: objects with an id and no type.
-fn decision_rows(home: &Path) -> Vec<J> {
-    let mut rows = Vec::new();
+/// Per integration id: the decision rows logged for it and the earliest `ts` among them (milliseconds; infinite when none parses).
+type RowStats = HashMap<String, (f64, f64)>;
+
+/// The scan's registered memory holder (`jev_review_scan`, limits `mem.jev_review_scan_*`), one instance per running scan.
+fn scan_budget() -> &'static crate::mem::Budget {
+    static BUDGET: OnceLock<crate::mem::Budget> = OnceLock::new();
+    BUDGET.get_or_init(|| {
+        crate::mem::global().register_instances(crate::mem::Spec::new(
+            "jev_review_scan",
+            "mem.jev_review_scan_soft_bytes",
+            "mem.jev_review_scan_hard_bytes",
+            "mem.jev_review_scan_low_water_pct",
+        ))
+    })
+}
+
+enum Line {
+    Read,
+    End,
+    TooLong,
+}
+
+/// One line (through its `\n`) of `r` into `buf`, stopping before `buf` would pass `cap` bytes (0 = no cap).
+fn read_line_capped(r: &mut impl BufRead, buf: &mut Vec<u8>, cap: usize) -> std::io::Result<Line> {
+    loop {
+        let chunk = match r.fill_buf() {
+            Ok(c) => c,
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(e),
+        };
+        if chunk.is_empty() {
+            return Ok(if buf.is_empty() { Line::End } else { Line::Read });
+        }
+        let (take, done) = chunk.iter().position(|&b| b == b'\n').map_or((chunk.len(), false), |i| (i + 1, true));
+        if cap > 0 && buf.len() + take > cap {
+            return Ok(Line::TooLong);
+        }
+        buf.extend_from_slice(&chunk[..take]);
+        r.consume(take);
+        if done {
+            return Ok(Line::Read);
+        }
+    }
+}
+
+/// The decision rows of the log's retained generations (objects with an id and no type), folded per id while the files are
+/// streamed: only one line and the per-id totals are held, never the log. Holding every parsed row cost about 56 MB of heap on
+/// each SessionStart for a 12 MB log (#104). The bytes held are reported to the `jev_review_scan` holder; a scan that would
+/// pass its hard limit (a line longer than that) stops, and the review state counts as unusable (`Err`).
+fn decision_stats(home: &Path) -> Result<RowStats, String> {
+    let mut inst = scan_budget().instance();
+    let cap = inst.hard_limit();
+    let over = |file: &Path| defaults::render("opcli.review_scan_over_limit", &[("file", &file.display()), ("limit", &cap)]);
+    let mut stats = RowStats::new();
+    let mut held = 0usize;
+    let mut buf = Vec::new();
     for f in crate::jev::report::retained(&base_dir(home).join(defaults::text("jev.log_file"))) {
-        let Ok(bytes) = std::fs::read(&f) else { continue };
-        for line in String::from_utf8_lossy(&bytes).split('\n') {
-            let t = crate::jev::js_trim(line);
+        let Ok(file) = std::fs::File::open(&f) else { continue };
+        let mut r = std::io::BufReader::new(file);
+        loop {
+            buf.clear();
+            match read_line_capped(&mut r, &mut buf, cap) {
+                Ok(Line::Read) => {}
+                Ok(Line::End) | Err(_) => break,
+                Ok(Line::TooLong) => return Err(over(&f)),
+            }
+            if matches!(inst.report(buf.capacity() + held), crate::mem::Action::Recycle) {
+                return Err(over(&f));
+            }
+            let text = String::from_utf8_lossy(&buf);
+            let t = crate::jev::js_trim(&text);
             if t.is_empty() {
                 continue;
             }
-            if let Ok(row @ J::Obj(_)) = parse_json(t)
-                && truthy(row.get(k("id")))
-                && !truthy(row.get(k("type")))
-            {
-                rows.push(row);
+            let Ok(row @ J::Obj(_)) = parse_json(t) else { continue };
+            if !truthy(row.get(k("id"))) || truthy(row.get(k("type"))) {
+                continue;
+            }
+            // `idStats` matches rows by a text id only; a row with another truthy id counts for no integration
+            let Some(J::Str(id)) = row.get(k("id")) else { continue };
+            let ts = match row.get(k("ts")) {
+                Some(J::Str(ts)) => date_ms(ts),
+                _ => None,
+            };
+            let slot = stats.entry(id.clone()).or_insert_with(|| {
+                held += id.len() + std::mem::size_of::<(String, (f64, f64))>();
+                (0.0, f64::INFINITY)
+            });
+            slot.0 += 1.0;
+            if let Some(t) = ts {
+                slot.1 = slot.1.min(t);
             }
         }
     }
-    rows
+    Ok(stats)
 }
 
 /// The daily rollups: objects with a text day and a list of groups, in file-name order.
@@ -208,24 +286,14 @@ fn rollups(home: &Path) -> Vec<J> {
 }
 
 struct Evidence {
-    rows: Vec<J>,
+    rows: RowStats,
     rollups: Vec<J>,
 }
 
 /// `idStats`: the decisions logged for `id` (raw rows plus the days only a rollup still covers) and the earliest instant.
 fn id_stats(ev: &Evidence, id: &str) -> (f64, Option<f64>) {
-    let mine: Vec<&J> = ev.rows.iter().filter(|r| matches!(r.get(k("id")), Some(J::Str(s)) if s == id)).collect();
-    let mut decisions = mine.len() as f64;
-    let mut oldest_raw = f64::INFINITY;
-    let mut earliest = f64::INFINITY;
-    for r in &mine {
-        if let Some(J::Str(ts)) = r.get(k("ts"))
-            && let Some(t) = date_ms(ts)
-        {
-            oldest_raw = oldest_raw.min(t);
-            earliest = earliest.min(t);
-        }
-    }
+    let (mut decisions, oldest_raw) = ev.rows.get(id).copied().unwrap_or((0.0, f64::INFINITY));
+    let mut earliest = oldest_raw;
     for rollup in &ev.rollups {
         let Some(J::Str(day)) = rollup.get(k("day")) else { continue };
         let Some(start) = date_ms(&format!("{day}{}", defaults::text("opcli.review_rollup_midnight"))) else { continue };
@@ -298,7 +366,7 @@ fn compute_due(home: &Path, s: &JevSettings, after: f64, min: f64) -> Result<Com
     }
     ids.retain(|id| s.mode(id, false).as_str() == defaults::text("opcli.review_mode_shadow"));
 
-    let ev = Evidence { rows: decision_rows(home), rollups: rollups(home) };
+    let ev = Evidence { rows: decision_stats(home)?, rollups: rollups(home) };
     let mut state = State::read(home);
     let mut due = Vec::new();
     for id in &ids {

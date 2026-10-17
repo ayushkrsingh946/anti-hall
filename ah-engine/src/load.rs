@@ -22,6 +22,7 @@ thread_local! {
     static SCAN_BYTES: Cell<u64> = const { Cell::new(0) };
     static CHECK_SCAN_BYTES: Cell<u64> = const { Cell::new(0) };
     static CHECK_CPU_US: Cell<u64> = const { Cell::new(0) };
+    static CHECK_MEM: Cell<Option<crate::mem::Delta>> = const { Cell::new(None) };
     static NOTES: std::cell::RefCell<Vec<Note>> = const { std::cell::RefCell::new(Vec::new()) };
     static TRANSCRIPT_SIZE: Cell<Option<u64>> = const { Cell::new(None) };
 }
@@ -47,6 +48,17 @@ pub fn note_check_cpu(us: u64) {
 /// The CPU noted for the check that just finished, and reset.
 pub fn take_check_cpu() -> u64 {
     CHECK_CPU_US.with(Cell::take)
+}
+
+/// The memory the check that just ran allocated (`None` when it was not measured), noted by [`crate::checks::run_env_guarded`] as the
+/// check finishes.
+pub fn note_check_mem(d: Option<crate::mem::Delta>) {
+    CHECK_MEM.with(|c| c.set(d));
+}
+
+/// The memory noted for the check that just finished, and reset.
+pub fn take_check_mem() -> Option<crate::mem::Delta> {
+    CHECK_MEM.with(Cell::take)
 }
 
 /// A check on this thread saw one `metric` event labelled `label` = `value` (for instance a kept-walk hit, or the reason it

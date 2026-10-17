@@ -656,22 +656,20 @@ pub fn compute(st: &MeshStore, inv: &Inv, touched: Option<&str>) -> R<OVal> {
         let floor = floor_of(st, &mut cur, home, &d.id, false)?;
         let cursor = floor;
         let mut unread = (total - cursor).max(0.0);
+        // unread rows the recipient's own family sent, when the union already counted them (the store-only path counts them below)
+        let mut own_unread: Option<usize> = None;
+        let family = recipient_family(&d.id, &rows);
         if d.inbox_path.is_some() || d.cursor_path.is_some() {
             let nd_floor = floor_of(st, &mut cur, home, &d.id, true)?;
             let (known, lines) = ndjson_backlog(d.inbox_path.as_deref(), d.cursor_path.as_deref());
             if known && lines > nd_floor {
                 // the NDJSON side has unread lines: the summary counts the loss-free union at the floors (reader-cursors
                 // `countFor` with no reader), which `unionUnreadFor` reports when it is known
-                let u = crate::meshw::union::union_unread(&crate::meshw::union::UnionIn {
-                    inbox: d.inbox_path.as_deref(),
-                    cursor_file: d.cursor_path.as_deref(),
-                    id: &d.id,
-                    store: Some(st.reader()),
-                    store_base: floor,
-                    nd_base: nd_floor,
-                    now: inv.now,
-                })?;
-                unread = u.unread as f64;
+                let u =
+                    crate::meshw::union::unread_at(st.reader(), &d.id, d.inbox_path.as_deref(), d.cursor_path.as_deref(), (floor, nd_floor), &family, inv.now)?;
+                crate::meshw::tick::note_own_excluded(&u);
+                unread = u.union.unread as f64;
+                own_unread = Some(u.own_excluded);
             }
         }
         let (gate_vals, gate_by) = {
@@ -758,7 +756,9 @@ pub fn compute(st: &MeshStore, inv: &Inv, touched: Option<&str>) -> R<OVal> {
             }
         }
         let bc_cursor = st.reader().broadcast_cursor(&d.id).or_else(|e| err("broadcast-cursor", e))? as f64;
-        let family = recipient_family(&d.id, &rows);
+        // directUnread: the unread direct mail without what the recipient's own identity family sent
+        let own_unread = own_unread.unwrap_or_else(|| unread_rows.iter().filter(|r| r.sender.as_ref().is_some_and(|x| family.contains(x))).count());
+        let direct_unread = (unread - own_unread as f64).max(0.0);
         // directTotalFromOthers: the partition total without the rows its own identity family sent (wake-watch wakes on others' mail)
         let direct_from_others =
             if family.is_empty() { total } else { st.reader().message_count_from_others(&d.id, &family).or_else(|e| err("count", e))? as f64 };
@@ -781,7 +781,7 @@ pub fn compute(st: &MeshStore, inv: &Inv, touched: Option<&str>) -> R<OVal> {
             ("cursor".into(), num(cursor)),
             ("unread".into(), num(unread)),
             ("directTotalFromOthers".into(), num(direct_from_others)),
-            ("directUnread".into(), num(unread)),
+            ("directUnread".into(), num(direct_unread)),
             ("oldestDirectUnreadTs".into(), opt_num(oldest_ts)),
             ("oldestDirectUnreadSender".into(), s_or_null(oldest_sender.as_deref())),
             ("broadcastUnread".into(), n(unread_bc.len() as f64)),

@@ -48,11 +48,6 @@ pub(crate) fn is_store_stage(which: &str) -> bool {
 
 /// Run one: `None` when Node must answer. `dry` is the ingest dry-run switch (a preview: nothing is written).
 pub(crate) fn run(ctx: &Ctx, which: &str, dry: bool) -> Option<Tally> {
-    // the git classifier is on for these post-update stages only (a nested checkout is classified as Node does, not deferred)
-    ident::with_git_classifier(|| run_stage(ctx, which, dry))
-}
-
-fn run_stage(ctx: &Ctx, which: &str, dry: bool) -> Option<Tally> {
     let home = Path::new(&ctx.home);
     let t = match which {
         "promote_unclaimed" => super::promote::promote_unclaimed(ctx),

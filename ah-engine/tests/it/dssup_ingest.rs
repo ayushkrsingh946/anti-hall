@@ -119,6 +119,13 @@ fn now() -> i64 {
     ah_engine::health::now_ms() as i64
 }
 
+/// A workspace descriptor the way `register` writes it (`devswarm/workspaces/<id>.json`): what makes a project registered.
+fn register(x: &Ix, id: &str, repo_key: &str, worktree: &Path) {
+    let dir = dev(x).join("workspaces");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join(format!("{id}.json")), json!({"id": id, "repoKey": repo_key, "worktreePath": worktree, "sessionId": "s"}).to_string()).unwrap();
+}
+
 // ---- the batch: parse, hash, rows against Node -----------------------------------------------------------------------------
 
 const MSG: &str = r#"{"fromBranch":"feat-a","toBranch":"main","message":"hello there","status":"unread","createdAt":"2026-10-09T01:02:03.456Z"}"#;
@@ -699,6 +706,7 @@ fn the_witness_reports_a_row_the_engine_claims_but_the_store_does_not_have() {
 fn projects_come_from_the_setting_fresh_node_heartbeats_and_memory() {
     ah_engine::defaults::init().unwrap();
     let x = ix("discover");
+    register(&x, &x.project.workspace_id, &x.project.repo_key, &x.main);
     let hb_dir = dev(&x).join("heartbeats");
     std::fs::create_dir_all(&hb_dir).unwrap();
     // a fresh Node heartbeat naming the repo; a stale one naming a path that exists; a fresh one naming a path that does not
@@ -734,6 +742,59 @@ fn projects_come_from_the_setting_fresh_node_heartbeats_and_memory() {
     for (w, o) in [("engine", Owner::Engine), (" ENGINE ", Owner::Engine), ("witness", Owner::Witness), ("enigne", Owner::Witness), ("", Owner::Witness)] {
         assert_eq!(Owner::parse(w), o, "{w:?}");
     }
+}
+
+#[test]
+fn a_scratch_clone_with_a_fresh_node_heartbeat_is_never_drained_or_remembered() {
+    // live 2026-10-16 19:33: an agent's `devswarm.js send` in a scratch clone installed a Node unit; its fresh heartbeat then made
+    // the engine adopt the clone as a project and remember it forever. Only a project a workspace descriptor names qualifies.
+    ah_engine::defaults::init().unwrap();
+    let x = ix("discover-scratch");
+    let scratch = x.home.join("work").join("wt-scratch");
+    std::fs::create_dir_all(&scratch).unwrap();
+    git(&["init", "-q"], &scratch);
+    let scratch_key = Project::resolve(scratch.to_str().unwrap()).unwrap().repo_key;
+    let hb_dir = dev(&x).join("heartbeats");
+    std::fs::create_dir_all(&hb_dir).unwrap();
+    std::fs::write(hb_dir.join(format!("ingest-{scratch_key}.json")), json!({"ts": now() - 1000, "workingDir": scratch}).to_string()).unwrap();
+    let found = ah_engine::dssup::ingest::discover(&x.home, &x.state, "", now());
+    assert!(found.iter().all(|p| p.repo_key != scratch_key), "{found:?}");
+    let remembered = std::fs::read_to_string(x.state.join("devswarm-ingest-projects.json")).unwrap_or_default();
+    assert!(!remembered.contains("wt-scratch"), "{remembered}");
+    // the same path named in devswarm_ingest.projects is the owner's explicit choice and qualifies
+    let explicit = ah_engine::dssup::ingest::discover(&x.home, &x.state, scratch.to_str().unwrap(), now());
+    assert!(explicit.iter().any(|p| p.repo_key == scratch_key));
+}
+
+#[test]
+fn a_registered_project_is_drained_without_any_node_heartbeat() {
+    // live 2026-10-16 19:36: tesla-docker had a registered Primary but no Node unit, so the engine never found it and Node's
+    // self-heal installed one. The registered workspaces are a discovery source of their own.
+    ah_engine::defaults::init().unwrap();
+    let x = ix("discover-registered");
+    let found = ah_engine::dssup::ingest::discover(&x.home, &x.state, "", now());
+    assert!(found.is_empty(), "nothing registered, no heartbeat: {found:?}");
+    register(&x, &x.project.workspace_id, &x.project.repo_key, &x.main);
+    let found = ah_engine::dssup::ingest::discover(&x.home, &x.state, "", now());
+    assert_eq!(found.iter().map(|p| p.repo_key.as_str()).collect::<Vec<_>>(), [x.project.repo_key.as_str()]);
+}
+
+#[test]
+fn the_ownership_marker_names_the_owner_and_how_long_it_holds() {
+    use ah_engine::dssup::ingest::{Owner, write_owner};
+    ah_engine::defaults::init().unwrap();
+    let t = TempDir::new("ingest-owner");
+    let home = std::fs::canonicalize(&t.0).unwrap();
+    let path = home.join(".anti-hall/devswarm/ingest-owner.json");
+    write_owner(&home, Owner::Engine, 1234);
+    let m: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(m["owner"], "engine");
+    assert_eq!(m["ts"], 1234);
+    assert_eq!(m["pid"], std::process::id());
+    assert_eq!(m["validForMs"], ah_engine::defaults::num("devswarm_ingest.owner_valid_ms"));
+    write_owner(&home, Owner::Witness, 5678);
+    let m: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(m["owner"], "witness", "switching to witness hands installs back to Node at once");
 }
 
 #[test]
@@ -773,6 +834,7 @@ fn the_ingest_verb_is_read_only_open_to_every_role_and_names_the_owner_and_the_p
     for role in ["main", "child", "subagent", "codex"] {
         assert!(ah_engine::dswire::cli::allowed(role, "ingest"), "{role}");
     }
+    register(&x, &x.project.workspace_id, &x.project.repo_key, &x.main);
     let hb_dir = dev(&x).join("heartbeats");
     std::fs::create_dir_all(&hb_dir).unwrap();
     std::fs::write(hb_dir.join(format!("ingest-{}.json", x.project.repo_key)), json!({"ts": now(), "workingDir": x.main}).to_string()).unwrap();
@@ -799,4 +861,79 @@ fn the_ingest_verb_is_read_only_open_to_every_role_and_names_the_owner_and_the_p
     assert!(!dev(&x).join(format!("locks/ingest-project-{}.lock", x.project.repo_key)).exists());
     // nothing is running at shutdown: joining the drain threads is immediate
     assert!(ah_engine::dssup::ingest::join_all());
+}
+
+// ---- a repository nested in another repository (no Node needed) -------------------------------------------------------------
+
+/// `outer/` and `outer/inner/`, each an independent repository with one commit (the `~/Projects/tesla` / `tesla-docker` shape).
+fn nested(tag: &str) -> (TempDir, PathBuf, PathBuf, PathBuf) {
+    ah_engine::defaults::init().unwrap();
+    let t = TempDir::new(tag);
+    let root = std::fs::canonicalize(&t.0).unwrap();
+    let (home, outer, inner) = (root.join("home"), root.join("outer"), root.join("outer").join("inner"));
+    for d in [&home, &inner] {
+        std::fs::create_dir_all(d).unwrap();
+    }
+    for d in [&outer, &inner] {
+        git(&["init", "-q"], d);
+        git(&["commit", "-q", "--allow-empty", "-m", "init"], d);
+    }
+    (t, home, outer, inner)
+}
+
+fn descriptor(home: &Path, id: &str, repo_key: &str, worktree: &Path) {
+    let dir = home.join(".anti-hall/devswarm/workspaces");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join(format!("{id}.json")), json!({"id": id, "repoKey": repo_key, "worktreePath": worktree, "sessionId": "s"}).to_string()).unwrap();
+}
+
+fn ingest_log(home: &Path) -> String {
+    std::fs::read_to_string(home.join(ah_engine::defaults::text("devswarm_ingest.log_file"))).unwrap_or_default()
+}
+
+#[test]
+fn an_independent_repository_nested_in_another_is_its_own_project() {
+    // live 2026-10-16: tesla-docker (its own .git directory) inside ~/Projects/tesla (also a repository) was never drained: the
+    // identity resolver deferred "git-superproject" and the drain dropped the project without a word.
+    let (_t, home, outer, inner) = nested("ingest-nested");
+    let p = Project::resolve(inner.to_str().unwrap()).expect("a nested independent repository resolves");
+    assert_eq!(p.worktree, inner.to_string_lossy(), "rooted at the inner checkout, not the outer one");
+    let o = Project::resolve(outer.to_str().unwrap()).unwrap();
+    assert_ne!(o.repo_key, p.repo_key);
+    // registered, it is found with no heartbeat and no explicit setting
+    descriptor(&home, &p.workspace_id, &p.repo_key, &inner);
+    let t2 = TempDir::new("ingest-nested-state");
+    let found = ah_engine::dssup::ingest::discover(&home, &t2.0, "", now());
+    assert_eq!(found.iter().map(|f| f.repo_key.as_str()).collect::<Vec<_>>(), [p.repo_key.as_str()], "{found:?}");
+}
+
+#[test]
+fn a_dropped_path_is_logged_once_with_its_reason() {
+    ah_engine::defaults::init().unwrap();
+    let t = TempDir::new("ingest-drops");
+    let home = std::fs::canonicalize(&t.0).unwrap();
+    let plain = home.join("plain");
+    std::fs::create_dir_all(&plain).unwrap();
+    let state = home.join("state");
+    let explicit = plain.to_str().unwrap();
+    for _ in 0..3 {
+        assert!(ah_engine::dssup::ingest::discover(&home, &state, explicit, now()).is_empty());
+    }
+    let log = ingest_log(&home);
+    let lines: Vec<&str> = log.lines().filter(|l| l.contains(explicit)).collect();
+    assert_eq!(lines.len(), 1, "one line per (path, reason), not one per pass: {log}");
+    assert!(lines[0].contains(ah_engine::defaults::text("devswarm_ingest.drop_reason_non_git")), "{}", lines[0]);
+}
+
+#[test]
+fn an_unregistered_project_skipped_by_require_registered_is_logged() {
+    let (_t, home, _outer, inner) = nested("ingest-unregistered");
+    let hb = home.join(".anti-hall/devswarm/heartbeats");
+    std::fs::create_dir_all(&hb).unwrap();
+    std::fs::write(hb.join("ingest-x.json"), json!({"ts": now() - 1000, "workingDir": inner}).to_string()).unwrap();
+    let state = home.join("state");
+    assert!(ah_engine::dssup::ingest::discover(&home, &state, "", now()).is_empty());
+    let log = ingest_log(&home);
+    let want = ah_engine::defaults::text("devswarm_ingest.drop_reason_unregistered");
+    assert!(log.lines().any(|l| l.contains(inner.to_str().unwrap()) && l.contains(want)), "{log}");
 }

@@ -12,6 +12,9 @@ debug_factor = 10.0
 # Seconds measured after the warm-up.
 window_s = 30
 warmup_s = 5
+# Periodic reconciles (the scheduler's safety-net job, one thread per run) fired inside the window. The real interval is
+# `devswarm_rt.reconcile_ms` (60 s), longer than the window, so the runs are spread over it: a deliberately stricter load.
+periodic_runs_per_window = 3
 
 [mem_reload]
 # tests/mem_reload.rs: a live daemon re-reads the plugin's defaults after each edit. Every reload may keep what the edit

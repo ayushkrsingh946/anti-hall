@@ -133,7 +133,8 @@ function main() {
   if (typeof (payload && payload.permission_mode) === 'string' &&
       payload.permission_mode.toLowerCase() === 'plan') {
     try {
-      fs.writeSync(1,
+      // stderr: stdout stays empty or ONE JSON object (the engine dispatcher cannot merge plain stdout with another Stop hook's JSON)
+      fs.writeSync(2,
         '[tasklist-guard] PLAN MODE — Stop not blocked (progress-file writes are not ' +
         'possible in plan mode). Track this work as tasks and refresh the progress file ' +
         'once you leave plan mode.\n'
@@ -505,9 +506,9 @@ function main() {
     const { isOmcLoopActive } = require('./omc-detect.js');
     const sid = (payload && payload.session_id && String(payload.session_id)) || undefined;
     if (isOmcLoopActive({ cwd: cwd || undefined, sessionId: sid })) {
-      // fs.writeSync(1): process.stdout.write races the async pipe flush with
-      // exit() on macOS node 18/20 (repo-wide rule for hook output).
-      fs.writeSync(1,
+      // fs.writeSync: process.stdout.write races the async pipe flush with
+      // exit() on macOS node 18/20 (repo-wide rule for hook output). stderr: an advisory, never stdout.
+      fs.writeSync(2,
         '[tasklist-guard] OMC autonomous loop active — deferring Stop block to avoid deadlock.\n'
       );
       process.exit(0);

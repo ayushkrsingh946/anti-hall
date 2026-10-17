@@ -435,6 +435,22 @@ value = { kind = "counter", unit = "advisories", labels = [] }
 doc = "Workspaces marked dirty for a per-child Jev sweep."
 value = { kind = "counter", unit = "marks", labels = [] }
 
+[metric.dswire_jev_threads]
+doc = "Threads started for a per-child Jev sweep (one per sweep that found queued workspaces and no sweep running)."
+value = { kind = "counter", unit = "threads", labels = [] }
+
+[metric.dswire_jev_coalesced]
+doc = "Jev sweep requests folded into the queue because a sweep was already running."
+value = { kind = "counter", unit = "requests", labels = [] }
+
+[metric.dswire_reconcile_cpu_us]
+doc = "CPU microseconds of the calling thread spent in a DevSwarm reconcile, by cause (startup, event, periodic, overflow) and phase (derive: read and diff the sources; sweep: the action sweeps that follow)."
+value = { kind = "counter", unit = "us", labels = ["cause", "phase"] }
+
+[metric.dswire_reconcile_runs]
+doc = "DevSwarm reconciles by cause and outcome (noop: no state change found; changed: edges found)."
+value = { kind = "counter", unit = "runs", labels = ["cause", "outcome"] }
+
 [devswarm_wire.col_last_selected]
 doc = "The builders column holding when the owner last selected the workspace in the DevSwarm app (ISO text); the viewed gate of the auto-archive reads it."
 value = "lastSelectedAt"
@@ -480,3 +496,27 @@ value = "devswarm-rt-advisory"
 [metric.dswire_stall_actions]
 doc = "Pokes and escalations of silent workspaces the engine ran or refused (feature 5), by kind (poke, escalate) and outcome (ok, failed, refused); the same actions, their inputs and the mistake signals found later are in the action log (`ah-engine telemetry actions stall`)."
 value = { kind = "counter", unit = "actions", labels = ["kind", "outcome"] }
+
+[devswarm_wire.batch_role_dirs]
+doc = "The DevSwarm state directories a watcher batch is classified by, as defaults keys; the same position in `batch_role_names` is the role."
+value = ["mesh_write.dir_heartbeats", "mesh_write.dir_workspaces", "mesh_write.dir_summaries", "mesh_write.dir_plans"]
+
+[devswarm_wire.batch_role_names]
+doc = "The role label (work counter `dswire_batches.<role>`) of each directory in `batch_role_dirs`."
+value = ["heartbeat", "descriptor", "summary", "plan"]
+
+[devswarm_wire.batch_role_mixed]
+doc = "The role label of a watcher batch whose paths fall in different state directories."
+value = "mixed"
+
+[devswarm_wire.batch_role_other]
+doc = "The role label of a watcher batch with paths outside the state directories (transcripts, repositories)."
+value = "other"
+
+[devswarm_wire.probe_site_default]
+doc = "The site label of a probe read made outside any attributed code path (work counter `probe_reads.<site>.<cause>`)."
+value = "other"
+
+[devswarm_wire.probe_cause_default]
+doc = "The cause label of a probe read made outside any reconcile (work counter `probe_reads.<site>.<cause>`)."
+value = "none"

@@ -63,6 +63,7 @@ pub mod summary;
 pub mod tick;
 pub mod union;
 pub mod verify;
+pub mod watcher;
 pub mod wsverbs;
 
 use crate::checks::guardkit::ojson::OVal;

@@ -133,6 +133,14 @@ function selfHeal(ctx) {
     // stale/missing. The SPAWN (never the health read above) is gated.
     if (!isDevswarmActive(env) || !repoKey) return { daemonWarning: 'stale' };
 
+    // ENGINE OWNS INGEST (live 2026-10-16): while ah-engine's ownership marker
+    // says engine, no Node ingest unit is installed from here — the engine
+    // drains this project (or will, once registered). Installing one would put
+    // a second consumer in front of the engine and silently undo a retirement.
+    if (ingestHealth.engineOwnsIngest(home, { now, io: ctx.io && ctx.io.health })) {
+      return { daemonWarning: 'stale', daemonEngineOwned: true };
+    }
+
     // DISABLED IN LAUNCHD (owner-intentional `launchctl disable`): the installer's
     // `launchctl load` cannot start a disabled job, so every heal would spawn the
     // installer for nothing. Read-only probe, fail-open; NEVER re-enables it.
@@ -158,6 +166,12 @@ function selfHeal(ctx) {
         if (last !== null) retryAfterMs = Math.max(0, SELF_HEAL_COOLDOWN_MS - (now - last));
       } catch (_) { /* keep the whole-window fallback above */ }
       return { daemonWarning: 'stale', daemonHealCooldown: true, retryAfterMs };
+    }
+    // UNREGISTERED PROJECT (live 2026-10-16 19:33): a scratch clone an agent ran
+    // `send` in resolved to its own repoKey and got a Node unit. Only a project
+    // a registered workspace descriptor names qualifies for an automatic install.
+    if (!ingestHealth.projectRegistered(home, repoKey, { io: ctx.io && ctx.io.health })) {
+      return { daemonWarning: 'stale', daemonUnregistered: true };
     }
     markSelfHealAttempt(home, repoKey, now, F);
     const spawn = (ctx.io && ctx.io.spawnInstaller) || defaultSpawnInstaller;

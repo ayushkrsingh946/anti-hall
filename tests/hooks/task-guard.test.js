@@ -793,8 +793,9 @@ test('PRUNE ADVISORY: > 10 completed tasks -> one-line advisory printed, no bloc
     const tp = h.writeTranscript([todoWrite(completedTodos(11))]);
     const r = testHook(HOOK, stopPayload(tp), { home: h.home });
     assert.ok(!isBlock(r), `all-completed tasks must never block; got ${JSON.stringify(r.json)}`);
-    assert.match(r.stdout, /\[task-guard\] 11 completed\/cancelled tasks/);
-    assert.match(r.stdout, /prune them with/i);
+    assert.match(r.stderr, /\[task-guard\] 11 completed\/cancelled tasks/);
+    assert.match(r.stderr, /prune them with/i);
+    assert.strictEqual(r.stdout, '', 'stdout stays empty or one JSON object');
   } finally {
     h.cleanup();
   }
@@ -1110,7 +1111,7 @@ test('PRUNE ADVISORY: guards.pruneCompletedTasksAfter env override lowers the th
   try {
     const tp = h.writeTranscript([todoWrite(completedTodos(3))]);
     const r = testHook(HOOK, stopPayload(tp), { home: h.home, env: { ANTIHALL_PRUNE_COMPLETED_TASKS_AFTER: '2' } });
-    assert.match(r.stdout, /\[task-guard\] 3 completed\/cancelled tasks/);
+    assert.match(r.stderr, /\[task-guard\] 3 completed\/cancelled tasks/);
   } finally {
     h.cleanup();
   }

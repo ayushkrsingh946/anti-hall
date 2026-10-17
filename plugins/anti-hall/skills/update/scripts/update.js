@@ -940,6 +940,14 @@ function inspectInstalledIngest(opts) {
     if (typeof isDevswarmActive !== 'function' || !isDevswarmActive(env)) {
       return gate('not a DevSwarm session — ingest heal skipped (gate closed)');
     }
+    // ENGINE OWNS INGEST (live 2026-10-16): no Node ingest unit is healed or
+    // re-baked while ah-engine's ownership marker says engine.
+    try {
+      const h = require(path.join(paths.pluginSrcDir, 'companion', 'lib', 'ingest-health.js'));
+      if (typeof h.engineOwnsIngest === 'function' && h.engineOwnsIngest(home)) {
+        return gate('the anti-hall engine owns the ingest drain — Node ingest heal skipped (gate closed)');
+      }
+    } catch (_) { /* fail-open: the pre-fix behaviour */ }
     const worktree = typeof installIngest.resolveWorktree === 'function' ? installIngest.resolveWorktree(cwd) : null;
     if (!worktree) {
       return gate('cwd is not a git worktree — ingest heal skipped (gate closed)');

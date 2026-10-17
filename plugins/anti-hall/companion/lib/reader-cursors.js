@@ -415,7 +415,35 @@ function countFor(store, opts) {
     const hit = (errs || []).find((e) => e && /(messages|reader_cursors)\.ndjson$/.test(String(e.path || '')));
     if (hit) return unknownResult('store-read-error', new Error(String(hit.code || 'EUNKNOWN') + ' ' + hit.path));
   } catch (_) { /* no error channel: nothing more to check */ }
-  return Object.assign(u, { unknown: false, view: pos.view, ndCursor: pos.nd });
+  const res = Object.assign(u, { unknown: false, view: pos.view, ndCursor: pos.nd });
+  // OWN SENDS (#181): mail the recipient's own identity family sent is not inbound. `unread` leaves it out, `unreadAll` keeps the
+  // whole union and `ownExcluded` is the difference; the row lists stay whole (an ack walks them). Opt-in, and only when something
+  // is unread (no registry read otherwise).
+  res.unreadAll = res.unread;
+  res.ownExcluded = 0;
+  if (o.excludeFamily && store && res.unread > 0) {
+    const family = familyOf(store, o.partition);
+    if (family && family.size) {
+      const own = (row) => row && row.sender != null && family.has(String(row.sender));
+      const ownNd = (res.ndjsonUnreadLines || []).filter((line) => {
+        let p = null;
+        try { p = JSON.parse(line); } catch (_) { p = null; }
+        return p && typeof p === 'object' && p.sender != null && family.has(String(p.sender));
+      }).length;
+      res.ownExcluded = ownNd + (res.storeOnlyUnreadRows || []).filter(own).length;
+      res.unread = res.unread - res.ownExcluded;
+    }
+  }
+  return res;
+}
+
+// familyOf(store, partition) -> Set of ids that are the partition's recipient itself or cross-linked to it
+// (devswarm-identity-family.js recipientFamilyIds), or null when the registry cannot be read.
+function familyOf(store, partition) {
+  try {
+    const rows = typeof store.listRegistry === 'function' ? (store.listRegistry() || []) : [];
+    return require('./devswarm-identity-family.js').recipientFamilyIds(partition, rows);
+  } catch (_) { return null; }
 }
 
 // ---------------------------------------------------------------------------

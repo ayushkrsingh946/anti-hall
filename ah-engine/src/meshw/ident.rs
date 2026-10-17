@@ -7,8 +7,8 @@
 //! `companion/lib/reader-identity.js` `deriveReaderNonce`.
 //!
 //! Node answers some of these by running git (`rev-parse --show-superproject-working-tree` for a checkout nested in
-//! another one). A hook caller never runs git here: where Node would, the answer is [`Defer`] and the verb goes to Node. Only the
-//! migrate/update post-update stages opt in ([`with_git_classifier`]) and then run the same git question Node runs.
+//! another one). The engine asks git the same one question, bounded and cached the same way (`git_superproject`); where git
+//! does not answer, or Node would run anything else, the answer is [`Defer`] and the verb goes to Node.
 // Discard triage (E3): every `.ok()` / `unwrap_or_default()` in this file is a deliberate keep, for these reasons:
 // - an unreadable optional file is the same as an absent one (fail-open, as Node's try/catch)
 // - text that does not parse or decode is the absent value (Node Number()/JSON.parse catch parity)
@@ -33,6 +33,39 @@ pub fn defer<T>(code: &str) -> Result<T, Defer> {
 
 /// Result of a resolution that may defer.
 pub type R<T> = Result<T, Defer>;
+
+/// The bytes of a mesh file a path names (a descriptor's inbox or cursor file, a harness session record), read the way Node's
+/// `readFileSync` in a try/catch reads it where that is safe: `Ok(None)` when it is absent, a directory or cannot be opened (Node's
+/// catch), the bytes of a regular file of at most `mesh_write.file_read_max_bytes`, and a deferral for anything else: a FIFO, socket or
+/// device (a read could block a worker thread for good) or a file over the cap (an unbounded allocation). Opened non-blocking, and
+/// read no further than the cap, so a file that grows or is swapped after the check cannot do either.
+pub fn read_bounded(path: &Path) -> R<Option<Vec<u8>>> {
+    use std::io::Read;
+    use std::os::unix::fs::OpenOptionsExt;
+    let cap = defaults::num("mesh_write.file_read_max_bytes");
+    let Ok(m) = std::fs::metadata(path) else { return Ok(None) };
+    if m.is_dir() {
+        return Ok(None);
+    }
+    if !m.is_file() {
+        return defer("not-a-regular-file");
+    }
+    if m.len() > cap {
+        return defer("file-over-cap");
+    }
+    let Ok(f) = std::fs::OpenOptions::new().read(true).custom_flags(libc::O_NONBLOCK).open(path) else { return Ok(None) };
+    if !f.metadata().is_ok_and(|m| m.is_file()) {
+        return defer("not-a-regular-file");
+    }
+    let mut buf = Vec::new();
+    if f.take(cap.saturating_add(1)).read_to_end(&mut buf).is_err() {
+        return Ok(None);
+    }
+    if buf.len() as u64 > cap {
+        return defer("file-over-cap");
+    }
+    Ok(Some(buf))
+}
 
 /// `path.resolve(p)` for an absolute path.
 pub fn resolve_abs(p: &str) -> String {
@@ -186,57 +219,6 @@ fn nearest_dot_git(dir: &str) -> Option<String> {
     }
 }
 
-/// Whether `<gitdir>/config` names a `core.worktree` (Node then hops to that checkout; the engine defers).
-fn has_core_worktree(gitdir: &str) -> bool {
-    let Ok(cfg) = std::fs::read(format!("{gitdir}/{}", defaults::text("mesh_write.git_config_file"))) else { return false };
-    let cfg = String::from_utf8_lossy(&cfg);
-    let mut in_core = false;
-    for line in cfg.lines() {
-        let t = line.trim();
-        if t.starts_with('[') {
-            in_core = t == defaults::text("mesh_write.git_core_section");
-            continue;
-        }
-        if in_core
-            && let Some(rest) = t.strip_prefix(defaults::text("mesh_write.git_worktree_key"))
-            && rest.trim_start().starts_with('=')
-        {
-            return true;
-        }
-    }
-    false
-}
-
-thread_local! {
-    /// The git classifier of the post-update stages (see [`with_git_classifier`]): off everywhere else, so a hook caller keeps deferring.
-    static GIT_CLASSIFY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-    /// Superproject answers of one classifier scope: nested-repo root -> superproject (identity.js `superCache`, per scope).
-    static SUPER_CACHE: std::cell::RefCell<HashMap<String, Option<String>>> = std::cell::RefCell::new(HashMap::new());
-}
-
-/// Run `f` with the opt-in git classifier on (only the migrate/update post-update stages call this; never a hook): a checkout
-/// nested in another one, a linked worktree of a submodule and a `core.worktree` hop are classified as Node does
-/// (`identity.js` `gitSuperproject`, `coreWorktreeOf`, `isGitlinkPath`) instead of deferring. Off when the setting
-/// `mesh_write.git_classify_update` is 0. A git call that fails still defers (Node counts that answer as uncertain).
-pub fn with_git_classifier<T>(f: impl FnOnce() -> T) -> T {
-    struct Restore(bool);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            GIT_CLASSIFY.with(|g| g.set(self.0));
-        }
-    }
-    let on = defaults::num("mesh_write.git_classify_update") == 1;
-    let _restore = Restore(GIT_CLASSIFY.with(|g| g.replace(on)));
-    if on {
-        SUPER_CACHE.with(|c| c.borrow_mut().clear());
-    }
-    f()
-}
-
-fn git_classify() -> bool {
-    GIT_CLASSIFY.with(std::cell::Cell::get)
-}
-
 /// `coreWorktreeOf(gitdir)`: the real path of `core.worktree` in `<gitdir>/config` (resolved against the gitdir), or `None`.
 fn core_worktree_of(gitdir: &str) -> Option<String> {
     let cfg = std::fs::read(format!("{gitdir}/{}", defaults::text("mesh_write.git_config_file"))).ok()?;
@@ -274,31 +256,50 @@ fn is_gitlink_path(p: &str, dir: &str) -> bool {
     })
 }
 
-/// `gitSuperproject(dir)`: `git -C dir rev-parse --show-superproject-working-tree`, its answer's real path (`None`: no superproject).
-/// A git that cannot run, times out, fails or names an unresolvable path defers (Node reads that as an uncertain answer).
-fn git_superproject(dir: &str) -> R<Option<String>> {
-    if let Some(hit) = SUPER_CACHE.with(|c| c.borrow().get(dir).cloned()) {
-        return Ok(hit);
+/// The superproject answers git gave, per nested checkout (identity.js `superCache`): `(answer, when)`. Only an answer git gave
+/// is kept; a failed call is asked again next time.
+type SuperCache = HashMap<String, (Option<String>, std::time::Instant)>;
+static SUPER_CACHE: std::sync::Mutex<Option<SuperCache>> = std::sync::Mutex::new(None);
+
+/// `gitSuperproject(dir)`: the real path of the superproject checkout git names for the nested checkout `root` (a `.git`
+/// directory, or a `.git` file layout the disk does not classify, below another repository), `None` for none. A git call that
+/// fails or times out, or an answer whose path does not resolve, is [`Defer`]: Node reads both as "uncertain".
+fn git_superproject(root: &str) -> R<Option<String>> {
+    let ttl = defaults::millis("mesh_write.super_cache_ttl_ms");
+    if let Ok(g) = SUPER_CACHE.lock()
+        && let Some((ans, at)) = g.as_ref().and_then(|m| m.get(root))
+        && at.elapsed() < ttl
+    {
+        return Ok(ans.clone());
     }
-    let mut cmd = std::process::Command::new(defaults::text("mesh_write.git_bin"));
-    cmd.arg("-C").arg(dir).args(defaults::list("mesh_write.git_super_args"));
-    for k in defaults::list("mesh_write.git_scrub_env") {
-        cmd.env_remove(k);
-    }
-    let out = match crate::proc::run(cmd, defaults::text("mesh_write.git_bin"), defaults::millis("mesh_write.git_spawn_timeout_ms"), defaults::millis("update.poll_ms")) {
-        Ok(o) if o.status.success() => o,
-        _ => return defer("git-superproject"),
-    };
-    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let argv: Vec<String> = defaults::list("codex_handover.argv_super").iter().map(|a| a.replace("{root}", root)).collect();
+    let out = crate::checks::jsport::gitrun::git_scrubbed(
+        root,
+        &argv.iter().map(String::as_str).collect::<Vec<_>>(),
+        defaults::millis("codex_handover.identity_git_timeout_ms"),
+        &crate::reqenv::RequestEnv::default(),
+        &defaults::list("codex_handover.git_scrub_env"),
+    );
+    let Some(out) = out else { return defer("git-superproject") };
+    let s = crate::checks::guardkit::text::js_trim(&out);
     let ans = if s.is_empty() {
         None
     } else {
-        match realpath(&s) {
+        match realpath(s) {
             Some(r) => Some(r),
             None => return defer("git-superproject"),
         }
     };
-    SUPER_CACHE.with(|c| c.borrow_mut().insert(dir.to_string(), ans.clone()));
+    if let Ok(mut g) = SUPER_CACHE.lock() {
+        let m = g.get_or_insert_with(HashMap::new);
+        if m.len() as u64 >= defaults::num("mesh_write.super_cache_max") {
+            m.retain(|_, (_, at)| at.elapsed() < ttl);
+            if m.len() as u64 >= defaults::num("mesh_write.super_cache_max") {
+                m.clear();
+            }
+        }
+        m.insert(root.to_string(), (ans.clone(), std::time::Instant::now()));
+    }
     Ok(ans)
 }
 
@@ -358,7 +359,6 @@ pub fn resolve_context(cwd: &str, ancestor: bool) -> R<Ctx> {
         return Ok(null_ctx(defaults::text("mesh_write.kind_non_git")));
     }
     // superOf(root, ri): Some(Some(p)) a superproject, Some(None) none, Err when only git can tell
-    let git = git_classify();
     let super_of = |root: &str, ri: &GitDir| -> R<Option<String>> {
         let Some(p) = nearest_dot_git(&dirname(root)) else { return Ok(None) };
         if p == root {
@@ -371,14 +371,14 @@ pub fn resolve_context(cwd: &str, ancestor: bool) -> R<Ctx> {
                 return Ok(Some(p));
             }
             if ri.has_commondir {
-                // a linked worktree of a submodule checked out at a gitlink path of the enclosing checkout (git classifier only)
-                if git && core_worktree_of(&ri.common).is_some() && is_gitlink_path(&p, root) {
+                // a linked worktree of a submodule checked out at a gitlink path of the enclosing checkout
+                if core_worktree_of(&ri.common).is_some() && is_gitlink_path(&p, root) {
                     return Ok(Some(p));
                 }
                 return Ok(None);
             }
         }
-        if git { git_superproject(root) } else { defer("git-superproject") }
+        git_superproject(root)
     };
     let mut root = t.clone();
     let t = t.clone();
@@ -387,20 +387,16 @@ pub fn resolve_context(cwd: &str, ancestor: bool) -> R<Ctx> {
     while depth < defaults::num("mesh_write.max_submodule_hops") {
         let sp = super_of(&root, &ri)?;
         if sp.is_none() && ri.is_file && ri.has_commondir {
-            if git {
-                // a linked worktree of a submodule: hop to the submodule checkout its common dir names when that is itself a submodule
-                let co = core_worktree_of(&ri.common).filter(|c| *c != root);
-                if let Some((co, co_info)) = co.and_then(|c| gitdir_of(&c).map(|i| (c, i)))
-                    && co_info.g == ri.common
-                    && super_of(&co, &co_info)?.is_some()
-                {
-                    root = co;
-                    ri = co_info;
-                    depth += 1;
-                    continue;
-                }
-            } else if has_core_worktree(&ri.common) {
-                return defer("core-worktree");
+            // a linked worktree of a submodule: hop to the submodule checkout its common dir names when that is itself a submodule
+            let co = core_worktree_of(&ri.common).filter(|c| *c != root);
+            if let Some((co, co_info)) = co.and_then(|c| gitdir_of(&c).map(|i| (c, i)))
+                && co_info.g == ri.common
+                && super_of(&co, &co_info)?.is_some()
+            {
+                root = co;
+                ri = co_info;
+                depth += 1;
+                continue;
             }
         }
         let Some(sp) = sp else { break };
@@ -825,16 +821,23 @@ fn pid_alive_raw(pid: i64) -> Option<bool> {
 /// `deriveReaderNonce({ home })`: `h:<pid>:<startMs>` of the nearest live harness ancestor (a `~/.claude/sessions/<pid>.json`
 /// record), else None. Starts at this process.
 pub fn reader_nonce(home: &Path) -> Option<String> {
+    reader_nonce_from(home, i64::from(std::process::id()))
+}
+
+/// [`reader_nonce`] starting at `start` instead of this process: the daemon starts at the hook client that sent the request
+/// (its peer on the socket), which is where the Node hook would have started, one process below the host.
+pub fn reader_nonce_from(home: &Path, start: i64) -> Option<String> {
     let sess = home.join(defaults::text("mesh_write.claude_dir")).join(defaults::text("mesh_write.sessions_dir"));
     let mut table: Option<Option<HashMap<i64, i64>>> = None;
-    let mut pid = i64::from(std::process::id());
+    let mut pid = start;
     let mut seen = std::collections::HashSet::new();
     for _ in 0..=defaults::num("mesh_write.max_ppid_hops") {
         if pid <= 1 || !seen.insert(pid) {
             return None;
         }
         let file = sess.join(format!("{pid}{}", defaults::text("mesh_write.json_suffix")));
-        let rec = std::fs::read(&file).ok().and_then(|b| OVal::parse(&String::from_utf8_lossy(&b)));
+        // a record that is no regular file or is over the cap is not one this walk can read safely: it counts as unreadable
+        let rec = read_bounded(&file).ok().flatten().and_then(|b| OVal::parse(&String::from_utf8_lossy(&b)));
         if let Some(rec) = rec
             && matches!(rec.get("pid"), Some(OVal::Num(n)) if *n == pid as f64)
         {

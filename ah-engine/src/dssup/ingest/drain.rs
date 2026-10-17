@@ -39,16 +39,45 @@ pub struct Project {
     pub workspace_id: String,
 }
 
+/// Why a path is not a project the engine can drain: the `devswarm_ingest.drop_reason_*` key (its text is the reason) and detail.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DropReason {
+    /// The `devswarm_ingest.drop_reason_*` settings key naming the reason.
+    pub key: &'static str,
+    /// What the resolver said (a deferral code, a kind, a path).
+    pub detail: String,
+}
+
+impl DropReason {
+    pub(crate) fn new(key: &'static str, detail: impl Into<String>) -> DropReason {
+        DropReason { key, detail: detail.into() }
+    }
+
+    /// The reason word, also the `reason` label of `ingest_drops`.
+    pub fn word(&self) -> &'static str {
+        defaults::text(self.key)
+    }
+}
+
 impl Project {
     /// Resolve a path to its project: the repository's MAIN worktree (what the Node unit bakes as its working directory, never a
     /// linked worktree that may be removed), its repo key and its Primary id. Any worktree of a repository names the same project.
-    /// `None` for a path that is not in a git repository, or whose main worktree is gone (nothing to drain there).
+    /// `Err` with the reason for a path that cannot be a project: not in a git repository, whose main worktree is gone, or that
+    /// the identity resolver cannot place.
+    pub fn resolve_why(path: &str) -> Result<Project, DropReason> {
+        let c = ident::resolve_context(path, true).map_err(|d| DropReason::new("devswarm_ingest.drop_reason_defer", d.0))?;
+        let Some(main) = c.main_worktree else { return Err(DropReason::new("devswarm_ingest.drop_reason_non_git", c.kind)) };
+        if !std::path::Path::new(&main).is_dir() {
+            return Err(DropReason::new("devswarm_ingest.drop_reason_no_main", main));
+        }
+        let repo_key = c.repo_key.ok_or_else(|| DropReason::new("devswarm_ingest.drop_reason_no_key", main.clone()))?;
+        let workspace_id = ident::primary_workspace_id(&main).map_err(|d| DropReason::new("devswarm_ingest.drop_reason_primary_id", d.0))?;
+        Ok(Project { worktree: main, repo_key, workspace_id })
+    }
+
+    /// [`Project::resolve_why`] without the reason: `None` for a path that is not a project.
     pub fn resolve(path: &str) -> Option<Project> {
-        let c = ident::resolve_context(path, true).ok()?;
-        let wt = c.main_worktree.filter(|m| std::path::Path::new(m).is_dir())?;
-        let repo_key = c.repo_key?;
-        let workspace_id = ident::primary_workspace_id(&wt).ok()?;
-        Some(Project { worktree: wt, repo_key, workspace_id })
+        Project::resolve_why(path).ok()
     }
 }
 

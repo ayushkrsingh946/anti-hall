@@ -868,7 +868,8 @@ fn the_cold_start_kick_starts_the_daemon_and_decides_nothing() {
 /// daemon it starts, so the copy is written after the spawn attempt. Timestamps, not timing: this holds on any machine load.
 #[test]
 fn a_cold_hook_client_starts_the_daemon_before_any_last_known_good_copy_is_written() {
-    let e = Env::new_no_prime("coldorder", &[]);
+    // a debug daemon on a loaded machine can take longer to start than the shipped slow window this guard call waits within
+    let e = Env::new_no_prime("coldorder", &[("AH_ENGINE_SLOW_FALLBACK_MAX_MS", "15000")]);
     let o = e
         .cmd()
         .args(["hook", "--event", "PreToolUse", "--host", "claude"])
@@ -881,7 +882,8 @@ fn a_cold_hook_client_starts_the_daemon_before_any_last_known_good_copy_is_writt
             ch.wait()
         })
         .unwrap();
-    assert_eq!(o.code(), Some(0), "a cold call fails open");
+    // a cold guard call waits for the daemon it starts (client.cold_guard_wait_ms) and returns its decision: DENY_IN is a block
+    assert_eq!(o.code(), Some(2), "a cold guard call returns the daemon's block, not an empty allow");
     assert!(wait_for(|| e.pid().is_some()), "the cold call started no daemon{}", e.diag());
     let stamp =
         || std::fs::read_dir(e.eng().join("defaults.lkg")).ok()?.flatten().find_map(|d| std::fs::metadata(d.path().join("STAMP")).ok()?.modified().ok());

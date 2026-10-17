@@ -32,7 +32,7 @@ const crypto = require('crypto');
 const { spawnSync, spawn } = require('child_process');
 
 const store = require('./lib/devswarm-store.js');
-const { resolveBranchSender } = require('./lib/devswarm-branch-sender.js');
+const { resolveBranchSender, fallbackSender } = require('./lib/devswarm-branch-sender.js');
 const lockLib = require('./lib/lock.js');
 const { devswarmRoot } = require('./lib/liveness.js');
 // Phase 5 delivery WAL around the destructive `monitor` read.
@@ -712,7 +712,7 @@ function ingestPayload(s, raw, opts) {
       body: (m && m.message != null) ? String(m.message) : stableJson(m),
       hash: messageHash(workspaceId, m),
       ts: (m && Number.isFinite(Date.parse(m.createdAt))) ? Date.parse(m.createdAt) : now,
-      sender: resolveBranchSender(registry, m && m.fromBranch),
+      sender: resolveBranchSender(registry, m && m.fromBranch) || fallbackSender(registry, workspaceId),
     }));
     // Lazy: scripts/devswarm.js requires lib/devswarm-pull.js, which requires
     // THIS module — never a top-level require here.

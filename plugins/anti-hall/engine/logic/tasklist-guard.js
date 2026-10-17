@@ -69,16 +69,61 @@ function tlToolUses(node, out) {
   }
 }
 
+// One tool use of the work count: `tu` is {name, input: {file_path, command}} (the fields the count reads), `ts` its entry's time in ms
+// or null; updates `out` ({work, lastWork, lastProgressWrite}).
+function tlCountUse(tu, ts, out, progressAbs, cx) {
+  var name = typeof tu.name === 'string' ? tu.name : '';
+  if (ah.cfg('workdetect.mutating_tools').indexOf(name) >= 0) {
+    var fp = tu.input && typeof tu.input.file_path === 'string' ? tu.input.file_path : '';
+    if (wd.counted(tu, cx)) { out.work++; if (ts !== null && ts > out.lastWork) out.lastWork = ts; }
+    if (progressAbs && ts !== null && fp === progressAbs && ts > out.lastProgressWrite) out.lastProgressWrite = ts;
+  } else if (name === 'Bash') {
+    var cmd = tu.input && typeof tu.input.command === 'string' ? tu.input.command : '';
+    if (wd.counted(tu, cx)) { out.work++; if (ts !== null && ts > out.lastWork) out.lastWork = ts; }
+    if (progressAbs && ts !== null && cmd && wd.bashWork(wd.neutralize(cmd)) && tlWritesTo(cmd, progressAbs) && ts > out.lastProgressWrite) out.lastProgressWrite = ts;
+  }
+}
+
+// An entry's `timestamp` in ms: null when it is not a string or spells no time; undefined when only V8 could read it (defer).
+function tlEntryTime(timestamp) {
+  if (typeof timestamp !== 'string') return null;
+  var ms = jx.isoMs(timestamp);
+  return ms === undefined ? undefined : (isNaN(ms) ? null : ms);
+}
+
+// The lines the work count reads: those that hold a tool use (or an escape that could spell one) or a null.
+var TL_NEEDLES = ['tool_use', '\\u', 'null'];
+
+// The work counting of a transcript bigger than the window: the host reads the lines of the window that hold a needle and cuts each
+// entry down to its timestamp and tool uses (ah.transcript.toolUseScan); the script never sees or parses those lines. Only a window
+// that holds the whole transcript can name the requested paths, so here there are none (wd.requestedPaths answers [] for it too).
+function tlScanHost(path, progressAbs, cx) {
+  var out = { work: 0, lastWork: 0, lastProgressWrite: 0 };
+  var items = ah.transcript.toolUseScan(path, tlN('window_bytes'), TL_NEEDLES, ah.cfg('taskstate.tools_collect_keys'));
+  if (items === null) return out;
+  cx.requested = [];
+  for (var i = 0; i < items.length; i++) {
+    var it = items[i];
+    if (it.length === 1) return it[0] === 'n' ? 'quiet' : 'defer';
+    var ts = tlEntryTime(it[0]);
+    if (ts === undefined) return 'defer';
+    var uses = it[1];
+    for (var u = 0; u < uses.length; u++) tlCountUse({ name: uses[u][0], input: { file_path: uses[u][1], command: uses[u][2] } }, ts, out, progressAbs, cx);
+  }
+  return out;
+}
+
 // The work counting of the transcript pass: {work, lastWork, lastProgressWrite}, 'quiet' (a JSON null entry makes the Node hook
 // throw, so it decides nothing) or 'defer'.
 function tlScanWork(path, progressAbs, cx) {
   var out = { work: 0, lastWork: 0, lastProgressWrite: 0 };
   // a session with ONE user request: a write under a path that request names is the requested output (workdetect.request_path_re);
-  // that needs every user entry, and only a window that holds the whole transcript counts, so only then are all lines read. Any
-  // other window needs the entries the loop below parses: those that hold a tool use (or an escape that could spell one) or a null.
+  // that needs every user entry, and only a window that holds the whole transcript counts, so only then are all lines read here.
+  // Any other window is the host's to read (tlScanHost).
   var size = ah.fs.size(path);
   var complete = size !== null && size <= tlN('window_bytes');
-  var lines = complete ? rp.lines(path, tlN('window_bytes')) : rp.lines(path, tlN('window_bytes'), ['tool_use', '\\u', 'null']);
+  if (!complete) return tlScanHost(path, progressAbs, cx);
+  var lines = rp.lines(path, tlN('window_bytes'));
   if (lines === null) return out;
   cx.requested = wd.requestedPaths(lines, cx, complete);
   for (var i = 0; i < lines.length; i++) {
@@ -92,26 +137,11 @@ function tlScanWork(path, progressAbs, cx) {
     if (r.invalid) continue;
     var entry = r.v;
     if (entry === null) return 'quiet';
-    var ts = null;
-    if (entry !== undefined && typeof entry.timestamp === 'string') {
-      var ms = jx.isoMs(entry.timestamp);
-      if (ms === undefined) return 'defer';
-      ts = isNaN(ms) ? null : ms;
-    }
+    var ts = entry !== undefined ? tlEntryTime(entry.timestamp) : null;
+    if (ts === undefined) return 'defer';
     var uses = [];
     tlToolUses(entry, uses);
-    for (var u = 0; u < uses.length; u++) {
-      var tu = uses[u], name = typeof tu.name === 'string' ? tu.name : '';
-      if (ah.cfg('workdetect.mutating_tools').indexOf(name) >= 0) {
-        var fp = tu.input && typeof tu.input.file_path === 'string' ? tu.input.file_path : '';
-        if (wd.counted(tu, cx)) { out.work++; if (ts !== null && ts > out.lastWork) out.lastWork = ts; }
-        if (progressAbs && ts !== null && fp === progressAbs && ts > out.lastProgressWrite) out.lastProgressWrite = ts;
-      } else if (name === 'Bash') {
-        var cmd = tu.input && typeof tu.input.command === 'string' ? tu.input.command : '';
-        if (wd.counted(tu, cx)) { out.work++; if (ts !== null && ts > out.lastWork) out.lastWork = ts; }
-        if (progressAbs && ts !== null && cmd && wd.bashWork(wd.neutralize(cmd)) && tlWritesTo(cmd, progressAbs) && ts > out.lastProgressWrite) out.lastProgressWrite = ts;
-      }
-    }
+    for (var u = 0; u < uses.length; u++) tlCountUse(uses[u], ts, out, progressAbs, cx);
   }
   return out;
 }
@@ -489,7 +519,8 @@ function tlFire(f) {
   // effects, in Node order
   var relaxed = tlJev(f, jevState);
   if (relaxed || versionStale || acked) return 'allow';
-  if (omc) return { exact: { code: 0, out: tlT('omc_text'), err: '' } };
+  // the advisories go to stderr: stdout stays empty or ONE JSON object, which the dispatcher can merge with another Stop hook's JSON
+  if (omc) return { exact: { code: 0, out: '', err: tlT('omc_text') } };
   if (advisory) { try { tlStamp(home, advisory.marker, advisory.body); } catch (e) { /* best-effort cap */ } }
   if (policy !== null && policy.rel !== null) {
     var now = ah.clock.now(), bk = function (kind) { return safe + '|' + tlT('guard_name') + '|' + kind; };
@@ -522,7 +553,7 @@ function decide(p, opts) {
   if (!ah.settings.bool('tasklist_guard.setting') || ah.settings.skipped(tlT('guard_name'))) return 'allow';
   if (p === null || typeof p !== 'object') p = {};
   if (typeof p.permission_mode === 'string' && p.permission_mode.toLowerCase() === tlT('plan_mode_value')) {
-    return { exact: { code: 0, out: tlT('plan_mode_text'), err: '' } };
+    return { exact: { code: 0, out: '', err: tlT('plan_mode_text') } };
   }
   var transcript = p.transcript_path;
   if (!transcript || typeof transcript !== 'string') return 'allow';

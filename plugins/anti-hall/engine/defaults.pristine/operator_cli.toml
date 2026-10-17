@@ -135,6 +135,10 @@ value = "{id} snoozed until {until}"
 doc = "A review-state write that failed after the verb was answered (best effort, as in Node: said, not fatal). Placeholder: {error}."
 value = "⚠️ anti-hall · jev-setup: could not save the review state: {error}"
 
+[opcli.review_scan_over_limit]
+doc = "The Jev decision-log scan stopped at its memory hard limit (mem.jev_review_scan_hard_bytes); the review state counts as unusable. Placeholders: {file}, {limit}."
+value = "review state: the Jev decision log {file} holds a line longer than the scan's {limit}-byte limit (mem.jev_review_scan_hard_bytes); the review was skipped"
+
 [opcli.review_state_bad]
 doc = "The review state holds an entry that is not an object, which the verb cannot update (nothing is written). Placeholder: {id}."
 value = "review state: the entry of {id} is not an object; fix or remove ~/.anti-hall/jev-review-state.json"

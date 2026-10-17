@@ -34,11 +34,23 @@ function mkGitRepo() {
   return root;
 }
 
+
+// Since 2026-10-16 only a registered project qualifies for an automatic
+// (selfHeal) ingest install: register the repo the test runs in.
+function registerRepo(home, repoCwd) {
+  const repokey = require(path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'lib', 'devswarm-repokey.js'));
+  const key = repokey.repoKeyForWorktree(repoCwd);
+  const dir = path.join(home, '.anti-hall', 'devswarm', 'workspaces');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'primary-reg.json'), JSON.stringify({ id: 'primary-reg', repoKey: key, worktreePath: repoCwd, sessionId: 's' }));
+}
+
 test('withSelfHeal marks possiblyStaleRegistry:true on an address refusal while the daemon is stale (2e8653787945)', () => {
   const dev = require(MODULE_PATH);
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'antihall-2e8-home-'));
   const repoCwd = mkGitRepo();
   try {
+    registerRepo(home, repoCwd);
     // ANTIHALL_DEVSWARM_SUPERVISOR=on forces isDevswarmActive(env) true; no
     // heartbeat/lock file exists under `home` for this repoKey, so
     // ingestHealth.daemonHealth naturally reports non-healthy (stale/missing)
@@ -124,6 +136,7 @@ test('selfHeal with ANTIHALL_INGEST_DRY_RUN=1 and no io mock never registers a r
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'antihall-2e8-home3-'));
   const repoCwd = mkGitRepo();
   try {
+    registerRepo(home, repoCwd);
     const ctx = {
       home, cwd: repoCwd,
       env: { ANTIHALL_DEVSWARM_SUPERVISOR: 'on', ANTIHALL_INGEST_DRY_RUN: '1' },
