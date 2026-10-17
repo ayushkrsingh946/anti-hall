@@ -347,6 +347,10 @@ value = "Stop, never blocks: records the checkable claims of the last reply that
 doc = "The guard id this check answers to in skip.json."
 value = "claim-ledger"
 
+[claim_ledger.unsure_log_kind]
+doc = "Engine log kind of a claim-ledger case the engine cannot reproduce exactly, so it defers (logged, before anything is written): relative_home, no_home, test_guard (HOME set but relative or empty, no home at all, or HOME unset with the passwd home being the real one under a spawn_ctx.test_markers variable; HOME unset otherwise adopts the passwd home as os.homedir() does), relative_transcript (a relative transcript path with no absolute payload cwd), transcript (a transcript record only JavaScript reads exactly)."
+value = "claim_ledger_unsure"
+
 [claim_ledger.setting]
 doc = "Where the on/off switch is read from (guards.claimLedger, default on)."
 value = { section = "guards", key = "claimLedger", env = "", aliases = [], option = "guards_claim_ledger", default = true }

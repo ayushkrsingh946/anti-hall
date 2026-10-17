@@ -25,6 +25,7 @@
 const fs = require('fs');
 const path = require('path');
 const cp = require('child_process');
+const enabledInstall = require('./enabled-install.js');
 
 const STRICT_SEMVER_RE = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
 const KEEP_NEWEST = 3;
@@ -79,16 +80,15 @@ function dirSize(dir) {
 }
 
 // registeredInstallPaths(home) -> every anti-hall installPath in
-// installed_plugins.json (v2 { plugins: { "anti-hall@anti-hall": [...] } } or
-// the legacy top-level shape), all scopes.
+// installed_plugins.json (v2 { plugins: { "anti-hall@<marketplace>": [...] } } or
+// the legacy top-level shape), every anti-hall@* key, all scopes.
 function registeredInstallPaths(home) {
   const out = [];
   try {
-    const data = JSON.parse(fs.readFileSync(path.join(home, '.claude', 'plugins', 'installed_plugins.json'), 'utf8'));
-    const reg = (data && data.plugins && typeof data.plugins === 'object') ? data.plugins : data;
-    const entry = reg && reg['anti-hall@anti-hall'];
-    const list = Array.isArray(entry) ? entry : [entry];
-    for (const e of list) {
+    // Every registered anti-hall@* key counts, enabled or not (#216): the ENABLED install may be a different key than
+    // anti-hall@anti-hall, and its cache dir must never be pruned.
+    const sel = enabledInstall.forHome(home);
+    for (const e of enabledInstall.allEntries(sel.reg)) {
       if (e && typeof e === 'object' && typeof e.installPath === 'string' && e.installPath) out.push(e.installPath);
     }
   } catch (_) { /* missing/unreadable registry: nothing registered */ }

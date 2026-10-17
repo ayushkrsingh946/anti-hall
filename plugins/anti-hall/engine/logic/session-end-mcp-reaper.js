@@ -5,9 +5,10 @@
 // against a fresh listing (a recycled pid must qualify again) and sends the forced signal to those that remain; every step is appended
 // to the audit log. The selection is decided HERE from the process table (ah.proc.list / ages / managed); the host only lists, probes,
 // waits and signals the pids this script names (ah.proc.signal refuses anything its own listing did not show, a forced signal before a
-// polite one, the engine itself and its parent, pids below 2). Nothing is written or signalled before the selection is complete, and a
-// case the host cannot decide the way Node would (a probe it cannot read, an ambiguous local time) leaves the state as it was and
-// defers. Mirrors hooks/session-end-mcp-reaper.js and companion/mcp-reaper.js. Keys and texts: mcp_reaper.toml, host_proc.toml.
+// polite one, the engine itself and its parent, pids below 2). Nothing is written or signalled before the selection is complete. Every
+// home is Node's os.homedir() (hookProc.adoptHome: HOME unset adopts the passwd home). What the host cannot read the way Node would
+// leaves the state as it was and defers, logged under mcp_reaper.unsure_log_kind: a relative or empty HOME, no home, the real home
+// under a test marker, a process id past the exact range, a probe it cannot read, an ambiguous local time. Mirrors hooks/session-end-mcp-reaper.js and companion/mcp-reaper.js. Keys and texts: mcp_reaper.toml, host_proc.toml.
 'use strict';
 
 function mrArgv0(cmd) {
@@ -81,15 +82,18 @@ function mrLog(rel, abs, fields) {
 
 function mrProc(p, action) { return { pid: p.pid, ppid: p.ppid, cmd: p.cmd, action: action }; }
 
+function mrDefer(why) { ah.log(ah.cfg('mcp_reaper.unsure_log_kind'), why); return 'defer'; }
+
 function decide(p) {
+  var noHome = hookProc.adoptHome();
+  if (noHome !== null) return mrDefer(noHome);
   if (!ah.settings.bool('mcp_reaper.setting')) return 'allow';
   var reason = p && typeof p === 'object' ? mrReason(p) : null;
   if (reason === null || ah.cfg('mcp_reaper.act_reasons').indexOf(reason) === -1) return 'allow';
   // The Node hook reuses companion/mcp-reaper.js's signature test and does nothing when that module cannot be loaded. The engine
   // carries the whole selection itself (mrInvariant and the host process probes), so it acts with or without the Node module: the
   // two differ only on an install whose companion file is gone, where the engine still sweeps (the sweep is the feature).
-  var home = spawn.osHome();
-  if (home === null) return 'defer';
+  var home = ah.home();
   var listed = ah.proc.list();
   if (listed === null || listed.rows.length === 0) return 'allow';
   var rows = listed.rows;
@@ -105,13 +109,13 @@ function decide(p) {
   var raw = rows.filter(function (q) { return mrInvariant(q, extra, exclude); }), kept = [], skipped = [];
   if (raw.length) {
     var exact = ah.cfgNum('hostproc.max_exact_id');
-    if (raw.some(function (q) { return !(q.pid >= 0 && q.pid < exact); })) return 'defer';
+    if (raw.some(function (q) { return !(q.pid >= 0 && q.pid < exact); })) return mrDefer('pid_range');
     var ages = ah.proc.ages(raw.map(function (q) { return q.pid; }));
-    if (ages.unsure) return 'defer';
+    if (ages.unsure) return mrDefer('ages');
     var aged = raw.filter(function (q) { var a = ages.ages[String(q.pid)]; return typeof a === 'number' && a >= minAge; });
     if (aged.length) {
       var m = ah.proc.managed(aged.map(function (q) { return q.pid; }));
-      if (m.unsure) return 'defer';
+      if (m.unsure) return mrDefer('managed');
       if (m.unverifiable) {
         skipped = aged.map(function (q) { return { proc: q, reason: ah.cfg('mcp_reaper.reason_launchd_unverifiable') }; });
       } else {

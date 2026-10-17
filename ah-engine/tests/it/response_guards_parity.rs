@@ -339,7 +339,9 @@ fn claim_ledger_cases() -> Vec<Case> {
     v.push(c("no-transcript-path").same(without(msg("took 12 seconds"), "transcript_path")));
     v.push(c("transcript-path-number").same(stop(json!({"transcript_path": 5}))));
     v.push(c("transcript-path-empty").same(stop(json!({"transcript_path": ""}))));
-    v.push(c("transcript-relative-defers").defer(stop(json!({"transcript_path": "rel/t.jsonl"}))));
+    // #68: a relative transcript path is opened from the absolute payload cwd (/tmp holds no rel/t.jsonl): answered natively
+    v.push(c("transcript-relative-from-cwd").same(stop(json!({"transcript_path": "rel/t.jsonl"}))));
+    v.push(c("transcript-relative-no-cwd-defers").defer(without(stop(json!({"transcript_path": "rel/t.jsonl"})), "cwd")));
     v.push(c("transcript-missing-file").same(stop(json!({"transcript_path": "/nonexistent/dir/t.jsonl"}))));
     v.push(c("transcript-empty-file").transcript_raw("").same(stop(json!({}))));
     v.push(c("transcript-garbage-lines").transcript_raw("garbage\n{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"took 12 seconds\"}]}}\n[1,2]\n\"str\"\nnull\n").same(stop(json!({}))));

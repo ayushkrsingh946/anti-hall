@@ -6,8 +6,11 @@
 // waiting (the answer only reaches the Jev decision log). The transcript is read by ah.transcript.evidence (the records as plain
 // text, in order) is walked by the engine (ah.transcript.evidenceWalk: the merge of one message's text, the payload skip, the join) and
 // stays there; this script asks it whether a token is in it (walkHas) and for its numbers (walkNumbers), so no megabyte string is
-// ever built in the interpreter; the rest is decided here. A relative
-// transcript path or a line only JavaScript reads defers to Node. Mirrors hooks/claim-ledger.js. Keys and texts: response_guards.toml
+// ever built in the interpreter; the rest is decided here. The home is Node's os.homedir() (hookProc.adoptHome: HOME unset adopts
+// the passwd home); a relative transcript path is opened from the absolute payload cwd. Only what the engine cannot reproduce exactly
+// defers, before anything is written, logged under claim_ledger.unsure_log_kind: a relative or empty HOME, no home, the real home
+// under a test marker, a relative transcript path with no absolute cwd, a transcript record only JavaScript reads exactly (an unsure
+// walk). Mirrors hooks/claim-ledger.js. Keys and texts: response_guards.toml
 // (claim_ledger.*).
 'use strict';
 
@@ -73,16 +76,21 @@ function clAsk(flag, sessionId, projectFrom, transcript) {
   try { ah.jev.ask(spec); } catch (e) { /* shadow only */ }
 }
 
+function clDefer(why) { ah.log(ah.cfg('claim_ledger.unsure_log_kind'), why); return 'defer'; }
+
 function decide(p) {
   if (ah.env.get(ah.cfg('session.judge_child_env')) === ah.cfg('session.judge_child_on')) return 'allow';
-  if (spawn.osHome() === null) return 'defer';
+  var noHome = hookProc.adoptHome();
+  if (noHome !== null) return clDefer(noHome);
   if (!ah.settings.bool('claim_ledger.setting') || ah.settings.skipped(ah.cfg('claim_ledger.guard_name'))) return 'allow';
   var tp = p && p.transcript_path;
   if (!tp || typeof tp !== 'string') return 'allow';
+  var tpOpen = hookProc.openKnown(p, tp); // Node reads a relative path from its own directory; the session hash below keeps the payload's
+  if (tpOpen === null) return clDefer('relative_transcript');
   var payloadText = typeof p.last_assistant_message === 'string' && p.last_assistant_message.trim() !== '' ? p.last_assistant_message : null;
-  var ev = ah.transcript.evidenceWalk(tp, ah.cfgNum('claim_ledger.window_bytes'), payloadText);
+  var ev = ah.transcript.evidenceWalk(tpOpen, ah.cfgNum('claim_ledger.window_bytes'), payloadText);
   if (ev === null) return 'allow';
-  if (ev.unsure) return 'defer';
+  if (ev.unsure) return clDefer('transcript');
   if (!ev.walked) return 'allow';
   var reply = ev.lastText, which = 'evidence', evidenceChars = ev.evidenceChars, tools = ev.toolsThisTurn, fromPayload = false;
   if (payloadText !== null) {
@@ -106,6 +114,6 @@ function decide(p) {
     }
   } catch (e) { /* best effort, as Node: a lost record never changes the answer */ }
   var cwd = typeof p.cwd === 'string' ? p.cwd : null;
-  for (var i = 0; i < flags.length; i++) clAsk(flags[i], sid, cwd, fromPayload ? null : tp);
+  for (var i = 0; i < flags.length; i++) clAsk(flags[i], sid, cwd, fromPayload ? null : tpOpen);
   return 'allow';
 }

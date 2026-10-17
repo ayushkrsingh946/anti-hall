@@ -618,6 +618,23 @@ fn a_payload_only_js_can_parse_is_deferred_to_node_not_blocked() {
     assert!(out.contains("node decided"), "{out}");
 }
 
+/// D74 keeps the Node hooks as the decider for a payload serde_json cannot read, but the fallback must be on record: one
+/// `dispatch_defer` health line (the fallback counter) per call, and the Node hook still runs.
+#[test]
+fn an_unreadable_payload_is_logged_as_a_fallback_and_node_still_runs() {
+    let e = Env::new("unparsed-logged");
+    let map = e.map(&[("git-guard", "echo NODE-RAN >&2")]);
+    let args = ["hook", "--event", "PreToolUse", "--tool", "Bash", "--fallback-map", map.to_str().unwrap()];
+    for (label, payload) in [("not JSON", "{bad"), ("empty", "")] {
+        let (code, out, err) = e.run(&args, true, payload, true);
+        assert_eq!(code, 0, "{label}: {out:?} {err:?}");
+        assert!(err.contains("NODE-RAN"), "{label}: the Node hook still runs: {err}");
+    }
+    let log = std::fs::read_to_string(e.state().join(ah_engine::health::log_name())).unwrap_or_default();
+    let lines: Vec<&str> = log.lines().filter(|l| l.contains("dispatch_defer") && l.contains("not readable as JSON")).collect();
+    assert_eq!(lines.len(), 2, "one fallback line per unreadable payload: {log}");
+}
+
 /// Any other event goes on with what it can run, and a usage error there stays the host's non-blocking 64.
 #[test]
 fn an_event_that_is_not_a_guard_runs_what_it_can() {

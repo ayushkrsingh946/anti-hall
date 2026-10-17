@@ -21,6 +21,7 @@
 //! | `settingEnum(key)` / `settingNum(key)` / `settingNumStrict(key)` / `settingStr(key)` | the effective value of the enum / numeric (clamped to the entry's range; strict: a value below its minimum is dropped, as `settings.get` does) / string setting described by defaults entry `key` |
 //! | `fileSize(path)` | the size in bytes of a regular file, or `null` |
 //! | `passwdHome()` | the user's home as the passwd database has it, or `null` |
+//! | `useHome(path)` | make the absolute `path` the home directory of the rest of the call (settings, skips, scoped state), as a Node hook whose `os.homedir()` fell back to the passwd home sees it; `false` (nothing changed) for a relative path |
 //! | `realpath(path)` | the canonical path (links resolved), or `null` when it does not exist |
 //! | `pathResolve(base, p)` | Node `path.resolve(base, p)` (posix) |
 //! | `writeAtomic(rel, text, leaveTemp?)` | the SCOPED write (`rel` is relative to the home directory, under the state directory; `leaveTemp`: a failed rename keeps the temporary file, as the Node writers do): see [`write_atomic`] |
@@ -812,6 +813,34 @@ pub fn exec(prog: &str, args: &[String], cwd: Option<&str>, env_pairs: &[String]
     Ok(serde_json::json!({"status": o.status.code(), "stdout": cut(&o.stdout), "stderr": cut(&o.stderr), "truncated": truncated}).to_string())
 }
 
+/// `realpath(p)`: the canonical path, or `null`; a path with a lone surrogate is looked up as Node would encode it.
+fn realpath_js<'js>(ctx: Ctx<'js>, p: rquickjs::String<'js>) -> rquickjs::Result<Option<String>> {
+    let p = well_formed(&ctx, &p)?;
+    Ok(std::fs::canonicalize(p).ok().map(|r| r.to_string_lossy().into_owned()))
+}
+
+/// `pathRelative(from, to)` over strings that may hold a lone surrogate (see [`well_formed`]).
+fn path_relative_js<'js>(ctx: Ctx<'js>, a: rquickjs::String<'js>, b: rquickjs::String<'js>) -> rquickjs::Result<String> {
+    Ok(paths::relative(&well_formed(&ctx, &a)?, &well_formed(&ctx, &b)?))
+}
+
+/// `pathResolve(base, rel)` over strings that may hold a lone surrogate (see [`well_formed`]).
+fn path_resolve_js<'js>(ctx: Ctx<'js>, a: rquickjs::String<'js>, b: rquickjs::String<'js>) -> rquickjs::Result<String> {
+    Ok(paths::resolve(&well_formed(&ctx, &a)?, &well_formed(&ctx, &b)?))
+}
+
+/// The text of a JavaScript string as Rust sees it: a lone surrogate (which no UTF-8 string can hold) becomes U+FFFD, which is
+/// what Node writes when it encodes such a string into a path.
+fn well_formed<'js>(ctx: &Ctx<'js>, s: &rquickjs::String<'js>) -> rquickjs::Result<String> {
+    if let Ok(t) = s.to_string() {
+        return Ok(t);
+    }
+    let proto: Object = ctx.globals().get::<_, Object>("String")?.get("prototype")?;
+    let fix: Function = proto.get("toWellFormed")?;
+    let fixed: rquickjs::String = fix.call((rquickjs::function::This(s.clone()),))?;
+    fixed.to_string()
+}
+
 /// The user's home as the passwd database has it.
 fn passwd_home() -> Option<String> {
     crate::checks::spawnctx::passwd_home()
@@ -882,8 +911,18 @@ pub fn install(c: &Ctx<'_>) -> rquickjs::Result<()> {
     )?;
     h.set("fileSize", Function::new(c.clone(), |p: String| std::fs::metadata(p).ok().filter(std::fs::Metadata::is_file).map(|m| m.len() as f64))?)?;
     h.set("passwdHome", Function::new(c.clone(), passwd_home)?)?;
-    h.set("realpath", Function::new(c.clone(), |p: String| std::fs::canonicalize(p).ok().map(|r| r.to_string_lossy().into_owned()))?)?;
-    h.set("pathResolve", Function::new(c.clone(), |a: String, b: String| paths::resolve(&a, &b))?)?;
+    h.set(
+        "useHome",
+        Function::new(c.clone(), |home: String| -> rquickjs::Result<bool> {
+            if !paths::is_absolute(&home) {
+                return Ok(false);
+            }
+            CALL.with(|c| c.borrow_mut().as_mut().map(|st| st.home = home)).ok_or_else(|| err("useHome", defaults::text("script.msg_no_request")))?;
+            Ok(true)
+        })?,
+    )?;
+    h.set("realpath", Function::new(c.clone(), realpath_js)?)?;
+    h.set("pathResolve", Function::new(c.clone(), path_resolve_js)?)?;
     h.set(
         "writeAtomic",
         Function::new(c.clone(), |rel: String, text: String, leave_temp: Option<bool>| -> rquickjs::Result<bool> {
@@ -987,7 +1026,7 @@ pub fn install(c: &Ctx<'_>) -> rquickjs::Result<()> {
     h.set("pathBasename", Function::new(c.clone(), |p: String| paths::basename(&p).to_string())?)?;
     h.set("pathJoin", Function::new(c.clone(), |a: String, b: String| paths::join(&a, &b))?)?;
     h.set("pathResolveAbs", Function::new(c.clone(), |p: String| paths::resolve_abs(&p))?)?;
-    h.set("pathRelative", Function::new(c.clone(), |a: String, b: String| paths::relative(&a, &b))?)?;
+    h.set("pathRelative", Function::new(c.clone(), path_relative_js)?)?;
     h.set(
         "reTest",
         Function::new(c.clone(), |src: String, flags: String, text: String| -> rquickjs::Result<bool> { with_re(&src, &flags, |re| re.is_match(&text)) })?,

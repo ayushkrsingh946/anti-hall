@@ -435,13 +435,24 @@ function resolveSendTarget(storeHandle, arg, home, opts) {
   // (names.shortId), so a copied short id matched nothing above. Last resort: a unique id
   // PREFIX resolves to that row (same stale-twin handling as an exact id, by re-resolving
   // the full id); several rows sharing the prefix is ambiguous — refuse, never pick one.
+  // The pool is registry ids AND live descriptor ids (the same universe resolveArchiveId searches): a descriptor-only
+  // workspace's short id resolves through its descriptor id, which the alias step above routes to its registered row.
   if (arg) {
-    const byPrefix = [];
+    const hits = new Set();
     for (const d of storeHandle.listRegistry()) {
-      if (d && d.id != null && String(d.id).startsWith(String(arg))) byPrefix.push(d);
+      if (d && d.id != null && String(d.id).startsWith(String(arg))) hits.add(String(d.id));
     }
-    if (byPrefix.length === 1) return resolveSendTarget(storeHandle, String(byPrefix[0].id), home, opts);
-    if (byPrefix.length > 1) return { target: null, ambiguous: true, prefix: true, candidates: byPrefix.map((d) => String(d.id)).sort() };
+    if (home && isSafeId(String(arg))) {
+      let names = [];
+      try { names = fs.readdirSync(workspacesDir(home)); } catch (_) { names = []; }
+      for (const n of names) {
+        if (n.endsWith('.json') && isSafeId(n.slice(0, -5)) && n.startsWith(String(arg))) hits.add(n.slice(0, -5));
+      }
+    }
+    const ids = Array.from(hits).sort();
+    // an id that is already the full `arg` was tried above: recursing on it would loop
+    if (ids.length === 1 && ids[0] !== String(arg)) return resolveSendTarget(storeHandle, ids[0], home, opts);
+    if (ids.length > 1) return { target: null, ambiguous: true, prefix: true, candidates: ids };
   }
   return { target: null, ambiguous: false, candidates: null };
 }

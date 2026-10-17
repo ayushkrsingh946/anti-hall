@@ -841,6 +841,8 @@ function resolveArchiveId(raw, ctx, opts) {
       };
     }
   }
+  // An exact id outranks a longer id that merely starts with it.
+  if (candidates.includes(raw)) return { ok: true, id: raw };
   if (candidates.length === 1) return { ok: true, id: candidates[0] };
   if (candidates.length === 0) {
     // Step 3: `raw` may be a MESH id (`primary-<hash>`, the label `send --to`

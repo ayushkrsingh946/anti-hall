@@ -118,7 +118,9 @@ fn codex_availability_matches_node() {
 fn codex_nudge_matches_node() {
     let _s = serial();
     let Some(hooks) = hooks_dir() else { return };
-    b78::require("codex-nudge", "codex-nudge", "codex-nudge.js", &hooks, b78_nudge::scenarios(), 100);
+    // the deep nesting and the lone-surrogate path are answered by the engine itself (they deferred before, which `require` accepts)
+    let native = ["wrap-nested-deep", "wrap-nested-50", "wrap-nested-50-codex", "lines-lone-surrogate-escape", "lines-lone-surrogate-escape-codex"];
+    b78::require_native("codex-nudge", "codex-nudge", "codex-nudge.js", &hooks, b78_nudge::scenarios(), 100, &native);
 }
 
 #[test]

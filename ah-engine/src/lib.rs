@@ -47,6 +47,7 @@ pub mod health;
 pub mod hookcfg;
 pub mod hookio;
 pub mod hooksgen;
+pub mod install;
 pub mod impact;
 pub mod jev;
 pub mod judge;
