@@ -282,6 +282,12 @@ pub(crate) fn dump_lane(name: &str, scenarios: &[Sc]) {
 const UNIX_EPOCH_ALIAS: std::time::SystemTime = std::time::UNIX_EPOCH;
 
 pub(crate) fn require(name: &str, check: &str, hook_file: &str, hooks: &Path, scenarios: Vec<Sc>, min: usize) {
+    require_native(name, check, hook_file, hooks, scenarios, min, &[]);
+}
+
+/// `require`, and the listed scenarios must also be answered by the engine itself (a deferral to Node would pass `require`).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn require_native(name: &str, check: &str, hook_file: &str, hooks: &Path, scenarios: Vec<Sc>, min: usize, native: &[&str]) {
     dump_lane(name, &scenarios);
     if std::env::var_os("AH_PARITY_DUMP_ONLY").is_some() {
         return;
@@ -292,6 +298,8 @@ pub(crate) fn require(name: &str, check: &str, hook_file: &str, hooks: &Path, sc
         std::fs::write(Path::new(&dir).join(format!("b78-{name}.summary.txt")), &rep.summary).ok();
     }
     assert!(rep.mismatch == 0, "{name}: mismatches:\n{}", rep.summary);
+    let deferred: Vec<&str> = native.iter().copied().filter(|id| rep.deferred_ids.iter().any(|d| d == id)).collect();
+    assert!(deferred.is_empty(), "{name}: deferred to Node, expected a native answer: {deferred:?}\n{}", rep.summary);
     assert!(rep.n >= min, "{name}: only {} scenarios", rep.n);
     assert!(rep.same > 0, "{name}: nothing compared exactly\n{}", rep.summary);
 }

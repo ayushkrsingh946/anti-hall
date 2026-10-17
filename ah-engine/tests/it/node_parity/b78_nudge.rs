@@ -281,6 +281,17 @@ pub(crate) fn scenarios() -> Vec<Sc> {
             ]
         }),
     ));
+    // ~50 levels of wrapper keys: the host's script stack must hold (an iterative walk), and the answer is Node's block
+    let deep = |b: &Base| {
+        let mut node = o(vec![("parts", a(e_n(4, "js", &ps(&b.repo))))]);
+        for _ in 0..16 {
+            node = o(vec![("message", o(vec![("content", a(vec![node]))]))]);
+        }
+        node.text()
+    };
+    out.push(sc("wrap-nested-50", mk(move |_, b| vec![deep(b)])));
+    // the Codex twin: its payload carries a turn id
+    out.push(sc("wrap-nested-50-codex", mk(move |_, b| vec![deep(b)]).payload(|_, _| vec![("turn_id", Some(s("turn-1")))])));
     out.push(sc(
         "wrap-string-array-elems",
         mk(|_, b| {
@@ -418,6 +429,16 @@ pub(crate) fn scenarios() -> Vec<Sc> {
                 format!("{{\"type\":\"tool_use\",\"name\":\"Edit\",\"input\":{{\"file_path\":\"{}/\\ud83d.js\"}}}}", ps(&b.repo)),
             ]
         }),
+    ));
+    out.push(sc(
+        "lines-lone-surrogate-escape-codex",
+        mk(|_, b| {
+            vec![
+                tu_line(e_n(3, "js", &ps(&b.repo)), None),
+                format!("{{\"type\":\"tool_use\",\"name\":\"Edit\",\"input\":{{\"file_path\":\"{}/\\ud83d.js\"}}}}", ps(&b.repo)),
+            ]
+        })
+        .payload(|_, _| vec![("turn_id", Some(s("turn-1")))]),
     ));
     out.push(sc("lines-deep-nesting", mk(move |_, b| vec![format!("{}{}", "[".repeat(200), "]".repeat(200)), tu4(b)])));
     out.push(sc("lines-number-out-of-range", mk(move |_, b| vec!["{\"n\":1e999}".into(), tu4(b)])));

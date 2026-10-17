@@ -132,9 +132,8 @@ function snState(path) {
 function snOneLine(s, max) {
   var o = jx.replaceAll(ah.cfg('silent_nudge.control_re'), '', s, ' ').replace(/\s+/g, ' ').trim();
   if (o.length > max) {
-    var cut = o.slice(0, max), last = cut.charCodeAt(cut.length - 1);
-    // a cut through a surrogate pair: Node keeps the lone half, which cannot cross into the engine; the half is dropped
-    if (last >= 0xd800 && last <= 0xdbff) { ah.log(ah.cfg('silent_nudge.unsure_log_kind'), 'label_surrogate'); cut = cut.slice(0, -1); }
+    // a cut through a surrogate pair keeps the lone high half, as Node does (JSON.stringify writes it as the ASCII escape \ud83d)
+    var cut = o.slice(0, max);
     return cut.replace(/\s+$/, '') + ah.cfg('silent_nudge.ellipsis');
   }
   return o;
@@ -233,10 +232,11 @@ function snDecide(p, opts) {
   }
 
   // stale-build downgrade: a newer version is already registered than the running plugin; say nothing, keep the state as it was
-  // the rule's plugin_root option, else the engine's variable for it. Unknown (no root) or unreadable versions: no newer build is
-  // known to be waiting, so the gate passes and the nudge is said (Node's answer whenever its own install is the newest)
+  // the rule's plugin_root option, else the engine's variable for it. Unreadable versions: no newer build is known to be waiting,
+  // so the gate passes and the nudge is said (Node's answer whenever its own install is the newest)
   var root = opts !== null && typeof opts === 'object' && typeof opts.plugin_root === 'string' ? opts.plugin_root : ah.env.get(ah.cfg('env.plugin_root')) || '';
-  if (!root) ah.log(ah.cfg('silent_nudge.unsure_log_kind'), 'no_plugin_root');
+  // no root to judge by: Node judges against its own install directory and may stay quiet, so the Node twin decides (before any write)
+  if (!root && ah.settings.bool('silent_nudge.version_gate_setting')) snUnsure('no_plugin_root', true);
   if (root && ah.settings.bool('silent_nudge.version_gate_setting')) {
     var v = ah.plugin.versions(root);
     if (v.unsure) ah.log(ah.cfg('silent_nudge.unsure_log_kind'), 'plugin_versions');

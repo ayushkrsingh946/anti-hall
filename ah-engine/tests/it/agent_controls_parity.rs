@@ -401,6 +401,10 @@ fn check_one(root: &Path, idx: usize, s: &Sc, mismatches: &mut Vec<String>) -> O
     e.arg("check").arg(s.hook);
     base_env(&mut e, &eh);
     e.env("AH_ENGINE_DIR", eh.join("engine"));
+    if s.hook == "silent-agent-nudge" {
+        // Node judges its stale-build gate against its own install directory; without a plugin root the engine defers to it
+        e.env("AH_ENGINE_PLUGIN_ROOT", repo().join("plugins/anti-hall"));
+    }
     for (k, v) in &s.env {
         n.env(k, v);
         e.env(k, v);

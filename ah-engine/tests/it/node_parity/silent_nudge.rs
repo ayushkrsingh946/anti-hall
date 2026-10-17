@@ -32,8 +32,6 @@ pub(crate) struct Sc {
     retouch: Option<(String, i64)>,
     /// Leave the engine without the plugin root (Node always knows its own).
     no_root: bool,
-    /// A native answer that differs from Node's by design: this text is removed from Node's stdout before the comparison.
-    node_drop: Option<String>,
 }
 
 fn sc(id: &str, session: Value) -> Sc {
@@ -46,7 +44,6 @@ fn sc(id: &str, session: Value) -> Sc {
         warm: false,
         retouch: None,
         no_root: false,
-        node_drop: None,
     }
 }
 
@@ -82,10 +79,6 @@ impl Sc {
     }
     fn ack(self, session: &str, body: &str) -> Sc {
         self.file(&format!(".anti-hall/stop-ack/stop-ack-{session}.json"), body)
-    }
-    fn node_drop(mut self, t: &str) -> Sc {
-        self.node_drop = Some(t.into());
-        self
     }
     fn warm(mut self) -> Sc {
         self.warm = true;
@@ -182,11 +175,8 @@ pub(crate) fn scenarios() -> Vec<Sc> {
     v.push(sc("description-control-chars", s1.clone()).lines(&agent("01", "a\u{1}b\tc\n\nd\u{85}e  ")).aged("out-01.txt", "{}\n", OLD));
     v.push(sc("description-unicode", s1.clone()).lines(&agent("01", "réparer — ü 😀 done")).aged("out-01.txt", "{}\n", OLD));
     v.push(
-        // C1 (#68): Node keeps the lone high half of the cut pair (JSON-escaped); it cannot cross into the engine, which drops it
-        sc("description-cut-through-pair-native", s1.clone())
-            .lines(&agent("01", &format!("{}😀tail", "x".repeat(59))))
-            .aged("out-01.txt", "{}\n", OLD)
-            .node_drop("\\ud83d"),
+        // Node keeps the lone high half of the cut pair (JSON-escaped as \ud83d); so does the engine, byte for byte
+        sc("description-cut-through-pair-native", s1.clone()).lines(&agent("01", &format!("{}😀tail", "x".repeat(59)))).aged("out-01.txt", "{}\n", OLD),
     );
     let other = "11111111-2222-3333-4444-555555555555";
     v.push(sc("previous-session-agent-is-skipped", s1.clone()).lines(&[task_status_typed(
@@ -309,9 +299,10 @@ pub(crate) fn scenarios() -> Vec<Sc> {
         v.push(s.env("ANTIHALL_MARKETPLACE_DIR", "$HOME/mk/plugins/marketplaces/anti-hall"));
     }
     {
-        // C1 (#68): no root, no newer build known: the gate passes and the nudge is Node's (no registry here)
+        // no root: Node judges the stale-build gate against its own install directory, so the engine defers to it (logged)
         let mut s = sc("no-plugin-root", s1.clone()).lines(&one());
         s.no_root = true;
+        s.defers = true;
         v.push(s);
     }
 
@@ -445,9 +436,6 @@ pub(crate) fn run_lane(hooks: &Path, scenarios: &[Sc], mutate: bool) -> Report {
         let e = run_side(hooks, &root, sc, &lab, true);
         wipe(&root);
         let mut nout = norm(&n.out.out, &root);
-        if let Some(d) = &sc.node_drop {
-            nout = nout.replace(d.as_str(), "");
-        }
         if mutate {
             nout.push_str("~mutant");
         }

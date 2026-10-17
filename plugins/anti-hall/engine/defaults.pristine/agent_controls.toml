@@ -514,7 +514,7 @@ doc = "What a Stop does when an input cannot be read exactly as V8 reads it (a t
 value = false
 
 [silent_nudge.unsure_log_kind]
-doc = "Engine log kind of a silent-agent-nudge decision taken without Node's exact reading: transcript, heartbeat, state_big, state_parse, ack_big, ack_parse (silent_nudge.unsure_quiet decides: defer to the Node twin, or nothing said), relative_home (a defer to the Node twin: the directory is the hook process's), no_plugin_root and plugin_versions (the stale-build gate passes: no newer build is known), label_surrogate (a name cut through a surrogate pair drops the lone half Node would keep)."
+doc = "Engine log kind of a silent-agent-nudge decision taken without Node's exact reading: transcript, heartbeat, state_big, state_parse, ack_big, ack_parse (silent_nudge.unsure_quiet decides: defer to the Node twin, or nothing said), relative_home (a defer to the Node twin: the directory is the hook process's), no_plugin_root (a defer to the Node twin, which judges the stale-build gate against its own install directory; only while the gate is on), plugin_versions (the stale-build gate passes: no newer build is known)."
 value = "silent_nudge_unsure"
 
 [silent_nudge.home_fallback_env]

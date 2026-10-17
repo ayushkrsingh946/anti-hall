@@ -76,14 +76,23 @@ function cxExcluded(fp, ex) {
   return ex.worktree !== null && !cxInsideDir(abs, ex.worktree);
 }
 
-function cxCollect(node, out) {
-  if (node === null || typeof node !== 'object' || Array.isArray(node)) return;
-  if (node.type === 'tool_use' && node.name) out.push(node);
-  cxT('nudge_child_keys').forEach(function (k) {
-    var v = node[k];
-    if (Array.isArray(v)) v.forEach(function (it) { cxCollect(it, out); });
-    else if (v !== null && typeof v === 'object') cxCollect(v, out);
-  });
+// An explicit stack, not recursion: the host's script stack is small and a deeply wrapped entry must not overflow it. The visit order is
+// the Node twin's recursive collectTU: pre-order, the child keys in order, an array's items in index order.
+function cxCollect(root, out) {
+  var keys = cxT('nudge_child_keys');
+  var stack = [root];
+  while (stack.length > 0) {
+    var node = stack.pop();
+    if (node === null || typeof node !== 'object' || Array.isArray(node)) continue;
+    if (node.type === 'tool_use' && node.name) out.push(node);
+    var kids = [];
+    for (var i = 0; i < keys.length; i++) {
+      var v = node[keys[i]];
+      if (Array.isArray(v)) { for (var j = 0; j < v.length; j++) kids.push(v[j]); }
+      else if (v !== null && typeof v === 'object') kids.push(v);
+    }
+    for (var m = kids.length - 1; m >= 0; m--) stack.push(kids[m]);
+  }
 }
 
 function cxFirstStr(inp, keys) { for (var i = 0; i < keys.length; i++) { var v = jx.isObj(inp) ? inp[keys[i]] : undefined; if (typeof v === 'string' && v !== '') return v; } return ''; }
