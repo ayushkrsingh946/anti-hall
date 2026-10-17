@@ -211,11 +211,12 @@ If an older anti-hall statusline is still configured, remove it first with `unin
 
 ## Requirements
 
-**Node.js ≥ 22 on `PATH`.** Every hook and the legacy statusline cleanup/render scripts are pure Node (built-ins
-only), launched as `node <hook>.js` (directly, or by `ah-engine` for the cases it hands back to Node). No `node` on the hook shell's `PATH` means Claude
-Code silently skips every anti-hall hook — verify with `node --version`. No npm
-install, no native deps, no other config. There is intentionally no shell-based
-preflight. Install Node from <https://nodejs.org>.
+**The `ah-engine` binary.** Every hook command runs the thin POSIX-sh wrapper `hooks/ah-hook.sh`, which calls the
+engine at `~/.anti-hall/ah-engine/bin/ah-engine` (installed and verified by `hooks/ah-engine-bootstrap.sh`; an
+`ah-engine` on `PATH` is used when the home install is not executable). No working engine means the hooks do not
+run — check with `~/.anti-hall/ah-engine/bin/ah-engine doctor`, or `sh hooks/ah-hook.sh --doctor` when the binary
+itself cannot start. Node.js is optional: it is used only for the few paths the engine still hands back to Node
+(the doctor names them). No npm install, no other config.
 
 **Supported systems:** macOS and Linux (both CI-tested), including WSL on Windows,
 which runs the Linux build. Native Windows is not supported yet.
@@ -1641,10 +1642,10 @@ Generated from `hooks/lib/settings-schema.js` (a hygiene test keeps this table a
 # Full zero-dependency E2E suite (node:test, run from the repo root):
 node --test                                                                  # 2693 pass +2 skipped (2695 total); CI runs the same on push/PR (.github/workflows/test.yml)
 
-# Quick smoke-checks of individual hooks:
-echo '{"hook_event_name":"SessionStart"}' | node hooks/verify-first-full.js  # full Iron-Law protocol + skill primer
-echo '{"prompt":"x"}' | node hooks/verify-first.js                           # short varying nudge (varies by full stdin envelope)
-echo '{"prompt":"y"}' | node hooks/verify-first.js                           # different envelope -> different nudge
+# Quick smoke-checks of individual checks (the engine runs one check on a payload from stdin):
+echo '{"hook_event_name":"SessionStart"}' | ~/.anti-hall/ah-engine/bin/ah-engine check verify-first-full  # full Iron-Law protocol + skill primer
+echo '{"hook_event_name":"UserPromptSubmit","prompt":"x"}' | ~/.anti-hall/ah-engine/bin/ah-engine check verify-first  # short varying nudge (varies by full stdin envelope)
+echo '{"hook_event_name":"UserPromptSubmit","prompt":"y"}' | ~/.anti-hall/ah-engine/bin/ah-engine check verify-first  # different envelope -> different nudge
 claude --plugin-dir /path/to/anti-hall                                       # load in a throwaway session
 ```
 
