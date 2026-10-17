@@ -1,7 +1,8 @@
-//! Node-vs-engine parity for the built-in `devswarm-child-gate`, `devswarm-parent-reply-tracker` and `devswarm-child-drain`
-//! checks. Every case runs the engine check; where it answers (an allow) the real Node hook must print nothing, exit 0 and
-//! leave the isolated home exactly as it was. Where the engine defers, Node decides, so there is nothing to compare: the
-//! guard direction is that an engine allow is never a stop Node would have held (D74).
+//! Node-vs-engine parity for the built-in `devswarm-child-gate`, `devswarm-parent-reply-tracker`, `devswarm-child-drain` and
+//! `devswarm-parent-gate` checks. The switch and role corpus runs the engine check alone; where it allows, the real Node hook must
+//! print nothing, exit 0 and leave the isolated home exactly as it was. The answer cases (`pg_exec`, `cx_exec`) run the engine and
+//! Node on the same home and compare output, exit code and the resulting home byte for byte. Where the engine defers, Node decides
+//! and the engine must have written nothing: an engine answer is never weaker than Node's (D74).
 #![allow(clippy::unwrap_used, clippy::expect_used)] // a test crate: a panic is the failure report, and E2 exempts tests
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
@@ -304,114 +305,71 @@ fn bash_payloads() -> Vec<(String, Vec<u8>)> {
     out
 }
 
-fn report(name: &str, t: &Tally, min_cases: usize) {
+/// `min_defers`: the switch and role corpus runs without a plugin root, so a child workspace still defers (the launchers Node
+/// installs cannot be checked); the reply tracker needs none and answers every case of it.
+fn report(name: &str, t: &Tally, min_cases: usize, min_defers: usize) {
     eprintln!("{name}: {} cases, {} engine allows (each compared with Node), {} deferred to Node", t.cases, t.allowed, t.deferred);
     assert!(t.cases >= min_cases, "{name}: corpus too small ({})", t.cases);
-    assert!(t.allowed >= 30, "{name}: too few allow cases compared with Node ({})", t.allowed);
-    assert!(t.deferred >= 1, "{name}: the corpus must also hold cases the engine defers");
+    assert!(t.cases > 0 && t.allowed + t.deferred == t.cases, "{name}: an empty slice or an unclassified case");
+    assert!(t.deferred >= min_defers, "{name}: the corpus must also hold cases the engine defers");
 }
 
+/// The switch and role corpus of one check, in `SHARDS` slices of its variants (the `shards!` tests below) (each slice its own test, so one runs well under the
+/// slow-test limit on a loaded machine). The first slice holds the plain child variant, which defers without a plugin root.
+const SHARDS: usize = 7;
+
+fn shard(guard: &'static str, plugin_env: &'static str, payloads: &[(String, Vec<u8>)], i: usize, min_defers: usize) {
+    let all = variants(guard, plugin_env);
+    assert!(all.len() * payloads.len() >= 300, "{guard}: the corpus shrank ({} cases)", all.len() * payloads.len());
+    let per = all.len().div_ceil(SHARDS);
+    let vs: Vec<Variant> = all.into_iter().skip(i * per).take(per).collect();
+    assert!(!vs.is_empty(), "{guard}: slice {} is empty: lower SHARDS", i + 1);
+    let t = compare(&repo(), guard, guard, &vs, payloads);
+    report(&format!("{guard} shard {}/{SHARDS}", i + 1), &t, vs.len() * payloads.len(), min_defers);
+}
+
+/// One test per slice: `shards!(name: guard, plugin option env, payloads, min defers of the first slice)`.
+macro_rules! shards {
+    ($name:ident: $guard:expr, $env:expr, $payloads:expr, $defers:expr) => {
+        mod $name {
+            fn run(i: usize) {
+                super::shard($guard, $env, &$payloads, i, if i == 0 { $defers } else { 0 });
+            }
+            #[test]
+            fn slice_1() { run(0) }
+            #[test]
+            fn slice_2() { run(1) }
+            #[test]
+            fn slice_3() { run(2) }
+            #[test]
+            fn slice_4() { run(3) }
+            #[test]
+            fn slice_5() { run(4) }
+            #[test]
+            fn slice_6() { run(5) }
+            #[test]
+            fn slice_7() { run(6) }
+        }
+    };
+}
+
+shards!(child_gate_allow_is_node_silence: "devswarm-child-gate", "CLAUDE_PLUGIN_OPTION_DEVSWARM_CHILD_GATE", super::stop_payloads(), 1);
+shards!(reply_tracker_allow_is_node_silence: "devswarm-parent-reply-tracker", "CLAUDE_PLUGIN_OPTION_DEVSWARM_PARENT_REPLY_TRACKER", super::bash_payloads(), 0);
+shards!(child_drain_allow_is_node_silence: "devswarm-child-drain", "CLAUDE_PLUGIN_OPTION_DEVSWARM_CHILD_DRAIN", super::bash_payloads(), 1);
+
+/// The cases that matter most: Node really acts (holds a stop, records a continuing stop, nudges, records a reply), and the engine
+/// answers the same, byte for byte, with the same files written.
 #[test]
-fn child_gate_allow_is_node_silence_and_a_child_workspace_defers() {
-    let vs = variants("devswarm-child-gate", "CLAUDE_PLUGIN_OPTION_DEVSWARM_CHILD_GATE");
-    let t = compare(&repo(), "devswarm-child-gate", "devswarm-child-gate", &vs, &stop_payloads());
-    report("devswarm-child-gate", &t, 300);
-}
-
-#[test]
-fn reply_tracker_allow_is_node_silence_and_a_plausible_send_defers() {
-    let vs = variants("devswarm-parent-reply-tracker", "CLAUDE_PLUGIN_OPTION_DEVSWARM_PARENT_REPLY_TRACKER");
-    let t = compare(&repo(), "devswarm-parent-reply-tracker", "devswarm-parent-reply-tracker", &vs, &bash_payloads());
-    report("devswarm-parent-reply-tracker", &t, 300);
-}
-
-#[test]
-fn child_drain_allow_is_node_silence_and_a_child_workspace_defers() {
-    let vs = variants("devswarm-child-drain", "CLAUDE_PLUGIN_OPTION_DEVSWARM_CHILD_DRAIN");
-    let t = compare(&repo(), "devswarm-child-drain", "devswarm-child-drain", &vs, &bash_payloads());
-    report("devswarm-child-drain", &t, 300);
-}
-
-/// A home with a git worktree, a registered child workspace `b-1` and an inbox with two unread messages.
-fn child_home(tag: &str) -> PathBuf {
-    let home = temp_home(tag);
-    let wt = home.join("wt");
-    std::fs::create_dir_all(home.join(".anti-hall/devswarm/workspaces")).unwrap();
-    std::fs::create_dir_all(&wt).unwrap();
-    for args in [vec!["init", "-q", "."], vec!["-c", "user.email=a@b", "-c", "user.name=n", "commit", "-q", "--allow-empty", "-m", "i"]] {
-        assert!(Command::new("git").args(&args).current_dir(&wt).env_remove("GIT_DIR").output().unwrap().status.success());
+fn where_node_acts_the_engine_answers_the_same() {
+    use PgWant::Answer as A;
+    let held = cx("act-held-stop", CG, &[A]).seed("in.ndjson", CX_INBOX2).expect("\"decision\":\"block\"");
+    let cont = cx("act-continuing-stop", CG, &[A]).payload(r#"{"hook_event_name":"Stop","session_id":"s2","stop_hook_active":true,"cwd":"{cwd}"}"#);
+    let nudge = cx("act-drain-nudge", CD, &[A]).seed("in.ndjson", CX_INBOX2).expect("2 unread message(s)");
+    let reply = cx("act-recorded-reply", RT, &[A]).unset("DEVSWARM_SOURCE_BRANCH");
+    for case in [held, cont, nudge, reply] {
+        let t = cx_exec(&case, "claude");
+        assert_eq!((t.answered, t.deferred), (1, 0), "{}: the engine must answer", case.name);
     }
-    std::fs::write(home.join("inbox.ndjson"), "{\"m\":1}\n{\"m\":2}\n").unwrap();
-    std::fs::write(home.join("cursor.json"), "0").unwrap();
-    let desc = json!({"id":"b-1","inboxPath":home.join("inbox.ndjson"),"cursorPath":home.join("cursor.json")});
-    std::fs::write(home.join(".anti-hall/devswarm/workspaces/b-1.json"), desc.to_string()).unwrap();
-    home
-}
-
-fn engine_says(home: &Path, check: &str, env: &[(&str, &str)], input: &str) -> (i32, String) {
-    let mut c = Command::new(env!("CARGO_BIN_EXE_ah-engine"));
-    c.arg("check").arg(check).env_clear().env("PATH", std::env::var("PATH").unwrap_or_default());
-    c.env("HOME", home).env("USERPROFILE", home).env("AH_ENGINE_DIR", home.join("engine")).env("ANTIHALL_TEST_ISOLATION", "1");
-    crate::node_parity::support::forward_test_scale(&mut c);
-    for (k, val) in env {
-        c.env(k, val);
-    }
-    let (code, out, _) = run(c, input.as_bytes());
-    (code, String::from_utf8_lossy(&out).trim().to_string())
-}
-
-fn node_says(repo: &Path, hook: &str, home: &Path, env: &[(&str, &str)], input: &str) -> (i32, String) {
-    let mut n = Command::new("node");
-    n.arg(repo.join("plugins/anti-hall/hooks").join(format!("{hook}.js")))
-        .env_clear()
-        .env("PATH", std::env::var("PATH").unwrap_or_default())
-        .env("HOME", home)
-        .env("USERPROFILE", home)
-        .env("ANTIHALL_TEST_ISOLATION", "1")
-        .env("ANTIHALL_INGEST_DRY_RUN", "1")
-        .current_dir(home);
-    for (k, val) in env {
-        n.env(k, val);
-    }
-    let (code, out, _) = run(n, input.as_bytes());
-    (code, String::from_utf8_lossy(&out).to_string())
-}
-
-/// The cases that matter most: Node really acts (blocks a stop, nudges, records a reply), and the engine must not allow.
-#[test]
-fn where_node_acts_the_engine_defers() {
-    let repo = repo();
-    // Child Stop gate: the held stop, and the state write of a continuing stop.
-    let home = child_home("gate-act");
-    let stop = json!({"hook_event_name":"Stop","session_id":"s1","cwd":home.join("wt")}).to_string();
-    let (code, out) = node_says(&repo, "devswarm-child-gate", &home, &CHILD, &stop);
-    assert!(code == 0 && out.contains("\"decision\":\"block\""), "Node must hold this stop: {code} {out}");
-    assert_eq!(engine_says(&home, "devswarm-child-gate", &CHILD, &stop), (0, "AHFALLBACK".to_string()), "a held stop must go to Node");
-    let home = child_home("gate-state");
-    let cont = json!({"hook_event_name":"Stop","session_id":"s2","stop_hook_active":true,"cwd":home.join("wt")}).to_string();
-    let before = snapshot(&home);
-    let (_, out) = node_says(&repo, "devswarm-child-gate", &home, &CHILD, &cont);
-    assert!(out.is_empty(), "a continuing stop is allowed by Node: {out}");
-    assert_ne!(before, snapshot(&home), "Node records the check in its state file, which an engine allow would skip");
-    assert_eq!(engine_says(&home, "devswarm-child-gate", &CHILD, &cont), (0, "AHFALLBACK".to_string()));
-    // Child drain: the nudge and its throttle state.
-    let home = child_home("drain-act");
-    let bash = json!({"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"ls"},"session_id":"s1","cwd":home.join("wt")}).to_string();
-    let (code, out) = node_says(&repo, "devswarm-child-drain", &home, &CHILD, &bash);
-    assert!(code == 0 && out.contains("2 unread message(s)"), "Node must nudge: {code} {out}");
-    assert_eq!(engine_says(&home, "devswarm-child-drain", &CHILD, &bash), (0, "AHFALLBACK".to_string()), "a nudge must go to Node");
-    // Reply tracker: the recorded reply.
-    let home = child_home("track-act");
-    let send = json!({"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"node devswarm.js send --to w --message hi"},
-        "tool_response":{"stdout":"{\"ok\":true,\"action\":\"send\",\"type\":\"direct\",\"toId\":\"w\",\"sent\":true}\n","stderr":""},"session_id":"s1","cwd":home.join("wt")})
-    .to_string();
-    let primary = [("DEVSWARM_REPO_ID", "r1")];
-    let before = snapshot(&home);
-    let (code, out) = node_says(&repo, "devswarm-parent-reply-tracker", &home, &primary, &send);
-    assert!(code == 0 && out.is_empty());
-    assert!(snapshot(&home).keys().any(|k| k.contains("parent-gate") && k.ends_with("-replies.json")), "Node must record the reply");
-    assert_ne!(before, snapshot(&home));
-    assert_eq!(engine_says(&home, "devswarm-parent-reply-tracker", &primary, &send), (0, "AHFALLBACK".to_string()), "a recorded reply must go to Node");
 }
 
 //
@@ -1216,4 +1174,475 @@ fn parent_gate_answers_match_node_byte_for_byte() {
         sum.answered, sum.blocks, sum.escalations, sum.deferred
     );
     assert!(cases >= 50 && sum.answered >= 50 && sum.blocks >= 20 && sum.escalations >= 2, "the corpus shrank or stopped blocking");
+}
+
+// ---- the child Stop gate, the drain nudge and the reply tracker: answers byte for byte ----------------------------------------
+//
+// Same protocol as the parent gate's cases: each step runs the engine first on the seeded home; an answer is compared with the real
+// Node hook run on the same home (output, exit code and the resulting home, clock readings masked); a deferral must leave the home
+// untouched and Node then advances it. The child cases run once as a Claude and once as a Codex workspace (the gate reads the agent).
+// `hivecontrol` is taken off the PATH; a case may put a fake one first (its output and exit code).
+
+struct Cx {
+    name: &'static str,
+    hook: &'static str,
+    steps: Vec<PgWant>,
+    seeds: Vec<(String, String)>,
+    env: Vec<(&'static str, String)>,
+    unset: Vec<&'static str>,
+    /// Seed the default descriptor of `b-1` (an empty inbox at cursor 0 in the home, its worktree the case's checkout).
+    desc: bool,
+    /// Seed the descriptor, inbox and store with Node's own writers (readside_seed.js): (inbox lines, store rows).
+    store: Option<(u32, u32)>,
+    /// A fake `hivecontrol` first on the PATH: (its stdout, its exit code).
+    hc: Option<(&'static str, i32)>,
+    /// A directory named `hivecontrol` first on the PATH (Node's spawn reads it as EACCES: an unknown count).
+    hc_dir: bool,
+    /// The payload text (`{cwd}`, `{now}` filled in); None: a plain event of the hook in the checkout.
+    payload: Option<String>,
+    expect: Option<&'static str>,
+    /// Run as a Claude and as a Codex workspace (else Claude only).
+    agents: bool,
+}
+
+const CG: &str = "devswarm-child-gate";
+const CD: &str = "devswarm-child-drain";
+const RT: &str = "devswarm-parent-reply-tracker";
+
+fn cx(name: &'static str, hook: &'static str, steps: &[PgWant]) -> Cx {
+    Cx {
+        name,
+        hook,
+        steps: steps.to_vec(),
+        seeds: vec![],
+        env: vec![],
+        unset: vec![],
+        desc: hook != RT,
+        store: None,
+        hc: None,
+        hc_dir: false,
+        payload: None,
+        expect: None,
+        agents: hook == CG,
+    }
+}
+
+impl Cx {
+    fn seed(mut self, rel: &str, body: &str) -> Cx {
+        self.seeds.push((rel.to_string(), body.to_string()));
+        self
+    }
+    fn env(mut self, k: &'static str, v: &str) -> Cx {
+        self.env.push((k, v.to_string()));
+        self
+    }
+    fn unset(mut self, k: &'static str) -> Cx {
+        self.unset.push(k);
+        self
+    }
+    fn nodesc(mut self) -> Cx {
+        self.desc = false;
+        self
+    }
+    fn store(mut self, nd: u32, rows: u32) -> Cx {
+        self.store = Some((nd, rows));
+        self
+    }
+    fn hc(mut self, out: &'static str, code: i32) -> Cx {
+        self.hc = Some((out, code));
+        self
+    }
+    fn hc_dir(mut self) -> Cx {
+        self.hc_dir = true;
+        self
+    }
+    fn payload(mut self, p: &str) -> Cx {
+        self.payload = Some(p.to_string());
+        self
+    }
+    fn expect(mut self, t: &'static str) -> Cx {
+        self.expect = Some(t);
+        self
+    }
+    fn claude_only(mut self) -> Cx {
+        self.agents = false;
+        self
+    }
+}
+
+/// Clock readings (13-digit runs) are each side's own: masked in every file. SQLite sidecars are not data, nor is the temporary file
+/// a failed Node rename leaves under its own process id.
+fn cx_mask(mut snap: BTreeMap<String, Vec<u8>>) -> BTreeMap<String, Vec<u8>> {
+    let pid_tmp = regex::Regex::new(r"\.\d+\.tmp$").unwrap();
+    snap.retain(|k, _| !k.ends_with("-wal") && !k.ends_with("-shm") && !pid_tmp.is_match(k));
+    let re = regex::Regex::new(r"\d{13}").unwrap();
+    for v in snap.values_mut() {
+        *v = re.replace_all(&String::from_utf8_lossy(v), "T").into_owned().into_bytes();
+    }
+    snap
+}
+
+#[derive(Default)]
+struct CxTally {
+    answered: usize,
+    deferred: usize,
+    blocks: usize,
+    nudges: usize,
+    stderr: usize,
+}
+
+fn cx_exec(case: &Cx, agent: &str) -> CxTally {
+    let repo = repo();
+    let root = repo.join("plugins/anti-hall").canonicalize().unwrap();
+    let tmp = temp_home(&format!("cx-{}", case.name)).canonicalize().unwrap();
+    let home = tmp.join("h");
+    std::fs::create_dir_all(home.join(".anti-hall")).unwrap();
+    let wt = tmp.join("wt");
+    pg_git(&wt);
+    let cwd = wt.canonicalize().unwrap().to_string_lossy().into_owned();
+    let key = ah_engine::meshw::ident::repo_key_for_worktree(&cwd).ok().flatten().expect("a repo key for the checkout");
+    let mut dirs: Vec<String> =
+        std::env::var("PATH").unwrap_or_default().split(':').filter(|d| !d.is_empty() && !Path::new(d).join("hivecontrol").exists()).map(str::to_string).collect();
+    if let Some((out, code)) = case.hc {
+        let bin = tmp.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let f = bin.join("hivecontrol");
+        std::fs::write(&f, format!("#!/bin/sh\nprintf '%s\\n' '{out}'\nexit {code}\n")).unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o755)).unwrap();
+        dirs.insert(0, bin.to_string_lossy().into_owned());
+    }
+    if case.hc_dir {
+        let bin = tmp.join("bin-dir");
+        std::fs::create_dir_all(bin.join("hivecontrol")).unwrap();
+        dirs.insert(0, bin.to_string_lossy().into_owned());
+    }
+    let path = dirs.join(":");
+    let set_env = |c: &mut Command| {
+        c.env_clear()
+            .env("PATH", &path)
+            .env("HOME", &home)
+            .env("USERPROFILE", &home)
+            .env("ANTIHALL_TEST_ISOLATION", "1")
+            .env("ANTIHALL_INGEST_DRY_RUN", "1")
+            .env("DEVSWARM_REPO_ID", "r1")
+            .env("DEVSWARM_SOURCE_BRANCH", "feat/x")
+            .env("DEVSWARM_BUILDER_ID", "b-1")
+            .env("DEVSWARM_AI_AGENT", agent);
+        for k in &case.unset {
+            c.env_remove(k);
+        }
+        for (k, v) in &case.env {
+            c.env(k, v);
+        }
+    };
+    let now_ms = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
+    let fill = |s: &str| {
+        s.replace("{iso}", &iso_of(now_ms))
+            .replace("{date}", &iso_of(now_ms)[..10])
+            .replace("{old}", &(now_ms - 7_200_000).to_string())
+            .replace("{five}", &(now_ms - 300_000).to_string())
+            .replace("{home}", &home.to_string_lossy())
+            .replace("{wt}", &cwd)
+            .replace("{cwd}", &cwd)
+            .replace("{key}", &key)
+            .replace("{now}", &now_ms.to_string())
+    };
+    let node_run = |input: &str| {
+        let mut n = Command::new("node");
+        n.arg(root.join(format!("hooks/{}.js", case.hook))).current_dir(&tmp);
+        set_env(&mut n);
+        run(n, input.as_bytes())
+    };
+    // install the stable launchers the way a running session has them (before the case is seeded: an archived marker holds even a
+    // continuing stop)
+    let warm = match case.hook {
+        CG => json!({"hook_event_name":"Stop","session_id":"w","stop_hook_active":true}),
+        _ => json!({"hook_event_name":"PostToolUse","tool_name":"Read","session_id":"w"}),
+    };
+    let (code, out, _) = node_run(&warm.to_string());
+    assert_eq!((code, out.as_slice()), (0, b"".as_slice()), "{}: warm-up", case.name);
+    if let Some((nd, rows)) = case.store {
+        let out = Command::new("node")
+            .arg(repo.join("ah-engine/tests/it/mesh_support/readside_seed.js"))
+            .args([home.to_str().unwrap(), &cwd, "b-1", &nd.to_string(), &rows.to_string()])
+            .env("HOME", &home)
+            .env("ANTIHALL_INGEST_DRY_RUN", "1")
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{}: seeding failed: {}", case.name, String::from_utf8_lossy(&out.stderr));
+    } else if case.desc {
+        let d = home.join(".anti-hall/devswarm/workspaces");
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(
+            d.join("b-1.json"),
+            fill(r#"{"id":"b-1","worktreePath":"{wt}","sessionId":"sess-b1","inboxPath":"{home}/in.ndjson","cursorPath":"{home}/cur.json"}"#),
+        )
+        .unwrap();
+        std::fs::write(home.join("in.ndjson"), "").unwrap();
+        std::fs::write(home.join("cur.json"), "0").unwrap();
+    }
+    for (rel, body) in &case.seeds {
+        let p = home.join(fill(rel));
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(&p, fill(body)).unwrap();
+    }
+    let input = fill(case.payload.as_deref().unwrap_or(match case.hook {
+        CG => r#"{"hook_event_name":"Stop","session_id":"s1","cwd":"{cwd}","stop_hook_active":false}"#,
+        CD => r#"{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"ls"},"session_id":"s1","cwd":"{cwd}"}"#,
+        _ => r#"{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"node devswarm.js send --to c-1 --message hi"},"tool_response":{"stdout":"{\"ok\":true,\"action\":\"send\",\"type\":\"direct\",\"toId\":\"c-1\",\"sent\":true}\n","stderr":""},"session_id":"s1","cwd":"{cwd}"}"#,
+    }));
+    let mut t = CxTally::default();
+    for (i, want) in case.steps.iter().enumerate() {
+        let label = format!("{} ({agent}) step {}", case.name, i + 1);
+        let before = snapshot(&home);
+        let times = pg_mtimes(&home);
+        let mut e = Command::new(env!("CARGO_BIN_EXE_ah-engine"));
+        e.arg("check").arg(case.hook);
+        set_env(&mut e);
+        e.env("AH_ENGINE_PLUGIN_ROOT", &root).env("AH_ENGINE_DIR", tmp.join("engine"));
+        crate::node_parity::support::forward_test_scale(&mut e);
+        let (ecode, eout, eerr) = run(e, input.as_bytes());
+        if String::from_utf8_lossy(&eout).trim() == "AHFALLBACK" {
+            assert_eq!(*want, PgWant::Defer, "{label}: the engine deferred, the case expects an answer");
+            assert_eq!(snapshot(&home), before, "{label}: a deferral must write nothing");
+            let (ncode, _, _) = node_run(&input);
+            assert_eq!(ncode, 0);
+            t.deferred += 1;
+            continue;
+        }
+        assert_eq!(*want, PgWant::Answer, "{label}: the engine answered {:?} {:?}, the case expects a deferral", String::from_utf8_lossy(&eout), String::from_utf8_lossy(&eerr));
+        let after_engine = snapshot(&home);
+        pg_restore(&home, &before, &times);
+        let (ncode, nout, nerr) = node_run(&input);
+        let s = |b: &[u8]| String::from_utf8_lossy(b).into_owned();
+        assert_eq!((ecode, s(&eout), s(&eerr)), (ncode, s(&nout), s(&nerr)), "{label}: engine and Node differ");
+        assert_eq!(cx_mask(after_engine), cx_mask(snapshot(&home)), "{label}: the home differs after the engine and after Node");
+        let all = format!("{}{}", s(&eout), s(&eerr));
+        if let (0, Some(want), "claude") = (i, case.expect, agent) {
+            match want.strip_prefix('!') {
+                Some(no) => assert!(!all.contains(no), "{label}: the answer carries {no:?}: {all}"),
+                None => assert!(all.contains(want), "{label}: the answer does not carry {want:?}: {all}"),
+            }
+        }
+        t.blocks += usize::from(all.contains("\"decision\":\"block\""));
+        t.nudges += usize::from(all.contains("devswarm-inbox"));
+        t.stderr += usize::from(!eerr.is_empty());
+        t.answered += 1;
+    }
+    ah_engine::discard::harmless(std::fs::remove_dir_all(&tmp));
+    t
+}
+
+fn cx_report(what: &str, cases: Vec<Cx>) -> CxTally {
+    let (mut n, mut sum) = (0, CxTally::default());
+    // AH_CX_ONLY=<a,b>: run only the cases whose name holds one of them (a quick re-check; the corpus asserts then do not apply)
+    let only = std::env::var("AH_CX_ONLY").ok();
+    for case in cases.iter().filter(|c| only.as_deref().is_none_or(|o| o.split(',').any(|x| c.name.contains(x)))) {
+        for agent in if case.agents { vec!["claude", "codex"] } else { vec!["claude"] } {
+            let t = cx_exec(case, agent);
+            n += 1;
+            sum.answered += t.answered;
+            sum.deferred += t.deferred;
+            sum.blocks += t.blocks;
+            sum.nudges += t.nudges;
+            sum.stderr += t.stderr;
+        }
+    }
+    eprintln!(
+        "{what} parity: {} cases ({n} runs), {} steps answered byte-identically to Node incl. home ({} blocks, {} nudges, {} with stderr), {} deferred",
+        cases.len(),
+        sum.answered,
+        sum.blocks,
+        sum.nudges,
+        sum.stderr,
+        sum.deferred
+    );
+    sum
+}
+
+const CX_SUMMARY: &str = ".anti-hall/devswarm/summaries/{key}.json";
+const CX_REPORTED: &str = r#"{"generatedAt":1,"workspaces":{},"recent":[{"from":"b-1","ts":{now},"body":"done"}]}"#;
+const CX_INBOX2: &str = "{\"m\":1}\n{\"m\":2}\n";
+const CX_TICK: &str = ".anti-hall/devswarm/wake-tick/b-1.json";
+const CX_ATTEMPT: &str = ".anti-hall/devswarm/summary-attempts/{key}/b-1.ndjson";
+const CX_POLICY: &str = ".anti-hall/devswarm/stop-policy/s1.json";
+const CX_DESC: &str = ".anti-hall/devswarm/workspaces/b-1.json";
+
+fn cg_cases() -> Vec<Cx> {
+    use PgWant::{Answer as A, Defer as D};
+    let cg = |n, s: &[PgWant]| cx(n, CG, s);
+    vec![
+        cg("block-heartbeat-twice-then-cap-then-quiet", &[A, A, A, A]).expect("Heartbeat: before you stop"),
+        cg("continuing-records-the-check", &[A]).payload(r#"{"hook_event_name":"Stop","session_id":"s1","cwd":"{cwd}","stop_hook_active":true}"#),
+        cg("continuing-without-cwd", &[A]).payload(r#"{"hook_event_name":"Stop","session_id":"s1","stop_hook_active":true}"#),
+        cg("no-cwd-defers", &[D]).payload(r#"{"hook_event_name":"Stop","session_id":"s1"}"#),
+        cg("relative-cwd-defers", &[D]).payload(r#"{"hook_event_name":"Stop","session_id":"s1","cwd":"rel/x"}"#),
+        cg("not-corroborated-without-repos-dir", &[A]).nodesc(),
+        cg("not-corroborated-with-repos-dir-defers", &[D]).nodesc().seed(".devswarm/repos/1/ab/x/.keep", ""),
+        cg("unsafe-id-not-corroborated", &[A]).env("DEVSWARM_BUILDER_ID", "a b"),
+        cg("unread-inbox-blocks-twice-then-cap", &[A, A, A]).seed("in.ndjson", CX_INBOX2).expect("unpulled/unread parent message(s)"),
+        cg("store-unread-blocks", &[A]).store(0, 2).expect("unpulled/unread parent message(s)"),
+        cg("store-and-inbox-unread-blocks", &[A]).store(2, 2).expect("unpulled/unread parent message(s)"),
+        cg("store-empty-asks-heartbeat", &[A]).store(0, 0).expect("Heartbeat: before you stop"),
+        cg("reported-allows-then-next-turn-blocks", &[A, A]).seed(CX_SUMMARY, CX_REPORTED).expect("!decision"),
+        cg("reported-with-unread-asks-inbox-only", &[A]).seed(CX_SUMMARY, CX_REPORTED).seed("in.ndjson", CX_INBOX2).expect("!Heartbeat: before"),
+        cg("report-by-another-workspace-does-not-count", &[A]).seed(CX_SUMMARY, r#"{"recent":[{"from":"b-2","ts":{now}}]}"#).expect("Heartbeat: before"),
+        cg("report-too-old-does-not-count", &[A]).seed(CX_SUMMARY, r#"{"recent":[{"from":"b-1","ts":{old}}]}"#),
+        cg("summary-not-json", &[A]).seed(CX_SUMMARY, "{not json"),
+        cg("tick-fresh-zero-allows", &[A]).seed(CX_TICK, r#"{"ts":{now},"unreadTotal":0,"known":true}"#).expect("!decision"),
+        cg("tick-without-known-blocks", &[A]).seed(CX_TICK, r#"{"ts":{now},"unreadTotal":0}"#),
+        cg("tick-gap-withheld-blocks", &[A]).seed(CX_TICK, r#"{"ts":{now},"unreadTotal":0,"known":true,"meshGapWithheld":true}"#),
+        cg("tick-fresh-with-unread-asks-inbox", &[A]).seed(CX_TICK, r#"{"ts":{now},"unreadTotal":0,"known":true}"#).seed("in.ndjson", CX_INBOX2),
+        cg("cron-missing-old-tick-twice-then-heartbeat", &[A, A, A]).seed(CX_TICK, r#"{"ts":{old},"unreadTotal":0,"known":true}"#),
+        cg("cron-missing-old-heartbeat", &[A]).seed(".anti-hall/devswarm/heartbeats/b-1.json", r#"{"ts":{old}}"#),
+        cg("cron-recent-heartbeat-no-warning", &[A]).seed(".anti-hall/devswarm/heartbeats/b-1.json", r#"{"ts":{now}}"#),
+        cg("cron-warning-text", &[A]).claude_only().seed(CX_TICK, r#"{"ts":{old},"unreadTotal":0,"known":true}"#).expect("no inbox tick for 120m"),
+        cg("cron-warning-age-set-defers", &[D]).claude_only().env("ANTIHALL_DEVSWARM_CRON_MISSING_WARN_MIN", "30").seed(CX_TICK, r#"{"ts":{old}}"#),
+        cg("cron-metric-capped", &[A]).claude_only().seed(CX_TICK, r#"{"ts":{old}}"#).seed(".anti-hall/devswarm/cron-missing-warned.jsonl", &"{\"ts\":1}\n".repeat(500)),
+        cg("native-count-blocks-inbox", &[A]).hc("3", 0).expect("unpulled/unread parent message(s)"),
+        cg("native-zero-asks-heartbeat", &[A]).hc("0", 0).expect("!Inbox:"),
+        cg("native-fails-is-unknown", &[A, A, A]).hc("boom", 1).expect("NATIVE unread count is UNKNOWN"),
+        cg("native-no-number-is-unknown", &[A]).hc("none", 0).expect("NATIVE unread count is UNKNOWN"),
+        cg("native-negative-is-unknown", &[A]).hc("-4", 0),
+        cg("reported-native-zero-allows", &[A]).hc("0", 0).seed(CX_SUMMARY, CX_REPORTED).expect("!decision"),
+        cg("reported-native-fails-warns-once", &[A, A]).hc("x", 1).seed(CX_SUMMARY, CX_REPORTED).expect("native channel is unreachable"),
+        cg("strict-mode-set-defers", &[D]).env("ANTIHALL_DEVSWARM_CHILD_GATE_STRICT", "0"),
+        cg("drop-attempt-allows", &[A]).seed(CX_ATTEMPT, r#"{"ts":{now},"id":"b-1","sessionId":"sess-b1","reason":"caller-not-registered"}"#).expect("!decision"),
+        cg("drop-attempt-with-unread-names-the-reason", &[A])
+            .seed(CX_ATTEMPT, r#"{"ts":{now},"id":"b-1","sessionId":"sess-b1","reason":"caller-not-registered"}"#)
+            .seed("in.ndjson", CX_INBOX2)
+            .expect("DROPPED — your workspace is not yet registered"),
+        cg("drop-attempt-unknown-reason", &[A])
+            .seed(CX_ATTEMPT, r#"{"ts":{now},"id":"b-1","sessionId":"sess-b1","reason":"<b>x</b>"}"#)
+            .seed("in.ndjson", CX_INBOX2)
+            .expect("reason not recognized"),
+        cg("drop-attempt-mismatch-notice-once", &[A, A])
+            .seed(CX_ATTEMPT, "{\"ts\":{now},\"id\":\"b-1\",\"sessionId\":\"other\",\"instanceNonce\":\"h:12345:67890123\"}\nnot json\n")
+            .expect("authenticated against NEITHER"),
+        cg("drop-attempt-legacy-flat-file", &[A])
+            .seed(".anti-hall/devswarm/summary-attempts/{key}.ndjson", r#"{"ts":{now},"id":"b-1","sessionId":"sess-b1","reason":"ownership-mismatch"}"#)
+            .expect("!decision"),
+        cg("drop-attempt-old-ignored", &[A]).seed(CX_ATTEMPT, r#"{"ts":{old},"id":"b-1","sessionId":"sess-b1","reason":"caller-not-registered"}"#),
+        cg("drop-attempt-family-fallback-defers", &[D])
+            .seed(CX_DESC, r#"{"id":"b-1","worktreePath":"{wt}","inboxPath":"{home}/in.ndjson","cursorPath":"{home}/cur.json"}"#)
+            .seed(CX_ATTEMPT, r#"{"ts":{now},"id":"b-9","sessionId":"sess-x","reason":"caller-not-registered"}"#),
+        cg("archived-marker-defers", &[D]).seed(".anti-hall/devswarm/archived/b-1.json", r#"{"id":"b-1","worktreePath":"{wt}"}"#),
+        cg("archived-marker-other-worktree-answers", &[A]).seed(".anti-hall/devswarm/archived/b-1.json", r#"{"id":"b-1","worktreePath":"/nonexistent-cx/other"}"#),
+        cg("session-from-transcript-path", &[A, A]).payload(r#"{"hook_event_name":"Stop","transcript_path":"/x/té.jsonl","cwd":"{cwd}"}"#),
+        cg("session-unknown", &[A]).payload(r#"{"hook_event_name":"Stop","cwd":"{cwd}"}"#),
+        cg("session-unsafe-characters", &[A]).payload(r#"{"hook_event_name":"Stop","session_id":"a/b cé","cwd":"{cwd}"}"#),
+        cg("session-number-defers", &[D]).payload(r#"{"hook_event_name":"Stop","session_id":7,"cwd":"{cwd}"}"#),
+        cg("session-lone-surrogate-defers", &[D]).payload(r#"{"hook_event_name":"Stop","session_id":"\ud800","cwd":"{cwd}"}"#),
+        cg("payload-array-defers", &[D]).payload("[1]"),
+        cg("budget-spent-elsewhere-notice", &[A, A])
+            .seed(CX_POLICY, r#"{"s1|child-gate|heartbeat-report":{"count":2,"lastAt":1},"s1|other|x":{"count":9,"lastAt":1}}"#)
+            .expect("forced-ack cap (2 per kind)"),
+        cg("budget-file-corrupt", &[A]).seed(CX_POLICY, "[1"),
+        cg("state-file-array", &[A]).seed(".anti-hall/devswarm/child-gate/s1.json", "[1,2]"),
+        cg("state-file-with-block-time", &[A]).seed(".anti-hall/devswarm/child-gate/s1.json", r#"{"blocks":1,"lastBlockAt":{five},"totalBlocks":4,"lastCheckAt":{five},"extra":1}"#),
+        cg("descriptor-not-json", &[A]).seed(CX_DESC, "{not json"),
+        cg("descriptor-without-worktree", &[A]).seed(CX_DESC, r#"{"id":"b-1","sessionId":"sess-b1","inboxPath":"{home}/in.ndjson","cursorPath":"{home}/cur.json"}"#).seed("in.ndjson", CX_INBOX2),
+        cg("inbox-relative-defers", &[D]).seed(CX_DESC, r#"{"id":"b-1","worktreePath":"{wt}","inboxPath":"rel/in.ndjson"}"#),
+        cg("cursor-missing-is-not-known", &[A]).seed(CX_DESC, r#"{"id":"b-1","worktreePath":"{wt}","inboxPath":"{home}/in.ndjson","cursorPath":"{home}/none.json"}"#).seed("in.ndjson", CX_INBOX2),
+        cg("cursor-json-line", &[A]).seed("in.ndjson", CX_INBOX2).seed("cur.json", r#"{"line":2}"#),
+        cg("stable-launcher-off", &[A]).env("ANTIHALL_DEVSWARM_STABLE_LAUNCHER", "0"),
+        // review fixes: a probe candidate that is no regular file; a budget the disk refuses to record (Node's fail-open)
+        cg("native-candidate-is-a-directory-defers", &[D]).hc_dir(),
+        cg("budget-unwritable-allows-and-keeps-state", &[A, A]).seed(".anti-hall/devswarm/stop-policy/s1.json/.keep", "").expect("!decision"),
+        cg("cron-budget-unwritable-falls-through", &[A])
+            .claude_only()
+            .seed(CX_TICK, r#"{"ts":{old},"unreadTotal":0,"known":true}"#)
+            .seed(".anti-hall/devswarm/stop-policy/s1.json/.keep", "")
+            .expect("!Mailbox cron missing"),
+        cg("cron-budget-unwritable-then-inbox-store", &[A]).claude_only().store(0, 2).seed(CX_TICK, r#"{"ts":{old}}"#).seed(".anti-hall/devswarm/stop-policy/s1.json/.keep", ""),
+    ]
+}
+
+#[test]
+fn child_gate_answers_match_node_byte_for_byte() {
+    let t = cx_report("devswarm-child-gate", cg_cases());
+    assert!(std::env::var("AH_CX_ONLY").is_ok() || t.answered >= 100 && t.blocks >= 50 && t.stderr >= 4 && t.deferred >= 10, "the corpus shrank or stopped blocking");
+}
+
+fn cd_cases() -> Vec<Cx> {
+    use PgWant::{Answer as A, Defer as D};
+    let dr = |n, s: &[PgWant]| cx(n, CD, s);
+    let nudge = ".anti-hall/devswarm/child-drain/b-1.json";
+    let three = "{\"m\":1,\"ts\":{five}}\n{\"m\":2}\n{\"m\":3}\n";
+    vec![
+        dr("nudge-then-throttled", &[A, A, A]).seed("in.ndjson", three).expect("3 unread message(s) addressed to YOU"),
+        dr("nudge-from-store", &[A]).store(0, 2).expect("2 unread message(s)"),
+        dr("nudge-from-both", &[A]).store(2, 2),
+        dr("nothing-unread", &[A]).store(0, 0).expect("!devswarm-inbox"),
+        dr("empty-inbox", &[A]).expect("!devswarm-inbox"),
+        dr("count-changed-renudges", &[A]).seed("in.ndjson", CX_INBOX2).seed(nudge, r#"{"lastCount":1,"lastInjectedAt":{now}}"#).expect("2 unread"),
+        dr("window-passed-renudges", &[A]).seed("in.ndjson", CX_INBOX2).seed(nudge, r#"{"lastCount":2,"lastInjectedAt":{old}}"#).expect("2 unread"),
+        dr("throttle-holds", &[A]).seed("in.ndjson", CX_INBOX2).seed(nudge, r#"{"lastCount":2,"lastInjectedAt":{now}}"#).expect("!devswarm-inbox"),
+        dr("throttle-file-corrupt", &[A]).seed("in.ndjson", CX_INBOX2).seed(nudge, "{"),
+        dr("cursor-past-end", &[A]).seed("in.ndjson", CX_INBOX2).seed("cur.json", "5"),
+        dr("cursor-json-line", &[A]).seed("in.ndjson", three).seed("cur.json", r#"{"line":1}"#).expect("2 unread"),
+        dr("cursor-missing", &[A]).seed(CX_DESC, r#"{"id":"b-1","inboxPath":"{home}/in.ndjson"}"#).seed("in.ndjson", CX_INBOX2),
+        dr("inbox-relative-defers", &[D]).seed(CX_DESC, r#"{"id":"b-1","inboxPath":"in.ndjson"}"#),
+        dr("descriptor-not-json", &[A]).seed(CX_DESC, "{not json"),
+        dr("subagent-is-silent", &[A]).seed("in.ndjson", CX_INBOX2).payload(r#"{"tool_name":"Bash","agent_id":"a1","tool_input":{"command":"ls"},"cwd":"{cwd}"}"#),
+        dr("read-primary-is-silent", &[A])
+            .seed("in.ndjson", CX_INBOX2)
+            .payload(r#"{"tool_name":"Bash","tool_input":{"command":"node x/devswarm.js inbox read-primary"},"cwd":"{cwd}"}"#),
+        dr("no-tool-name-nudges", &[A]).seed("in.ndjson", CX_INBOX2).payload(r#"{"tool_input":{"command":"ls"}}"#).expect("2 unread"),
+        dr("stable-launcher-off", &[A]).seed("in.ndjson", CX_INBOX2).env("ANTIHALL_DEVSWARM_STABLE_LAUNCHER", "0"),
+    ]
+}
+
+#[test]
+fn child_drain_answers_match_node_byte_for_byte() {
+    let t = cx_report("devswarm-child-drain", cd_cases());
+    assert!(std::env::var("AH_CX_ONLY").is_ok() || t.answered >= 18 && t.nudges >= 8 && t.deferred >= 1, "the corpus shrank or stopped nudging");
+}
+
+fn rt_send(extra: &str) -> String {
+    format!(
+        r#"{{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{{"command":"node devswarm.js send --to c-1"}},"tool_response":{{"stdout":"{{\"ok\":true,\"action\":\"send\",\"type\":\"direct\",\"toId\":\"c-1\"{extra}}}\n","stderr":""}},"session_id":"s1","cwd":"{{cwd}}"}}"#
+    )
+}
+
+fn rt_cases() -> Vec<Cx> {
+    use PgWant::{Answer as A, Defer as D};
+    let rt = |n, s: &[PgWant]| cx(n, RT, s).unset("DEVSWARM_SOURCE_BRANCH");
+    let replies = ".anti-hall/devswarm/parent-gate/{key}-replies.json";
+    let receipt = ".anti-hall/devswarm/send-receipts/{date}/r1.json";
+    let pending = r#"{"workspaces":{"primary-x":{"pendingQuestions":[{"from":"c-1","ts":1}]}}}"#;
+    vec![
+        rt("direct-send-recorded", &[A, A]).payload(&rt_send(r#",\"sent\":true"#)),
+        rt("record-after-a-line-without-newline", &[A]).seed(replies, r#"{"m":"x","t":1}"#).payload(&rt_send("")),
+        rt("record-after-an-empty-file", &[A]).seed(replies, "").payload(&rt_send("")),
+        rt("payload-time-is-the-record-time", &[A]).payload(&rt_send("").replace(r#""session_id":"s1""#, r#""session_id":"s1","timestamp":1790000000123.5"#)),
+        rt("question-send-without-pending-is-silent", &[A]).payload(&rt_send(r#",\"needsReply\":true"#)),
+        rt("question-send-with-pending-defers", &[D]).seed(CX_SUMMARY, pending).payload(&rt_send(r#",\"needsReply\":true"#)),
+        rt("question-send-that-answers-is-recorded", &[A]).seed(CX_SUMMARY, pending).payload(&rt_send(r#",\"needsReply\":true,\"answers\":true"#)),
+        rt("not-sent-is-silent", &[A]).payload(&rt_send(r#",\"sent\":false"#)),
+        rt("broadcast-is-silent", &[A]).payload(&rt_send("").replace(r#"\"type\":\"direct\""#, r#"\"type\":\"broadcast\""#)),
+        rt("failed-send-is-silent", &[A]).payload(&rt_send("").replace(r#"\"ok\":true"#, r#"\"ok\":false"#)),
+        rt("no-send-line-defers", &[D]).payload(&rt_send("").replace(r#"\"action\":\"send\""#, r#"\"action\":\"other\""#)),
+        rt("empty-response-is-silent", &[A]).payload(r#"{"tool_name":"Bash","tool_input":{"command":"devswarm send"},"tool_response":{"stdout":"  "},"cwd":"{cwd}"}"#),
+        rt("response-string", &[A]).payload(r#"{"tool_name":"Bash","tool_input":{"command":"devswarm send"},"tool_response":"x\n{\"ok\":true,\"action\":\"send\",\"type\":\"direct\",\"toId\":\"c-3\"}","cwd":"{cwd}"}"#),
+        rt("receipt-credited", &[A]).seed(receipt, r#"{"ok":true,"type":"direct","toId":"c-2","ts":{now},"repoKey":"{key}"}"#).payload(&rt_send("")),
+        rt("receipt-of-another-project-ignored", &[A]).seed(receipt, r#"{"ok":true,"type":"direct","toId":"c-2","ts":{now},"repoKey":"other"}"#).payload(&rt_send("")),
+        rt("receipt-question-ignored", &[A]).seed(receipt, r#"{"ok":true,"type":"direct","toId":"c-2","ts":{now},"needsReply":true}"#).payload(&rt_send("")),
+        rt("receipt-without-time-defers", &[D]).seed(receipt, r#"{"ok":true,"type":"direct","toId":"c-2"}"#).payload(&rt_send("")),
+        rt("receipt-window-set-defers", &[D]).env("ANTIHALL_DEVSWARM_RECEIPT_WINDOW_MS", "1000").payload(&rt_send("")),
+        rt("inactive-without-summary-is-silent", &[A]).unset("DEVSWARM_REPO_ID").payload(&rt_send("")),
+        rt("inactive-with-summary-records", &[A]).unset("DEVSWARM_REPO_ID").seed(CX_SUMMARY, "{}").payload(&rt_send("")),
+        rt("cwd-outside-git-is-silent", &[A]).payload(&rt_send("").replace("{cwd}", "/nonexistent-rt/x")),
+        rt("cwd-relative-defers", &[D]).payload(&rt_send("").replace("{cwd}", "rel/x")),
+        rt("no-cwd-is-silent", &[A]).payload(r#"{"tool_name":"Bash","tool_input":{"command":"devswarm send"},"tool_response":"{\"ok\":true,\"action\":\"send\",\"type\":\"direct\",\"toId\":\"c-1\"}"}"#),
+        rt("oversized-record-skipped", &[A]).payload(&rt_send("").replace(r#"\"toId\":\"c-1\""#, &format!(r#"\"toId\":\"{}\""#, "c".repeat(500)))),
+        rt("child-workspace-is-silent", &[A]).env("DEVSWARM_SOURCE_BRANCH", "feat/x").payload(&rt_send("")),
+    ]
+}
+
+#[test]
+fn reply_tracker_answers_match_node_byte_for_byte() {
+    let t = cx_report("devswarm-parent-reply-tracker", rt_cases());
+    assert!(std::env::var("AH_CX_ONLY").is_ok() || t.answered >= 18 && t.deferred >= 4, "the corpus shrank");
 }

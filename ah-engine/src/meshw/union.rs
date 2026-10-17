@@ -64,9 +64,9 @@ fn floor_index(x: f64) -> usize {
 }
 
 /// `String(readFileSync(path, 'utf8')).split('\n').filter((l) => l.trim() !== '')`; `None` when the file cannot be read.
-pub fn non_empty_lines(path: &str) -> Option<Vec<String>> {
-    let bytes = std::fs::read(path).ok()?;
-    Some(lines_of(&String::from_utf8_lossy(&bytes)))
+/// A FIFO, device or file over the cap defers ([`ident::read_bounded`]).
+pub fn non_empty_lines(path: &str) -> R<Option<Vec<String>>> {
+    Ok(ident::read_bounded(Path::new(path))?.map(|bytes| lines_of(&String::from_utf8_lossy(&bytes))))
 }
 
 fn lines_of(text: &str) -> Vec<String> {
@@ -75,7 +75,7 @@ fn lines_of(text: &str) -> Vec<String> {
 
 /// Why an NDJSON cursor file does not give a position (`unreadBacklog`'s `known: false`).
 pub fn cursor_position(path: &str) -> R<Option<f64>> {
-    let Ok(bytes) = std::fs::read(path) else { return Ok(None) };
+    let Some(bytes) = ident::read_bounded(Path::new(path))? else { return Ok(None) };
     let text = String::from_utf8_lossy(&bytes).into_owned();
     let raw = js_trim(&text);
     let c = if !raw.is_empty() && raw.bytes().all(|b| b.is_ascii_digit()) {
@@ -183,7 +183,10 @@ fn line_ts(line: &str) -> Option<f64> {
 /// `unionUnread(opts)` for an NDJSON inbox plus a store partition read at the given bases.
 pub fn union_unread(i: &UnionIn<'_>) -> R<Union> {
     // readUnread / unreadBacklog: the lines are only known when the inbox and its cursor file both read
-    let all = i.inbox.and_then(non_empty_lines);
+    let all = match i.inbox {
+        Some(p) => non_empty_lines(p)?,
+        None => None,
+    };
     let position = match (&all, i.cursor_file) {
         (Some(_), Some(c)) => cursor_position(c)?,
         _ => None,
@@ -242,7 +245,10 @@ pub fn union_unread(i: &UnionIn<'_>) -> R<Union> {
 /// `unionUnread`'s merged `total` over the whole history: the NDJSON lines plus the store rows no line covers (by hash,
 /// else by body). Only a read that reports `total` needs it.
 pub fn merged_total(i: &UnionIn<'_>) -> R<usize> {
-    let all = i.inbox.and_then(non_empty_lines).unwrap_or_default();
+    let all = match i.inbox {
+        Some(p) => non_empty_lines(p)?.unwrap_or_default(),
+        None => Vec::new(),
+    };
     let Some(reader) = i.store else { return Ok(all.len()) };
     let hashes = line_hashes(&all, i.id, 0)?;
     let mut rows: Vec<Value> = Vec::new();
@@ -299,6 +305,68 @@ pub fn path_field(d: &OVal, key: &str) -> R<Option<String>> {
 mod tests {
     use super::*;
     use rusqlite::{Connection, params};
+
+    /// Runs `f` on a thread and returns its answer, failing when it takes longer than the bound (a read that blocks on a FIFO).
+    fn within<T: Send + 'static>(what: &str, f: impl FnOnce() -> T + Send + 'static) -> T {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || crate::discard::harmless(tx.send(f())));
+        rx.recv_timeout(std::time::Duration::from_secs(10)).unwrap_or_else(|_| panic!("{what}: still blocked after 10 s"))
+    }
+
+    fn scratch(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("ah-union-bounded-{}-{tag}", std::process::id()));
+        crate::discard::harmless(std::fs::remove_dir_all(&dir)); // keep: an absent directory is the goal state
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn fifo(p: &std::path::Path) {
+        let c = std::ffi::CString::new(p.to_string_lossy().as_bytes()).unwrap();
+        // SAFETY: `c` is a NUL-terminated path that outlives the call; mkfifo only creates the node.
+        assert_eq!(unsafe { libc::mkfifo(c.as_ptr(), 0o600) }, 0, "mkfifo");
+    }
+
+    #[test]
+    fn a_fifo_inbox_or_cursor_defers_at_once_instead_of_blocking() {
+        let dir = scratch("fifo");
+        let (inbox, cursor) = (dir.join("in.ndjson"), dir.join("cur.json"));
+        fifo(&inbox);
+        fifo(&cursor);
+        let (i, c) = (inbox.to_string_lossy().into_owned(), cursor.to_string_lossy().into_owned());
+        let (i2, c2) = (i.clone(), c.clone());
+        assert!(within("non_empty_lines", move || non_empty_lines(&i2).is_err()));
+        assert!(within("cursor_position", move || cursor_position(&c2).is_err()));
+        let got = within("union_unread", move || {
+            union_unread(&UnionIn { inbox: Some(&i), cursor_file: Some(&c), id: "w", store: None, store_base: 0.0, nd_base: 0.0, now: 0 }).is_err()
+        });
+        assert!(got, "a FIFO inbox defers");
+        crate::discard::harmless(std::fs::remove_dir_all(&dir)); // keep: cleanup of a scratch directory
+    }
+
+    #[test]
+    fn a_file_over_the_cap_defers_without_being_read_and_a_directory_is_absent() {
+        let dir = scratch("big");
+        let big = dir.join("in.ndjson");
+        std::fs::File::create(&big).unwrap().set_len(defaults::num("mesh_write.file_read_max_bytes") + 1).unwrap();
+        let b = big.to_string_lossy().into_owned();
+        assert!(within("oversize", move || non_empty_lines(&b).is_err() && cursor_position(&b).is_err()));
+        std::fs::create_dir_all(dir.join("d")).unwrap();
+        assert_eq!(non_empty_lines(&dir.join("d").to_string_lossy()), Ok(None), "a directory reads as Node's caught EISDIR");
+        assert_eq!(non_empty_lines(&dir.join("none").to_string_lossy()), Ok(None));
+        crate::discard::harmless(std::fs::remove_dir_all(&dir)); // keep: cleanup of a scratch directory
+    }
+
+    #[test]
+    fn a_fifo_session_record_does_not_block_the_reader_nonce_walk() {
+        let home = scratch("nonce");
+        let sess = home.join(defaults::text("mesh_write.claude_dir")).join(defaults::text("mesh_write.sessions_dir"));
+        std::fs::create_dir_all(&sess).unwrap();
+        let me = i64::from(std::process::id());
+        fifo(&sess.join(format!("{me}{}", defaults::text("mesh_write.json_suffix"))));
+        let h = home.clone();
+        within("reader_nonce_from", move || ident::reader_nonce_from(&h, me));
+        crate::discard::harmless(std::fs::remove_dir_all(&home)); // keep: cleanup of a scratch directory
+    }
 
     /// A scratch inbox (one `_h` line per hash), a cursor file and a store holding one row per hash.
     fn fixture(tag: &str, hashes: &[&str], cursor: usize) -> (std::path::PathBuf, MeshReader, String, String) {
