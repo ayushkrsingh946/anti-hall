@@ -456,7 +456,6 @@ pub fn usage() -> (usize, u64) {
 #[cfg(test)]
 mod tests {
     use super::super::host_d::{transcript_tasks, transcript_tasks_uncached};
-    use super::usage;
     use crate::defaults;
     use serde_json::json;
     use std::io::Write;
@@ -471,13 +470,13 @@ mod tests {
         let n = i / 16;
         let v = match i % 16 {
             0 => {
-                json!({"type": "assistant", "timestamp": "2026-10-16T08:00:00.000Z", "message": {"id": format!("m{n}"), "role": "assistant", "content": [{"type": "tool_use", "id": format!("c{n}"), "name": "TaskCreate", "input": {"subject": format!("task {n} {pad}"), "priority": if n % 3 == 0 { "P1" } else { "low" }}}]}})
+                json!({"type": "assistant", "timestamp": "2026-10-16T08:00:00.000Z", "message": {"id": format!("m{n}"), "role": "assistant", "content": [{"type": "tool_use", "id": format!("c{n}"), "name": "TaskCreate", "input": {"subject": format!("task {n} {pad}"), "priority": if n.is_multiple_of(3) { "P1" } else { "low" }}}]}})
             }
             1 => {
                 json!({"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": format!("c{n}"), "content": format!("Task #{} created successfully: task", n + 1)}]}})
             }
             2 => {
-                json!({"type": "assistant", "timestamp": "2026-10-16T08:01:00.000Z", "message": {"id": format!("u{n}"), "role": "assistant", "content": [{"type": "tool_use", "id": format!("u{n}"), "name": "TaskUpdate", "input": {"taskId": format!("{}", n + 1), "status": if n % 2 == 0 { "in_progress" } else { "completed" }, "owner": "bob"}}]}})
+                json!({"type": "assistant", "timestamp": "2026-10-16T08:01:00.000Z", "message": {"id": format!("u{n}"), "role": "assistant", "content": [{"type": "tool_use", "id": format!("u{n}"), "name": "TaskUpdate", "input": {"taskId": format!("{}", n + 1), "status": if n.is_multiple_of(2) { "in_progress" } else { "completed" }, "owner": "bob"}}]}})
             }
             3 => {
                 json!({"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": format!("u{n}"), "content": if n % 5 == 4 { "Task #99 not found".to_string() } else { format!("Updated {pad}") }}]}})
