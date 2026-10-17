@@ -141,7 +141,7 @@ fn pending_for(inv: &Inv, id: &str, desc: &OVal) -> R<Pending> {
 /// backlog is not known.
 pub(crate) fn known_backlog(inbox: Option<&str>, cursor_file: Option<&str>) -> R<usize> {
     let (Some(i), Some(c)) = (inbox, cursor_file) else { return Ok(0) };
-    let Some(all) = union::non_empty_lines(i) else { return Ok(0) };
+    let Some(all) = union::non_empty_lines(i)? else { return Ok(0) };
     let Some(pos) = union::cursor_position(c)? else { return Ok(0) };
     Ok(all.len().saturating_sub(if pos > 0.0 { pos.floor() as usize } else { 0 }))
 }

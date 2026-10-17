@@ -126,6 +126,10 @@ fn stage_status(row: &V) -> (Option<&'static str>, Vec<String>) {
         return (Some(node()), vec![format!("{}:{}", word("opcli.migration_why_fn"), row.str_field("fn"))]);
     }
     if !row.str_field("native").is_empty() {
+        let fallback = row.str_field("fallback");
+        if !fallback.is_empty() {
+            return (Some(partial()), vec![format!("{}:{fallback}", word("opcli.migration_why_fallback"))]);
+        }
         return (Some(native()), vec![]);
     }
     (None, vec![])

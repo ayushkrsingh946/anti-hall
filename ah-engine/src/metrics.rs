@@ -78,6 +78,22 @@ fn bucket_bounds() -> Vec<u64> {
     defaults::raw("telemetry.latency_buckets_us").as_array().unwrap_or_default().iter().filter_map(defaults::V::as_integer).map(|v| v.max(0) as u64).collect()
 }
 
+/// The byte histogram bucket bounds (`telemetry.byte_buckets_bytes`).
+fn byte_bounds() -> Vec<u64> {
+    defaults::raw("telemetry.byte_buckets_bytes").as_array().unwrap_or_default().iter().filter_map(defaults::V::as_integer).map(|v| v.max(0) as u64).collect()
+}
+
+/// True when the registered metric `name` counts bytes (unit `bytes`): its histogram uses the byte buckets, not the latency ones.
+fn is_byte_metric(name: &str) -> bool {
+    let key = format!("metric.{name}");
+    defaults::has(&key) && defaults::raw(&key).str_field("unit") == defaults::text("telemetry.byte_unit")
+}
+
+/// The bucket bounds of the histogram `name`.
+fn bounds_for(name: &str) -> Vec<u64> {
+    if is_byte_metric(name) { byte_bounds() } else { bucket_bounds() }
+}
+
 /// True when `name` is a registered metric.
 pub fn is_registered(name: &str) -> bool {
     defaults::has(&format!("metric.{name}"))
@@ -162,10 +178,16 @@ impl Metrics {
 
     /// Record one observation (microseconds) in a histogram.
     pub fn observe(&mut self, name: &str, labels: &[(&str, &str)], micros: u64) {
-        let bounds: Vec<u64> = bucket_bounds();
+        let bounds: Vec<u64> = bounds_for(name);
         let exists = self.hists.contains_key(&series(name, labels));
         let k = self.key(name, labels, exists);
         self.hists.entry(k).or_default().observe(&bounds, micros);
+    }
+
+    /// Record one observation (bytes) in a histogram registered with unit `bytes` (the same as [`Metrics::observe`]; the name picks
+    /// the byte buckets).
+    pub fn observe_bytes(&mut self, name: &str, labels: &[(&str, &str)], bytes: u64) {
+        self.observe(name, labels, bytes);
     }
 
     /// A counter's value (0 when never incremented).
@@ -189,7 +211,6 @@ impl Metrics {
     /// Load a snapshot made by [`Metrics::export`]: its counters and histograms become the starting values. A histogram
     /// whose bucket count no longer matches `telemetry.latency_buckets_us` is skipped (its buckets would be misread).
     pub fn import(&mut self, v: &Value) {
-        let want = bucket_bounds().len() + 1;
         if let Some(c) = v.get("counters").and_then(Value::as_object) {
             for (k, n) in c {
                 if let Some(n) = n.as_u64() {
@@ -201,7 +222,7 @@ impl Metrics {
         if let Some(h) = v.get("histograms").and_then(Value::as_object) {
             for (k, x) in h {
                 let buckets: Vec<u64> = x.get("buckets").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_u64).collect()).unwrap_or_default();
-                if buckets.len() != want {
+                if buckets.len() != bounds_for(k.split('|').next().unwrap_or("")).len() + 1 {
                     continue;
                 }
                 let n = |f: &str| x.get(f).and_then(Value::as_u64).unwrap_or(0);
@@ -221,7 +242,6 @@ impl Metrics {
 
     /// Everything as JSON, optionally only series whose `check` label equals `check`.
     pub fn snapshot(&self, check: &str) -> Value {
-        let bounds: Vec<u64> = bucket_bounds();
         let wanted = |k: &str| check.is_empty() || k.contains(&format!("|check={check}"));
         let parse = |k: &str| -> (String, Map<String, Value>) {
             let mut it = k.split('|');
@@ -245,8 +265,17 @@ impl Metrics {
             .filter(|(k, _)| wanted(k))
             .map(|(k, h)| {
                 let (name, labels) = parse(k);
+                let bounds = bounds_for(&name);
+                let mean = h.sum.checked_div(h.count).unwrap_or(0);
+                if is_byte_metric(&name) {
+                    return json!({
+                        "name": name, "labels": labels, "count": h.count, "mean_bytes": mean, "max_bytes": h.max,
+                        "p50_bytes": h.quantile(&bounds, 0.50), "p95_bytes": h.quantile(&bounds, 0.95), "p99_bytes": h.quantile(&bounds, 0.99),
+                        "quantile_note": defaults::text("msg.metrics_quantile_note"),
+                    });
+                }
                 json!({
-                    "name": name, "labels": labels, "count": h.count, "mean_us": h.sum.checked_div(h.count).unwrap_or(0), "max_us": h.max,
+                    "name": name, "labels": labels, "count": h.count, "mean_us": mean, "max_us": h.max,
                     "p50_us": h.quantile(&bounds, 0.50), "p95_us": h.quantile(&bounds, 0.95), "p99_us": h.quantile(&bounds, 0.99),
                     "quantile_note": defaults::text("msg.metrics_quantile_note"),
                 })
@@ -284,6 +313,23 @@ mod tests {
         assert_eq!(h["p95_us"], 10000, "the tenth value (9000us) sits in the <=10000 bucket");
         assert_eq!(h["p99_us"], 10000);
         assert_eq!(h["max_us"], 9000);
+    }
+
+    #[test]
+    fn byte_histograms_use_the_byte_buckets_and_survive_a_snapshot_round_trip() {
+        let mut m = Metrics::default();
+        for v in [1000, 5000, 3 * 1024 * 1024] {
+            m.observe_bytes("check_mem_peak_bytes", &[("check", "git")], v);
+        }
+        m.observe("check_latency_us", &[("check", "git")], 300);
+        let s = m.snapshot("");
+        let h = s["histograms"].as_array().unwrap().iter().find(|h| h["name"] == "check_mem_peak_bytes").unwrap().clone();
+        assert_eq!((h["count"].as_u64(), h["max_bytes"].as_u64()), (Some(3), Some(3 * 1024 * 1024)));
+        assert_eq!(h["p50_bytes"], 16384, "5000 B sits in the <=16384 byte bucket");
+        assert_eq!(h["p99_bytes"], 4194304, "3 MiB sits in the <=4 MiB bucket");
+        let mut back = Metrics::default();
+        back.import(&m.export());
+        assert_eq!(back.snapshot(""), s, "both histogram families come back from storage with their own bucket counts");
     }
 
     #[test]

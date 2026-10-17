@@ -34,6 +34,39 @@ pub fn defer<T>(code: &str) -> Result<T, Defer> {
 /// Result of a resolution that may defer.
 pub type R<T> = Result<T, Defer>;
 
+/// The bytes of a mesh file a path names (a descriptor's inbox or cursor file, a harness session record), read the way Node's
+/// `readFileSync` in a try/catch reads it where that is safe: `Ok(None)` when it is absent, a directory or cannot be opened (Node's
+/// catch), the bytes of a regular file of at most `mesh_write.file_read_max_bytes`, and a deferral for anything else: a FIFO, socket or
+/// device (a read could block a worker thread for good) or a file over the cap (an unbounded allocation). Opened non-blocking, and
+/// read no further than the cap, so a file that grows or is swapped after the check cannot do either.
+pub fn read_bounded(path: &Path) -> R<Option<Vec<u8>>> {
+    use std::io::Read;
+    use std::os::unix::fs::OpenOptionsExt;
+    let cap = defaults::num("mesh_write.file_read_max_bytes");
+    let Ok(m) = std::fs::metadata(path) else { return Ok(None) };
+    if m.is_dir() {
+        return Ok(None);
+    }
+    if !m.is_file() {
+        return defer("not-a-regular-file");
+    }
+    if m.len() > cap {
+        return defer("file-over-cap");
+    }
+    let Ok(f) = std::fs::OpenOptions::new().read(true).custom_flags(libc::O_NONBLOCK).open(path) else { return Ok(None) };
+    if !f.metadata().is_ok_and(|m| m.is_file()) {
+        return defer("not-a-regular-file");
+    }
+    let mut buf = Vec::new();
+    if f.take(cap.saturating_add(1)).read_to_end(&mut buf).is_err() {
+        return Ok(None);
+    }
+    if buf.len() as u64 > cap {
+        return defer("file-over-cap");
+    }
+    Ok(Some(buf))
+}
+
 /// `path.resolve(p)` for an absolute path.
 pub fn resolve_abs(p: &str) -> String {
     let n = posix_normalize(p);
@@ -773,7 +806,8 @@ pub fn reader_nonce_from(home: &Path, start: i64) -> Option<String> {
             return None;
         }
         let file = sess.join(format!("{pid}{}", defaults::text("mesh_write.json_suffix")));
-        let rec = std::fs::read(&file).ok().and_then(|b| OVal::parse(&String::from_utf8_lossy(&b)));
+        // a record that is no regular file or is over the cap is not one this walk can read safely: it counts as unreadable
+        let rec = read_bounded(&file).ok().flatten().and_then(|b| OVal::parse(&String::from_utf8_lossy(&b)));
         if let Some(rec) = rec
             && matches!(rec.get("pid"), Some(OVal::Num(n)) if *n == pid as f64)
         {

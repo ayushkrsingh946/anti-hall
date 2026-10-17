@@ -671,7 +671,7 @@ fn plan(inv: &Inv, a: &Args, promoted: Option<bool>) -> R<Planned> {
     let mut nd_op_target: Option<f64> = None;
     if let Some(inbox) = &inbox {
         let Some(cf) = &cursor_file else { return defer("no-cursor-path") };
-        if union::non_empty_lines(inbox).is_none() || union::cursor_position(cf)?.is_none() {
+        if union::non_empty_lines(inbox)?.is_none() || union::cursor_position(cf)?.is_none() {
             return defer("unknown-count");
         }
         let input = union::UnionIn { inbox: Some(inbox), cursor_file: Some(cf), id, store: Some(&o.reader), store_base, nd_base, now: inv.now };

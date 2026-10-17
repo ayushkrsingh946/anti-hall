@@ -255,7 +255,7 @@ fn count_mail(inv: &Inv, id: &str, desc: &OVal, line_form: bool) -> R<Counted> {
     let o = open_partition(inv, id, desc)?;
     single_partition(&o.rows, desc, id)?;
     // known: the inbox and its cursor file both read (otherwise Node prints a warning and the count is unknown)
-    let known = union::non_empty_lines(&inbox).is_some() && union::cursor_position(&cursor_file)?.is_some();
+    let known = union::non_empty_lines(&inbox)?.is_some() && union::cursor_position(&cursor_file)?.is_some();
     if !known && !line_form {
         return defer("unknown-count");
     }
