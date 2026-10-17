@@ -45,9 +45,6 @@ enum Expect {
     Defer,
     /// Either: a deferral is allowed only where Node itself would block, an answer must equal Node's.
     Auto,
-    /// The engine decides natively and says nothing (exit 0, no output, no deferral) where Node's reading is one the engine cannot
-    /// reproduce (a line only V8 reads): the policy answer of the check, pinned (the reason is part of the scenario's name).
-    Quiet,
 }
 
 #[derive(Clone)]
@@ -91,10 +88,6 @@ impl Sc {
     }
     fn defers(mut self) -> Sc {
         self.expect = Expect::Defer;
-        self
-    }
-    fn quiet(mut self) -> Sc {
-        self.expect = Expect::Quiet;
         self
     }
     fn raw(mut self, s: &str) -> Sc {
@@ -472,12 +465,6 @@ fn check_one(root: &Path, idx: usize, s: &Sc, mismatches: &mut Vec<String>) -> O
             }
         }
         (Expect::Defer, true) => {}
-        (Expect::Quiet, true) => mismatches.push(tag("engine deferred where it should decide natively")),
-        (Expect::Quiet, false) => {
-            if er.code != 0 || !er.out.trim_end().is_empty() {
-                mismatches.push(tag(&format!("expected a quiet native answer, engine answered code={} out={:?}", er.code, er.out)));
-            }
-        }
     }
     Outcome { deferred, node_kind: kind }
 }
