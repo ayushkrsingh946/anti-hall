@@ -542,6 +542,7 @@ impl Case {
             "child-sender-labels" => "repairChildSenderLabels",
             "owner-key-migrate" => "ownerKeyMigrate",
             "app-archived-markers" => "markAppArchived",
+            "re-retire-resurrected" => "reRetireResurrected",
             _ => "none",
         }
     }
@@ -722,7 +723,7 @@ fn a_stage_switched_off_reports_itself_skipped_and_touches_nothing() {
     let out = run_engine(&w, &o, &["--post-pull-only"]);
     let status: Value = serde_json::from_str(out.stdout.lines().next().unwrap()).unwrap();
     let status = &status["status"];
-    for (key, name) in [("readerCursorsImport", "reader-cursors-import"), ("readerFloorRepair", "reader-floor-repair"), ("dualPartitionAcks", "dual-partition-acks"), ("promoteUnclaimed", "promote-unclaimed"), ("cursorHygiene", "cursor-hygiene"), ("mergeSplitBackendStores", "merge-split-backend-stores"), ("childSenderLabels", "child-sender-labels"), ("ownerKeyMigrate", "owner-key-migrate"), ("appArchivedMarkers", "app-archived-markers")] {
+    for (key, name) in [("readerCursorsImport", "reader-cursors-import"), ("readerFloorRepair", "reader-floor-repair"), ("dualPartitionAcks", "dual-partition-acks"), ("promoteUnclaimed", "promote-unclaimed"), ("cursorHygiene", "cursor-hygiene"), ("mergeSplitBackendStores", "merge-split-backend-stores"), ("childSenderLabels", "child-sender-labels"), ("ownerKeyMigrate", "owner-key-migrate"), ("appArchivedMarkers", "app-archived-markers"), ("reRetireResurrected", "re-retire-resurrected")] {
         let a = &status[key];
         assert_eq!(a["attempted"], json!(false), "{key}: {a}");
         assert_eq!(a["disabled"], json!(true), "{key}: {a}");
@@ -1252,5 +1253,66 @@ fn app_markers_never_overwrite_a_marker_and_never_touch_a_descriptor() {
         if f.contains("/workspaces/") || f.ends_with(&format!("archived/{B_MARKED}.json")) {
             assert_eq!(after["files"].get(f), Some(v), "{f} changed");
         }
+    }
+}
+
+
+// ---- re-retire-resurrected (roadmap #61 G3) --------------------------------------------------------------------------------------
+
+fn archive_marker(home: &Path, id: &str, wt: &str) {
+    put(home, &format!(".anti-hall/devswarm/archived/{id}.json"), &format!(r#"{{"id":"{id}","worktreePath":"{wt}","archivedBy":"owner","archivedAt":1}}"#));
+}
+
+/// A registry row an old migration resurrected: its worktree is archived under another id and its session is a placeholder (a
+/// candidate); a twin on the same worktree with a real session (live, left alone); a row whose only marker is its own (no forward target);
+/// a row with no archive link at all.
+fn seed_resurrected(home: &Path) {
+    let st = open_store(home, STORE);
+    registry(&st, "rz-1", Some("/nonexistent/wt1"), Some("unclaimed:rz-1"));
+    registry(&st, "rz-2", Some("/nonexistent/wt1"), Some("real-session-2"));
+    registry(&st, "solo", Some("/nonexistent/wt2"), Some("unclaimed:solo"));
+    registry(&st, "free", Some("/nonexistent/wt3"), Some("unclaimed:free"));
+    drop(st);
+    archive_marker(home, "arch-1", "/nonexistent/wt1");
+    archive_marker(home, "solo", "/nonexistent/wt2");
+}
+
+/// Nothing resurrected: only the live twin and the unlinked row.
+fn seed_not_resurrected(home: &Path) {
+    let st = open_store(home, STORE);
+    registry(&st, "rz-2", Some("/nonexistent/wt1"), Some("real-session-2"));
+    registry(&st, "free", Some("/nonexistent/wt3"), Some("unclaimed:free"));
+    drop(st);
+    archive_marker(home, "arch-1", "/nonexistent/wt1");
+}
+
+/// Only a row with no forward target.
+fn seed_unhealable_only(home: &Path) {
+    let st = open_store(home, STORE);
+    registry(&st, "solo", Some("/nonexistent/wt2"), Some("unclaimed:solo"));
+    drop(st);
+    archive_marker(home, "solo", "/nonexistent/wt2");
+}
+
+case!(resurrected_rows_are_reported_not_removed, "re-retire-resurrected", "bad_state", "re-retire-resurrected", "reRetireResurrected", "reRetireResurrectedPostUpdate", seed_resurrected, live: true, markers: false);
+case!(resurrected_report_with_nothing_found, "re-retire-resurrected", "nothing", "re-retire-resurrected", "reRetireResurrected", "reRetireResurrectedPostUpdate", seed_not_resurrected, live: true, markers: false);
+case!(resurrected_report_names_a_row_with_no_forward_target, "re-retire-resurrected", "unhealable_only", "re-retire-resurrected", "reRetireResurrected", "reRetireResurrectedPostUpdate", seed_unhealable_only, live: true, markers: false);
+case!(resurrected_report_ignores_the_ingest_dry_run_switch_like_node, "re-retire-resurrected", "dry_run_switch", "re-retire-resurrected", "reRetireResurrected", "reRetireResurrectedPostUpdate", seed_resurrected, live: false, markers: false);
+case!(resurrected_already_done_is_skipped, "re-retire-resurrected", "already_done", "re-retire-resurrected", "reRetireResurrected", "reRetireResurrectedPostUpdate", seed_resurrected, live: true, markers: true);
+
+/// The update only reports: every registry row, every message and every marker is still there after the stage.
+#[test]
+fn the_resurrected_report_removes_nothing() {
+    let o = Opt { ds: true, no_upstream_move: true, live: true, no_node: true, stage_only: Some("re-retire-resurrected"), ..Opt::default() };
+    let w = world(&o);
+    seed_resurrected(&w.home);
+    let before = picture(&w, Value::Null, None);
+    let ans = engine_answer(&w, &o, "reRetireResurrected");
+    assert_eq!(ans["candidates"], json!(1), "{ans}");
+    assert_eq!(stage_node_calls(&w), Vec::<String>::new());
+    let after = picture(&w, Value::Null, None);
+    assert_eq!(before["stores"], after["stores"], "the report changed a store");
+    for f in before["files"].as_object().unwrap().keys() {
+        assert!(after["files"].get(f).is_some(), "file {f} vanished");
     }
 }

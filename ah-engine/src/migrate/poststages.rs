@@ -59,6 +59,7 @@ fn run_stage(ctx: &Ctx, which: &str, dry: bool) -> Option<Tally> {
         "cursor_hygiene" => Some(super::cursorhyg::run(ctx)),
         "owner_key_migrate" => owner_key_migrate(ctx),
         "app_archived_markers" => app_archived_markers(ctx, dry),
+        "re_retire_resurrected" => re_retire_resurrected(ctx),
         "merge_split_backend_stores" => merge_split(ctx),
         _ => {
             let hashes = stores(ctx, dry)?;
@@ -151,6 +152,93 @@ fn app_archived_markers(ctx: &Ctx, dry: bool) -> Option<Tally> {
     // a preview leaves its planned markers pending, which keeps the one-time stamp off
     t.pending_rows = if dry { pending } else { 0.0 };
     Some(t)
+}
+
+/// `reRetireResurrectedRowsAllStores(home, {dryRun: true})` (`reRetireResurrectedPostUpdate`): the update only REPORTS the registry rows
+/// an old migration resurrected (a row with a proven archive link, not live, whose archived twin is another id). It writes nothing
+/// but the BACKEND marker an open of an old store pins, as Node's open does; the removal stays the operator's (`doctor --repair-resurrected`).
+fn re_retire_resurrected(ctx: &Ctx) -> Option<Tally> {
+    let home = Path::new(&ctx.home);
+    let hashes = stores(ctx, false)?;
+    let inv = Inv {
+        home: home.to_path_buf(),
+        env: ctx.env.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+        cwd: ctx.cwd.clone(),
+        now: crate::health::now_ms() as i64,
+        stdin: None,
+        write_home: home.to_path_buf(),
+        store_override: None,
+    };
+    let now = inv.now as f64;
+    let index = archive_index(home)?;
+    let mut t = Tally::default();
+    for hash in &hashes {
+        let registry = match rc::open(home, hash, false).map_err(|e| e.to_string()).and_then(|h| h.rd().roster().map_err(|e| e.to_string())) {
+            Ok(r) => r,
+            Err(e) => {
+                t.add("errors", 1.0);
+                swallowed(ctx, "re-retire-resurrected", hash, &e);
+                continue;
+            }
+        };
+        for row in &registry {
+            let Some(id) = row_id(row).filter(|i| crate::meshw::idlock::is_safe_id(i)) else { continue };
+            let desc = ident::read_descriptor(home, &id);
+            let desc_wt = match desc.as_ref().and_then(|d| d.get("worktreePath")) {
+                Some(crate::checks::guardkit::ojson::OVal::Str(s)) if !s.is_empty() => Some(s.clone()),
+                Some(v) if v.truthy() => return None, // a worktree of a type only Node reads
+                _ => None,
+            };
+            let row_wt = desc_wt.or_else(|| jv(row, "worktreePath").as_str().filter(|w| !w.is_empty()).map(str::to_string));
+            let Some(wt) = row_wt.clone() else { continue };
+            let real = if wt.starts_with('/') { ident::realpath(&wt).unwrap_or_else(|| wt.clone()) } else { return None };
+            let Some(hits) = index.get(&real).filter(|h| !h.is_empty()) else { continue };
+            let hit = hits.iter().find(|h| **h != id).unwrap_or(&hits[0]);
+            let session = jv(row, "sessionId").as_str().map(str::to_string);
+            if crate::meshw::rosterrows::sibling_partition_live(&inv, now, &id, Some(&wt), session.as_deref()).ok()? {
+                continue;
+            }
+            if *hit == id {
+                t.add("unhealable", 1.0);
+                continue;
+            }
+            t.add("candidates", 1.0);
+        }
+    }
+    // the answer's `left` placeholder counts the rows needing a manual review
+    let unhealable = t.get("unhealable");
+    t.add("left", unhealable);
+    Some(t)
+}
+
+/// `buildArchivedWorktreeIndex(home)`: the ids of the archive markers, by the real path of the worktree each names, in directory order.
+fn archive_index(home: &Path) -> Option<HashMap<String, Vec<String>>> {
+    let mut idx: HashMap<String, Vec<String>> = HashMap::new();
+    let dir = ident_archived_dir(home);
+    let suffix = defaults::text("mesh_write.json_suffix");
+    let Ok(rd) = std::fs::read_dir(&dir) else { return Some(idx) };
+    for e in rd.flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        let Some(id) = name.strip_suffix(suffix) else { continue };
+        if !crate::meshw::idlock::is_safe_id(id) {
+            continue;
+        }
+        let Some(marker) = std::fs::read(e.path()).ok().and_then(|b| crate::checks::guardkit::ojson::OVal::parse(&String::from_utf8_lossy(&b))) else { continue };
+        let wt = match marker.get("worktreePath") {
+            Some(crate::checks::guardkit::ojson::OVal::Str(s)) if !s.is_empty() => s.clone(),
+            _ => continue,
+        };
+        if !wt.starts_with('/') {
+            return None;
+        }
+        let real = ident::realpath(&wt).unwrap_or(wt);
+        idx.entry(real).or_default().push(id.to_string());
+    }
+    Some(idx)
+}
+
+fn ident_archived_dir(home: &Path) -> std::path::PathBuf {
+    crate::meshw::idlock::devswarm_root(home).join(defaults::text("mesh_write.dir_archived"))
 }
 
 /// `store.listStoreHashes(home)`, when the engine can open every one of them as Node would. A store with no readable `BACKEND` marker
