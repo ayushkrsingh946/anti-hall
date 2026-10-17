@@ -199,6 +199,14 @@ value = "name"
 doc = "Between plugin and marketplace in an install key (`plugin@marketplace`)."
 value = "@"
 
+[wake_watch.install_key_prefix]
+doc = "The start of every anti-hall install key in the registry and in `enabledPlugins` (`anti-hall@<marketplace>`): the registered installs the enabled one is chosen from."
+value = "anti-hall@"
+
+[wake_watch.install_fallback_key]
+doc = "The install key used when no registered anti-hall install is enabled in the user's settings."
+value = "anti-hall@anti-hall"
+
 [wake_watch.user_settings_rel]
 doc = "The user's harness settings file, relative to the home: it says which installs are enabled."
 value = ".claude/settings.json"

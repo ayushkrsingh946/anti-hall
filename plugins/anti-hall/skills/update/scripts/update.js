@@ -34,6 +34,7 @@
 
 const fs = require('fs');
 const { readOnlyGitEnv } = require('../../../hooks/lib/git-env.js');
+const enabledInstall = require('../../../hooks/lib/enabled-install.js');
 const path = require('path');
 const os = require('os');
 const { execFileSync, spawnSync } = require('child_process');
@@ -173,19 +174,27 @@ function compareVersions(a, b) {
 function versionFromInstalledJson(installedJsonPath) {
   const data = readJsonBounded(installedJsonPath);
   if (!data || typeof data !== 'object') return null;
-  // v2: registry under .plugins; legacy: key at top level.
-  const reg = (data.plugins && typeof data.plugins === 'object') ? data.plugins : data;
-  const entry = reg['anti-hall@anti-hall'];
-  if (Array.isArray(entry)) {
-    const valid = entry.filter(e => e && typeof e === 'object' && isSemver(e.version));
-    const pick =
-      valid.find(e => e.scope === 'user') ||
-      valid.find(e => e.scope === 'project') ||
-      valid[0];
-    return pick ? pick.version : null;
+  // v2: registry under .plugins; legacy: key at top level. The ENABLED anti-hall@* install is the one whose version
+  // counts (#216); anti-hall@anti-hall only when none is enabled. settings.json sits one level above plugins/.
+  const sel = enabledInstall.load({
+    registryPath: installedJsonPath,
+    settingsPath: path.join(path.dirname(installedJsonPath), '..', 'settings.json'),
+  });
+  for (const key of sel.keys) {
+    const entry = sel.reg[key];
+    if (Array.isArray(entry)) {
+      const valid = entry.filter(e => e && typeof e === 'object' && isSemver(e.version));
+      const pick =
+        valid.find(e => e.scope === 'user') ||
+        valid.find(e => e.scope === 'project') ||
+        valid[0];
+      if (pick) return pick.version;
+    } else if (typeof entry === 'string') {
+      if (isSemver(entry)) return entry;
+    } else if (entry && typeof entry === 'object' && isSemver(entry.version)) {
+      return entry.version;
+    }
   }
-  if (typeof entry === 'string') return isSemver(entry) ? entry : null;
-  if (entry && typeof entry === 'object' && isSemver(entry.version)) return entry.version;
   return null;
 }
 
