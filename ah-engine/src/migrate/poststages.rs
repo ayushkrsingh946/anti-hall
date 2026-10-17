@@ -58,6 +58,7 @@ fn run_stage(ctx: &Ctx, which: &str, dry: bool) -> Option<Tally> {
         "promote_unclaimed" => super::promote::promote_unclaimed(ctx),
         "cursor_hygiene" => Some(super::cursorhyg::run(ctx)),
         "owner_key_migrate" => owner_key_migrate(ctx),
+        "app_archived_markers" => app_archived_markers(ctx, dry),
         "merge_split_backend_stores" => merge_split(ctx),
         _ => {
             let hashes = stores(ctx, dry)?;
@@ -101,6 +102,54 @@ fn owner_key_migrate(ctx: &Ctx) -> Option<Tally> {
             t.add(k, *n);
         }
     }
+    Some(t)
+}
+
+/// `markAppArchivedDescriptors(home, {env, cwd})` (`markAppArchivedPostUpdate`): the archived marker for every active descriptor the
+/// DevSwarm app's own database proves archived or deleted, planned and written by the same code the supervisor's app sync uses
+/// (`dssup::appsync::plan`). A marker is created only when absent (never overwritten) and the descriptor is never touched or deleted;
+/// the ingest dry-run switch makes it a preview. A database the engine cannot read exactly as Node's `builderStates` does, or a
+/// descriptor shape only Node decides, hands the whole stage to Node before anything is written.
+fn app_archived_markers(ctx: &Ctx, dry: bool) -> Option<Tally> {
+    use crate::dssup::appsync::{plan, snap};
+    let home = Path::new(&ctx.home);
+    let env: ident::Env = ctx.env.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+    let file = ident::app_db_path(home, &env)?;
+    let snapshot = snap::read(&file).ok()??;
+    // whatever the engine cannot read as JavaScript would: Node's, before the first write
+    plan::read_json_dir(&plan::dir_of(home, "devswarm_sup.as_dir_workspaces")).ok()?;
+    plan::read_json_dir(&plan::dir_of(home, "devswarm_sup.as_dir_archived")).ok()?;
+    let marks = plan::plan_marks(home, &snapshot).ok()?;
+    let ext = defaults::text("devswarm_sup.as_json_ext");
+    let wdir = plan::dir_of(home, "devswarm_sup.as_dir_workspaces");
+    let scanned = crate::checks::jsport::fsx::read_dir_names(&wdir.to_string_lossy())
+        .unwrap_or_default()
+        .iter()
+        .filter(|(n, _)| n.strip_suffix(ext).is_some_and(plan::safe_id))
+        .count();
+    let (mut marked, mut errors) = (0.0, 0.0);
+    if !dry {
+        let now = crate::health::now_ms() as i64;
+        for m in &marks.marks {
+            match plan::write_marker(home, m, now) {
+                plan::Wrote::Marked => marked += 1.0,
+                plan::Wrote::Exists => {}
+                plan::Wrote::Failed(e) => {
+                    errors += 1.0;
+                    swallowed(ctx, "app-archived-markers", &m.id, &e);
+                }
+            }
+        }
+    }
+    let mut t = Tally::default();
+    t.add("scanned", scanned as f64);
+    t.add("marked", marked);
+    t.add("errors", errors);
+    // Node's `pending`: the planned markers not written (all of them in a preview)
+    let pending = (marks.marks.len() as f64 - marked).max(0.0);
+    t.add("pending", pending);
+    // a preview leaves its planned markers pending, which keeps the one-time stamp off
+    t.pending_rows = if dry { pending } else { 0.0 };
     Some(t)
 }
 

@@ -444,6 +444,7 @@ fn picture(w: &World, answer: Value, anchor: Option<&str>) -> Value {
     let pid = regex::Regex::new(r#""pid":\d+"#).unwrap();
     let ts = regex::Regex::new(r#"^\{"ts":"[^"]*""#).unwrap();
     let generated = regex::Regex::new(r#""generatedAt":\d+"#).unwrap();
+    let archived_at = regex::Regex::new(r#""archivedAt":\d+"#).unwrap();
     let files: BTreeMap<String, String> = tree(&w.home)
         .into_iter()
         .filter(|(k, _)| {
@@ -452,6 +453,7 @@ fn picture(w: &World, answer: Value, anchor: Option<&str>) -> Value {
         .map(|(k, v)| {
             let v = pid.replace_all(&norm(&v, w), r#""pid":0"#).into_owned();
             let v = generated.replace_all(&v, r#""generatedAt":0"#).into_owned();
+            let v = archived_at.replace_all(&v, r#""archivedAt":0"#).into_owned();
             (k, v.lines().map(|l| ts.replace(l, r#"{"ts":"T""#).into_owned()).collect::<Vec<_>>().join("\n"))
         })
         .collect();
@@ -539,6 +541,7 @@ impl Case {
             "merge-split-backend-stores" => "mergeSplitBackendStores",
             "child-sender-labels" => "repairChildSenderLabels",
             "owner-key-migrate" => "ownerKeyMigrate",
+            "app-archived-markers" => "markAppArchived",
             _ => "none",
         }
     }
@@ -719,7 +722,7 @@ fn a_stage_switched_off_reports_itself_skipped_and_touches_nothing() {
     let out = run_engine(&w, &o, &["--post-pull-only"]);
     let status: Value = serde_json::from_str(out.stdout.lines().next().unwrap()).unwrap();
     let status = &status["status"];
-    for (key, name) in [("readerCursorsImport", "reader-cursors-import"), ("readerFloorRepair", "reader-floor-repair"), ("dualPartitionAcks", "dual-partition-acks"), ("promoteUnclaimed", "promote-unclaimed"), ("cursorHygiene", "cursor-hygiene"), ("mergeSplitBackendStores", "merge-split-backend-stores"), ("childSenderLabels", "child-sender-labels"), ("ownerKeyMigrate", "owner-key-migrate")] {
+    for (key, name) in [("readerCursorsImport", "reader-cursors-import"), ("readerFloorRepair", "reader-floor-repair"), ("dualPartitionAcks", "dual-partition-acks"), ("promoteUnclaimed", "promote-unclaimed"), ("cursorHygiene", "cursor-hygiene"), ("mergeSplitBackendStores", "merge-split-backend-stores"), ("childSenderLabels", "child-sender-labels"), ("ownerKeyMigrate", "owner-key-migrate"), ("appArchivedMarkers", "app-archived-markers")] {
         let a = &status[key];
         assert_eq!(a["attempted"], json!(false), "{key}: {a}");
         assert_eq!(a["disabled"], json!(true), "{key}: {a}");
@@ -1175,6 +1178,79 @@ fn owner_key_migrate_deletes_nothing_and_keeps_every_field() {
             for (k, v) in was.as_object().unwrap() {
                 assert_eq!(is.get(k), Some(v), "{f}: field {k} changed");
             }
+        }
+    }
+}
+
+
+// ---- app-archived-markers (roadmap #61 G3) ---------------------------------------------------------------------------------------
+
+const B_ARCHIVED: &str = "11111111-1111-4111-8111-111111111111";
+const B_DELETED: &str = "22222222-2222-4222-8222-222222222222";
+const B_OPEN: &str = "33333333-3333-4333-8333-333333333333";
+const B_MARKED: &str = "44444444-4444-4444-8444-444444444444";
+
+/// The DevSwarm app's database on this platform, with the tables the app sync reads and one repository, the Primary, one archived
+/// builder, one open builder and one archived builder that a twin descriptor shares a worktree with.
+fn seed_app_db(home: &Path) {
+    let file = ah_engine::meshw::ident::app_db_path(home, &std::collections::HashMap::new()).expect("app db path");
+    fs::create_dir_all(Path::new(&file).parent().unwrap()).unwrap();
+    let c = rusqlite::Connection::open(&file).unwrap();
+    c.execute_batch(
+        "CREATE TABLE repositories (id TEXT PRIMARY KEY, path TEXT, name TEXT, defaultBaseBranch TEXT);
+         CREATE TABLE builders (id TEXT PRIMARY KEY, repositoryId TEXT, sourceBranch TEXT, branchName TEXT, worktreePath TEXT, terminalId TEXT, label TEXT, createdAt TEXT, lastAccessed TEXT, rank INTEGER, isHidden INTEGER, pullRequestId TEXT, builderType TEXT, isPinned INTEGER, isActive INTEGER, lastSelectedAt TEXT);
+         CREATE TABLE builder_terminals (id TEXT, builderId TEXT, terminalId TEXT, terminalType TEXT, aiAgent TEXT, ai_session_config TEXT, isActive INTEGER, panelStatus TEXT, createdAt TEXT, lastViewedAt TEXT, initialPrompt TEXT, initialPromptDeliveredAt TEXT, initialPromptWithheldAt TEXT);
+         CREATE TABLE pull_requests (id TEXT PRIMARY KEY, repositoryId TEXT, branchName TEXT, number INTEGER, state TEXT, isDraft INTEGER, url TEXT, checkStatus TEXT, reviewStatus TEXT, lastSyncedAt TEXT);
+         CREATE TABLE workspace_messages (repositoryId TEXT, toBranch TEXT, createdAt TEXT, message TEXT);
+         INSERT INTO repositories VALUES ('r1', '/code/r1', 'r1', 'main');",
+    )
+    .unwrap();
+    let ins = |id: &str, wt: &str, hidden: i64, active: i64, kind: &str| {
+        c.execute(
+            "INSERT INTO builders (id, repositoryId, sourceBranch, branchName, worktreePath, label, createdAt, rank, isHidden, builderType, isPinned, isActive) VALUES (?1, 'r1', 'main', 'b', ?2, 'L', '2026-01-01T00:00:00.000Z', 1, ?3, ?4, 0, ?5)",
+            rusqlite::params![id, wt, hidden, kind, active],
+        )
+        .unwrap();
+    };
+    ins("55555555-5555-4555-8555-555555555555", "/code/r1", 0, 1, "primary");
+    ins(B_ARCHIVED, "/code/wts/archived", 1, 0, "standard");
+    ins(B_OPEN, "/code/wts/open", 0, 1, "standard");
+    ins("66666666-6666-4666-8666-666666666666", "/code/wts/twin", 1, 0, "standard");
+}
+
+/// Descriptors an earlier build never marked: archived in the app by id, deleted in the app (no row), open in the app, archived through
+/// a twin builder on its worktree, one already marked, one with no worktree, one that is not a descriptor.
+fn seed_app_archived(home: &Path) {
+    seed_app_db(home);
+    let d = |id: &str, wt: &str| put(home, &format!(".anti-hall/devswarm/workspaces/{id}.json"), &format!(r#"{{"id":"{id}","worktreePath":"{wt}","sessionId":"s-{id}"}}"#));
+    d(B_ARCHIVED, "/code/wts/archived");
+    d(B_DELETED, "/code/wts/deleted");
+    d(B_OPEN, "/code/wts/open");
+    d("twin-ws", "/code/wts/twin");
+    d(B_MARKED, "/code/wts/gone-already-marked");
+    put(home, ".anti-hall/devswarm/workspaces/nowt.json", r#"{"id":"nowt"}"#);
+    put(home, ".anti-hall/devswarm/workspaces/junk.json", "[1,2");
+    put(home, &format!(".anti-hall/devswarm/archived/{B_MARKED}.json"), r#"{"id":"mine","archivedBy":"owner","archivedAt":1}"#);
+}
+
+case!(app_markers_are_written_for_what_the_app_proves_archived_or_deleted, "app-archived-markers", "bad_state", "app-archived-markers", "appArchivedMarkers", "markAppArchivedPostUpdate", seed_app_archived, live: true, markers: false);
+case!(app_markers_preview_writes_nothing, "app-archived-markers", "dry_run", "app-archived-markers", "appArchivedMarkers", "markAppArchivedPostUpdate", seed_app_archived, live: false, markers: false);
+case!(app_markers_already_done_is_skipped, "app-archived-markers", "already_done", "app-archived-markers", "appArchivedMarkers", "markAppArchivedPostUpdate", seed_app_archived, live: true, markers: true);
+case!(app_markers_without_an_app_database_do_nothing, "app-archived-markers", "no_db", "app-archived-markers", "appArchivedMarkers", "markAppArchivedPostUpdate", seed_nothing, live: true, markers: false);
+
+/// A marker is created, never replaced; no descriptor is touched or removed.
+#[test]
+fn app_markers_never_overwrite_a_marker_and_never_touch_a_descriptor() {
+    let o = Opt { ds: true, no_upstream_move: true, live: true, no_node: true, stage_only: Some("app-archived-markers"), ..Opt::default() };
+    let w = world(&o);
+    seed_app_archived(&w.home);
+    let before = picture(&w, Value::Null, None);
+    let ans = engine_answer(&w, &o, "appArchivedMarkers");
+    assert_eq!(ans["marked"], json!(3), "{ans}");
+    let after = picture(&w, Value::Null, None);
+    for (f, v) in before["files"].as_object().unwrap() {
+        if f.contains("/workspaces/") || f.ends_with(&format!("archived/{B_MARKED}.json")) {
+            assert_eq!(after["files"].get(f), Some(v), "{f} changed");
         }
     }
 }
