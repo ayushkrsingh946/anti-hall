@@ -27,6 +27,8 @@ use crate::setup::jsfmt::js_string;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
+mod wake;
+
 fn text(key: &str) -> &'static str {
     defaults::text(key)
 }
@@ -414,6 +416,8 @@ impl Run<'_> {
         }
         let template = match row.str_field("detail_dry") {
             d if dry && !d.is_empty() => d,
+            // a stage whose text differs when it found nothing names the count that decides (`zero_key`) and the text (`detail_zero`)
+            _ if row.get("zero_key").and_then(defaults::V::as_str).is_some_and(|k| t.n.get(k).copied().unwrap_or(0.0) == 0.0) => row.str_field("detail_zero"),
             _ => row.str_field("detail"),
         };
         let done_keys = row.get("done").map(|d| d.strings()).unwrap_or_default();
@@ -423,6 +427,10 @@ impl Run<'_> {
                 "done" => done_keys.get(usize::from(dry)).map_or_else(String::new, |k| js_string(&J::Num(t.n.get(k).copied().unwrap_or(0.0)))),
                 "errors" if errors > 0.0 => defaults::fill(row.str_field("errors_text"), &[("n", &js_string(&J::Num(errors)))]),
                 "errors" => String::new(),
+                "left_text0" => {
+                    let left = t.n.get("left").copied().unwrap_or(0.0);
+                    if left > 0.0 { defaults::fill(row.str_field("left_text0"), &[("left", &js_string(&J::Num(left)))]) } else { String::new() }
+                }
                 "left_text" => {
                     let left = t.n.get("left").copied().unwrap_or(0.0);
                     if left > 0.0 { defaults::fill(row.str_field("left_text"), &[("left", &js_string(&J::Num(left)))]) } else { String::new() }
@@ -464,6 +472,11 @@ impl Run<'_> {
         match row.get("native").and_then(defaults::V::as_str) {
             Some("settings") => return self.settings_stage(),
             Some("codex_graphify") => return self.codex_graphify_stage(),
+            Some("wake_monitor") => {
+                if let Some(v) = self.wake_monitor_stage(row) {
+                    return v;
+                }
+            }
             Some(which) if migrate::poststages::is_store_stage(which) => {
                 if let Some(v) = self.store_stage(row, which) {
                     return v;

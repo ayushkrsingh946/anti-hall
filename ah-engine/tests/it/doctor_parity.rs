@@ -638,14 +638,10 @@ fn the_devswarm_section_is_silent_when_dormant_and_runs_the_four_hook_tests_when
         put(home, ".anti-hall/devswarm/cron-missing-warned.jsonl", "{}\n");
     };
     let (n, r) = both(&seed, &needles);
-    // a deliberate difference (#66): the engine has no native devswarm-child-gate self-test, so it reports that check as deferred
-    // (a warning) where Node prints the pass line; every other line is the same text
-    let n: Vec<String> = n.into_iter().filter(|l| !l.contains("devswarm-child-gate forces")).collect();
     assert_eq!(n, r);
-    let (_, rust_all) = run_rust(&fixture(&seed), &["--dry-run"]);
-    assert!(rust_all.contains("devswarm-child-gate: the engine does not decide this self-test"), "{rust_all}");
     for want in [
         "devswarm-child-turn writes",
+        "devswarm-child-gate forces",
         "devswarm-parent-gate blocks",
         "cron ticks that found mail while a watcher was armed: 2",
         "wake-watch idle-skips: 2",
@@ -656,7 +652,6 @@ fn the_devswarm_section_is_silent_when_dormant_and_runs_the_four_hook_tests_when
     }
     // a Primary session (DevSwarm environment, no descriptors) is active too
     let (n, r) = with_env(&[("DEVSWARM_REPO_ID", "repo-x")], || both(&|_, _| {}, &needles));
-    let n: Vec<String> = n.into_iter().filter(|l| !l.contains("devswarm-child-gate forces")).collect();
     assert_eq!(n, r);
     assert!(!r.is_empty());
 }

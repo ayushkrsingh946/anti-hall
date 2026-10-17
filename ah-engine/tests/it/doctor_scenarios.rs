@@ -1664,3 +1664,47 @@ fn un_01_the_repair_heals_the_units_once_never_in_a_check_and_obeys_the_switch()
     assert_eq!(unit_files(&sc.home), written);
     assert_eq!(written.iter().map(|p| fs::read(p).unwrap()).collect::<Vec<_>>(), bytes);
 }
+
+// ---- STO: legacy DevSwarm stores (journal backend, split store) -----------------------------------------------------------------
+
+#[test]
+fn sto_01_journal_and_split_stores_are_reported_as_unsupported_legacy() {
+    let sc = Sc::new();
+    let stores = sc.home.join(".anti-hall/devswarm/store");
+    // a pure journal store (pinned), a journal store found by its segments, a split store, a healthy sqlite store, an empty journal dir
+    for (hash, marker, db, seg) in [
+        ("aaaa1111", Some("journal"), false, true),
+        ("bbbb2222", None, false, true),
+        ("cccc3333", Some("sqlite"), true, true),
+        ("dddd4444", Some("sqlite"), true, false),
+        ("eeee5555", None, false, false),
+    ] {
+        let d = stores.join(hash);
+        fs::create_dir_all(d.join("journal")).unwrap();
+        if let Some(m) = marker {
+            fs::write(d.join("BACKEND"), m).unwrap();
+        }
+        if db {
+            fs::write(d.join("devswarm.db"), b"x").unwrap();
+        }
+        if seg {
+            fs::write(d.join("journal/messages.ndjson"), b"{}\n").unwrap();
+        }
+        fs::write(d.join("journal/.lock"), b"").unwrap();
+    }
+    let r = sc.doctor(&[]);
+    r.has("warn", &["2 DevSwarm store(s) use the legacy journal backend", "aaaa1111, bbbb2222", "No anti-hall command converts a journal store to SQLite"]);
+    r.has("warn", &["1 DevSwarm store(s) are split", "cccc3333", "merge-split-backend-stores", "hooks/doctor.js --repair"]);
+    r.lacks("dddd4444");
+    r.lacks("eeee5555");
+    // read-only: nothing moved or written
+    assert!(stores.join("aaaa1111/journal/messages.ndjson").exists() && stores.join("cccc3333/devswarm.db").exists());
+    // the report is switchable off
+    let mut c = Command::new(BIN);
+    c.arg("doctor").arg("--check").arg("--plugin-root").arg(&sc.plugin);
+    sc.env(&mut c);
+    // the key has no env override: the owner's settings.json switches it off
+    sc.put(".anti-hall/settings.json", br#"{"doctor":{"legacy_stores_report":0}}"#);
+    let off = sc.finish(c);
+    off.lacks("legacy journal backend");
+}

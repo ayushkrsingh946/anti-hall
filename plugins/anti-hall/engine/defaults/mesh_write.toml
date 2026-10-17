@@ -2066,3 +2066,11 @@ value = { kind = "counter", unit = "references", labels = ["outcome"] }
 [metric.mesh_watcher_matched_by_checkout]
 doc = "Watcher-live checks answered by another row's lock on the same checkout because the workspace's own id had no live lock."
 value = { kind = "counter", unit = "checks", labels = [] }
+
+[mesh_write.gitmodules_file]
+doc = "The file of a checkout declaring its submodule paths."
+value = ".gitmodules"
+
+[mesh_write.gitmodules_path_key]
+doc = "The key of a submodule's path in .gitmodules."
+value = "path"
