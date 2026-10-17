@@ -11,6 +11,7 @@
 //! | `meshRegisteredKey(descriptorJson, id)` | `{key}`: the project an id is registered under |
 //! | `meshMessageCount(key, id)` | `{state: "none"}` (no store file) or `{state: "ok", count}`: the messages a partition holds |
 //! | `meshUnion(key, id, inbox, cursor, own, now)` | `{state: "none"}` or `{state: "ok", storeOnly: [row], age}`: the store rows no inbox line covers and the age in ms of the oldest unread row |
+//! | `meshOwnReader(key, id, inbox, cursor, count, now)` | `{reader: false}`, `{reader: true, state: "none"}` or `{reader: true, state: "ok", own, unread?, total?}`: this hook's own reader row on a partition and, with `count`, its unread count and the partition's message count |
 //! | `meshAppArchived(id, worktree, cache)` | `{verdict: true \| false \| null, cache: n \| null}`: the app database's archive verdict; `cache` names a cache write owed |
 //! | `meshPerformCache()` | perform every cache write the call's lookups owe |
 //! | `meshSessionAlive(session)` | `{alive}`: a session record of this session names a live process |
@@ -218,6 +219,23 @@ fn union_of(st: &Settings, key: &str, id: &str, inbox: Option<&str>, cursor: Opt
     Ok(json!({"state": "ok", "storeOnly": u.store_only_unread, "age": age}))
 }
 
+/// This hook's own reader on partition `id` (`ownReaderDelta` / `ownReaderLiveUnread`): `{reader: false}` when the hook has no
+/// reader key (checked before the store is opened, as Node does), `{reader: true, state: "none"}` when the project has no
+/// store, else `{reader: true, state: "ok", own}` with `own` the value of this reader's own `store` row (`null`: no row, or
+/// not a finite number). With `count` and a row, also `unread` (`countFor` with this reader) and `total` (`messageCount`).
+fn own_view(st: &Settings, key: &str, id: &str, inbox: Option<&str>, cursor: Option<&str>, count: bool, now: f64) -> Result<Value, No> {
+    let Some(reader) = own_reader(st)? else { return Ok(json!({"reader": false})) };
+    let Some(store) = open_store(st, key)? else { return Ok(json!({"reader": true, "state": "none"})) };
+    let rows = store.reader_cursors(id).map_err(|_| No)?;
+    let ns = defaults::text("mesh_write.cursor_ns_store");
+    let own = rows.iter().find(|x| x["ns"] == ns && x["reader"] == reader.as_str()).and_then(|x| x["value"].as_f64()).filter(|v| v.is_finite());
+    let Some(value) = own.filter(|_| count) else { return Ok(json!({"reader": true, "state": "ok", "own": own})) };
+    let (sb, nb) = floor_positions(&store, &st.home, id, cursor, Some(&reader))?;
+    let u = union_unread(&UnionIn { inbox, cursor_file: cursor, id, store: Some(&store), store_base: sb, nd_base: nb, now: now as i64 }).map_err(|_| No)?;
+    let total = store.message_count(id).map_err(|_| No)?;
+    Ok(json!({"reader": true, "state": "ok", "own": value, "unread": u.unread, "total": total}))
+}
+
 fn app_archived(st: &Settings, id: &str, worktree: &str, cache: bool) -> Result<Value, No> {
     let now = crate::meshw::common::now_ms();
     APP.with(|a| {
@@ -293,6 +311,15 @@ pub(super) fn install<'js>(c: &Ctx<'js>, h: &Object<'js>) -> rquickjs::Result<()
         Function::new(c.clone(), |key: String, id: String, inbox: Option<String>, cursor: Option<String>, own: bool, now: f64| -> rquickjs::Result<String> {
             Ok(answer(with_settings(|st| union_of(st, &key, &id, inbox.as_deref(), cursor.as_deref(), own, now))?))
         })?,
+    )?;
+    h.set(
+        "meshOwnReader",
+        Function::new(
+            c.clone(),
+            |key: String, id: String, inbox: Option<String>, cursor: Option<String>, count: bool, now: f64| -> rquickjs::Result<String> {
+                Ok(answer(with_settings(|st| own_view(st, &key, &id, inbox.as_deref(), cursor.as_deref(), count, now))?))
+            },
+        )?,
     )?;
     h.set(
         "meshAppArchived",

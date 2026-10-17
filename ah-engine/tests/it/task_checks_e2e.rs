@@ -365,3 +365,26 @@ fn tasklist_guard_answers_a_quiet_stop_with_its_file_effects_and_answers_a_block
     assert_eq!(code, 0, "answered by the engine, the Node hook (exit 99) never ran");
     assert!(out.contains("\"decision\":\"block\""), "the engine's answer is the block: {out}");
 }
+
+/// A transcript bigger than the tasklist guard's window is read by the host (`ah.transcript.toolUseScan`): the tool uses inside the
+/// window count exactly as they do when the whole transcript fits, and the ones before it are out of sight.
+#[test]
+fn tasklist_guard_counts_the_work_inside_a_window_smaller_than_the_transcript() {
+    let w = World::new("tasklist-guard-window");
+    let cwd = std::fs::canonicalize(w.path("proj")).unwrap();
+    let edit = |n: u32| serde_json::json!({"type": "assistant", "timestamp": "2026-10-06T08:00:00.000Z", "message": {"id": format!("m{n}"), "role": "assistant", "content": [{"type": "tool_use", "id": format!("t{n}"), "name": "Edit", "input": {"file_path": format!("/p/f{n}.js")}}]}});
+    let filler = serde_json::json!({"type": "user", "message": {"role": "user", "content": "x".repeat(1000)}}).to_string();
+    let pad: String = (0..700).map(|_| format!("{filler}\n")).collect(); // ~700 KB, past the 512 KiB window
+    assert!(pad.len() > 600_000);
+    let payload = |f: &str| serde_json::json!({"hook_event_name": "Stop", "session_id": "s1", "cwd": cwd, "transcript_path": w.path(f)}).to_string();
+    // the three edits sit inside the window: the block of the small transcript
+    std::fs::write(w.path("in.jsonl"), format!("{pad}{}\n{}\n{}\n", edit(1), edit(2), edit(3))).unwrap();
+    let (code, out) = stop_run(&w, "tasklist-guard", &payload("in.jsonl"));
+    assert_eq!(code, 0);
+    assert!(out.contains("\"decision\":\"block\""), "work inside the window is counted: {out}");
+    // the same edits before the window: no work is seen, no block
+    std::fs::write(w.path("out.jsonl"), format!("{}\n{}\n{}\n{pad}", edit(1), edit(2), edit(3))).unwrap();
+    let (code, out) = stop_run(&w, "tasklist-guard", &payload("out.jsonl"));
+    assert_eq!(code, 0);
+    assert!(!out.contains("\"decision\":\"block\""), "work before the window is not counted: {out}");
+}

@@ -68,6 +68,7 @@ const ALLOW: &[(&str, &str, &str)] = &[
         "AH_ENGINE_ALLOCATOR",
         "the allocator selector env name must be read with libc getenv before defaults can be loaded, because loading defaults allocates",
     ),
+    ("src/memstat.rs", "static TL_", "per-thread byte counters initialised to zero (the allocator cannot allocate or read the config): state, not tunables"),
     ("src/main.rs", "static ALLOC", "the global allocator item: a language construct, not a value"),
     ("src/memdiag.rs", "static ON", "a thread-local flag initialised off: state, not a tunable"),
     (

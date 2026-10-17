@@ -10,6 +10,7 @@
 //! | `transcriptEvidenceWalk(path, window, payload)` | the claim ledger's walk of that evidence done in the engine (merge of one message's text, payload skip, join): small facts back, the two big texts kept: see [`super::evidence_walk::evidence_walk`] |
 //! | `transcriptWalkHas(which, needle)` | is `needle` in the evidence (`"evidence"`) or the evidence with the last reply (`"withLast"`) of this thread's last walk: see [`super::evidence_walk::walk_has`] |
 //! | `transcriptWalkNumbers(which, src, flags, strip)` | `reNumbers` over that text: see [`super::evidence_walk::walk_numbers`] |
+//! | `toolUseScan(path, window, needles, keys)` | the tasklist guard's tool uses of the lines of the last `window` bytes that hold a needle, cut down to `[name, file_path, command]` per entry, in order: see [`super::tool_use_scan::tool_use_scan`] |
 //! | `transcriptTeammates(path, tail)` | the named in-process teammates the last `tail` bytes show finished but never stopped, with when each went idle: see [`teammates`] |
 //! | `transcriptCodexAgents(path, tail)` | the Codex `multi_agent_v1` agents a rollout tail shows finished but never closed: see [`codex_agents`] |
 // Discard triage (E3): every `.ok()` / `unwrap_or_default()` in this file is a deliberate keep, for these reasons:
@@ -260,6 +261,7 @@ pub fn install<'a>(c: &Ctx<'a>, h: &Object<'a>) -> rquickjs::Result<()> {
     h.set("reNumbers", Function::new(c.clone(), |src: String, flags: String, text: String, strip: String| re_numbers(&src, &flags, &text, &strip))?)?;
     h.set("transcriptEvidence", Function::new(c.clone(), |p: String, w: f64| evidence(&p, w))?)?;
     super::evidence_walk::install(c, h)?;
+    super::tool_use_scan::install(c, h)?;
     h.set("transcriptTeammates", Function::new(c.clone(), |p: String, t: f64| teammates(&p, t))?)?;
     h.set("transcriptCodexAgents", Function::new(c.clone(), |p: String, t: f64| codex_agents(&p, t))?)?;
     Ok(())

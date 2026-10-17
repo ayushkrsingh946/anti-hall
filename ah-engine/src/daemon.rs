@@ -370,6 +370,17 @@ impl Shared {
         })
     }
 
+    /// [`memory`](Self::memory) plus the live ledger (`status --memory`): the footprint, the C-library zones and the Rust heap
+    /// against the named holders. Kept out of `memory()` itself, which the crash breadcrumb and the debug sampler also call.
+    fn memory_with_ledger(&self) -> serde_json::Value {
+        let mut m = self.memory();
+        let ledger = crate::memdiag::live_ledger(m.get("budgets").unwrap_or(&serde_json::Value::Null));
+        if let Some(o) = m.as_object_mut() {
+            o.insert("ledger".into(), ledger);
+        }
+        m
+    }
+
     /// The memory breakdown as one short `key=value` line for the event log (which cuts a line at `health.event_text_max`).
     fn memory_line(&self) -> String {
         let m = self.memory();
@@ -443,7 +454,7 @@ impl Shared {
             "allocator": crate::memstat::active_allocator().as_str(),
             "allocator_config": self.cfg().effective.text("diagnostics.allocator"),
             "rss_peak_kb": self.rss_peak_kb.fetch_max(rss_now, SeqCst).max(rss_now),
-            "memory": self.memory(),
+            "memory": self.memory_with_ledger(),
             "load": self.load.report(health::now_ms()),
             "health": health_summary,
             "cpu_s": (limits::process_cpu_secs() * 1000.0).round() / 1000.0,
@@ -1719,6 +1730,7 @@ pub fn serve() {
     if prev != 0 && prev != std::process::id() && health::pid_is_engine(prev) && crate::client::ping(&sock).is_some() {
         return;
     }
+    crate::memdiag::apply_decay_if_untuned();
     crate::jev::shared::set_resident();
     health::reap_marker();
     crate::discard::harmless(lock.set_len(0)); // keep: best effort, fail-open

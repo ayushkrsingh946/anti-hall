@@ -18,9 +18,11 @@
 //! A guard test (`tests/it/mem_guard.rs`) fails the build when a long-lived collection appears outside this module without an
 //! entry in `tests/mem_allowlist.txt` that states its bound.
 mod cache;
+mod measure;
 mod registry;
 
 pub use cache::BoundedCache;
+pub use measure::{Delta, measure};
 pub use registry::{Action, Admit, Budget, Event, Instance, Kind, Owner, Registry, Restart, Spec};
 
 use std::sync::OnceLock;

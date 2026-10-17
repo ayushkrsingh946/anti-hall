@@ -6,11 +6,13 @@
 // its loop state, forced-acknowledgement counter, the one escalation and the quiet tail after it, the stated intent's larger budget, the
 // waiting-on-human lines, the mailbox-wake line and the stale-build downgrade, and the questions asked of the Primary (its summary entry's
 // pending questions cross-checked against the reply records, retired senders named only, put-away askers dropped, a truncated list, the
-// question ceiling and its one escalation). Whatever it cannot settle exactly defers to the Node gate before anything is written: own
-// unread in the summary, a Jev question candidate (jev-assist's trust math and log), a parked escalation, a stale or
-// escalated verdict, a workspace the app database has no opinion on under the DevSwarm repos root, a straying-plan advisory, a live child
-// on the clean pass (the wake-coverage line), an in-flight drain marker, the conservation hold, a non-sqlite store, and any setting of the
-// gate that is set anywhere. Mirrors hooks/devswarm-parent-gate.js (`main`, `readOwnUnread`, `buildReason` and helpers), the companion's
+// question ceiling and its one escalation), the Primary's own summary count corrected by this reader's own position in the store
+// (devswarm-own-reader.js: the delta, the live recheck with its summary refresh, the stale-cache unknown, the urgent prefix) and the
+// in-flight drain marker (a fresh one of this session: a stderr notice, the loop state unchanged; a stale one removed). Whatever it
+// cannot settle exactly defers to the Node gate before anything is written: a Jev question candidate (jev-assist's trust math and
+// log), a parked escalation, a stale or escalated verdict, a workspace the app database has no opinion on under the DevSwarm repos
+// root, a straying-plan advisory, a live child on the clean pass (the wake-coverage line), the conservation hold, a non-sqlite store,
+// and any setting of the gate that is set anywhere. Mirrors hooks/devswarm-parent-gate.js (`main`, `readOwnUnread`, `buildReason` and helpers), the companion's
 // inbox cursor, reader cursors, identity family, row eligibility, archived and live-children readers, hooks/lib/devswarm-wake.js
 // `wakeReassert`, hooks/lib/block-message.js `frame`, hooks/lib/skip-cmd.js and hooks/lib/stop-version-gate.js. Builds on
 // devswarm-child-role.js (script.includes). Keys and texts: devswarm_role.toml (devswarm_role.pg_*, sw_*), devswarm_cli.toml (rr_tr_*).
@@ -66,7 +68,9 @@ function pgDq(s) { return '"' + s.replace(/["\\$`]/g, function (c) { return '\\'
 
 function pgReadOwn(home, idn, selfKey) {
   // `pending`, `truncated`, `registryRows` and `archivedKnown` are the entry's question fields and the registry projection Node returns
-  var own = { id: null, unknown: false, parsed: false, registryIds: [], pending: [], truncated: null, registryRows: [], archivedKnown: false };
+  // `unread`, `stale`, `source` ('live' | 'cache' | null), `rawZero`, `derive` and `urgency` are the own-reader projection
+  var own = { id: null, unknown: false, parsed: false, registryIds: [], pending: [], truncated: null, registryRows: [], archivedKnown: false,
+    unread: 0, stale: false, source: null, rawZero: false, derive: false, urgency: null };
   if (idn.top === null) return own;
   var id = idn.own, prefix = ah.cfg('mesh_write.primary_prefix');
   var hash;
@@ -90,11 +94,21 @@ function pgReadOwn(home, idn, selfKey) {
   if (Array.isArray(ws)) throw meshDefer;
   if (!jx.isObj(ws)) { own.unknown = true; return own; }
   var e = ws[id];
+  var raw = 0;
   if (jx.isObj(e)) {
-    if (typeof e.unread === 'number' && isFinite(e.unread) && e.unread > 0) throw meshDefer; // the live own-reader recheck
     // a Jev-confirmed question candidate is folded in through jev-assist's trust math and its log: Node's
     if (Array.isArray(e.jevQuestionCandidates) && e.jevQuestionCandidates.length > 0) throw meshDefer;
+    raw = piFinite(e.unread) && e.unread > 0 ? e.unread : 0;
   }
+  // the entry's count corrected by this reader's own position (devswarm-own-reader.js)
+  var c = pgOwnCount(selfKey, id, e, raw);
+  own.unread = c.unread;
+  own.unknown = c.stale;
+  own.stale = c.stale;
+  own.source = c.stale ? null : (c.live ? 'live' : 'cache');
+  own.rawZero = c.rawZero;
+  own.derive = c.derive;
+  own.urgency = c.unread > 0 && e.urgencyMax ? e.urgencyMax : null;
   if (e && Array.isArray(e.pendingQuestions)) own.pending = e.pendingQuestions;
   own.truncated = e && e.pendingQuestionsTruncated ? e.pendingQuestionsTruncated : null;
   own.registryIds = Object.keys(ws);
@@ -111,6 +125,61 @@ function pgReadOwn(home, idn, selfKey) {
   }
   own.parsed = true;
   return own;
+}
+
+// This hook's own reader on the Primary's partition (ah.mesh.ownReader), with the entry's inbox and cursor paths (`|| null`).
+function pgOwnReader(selfKey, id, e, count) {
+  if (selfKey === null) throw meshDefer; // Node opens the store by the work tree's own key
+  return ah.mesh.ownReader(selfKey, id, pgPathField(e, 'inboxPath'), pgPathField(e, 'cursorPath'), count, ah.clock.now());
+}
+
+// The live count of an own reader view read with `count`: `Math.max(countFor, messageCount - own)`.
+function pgOwnLive(v, own) {
+  if (v.state !== 'ok' || v.own === null || !piFinite(v.unread) || !piFinite(v.total)) throw meshDefer;
+  return Math.max(v.unread, Math.max(0, v.total - own));
+}
+
+// readOwnUnread's own-instance projection of the summary count `raw` (companion/lib/devswarm-own-reader.js `ownReaderDelta`, then
+// `ownReaderLiveUnread` before a cached count may block): {unread, stale, live, rawZero, derive}. `derive`: the live count is 0
+// after a positive summary count, so Node refreshes the summary (deriveSummary). A read the engine cannot settle exactly defers.
+function pgOwnCount(selfKey, id, e, raw) {
+  var r = { unread: 0, stale: false, live: false, rawZero: false, derive: false };
+  if (!(raw > 0)) { r.rawZero = true; return r; }
+  // ownReaderDelta
+  var delta = 0, live = null;
+  if (piFinite(e.cursor)) {
+    var v = pgOwnReader(selfKey, id, e, false);
+    if (v.reader && v.state !== 'ok') r.stale = true; // a summary with a cursor came from a store that is gone now: unknown
+    else if (v.reader && v.own !== null && v.own > e.cursor) {
+      if (piFinite(e.total) && v.own < e.total) delta = v.own - e.cursor;
+      else live = pgOwnLive(pgOwnReader(selfKey, id, e, true), v.own); // the ambiguous branch: one live count settles it
+    }
+  }
+  if (live !== null) { r.unread = live; r.live = true; return r; }
+  if (r.stale) return r;
+  r.unread = delta > 0 ? Math.max(0, raw - delta) : raw;
+  if (r.unread > 0) {
+    // ownReaderLiveUnread: never block on a cached count when this reader's own row can be read live
+    var w = pgOwnReader(selfKey, id, e, true);
+    if (w.reader && w.state === 'ok' && w.own !== null) {
+      r.unread = pgOwnLive(w, w.own);
+      r.live = true;
+      r.derive = r.unread === 0;
+    }
+  }
+  return r;
+}
+
+// The `workspaces` map of a summary text (null when it has none), as pgArchiveReady reads it.
+function pgSummaryWs(text) {
+  var ws = null, t = text.trim();
+  if (t !== '') {
+    var j = jx.parse(t);
+    if (j.unsure) throw meshDefer;
+    if (!j.invalid && jx.isObj(j.v) && j.v.workspaces !== null && typeof j.v.workspaces === 'object') ws = j.v.workspaces;
+  }
+  if (Array.isArray(ws)) throw meshDefer;
+  return ws;
 }
 
 // ---- the questions the Primary was asked ---------------------------------------------------------------------------------
@@ -327,18 +396,9 @@ function pgRowTs(row) {
 function pgArchiveReady(home, id, repoKey, memo) {
   if (repoKey === null) return false;
   if (!Object.prototype.hasOwnProperty.call(memo, repoKey)) {
-    var ws = null, r = jx.read(pgDir(home) + '/' + ah.cfg('devswarm_role.pg_dir_summaries') + '/' + repoKey + '.json');
+    var r = jx.read(pgDir(home) + '/' + ah.cfg('devswarm_role.pg_dir_summaries') + '/' + repoKey + '.json');
     if (r.big) throw meshDefer;
-    if (r.text !== undefined) {
-      var t = r.text.trim();
-      if (t !== '') {
-        var j = jx.parse(t);
-        if (j.unsure) throw meshDefer;
-        if (!j.invalid && jx.isObj(j.v) && j.v.workspaces !== null && typeof j.v.workspaces === 'object') ws = j.v.workspaces;
-      }
-    }
-    if (Array.isArray(ws)) throw meshDefer;
-    memo[repoKey] = ws;
+    memo[repoKey] = r.text !== undefined ? pgSummaryWs(r.text) : null;
   }
   var w = memo[repoKey];
   return w !== null && jx.isObj(w[id]) && w[id].archive_ready === true;
@@ -412,11 +472,11 @@ function pgCollapse(entries) {
 function pgNewEntry(id, wt, session) {
   return { id: id, worktree: wt, session: session, realUnread: 0, unknown: false, reason: null, reasonPath: null, reasonErrno: null, done: false, archived: false,
     appArchived: false, ignored: false, held: false, live: false, busy: false, waiting: false, waitingQ: null, oldestAge: null, ageUnknown: false, ageOdd: false,
-    stateSkipped: false, foreign: false, hadStoreOnly: false };
+    stateSkipped: false, foreign: false, hadStoreOnly: false, urgency: null };
 }
 
 function pgGate(p, root, l) {
-  var home = l.home, fx = { err: '', out: '', unlink: null, write: null, extra: [], cacheOwed: false };
+  var home = l.home, fx = { err: '', out: '', unlink: null, write: null, extra: [], cacheOwed: false, drainClear: null };
   var sidRaw = p.session_id, sid;
   if (sidRaw === undefined || sidRaw === null || sidRaw === false || sidRaw === '') sid = ah.cfg('devswarm_role.pg_no_session');
   else if (typeof sidRaw === 'string') sid = sidRaw;
@@ -425,32 +485,45 @@ function pgGate(p, root, l) {
   if (typeof cwd !== 'string' || cwd === '' || cwd.charAt(0) !== '/') throw meshDefer; // Node falls back to its own working directory
   var idn = ah.mesh.ident(cwd), selfKey = idn.key;
   var own = pgReadOwn(home, idn, selfKey);
+  // the live count is 0 after a positive summary count: Node refreshes the summary from the store (deriveSummary), before any
+  // later read of it
+  var derived = null;
+  if (own.derive) {
+    var dr = JSON.parse(ahHost.piDerive(selfKey, ah.clock.now()));
+    if (dr.unsure || typeof dr.text !== 'string') throw meshDefer;
+    derived = dr.text;
+    fx.extra.push({ rel: ah.cfg('devswarm_role.pg_devswarm_dir') + '/' + ah.cfg('devswarm_role.pg_dir_summaries') + '/' + selfKey + '.json', body: derived });
+  }
   var descriptors = pgDescriptors(home);
   var qs = pgQuestions(home, own, descriptors, selfKey, fx);
   var unanswered = qs.blocking, informational = qs.informational, truncated = own.truncated;
   if (own.id !== null && pgHasJson(pgDir(home) + '/' + ah.cfg('devswarm_role.pg_dir_escalation'))) throw meshDefer; // a parked escalation notice
   var stateRel = ah.cfg('devswarm_role.pg_devswarm_dir') + '/' + ah.cfg('devswarm_role.pg_dir_gate') + '/' + sid.replace(/[^A-Za-z0-9_.-]/g, '_') + '.json';
   var stateFile = home + '/' + stateRel;
-  if (descriptors.length === 0 && !own.unknown && unanswered.length === 0 && !truncated) { fx.unlink = stateRel; return fx; }
+  if (descriptors.length === 0 && own.unread === 0 && !own.unknown && unanswered.length === 0 && !truncated) { fx.unlink = stateRel; return fx; }
 
   var entries = [];
   if (own.id !== null) {
     var oe = pgNewEntry(own.id, cwd, null);
+    oe.realUnread = own.unread;
     oe.unknown = own.unknown;
-    oe.reason = own.unknown ? 'own-summary-unreadable' : null;
+    oe.reason = own.stale ? 'own-cache-stale' : (own.unknown ? 'own-summary-unreadable' : null);
+    oe.urgency = own.urgency;
     entries.push(oe);
   }
   var now = ah.clock.now();
   if (ah.settings.touched('devswarm_role.pg_set_held')) throw meshDefer; // the owner's held partitions
   var ignore = pgIgnoreIds(home), keyMemo = Object.create(null), readyMemo = Object.create(null), goneMemo = Object.create(null);
   keyMemo[cwd] = selfKey;
+  if (derived !== null) readyMemo[selfKey] = pgSummaryWs(derived);
   function keyOf(wt) {
     if (!Object.prototype.hasOwnProperty.call(keyMemo, wt)) keyMemo[wt] = ah.mesh.repoKey(wt);
     return keyMemo[wt];
   }
   descriptors.forEach(function (d) {
     var isOwn = own.id === d.id;
-    if (isOwn && !own.parsed) return;
+    // the own descriptor is the own row's, except when the summary's own count was 0 (not checked at all): then it is counted here
+    if (isOwn && !(own.parsed && own.rawZero)) return;
     var fresh = selfKey !== null ? keyOf(d.worktree) : null;
     if (selfKey !== null && fresh !== null && selfKey !== fresh) return;
     var registered = selfKey !== null && fresh === null ? ah.mesh.registeredKey(d.raw, d.id) : fresh;
@@ -565,7 +638,7 @@ function pgGate(p, root, l) {
     var union = 0, unknown = false, archivedMemberUnread = 0, liveMembers = 0;
     var unknownMembers = [], contributors = [], foreignAll = fam.members.length > 0, gone = false, allDoneOrIdle = true;
     if (!famChild && fam.members.some(function (mi) { return entries[mi].stateSkipped; })) throw meshDefer; // an archived twin of the Primary's own row
-    var famBusy = false, famWaiting = false, famAgeUnknown = false, famStoreOnly = false, famOldest = null;
+    var famBusy = false, famWaiting = false, famAgeUnknown = false, famStoreOnly = false, famOldest = null, famUrgency = null;
     for (var mj = 0; mj < fam.members.length; mj++) {
       var mi = fam.members[mj], m = entries[mi];
       if (m.held || (famChild && (m.archived || m.appArchived || m.ignored))) {
@@ -585,6 +658,7 @@ function pgGate(p, root, l) {
       if (m.realUnread > 0) contributors.push([m.id, m.realUnread, m.archived, m.appArchived, mg]);
       if (m.unknown) { unknown = true; unknownMembers.push([m.id, m.reason === null ? 'unknown' : m.reason, m.reasonPath, m.reasonErrno]); }
       if (!m.foreign) foreignAll = false;
+      if (m.urgency !== null && m.urgency !== undefined) famUrgency = m.urgency;
     }
     if (famChild && liveMembers === 0) {
       if (archivedMemberUnread > 0) archivedUnreadFamilies += 1;
@@ -621,7 +695,7 @@ function pgGate(p, root, l) {
       notOwnCountOnly: contributors.some(function (c) { return own.id !== c[0]; }), foreign: foreignAll, worktreeGone: gone,
       doneOrIdle: liveMembers > 0 && famChild && allDoneOrIdle, mergedTwins: fam.mergedTwins, waitingOnInput: famWaiting,
       waiting: fam.members.map(function (x) { return entries[x]; }).filter(function (x) { return x.waiting; }).map(function (x) { return [x.id, x.waitingQ]; }),
-      busyStaleAgeMin: busyStaleAgeMin,
+      busyStaleAgeMin: busyStaleAgeMin, urgency: famUrgency,
     });
   }
   if (archivedUnreadFamilies > 0) fx.err += text.render(ah.cfg('devswarm_role.pg_err_archived_unread'), { n: String(archivedUnreadFamilies) });
@@ -656,8 +730,19 @@ function pgGate(p, root, l) {
   var hasIntent = intents !== null && Object.prototype.hasOwnProperty.call(intents, sig);
   var same = sig === lastSig;
   var effBlocks = same ? blocks : 0, effEscalated = same && escalated, effAcks = same ? intentAcks : 0;
-  // the drain marker of this Primary
-  if (own.id !== null && pgExists(pgDir(home) + '/' + ah.cfg('devswarm_role.pg_dir_drain') + '/' + own.id + '.json')) throw meshDefer;
+  // the in-flight drain marker of this Primary (devswarm-drain-marker.js): a fresh one of this session turns the block into a stderr
+  // notice and keeps the loop state unchanged; a stale one is removed and the gate goes on
+  var drain = own.id !== null ? pgDrainMarker(home, own.id) : null;
+  if (drain !== null && drain.stale) fx.drainClear = pgDrainRel(own.id);
+  else if (drain !== null && drain.session !== '' && drain.session === (sidRaw === undefined || sidRaw === null ? '' : String(sidRaw))) {
+    var keepQ = qSig === lastQSig;
+    fx.write = { rel: stateRel, body: JSON.stringify({ sig: sig, blocks: effBlocks, escalated: effEscalated, qSig: qSig, qBlocks: keepQ ? qBlocks : 0,
+      qEscalated: keepQ && qEscalated, intents: hasIntent ? pgOneKey(sig, intents[sig]) : {}, intentAcks: effAcks }) };
+    var first = pgReason(blocking, own, null, hasIntent,
+      { unanswered: unanswered, informational: informational, truncated: truncated, qEscalate: null, waiting: pgWaitingSeg(home, blocking) }).split('\n')[0];
+    fx.err += (first.indexOf(ah.cfg('devswarm_role.pg_drain_tag')) >= 0 ? '' : ah.cfg('devswarm_role.pg_drain_prefix')) + first + ah.cfg('devswarm_role.pg_drain_suffix');
+    return fx;
+  }
   // an unanswered question or a truncated question list bypasses the neglect cap; the question set has its own ceiling
   var bypassCap = unanswered.length > 0 || !!truncated;
   if (!bypassCap && effEscalated) return fx; // already escalated once: quiet
@@ -667,8 +752,7 @@ function pgGate(p, root, l) {
   var effQBlocks = qSig === lastQSig ? qBlocks : 0, effQEscalated = qSig === lastQSig && qEscalated;
   var nextQBlocks = effQBlocks, nextQEscalated = effQEscalated;
   var escalateTimes = null, qEscalateTimes = null;
-  var nextIntents = {};
-  if (hasIntent) nextIntents[sig] = intents[sig];
+  var nextIntents = hasIntent ? pgOneKey(sig, intents[sig]) : {};
   var stateBody = function (qb, qe) {
     return JSON.stringify({ sig: sig, blocks: nextBlocks, escalated: nextEscalated, qSig: qSig, qBlocks: qb, qEscalated: qe, intents: nextIntents, intentAcks: nextAcks });
   };
@@ -697,23 +781,43 @@ function pgGate(p, root, l) {
   // the stale-build downgrade: a plain neglect block is dropped while the host registered a newer version
   if (blocking.length > 0 && !bypassCap && escalateTimes === null && qEscalateTimes === null && pgVersionStale(root)) return fx;
   var wake = pgWakeLine(own.id, l);
-  var waitingSeg = '';
-  blocking.forEach(function (b) {
-    if (b.waitingOnInput) {
-      if (b.waiting.length === 0) waitingSeg += text.render(ah.cfg('devswarm_role.pg_waiting_line'), { title: pgTitle(home, b.id), q: '' });
-      b.waiting.forEach(function (w) {
-        var qs = w[1] !== null ? text.render(ah.cfg('devswarm_role.pg_waiting_q'), { q: w[1] }) : '';
-        waitingSeg += text.render(ah.cfg('devswarm_role.pg_waiting_line'), { title: pgTitle(home, w[0]), q: qs });
-      });
-    }
-    if (b.busyStaleAgeMin !== null) waitingSeg += text.render(ah.cfg('devswarm_role.pg_busy_stale_line'), { title: pgTitle(home, b.id), m: String(b.busyStaleAgeMin) });
-  });
-  var base = pgReason(blocking, own.id, escalateTimes, hasIntent, own.unknown, own.parsed,
-    { unanswered: unanswered, informational: informational, truncated: truncated, qEscalate: qEscalateTimes, waiting: waitingSeg });
+  var base = pgReason(blocking, own, escalateTimes, hasIntent,
+    { unanswered: unanswered, informational: informational, truncated: truncated, qEscalate: qEscalateTimes, waiting: pgWaitingSeg(home, blocking) });
   var cli = root + '/' + ah.cfg('devswarm_role.launcher_cli').target;
   var skip = text.render(ah.cfg('devswarm_role.pg_skip_cmd'), { cli: pgShQuote(ah.path.resolveAbs(cli)), guard: ah.cfg('devswarm_role.gate_guard') });
   fx.out = JSON.stringify({ decision: ah.cfg('devswarm_role.pg_decision_block'), reason: pgFrame(base + wake, skip) }) + '\n';
   return fx;
+}
+
+// The waiting-on-input and busy-but-stale lines of the blocking families, as buildReason places them.
+function pgWaitingSeg(home, blocking) {
+  var seg = '';
+  blocking.forEach(function (b) {
+    if (b.waitingOnInput) {
+      if (b.waiting.length === 0) seg += text.render(ah.cfg('devswarm_role.pg_waiting_line'), { title: pgTitle(home, b.id), q: '' });
+      b.waiting.forEach(function (w) {
+        var qs = w[1] !== null ? text.render(ah.cfg('devswarm_role.pg_waiting_q'), { q: w[1] }) : '';
+        seg += text.render(ah.cfg('devswarm_role.pg_waiting_line'), { title: pgTitle(home, w[0]), q: qs });
+      });
+    }
+    if (b.busyStaleAgeMin !== null) seg += text.render(ah.cfg('devswarm_role.pg_busy_stale_line'), { title: pgTitle(home, b.id), m: String(b.busyStaleAgeMin) });
+  });
+  return seg;
+}
+
+// `{ [k]: v }`.
+function pgOneKey(k, v) { var o = {}; o[k] = v; return o; }
+
+function pgDrainRel(id) { return ah.cfg('devswarm_role.pg_devswarm_dir') + '/' + ah.cfg('devswarm_role.pg_dir_drain') + '/' + id + '.json'; }
+
+// `readDrainMarker(home, id, { now })`: {stale, session} (session '' when the marker names none), or null (an unsafe id, a marker
+// that cannot be read or parsed, or one without a finite start time).
+function pgDrainMarker(home, id) {
+  if (!pgSafeId(id)) return null;
+  var m = pgJson(home + '/' + pgDrainRel(id));
+  if (m === null || typeof m !== 'object' || !piFinite(m.startedAt)) return null;
+  var age = ah.clock.now() - m.startedAt, ttl = pgSetNum('devswarm_role.pg_set_drain_ttl');
+  return { stale: !(age >= 0 && age <= ttl), session: m.sessionId !== null && m.sessionId !== undefined ? String(m.sessionId) : '' };
 }
 
 // `emitStrayingAdvisory(home, sessionId, repoKeyOf, selfKey)`: the straying warnings of this project's children (devswarm-plan.js
@@ -863,7 +967,8 @@ function pgListMore(ids, max) {
 
 // `buildReason` for the shapes the gate answers (no stale verdict). `q`: the unanswered and informational questions, the truncation
 // record, the question escalation count (or null) and the waiting-on-input lines, placed as buildReason places them.
-function pgReason(blocking, ownId, escalate, hasIntent, ownUnknown, ownParsed, q) {
+function pgReason(blocking, own, escalate, hasIntent, q) {
+  var ownId = own.id;
   if (q.qEscalate !== null) {
     var who = q.unanswered.slice(0, ah.cfgNum('devswarm_role.pg_q_max_shown')).map(pgSender).join(ah.cfg('devswarm_role.pg_q_sep'));
     var what = q.truncated ? ah.cfg('devswarm_role.pg_q_escalation_truncated') : text.render(ah.cfg('devswarm_role.pg_q_escalation_from'), { who: who, more: pgQMore(q.unanswered) });
@@ -884,7 +989,8 @@ function pgReason(blocking, ownId, escalate, hasIntent, ownUnknown, ownParsed, q
         bits.push(s);
       }
     }
-    if (isOwn(b.id) && ownParsed && !b.notOwnCountOnly) bits.push(ah.cfg('devswarm_role.pg_cached'));
+    // the provenance of the Primary's own count: re-read live, or the summary cache
+    if (isOwn(b.id) && own.source !== null && !b.notOwnCountOnly) bits.push(ah.cfg(own.source === 'live' ? 'devswarm_role.pg_live_resolved' : 'devswarm_role.pg_cached'));
     return b.id + (isOwn(b.id) ? you : '') + ' (' + bits.join(', ') + ')';
   }).join('; ');
   var more = blocking.length > max ? text.render(ah.cfg('devswarm_role.pg_and_more'), { n: String(blocking.length - max) }) : '';
@@ -914,9 +1020,12 @@ function pgReason(blocking, ownId, escalate, hasIntent, ownUnknown, ownParsed, q
     }).join('; ');
     body += text.render(ah.cfg('devswarm_role.pg_attribution'), { id: b.id, n: String(b.unread), parts: parts });
   });
-  if (ownUnknown) body += text.render(ah.cfg('devswarm_role.pg_own_unknown'), { id: ownId === null ? '' : ownId });
-  // the Primary's own mail (store rows past its read position; a summary count with an urgency is still Node's)
-  else if (ownEntry !== null && ownEntry.unread > 0) body += text.render(ah.cfg('devswarm_role.pg_own_unread'), { n: String(ownEntry.unread), id: ownId });
+  if (own.unknown) body += text.render(ah.cfg(own.stale ? 'devswarm_role.pg_own_stale' : 'devswarm_role.pg_own_unknown'), { id: ownId === null ? '' : ownId });
+  // the Primary's own mail, with the urgent prefix for an urgent or high summary urgency
+  else if (ownEntry !== null && ownEntry.unread > 0) {
+    var urgent = ah.cfg('devswarm_role.pg_urgent_levels').indexOf(ownEntry.urgency) >= 0;
+    body += (urgent ? ah.cfg('devswarm_role.pg_urgent_prefix') : '') + text.render(ah.cfg('devswarm_role.pg_own_unread'), { n: String(ownEntry.unread), id: ownId });
+  }
   if (ownEntry !== null && ownEntry.mergedTwins.length > 0) {
     var tw = ownEntry.mergedTwins;
     var list = tw.slice(0, max).join('; '), moreT = tw.length > max ? text.render(ah.cfg('devswarm_role.pg_twin_more'), { n: String(tw.length - max) }) : '';
@@ -934,7 +1043,8 @@ function pgReason(blocking, ownId, escalate, hasIntent, ownUnknown, ownParsed, q
 
 // Apply what the gate decided, only once nothing can defer any more.
 function pgApply(fx) {
-  if (fx.unlink !== null || fx.write !== null || fx.extra.length || fx.cacheOwed) ah.commit();
+  if (fx.unlink !== null || fx.write !== null || fx.extra.length || fx.cacheOwed || fx.drainClear !== null) ah.commit();
+  if (fx.drainClear !== null) ah.state.remove(fx.drainClear); // clearDrainMarker, best-effort
   // the advisory writes are best-effort, as Node's (a failed write shows the line again next Stop)
   fx.extra.forEach(function (w) { ah.state.writeAtomic(w.rel, w.body); });
   if (fx.unlink !== null) ah.state.remove(fx.unlink);

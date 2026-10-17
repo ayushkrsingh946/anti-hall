@@ -5,7 +5,8 @@
 //   own : also write this Primary's own descriptor (no inbox), its summary entry and a store with its registry row
 // PG_SUMMARY=question|unread puts a pending question / own unread into the summary entry.
 // PG_READER=self|other adds two store-only messages to the Primary and a per-session reader row past them: this harness's own
-// (the session record `.claude/sessions/<this script's parent pid>.json`, startedAt 5, is the case's seed) or a stranger's.
+// (the session record `.claude/sessions/<this script's parent pid>.json`, startedAt 5, is the case's seed) or a stranger's;
+// PG_READER_AT=<n> puts that row at n instead (n < 2: the reader is behind its mail). PG_URGENCY=<u> sets the entry's urgencyMax.
 const path = require('path');
 const fs = require('fs');
 const lib = path.join(__dirname, '..', '..', '..', '..', 'plugins', 'anti-hall', 'companion');
@@ -32,13 +33,14 @@ if (mode === 'own') {
     const reader = process.env.PG_READER === 'self' ? 'h:' + process.ppid + ':5' : 'h:1:1';
     s.readerCursorTxn((tx) => {
       for (const ns of ['store', 'nd']) tx.put({ partition: own, ns, reader: '#floor', value: 0 });
-      tx.put({ partition: own, ns: 'store', reader, value: 2 });
+      tx.put({ partition: own, ns: 'store', reader, value: Number(process.env.PG_READER_AT || 2) });
     });
   }
   s.close();
   const entry = { id: own, worktreePath: cwd, sessionId: 'sess-own', unread: 0, pendingQuestions: [] };
   if (process.env.PG_SUMMARY === 'question') entry.pendingQuestions = [{ from: 'c-9', ts: 1 }];
   if (process.env.PG_SUMMARY === 'unread') entry.unread = 2;
+  if (process.env.PG_URGENCY) entry.urgencyMax = process.env.PG_URGENCY;
   fs.mkdirSync(path.join(dir, 'summaries'), { recursive: true });
   fs.writeFileSync(path.join(dir, 'summaries', key + '.json'), JSON.stringify({ generatedAt: 1, workspaces: { [own]: entry }, recent: [], archivedRegistryRows: [] }));
 }

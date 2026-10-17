@@ -454,6 +454,11 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `daemon.lock_wait_ms` | `1500` |  | ms | How long a starting daemon waits for an outgoing (version-handoff) daemon to release the singleton lock. |
 | `daemon.malloc_conf` | `narenas:1,dirty_decay_ms:0,muzzy_decay_ms:0` |  |  | Allocator purge tuning handed to the daemon at start (jemalloc `malloc_conf` syntax): one arena for the four worker threads (less fragmentation) and decay 0 (freed pages go back to the OS at once; the system allocators keep them, which left RSS at 2.5x the live heap). Measured on 1000 mixed calls, this Mac: system allocator 45-48 MB RSS, jemalloc with only decay 0 37 MB, with narenas:1 as well 32 MB (live heap 16 MB), adding tcache:false 27 MB but p50 call latency 10 ms against 6.5-7 ms, so tcache stays on. empty = the allocator's own defaults. A variable the caller already set is not overridden. |
 | `daemon.malloc_conf_vars` | `_RJEM_MALLOC_CONF, MALLOC_CONF` |  |  | Environment variables the allocator reads its tuning from (the crate's prefixed name and the plain one). |
+| `daemon.malloc_decay_keys` | `dirty_decay_ms, muzzy_decay_ms` |  |  | The decay settings of `daemon.malloc_conf` that a daemon started without the tuning in its environment (a launchd or systemd unit, a replay or test driver) applies to the running allocator; each is also the name of the allocator control under `arenas.` and `arena.<all>.`. `narenas` is not among them: it cannot change once the allocator runs. |
+| `daemon.malloc_decay_kind` | `malloc_decay` |  |  | Event-log kind of the line written when the daemon applies (or cannot apply) the allocator decay settings at start. |
+| `daemon.malloc_decay_why_error` | `the allocator refused {key} (error {rc})` |  |  | Reason logged when the allocator refused a decay setting. Placeholders: {key}, {rc} (the allocator's error number). |
+| `daemon.malloc_decay_why_none` | `daemon.malloc_conf holds no decay setting` |  |  | Reason logged when `daemon.malloc_conf` holds none of `daemon.malloc_decay_keys`. |
+| `daemon.malloc_decay_why_system` | `the system allocator is active` |  |  | Reason logged when the decay settings are not applied because the system allocator is active. |
 | `daemon.max_request` | `1048576` | `AH_ENGINE_MAX_REQUEST` | bytes | Largest request the daemon reads; the client sends nothing larger (it falls back instead). |
 | `daemon.mem_mb` | `512` | `AH_ENGINE_MEM_MB` | MB | Data-segment limit applied with setrlimit; 0 = none. It is a ceiling against runaway allocation, not a budget (the RSS cap is the budget), and Linux enforces it on thread stacks, so it must exceed daemon.workers times git.stack_mb plus headroom or a check thread cannot start. macOS does not support RLIMIT_DATA here, so the daemon reports unsupported and relies on the RSS/footprint cap. |
 | `daemon.mem_metric` | `footprint` |  |  | Which figure `daemon.rss_cap_kb` is compared with: `footprint` (the process's own memory: macOS physical footprint, Linux RssAnon + RssShmem; shared and reclaimable file pages are not counted) or `rss` (the kernel's resident set, which also counts shared code pages touched over time and made the daemon restart without a real leak). Falls back to the resident set where the platform has no footprint. |
@@ -4054,6 +4059,9 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_role.pg_dir_stray_seen` | `stray-seen` |  |  | The straying warnings each Primary session was already shown (stray-seen/<sha1(session)>.json), under the DevSwarm directory. |
 | `devswarm_role.pg_dir_summaries` | `summaries` |  |  | The per-project summary projections, under the DevSwarm directory. |
 | `devswarm_role.pg_dir_workspaces` | `workspaces` |  |  | The workspace descriptors, under the DevSwarm directory. |
+| `devswarm_role.pg_drain_prefix` | `⚠️ anti-hall · devswarm-parent-gate: ` |  |  | Put before the first reason line of the drain notice (stderr) unless it carries pg_drain_tag. |
+| `devswarm_role.pg_drain_suffix` | ` — not blocking (in-flight drain marker fresh for this session)\n` |  |  | Ends the drain notice: the Stop is not blocked while this session's drain marker is fresh. |
+| `devswarm_role.pg_drain_tag` | ` anti-hall · ` |  |  | A first reason line that already carries this tag gets no drain-notice prefix. |
 | `devswarm_role.pg_err_archived_unread` | `💡 anti-hall · devswarm-parent-gate: {n} archived workspace(s) still have unre...` |  |  | Stderr line counting archived families that still hold unread mail: {n}. |
 | `devswarm_role.pg_err_busy` | `⚠️ anti-hall · devswarm-parent-gate: {id}: busy, {n} queued{age}\n` |  |  | Stderr line for a busy child with queued mail: {id}, {n} messages, {age} (the age phrase, or empty). |
 | `devswarm_role.pg_err_busy_age` | ` (oldest {m}m)` |  |  | The age phrase of that line: {m} minutes. |
@@ -4084,6 +4092,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_role.pg_kind_children` | `children` |  |  | The block kind of a child family. |
 | `devswarm_role.pg_kind_mailbox` | `mailbox` |  |  | The block kind of the Primary's own family. |
 | `devswarm_role.pg_kind_wakepath` | `wakepath` |  |  | The block kind of the clean pass's mailbox-wake block (its loop-state signature is the hashed prefix and this kind). |
+| `devswarm_role.pg_live_resolved` | `live-resolved` |  |  | Marks an own count the gate re-read live from this reader's own position in the store. |
 | `devswarm_role.pg_max_shown` | `5` |  |  | Rows, twins and ids named in the reason before the rest is counted. |
 | `devswarm_role.pg_max_unknown_shown` | `3` |  |  | Unknown members named per row (MAX_UNKNOWN_MEMBERS_SHOWN). |
 | `devswarm_role.pg_min_per_hour` | `60` |  |  | Minutes in an hour (approxAge). |
@@ -4091,6 +4100,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_role.pg_ms_per_min` | `60000` |  |  | Milliseconds in a minute (the gate's minute settings and its age lines). |
 | `devswarm_role.pg_neglect` | `Neglect: {n} workspace(s) still need attention before this Primary turn ends:...` |  |  | The neglect line: {n}, {shown}, {more}. |
 | `devswarm_role.pg_no_session` | `nosession` |  |  | The state-file name used when the payload has no session id (stateFileFor). |
+| `devswarm_role.pg_own_stale` | `YOUR OWN inbound status could not be confirmed: the cached summary predates t...` |  |  | The own-summary segment when the cached summary predates this reader's live position and the live recheck could not settle it: {id}. |
 | `devswarm_role.pg_own_unknown` | `YOUR OWN inbound status could not be confirmed (own-summary unreadable or cor...` |  |  | The own-summary-unreadable segment: {id}. |
 | `devswarm_role.pg_own_unread` | `YOU (the Primary) have {n} unread parent/peer message(s) — STOP and read them...` |  |  | The reason segment for the Primary's own unread mail. Placeholders: {n}, {id}. |
 | `devswarm_role.pg_plural_s` | `s` |  |  | Plural suffix. |
@@ -4116,6 +4126,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_role.pg_set_busy_fresh` | `5 entries` |  |  | Setting devswarm.parentGateBusyFreshMin: minutes a child's transcript counts as fresh for the busy test. The engine answers only while it is unset, with this default. |
 | `devswarm_role.pg_set_busy_max_age` | `5 entries` |  |  | Setting devswarm.parentGateBusyMaxAgeMin: minutes of the oldest unread past which even a busy child blocks. The engine answers only while it is unset, with this default. |
 | `devswarm_role.pg_set_cap` | `5 entries` |  |  | Setting devswarm.parentGateCap: forced acknowledgements per blocking signature before the one escalation (Node clamps it to 2..5). The engine answers only while it is unset, with this default. |
+| `devswarm_role.pg_set_drain_ttl` | `5 entries` |  |  | Setting devswarm.drainTtlMs: milliseconds an in-flight drain marker stays fresh (devswarm-drain-marker.js). The engine answers only while it is unset, with this default. |
 | `devswarm_role.pg_set_grace` | `5 entries` |  |  | Setting devswarm.parentGateNeglectGraceMin: minutes a fresh unread message is still in flight and not neglect. The engine answers only while it is unset, with this default. |
 | `devswarm_role.pg_set_held` | `5 entries` |  |  | Setting devswarm.heldPartitions: owner-held partition ids. The engine answers only while it is unset everywhere (an empty set). |
 | `devswarm_role.pg_set_neglect_min` | `5 entries` |  |  | Setting devswarm.parentGateNeglectMinUnread: unread messages a not-busy child may hold without a block. The engine answers only while it is unset, with this default. |
@@ -4143,6 +4154,8 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_role.pg_title_fmt` | `{name} ({short})` |  |  | A workspace's display name: {name}, {short} (the id's first characters). |
 | `devswarm_role.pg_twin_more` | ` and {n} more` |  |  | More twins than shown: {n}. |
 | `devswarm_role.pg_twins` | `NOTE — the unread count above includes {n} same-worktree twin descriptor{s} r...` |  |  | The merged-twin note: {n}, {s}, {list}. |
+| `devswarm_role.pg_urgent_levels` | `urgent, high` |  |  | The summary entry urgencies (`urgencyMax`) that put the urgent prefix on the Primary's own-unread segment. |
+| `devswarm_role.pg_urgent_prefix` | `URGENT — ` |  |  | Put before the Primary's own-unread segment when its urgency is one of pg_urgent_levels. |
 | `devswarm_role.pg_verb_are` | `are` |  |  | Plural verb. |
 | `devswarm_role.pg_verb_has` | `has` |  |  | Singular verb. |
 | `devswarm_role.pg_verb_have` | `have` |  |  | Plural verb. |
@@ -9550,6 +9563,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `wake_watch.active_cache_file` | `hivecontrol-active.json` |  |  | The supervisor's cache of the hivecontrol active list, under the DevSwarm state directory. While it exists the engine does not decide the idle-skip for a worktree the app database has no opinion on: Node does. |
 | `wake_watch.archived_recheck_floor_ms` | `100` |  |  | Smallest accepted value of the archived re-check override. |
 | `wake_watch.archived_recheck_ms` | `120000` |  |  | How often a child watcher asks again whether its own workspace is archived (it reads the app database), in milliseconds. |
+| `wake_watch.cache_dir` | `cache` |  |  | The cache directory under the plugins directory (one directory per marketplace, plugin and version). |
 | `wake_watch.diag_lock_held` | `[wake-watch] another watcher already holds the lock for {role} {id} (holder p...` |  |  | Printed on stderr when a live watcher already holds the lock. {role} {id} {pid} {age} {session} {acquired} {version}. |
 | `wake_watch.diag_no_identity` | `[wake-watch] could not resolve a DevSwarm identity for cwd={cwd}; exiting qui...` |  |  | Printed on stderr when DevSwarm is active but no identity resolves. {cwd}. |
 | `wake_watch.diag_not_devswarm` | `[wake-watch] not a DevSwarm session; exiting quietly (not arming).\n` |  |  | Printed on stderr when the session shows no sign of DevSwarm. |
@@ -9559,6 +9573,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `wake_watch.dir_inbox` | `inbox` |  |  | The directory of the children's durable inboxes, under the DevSwarm state directory. |
 | `wake_watch.dir_summaries` | `summaries` |  |  | The directory of the projects' derived summaries, under the DevSwarm state directory. |
 | `wake_watch.dir_wake` | `wake` |  |  | The directory of the watchers' private cursors, under the DevSwarm state directory. |
+| `wake_watch.enabled_plugins_field` | `enabledPlugins` |  |  | The settings member that maps an install key to whether it is enabled. |
 | `wake_watch.env_archived_recheck` | `ANTIHALL_DEVSWARM_WAKE_WATCH_ARCHIVED_RECHECK_MS` |  |  | Test knob: overrides the archived re-check interval (milliseconds). |
 | `wake_watch.env_handoff` | `ANTIHALL_WAKE_WATCH_HANDED_OFF` |  |  | Set by a watcher that hands over to a newer build: the version it handed over to, so a chain of handoffs only ever moves forward. |
 | `wake_watch.env_source_branch` | `DEVSWARM_SOURCE_BRANCH` |  |  | The variable whose non-blank value marks a DevSwarm child workspace. |
@@ -9576,7 +9591,11 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `wake_watch.handoff_not_registered` | `the harness has not registered it` |  |  | Part of the cached-only note when the registry names no version. |
 | `wake_watch.handoff_still_registers` | `the harness still registers {version}` |  |  | Part of the cached-only note: the registry's version. {version}. |
 | `wake_watch.inbox_suffix` | `.ndjson` |  |  | End of an inbox file's name. |
+| `wake_watch.install_location_field` | `installLocation` |  |  | The member of a registered marketplace that names the directory it lives in. |
+| `wake_watch.installed_file` | `installed_plugins.json` |  |  | The harness registry of installed plugins, under the plugins directory. |
 | `wake_watch.json_suffix` | `.json` |  |  | End of a JSON state file's name. |
+| `wake_watch.key_sep` | `@` |  |  | Between plugin and marketplace in an install key (`plugin@marketplace`). |
+| `wake_watch.known_marketplaces_file` | `known_marketplaces.json` |  |  | The harness record of registered marketplaces, under the plugins directory. |
 | `wake_watch.label_broadcast` | `broadcast` |  |  | Label of the broadcast channel. |
 | `wake_watch.label_mesh_direct` | `mesh-direct` |  |  | Label of the child's mesh-direct channel. |
 | `wake_watch.label_ndjson` | `ndjson` |  |  | Label of the child's durable-inbox channel when two channels are watched. |
@@ -9601,14 +9620,17 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `wake_watch.lock_step_ms` | `5` |  |  | The pause between retries, in milliseconds. |
 | `wake_watch.lock_suffix` | `.lock` |  |  | End of the watcher lock's file name. |
 | `wake_watch.lock_wait_ms` | `0` |  |  | How long to keep retrying a lock another watcher holds, in milliseconds (0: refuse at once). |
+| `wake_watch.manifest_name_field` | `name` |  |  | The manifest member that names the plugin (the first half of the install key). |
 | `wake_watch.manifest_rel` | `.claude-plugin/plugin.json` |  |  | The plugin manifest that names the build the watcher runs, relative to the plugin root. |
-| `wake_watch.node_bin` | `node` |  |  | The interpreter that runs the newer build's watcher script on a handoff. |
+| `wake_watch.marketplace_plugin_rel` | `plugins/anti-hall` |  |  | Where a marketplace keeps the plugin, relative to the marketplace directory: the manifest of the newest source build is read there. |
+| `wake_watch.plugins_rel` | `.claude/plugins` |  |  | The harness's plugins directory, relative to the home: its cache, registry and marketplace records. |
 | `wake_watch.poll_max_ms` | `60000` |  |  | Ceiling of the tick in milliseconds. |
 | `wake_watch.poll_min_ms` | `250` |  |  | Floor of the tick in milliseconds. |
 | `wake_watch.reason_disabled` | `disabled-by-settings` |  |  | Refusal reason (closed vocabulary): switched off by devswarm.wakeWatch. |
 | `wake_watch.reason_identity` | `identity-unresolved` |  |  | Refusal reason (closed vocabulary): no DevSwarm identity could be resolved. |
 | `wake_watch.reason_lock_held` | `lock-held` |  |  | Refusal reason (closed vocabulary): another watcher holds the lock. |
 | `wake_watch.reason_not_devswarm` | `not-a-devswarm-session` |  |  | Refusal reason (closed vocabulary): the session is not a DevSwarm session. |
+| `wake_watch.registry_plugins_field` | `plugins` |  |  | The registry member that maps `<plugin>@<marketplace>` to its install records. |
 | `wake_watch.replacement_escape` | `�` |  |  | The JSON escape a lone surrogate escape is rewritten to before parsing (the strict parser refuses it, JavaScript reads it). |
 | `wake_watch.repos_root_re` | `[\\/]\.devswarm[\\/]repos[\\/]` |  |  | Regex source: a worktree under the DevSwarm repos root, the only kind the supervisor's active list can call archived. |
 | `wake_watch.role_child` | `child` |  |  | The role word of a child workspace in the lines. |
@@ -9620,8 +9642,9 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `wake_watch.set_enabled` | `5 entries` |  |  | The setting devswarm.wakeWatch: off refuses to arm (the cron wake fallback is unaffected). |
 | `wake_watch.set_idle_skip` | `6 entries` |  |  | The setting devswarm.wakeWatchIdleSkip: a Primary with no live child workspace need not arm (Node prints its one idle line). |
 | `wake_watch.set_poll_ms` | `7 entries` |  |  | The setting devswarm.wakeWatchPollMs: the tick of the watcher in milliseconds (lock heartbeat, parent check, stale-build check, reads). A change of a watched file wakes the tick early. |
-| `wake_watch.stale_script_rel` | `companion/lib/devswarm-wake-watch.js` |  |  | The watcher script of another build, relative to that build's cache directory: a newer build is handed over to only when this file exists. |
+| `wake_watch.stale_script_rel` | `companion/lib/devswarm-wake-watch.js` |  |  | The Node watcher script of another build, relative to that build's cache directory: named only in the re-arm line printed when a handoff is refused. A handoff itself needs only that build's manifest and never runs this script. |
 | `wake_watch.tmp_suffix` | `.tmp` |  |  | End of the temporary file a cursor is written to before the rename. |
+| `wake_watch.user_settings_rel` | `.claude/settings.json` |  |  | The user's harness settings file, relative to the home: it says which installs are enabled. |
 | `wake_watch.verb` | `wake-watch` |  |  | The `ah-engine devswarm` verb that runs the idle-wake Monitor. |
 | `wake_watch.word_unavailable` | `unavailable` |  |  | Said where the session of a lock holder is not recorded. |
 | `wake_watch.word_unknown` | `unknown` |  |  | Said where a role, id or version is not known. |
@@ -9848,14 +9871,17 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `units.out_present` | `present` |  |  | Status outcome: the file is there. |
 | `units.out_refused` | `refused` |  |  | Outcome: a service-manager command refused under a test or a temporary home. |
 | `units.plist_arg` | `    <string>{arg}</string>` |  |  | One ProgramArguments entry of the LaunchAgent. {arg}. |
+| `units.plist_env` | `  <key>EnvironmentVariables</key>\n  <dict>\n{entries}\n  </dict>\n` |  |  | The EnvironmentVariables block of the LaunchAgent, written when the engine has allocator tuning to hand its daemon (`daemon.malloc_conf`; the daemon reads it before its first allocation, and a unit is a starter that otherwise gives it none). {entries} is one units.plist_env_entry per variable. |
+| `units.plist_env_entry` | `    <key>{name}</key>\n    <string>{value}</string>` |  |  | One variable of the LaunchAgent's EnvironmentVariables. {name} {value}, both XML-escaped. |
 | `units.plist_log` | `/dev/null` |  |  | Where launchd sends the unit's stdout and stderr (the daemon writes its own log). |
 | `units.plist_suffix` | `.plist` |  |  | The file name suffix of a launchd unit. |
-| `units.plist_template` | `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD...` |  |  | The LaunchAgent of the engine unit. {label} {args} (one units.plist_arg per argument) {interval} {log}; every value is XML-escaped. |
+| `units.plist_template` | `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD...` |  |  | The LaunchAgent of the engine unit. {label} {args} (one units.plist_arg per argument) {env} (the units.plist_env block, or nothing) {interval} {log}; every value is XML-escaped. |
 | `units.reason_sep` | ` - ` |  |  | Between the outcome and the reason in a report line. |
 | `units.retired_subdir` | `retired` |  |  | Where moved-aside unit files go, inside the units directory: `<file name>.<epoch ms>`. |
 | `units.serve_args` | `serve` |  |  | The arguments the unit gives the engine binary. |
+| `units.service_env` | `Environment="{name}={value}"` |  |  | One Environment line of the systemd service: the allocator tuning (`daemon.malloc_conf`) for the daemon the unit starts, double-quoted with the systemd escapes applied. {name} {value}. |
 | `units.service_suffix` | `.service` |  |  | The file name suffix of a systemd service. |
-| `units.service_template` | `[Unit]\nDescription=anti-hall engine daemon (starts it when none is running)\...` |  |  | The systemd user service of the engine unit. {exec} is the quoted command line. |
+| `units.service_template` | `[Unit]\nDescription=anti-hall engine daemon (starts it when none is running)\...` |  |  | The systemd user service of the engine unit. {exec} is the quoted command line; {env} is one units.service_env line per variable, or nothing. |
 | `units.stage_name` | `units-heal` |  |  | The progress name of update's units heal stage. |
 | `units.state_subdir` | `units` |  |  | The units directory inside the engine state directory (ledger, lock, retired files). The reaper opt-in marker is mcp_reaper.job_optin_rel. |
 | `units.sub_heal` | `heal` |  |  | The subcommand that installs the engine unit and retires the Node units whose duty the engine runs (what update and doctor --repair call). |
@@ -9952,6 +9978,8 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `diagnostics.budget_cpu_pct` | `2` |  | % | CPU budget of the daemon, percent of one core. A breach is reported when the CPU over diagnostics.budget_cpu_windows consecutive daemon.cpu_check_ms windows stays at or above it; 0 turns the CPU budget off. |
 | `diagnostics.budget_cpu_windows` | `2` |  |  | Consecutive daemon.cpu_check_ms windows over the CPU budget that make a breach (one busy window is a burst, not a breach). |
 | `diagnostics.budget_mem_mb` | `100` |  | MB | Memory budget of the daemon in MB, measured with the figure daemon.mem_metric selects. A breach is reported while the daemon is over it; 0 turns the memory budget off. |
+| `diagnostics.check_mem` | `true` |  |  | Measure the bytes each check allocates (total, peak growth, kept) from per-thread counters in the counting allocator. Off also stops the counting in the allocator. Cost is a few nanoseconds per allocation. |
+| `diagnostics.check_mem_sample_every` | `1` |  |  | Measure every Nth check call (1 = every call). Raise it only if the measured cost of the per-thread counters becomes a problem. |
 | `diagnostics.debug_flag` | `--debug` |  |  | The command-line flag that turns debug mode on for one `serve` or `hook` process. |
 | `diagnostics.debug_log_max_bytes` | `8388608` |  | bytes | Size at which the debug log is rotated (the old file is kept once, as <name>.1, replacing the previous one), so it never holds more than twice this. |
 | `diagnostics.debug_mem_snapshot_ms` | `30000` |  | ms | In debug mode, how often the watchdog writes a memory line (resident set, footprint, allocator and component sizes) to the debug log; in normal mode memory is only snapshotted when the resident-set cap trips. |
@@ -10014,7 +10042,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `mem.evidence_cache_hard_bytes` | `20971520` |  | bytes | Bytes of kept transcript evidence at which an insert is refused (the answer is returned, not kept) and the cache is recycled. |
 | `mem.evidence_cache_low_water_pct` | `80` |  |  | Percent of mem.evidence_cache_soft_bytes the kept transcript evidence is evicted down to when the soft limit is reached. |
 | `mem.evidence_cache_soft_bytes` | `10485760` |  | bytes | Bytes of kept transcript evidence held before the least recently used are dropped down to the low-water mark. |
-| `mem.evidence_walk_hard_bytes` | `25165824` |  | bytes | Bytes of kept evidence walks at which an insert is refused (the check defers) and the cache is recycled. |
+| `mem.evidence_walk_hard_bytes` | `25165824` |  | bytes | Bytes of kept evidence walks at which an insert is refused and the cache is recycled; the worker thread still keeps its one walk, so the check never defers for it. |
 | `mem.evidence_walk_low_water_pct` | `80` |  |  | Percent of mem.evidence_walk_soft_bytes the kept evidence walks are evicted down to when the soft limit is reached. |
 | `mem.evidence_walk_soft_bytes` | `12582912` |  | bytes | Bytes of kept evidence walks (the claim ledger's joined evidence text) held before the least recently used are dropped down to the low-water mark. |
 | `mem.global_hard_bytes` | `125829120` |  | bytes | Process memory above which every holder is recycled and every cache insert is refused. If it is still above this `mem.global_restart_after_s` later, the daemon is asked to restart cleanly and the reason is recorded in the event log. |
@@ -10042,6 +10070,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `mem.key_cache_low_water_pct` | `80` |  |  | Percent of mem.key_cache_soft_bytes cwd-to-project keys are evicted down to when the soft limit is reached. |
 | `mem.key_cache_max_entries` | `4096` |  |  | Cwd-to-project cache entries kept at most; past it the least recently used cwd is dropped first. |
 | `mem.key_cache_soft_bytes` | `262144` |  | bytes | Estimated bytes of cached cwd-to-project keys held before least recently used paths are evicted down to the low-water mark. |
+| `mem.ledger_skew_bytes` | `262144` |  | bytes | Slack in the memory ledger's invariant (the named holders must fit inside the counted Rust heap): the holders and the heap are read a few microseconds apart while other threads allocate, so a holder total up to this much over the heap is not reported as an overcount. |
 | `mem.msg_exit_reason` | `memory: {holder} over its hard limit ({usage} over {limit} bytes) for {secs} ...` |  |  | Exit reason recorded when the daemon restarts because memory stayed over a hard limit. Placeholders: holder, usage, limit, secs. |
 | `mem.msg_hard` | `{holder} crossed its hard memory limit ({usage} over {limit} bytes): inserts ...` |  |  | Event-log line when a holder crosses its hard limit (the insert is refused and the holder recycled). Placeholders: holder, usage, limit. |
 | `mem.msg_restart` | `{holder} stayed over its hard memory limit ({usage} over {limit} bytes) after...` |  |  | Event-log line when a clean restart is requested because memory stayed over a hard limit. Placeholders: holder, usage, limit. |
@@ -10450,6 +10479,8 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `msg.log_hung_spared` | Log detail when a client declines to end a daemon it found hung, because the heartbeat moved, or the process generation (pid, start time, executable, state dir) could not be confirmed. {pid} = the pid the heartbeat names, {why} = the stale-heartbeat detail. |
 | `msg.log_lock_fail` | Start-failure detail when the lock file cannot be opened. Placeholders: {path}, {err}. |
 | `msg.log_lock_no_daemon` | Log detail when a starting daemon gives up on the singleton lock while no daemon answers on the socket. Placeholders: {path}, {pid} (the pid the lock file names, may be empty), {live_engine}. |
+| `msg.log_malloc_decay_applied` | Event-log detail (kind malloc_decay) when the daemon, started without the allocator tuning in its environment, applied the decay settings of daemon.malloc_conf at runtime. Placeholder: {settings} (key=value list). |
+| `msg.log_malloc_decay_skipped` | Event-log detail (kind malloc_decay) when the allocator decay settings could not be applied at start; the daemon runs with the allocator's own defaults. Placeholder: {reason}. |
 | `msg.log_not_socket` | Start-failure detail when something other than a socket sits at the socket path. Placeholder: {path}. |
 | `msg.log_operator_reset` | Log detail for `reset`. |
 | `msg.log_panic` | Log and failure detail when a request handler panicked. |

@@ -109,7 +109,7 @@ fn tail_has_any(path: &str, window: u64, needles: &[String], lower_needles: &[St
     Some(lower_needles.iter().any(|n| lower.contains(n.as_str())))
 }
 
-fn read_tail(path: &str, window: u64) -> Option<String> {
+pub(super) fn read_tail(path: &str, window: u64) -> Option<String> {
     use std::io::{Read, Seek, SeekFrom};
     let mut f = std::fs::File::open(path).ok()?;
     let size = f.metadata().ok()?.len();
