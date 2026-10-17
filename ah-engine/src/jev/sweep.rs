@@ -577,7 +577,10 @@ pub fn sweep_rt(home: &Path, env: &Env, now: i64, only: Option<&[String]>, rt: O
         let Ok(text) = std::fs::read_to_string(&file) else { continue };
         // a restricted sweep parses only a file that can match: the file name or the text names one of `only` (a plan is matched
         // by its id, its file name or its worktree, all of which are in the text)
-        if only.is_some_and(|o| !o.iter().any(|x| !x.is_empty() && (*x == key || text.contains(x.as_str())))) {
+        // (a JSON writer may escape the path in the file (`\/`, `\uXXXX`, `\"`, `\\`): a file holding any escape, or an entry that
+        // could be written escaped, can't be ruled out as text and is parsed; the exact match below decides)
+        let maybe_escaped = |x: &str| !x.is_ascii() || x.contains(['"', '\\']);
+        if only.is_some_and(|o| !text.contains('\\') && !o.iter().any(|x| !x.is_empty() && (*x == key || maybe_escaped(x) || text.contains(x.as_str())))) {
             continue;
         }
         crate::threads::tally("jev_sweep_plans_parsed", 1);

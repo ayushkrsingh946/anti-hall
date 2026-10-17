@@ -635,6 +635,33 @@ fn a_restricted_jev_sweep_parses_only_the_plan_files_that_can_match() {
     assert_eq!(parsed() - before, 1, "a plan named by its file stem is parsed alone");
 }
 
+#[test]
+fn a_restricted_jev_sweep_still_matches_a_plan_whose_worktree_is_written_escaped() {
+    ah_engine::defaults::init().unwrap();
+    let t = TempDir::new("sweep-escaped");
+    let home = t.0.join("home");
+    let plans = home.join(".anti-hall/devswarm/plans");
+    std::fs::create_dir_all(&plans).unwrap();
+    // the same worktree the way a JSON writer may escape it: `\/` for `/`, `\u00e9` for a non-ASCII char
+    let escaped = [
+        ("primary-esc1.json", r#"{"id":"primary-esc1","worktreePath":"\/tmp\/ws-x","steps":[{"title":"s"}]}"#, "/tmp/ws-x"),
+        ("primary-esc2.json", r#"{"id":"primary-esc2","worktreePath":"/tmp/caf\u00e9","steps":[{"title":"s"}]}"#, "/tmp/caf\u{e9}"),
+    ];
+    let env = ah_engine::jev::settings::Env::from_pairs([
+        ("HOME", home.to_string_lossy().into_owned()),
+        ("ANTIHALL_JEV", "1".to_string()),
+        ("CLAUDE_PLUGIN_OPTION_JEV_INTEGRATION_DEVSWARM_WAIT_KIND", "on".to_string()),
+    ]);
+    let parsed = || ah_engine::threads::work()["jev_sweep_plans_parsed"].as_u64().unwrap_or(0);
+    // each file is added in turn; the sweep must parse every escaped file written so far (none is skipped by the text prefilter)
+    for (n, (file, text, wt)) in escaped.iter().enumerate() {
+        std::fs::write(plans.join(file), text).unwrap();
+        let before = parsed();
+        ah_engine::jev::sweep::sweep_only(&home, &env, now(), Some(&[wt.to_string()]));
+        assert_eq!(parsed() - before, n as u64 + 1, "the escaped plan for {wt} is parsed, not skipped");
+    }
+}
+
 // ---- watcher plan ----------------------------------------------------------------------------------------------------------
 
 #[test]
