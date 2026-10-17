@@ -248,3 +248,31 @@ test('launcher picks the ENABLED anti-hall@* install, not the anti-hall@anti-hal
     rm(home);
   }
 });
+
+test('launcher-choice.log gets one line per CHANGE of choice, not one per run (#216)', () => {
+  const home = tmpHome();
+  try {
+    const root = path.join(home, 'only-install', 'plugins', 'anti-hall');
+    const kind = ['scripts', 'devswarm.js'];
+    writeRealTarget(root, kind, 'console.log("ONLY");\n');
+    writeRealTarget(root, ['companion', 'lib', 'devswarm-wake-watch.js'], 'console.log("ONLY");\n');
+    const dir = path.join(home, '.claude', 'plugins');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'installed_plugins.json'), JSON.stringify({
+      version: 2,
+      plugins: { 'anti-hall@anti-hall': [{ scope: 'user', installPath: root, version: '0.300.2' }] },
+    }));
+    fs.writeFileSync(path.join(home, '.claude', 'settings.json'), JSON.stringify({ enabledPlugins: {} }));
+    const env = Object.assign({}, process.env, { HOME: home, USERPROFILE: home });
+    const { cli } = stableLauncher.installLaunchers({
+      cliFallback: path.join(root, 'scripts', 'devswarm.js'),
+      watcherFallback: path.join(root, 'companion', 'lib', 'devswarm-wake-watch.js'),
+      home,
+    });
+    for (let i = 0; i < 3; i++) execFileSync(process.execPath, [cli], { env });
+    const lines = fs.readFileSync(path.join(home, '.anti-hall', 'ah-engine', 'launcher-choice.log'), 'utf8').trim().split('\n');
+    assert.strictEqual(lines.length, 1);
+  } finally {
+    rm(home);
+  }
+});
