@@ -3,13 +3,13 @@
 # compares the command with the script on seeded scratch homes.
 
 [update_post.stages]
-doc = """The post-pull stages in the order update.js runs them. `name` is the progress name, `key` the status key, `fn` the exported Node stage function the engine runs (a bounded subprocess) when it cannot answer the stage itself. `budget`: the overall post-pull budget defers the stage. `files`: plugin files the stage needs (relative to the plugin dir); if one is missing Node answers. `gate`: the stage is DevSwarm-session-only; `gate_json` is the answer with the gate closed. `state`: keys of update-sweep-state.json that must all hold completedVersion == the new version for the one-time stage to be done; `done_json` is the answer then (`{version}` in its detail). `passes`: the options handed to the Node function (`version`, `hashes` = the store hashes ordered smallest first, `deadline` = the post-pull deadline). `enabled`: false makes the stage report itself skipped (`disabled_json`) without running anything (read on every run). `fallback`: the Node stage function the engine runs when its native port cannot answer (a store it cannot open the way Node does, a case only Node decides). `done`, `out`, `detail`, `detail_dry`, `errors_text`, `left_text`: the shape of a native store stage's answer (`done` names the count the detail's `{done}` shows, outside and inside the dry-run preview). `native`: the engine answers the stage itself, no Node (`reader_cursors_import`, `reader_floor_repair`, `dual_partition_acks`, `promote_unclaimed`, `cursor_hygiene`, `merge_split_backend_stores`, `child_sender_labels`: the store stages; `reply_state`, `gate_intents`, `auto_archived`: the state-file migrations of migrate-state.js, shaped by `label`/`out`/`already`/`detail` exactly as update.js shapes them; `settings`: the settings forward-migration, the one-time legacy Jev key opt-in and the Jev triage cache repair; `codex_graphify`: the Codex hooks.json graphify-group cleanup). `empty_when`: a store repair the engine answers itself when the machine has nothing for it to walk (`no_stores`: no DevSwarm store directory; `no_app_db`: no readable DevSwarm app database), with `empty_json` (`empty_dry_json` under the ingest dry-run switch) and the completion stamp the Node pass writes then (the first `state` key); otherwise the Node function runs."""
+doc = """The post-pull stages in the order update.js runs them. `name` is the progress name, `key` the status key, `fn` the exported Node stage function the engine runs (a bounded subprocess) when it cannot answer the stage itself. `budget`: the overall post-pull budget defers the stage. `files`: plugin files the stage needs (relative to the plugin dir); if one is missing Node answers. `gate`: the stage is DevSwarm-session-only; `gate_json` is the answer with the gate closed. `state`: keys of update-sweep-state.json that must all hold completedVersion == the new version for the one-time stage to be done; `done_json` is the answer then (`{version}` in its detail). `passes`: the options handed to the Node function (`version`, `hashes` = the store hashes ordered smallest first, `deadline` = the post-pull deadline). `enabled`: false makes the stage report itself skipped (`disabled_json`) without running anything (read on every run). `fallback`: the Node stage function the engine runs when its native port cannot answer (a store it cannot open the way Node does, a case only Node decides). `done`, `out`, `detail`, `detail_dry`, `errors_text`, `left_text`: the shape of a native store stage's answer (`done` names the count the detail's `{done}` shows, outside and inside the dry-run preview). `native`: the engine answers the stage itself, no Node (`reader_cursors_import`, `reader_floor_repair`, `dual_partition_acks`, `promote_unclaimed`, `cursor_hygiene`, `merge_split_backend_stores`, `child_sender_labels`: the store stages; `reply_state`, `gate_intents`, `auto_archived`: the state-file migrations of migrate-state.js, shaped by `label`/`out`/`already`/`detail` exactly as update.js shapes them; `settings`: the settings forward-migration, the one-time legacy Jev key opt-in and the Jev triage cache repair; `codex_graphify`: the Codex hooks.json graphify-group cleanup). `empty_when`: a store repair the engine answers itself when the machine has nothing for it to walk (`no_stores`: no DevSwarm store directory; `no_app_db`: no readable DevSwarm app database), with `empty_json` (`empty_dry_json` under the ingest dry-run switch) and the completion stamp the Node pass writes then (the first `state` key); otherwise the Node function runs. `recon`: the stage is one of the six DevSwarm reconcile-family stages; when the engine-mode switch (devswarm_sup.reconcile_mode for `reconcile`, devswarm_sup.sweep_tail_mode for the rest) says engine the engine runs the witnessed port and answers with the members of `out` in that order, otherwise (the default) `fn` runs."""
 value = [
-  { name = "reconcile", enabled = true, key = "reconcile", fn = "reconcilePostUpdate", budget = true, gate = true, files = ["hooks/lib/devswarm-detect.js", "scripts/devswarm.js"], state = [], passes = [], gate_json = '{"attempted":false,"detail":"not a DevSwarm session — reconcile skipped (gate closed)"}', done_json = '' },
-  { name = "fold", enabled = true, key = "fold", fn = "foldMeshPostUpdate", budget = true, gate = true, files = ["hooks/lib/devswarm-detect.js", "scripts/devswarm.js"], state = [], passes = [], gate_json = '{"attempted":false,"detail":"not a DevSwarm session — fold skipped (gate closed)"}', done_json = '' },
-  { name = "fold-all-stores", enabled = true, key = "foldAllStores", fn = "foldAllStoresPostUpdate", budget = true, gate = true, files = ["hooks/lib/devswarm-detect.js", "scripts/devswarm.js", "companion/lib/devswarm-store.js"], state = ["foldAllStores"], passes = ["version", "hashes", "deadline"], gate_json = '{"attempted":false,"detail":"not a DevSwarm session — fold-all-stores skipped (gate closed)"}', done_json = '{"attempted":true,"stores":0,"retired":0,"forwarded":0,"folded":0,"errors":0,"skippedAlreadyDone":true,"detail":"fold-all-stores: already completed for {version} — skipped (one-time per-version migration)"}' },
-  { name = "heal-orphan-partitions", enabled = true, key = "healOrphanPartitions", fn = "healOrphanPartitionsPostUpdate", budget = true, gate = true, files = ["hooks/lib/devswarm-detect.js", "scripts/devswarm.js", "companion/lib/devswarm-store.js"], state = ["healOrphanPartitions"], passes = ["version", "hashes", "deadline"], gate_json = '{"attempted":false,"detail":"not a DevSwarm session — heal-orphan-partitions skipped (gate closed)"}', done_json = '{"attempted":true,"stores":0,"adopted":0,"forwarded":0,"unhealable":0,"skipped":0,"errors":0,"unhealableSample":[],"skippedAlreadyDone":true,"detail":"heal-orphan-partitions: already completed for {version} — skipped (one-time per-version migration)"}' },
-  { name = "fold-archived-rows", enabled = true, key = "foldArchivedRows", fn = "foldArchivedRowsPostUpdate", budget = true, gate = true, files = ["hooks/lib/devswarm-detect.js", "scripts/devswarm.js"], state = ["foldArchivedRows", "foldArchivedFamilyDescriptors"], passes = ["version", "deadline"], gate_json = '{"attempted":false,"detail":"not a DevSwarm session — fold-archived-rows skipped (gate closed)"}', done_json = '{"attempted":true,"retired":0,"forwarded":0,"left":0,"errors":0,"skippedAlreadyDone":true,"detail":"fold-archived-rows: already completed for {version} — skipped (one-time per-version migration)"}' },
+  { name = "reconcile", enabled = true, key = "reconcile", recon = "reconcile", out = ["attempted", "count", "imported", "lost", "skipped", "nativeTimeouts", "results", "detail"], fn = "reconcilePostUpdate", budget = true, gate = true, files = ["hooks/lib/devswarm-detect.js", "scripts/devswarm.js"], state = [], passes = [], gate_json = '{"attempted":false,"detail":"not a DevSwarm session — reconcile skipped (gate closed)"}', done_json = '' },
+  { name = "fold", enabled = true, key = "fold", recon = "fold", out = ["attempted", "pendingRows", "retired", "forwarded", "folded", "left", "rekeyed", "detail"], fn = "foldMeshPostUpdate", budget = true, gate = true, files = ["hooks/lib/devswarm-detect.js", "scripts/devswarm.js"], state = [], passes = [], gate_json = '{"attempted":false,"detail":"not a DevSwarm session — fold skipped (gate closed)"}', done_json = '' },
+  { name = "fold-all-stores", enabled = true, key = "foldAllStores", recon = "fold_all", out = ["attempted", "stores", "retired", "forwarded", "folded", "errors", "pendingRows", "budgetExhausted", "pending", "detail"], fn = "foldAllStoresPostUpdate", budget = true, gate = true, files = ["hooks/lib/devswarm-detect.js", "scripts/devswarm.js", "companion/lib/devswarm-store.js"], state = ["foldAllStores"], passes = ["version", "hashes", "deadline"], gate_json = '{"attempted":false,"detail":"not a DevSwarm session — fold-all-stores skipped (gate closed)"}', done_json = '{"attempted":true,"stores":0,"retired":0,"forwarded":0,"folded":0,"errors":0,"skippedAlreadyDone":true,"detail":"fold-all-stores: already completed for {version} — skipped (one-time per-version migration)"}' },
+  { name = "heal-orphan-partitions", enabled = true, key = "healOrphanPartitions", recon = "heal_orphans", out = ["attempted", "stores", "adopted", "forwarded", "unhealable", "skipped", "pendingRows", "errors", "unhealableSample", "budgetExhausted", "pending", "detail"], fn = "healOrphanPartitionsPostUpdate", budget = true, gate = true, files = ["hooks/lib/devswarm-detect.js", "scripts/devswarm.js", "companion/lib/devswarm-store.js"], state = ["healOrphanPartitions"], passes = ["version", "hashes", "deadline"], gate_json = '{"attempted":false,"detail":"not a DevSwarm session — heal-orphan-partitions skipped (gate closed)"}', done_json = '{"attempted":true,"stores":0,"adopted":0,"forwarded":0,"unhealable":0,"skipped":0,"errors":0,"unhealableSample":[],"skippedAlreadyDone":true,"detail":"heal-orphan-partitions: already completed for {version} — skipped (one-time per-version migration)"}' },
+  { name = "fold-archived-rows", enabled = true, key = "foldArchivedRows", recon = "archived", out = ["attempted", "retired", "forwarded", "left", "errors", "familyDescriptorsRetired", "familyDescriptorsLeft", "familyDescriptorsErrors", "familyDescriptorsOk", "budgetExhausted", "skipped", "notStamped", "detail"], fn = "foldArchivedRowsPostUpdate", budget = true, gate = true, files = ["hooks/lib/devswarm-detect.js", "scripts/devswarm.js"], state = ["foldArchivedRows", "foldArchivedFamilyDescriptors"], passes = ["version", "deadline"], gate_json = '{"attempted":false,"detail":"not a DevSwarm session — fold-archived-rows skipped (gate closed)"}', done_json = '{"attempted":true,"retired":0,"forwarded":0,"left":0,"errors":0,"skippedAlreadyDone":true,"detail":"fold-archived-rows: already completed for {version} — skipped (one-time per-version migration)"}' },
   { name = "re-retire-resurrected", enabled = true, key = "reRetireResurrected", fn = "", native = "re_retire_resurrected", fallback = "reRetireResurrectedPostUpdate", done = [], out = ["candidates", "unhealable", "errors"], detail = "re-retire-resurrected: {candidates} resurrected registry row(s) found — run `doctor --repair-resurrected --apply` to re-retire them{left_text}{errors}", zero_key = "candidates", detail_zero = "re-retire-resurrected: nothing to report{left_text0}", left_text = "; {left} additional row(s) need manual review (no safe forward target)", left_text0 = " — {left} row(s) need manual review (no safe forward target)", errors_text = " ({n} error(s) during detection, fail-open)", detail_dry = "", budget = true, gate = true, files = ["hooks/lib/devswarm-detect.js", "scripts/devswarm.js"], state = ["reRetireResurrected"], passes = ["version"], gate_json = '{"attempted":false,"detail":"not a DevSwarm session — re-retire-resurrected skipped (gate closed)"}', done_json = '{"attempted":true,"candidates":0,"unhealable":0,"errors":0,"skippedAlreadyDone":true,"detail":"re-retire-resurrected: report already shown for {version} — skipped (one-time per-version report)"}' },
   { name = "promote-unclaimed", enabled = true, key = "promoteUnclaimed", fn = "", native = "promote_unclaimed", fallback = "promoteUnclaimedPostUpdate", done = [], out = ["promoted", "left", "errors", "ok"], detail = "promote-unclaimed: promoted {promoted} unclaimed workspace session id(s){left_text}", detail_dry = "", left_text = " — {left} left as is (no known session)", errors_text = "", budget = true, gate = true, files = [], state = [], passes = [], gate_json = '{"attempted":false,"detail":"not a DevSwarm session — promote-unclaimed skipped (gate closed)"}', done_json = '' },
   { name = "owner-key-migrate", enabled = true, key = "ownerKeyMigrate", fn = "", native = "owner_key_migrate", fallback = "ownerKeyMigratePostUpdate", done = [], out = ["scanned", "backfilled", "rehomed", "errors"], detail = "ownerKey migrate: scanned {scanned}, backfilled {backfilled}, re-homed {rehomed}{errors}", detail_dry = "", errors_text = " ({n} error(s), fail-open)", budget = true, gate = true, files = ["hooks/lib/devswarm-detect.js", "scripts/devswarm.js"], state = ["ownerKeyMigrate"], passes = ["version"], gate_json = '{"attempted":false,"detail":"not a DevSwarm session — ownerKey migrate skipped (gate closed)"}', done_json = '{"attempted":true,"scanned":0,"backfilled":0,"rehomed":0,"errors":0,"skippedAlreadyDone":true,"detail":"ownerKey migrate: already completed for {version} — skipped (one-time per-version migration)"}' },
@@ -24,7 +24,7 @@ value = [
   { name = "gate-intents-migrate", enabled = true, key = "gateIntentsMigrate", fn = "", native = "gate_intents", already = "alreadyCurrent", label = "gate-intents migrate", out = ["scanned", "migrated", "alreadyCurrent", "errors"], detail = "gate-intents migrate: scanned {scanned}, migrated {migrated}, already-current {alreadyCurrent}{errors}", budget = true, gate = true, files = [], state = [], passes = [], gate_json = '{"attempted":false,"detail":"not a DevSwarm session — gate-intents migrate skipped (gate closed)"}', done_json = '' },
   { name = "auto-archived-state-migrate", enabled = true, key = "autoArchivedStateMigrate", fn = "", native = "auto_archived", already = "", label = "auto-archived-state migrate", out = ["scanned", "migrated", "pending", "errors"], detail = "auto-archived-state migrate: scanned {scanned}, migrated {migrated}{errors}", budget = true, gate = true, files = [], state = [], passes = [], gate_json = '{"attempted":false,"detail":"not a DevSwarm session — auto-archived-state migrate skipped (gate closed)"}', done_json = '' },
   { name = "settings-migrate", enabled = true, key = "settingsMigrate", fn = "", native = "settings", budget = true, gate = false, files = [], state = [], passes = ["version"], gate_json = '', done_json = '' },
-  { name = "heal-registry-rows", enabled = true, key = "healRegistryRows", fn = "healRegistryPostUpdate", budget = true, gate = true, files = ["hooks/lib/devswarm-detect.js", "scripts/devswarm.js", "companion/lib/devswarm-store.js"], state = ["healRegistry"], passes = ["version", "hashes"], gate_json = '{"attempted":false,"detail":"not a DevSwarm session — heal-registry-rows skipped (gate closed)"}', done_json = '{"attempted":true,"checked":0,"healed":0,"rehomed":0,"stores":[],"skippedAlreadyDone":true,"detail":"heal-registry-rows: already completed for {version} — skipped (one-time per-version migration)"}' },
+  { name = "heal-registry-rows", enabled = true, key = "healRegistryRows", recon = "heal_registry", out = ["attempted", "checked", "healed", "rehomed", "errors", "stores", "budgetExhausted", "pending", "detail"], fn = "healRegistryPostUpdate", budget = true, gate = true, files = ["hooks/lib/devswarm-detect.js", "scripts/devswarm.js", "companion/lib/devswarm-store.js"], state = ["healRegistry"], passes = ["version", "hashes"], gate_json = '{"attempted":false,"detail":"not a DevSwarm session — heal-registry-rows skipped (gate closed)"}', done_json = '{"attempted":true,"checked":0,"healed":0,"rehomed":0,"stores":[],"skippedAlreadyDone":true,"detail":"heal-registry-rows: already completed for {version} — skipped (one-time per-version migration)"}' },
   { name = "wake-monitor", enabled = true, key = "wakeMonitor", fn = "", native = "wake_monitor", fallback = "wakeMonitorPostUpdate", budget = false, gate = true, files = ["hooks/lib/devswarm-detect.js"], state = [], passes = [], gate_json = '{"attempted":false,"shipped":false,"live":false,"detail":"not a DevSwarm session — wake-monitor skipped (gate closed)"}', done_json = '' },
   { name = "codex-graphify-hooks-migrate", enabled = true, key = "codexGraphifyHooksMigrate", fn = "", native = "codex_graphify", budget = false, gate = false, files = [], state = [], passes = [], gate_json = '', done_json = '' },
 ]
@@ -323,3 +323,100 @@ value = "wake-monitor shipped; wake watcher not needed now (no live child worksp
 [update_post.wake_not_live]
 doc = "The wake-monitor answer when no watcher is live for the identity. Placeholders: role, id, arm."
 value = "wake-monitor shipped but NOT live for {role} {id} \u2014 arm it: {arm}."
+
+[update_post.sweep_budget_env]
+doc = "The environment variable that sets the sweep budget of one store stage of the update (updates.sweepBudgetMs)."
+value = "ANTIHALL_UPDATE_SWEEP_BUDGET_MS"
+
+[update_post.sweep_budget_default]
+doc = "The sweep budget of one store stage of the update when the environment does not set one (update.js DEFAULT_SWEEP_BUDGET_MS)."
+value = 20000
+unit = "ms"
+
+[update_post.recon_reconcile]
+doc = "The `recon` kind of the stage that drains the project's worktrees (`reconcile`); its engine switch is devswarm_sup.reconcile_mode."
+value = "reconcile"
+
+[update_post.recon_fold]
+doc = "The `recon` kind of the stage that folds the working directory's project (`fold`); its engine switch is devswarm_sup.sweep_tail_mode, like the other four."
+value = "fold"
+
+[update_post.recon_reconcile_mode_key]
+doc = "The setting that says who runs the reconcile stage: node (default) or engine."
+value = "devswarm_sup.reconcile_mode"
+
+[update_post.recon_nested]
+doc = "The member order of the objects nested in the answers of the engine-run reconcile-family stages, by the member they sit under (the script's own order)."
+value = { unhealableSample = ["repoKey", "id", "reason"], stores = ["repoKey", "rows"] }
+
+[update_post.recon_max_listed]
+doc = "How many failing worktrees the reconcile failure detail names (update.js MAX_LISTED)."
+value = 5
+
+[update_post.recon_unknown]
+doc = "The reconcile failure detail when nothing names a cause."
+value = "unknown error"
+
+[update_post.recon_lost]
+doc = "The reconcile detail when messages were lost. Placeholders: lost, count."
+value = "reconcile LOST {lost} message(s) across {count} worktree(s)"
+
+[update_post.recon_failed]
+doc = "The reconcile detail when it failed. Placeholders: why, also."
+value = "reconcile failed: {why}{also}"
+
+[update_post.recon_also_skipped]
+doc = "The reconcile failure suffix naming the skipped archived worktrees. Placeholder: n."
+value = " (also skipped {n} archived worktree(s))"
+
+[update_post.recon_row]
+doc = "One failing worktree in the reconcile failure detail. Placeholders: id, error."
+value = "{id}: {error}"
+
+[update_post.recon_row_sep]
+doc = "The separator between the failing worktrees of the reconcile failure detail."
+value = "; "
+
+[update_post.recon_more]
+doc = "The reconcile failure suffix when more worktrees failed than are named. Placeholder: n."
+value = " (+{n} more)"
+
+[update_post.recon_done]
+doc = "The reconcile detail on success. Placeholders: n, skipped, timeouts, imported."
+value = "reconciled {n} worktree(s){skipped}{timeouts} — imported {imported} message(s) into the shared store"
+
+[update_post.recon_skipped]
+doc = "The reconcile success suffix naming the skipped archived worktrees. Placeholder: n."
+value = ", skipped {n} (archived)"
+
+[update_post.recon_timeouts]
+doc = "The reconcile success suffix naming the worktrees whose native read timed out. Placeholder: n."
+value = ", skipped {n} (native unavailable: timeout)"
+
+[update_post.fold_done]
+doc = "The fold detail. Placeholder: retired."
+value = "folded {retired} duplicate mesh row(s) into their canonical survivor"
+
+[update_post.fold_forwarded]
+doc = "The fold detail suffix when messages were forwarded. Placeholder: n."
+value = " (forwarded {n} message(s))"
+
+[update_post.fold_rekeyed]
+doc = "The fold detail suffix when subdirectory rows were re-keyed. Placeholder: n."
+value = " — re-keyed {n} subdir row(s) to their toplevel"
+
+[update_post.fold_left]
+doc = "The fold detail suffix when descriptor-backed rows were left. Placeholder: n."
+value = " — {n} descriptor-backed row(s) left in place"
+
+[update_post.fold_pending]
+doc = "The fold detail suffix when rows are pending. Placeholder: n."
+value = " — {n} row(s) pending (lock busy or survivor gone), retried next run"
+
+[update_post.recon_benign_flags]
+doc = "The members of one reconcile target's result that make a not-ok target benign (not named in the failure detail): it was ok, locked, had no hivecontrol or worktree, was skipped as archived, or its native read timed out."
+value = ["ok", "locked", "hivecontrolMissing", "worktreeMissing", "skipped", "nativeTimeout"]
+
+[update_post.recon_undefined]
+doc = "How a target without an id reads in the reconcile failure detail (JavaScript's text of a missing value)."
+value = "undefined"

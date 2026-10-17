@@ -17,32 +17,32 @@ use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 static N: AtomicUsize = AtomicUsize::new(0);
-const VERSION: &str = "0.1.0";
-const STORE: &str = "proj-a1b2c3";
+pub(super) const VERSION: &str = "0.1.0";
+pub(super) const STORE: &str = "proj-a1b2c3";
 const FAR_FUTURE: i64 = 4_000_000_000_000;
 
-fn recording() -> bool {
+pub(super) fn recording() -> bool {
     std::env::var_os("AH_RECORD_UPDATE_FIXTURES").is_some()
 }
 
-fn fixture_path(stage: &str, name: &str) -> PathBuf {
+pub(super) fn fixture_path(stage: &str, name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/update_post").join(stage).join(format!("{name}.json"))
 }
 
 // ---- seeding -------------------------------------------------------------------------------------------------------------
 
-fn ds(home: &Path) -> PathBuf {
+pub(super) fn ds(home: &Path) -> PathBuf {
     home.join(".anti-hall/devswarm")
 }
 
-fn open_store(home: &Path, hash: &str) -> MeshStore {
+pub(super) fn open_store(home: &Path, hash: &str) -> MeshStore {
     let dir = ds(home).join("store").join(hash);
     fs::create_dir_all(&dir).unwrap();
     fs::write(dir.join("BACKEND"), "sqlite\n").unwrap();
     MeshStore::open(&dir.join("devswarm.db")).unwrap()
 }
 
-fn msg(st: &MeshStore, ws: &str, n: i64, hash: &str, orig: Option<&str>) {
+pub(super) fn msg(st: &MeshStore, ws: &str, n: i64, hash: &str, orig: Option<&str>) {
     st.append_mesh_row(&MeshRow {
         workspace_id: ws.into(),
         ts: 1_790_000_000_000 + n,
@@ -62,7 +62,7 @@ fn cur(st: &MeshStore, p: &str, ns: &str, reader: &str, value: i64) {
     st.reader_cursor_txn(&[CursorPut { partition: p.into(), ns: ns.into(), reader: reader.into(), value, retired_line: None, updated_at: 1000 }]).unwrap();
 }
 
-fn registry(st: &MeshStore, id: &str, wt: Option<&str>, session: Option<&str>) {
+pub(super) fn registry(st: &MeshStore, id: &str, wt: Option<&str>, session: Option<&str>) {
     st.upsert_registry(
         &RegistryRow { id: id.into(), worktree_path: wt.map(str::to_string), session_id: session.map(str::to_string), ..RegistryRow::default() },
         1000,
@@ -71,7 +71,7 @@ fn registry(st: &MeshStore, id: &str, wt: Option<&str>, session: Option<&str>) {
     .unwrap();
 }
 
-fn put(home: &Path, rel: &str, text: &str) {
+pub(super) fn put(home: &Path, rel: &str, text: &str) {
     let p = home.join(rel);
     fs::create_dir_all(p.parent().unwrap()).unwrap();
     fs::write(p, text).unwrap();
@@ -241,7 +241,7 @@ fn seed_promote(home: &Path) {
 static REPO: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
 
 /// One git checkout shared by every world of this process: the mesh id of a worktree is a hash of its real path.
-fn repo() -> &'static Path {
+pub(super) fn repo() -> &'static Path {
     REPO.get_or_init(|| {
         let p = fs::canonicalize(std::env::temp_dir()).unwrap().join(format!("ah-c1-repo-{}-{}", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
         fs::create_dir_all(&p).unwrap();
@@ -251,7 +251,7 @@ fn repo() -> &'static Path {
     })
 }
 
-fn anchor() -> String {
+pub(super) fn anchor() -> String {
     ah_engine::meshw::ident::canonical_mesh_id(&repo().to_string_lossy()).unwrap().unwrap()
 }
 
@@ -423,7 +423,7 @@ fn rows(db: &Path, table: &str, cols: &str, order: &str) -> Value {
 }
 
 /// The stores (reader cursors, the legacy cursor rows, the registry) and the files under `.anti-hall` of a world.
-fn picture(w: &World, answer: Value, anchor: Option<&str>) -> Value {
+pub(super) fn picture(w: &World, answer: Value, anchor: Option<&str>) -> Value {
     let mut stores = BTreeMap::new();
     let dir = ds(&w.home).join("store");
     for e in fs::read_dir(&dir).into_iter().flatten().flatten() {
@@ -601,7 +601,7 @@ fn replay(c: &Case) -> (Value, World, Opt) {
 }
 
 /// The members that differ between two JSON objects (or the two values), for a failure message.
-fn diff(want: &Value, got: &Value) -> String {
+pub(super) fn diff(want: &Value, got: &Value) -> String {
     match (want.as_object(), got.as_object()) {
         (Some(w), Some(g)) => w
             .keys()
