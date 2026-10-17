@@ -260,7 +260,7 @@ wording.
 "Turn off auto-handover" = `set autoHandover.enabled false`; "set auto-handover to
 80%" = `set autoHandover.pct 80`. The older one-purpose CLI still works as an alias
 over the same keys:
-`node "${CLAUDE_PLUGIN_ROOT}/scripts/auto-handover-config.js" get [--json] | set <1-99> | off | on | max-tokens <n> | nag on|off | nag-step <n> | nag-quiet <n>`.
+`~/.anti-hall/ah-engine/bin/ah-engine auto-handover-config get [--json] | set <1-99> | off | on | max-tokens <n> | nag on|off | nag-step <n> | nag-quiet <n>`.
 
 Context % comes from the best source available: the statusline's real
 `context_window` figure (Claude), the rollout's `model_context_window` (Codex), else

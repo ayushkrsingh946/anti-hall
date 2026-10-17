@@ -29,8 +29,8 @@ changes nothing.
   normal spawn under healthy memory; model-routing-guard blocks a mechanical task pinned
   to a flagship model (synthetic payload: fetch/download description + `model:"opus"` +
   `subagent_type:"general-purpose"` → exit 2) and allows a benign spawn with no model and
-  no mechanical signals (exit 0); omc-detect.js (the OMC-deference shared helper consumed
-  by task-guard / tasklist-guard) is checked for presence + syntax validity.
+  no mechanical signals (exit 0); the OMC-deference detection consumed by task-guard / tasklist-guard is built
+  into the engine.
 - **Phantom Primary rows:** report-only detection of Primary registrations keyed by a submodule cwd; only `--repair` archives them (nothing is deleted).
 - **Handover format:** warns (report-only, nothing moved) about handover files tracked by git or sitting outside `.anti-hall/handovers/<date>/<session_id>/`, each with its canonical destination.
 - **Statusline:** whether an older anti-hall `statusLine` remains and can be cleaned up.
@@ -178,7 +178,7 @@ Flags:
   `WorkingDirectory` no longer points inside a worktree is rebuilt from the right one),
   stale ExecStart script, the supervisor FIRST-install, and (**v0.58.1**) **`reconcile`**
   — draining every stranded per-worktree native hivecontrol queue into the shared store
-  (`node scripts/devswarm.js reconcile`, previously a MANUAL-only verb). Unlike the
+  (`~/.anti-hall/ah-engine/bin/ah-engine mesh reconcile`, previously a MANUAL-only verb). Unlike the
   daemon fixes, `reconcile` never touches launchd/systemd, so it needs no scheduler.
   When the gate is closed, doctor **reports the gap plus the exact manual command** and
   mutates nothing.
@@ -239,7 +239,7 @@ sh "${CLAUDE_PLUGIN_ROOT}/scripts/ah-run.sh" doctor --check   # read-only (CI)
 
 The engine runs the doctor (`ah-engine doctor`); Node's `hooks/doctor.js` answers only when the engine is absent. The engine
 doctor names what it does not check yet (the DevSwarm runtime checks of an active session, `--prune-cache`,
-`--reclaim-ingest-lock`, `--logs`): run `node "${CLAUDE_PLUGIN_ROOT}/hooks/doctor.js"` with that flag for those. The explicit
+`--reclaim-ingest-lock`, `--logs`): run `~/.anti-hall/ah-engine/bin/ah-engine doctor` with that flag for those. The explicit
 `--repair-ingest-orphans`, `--repair-test-stores` and `--repair-resurrected` flags preview by default and act with `--apply`.
 
 Add `--quiet` for just the one-line verdict. Exit code is non-zero if any critical check

@@ -600,7 +600,7 @@ this release — the log format supports it for when it is.
 **`jev report`** (`scripts/jev-report.js`, read-only):
 
 ```
-node plugins/anti-hall/scripts/jev-report.js [--days 7] [--json] [--window 24h|7d]
+~/.anti-hall/ah-engine/bin/ah-engine jev-report [--days 7] [--json] [--window 24h|7d]
   [--by project|session] [--project <name>] [--weekly]
 ```
 

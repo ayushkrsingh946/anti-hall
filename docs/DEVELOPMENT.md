@@ -188,7 +188,7 @@ node --test tests/hygiene/docs-links.test.js
 node tools/gen-protocol.js --check
 node tools/gen-agents-catalog.js --check
 node tools/gen-kb-counts.js --check
-node plugins/anti-hall/hooks/doctor.js --check
+~/.anti-hall/ah-engine/bin/ah-engine doctor --check
 ```
 
 A green local run is not a green CI run. CI runs on ubuntu and macOS, slower, with a real `HOME` and a detached `HEAD`; read the Actions result on your pull request. Tests must never touch the real home: see "Test isolation" in [CONTRIBUTING.md](../CONTRIBUTING.md).
@@ -262,16 +262,16 @@ Inside the session, `/reload-plugins` picks up edits. To use the marketplace bui
 **Codex.** The installer writes hook files; preview first, then install into a project or globally:
 
 ```sh
-node plugins/anti-hall/codex/install-codex.js --dry-run
+~/.anti-hall/ah-engine/bin/ah-engine install-codex --dry-run
 ```
 
 <!-- doc-check: skip (writes .codex/ in the clone, or ~/.codex with --global) -->
 ```sh
-node plugins/anti-hall/codex/install-codex.js
-node plugins/anti-hall/codex/install-codex.js --global
+~/.anti-hall/ah-engine/bin/ah-engine install-codex
+~/.anti-hall/ah-engine/bin/ah-engine install-codex --global
 ```
 
-Check an install with `node plugins/anti-hall/hooks/doctor.js --check`, or ask "is anti-hall working" inside a session.
+Check an install with `~/.anti-hall/ah-engine/bin/ah-engine doctor --check`, or ask "is anti-hall working" inside a session.
 
 ## Debug the engine
 
@@ -293,7 +293,7 @@ cat "$AH_ENGINE_DIR/ah-engine.log"
 wait "$DAEMON" || true
 ```
 
-If hooks seem slow or the engine seems absent, read `running`, `breaker` and `crashloop` in `status --json`; `ah-engine reset` clears a breaker or crash-loop stop. The troubleshooting table in [AH-ENGINE.md](AH-ENGINE.md) lists the rest. Run a daemon in the foreground with `ah-engine serve` to see it directly. To debug a check without a daemon, pipe a payload to `ah-engine check <name>`. Plugin hooks write under `~/.anti-hall/` and `<project>/.anti-hall/`; `node plugins/anti-hall/hooks/doctor.js` explains what is wrong.
+If hooks seem slow or the engine seems absent, read `running`, `breaker` and `crashloop` in `status --json`; `ah-engine reset` clears a breaker or crash-loop stop. The troubleshooting table in [AH-ENGINE.md](AH-ENGINE.md) lists the rest. Run a daemon in the foreground with `ah-engine serve` to see it directly. To debug a check without a daemon, pipe a payload to `ah-engine check <name>`. Plugin hooks write under `~/.anti-hall/` and `<project>/.anti-hall/`; `~/.anti-hall/ah-engine/bin/ah-engine doctor` explains what is wrong.
 
 ## A debugging session
 

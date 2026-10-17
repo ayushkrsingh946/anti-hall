@@ -66,7 +66,7 @@ These are NOT touched by activate — they remain opt-in and require explicit us
 
 | Feature | How to enable |
 |---------|--------------|
-| `mcp-reaper` companion | `node plugins/anti-hall/companion/install-reaper.js` |
+| `mcp-reaper` companion | `~/.anti-hall/ah-engine/bin/ah-engine units heal` (the engine runs the reaper as a scheduled job; see `mcp-reaper`) |
 | `ANTIHALL_API_GUARD_THIRDPARTY` | Set env var to `1` in project settings |
 | `ANTIHALL_SHIPIT_GATE` | Set env var to `1` in project settings |
 | `ANTIHALL_MERGE_GATE` | Set env var to `1` in project settings |

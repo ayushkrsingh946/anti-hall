@@ -45,7 +45,7 @@ the hook files inside your clone.
 
     ```bash
     git clone https://github.com/talas9/anti-hall.git
-    node anti-hall/plugins/anti-hall/codex/install-codex.js --global
+    ~/.anti-hall/ah-engine/bin/ah-engine install-codex --global
     ```
 
     Writes `~/.codex/hooks.json`.
@@ -56,7 +56,7 @@ the hook files inside your clone.
 
     ```bash
     cd /path/to/your/project
-    node /path/to/anti-hall/plugins/anti-hall/codex/install-codex.js
+    ~/.anti-hall/ah-engine/bin/ah-engine install-codex
     ```
 
     Writes `.codex/hooks.json` in the current directory.
@@ -87,7 +87,7 @@ Or ask for `/anti-hall:doctor --repair`, which adds it to the repository's untra
 - In Claude Code, ask **"is anti-hall working"**. That runs the `doctor` skill, which
   runs live self-tests on every guard.
 - Or run `/anti-hall:settings` to see the active settings.
-- From a clone: `node plugins/anti-hall/hooks/doctor.js --check`.
+- From a clone: `~/.anti-hall/ah-engine/bin/ah-engine doctor --check`.
 
 ## Optional: Jev
 

@@ -39,7 +39,7 @@ Needs **Node.js 22+** on your `PATH` (`node --version`).
 
 ```bash
 git clone https://github.com/talas9/anti-hall.git && cd anti-hall
-node plugins/anti-hall/codex/install-codex.js
+~/.anti-hall/ah-engine/bin/ah-engine install-codex
 ```
 
 Add `.anti-hall/` to your project's `.gitignore`: anti-hall keeps per-project session notes there (or run `/anti-hall:doctor --repair`, which excludes it locally).

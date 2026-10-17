@@ -16,7 +16,7 @@ only when they are present.
 |---|---|
 | `/anti-hall:doctor` | Check everything and report. |
 | `/anti-hall:doctor --repair` | Also apply safe fixes, such as adding `.anti-hall/` to `.git/info/exclude`. |
-| `node plugins/anti-hall/hooks/doctor.js --check` | The same check from a clone, without the assistant. |
+| `~/.anti-hall/ah-engine/bin/ah-engine doctor --check` | The same check from a clone, without the assistant. |
 
 ## Common problems
 
@@ -90,7 +90,7 @@ by default. A skip for `"all"` never covers `git-guard`; that one has to be name
 command line:
 
 ```bash
-node plugins/anti-hall/scripts/settings.js set guards.speculationGuard false
+~/.anti-hall/ah-engine/bin/ah-engine settings set guards.speculationGuard false
 ```
 
 The four `safety.*` guards need confirmation to turn off

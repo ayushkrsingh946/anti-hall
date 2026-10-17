@@ -28,14 +28,14 @@ Prerequisite: Node.js >= 22 on PATH (hooks silently no-op without it; Windows is
 /plugin install anti-hall@anti-hall
 ```
 
-Verify: ask Claude "is anti-hall working" (the `doctor` skill), or run `node plugins/anti-hall/hooks/doctor.js --check` from a clone.
+Verify: ask Claude "is anti-hall working" (the `doctor` skill), or run `~/.anti-hall/ah-engine/bin/ah-engine doctor --check` from a clone.
 
 Codex (from a clone; project-local, or add `--global`):
 
 ```
 git clone https://github.com/talas9/anti-hall.git
 cd anti-hall
-node plugins/anti-hall/codex/install-codex.js
+~/.anti-hall/ah-engine/bin/ah-engine install-codex
 ```
 
 Update with `/anti-hall:update` (Claude) or the `anti-hall-update` skill (Codex), then `/reload-plugins` (Claude Code; restart only if a hook or skill path still shows the old version).
