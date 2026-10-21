@@ -4165,6 +4165,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_role.pg_journal_dir` | `journal` |  |  | The journal backend directory of a store (inferBackendFromDisk). |
 | `devswarm_role.pg_kind_children` | `children` |  |  | The block kind of a child family. |
 | `devswarm_role.pg_kind_mailbox` | `mailbox` |  |  | The block kind of the Primary's own family. |
+| `devswarm_role.pg_kind_parked` | `parked` |  |  | The block kind of an escalation notice the supervisor could not deliver to the Primary (parked in escalation-pending/). |
 | `devswarm_role.pg_kind_wakepath` | `wakepath` |  |  | The block kind of the clean pass's mailbox-wake block (its loop-state signature is the hashed prefix and this kind). |
 | `devswarm_role.pg_live_resolved` | `live-resolved` |  |  | Marks an own count the gate re-read live from this reader's own position in the store. |
 | `devswarm_role.pg_max_shown` | `5` |  |  | Rows, twins and ids named in the reason before the rest is counted. |
@@ -4177,6 +4178,9 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_role.pg_own_stale` | `YOUR OWN inbound status could not be confirmed: the cached summary predates t...` |  |  | The own-summary segment when the cached summary predates this reader's live position and the live recheck could not settle it: {id}. |
 | `devswarm_role.pg_own_unknown` | `YOUR OWN inbound status could not be confirmed (own-summary unreadable or cor...` |  |  | The own-summary-unreadable segment: {id}. |
 | `devswarm_role.pg_own_unread` | `YOU (the Primary) have {n} unread parent/peer message(s) — STOP and read them...` |  |  | The reason segment for the Primary's own unread mail. Placeholders: {n}, {id}. |
+| `devswarm_role.pg_parked_joiner` | `\n\n` |  |  | What joins the parked-escalation text to the block reason. |
+| `devswarm_role.pg_parked_kid_sep` | `, ` |  |  | What separates the escalated children in the parked-escalation text. |
+| `devswarm_role.pg_parked_segment` | `⚠️ anti-hall · devswarm-escalations: not delivered ({n}): the supervisor esca...` |  |  | The parked-escalation text of the Stop gate and the Primary's per-turn injection (parkedEscalationSegment): {n} notices, {kids} the escalated children (JSON texts), {id} the Primary, {cli} the DevSwarm launcher. |
 | `devswarm_role.pg_plural_s` | `s` |  |  | Plural suffix. |
 | `devswarm_role.pg_poke_prefix` | `[Primary poke]` |  |  | The text prefix of a system poke row, never real unread (devswarm-noise.js POKE_PREFIX). |
 | `devswarm_role.pg_q_escalation` | `Escalation: {what} has forced-blocked this Stop {times} times with no reply s...` |  |  | The question-ceiling escalation text (buildReason with qEscalateTimes): {what}, {times}. |
@@ -4196,6 +4200,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_role.pg_q_unknown_sender` | `unknown sender` |  |  | The asker named for a question that carries no sender. |
 | `devswarm_role.pg_reason_default` | `inbox status could not be confirmed` |  |  | Label of an unknown-inbox reason not in reason_labels. |
 | `devswarm_role.pg_reason_labels` | `13 entries` |  |  | The label of each unknown-inbox reason (reasonLabel). |
+| `devswarm_role.pg_reason_parked_only` | `DevSwarm Stop gate.` |  |  | The block reason body when only a parked escalation holds the turn (no family, question or truncation). |
 | `devswarm_role.pg_repos_root_marker` | `/.devswarm/repos/` |  |  | A worktree under this path segment is a DevSwarm-app workspace the supervisor active-list cache can archive (DEVSWARM_REPOS_ROOT_RE). |
 | `devswarm_role.pg_set_busy_fresh` | `5 entries` |  |  | Setting devswarm.parentGateBusyFreshMin: minutes a child's transcript counts as fresh for the busy test. The engine answers only while it is unset, with this default. |
 | `devswarm_role.pg_set_busy_max_age` | `5 entries` |  |  | Setting devswarm.parentGateBusyMaxAgeMin: minutes of the oldest unread past which even a busy child blocks. The engine answers only while it is unset, with this default. |

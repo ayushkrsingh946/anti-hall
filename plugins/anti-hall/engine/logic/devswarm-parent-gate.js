@@ -507,10 +507,10 @@ function pgGate(p, root, l) {
   var descriptors = pgDescriptors(home);
   var qs = pgQuestions(home, own, descriptors, selfKey, fx);
   var unanswered = qs.blocking, informational = qs.informational, truncated = own.truncated;
-  if (own.id !== null && pgHasJson(pgDir(home) + '/' + ah.cfg('devswarm_role.pg_dir_escalation'))) ah.unable('devswarm-parent-gate:parked_escalation'); // a parked escalation notice is not shown here; the gate goes on
+  var parked = pgParkedSegment(home, own.id, l.cli); // escalation notices the supervisor could not deliver to this Primary block like unread mail
   var stateRel = ah.cfg('devswarm_role.pg_devswarm_dir') + '/' + ah.cfg('devswarm_role.pg_dir_gate') + '/' + sid.replace(/[^A-Za-z0-9_.-]/g, '_') + '.json';
   var stateFile = home + '/' + stateRel;
-  if (descriptors.length === 0 && own.unread === 0 && !own.unknown && unanswered.length === 0 && !truncated) { fx.unlink = stateRel; return fx; }
+  if (descriptors.length === 0 && own.unread === 0 && !own.unknown && unanswered.length === 0 && !truncated && parked === null) { fx.unlink = stateRel; return fx; }
 
   var entries = [];
   if (own.id !== null) {
@@ -714,7 +714,7 @@ function pgGate(p, root, l) {
   if (archivedUnreadFamilies > 0) fx.err += text.render(ah.cfg('devswarm_role.pg_err_archived_unread'), { n: String(archivedUnreadFamilies) });
   pgStray(home, sidRaw, selfKey, keyOf, now, fx);
 
-  if (blocking.length === 0 && unanswered.length === 0 && !truncated) {
+  if (blocking.length === 0 && unanswered.length === 0 && !truncated && parked === null) {
     // a pass that only deferred unread mail keeps the loop state and skips the wake-coverage line; only a clean pass clears the state,
     // after the wake-coverage line (which needs a live child of this project) is known to be silent
     if (!busyAdvisoryHeld) {
@@ -725,7 +725,9 @@ function pgGate(p, root, l) {
   }
 
   // ---- the block: loop state, cap, escalation -----------------------------------------------------------------------
-  var kinds = blocking.map(function (b) { return own.id === b.id ? ah.cfg('devswarm_role.pg_kind_mailbox') : ah.cfg('devswarm_role.pg_kind_children'); }).sort();
+  var kinds = blocking.map(function (b) { return own.id === b.id ? ah.cfg('devswarm_role.pg_kind_mailbox') : ah.cfg('devswarm_role.pg_kind_children'); });
+  if (parked !== null) kinds.push(ah.cfg('devswarm_role.pg_kind_parked')); // its arrival opens a fresh budget; its text never enters the signature
+  kinds.sort();
   kinds = kinds.filter(function (k, i) { return i === 0 || k !== kinds[i - 1]; });
   var sig = ah.sha1(ah.cfg('devswarm_role.pg_sig_prefix') + kinds.join(','));
   var qField = String.fromCharCode(ah.cfgNum('devswarm_role.pg_q_sig_field_sep')), qRow = String.fromCharCode(ah.cfgNum('devswarm_role.pg_q_sig_row_sep'));
@@ -793,12 +795,32 @@ function pgGate(p, root, l) {
   // the stale-build downgrade: a plain neglect block is dropped while the host registered a newer version
   if (blocking.length > 0 && !bypassCap && escalateTimes === null && qEscalateTimes === null && pgVersionStale(root)) return fx;
   var wake = pgWakeLine(own.id, l);
-  var base = pgReason(blocking, own, escalateTimes, hasIntent,
-    { unanswered: unanswered, informational: informational, truncated: truncated, qEscalate: qEscalateTimes, waiting: pgWaitingSeg(home, blocking) });
+  var base = (blocking.length > 0 || unanswered.length > 0 || truncated)
+    ? pgReason(blocking, own, escalateTimes, hasIntent,
+      { unanswered: unanswered, informational: informational, truncated: truncated, qEscalate: qEscalateTimes, waiting: pgWaitingSeg(home, blocking) })
+    : ah.cfg('devswarm_role.pg_reason_parked_only');
   var cli = root + '/' + ah.cfg('devswarm_role.launcher_cli').target;
   var skip = text.render(ah.cfg('devswarm_role.pg_skip_cmd'), { cli: pgShQuote(ah.path.resolveAbs(cli)), guard: ah.cfg('devswarm_role.gate_guard') });
-  fx.out = JSON.stringify({ decision: ah.cfg('devswarm_role.pg_decision_block'), reason: pgFrame(base + wake, skip) }) + '\n';
+  fx.out = JSON.stringify({ decision: ah.cfg('devswarm_role.pg_decision_block'), reason: pgFrame(base + (parked !== null ? ah.cfg('devswarm_role.pg_parked_joiner') + parked : '') + wake, skip) }) + '\n';
   return fx;
+}
+
+// `parkedEscalationSegment(home, parentId, cliPath)`: the escalation notices the supervisor could not deliver to this Primary (recovery.js
+// escalation-pending/, one JSON file per child with `parentId` and `row`, `delivered` once it reached the mesh store), as one text; null
+// when there are none for it.
+function pgParkedSegment(home, parentId, cliPath) {
+  if (parentId === null || parentId === undefined || parentId === '' || parentId === false || parentId === 0) return null;
+  var dir = pgDir(home) + '/' + ah.cfg('devswarm_role.pg_dir_escalation'), mine = [];
+  (pgNames(dir) || []).forEach(function (n) {
+    if (!/\.json$/.test(n)) return;
+    var it = pgJson(dir + '/' + n);
+    if (it && it.parentId && it.row && !it.delivered && String(it.parentId) === String(parentId)) mine.push(it);
+  });
+  if (mine.length === 0) return null;
+  var kids = mine.map(function (i) { return i.childId; }).sort();
+  return text.render(ah.cfg('devswarm_role.pg_parked_segment'), {
+    n: String(mine.length), kids: kids.map(function (k) { return JSON.stringify(k); }).join(ah.cfg('devswarm_role.pg_parked_kid_sep')), id: String(parentId), cli: cliPath,
+  });
 }
 
 // The waiting-on-input and busy-but-stale lines of the blocking families, as buildReason places them.

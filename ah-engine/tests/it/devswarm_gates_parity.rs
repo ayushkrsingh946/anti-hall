@@ -758,6 +758,8 @@ fn pg_sum(questions: &str, rows: &str, archived: Option<&str>) -> String {
     s.push('}');
     s
 }
+const PG_PARKED: &str = ".anti-hall/devswarm/escalation-pending/c-9.json";
+const PG_PARKED_BODY: &str = r#"{"parentId":"{own}","childId":"c-9","row":{"ts":1},"lastStatus":"escalated"}"#;
 const PG_CHILD: &str = ".anti-hall/devswarm/workspaces/c-1.json";
 const PG_CHILD_BODY: &str = r#"{"id":"c-1","worktreePath":"{wt2}","sessionId":"sess-c1"}"#;
 
@@ -1026,6 +1028,11 @@ fn pg_cases() -> Vec<PgCase> {
         // the Primary's own mailbox
         pg("own-summary-corrupt-blocks-then-conservation-defers", &[A, A, A, D]).git().seed(".anti-hall/devswarm/summaries/{key}.json", "{oops"),
         pg("own-store-clean-pass", &[A, A]).own(),
+        // #227: an escalation the supervisor could not deliver to this Primary blocks like unread mail until it is delivered
+        pg("own-parked-escalation-blocks-cap-escalate-quiet", &[A, A, A, A, A]).own().seed(PG_PARKED, PG_PARKED_BODY).expect("is not registered in the mesh store"),
+        pg("own-parked-escalation-clears-with-delivery", &[A]).own().seed(PG_PARKED, r#"{"parentId":"{own}","childId":"c-9","row":{"ts":1},"delivered":true}"#).seed(PG_GATE_STATE, r#"{"sig":"x","blocks":1}"#).expect("!decision"),
+        pg("another-primarys-parked-escalation-is-not-mine", &[A]).own().seed(PG_PARKED, r#"{"parentId":"someone-else","childId":"c-9","row":{"ts":1}}"#).expect("!decision"),
+        pg("own-parked-escalation-without-row-is-ignored", &[A]).own().seed(PG_PARKED, r#"{"parentId":"{own}","childId":"c-9"}"#).expect("!decision"),
         pg("own-store-clean-clears-state", &[A]).own().seed(PG_GATE_STATE, r#"{"sig":"x","blocks":2}"#),
         pg("own-store-other-project-child-is-clean", &[A, A]).own().child().seed(PG_CHILD, PG_CHILD_BODY),
         // a question from a sender no registry row names is informational only: on its own it never blocks
@@ -1153,7 +1160,7 @@ fn pg_cases() -> Vec<PgCase> {
         pg("own-reader-view-past-the-mail-is-clean", &[A, A]).own().env("PG_READER", "self").seed(".claude/sessions/{pid}.json", r#"{"pid":{pid},"sessionId":"sess-own","startedAt":5}"#),
         pg("own-reader-view-of-a-stranger-is-the-floor", &[A, A]).own().env("PG_READER", "other").seed(".claude/sessions/{pid}.json", r#"{"pid":{pid},"sessionId":"sess-own","startedAt":5}"#),
         pg("own-reader-view-headless-is-the-floor", &[A, A]).own().env("PG_READER", "self"),
-        pg("own-parked-escalation-defers", &[D]).own().seed(".anti-hall/devswarm/escalation-pending/e1.json", r#"{"parentId":"p","row":{}}"#),
+        pg("own-parked-escalation-of-another-parent-is-clean", &[A]).own().seed(".anti-hall/devswarm/escalation-pending/e1.json", r#"{"parentId":"p","row":{}}"#),
         // the in-flight drain marker: fresh and of this session a notice (the loop state unchanged), of another session the block,
         // stale removed and the block
         pg("own-drain-marker-fresh-session-is-a-notice", &[A, A])
@@ -1222,7 +1229,11 @@ fn the_mailbox_wake_block_counts_only_workspaces_that_can_still_send_mail() {
 #[test]
 fn parent_gate_answers_match_node_byte_for_byte() {
     let (mut cases, mut sum) = (0, PgTally::default());
-    for case in pg_cases() {
+    // AH_PG_ONLY=<a,b>: run only the cases whose name holds one of them (a quick re-check; the corpus assert then does not apply)
+    let only = std::env::var("AH_PG_ONLY").ok();
+    // AH_PG_ANSWERS_ONLY=1: skip the cases that expect a deferral to Node (no Node fallback is left to defer to)
+    let answers_only = std::env::var_os("AH_PG_ANSWERS_ONLY").is_some();
+    for case in pg_cases().into_iter().filter(|c| only.as_deref().is_none_or(|o| o.split(',').any(|x| c.name.contains(x))) && !(answers_only && c.steps.contains(&PgWant::Defer))) {
         let t = pg_exec(&case);
         cases += 1;
         sum.answered += t.answered;
@@ -1234,7 +1245,7 @@ fn parent_gate_answers_match_node_byte_for_byte() {
         "devswarm-parent-gate parity: {cases} cases, {} steps answered byte-identically to Node ({} blocks, {} escalations), {} deferred",
         sum.answered, sum.blocks, sum.escalations, sum.deferred
     );
-    assert!(cases >= 50 && sum.answered >= 50 && sum.blocks >= 20 && sum.escalations >= 2, "the corpus shrank or stopped blocking");
+    assert!(only.is_some() || answers_only || cases >= 50 && sum.answered >= 50 && sum.blocks >= 20 && sum.escalations >= 2, "the corpus shrank or stopped blocking");
 }
 
 // ---- the child Stop gate, the drain nudge and the reply tracker: answers byte for byte ----------------------------------------

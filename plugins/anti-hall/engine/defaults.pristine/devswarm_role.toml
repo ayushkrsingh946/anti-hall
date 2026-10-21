@@ -446,6 +446,26 @@ value = "⚠️ anti-hall · devswarm-parent-gate: workspace {id} (this Primary)
 doc = "Stderr line counting archived families that still hold unread mail: {n}."
 value = "💡 anti-hall · devswarm-parent-gate: {n} archived workspace(s) still have unread mail (ignored)\n"
 
+[devswarm_role.pg_kind_parked]
+doc = "The block kind of an escalation notice the supervisor could not deliver to the Primary (parked in escalation-pending/)."
+value = "parked"
+
+[devswarm_role.pg_parked_segment]
+doc = "The parked-escalation text of the Stop gate and the Primary's per-turn injection (parkedEscalationSegment): {n} notices, {kids} the escalated children (JSON texts), {id} the Primary, {cli} the DevSwarm launcher."
+value = "⚠️ anti-hall · devswarm-escalations: not delivered ({n}): the supervisor escalated {kids} (idle — reassign or archive), but this Primary ({id}) is not registered in the mesh store (or its lock was busy), so the notice is PARKED. Run `node {cli} register-primary` — the next supervisor sweep then delivers it."
+
+[devswarm_role.pg_parked_kid_sep]
+doc = "What separates the escalated children in the parked-escalation text."
+value = ", "
+
+[devswarm_role.pg_parked_joiner]
+doc = "What joins the parked-escalation text to the block reason."
+value = "\n\n"
+
+[devswarm_role.pg_reason_parked_only]
+doc = "The block reason body when only a parked escalation holds the turn (no family, question or truncation)."
+value = "DevSwarm Stop gate."
+
 [devswarm_role.pg_kind_mailbox]
 doc = "The block kind of the Primary's own family."
 value = "mailbox"
