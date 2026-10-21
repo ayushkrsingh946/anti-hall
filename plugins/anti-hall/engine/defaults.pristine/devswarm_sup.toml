@@ -213,10 +213,6 @@ value = "the rotation cursor cannot be read exactly like JavaScript"
 doc = "Why the deferred duty holds a stage the engine does not take now (an unusable marker or an unknown stage). Placeholder: {stage}."
 value = "stage {stage} not taken: marker unusable or stage unknown; it comes round again"
 
-[devswarm_sup.as_why_retire]
-doc = "Why the app sync holds the retirement of stale archived markers: restoring the descriptor and moving the marker has no native port."
-value = "retiring a stale marker (restore the descriptor, move the marker) has no native port; the marker stays"
-
 [devswarm_sup.lv_why_tail]
 doc = "Why the verdicts duty holds the per-workspace tail work (Jev blocker label, straying signals, a stale workspace nobody else pokes): no native port."
 value = "tail work (Jev blocker label, straying signals) has no native port"
@@ -1560,6 +1556,74 @@ value = "marked"
 [devswarm_sup.as_action_failed]
 doc = "The outcome word of a marker that could not be written."
 value = "failed"
+
+[devswarm_sup.as_dir_retired]
+doc = "The directory a retired stale marker is moved to (never deleted)."
+value = "archived-retired"
+
+[devswarm_sup.as_msg_retired_dir]
+doc = "Why a marker was not retired: the retired directory is a link or a file."
+value = "retired dir is not a real directory"
+
+[devswarm_sup.as_why_lock_busy]
+doc = "Why a stale marker was left: another actor holds the workspace's lock (tried again next sweep)."
+value = "lock-busy"
+
+[devswarm_sup.as_why_restore_failed]
+doc = "Why a stale marker was left: the descriptor or registry row could not be restored first. Placeholder: {error}."
+value = "restore-failed: {error}"
+
+[devswarm_sup.as_why_retired_exists]
+doc = "Why a stale marker was left: the retired file for this id and second already exists (never overwritten)."
+value = "retired-exists"
+
+[devswarm_sup.as_retired_raw]
+doc = "The field that carries the marker's bytes when they are not a JSON object."
+value = "raw"
+
+[devswarm_sup.as_retired_field]
+doc = "The field a retired marker gets, holding the retire record."
+value = "retired"
+
+[devswarm_sup.as_retired_at]
+doc = "The retire record's time field (epoch ms)."
+value = "at"
+
+[devswarm_sup.as_retired_by]
+doc = "The retire record's actor field."
+value = "by"
+
+[devswarm_sup.as_retired_reason]
+doc = "The retire record's reason field."
+value = "reason"
+
+[devswarm_sup.as_retired_builder]
+doc = "The retire record's app builder id field."
+value = "builderId"
+
+[devswarm_sup.as_retired_restored]
+doc = "The retire record's field saying the workspace was restored to active."
+value = "restored"
+
+[devswarm_sup.as_retired_by_value]
+doc = "Who retired the marker (the retire record's actor)."
+value = "devswarm-app-sync"
+
+[devswarm_sup.as_retired_reason_value]
+doc = "Why the marker was retired (the retire record's reason)."
+value = "open in the DevSwarm app (isActive=1, isHidden=0); workspace restored to active"
+
+[devswarm_sup.as_action_retire]
+doc = "The action word of a stale marker retire (action ledger)."
+value = "dssup-app-retire-marker"
+
+[devswarm_sup.as_action_retired]
+doc = "The outcome word of a marker retired."
+value = "retired"
+
+[devswarm_sup.as_action_left]
+doc = "The outcome word of a marker left in place (the reason is in the ledger row)."
+value = "left"
 
 
 # ---- the deferred stage, native (src/dssup/deferred.rs) --------------------------------------------------------------------------
