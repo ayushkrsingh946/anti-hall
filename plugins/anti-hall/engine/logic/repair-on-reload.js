@@ -35,23 +35,28 @@ function inCooldown(version) {
   return age >= 0 && age < ah.cfgNum('repair_reload.cooldown_ms');
 }
 
+// `gates.run` without the hand-back: a setting answer the host cannot decide (it needs a plugin root the request lacks, or a file over the read cap) allows (counted).
+function roRun(f) {
+  try { return f(); } catch (e) { if (e === gates.UNDECIDABLE) { ah.unable('repair-on-reload:undecidable'); return 'allow'; } throw e; }
+}
+
 function decide(p, opts) {
-  if (!gates.homeKnown()) return 'defer';
-  return gates.run(function () {
+  if (!gates.homeKnown()) { ah.unable('repair-on-reload:no_home'); return 'allow'; } // no absolute HOME: no marker to read
+  return roRun(function () {
     var root = gates.pluginRoot(opts);
     if (gates.judgeChild()) return 'allow';
     var on = gates.setting('repair_reload.setting', undefined, root);
     if (on === false || on === 'off') return 'allow';
     if (gates.isObject(p) && ah.cfg('session_gates.agent_key_markers').some(function (k) { return p[k] !== undefined && p[k] !== null; })) return 'allow';
     if (ah.settings.skipped(ah.cfg('repair_reload.guard_name'))) return 'allow';
-    if (root === '') return 'defer';
+    if (root === '') { ah.unable('repair-on-reload:no_plugin_root'); return 'allow'; } // no plugin root: no manifest to read, no repair to ask for
     var raw = ah.fs.readText(root + '/' + ah.cfg('guardkit.plugin_manifest')), manifest = null;
     if (raw !== null) { try { manifest = JSON.parse(raw); } catch (e) { manifest = null; } }
     var version = gates.isObject(manifest) && typeof manifest.version === 'string' && manifest.version !== '' ? manifest.version : null;
     if (version === null) return 'allow';
-    // A version that is not a plain three-part one is compared by Node with NaN arithmetic; leave it to Node.
+    // A version that is not a plain three-part one is compared by Node with NaN arithmetic; no repair is asked for (counted).
     var running = version.trim() === version ? triple(version) : null;
-    if (running === null) return 'defer';
+    if (running === null) { ah.unable('repair-on-reload:version_form'); return 'allow'; } // not a plain three-part version: no repair is asked for
     if (!repairPending(running)) return 'allow';
     if (inCooldown(version)) return 'allow';
     // Past every gate the Node hook took `repair-on-reload.lock` and started `doctor.js --repair --migrations-only` detached.
