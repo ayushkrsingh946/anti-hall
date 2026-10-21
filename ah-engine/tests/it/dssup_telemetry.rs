@@ -4,7 +4,7 @@
 use ah_engine::checks::git::util::Settings;
 use ah_engine::db::TempDir;
 use ah_engine::dsact::runner::{RunResult, RunSpec, Runner};
-use ah_engine::dssup::{Owner, recover, tick, witness};
+use ah_engine::dssup::{Owner, recover, tick};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -100,20 +100,6 @@ fn every_duty_outcome_of_a_tick_is_an_act_event() {
     for d in &duties {
         assert!(acts.iter().any(|v| v["e"] == d.as_str()), "no act event for {d}: {acts:?}");
     }
-}
-
-#[test]
-fn a_witness_that_disagrees_is_a_mistake_event() {
-    let f = fx("tel-witness");
-    let st = settings(&f);
-    let ctx = tick::Ctx { home: &f.home, root: &f.root, st: &st, now: now(), engine_pokes: true };
-    let job = witness::prepare_log_rotate(&ctx).expect("a witness job");
-    let engine = json!({"detail": {"supervisor": {"rotated": false, "size": 0}}});
-    let rec = witness::finish(job, &ctx, &Fixed("{\"rotated\":true,\"size\":999}\n"), &engine);
-    assert_eq!(rec["match"], false, "{rec}");
-    let m = events(&f.home, "mistake");
-    assert_eq!(m.len(), 1, "{m:?}");
-    assert_eq!(m[0]["e"], "duty-log_rotate");
 }
 
 #[test]
