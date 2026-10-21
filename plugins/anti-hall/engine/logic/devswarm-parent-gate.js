@@ -407,6 +407,12 @@ function pgArchiveReady(home, id, repoKey, memo) {
   return w !== null && jx.isObj(w[id]) && w[id].archive_ready === true;
 }
 
+// The summary's `gates.done` flag for `id` (read after pgArchiveReady has filled the memo of `repoKey`).
+function pgGateDone(memo, repoKey, id) {
+  var w = repoKey === null || !Object.prototype.hasOwnProperty.call(memo, repoKey) ? null : memo[repoKey];
+  return w !== null && jx.isObj(w[id]) && jx.isObj(w[id].gates) && w[id].gates.done === true;
+}
+
 function pgIgnoreIds(home) {
   var v = pgJson(pgDir(home) + '/' + ah.cfg('devswarm_role.pg_ignore_file'));
   var out = Object.create(null);
@@ -474,7 +480,7 @@ function pgCollapse(entries) {
 function pgNewEntry(id, wt, session) {
   return { id: id, worktree: wt, session: session, realUnread: 0, unknown: false, reason: null, reasonPath: null, reasonErrno: null, done: false, archived: false,
     appArchived: false, ignored: false, held: false, live: false, busy: false, waiting: false, waitingQ: null, oldestAge: null, ageUnknown: false, ageOdd: false,
-    stateSkipped: false, foreign: false, hadStoreOnly: false, urgency: null };
+    stateSkipped: false, foreign: false, hadStoreOnly: false, urgency: null, idleKnown: false, doneGate: false };
 }
 
 function pgGate(p, root, l) {
@@ -536,6 +542,7 @@ function pgGate(p, root, l) {
     var done = !isOwn && pgArchiveReady(home, d.id, fresh, readyMemo);
     var e = pgNewEntry(d.id, d.worktree, d.session);
     e.done = done;
+    e.doneGate = !isOwn && pgGateDone(readyMemo, fresh, d.id);
     e.foreign = foreign;
     var ndOldest = null, ownNoInbox = false, ownStoreCounted = false, dead = false;
     var bl = pgBacklog(d.inbox, d.cursor);
@@ -608,6 +615,7 @@ function pgGate(p, root, l) {
         e.waiting = b.waiting && e.live;
         e.waitingQ = e.waiting ? b.question : null;
         e.busy = b.busy && !e.waiting;
+        e.idleKnown = b.seen === true && !b.busy && !b.waiting; // the transcript shows no turn in progress: nothing is left to send mail
       }
     }
     entries.push(e);
@@ -710,7 +718,7 @@ function pgGate(p, root, l) {
     // a pass that only deferred unread mail keeps the loop state and skips the wake-coverage line; only a clean pass clears the state,
     // after the wake-coverage line (which needs a live child of this project) is known to be silent
     if (!busyAdvisoryHeld) {
-      if (own.id !== null && pgWakeBlock(home, cwd, own.id, now, l, stateFile, stateRel, fx)) return fx;
+      if (own.id !== null && pgWakeBlock(home, cwd, own.id, now, l, stateFile, stateRel, fx, entries)) return fx;
       fx.unlink = stateRel;
     }
     return fx;
@@ -888,13 +896,17 @@ function pgRawName(home, id) {
 // The clean pass's mailbox-wake block (`wakeCoverage` + `noWakePathLine`): a Claude Primary with a live child of this project, no live
 // watcher and no recent cron tick is told to arm both, under its own loop-state signature and the same forced-acknowledgement cap,
 // then quiet. True when it decided (a block written to `fx`, or the spent cap's quiet pass); false when nothing is missing.
-function pgWakeBlock(home, cwd, ownId, now, l, stateFile, stateRel, fx) {
+function pgWakeBlock(home, cwd, ownId, now, l, stateFile, stateRel, fx, entries) {
   if (!pgSafeId(ownId)) return false; // wakeCoverage: an id it cannot use is "unknown"
   var raw = ah.env.get(ah.cfg('devswarm_role.agent_env'));
   if ((raw === null ? '' : raw.trim().toLowerCase()) !== ah.cfg('devswarm_role.claude_agent')) return false;
   var ctx = { home: home, now: now };
   var lc = piLiveChildren(ctx, cwd);
   if (!lc.known || !lc.live) return false;
+  // only a child that can still send mail needs a wake path: a done (archive-ready) workspace, a waiting-on-human one and an idle one
+  // (live session, not busy) do not count. A live child no descriptor names (found in the app database) stands when no row is known.
+  var rows = (entries || []).filter(function (e) { return e.id !== ownId && !e.stateSkipped && !e.held; });
+  if (rows.length > 0 && !rows.some(function (e) { return !e.done && !e.doneGate && !e.waiting && !e.idleKnown; })) return false;
   var tick = piJson(pgDir(home) + '/' + ah.cfg('devswarm_parent.dir_wake_tick') + '/' + ownId + '.json');
   var ageMin = tick && piFinite(tick.ts) ? Math.max(0, Math.floor((now - tick.ts) / ah.cfgNum('devswarm_prompt.ms_per_minute'))) : null;
   var warn = piSetDefault('devswarm_parent.set_cron_warn');
@@ -909,6 +921,12 @@ function pgWakeBlock(home, cwd, ownId, now, l, stateFile, stateRel, fx) {
   if (prev && typeof prev === 'object') prevState = prev;
   if (prev && prev.sig === wsig && Number.isFinite(prev.blocks)) wblocks = prev.blocks;
   if (wblocks >= ah.settings.num('devswarm_role.pg_set_cap')) return true; // the budget of this unchanged condition is spent: quiet
+  // the per-session budget: a count no clean pass clears, so a condition that flaps cannot re-arm the block again and again
+  var totalRel = ah.cfg('devswarm_role.pg_devswarm_dir') + '/' + ah.cfg('devswarm_role.pg_dir_gate') + '/' + ah.cfg('devswarm_role.pg_wake_total_prefix') + stateRel.split('/').pop();
+  var total = pgJson(home + '/' + totalRel);
+  var spent = total && Number.isFinite(total.blocks) ? total.blocks : 0;
+  if (spent >= ah.settings.num('devswarm_role.pg_set_cap')) return false;
+  fx.extra.push({ rel: totalRel, body: JSON.stringify({ blocks: spent + 1 }) });
   var next = Object.assign({ qSig: '', qBlocks: 0, qEscalated: false, intents: {}, intentAcks: 0 }, prevState, { sig: wsig, blocks: wblocks + 1, escalated: false });
   fx.write = { rel: stateRel, body: JSON.stringify(next) };
   fx.out = JSON.stringify({ decision: ah.cfg('devswarm_role.pg_decision_block'), reason: wakeText }) + '\n';

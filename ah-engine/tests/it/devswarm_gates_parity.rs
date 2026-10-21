@@ -406,6 +406,10 @@ struct PgCase {
     /// Text the first step's answer (stdout + stderr) must carry (`!text`: must not carry): proves the case reaches the branch it is
     /// named for.
     expect: Option<&'static str>,
+    /// An intended divergence from the Node twin (a fixed false positive): the engine alone answers, and `expects` holds, per step, the
+    /// text its answer must carry (`!text`: must not carry).
+    diverges: bool,
+    expects: Vec<&'static str>,
 }
 
 /// `YYYY-MM-DDTHH:MM:SS.mmmZ` of a time in ms.
@@ -443,10 +447,18 @@ fn pg(name: &'static str, steps: &[PgWant]) -> PgCase {
         steps: steps.to_vec(),
         fuzz_secs: false,
         expect: None,
+        diverges: false,
+        expects: vec![],
     }
 }
 
 impl PgCase {
+    /// The engine alone answers (Node keeps the false positive); each step's answer is checked against `expects`.
+    fn diverge(mut self, expects: &[&'static str]) -> PgCase {
+        self.diverges = true;
+        self.expects = expects.to_vec();
+        self
+    }
     fn seed(mut self, rel: &str, body: &str) -> PgCase {
         self.seeds.push((rel.to_string(), body.to_string()));
         self
@@ -615,6 +627,7 @@ fn pg_exec(case: &PgCase) -> PgTally {
         let now_ms = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
         let now = now_ms.to_string();
         let enc2: String = wt2.to_string_lossy().chars().map(|c| if "/\\:.".contains(c) { '-' } else { c }).collect();
+        let enc3: String = wt3.to_string_lossy().chars().map(|c| if "/\\:.".contains(c) { '-' } else { c }).collect();
         let body = body
             .replace("{iso}", &iso_of(now_ms))
             .replace("{old}", &(now_ms - 7_200_000).to_string())
@@ -631,7 +644,7 @@ fn pg_exec(case: &PgCase) -> PgTally {
             Some(r) => (true, r.to_string()),
             None => (false, rel.clone()),
         };
-        let rel = rel.replace("{key}", &key).replace("{own}", &own).replace("{enc2}", &enc2).replace("{pid}", &std::process::id().to_string());
+        let rel = rel.replace("{key}", &key).replace("{own}", &own).replace("{enc2}", &enc2).replace("{enc3}", &enc3).replace("{pid}", &std::process::id().to_string());
         let p = home.join(rel);
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
         std::fs::write(&p, body).unwrap();
@@ -671,6 +684,15 @@ fn pg_exec(case: &PgCase) -> PgTally {
             continue;
         }
         assert_eq!(*want, PgWant::Answer, "{label}: the engine answered {:?}, the case expects a deferral", String::from_utf8_lossy(&eout));
+        if case.diverges {
+            let all = format!("{}{}", String::from_utf8_lossy(&eout), String::from_utf8_lossy(&eerr));
+            match case.expects[i].strip_prefix('!') {
+                Some(no) => assert!(!all.contains(no), "{label}: the answer carries {no:?}: {all}"),
+                None => assert!(all.contains(case.expects[i]), "{label}: the answer does not carry {:?}: {all}", case.expects[i]),
+            }
+            t.answered += 1;
+            continue;
+        }
         let after_engine = snapshot(&home);
         pg_restore(&home, &before, &times);
         let (ncode, nout, nerr) = node_run(&input);
@@ -1156,6 +1178,45 @@ fn pg_cases() -> Vec<PgCase> {
             .seed(".anti-hall/devswarm/parent-gate/s1.json", r#"{"sig":"x","blocks":1,"escalated":false,"qSig":"","qBlocks":0,"qEscalated":false,"intents":{},"intentAcks":0}"#)
             .seed(".anti-hall/devswarm/drain/{own}.json", r#"{"startedAt":{now},"sessionId":"s1","pid":1,"count":0}"#),
     ]
+}
+
+
+const PG_WAKE_DESC: &str = r#"{"id":"c-3","worktreePath":"{wt3}","sessionId":"sess-c3","inboxPath":"{home}/in.ndjson","cursorPath":"{home}/cur.json"}"#;
+const PG_WAKE_BLOCK: &str = "NO MAILBOX WAKE PATH";
+
+/// The mailbox-wake block fired at a Primary whose workspaces were all idle, done or archive-pending, and every Stop was blocked
+/// again. Node keeps that false positive; the engine counts only a workspace that can still send mail, caps the block per session
+/// (a count no clean pass clears) and honours `devswarm.wakeWatch` off. Each case: a live linked workspace, no watcher, no tick.
+fn pg_wake_cases() -> Vec<PgCase> {
+    use PgWant::Answer as A;
+    let wake = |name: &'static str, steps: &[PgWant]| {
+        pg(name, steps).linked().seed(".anti-hall/devswarm/workspaces/c-3.json", PG_WAKE_DESC).seed("in.ndjson", "").seed("cur.json", "0")
+    };
+    let idle_tr = lines(&[T_HUMAN, T_TOOL, T_RESULT, T_CLOSE]); // written an hour ago: no turn in progress
+    let busy_tr = lines(&[T_HUMAN, T_TOOL]);
+    vec![
+        wake("wake-block-for-a-workspace-with-unknown-activity", &[A]).diverge(&[PG_WAKE_BLOCK]),
+        wake("wake-block-for-a-busy-workspace", &[A]).seed(".claude/projects/{enc3}/sess-c3.jsonl", &busy_tr).diverge(&[PG_WAKE_BLOCK]),
+        wake("wake-no-block-for-an-idle-workspace", &[A]).seed("~aged/.claude/projects/{enc3}/sess-c3.jsonl", &idle_tr).diverge(&["!NO MAILBOX"]),
+        wake("wake-no-block-for-an-archive-ready-workspace", &[A])
+            .seed(".anti-hall/devswarm/summaries/{key}.json", r#"{"workspaces":{"c-3":{"archive_ready":true}}}"#)
+            .diverge(&["!NO MAILBOX"]),
+        wake("wake-no-block-for-a-done-gated-workspace", &[A])
+            .seed(".anti-hall/devswarm/summaries/{key}.json", r#"{"workspaces":{"c-3":{"gates":{"done":true}}}}"#)
+            .diverge(&["!NO MAILBOX"]),
+        wake("wake-per-session-budget-survives-a-clean-pass", &[A, A])
+            .seed(".anti-hall/devswarm/parent-gate/wake-total-s1.json", r#"{"blocks":2}"#)
+            .diverge(&[PG_WAKE_BLOCK, "!NO MAILBOX"]),
+        wake("wake-spent-session-budget-is-quiet", &[A]).seed(".anti-hall/devswarm/parent-gate/wake-total-s1.json", r#"{"blocks":3}"#).diverge(&["!NO MAILBOX"]),
+        wake("wake-watch-off-is-quiet", &[A]).seed(".anti-hall/settings.json", r#"{"devswarm":{"wakeWatch":false}}"#).diverge(&["!NO MAILBOX"]),
+    ]
+}
+
+#[test]
+fn the_mailbox_wake_block_counts_only_workspaces_that_can_still_send_mail() {
+    for case in pg_wake_cases() {
+        pg_exec(&case);
+    }
 }
 
 #[test]
