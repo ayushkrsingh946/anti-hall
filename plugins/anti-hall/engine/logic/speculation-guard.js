@@ -5,7 +5,10 @@
 // While the Jev master switch is on the reply is also asked about on the Jev lane (add-block trust: a confident "speculative" adds a
 // block; a hedge under a plan or expectation heading is asked once more with relax-block trust), every decision is written to the
 // guard's own jev-judge.ndjson, and the Stop after a block reports that block's outcome to the Jev decision log. Anything this
-// script cannot reproduce exactly defers BEFORE a side effect (guards.inferenceCheck on, which reads tool evidence; a Jev text cut through a surrogate pair; a relative transcript path). Keys and texts: response_guards.toml (speculation_guard.*).
+// script cannot model exactly is counted (native_unable at `speculation-guard.*`) and decided natively before any side effect: a state
+// file or transcript line only V8 reads is read as absent, a lone surrogate becomes U+FFFD, a relative transcript path reads nothing.
+// The causal-claim scan (guards.inferenceCheck, default off) is lib/80-inference.js. Blocks are never gated by Jev or the advisory
+// layer. Keys and texts: response_guards.toml (speculation_guard.*), inference.toml.
 'use strict';
 
 function sgT(key, flags, t) { return ah.re.test(ah.cfg(key), flags, t); }
@@ -25,7 +28,7 @@ function sgTurnOutputs(lines) {
     var raw = lines[i];
     if (raw.indexOf('"user"') < 0) continue;
     var r = jx.parse(raw.trim());
-    if (r.unsure) return null;
+    if (r.unsure) { ah.unable('speculation-guard:turn_line_unsure'); continue; }
     if (r.invalid || !jx.isObj(r.v) || r.v.type !== 'user') continue;
     var c = jx.isObj(r.v.message) ? r.v.message.content : undefined;
     if (typeof c === 'string') { if (r.v.isMeta !== true && c.trim() !== '' && c.indexOf('<') !== 0) break; continue; }
@@ -49,7 +52,7 @@ function sgTurnOutputs(lines) {
 function sgCites(reply, lines) {
   if (lines === null) return false;
   var outs = sgTurnOutputs(lines);
-  if (outs === null || outs === '') return false;
+  if (outs === '') return false;
   var toks = ah.re.findAll(ah.cfg('speculation_guard.cite_token_re'), '', reply), seen = {}, hits = 0, min = ah.cfgNum('speculation_guard.cite_min_len');
   for (var i = 0; i < toks.length && hits < ah.cfgNum('speculation_guard.cite_min_hits'); i++) {
     var tk = reply.slice(toks[i][0], toks[i][1]);
@@ -104,16 +107,17 @@ function sgFramed(text, at) {
   return false;
 }
 
-// {hash, blocks, pending} of the session's state file (nothing blocked yet when it is absent, empty or not JSON); null to defer.
+// {hash, blocks, pending} of the session's state file (nothing blocked yet when it is absent, empty, not JSON, over the read cap or
+// one the script cannot parse exactly: counted).
 function sgPrior(path) {
   var none = { hash: '', blocks: 0, pending: null };
   var f = jx.read(path);
-  if (f.big) return null;
+  if (f.big) { ah.unable('speculation-guard:state_big'); return none; }
   if (f.text === undefined) return none;
   var t = f.text.trim();
   if (!t) return none;
   var r = jx.parse(t);
-  if (r.unsure) return null;
+  if (r.unsure) { ah.unable('speculation-guard:state_unsure'); return none; }
   if (r.invalid) return none;
   var v = r.v;
   if (v && typeof v === 'object') {
@@ -140,7 +144,7 @@ function sgEntryLine(e, verdict) {
 function sgSession(p, transcript) {
   if (p.session_id) {
     var t = typeof p.session_id;
-    if (t !== 'string' && t !== 'number' && t !== 'boolean') return null;
+    if (t !== 'string' && t !== 'number' && t !== 'boolean') ah.unable('speculation-guard:session_type');
     return String(p.session_id);
   }
   return ah.sha1(transcript).slice(0, 16);
@@ -155,14 +159,14 @@ function sgAsk(spec, p) {
 
 function decide(p) {
   var home = ah.env.get(ah.cfg('env.home'));
-  if (!home) return 'defer';
+  if (!home) { ah.unable('speculation-guard:no_home'); return 'allow'; } // no home: no state to read or write
   if (!ah.settings.bool('speculation_guard.setting')) return 'allow';
   if (p === null || typeof p !== 'object') p = {};
   var transcript = typeof p.transcript_path === 'string' ? p.transcript_path : '';
   if (!transcript) return 'allow';
-  if (transcript.charAt(0) !== '/') return 'defer';
+  var readable = transcript.charAt(0) === '/';
+  if (!readable) ah.unable('speculation-guard:relative_transcript'); // Node resolves it against its own directory; here it reads nothing
   var sessionRaw = sgSession(p, transcript);
-  if (sessionRaw === null) return 'defer';
   var stateName = ah.cfg('speculation_guard.state_prefix') + sessionRaw.replace(/[^A-Za-z0-9_.-]/g, '_') + ah.cfg('replykit.json_ext');
   var stateDir = ah.cfg('replykit.state_dir');
   var stateRel = stateDir + '/' + stateName;
@@ -172,7 +176,7 @@ function decide(p) {
   var tailLines, asstLines;
   // the lines lastAssistant reads: entries that name `assistant` (or spell it with an escape); the host hands over just those
   function assistantLines() {
-    if (asstLines === undefined) asstLines = rp.lines(transcript, ah.cfgNum('speculation_guard.window_bytes'), ['assistant', '\\u']);
+    if (asstLines === undefined) asstLines = readable ? rp.lines(transcript, ah.cfgNum('speculation_guard.window_bytes'), ['assistant', '\\u']) : null;
     return asstLines;
   }
   function fromTranscript(map) {
@@ -183,30 +187,27 @@ function decide(p) {
   if (payloadText !== null) lastText = payloadText;
   else {
     var r = fromTranscript();
-    if (r.unsure) return 'defer';
+    if (r.unsure) { ah.unable('speculation-guard:reply_unsure'); return 'allow'; } // the reply cannot be read exactly: nothing to judge
     if (r.text === null) return 'allow';
     lastText = r.text;
   }
   if (lastText === '') return 'allow';
-  if (jx.loneSurrogate(lastText)) return 'defer';
+  if (jx.loneSurrogate(lastText)) { ah.unable('speculation-guard:lone_surrogate'); lastText = ahWf(lastText); }
   var markerText;
   if (payloadText !== null) markerText = mask(payloadText);
   else {
     var m = fromTranscript(mask);
-    if (m.unsure) return 'defer';
-    markerText = m.text === null ? '' : m.text;
+    if (m.unsure) ah.unable('speculation-guard:masked_unsure');
+    markerText = m.unsure || m.text === null ? '' : m.text;
   }
   if (!markerText.trim()) markerText = lastText;
   var msgHash = ah.sha1(lastText);
   var prior = sgPrior(home + '/' + stateRel);
-  if (prior === null) return 'defer';
   var guard = ah.cfg('speculation_guard.guard_name');
   var skipped = ah.settings.skipped(guard);
   var jevOn = ah.jev.enabled();
   var loopSafe = msgHash === prior.hash || prior.blocks >= ah.cfgNum('speculation_guard.max_blocks');
   var inferenceOn = ah.settings.bool('speculation_guard.inference_setting');
-  // everything that would have to be rebuilt from the transcript, or that Node alone can judge, is decided before the first side effect
-  if (inferenceOn && !loopSafe && jevOn) return 'defer';
   var jevText = null;
   if (jevOn && !loopSafe && !skipped) {
     // Jev reads the Stop payload's reply; without one, the transcript's last assistant text read WITHOUT the doubled nested message
@@ -215,12 +216,11 @@ function decide(p) {
     if (jevFull === null) {
       var al2 = assistantLines();
       var dd = al2 === null ? { text: null } : rp.lastAssistant(al2, undefined, true);
-      if (dd.unsure) return 'defer';
-      jevFull = dd.text ? dd.text : lastText;
-      if (jx.loneSurrogate(jevFull)) return 'defer';
+      if (dd.unsure) ah.unable('speculation-guard:jev_reply_unsure');
+      jevFull = dd.unsure || !dd.text ? lastText : dd.text;
     }
-    jevText = jx.sliceUnits(jevFull, ah.cfgNum('speculation_guard.jev_state_chars'));
-    if (jevText.length < jevFull.length && jevText.length < ah.cfgNum('speculation_guard.jev_state_chars')) return 'defer'; // the cut splits a surrogate pair
+    if (jx.loneSurrogate(jevFull)) { ah.unable('speculation-guard:jev_lone_surrogate'); jevFull = ahWf(jevFull); }
+    jevText = jx.sliceUnits(jevFull, ah.cfgNum('speculation_guard.jev_state_chars')); // a cut through a surrogate pair drops the half pair
   }
   var jevId = ah.cfg('speculation_guard.jev_id');
 
@@ -239,7 +239,7 @@ function decide(p) {
   var hit = sgHit(markerText);
   var cited = false;
   if (hit !== null && !sgHasAck(lastText)) {
-    if (tailLines === undefined) tailLines = rp.lines(transcript, ah.cfgNum('speculation_guard.window_bytes'));
+    if (tailLines === undefined) tailLines = readable ? rp.lines(transcript, ah.cfgNum('speculation_guard.window_bytes')) : null;
     cited = sgCites(lastText, tailLines);
   }
   var wouldBlock = hit !== null && !sgHasAck(lastText) && !cited;
@@ -272,13 +272,16 @@ function decide(p) {
     return v;
   }
 
-  var marker = null, hitAt = 0;
+  var marker = null, hitAt = 0, inference = null;
   if (!jevBlock) {
     if (hit !== null && !sgHasAck(lastText) && !cited) { marker = hit.text; hitAt = hit.at; }
     else {
       // no hedge, or an honest one: the causal-claim scan (off unless guards.inferenceCheck is on) reads tool evidence
-      if (!loopSafe && inferenceOn) return 'defer';
-      return finish('allow', 'allow');
+      if (!loopSafe && inferenceOn && inf.anyConnective(markerText)) {
+        var evLines = readable ? rp.lines(transcript, ah.cfgNum('inference.window_bytes')) : null;
+        if (evLines !== null) inference = inf.unsupported(markerText, evLines, lastText);
+      }
+      if (inference === null) return finish('allow', 'allow');
     }
   }
   if (loopSafe) return finish('allow', 'allow');
@@ -287,8 +290,7 @@ function decide(p) {
   // non-block, never add one.
   if (!jevBlock && marker !== null && jevOn && sgFramed(markerText, hitAt)) {
     sgLog(home, JSON.stringify({ ts: new Date(ah.clock.now()).toISOString(), event: 'trigger', id: ah.cfg('speculation_guard.jev_framed_id'), outcome: 'seen' }) + '\n');
-    if (jevText === null) return 'defer';
-    var fd = sgAsk({
+    var fd = jevText === null ? null : sgAsk({
       id: ah.cfg('speculation_guard.jev_framed_id'), state: jevText, trust: 'relax_block', baseline: true, flagged: true, sessionId: sessionRaw, turnRefFrom: payloadText === null ? transcript : undefined,
       question: { type: 'noul', instructions: ah.cfg('speculation_guard.framed_instructions'), criteria: [['true', ah.cfg('speculation_guard.framed_true')], ['false', ah.cfg('speculation_guard.framed_false')]] },
     }, p);
@@ -296,11 +298,12 @@ function decide(p) {
   }
 
   var pendingH = jevBlock ? (jevHash || msgHash) : msgHash;
-  var source = jevBlock ? ah.cfg('speculation_guard.source_jev') : ah.cfg('speculation_guard.source_regex');
+  var source = jevBlock ? ah.cfg('speculation_guard.source_jev') : (inference !== null ? ah.cfg('inference.source') : ah.cfg('speculation_guard.source_regex'));
   var body = JSON.stringify({ hash: msgHash, blocks: prior.blocks + 1, pending: { h: pendingH, source: source } });
   if (!ah.state.writeAtomic(stateRel, body)) return finish('allow', 'allow');
   ah.state.prune(ah.cfg('speculation_guard.prune_prefix'), stateName);
-  var what = jevBlock ? ah.cfg('speculation_guard.msg_what_jev') : text.render(ah.cfg('speculation_guard.msg_what'), { marker: marker });
+  var what = jevBlock ? ah.cfg('speculation_guard.msg_what_jev')
+    : (inference !== null ? text.render(ah.cfg('inference.msg_what'), { sentence: inf.oneLine(inference.sentence, ah.cfgNum('inference.oneline_max')) }) : text.render(ah.cfg('speculation_guard.msg_what'), { marker: marker }));
   var reason = text.message('block', guard, { what: what, why: ah.cfg('speculation_guard.msg_why'), instead: ah.cfg('speculation_guard.msg_instead') });
   return finish({ exact: { code: 0, out: JSON.stringify({ decision: 'block', reason: reason }) + '\n', err: '' } }, 'block');
 }
