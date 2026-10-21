@@ -36,6 +36,7 @@ pub mod orphans;
 pub mod pull;
 pub mod side;
 pub mod stage;
+pub mod survivor;
 pub mod sweep;
 pub mod view;
 
@@ -103,6 +104,9 @@ pub enum Op {
         rel: String,
         /// The bytes.
         bytes: Vec<u8>,
+        /// Tail-preserving rotation after the append (the cursor journal's): keep the newest this-many non-blank records and move
+        /// the older ones to `<rel>.1`, replacing what was there. `None`: append only.
+        keep: Option<usize>,
     },
     /// Rename a file when it exists (a log rotation).
     Rename {

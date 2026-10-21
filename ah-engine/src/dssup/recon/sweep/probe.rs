@@ -12,7 +12,7 @@
 //! * **The start-up sampling** (`devswarm.startupSampling`): data capture only, at most `devswarm.pausedProbeMax` `workspace
 //!   info` probes of workspaces whose persisted verdict reads stale or not draining.
 use super::*;
-use crate::dsact::runner::RunSpec;
+use crate::dsact::runner::{RunResult, RunSpec};
 use std::collections::{HashMap, HashSet};
 
 /// One record of the listing.
@@ -63,8 +63,25 @@ fn opt_text(v: Option<&OVal>) -> Option<String> {
     }
 }
 
-/// `fetchActiveWorkspaceRecords(ctx)`.
-fn fetch(runner: &dyn Runner, cwd: &str) -> Active {
+/// What one `hivecontrol workspace list all` came to.
+pub(super) enum Listing {
+    /// A clean exit 0: its stdout.
+    Out(String),
+    /// Not run: the build positively lacks `workspace list` and the capability cache already says so (`gatedRun`'s refusal text).
+    Refused(String),
+    /// Run and failed.
+    Failed(RunResult),
+}
+
+/// The one bounded, read-only listing every part of the sweep shares, behind the capability gate (`hcRun`): a build the cache records
+/// as lacking `workspace list` is not asked. A missing or stale cache, or no binary, goes through to the call, which then fails
+/// like any other (the probe that fills the cache is not run here).
+pub(super) fn list_all(ctx: &Ctx, runner: &dyn Runner, cwd: &str) -> Listing {
+    let env = pull::sweep_env(&ctx.st.env, ctx.home);
+    let verb = defaults::text("mesh_write.hivecontrol_list_verb");
+    if let crate::meshw::hivecontrol::Cap::Dormant(reason) = crate::meshw::hivecontrol::cap_verb(&env, ctx.home, verb, None, None) {
+        return Listing::Refused(defaults::render("devswarm_recon.msg_capability_dormant", &[("name", &format!("{}{verb}", defaults::text("devswarm_cli.hc_cap_prefix"))), ("reason", &reason)]));
+    }
     let spec = RunSpec {
         bin: None,
         args: defaults::list("devswarm_recon.list_all_args").iter().map(|a| (*a).to_string()).collect(),
@@ -74,19 +91,30 @@ fn fetch(runner: &dyn Runner, cwd: &str) -> Active {
         ..RunSpec::default()
     };
     let res = runner.run(&spec);
-    if !(res.ok && res.status == Some(0)) {
-        let cap = defaults::num("devswarm_recon.probe_stderr_max") as usize;
-        return Active::Fail(Fail {
-            reason: defaults::text("devswarm_recon.reason_unavailable").to_string(),
-            error: Some(res.error.filter(|e| !e.is_empty()).unwrap_or_else(|| defaults::text("devswarm_recon.word_no_output").to_string())),
-            status: res.status,
-            signal: None,
-            stderr: Some(crate::checks::jsport::text::slice16_lossy(&res.stderr, cap)),
-            ..Fail::default()
-        });
-    }
+    if res.ok && res.status == Some(0) { Listing::Out(res.stdout) } else { Listing::Failed(res) }
+}
+
+/// `fetchActiveWorkspaceRecords(ctx)`.
+fn fetch(ctx: &Ctx, runner: &dyn Runner, cwd: &str) -> Active {
+    let cap = defaults::num("devswarm_recon.probe_stderr_max") as usize;
+    let stdout = match list_all(ctx, runner, cwd) {
+        Listing::Out(o) => o,
+        Listing::Refused(why) => {
+            return Active::Fail(Fail { reason: defaults::text("devswarm_recon.reason_unavailable").to_string(), error: Some(why), ..Fail::default() });
+        }
+        Listing::Failed(res) => {
+            return Active::Fail(Fail {
+                reason: defaults::text("devswarm_recon.reason_unavailable").to_string(),
+                error: Some(res.error.filter(|e| !e.is_empty()).unwrap_or_else(|| defaults::text("devswarm_recon.word_no_output").to_string())),
+                status: res.status,
+                signal: None,
+                stderr: Some(crate::checks::jsport::text::slice16_lossy(&res.stderr, cap)),
+                ..Fail::default()
+            });
+        }
+    };
     let shape = |keys: Vec<String>| Active::Fail(Fail { reason: defaults::text("devswarm_recon.reason_shape").to_string(), raw_keys: keys, ..Fail::default() });
-    let Some(parsed) = OVal::parse(&res.stdout) else { return shape(Vec::new()) };
+    let Some(parsed) = OVal::parse(&stdout) else { return shape(Vec::new()) };
     let list: &[OVal] = match &parsed {
         OVal::Arr(a) => a,
         OVal::Obj(o) => match parsed.get(defaults::text("mesh_write.roster_children_key")) {
@@ -184,7 +212,7 @@ pub(super) fn probe_project(ctx: &Ctx, runner: &dyn Runner, descs: &[Descriptor]
     if side::repo_unknown_suppressed(home, &p.repo_key, scope, ctx.now) && repo_terminal(acc, &inv, &held, descs, &p.repo_key) {
         return Value::Null;
     }
-    let mut active = fetch(runner, &p.worktree);
+    let mut active = fetch(ctx, runner, &p.worktree);
     match &active {
         Active::Ok(_) => {
             apply_side(ctx, runner, job, side::plan_repo_unknown_clear(home, &p.repo_key, scope), &[]);

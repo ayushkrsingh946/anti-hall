@@ -726,19 +726,8 @@ fn backfill_names(ctx: &Ctx, runner: &dyn Runner, cwd: &str, targets: &[Target])
     if missing.is_empty() {
         return 0;
     }
-    let spec = crate::dsact::runner::RunSpec {
-        bin: None,
-        args: defaults::list("devswarm_recon.list_all_args").iter().map(|a| (*a).to_string()).collect(),
-        cwd: Some(cwd.to_string()),
-        timeout_ms: defaults::num("devswarm_recon.list_timeout_ms"),
-        scrub_env: defaults::list("devswarm_recon.env_strip").iter().map(|a| (*a).to_string()).collect(),
-        ..Default::default()
-    };
-    let res = runner.run(&spec);
-    if !(res.ok && res.status == Some(0)) {
-        return 0;
-    }
-    let labels = state::parse_labels(&res.stdout);
+    let probe::Listing::Out(stdout) = probe::list_all(ctx, runner, cwd) else { return 0 };
+    let labels = state::parse_labels(&stdout);
     missing
         .iter()
         .filter(|t| labels.iter().find(|(id, _)| *id == t.id).and_then(|(_, l)| l.as_deref()).is_some_and(|l| state::write_name(ctx.home, &t.id, l, ctx.now)))
@@ -809,7 +798,7 @@ pub fn duty(ctx: &Ctx, runner: &dyn Runner, hooks: &Hooks) -> Value {
                     }
                 }
                 if v.get("ok") == Some(&json!(false)) && rows.is_empty() {
-                    let err = ["error", "reason"].iter().find_map(|k| v.get(*k).filter(|e| truthy(Some(e)))).map_or_else(|| defaults::text("devswarm_recon.word_reconcile_failed").to_string(), js_str);
+                    let err = v.get("error").filter(|e| truthy(Some(e))).or_else(|| v.get("reason").filter(|e| truthy(Some(e)))).map_or_else(|| defaults::text("devswarm_recon.word_reconcile_failed").to_string(), js_str);
                     failures.push(json!({"repoKey": p.repo_key, "error": clean(&err)}));
                 }
                 if fold.get("ok") == Some(&json!(false)) {

@@ -1057,3 +1057,15 @@ value = "{n} unchanged failures (same as last run)"
 [devswarm_recon.file_log_sig]
 doc = "The file, under the DevSwarm state directory, holding the signature of the last logged failure list."
 value = "reconcile-log-sig.json"
+
+[devswarm_recon.msg_capability_dormant]
+doc = "The failure text of a hivecontrol call the capability cache already records as unsupported by this build. Placeholders: {name}, {reason}."
+value = "capability dormant: {name} — {reason}"
+
+[devswarm_recon.cursor_log_rotation]
+doc = "Whether the fold may rotate a cursor-write journal that is past `mesh_write.cursor_log_cap` records: the newest records stay and the older ones REPLACE the journal's `.1` file (what the previous generation held is dropped). Off (the default): a fold that would need it waits (counted, nothing written for that group) until you switch it on or trim the journal yourself."
+value = false
+
+[devswarm_recon.cursor_log_older_suffix]
+doc = "The suffix of the file a rotated cursor journal's older records move to."
+value = ".1"

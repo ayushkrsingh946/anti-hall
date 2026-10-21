@@ -382,7 +382,8 @@ fn off_scope_files(ctx: &Ctx, runner: &dyn Runner, plan: &Value, wt: &str) -> Op
         allow.push(e.get("glob").map_or_else(|| "undefined".to_string(), |g| g.as_str().map_or_else(|| g.to_string(), str::to_string)));
     }
     let base = plan.get("base").and_then(Value::as_str).filter(|b| !b.is_empty()).unwrap_or(defaults::text("devswarm_sup.tl_default_base"));
-    let argv: Vec<String> = ["ready-check", "HEAD", "--base", base, "--allow", &allow.join(",")].iter().map(|a| (*a).to_string()).collect();
+    let allow = allow.join(",");
+    let argv: Vec<String> = defaults::list("devswarm_sup.tl_ready_args").iter().map(|a| a.replace("{base}", base).replace("{allow}", &allow)).collect();
     let args = crate::meshw::args::parse(&argv);
     let answer = crate::meshw::gitverbs::ready_check_with(&inv_of(ctx, wt), &args, runner).ok()?;
     let r: Value = serde_json::from_str(answer.stdout.trim()).ok()?;
@@ -471,7 +472,7 @@ fn signals_of(ctx: &Ctx, runner: &dyn Runner, plan: &Value, c: &Child, usage: Op
 /// `shortHash(s)`: the first ten hex digits of the SHA-1.
 fn content_digest(s: &str) -> String {
     let d = ring::digest::digest(&ring::digest::SHA1_FOR_LEGACY_USE_ONLY, s.as_bytes());
-    d.as_ref().iter().map(|b| format!("{b:02x}")).collect::<String>().chars().take(10).collect()
+    d.as_ref().iter().map(|b| format!("{b:02x}")).collect::<String>().chars().take(defaults::num("devswarm_sup.tl_digest_len") as usize).collect()
 }
 
 fn stray_path(home: &Path, key: &str) -> PathBuf {

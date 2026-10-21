@@ -8,16 +8,17 @@
 //! the cursor move, then (unless the candidate has a descriptor) remove the registry row with the conditional delete and leave
 //! a redirect file. No message row is deleted or updated: the op vocabulary cannot express it.
 //!
-//! The engine decides a group only when it can reproduce Node's answer exactly; otherwise the WHOLE group is handed back to Node
-//! (nothing planned, nothing written for it), because a candidate's verdict depends on the other candidates of its group:
+//! The engine decides a group from the same evidence Node's function reads; what it cannot decide is handed back whole (nothing
+//! planned, nothing written, counted):
 //!
-//! * the survivor choice needs liveness (`isRoutingLiveRowStrict`: a harness session's dormancy) unless it is forced: exactly one
-//!   row of the group carries a real session, no other row has a heartbeat file, and that row also wins the deterministic
-//!   fallback (so it is the survivor whether or not it is live);
-//! * a candidate whose id is its worktree's mesh id (the anchor) is decided natively when a descriptor or reader evidence
-//!   protects it; when only liveness could tell (a heartbeat file, a real session without a descriptor) the group goes to Node;
-//! * a candidate partition without floor rows whose cursor would have to move needs Node's legacy-cursor import;
-//! * a cursor journal that would roll over, a partition message of a type the engine does not model, a deadline.
+//! * the survivor is the freshest live row ([`super::survivor`]: the strict routing liveness, then session-reference integrity, drain
+//!   activity, a session-authored heartbeat and recency);
+//! * a candidate whose id is its worktree's mesh id (the anchor) stays when its session is live (`isSiblingPartitionLive`), a descriptor
+//!   exists or a reader has drained it; a cross-referenced anchor keeps only the unforgeable half (a heartbeat of its own right now);
+//! * a candidate partition without floor rows whose cursor would have to move needs the legacy-cursor import with a session's
+//!   working directory only git can classify;
+//! * a cursor journal that would roll over waits unless `devswarm_recon.cursor_log_rotation` is on (rotation replaces the journal's
+//!   `.1` file); a partition message of a type the engine does not model; a deadline.
 //!
 //! Deferral reasons are the `Defer` texts below; a unit that ends deferred or failed on the real home is reported the same way.
 use super::gate::{self, Job, Verdict};
@@ -30,6 +31,7 @@ use crate::defaults;
 use crate::dsact::runner::Runner;
 use crate::dssup::tick::Ctx;
 use crate::mesh::MeshReader;
+use crate::meshw::common::Inv;
 use crate::meshw::ident::{self, Defer, R, defer};
 use crate::meshw::idlock::is_safe_id;
 use crate::meshw::store::{CursorRow, MeshRow, mesh_message_hash};
@@ -85,6 +87,8 @@ pub(super) struct Cx<'a> {
     pub(super) rd: &'a MeshReader,
     pub(super) now: i64,
     pub(super) rows: &'a [RegRow],
+    /// The invocation the liveness readers (heartbeats, harness sessions, the app's archive verdict) run in.
+    pub(super) inv: &'a Inv,
 }
 
 pub(super) fn is_live_sid(sid: &str) -> bool {
@@ -96,10 +100,6 @@ pub(super) fn forwardable(m: &Msg) -> bool {
         && m.mtype.as_deref() == Some(defaults::text("mesh_write.mtype_direct"))
         && m.sender.as_deref().is_some_and(|s| !js_trim(s).is_empty())
         && m.recipient.as_deref().is_some_and(|s| !js_trim(s).is_empty())
-}
-
-fn cmp_utf16(a: &str, b: &str) -> std::cmp::Ordering {
-    a.encode_utf16().cmp(b.encode_utf16())
 }
 
 /// `meshRowCopy(m, 'message', {...})` plus the hash, as the row the forward inserts.
@@ -161,41 +161,11 @@ pub(super) fn descriptor_exists(home: &Path, id: &str) -> bool {
     ident::read_descriptor(home, id).is_some()
 }
 
-/// The deterministic fallback of `pickFreshestLive` over rows none of which is live (`pickDeterministicFallback`).
-fn fallback_winner(rows: &[RegRow]) -> Option<&RegRow> {
-    let upd = |r: &RegRow| r.updated_at.unwrap_or(0);
-    let mut winner: Option<&RegRow> = None;
-    for d in rows {
-        let Some(w) = winner else {
-            winner = Some(d);
-            continue;
-        };
-        match upd(d).cmp(&upd(w)) {
-            std::cmp::Ordering::Greater => winner = Some(d),
-            std::cmp::Ordering::Less => {}
-            std::cmp::Ordering::Equal => {
-                if cmp_utf16(&d.row.id, &w.row.id) == std::cmp::Ordering::Less {
-                    winner = Some(d);
-                }
-            }
-        }
-    }
-    winner
-}
-
-/// `pickSurvivor(s, {rows}, home)` where the answer does not depend on liveness (see the module header).
-fn pick_survivor(home: &Path, rows: &[RegRow]) -> R<String> {
-    let live: Vec<&RegRow> = rows.iter().filter(|r| view::descriptor_of(r).session_id.as_deref().is_some_and(is_live_sid)).collect();
-    if live.len() != 1 {
-        return defer("survivor-liveness");
-    }
-    let l = live[0];
-    if rows.iter().any(|r| r.row.id != l.row.id && exists(home, &heartbeat_rel(&r.row.id))) {
-        return defer("survivor-heartbeat");
-    }
-    match fallback_winner(rows) {
-        Some(w) if w.row.id == l.row.id => Ok(l.row.id.clone()),
-        _ => defer("survivor-liveness"),
+/// `pickSurvivor(s, {rows}, home)`: the freshest live row of the group ([`super::survivor`]).
+fn pick_survivor(cx: &Cx, rows: &[RegRow]) -> R<String> {
+    match super::survivor::pick(cx, rows)? {
+        Some(id) => Ok(id),
+        None => defer("no-survivor"),
     }
 }
 
@@ -275,23 +245,14 @@ pub(super) fn plan_group(cx: &Cx, sim: &mut Sim, survivor: &str, cands: &[RegRow
             };
             if mesh.as_deref() == Some(id.as_str()) {
                 let evidence = view::has_reader_evidence(cx.home, cx.rd, &id)?;
-                let beat = exists(cx.home, &heartbeat_rel(&id));
+                // `isSiblingPartitionLive` of the row (an undetermined answer reads as live: loss-free, as Node's catch does); a stale
+                // cross-reference keeps only its unforgeable half, a heartbeat written to the row's own file right now
                 let anchor = if stale {
-                    if evidence {
-                        true
-                    } else if beat {
-                        return defer("anchor-heartbeat");
-                    } else {
-                        false
-                    }
-                } else if evidence || descriptor_exists(cx.home, &id) {
-                    true
-                } else if beat {
-                    return defer("anchor-heartbeat");
-                } else if is_live_sid(&sid) {
-                    return defer("anchor-dormancy");
+                    evidence || super::view::fresh_heartbeat(cx.home, &id, cx.now as f64)
                 } else {
-                    false
+                    let sid_opt = (!sid.is_empty()).then_some(sid.as_str());
+                    let live = crate::meshw::rosterrows::sibling_partition_live(cx.inv, cx.now as f64, &id, Some(wt), sid_opt).unwrap_or(true);
+                    live || descriptor_exists(cx.home, &id) || evidence
                 };
                 if anchor {
                     out.left.push(id.clone());
@@ -345,9 +306,13 @@ pub(super) fn plan_group(cx: &Cx, sim: &mut Sim, survivor: &str, cands: &[RegRow
             let journal = crate::meshw::cursors::log_path(cx.home, Some(&key));
             let lines = if moved > 0 { 2 } else { 1 };
             let added = sim.log_added.entry(journal.clone()).or_insert(0);
-            if journal_lines(&journal) + *added + lines > log_cap {
+            // past the cap the journal rotates (the older records replace its `.1` file): only when the owner switched that on, else the
+            // group waits (nothing is replaced automatically)
+            let rotate = defaults::raw("devswarm_recon.cursor_log_rotation").as_bool().unwrap_or(false);
+            if journal_lines(&journal) + *added + lines > log_cap && !rotate {
                 return defer("cursor-log-rotation");
             }
+            let keep = rotate.then_some(log_cap);
             *added += lines;
             let rel = rel_of(cx.home, &journal);
             out.raised.push((id.clone(), advance_to));
@@ -356,9 +321,10 @@ pub(super) fn plan_group(cx: &Cx, sim: &mut Sim, survivor: &str, cands: &[RegRow
                 ops.push(Op::Append {
                     rel: rel.clone(),
                     bytes: cursor_log_line(cx.now, &id, defaults::text("mesh_write.log_ns_store"), since, advance_to).into_bytes(),
+                    keep,
                 });
             }
-            ops.push(Op::Append { rel, bytes: cursor_log_line(cx.now, &id, ns, since, advance_to).into_bytes() });
+            ops.push(Op::Append { rel, bytes: cursor_log_line(cx.now, &id, ns, since, advance_to).into_bytes(), keep });
         }
         if !stale && descriptor_exists(cx.home, &id) {
             out.left.push(id.clone());
@@ -557,7 +523,8 @@ pub fn plan_fold(ctx: &Ctx, repo_key: &str) -> R<FoldPlan> {
         }
         by_mesh.entry(mesh).or_default().push(d.clone());
     }
-    let cx = Cx { home, store: repo_key, rd: &rd, now: ctx.now, rows: &rows };
+    let inv = super::survivor::inv_of(ctx);
+    let cx = Cx { home, store: repo_key, rd: &rd, now: ctx.now, rows: &rows, inv: &inv };
     let mut sim = Sim::default();
     let mut g = Groups::default();
     for mesh in &order {
@@ -592,7 +559,7 @@ pub fn plan_fold(ctx: &Ctx, repo_key: &str) -> R<FoldPlan> {
                     }
                     return Ok(None);
                 }
-                let survivor = pick_survivor(home, sub)?;
+                let survivor = pick_survivor(&cx, sub)?;
                 let cands = sub.iter().filter(|r| r.row.id != survivor).cloned().collect();
                 Ok(Some((survivor, cands)))
             })();

@@ -1885,3 +1885,13 @@ doc = "Milliseconds in a minute (the stall window is configured in minutes)."
 value = 60000
 min = 1
 max = 1000000
+
+[devswarm_sup.tl_ready_args]
+doc = "The arguments of the read-only ready check that lists a child's files outside its plan's scope. Placeholders: {base} (the plan's base) and {allow} (the scope globs and extras, comma separated)."
+value = ["ready-check", "HEAD", "--base", "{base}", "--allow", "{allow}"]
+
+[devswarm_sup.tl_digest_len]
+doc = "How many hex digits of the SHA-1 of the off-scope file list name an off-scope episode."
+value = 10
+min = 4
+max = 40

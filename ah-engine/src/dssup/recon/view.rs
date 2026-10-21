@@ -307,3 +307,9 @@ pub fn partition_sig(home: &Path, store: &str, id: &str) -> R<String> {
     }
     Ok(s)
 }
+
+/// `hasFreshHeartbeat(id, home, { now })`: the partition's own heartbeat file is newer than the freshness window.
+pub fn fresh_heartbeat(home: &Path, id: &str, now: f64) -> bool {
+    crate::meshw::idlock::is_safe_id(id)
+        && crate::dssup::liveness::is_fresh(crate::dssup::liveness::heartbeat_ts(home, id), now, defaults::num("devswarm_sup.lv_heartbeat_fresh_ms") as f64)
+}

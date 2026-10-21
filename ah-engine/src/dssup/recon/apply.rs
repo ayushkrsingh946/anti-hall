@@ -255,6 +255,21 @@ fn raise(env: &Env, store: &str, partition: &str, value: i64) -> Result<(), Stri
     Ok(())
 }
 
+/// `logCursorWrite`'s rotation: once the journal holds more than `cap` non-blank records, the newest `cap` stay and the older ones
+/// replace `<path>.1`. The overflow is written first, so a failure in between leaves every record in at least one of the two files.
+fn rotate_tail(path: &Path, cap: usize) -> Result<(), String> {
+    let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+    let lines: Vec<&str> = text.split('\n').filter(|l| !l.trim().is_empty()).collect();
+    if lines.len() <= cap {
+        return Ok(());
+    }
+    let (old, keep) = lines.split_at(lines.len() - cap);
+    let mut older = path.as_os_str().to_os_string();
+    older.push(defaults::text("devswarm_recon.cursor_log_older_suffix"));
+    crate::atomic::write(std::path::PathBuf::from(older), format!("{}\n", old.join("\n"))).map_err(|e| e.to_string())?;
+    crate::atomic::write(path, format!("{}\n", keep.join("\n"))).map_err(|e| e.to_string())
+}
+
 /// `removeRegistryIf`: the NULL-safe conditional delete of one registry row.
 fn remove_if(env: &Env, store: &str, id: &str, session_id: &Option<String>, updated_at: Option<i64>, write_seq: Option<i64>) -> Result<(), String> {
     let st = open_store(env, store)?;
@@ -305,10 +320,14 @@ fn run_op(env: &Env, op: &Op, hook: &dyn Fn(&str)) -> Result<(), String> {
             Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.to_string()),
             _ => Ok(()),
         },
-        Op::Append { rel, bytes } => {
+        Op::Append { rel, bytes, keep } => {
             mkparent(&at(rel))?;
             let mut f = std::fs::OpenOptions::new().create(true).append(true).open(at(rel)).map_err(|e| e.to_string())?;
-            f.write_all(bytes).map_err(|e| e.to_string())
+            f.write_all(bytes).map_err(|e| e.to_string())?;
+            match keep {
+                Some(cap) => rotate_tail(&at(rel), *cap),
+                None => Ok(()),
+            }
         }
         Op::Rename { rel, to } => {
             if !at(rel).exists() {
@@ -382,4 +401,26 @@ pub fn unit(env: &Env, u: &Unit, hooks: &Hooks) -> UnitEnd {
         h.release();
     }
     end
+}
+
+#[cfg(test)]
+mod rotation_tests {
+    use super::*;
+
+    #[test]
+    fn dssup_recon_cursor_log_rotation_keeps_the_newest_records_and_the_older_move_to_dot_one() {
+        crate::defaults::init().unwrap();
+        let d = crate::db::TempDir::new("cursor-rotation");
+        let p = d.0.join(defaults::text("devswarm_recon.file_samples"));
+        std::fs::write(&p, "{\"n\":1}\n{\"n\":2}\n\n{\"n\":3}\n{\"n\":4}\n").unwrap();
+        let older = d.0.join(format!("{}{}", defaults::text("devswarm_recon.file_samples"), defaults::text("devswarm_recon.cursor_log_older_suffix")));
+        std::fs::write(&older, "{\"n\":0}\n").unwrap();
+        // at or under the cap nothing moves
+        rotate_tail(&p, 4).unwrap();
+        assert_eq!(std::fs::read_to_string(&older).unwrap(), "{\"n\":0}\n");
+        // over it: the newest two stay, the older two replace `.1`
+        rotate_tail(&p, 2).unwrap();
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "{\"n\":3}\n{\"n\":4}\n");
+        assert_eq!(std::fs::read_to_string(&older).unwrap(), "{\"n\":1}\n{\"n\":2}\n");
+    }
 }
