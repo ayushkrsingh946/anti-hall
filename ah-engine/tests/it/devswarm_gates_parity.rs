@@ -760,6 +760,7 @@ fn pg_sum(questions: &str, rows: &str, archived: Option<&str>) -> String {
 }
 const PG_PARKED: &str = ".anti-hall/devswarm/escalation-pending/c-9.json";
 const PG_PARKED_BODY: &str = r#"{"parentId":"{own}","childId":"c-9","row":{"ts":1},"lastStatus":"escalated"}"#;
+const PG_LIVENESS: &str = ".anti-hall/devswarm/liveness/c-1.json";
 const PG_CHILD: &str = ".anti-hall/devswarm/workspaces/c-1.json";
 const PG_CHILD_BODY: &str = r#"{"id":"c-1","worktreePath":"{wt2}","sessionId":"sess-c1"}"#;
 
@@ -806,6 +807,46 @@ fn pg_cases() -> Vec<PgCase> {
             .seed(PG_CHILD, r#"{"id":"c-1","worktreePath":"{wt2}","sessionId":"sess-c1","inboxPath":"{home}/in.ndjson","cursorPath":"{home}/cur.json"}"#)
             .seed("in.ndjson", "{\"message\":\"  [Primary poke] wake\"}\n{\"message\":\"real\"}\n")
             .seed("cur.json", "0"),
+        // #228: a stale/escalated liveness verdict that is corroborated (pending) blocks even with an empty mailbox; uncorroborated or
+        // suppressed (a fresh heartbeat) it does not
+        child("liveness-escalated-pending-blocks-cap-escalate-quiet", &[A, A, A, A, A])
+            .seed(PG_CHILD, PG_INBOX_DESC)
+            .seed("in.ndjson", "")
+            .seed("cur.json", "0")
+            .seed(PG_LIVENESS, r#"{"status":"escalated","pending":true}"#)
+            .expect("escalated"),
+        child("liveness-stale-pending-blocks", &[A])
+            .seed(PG_CHILD, PG_INBOX_DESC)
+            .seed("in.ndjson", "")
+            .seed("cur.json", "0")
+            .seed(PG_LIVENESS, r#"{"status":"stale","pending":true}"#)
+            .expect("A stale child is wedged"),
+        child("liveness-escalated-uncorroborated-is-an-advisory", &[A])
+            .seed(PG_CHILD, PG_INBOX_DESC)
+            .seed("in.ndjson", "")
+            .seed("cur.json", "0")
+            .seed(PG_LIVENESS, r#"{"status":"escalated","pending":false}"#)
+            .expect("uncorroborated"),
+        child("liveness-escalated-pending-fresh-heartbeat-is-clean", &[A])
+            .seed(PG_CHILD, PG_INBOX_DESC)
+            .seed("in.ndjson", "")
+            .seed("cur.json", "0")
+            .seed(PG_LIVENESS, r#"{"status":"escalated","pending":true}"#)
+            .seed(".anti-hall/devswarm/heartbeats/c-1.json", r#"{"ts":{now}}"#)
+            .expect("!decision"),
+        child("liveness-escalated-pending-old-heartbeat-blocks", &[A])
+            .seed(PG_CHILD, PG_INBOX_DESC)
+            .seed("in.ndjson", "")
+            .seed("cur.json", "0")
+            .seed(PG_LIVENESS, r#"{"status":"escalated","pending":true}"#)
+            .seed(".anti-hall/devswarm/heartbeats/c-1.json", r#"{"ts":{old}}"#)
+            .expect("escalated"),
+        child("liveness-ok-verdict-is-clean", &[A])
+            .seed(PG_CHILD, PG_INBOX_DESC)
+            .seed("in.ndjson", "")
+            .seed("cur.json", "0")
+            .seed(PG_LIVENESS, r#"{"status":"ok","pending":true}"#)
+            .expect("!decision"),
         child("child-with-unread-blocks", &[A])
             .seed(PG_CHILD, r#"{"id":"c-1","worktreePath":"{wt2}","sessionId":"sess-c1","inboxPath":"{home}/in.ndjson","cursorPath":"{home}/cur.json"}"#)
             .seed("in.ndjson", "{\"message\":\"hi\",\"ts\":1}\n")

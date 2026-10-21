@@ -4126,6 +4126,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_role.pg_dir_drain` | `drain` |  |  | The in-flight drain markers (devswarm-drain-marker.js), under the DevSwarm directory. |
 | `devswarm_role.pg_dir_escalation` | `escalation-pending` |  |  | The parked escalation notices (recovery.js listEscalationIntents), under the DevSwarm directory. |
 | `devswarm_role.pg_dir_gate` | `parent-gate` |  |  | The per-session loop-state directory of the parent gate (stateFileFor), under the DevSwarm directory. |
+| `devswarm_role.pg_dir_heartbeats` | `heartbeats` |  |  | The workspace heartbeat files (liveness.js heartbeatPathFor), under the DevSwarm directory. |
 | `devswarm_role.pg_dir_liveness` | `liveness` |  |  | The supervisor verdict files, under the DevSwarm directory. |
 | `devswarm_role.pg_dir_names` | `names` |  |  | The directory of cached workspace display names under the DevSwarm state directory. |
 | `devswarm_role.pg_dir_stray` | `stray` |  |  | The straying-plan states (devswarm-plan.js listStray), under the DevSwarm directory. |
@@ -4140,6 +4141,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_role.pg_err_busy_age` | ` (oldest {m}m)` |  |  | The age phrase of that line: {m} minutes. |
 | `devswarm_role.pg_err_grace` | `⚠️ anti-hall · devswarm-parent-gate: {id}: {n} unread — awaiting child pickup...` |  |  | Stderr line for mail too young to count as neglect: {id}, {n} messages, {s} seconds. |
 | `devswarm_role.pg_err_own_no_key` | `⚠️ anti-hall · devswarm-parent-gate: workspace {id} (this Primary) unread cou...` |  |  | Stderr line when this Primary's own descriptor has no inbox and no store count: {id}. |
+| `devswarm_role.pg_err_uncorroborated` | `⚠️ anti-hall · devswarm-parent-gate: workspace {id} verdict is '{status}' but...` |  |  | The stderr line for a stale or escalated verdict with nothing to corroborate it (no pending flag, no unread mail, no unanswered question): {id}, {status}. |
 | `devswarm_role.pg_escalation` | `Escalation: this neglect signature ({shown}) has been forced-acknowledged {ti...` |  |  | The escalation text: {shown}, {times}, {intent}, {archive}. |
 | `devswarm_role.pg_escalation_archive` | `Every flagged child is done or idle: archive them (`devswarm.js archive <id>`...` |  |  | Escalation note when every flagged child is done or idle. |
 | `devswarm_role.pg_escalation_intent` | ` (a stated intent was on file for this exact condition, but the absolute back...` |  |  | Escalation note when a stated intent was on file. |
@@ -4213,6 +4215,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_role.pg_sig_prefix` | `devswarm-parent:` |  |  | Prefix of the hashed block-kind signature. |
 | `devswarm_role.pg_skip_cmd` | `node {cli} skip {guard}` |  |  | The override command: {cli} (shell-quoted plugin CLI path) and {guard}. |
 | `devswarm_role.pg_skip_ttl` | ` (15-min TTL)` |  |  | Appended to the override command. |
+| `devswarm_role.pg_stale_note` | `A stale child is wedged (claude-code#39755); an escalated one already exhaust...` |  |  | The reason paragraph when a blocking workspace carries a stale or escalated verdict. |
 | `devswarm_role.pg_status_escalated` | `escalated` |  |  | The escalated verdict status. |
 | `devswarm_role.pg_status_stale` | `stale` |  |  | The stale verdict status. |
 | `devswarm_role.pg_stray_head` | `⚠️ anti-hall · devswarm-straying: ` |  |  | Starts the straying advisory line. |

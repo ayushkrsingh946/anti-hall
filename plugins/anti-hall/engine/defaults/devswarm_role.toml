@@ -638,6 +638,18 @@ value = "NOTE — {ids} {verb} a GONE worktree at its recorded path — this can
 doc = "The inspect hint when a child has unread."
 value = "INSPECT the unread backlog via `devswarm.js inbox peek-primary <id>` (read-only — does not advance any cursor) to see what is pending for each workspace, then follow up with that workspace as needed; a workspace's own cursor is only advanced by that workspace reading its own inbox, never by this Primary. "
 
+[devswarm_role.pg_dir_heartbeats]
+doc = "The workspace heartbeat files (liveness.js heartbeatPathFor), under the DevSwarm directory."
+value = "heartbeats"
+
+[devswarm_role.pg_err_uncorroborated]
+doc = "The stderr line for a stale or escalated verdict with nothing to corroborate it (no pending flag, no unread mail, no unanswered question): {id}, {status}."
+value = "⚠️ anti-hall · devswarm-parent-gate: workspace {id} verdict is '{status}' but uncorroborated (no pending unread, no unanswered question); not blocking\n"
+
+[devswarm_role.pg_stale_note]
+doc = "The reason paragraph when a blocking workspace carries a stale or escalated verdict."
+value = "A stale child is wedged (claude-code#39755); an escalated one already exhausted the automatic poke and needs a human — attend to it (on-demand devswarm-recover for a confirmed wedge, or reassign/archive). "
+
 [devswarm_role.pg_tail]
 doc = "The closing sentence of the reason."
 value = "If this is intentional, say so explicitly. Escape hatch: the user may direct a skip via ~/.anti-hall/skip.json (\"devswarm-parent-gate\")."

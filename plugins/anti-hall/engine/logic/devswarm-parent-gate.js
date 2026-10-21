@@ -480,7 +480,7 @@ function pgCollapse(entries) {
 function pgNewEntry(id, wt, session) {
   return { id: id, worktree: wt, session: session, realUnread: 0, unknown: false, reason: null, reasonPath: null, reasonErrno: null, done: false, archived: false,
     appArchived: false, ignored: false, held: false, live: false, busy: false, waiting: false, waitingQ: null, oldestAge: null, ageUnknown: false, ageOdd: false,
-    stateSkipped: false, foreign: false, hadStoreOnly: false, urgency: null, idleKnown: false, doneGate: false };
+    stateSkipped: false, foreign: false, hadStoreOnly: false, urgency: null, idleKnown: false, doneGate: false, soe: false, status: '', verdictPending: false };
 }
 
 function pgGate(p, root, l) {
@@ -590,9 +590,11 @@ function pgGate(p, root, l) {
     }
     if (e.realUnread > 0 && e.oldestAge === null) e.ageUnknown = true;
     if (ownNoInbox && !ownStoreCounted && !e.unknown) fx.err += text.render(ah.cfg('devswarm_role.pg_err_own_no_key'), { id: d.id });
+    // the liveness verdict (readVerdict): its status and its own `pending` flag; a row of another project has none
+    var verdictStatus = '';
     if (!foreign) {
       var lv = pgJson(pgDir(home) + '/' + ah.cfg('devswarm_role.pg_dir_liveness') + '/' + d.id + '.json');
-      if (lv !== null && typeof lv === 'object' && (lv.status === ah.cfg('devswarm_role.pg_status_stale') || lv.status === ah.cfg('devswarm_role.pg_status_escalated'))) ah.unable('devswarm-parent-gate:liveness_verdict'); // a stale or escalated verdict is not reported here; the child is judged by its mail
+      if (lv !== null && typeof lv === 'object' && typeof lv.status === 'string') { verdictStatus = lv.status; e.verdictPending = lv.pending === true; }
     }
     // the eligibility projection (row-eligibility.js `of`, liveness on, the cross-invocation app cache on)
     e.archived = pgMarkerArchived(home, d);
@@ -617,6 +619,12 @@ function pgGate(p, root, l) {
         e.busy = b.busy && !e.waiting;
         e.idleKnown = b.seen === true && !b.busy && !b.waiting; // the transcript shows no turn in progress: nothing is left to send mail
       }
+    }
+    // a stale or escalated verdict drives a block only for a workspace with no proof of life: a fresh heartbeat, a done ruling, a running
+    // session or an archive each clear the liveness axis alone (the mail axes are untouched)
+    if (verdictStatus === ah.cfg('devswarm_role.pg_status_stale') || verdictStatus === ah.cfg('devswarm_role.pg_status_escalated')) {
+      e.soe = !(pgFreshBeat(home, d.id, now) || done || e.live === true || e.archived || e.appArchived);
+      e.status = e.soe ? verdictStatus : '';
     }
     entries.push(e);
   });
@@ -652,6 +660,7 @@ function pgGate(p, root, l) {
     var unknownMembers = [], contributors = [], foreignAll = fam.members.length > 0, gone = false, allDoneOrIdle = true;
     if (!famChild && fam.members.some(function (mi) { return entries[mi].stateSkipped; })) ah.unable('devswarm-parent-gate:archived_twin'); // an archived twin of the Primary's own row: listed with the family
     var famBusy = false, famWaiting = false, famAgeUnknown = false, famStoreOnly = false, famOldest = null, famUrgency = null;
+    var famSoe = false, famStatus = '', famPending = false;
     for (var mj = 0; mj < fam.members.length; mj++) {
       var mi = fam.members[mj], m = entries[mi];
       if (m.held || (famChild && (m.archived || m.appArchived || m.ignored))) {
@@ -671,15 +680,28 @@ function pgGate(p, root, l) {
       if (m.realUnread > 0) contributors.push([m.id, m.realUnread, m.archived, m.appArchived, mg]);
       if (m.unknown) { unknown = true; unknownMembers.push([m.id, m.reason === null ? 'unknown' : m.reason, m.reasonPath, m.reasonErrno]); }
       if (!m.foreign) foreignAll = false;
+      if (m.soe) { famSoe = true; if (m.status !== '') famStatus = m.status; }
+      if (m.verdictPending) famPending = true;
       if (m.urgency !== null && m.urgency !== undefined) famUrgency = m.urgency;
     }
     if (famChild && liveMembers === 0) {
       if (archivedMemberUnread > 0) archivedUnreadFamilies += 1;
       continue;
     }
+    // a stale or escalated verdict is a block only when corroborated: the verdict's own pending flag, real unread mail, an unreadable
+    // mailbox, or an unanswered question from a member of the family (never the status alone)
+    if (famSoe) {
+      var memberIds = fam.members.map(function (x) { return entries[x].id; });
+      var askedByMember = unanswered.some(function (q) { return q && q.from !== null && q.from !== undefined && memberIds.indexOf(String(q.from)) >= 0; });
+      if (!(famPending || union > 0 || unknown || askedByMember)) {
+        fx.err += text.render(ah.cfg('devswarm_role.pg_err_uncorroborated'), { id: entries[fam.survivor].id, status: famStatus });
+        famSoe = false;
+        famStatus = '';
+      }
+    }
     // the busy downgrade and the fresh-mail grace window: a child family whose only reason to report is a plain backlog
     var busyStaleAgeMin = null;
-    if (famChild && !unknown && union > 0) {
+    if (famChild && !unknown && !famSoe && union > 0) {
       if (fam.members.some(function (x) { return entries[x].ageOdd; })) ah.unable('devswarm-parent-gate:age_odd'); // a time only V8 reads: taken as the engine reads it
       var survId = entries[fam.survivor].id, ageKnown = !famAgeUnknown && famOldest !== null;
       if (famBusy && !famWaiting) {
@@ -701,14 +723,14 @@ function pgGate(p, root, l) {
         if (union <= pgSetNum('devswarm_role.pg_set_neglect_min')) continue;
       }
     }
-    if (!(unknown || union > 0)) continue;
+    if (!(unknown || union > 0 || famSoe)) continue;
     if (famWaiting && fam.members.some(function (x) { return entries[x].stateSkipped; })) ah.unable('devswarm-parent-gate:waiting_archived'); // the waiting members are listed by id, archived ones included
     blocking.push({
       id: entries[fam.survivor].id, unread: union, unknown: unknown, unknownMembers: unknownMembers, contributors: contributors,
       notOwnCountOnly: contributors.some(function (c) { return own.id !== c[0]; }), foreign: foreignAll, worktreeGone: gone,
       doneOrIdle: liveMembers > 0 && famChild && allDoneOrIdle, mergedTwins: fam.mergedTwins, waitingOnInput: famWaiting,
       waiting: fam.members.map(function (x) { return entries[x]; }).filter(function (x) { return x.waiting; }).map(function (x) { return [x.id, x.waitingQ]; }),
-      busyStaleAgeMin: busyStaleAgeMin, urgency: famUrgency,
+      busyStaleAgeMin: busyStaleAgeMin, urgency: famUrgency, status: famSoe ? famStatus : '',
     });
   }
   if (archivedUnreadFamilies > 0) fx.err += text.render(ah.cfg('devswarm_role.pg_err_archived_unread'), { n: String(archivedUnreadFamilies) });
@@ -803,6 +825,18 @@ function pgGate(p, root, l) {
   var skip = text.render(ah.cfg('devswarm_role.pg_skip_cmd'), { cli: pgShQuote(ah.path.resolveAbs(cli)), guard: ah.cfg('devswarm_role.gate_guard') });
   fx.out = JSON.stringify({ decision: ah.cfg('devswarm_role.pg_decision_block'), reason: pgFrame(base + (parked !== null ? ah.cfg('devswarm_role.pg_parked_joiner') + parked : '') + wake, skip) }) + '\n';
   return fx;
+}
+
+// `hasFreshHeartbeat(id, home)`: the workspace's heartbeat (its `ts`, else the file's mtime) is positive, not in the future and within the
+// freshness window: definitive proof of life.
+function pgFreshBeat(home, id, now) {
+  if (!pgSafeId(id)) return false;
+  var file = pgDir(home) + '/' + ah.cfg('devswarm_role.pg_dir_heartbeats') + '/' + id + '.json', ts = null;
+  var beat = pgJson(file);
+  if (beat !== null && typeof beat === 'object' && piFinite(beat.ts)) ts = beat.ts;
+  else ts = ah.fs.mtimeMs(file);
+  if (ts === null || !isFinite(ts) || ts <= 0 || ts > now) return false;
+  return now - ts <= ah.cfgNum('devswarm_sup.lv_heartbeat_fresh_ms');
 }
 
 // `parkedEscalationSegment(home, parentId, cliPath)`: the escalation notices the supervisor could not deliver to this Primary (recovery.js
@@ -1032,6 +1066,7 @@ function pgReason(blocking, own, escalate, hasIntent, q) {
         bits.push(s);
       }
     }
+    if (b.status !== '') bits.push(b.status);
     // the provenance of the Primary's own count: re-read live, or the summary cache
     if (isOwn(b.id) && own.source !== null && !b.notOwnCountOnly) bits.push(ah.cfg(own.source === 'live' ? 'devswarm_role.pg_live_resolved' : 'devswarm_role.pg_cached'));
     return b.id + (isOwn(b.id) ? you : '') + ' (' + bits.join(', ') + ')';
@@ -1079,6 +1114,7 @@ function pgReason(blocking, own, escalate, hasIntent, q) {
   var gone = blocking.filter(function (b) { return b.worktreeGone && !b.foreign; }).map(function (b) { return b.id; });
   if (gone.length > 0) body += text.render(ah.cfg('devswarm_role.pg_gone'), { ids: pgListMore(gone, max), verb: gone.length === 1 ? ah.cfg('devswarm_role.pg_verb_has') : ah.cfg('devswarm_role.pg_verb_have') });
   if (anyChild) body += ah.cfg('devswarm_role.pg_inspect');
+  if (blocking.some(function (b) { return b.status === ah.cfg('devswarm_role.pg_status_stale') || b.status === ah.cfg('devswarm_role.pg_status_escalated'); })) body += ah.cfg('devswarm_role.pg_stale_note');
   return body + ah.cfg('devswarm_role.pg_tail');
 }
 
