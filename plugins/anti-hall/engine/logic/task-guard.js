@@ -3,10 +3,11 @@
 // (no open task, every open task honestly blocked, the same set already blocked, the block cap reached), the steps aside (an OMC
 // loop, live agents, a spent per-prompt budget) and both blocks: the sharp idle-neglect block (dispatchable tasks no running agent
 // covers) and the generic one, with the loop-state file, the per-prompt budget file and the idle-neglect metrics written as Node
-// writes them. State is written only after the reply is delivered. Anything this script cannot reproduce exactly defers BEFORE the
-// first write: a state file or timestamp only V8 reads, a subject cut through a surrogate pair, and every answer that needs the
-// DevSwarm app database (read by Node through node:sqlite; without the file Node's answer is fixed). The parallel cap needs the CPU
-// count as libuv reads it. Keys and texts: task_guards.toml (task_guard.*, taskstate.*, taskkit.*).
+// writes them. State is written only after the reply is delivered. Nothing is handed back to Node: a state file, timestamp or
+// transcript line only V8 reads exactly is counted (native_unable at `task-guard.*`) and read as absent, so a corrupt state can only
+// make a block fire again (bounded by the block cap and the per-prompt budget), never silence one; the DevSwarm app database is read
+// natively (ah.mesh / tk.childAttended). The fixed stderr notes pass the advisory gate (once per session, again after N calls).
+// Keys and texts: task_guards.toml (task_guard.*, taskstate.*, taskkit.*), advisory.toml.
 'use strict';
 
 function tgRe(key, flags) { return jx.re(key, flags); }
@@ -48,14 +49,8 @@ function tgActionable(open, tasks) {
   });
 }
 
-// `devswarmChildAttended(owner)`: null when the answer needs the app database.
-function tgChildAttended(owner) {
-  var o = (owner || '').trim();
-  if (!o || tgCoordinator(o)) return false;
-  var id = o.replace(tgRe('task_guard.workspace_prefix_re', 'i'), '');
-  if (!id.trim()) return false;
-  return tk.appDbPresent(ah.home()) ? null : false;
-}
+// `devswarmChildAttended(owner)`: the app database shows the owner's workspace live (tk.childAttended).
+function tgChildAttended(owner) { return tk.childAttended(owner); }
 
 // A task whose owner names an agent this session has running (its id, the name it was launched with, or its description) is attended: the agent is working
 // it. `rows` is the running-agent list of the transcript scan (null when unreadable: nothing is attended through it).
@@ -71,7 +66,7 @@ function tgLiveAgentOwner(owner, rows) {
 }
 
 // The open tasks the generic block lists: a task waiting (through any chain) on an open task that is itself free or waiting on the
-// owner is honestly blocked and left out, as is a task waiting on the owner and one owned by a live DevSwarm workspace. null defers.
+// owner is honestly blocked and left out, as is a task waiting on the owner and one owned by a live DevSwarm workspace.
 function tgUnblocked(open, tasks, rows) {
   var byId = {}, openIds = [];
   tasks.forEach(function (t) { byId[t.id] = t; if (ah.cfg('taskstate.open_statuses').indexOf(tk.statusLc(t)) >= 0 && openIds.indexOf(t.id) < 0) openIds.push(t.id); });
@@ -91,14 +86,13 @@ function tgUnblocked(open, tasks, rows) {
     var t = open[i];
     if (tgOwnerBlocked(t) || valid(t).some(function (b) { return reach[b] === true; })) continue;
     if (tgLiveAgentOwner(t.owner, rows)) continue;
-    var attended = tgChildAttended(t.owner);
-    if (attended === null) return null;
-    if (!attended) out.push(t);
+    if (!tgChildAttended(t.owner)) out.push(t);
   }
   return out;
 }
 
-// `agentsRunning()`: some ~/.anti-hall/agents/*.json heartbeat (its `ts`, else the file time) is fresh. null defers.
+// `agentsRunning()`: some ~/.anti-hall/agents/*.json heartbeat (its `ts`, else the file time) is fresh. A heartbeat the script cannot
+// parse exactly counts by its file time.
 function tgAgentsRunning(home, now) {
   var dir = home + '/' + ah.cfg('paths.base_dir') + '/' + ah.cfg('task_guard.agents_dir');
   var names = ah.fs.listDir(dir);
@@ -111,8 +105,8 @@ function tgAgentsRunning(home, now) {
     var f = jx.read(full);
     if (f.text !== undefined) {
       var r = jx.parse(f.text);
-      if (r.unsure) return null;
-      if (!r.invalid && jx.isObj(r.v) && typeof r.v[ah.cfg('task_guard.agents_ts_key')] === 'number') ts = r.v[ah.cfg('task_guard.agents_ts_key')];
+      if (r.unsure) ah.unable('task-guard:heartbeat_unsure');
+      else if (!r.invalid && jx.isObj(r.v) && typeof r.v[ah.cfg('task_guard.agents_ts_key')] === 'number') ts = r.v[ah.cfg('task_guard.agents_ts_key')];
     }
     if (ts === 0) { var m = ah.fs.mtimeMs(full); ts = m === null ? 0 : m; }
     if (ts !== 0 && !isNaN(ts) && now - ts < fresh) return true;
@@ -122,7 +116,7 @@ function tgAgentsRunning(home, now) {
 
 
 
-// `evaluate`: the per-task cover from this session's running agents, the parallel cap and the proven count (lib/69-tasks.js). null defers.
+// `evaluate`: the per-task cover from this session's running agents, the parallel cap and the proven count (lib/69-tasks.js).
 function tgEvaluate(actionable, tasks, open, running, now) { return tk.evaluate(actionable, tasks, open, running, now, true); }
 function tgLabel(t) { return tk.label(t); }
 
@@ -132,11 +126,9 @@ function tgRenderList(ts) {
   for (var i = 0; i < max; i++) {
     var t = ts[i], unknown = ah.cfg('task_guard.subject_unknown');
     var subj = tk.oneLine(t.content && t.content !== t.id ? t.content : unknown, ah.cfgNum('task_guard.subject_max'));
-    if (subj === null) return null;
     if (!subj) subj = unknown;
     var openWord = ah.cfg('task_guard.status_open');
     var st = tk.oneLine(t.status ? t.status : openWord, ah.cfgNum('task_guard.status_max'));
-    if (st === null) return null;
     if (!st) st = openWord;
     parts.push(JSON.stringify(subj) + ' [' + JSON.stringify(st) + ']');
   }
@@ -149,15 +141,16 @@ function tgIds(ts) {
   return ids.join(ah.cfg('task_guard.hash_sep'));
 }
 
-// {hash, blocks} of the loop-state file of the last block (or a legacy bare hash); null defers.
+// {hash, blocks} of the loop-state file of the last block (or a legacy bare hash); a file over the read cap or one the script cannot
+// parse exactly reads as no earlier block (counted).
 function tgReadState(path) {
   var f = jx.read(path);
-  if (f.big) return null;
+  if (f.big) { ah.unable('task-guard:state_big'); return { hash: '', blocks: 0 }; }
   if (f.text === undefined) return { hash: '', blocks: 0 };
   var raw = f.text.trim();
   if (!raw) return { hash: '', blocks: 0 };
   var r = jx.parse(raw);
-  if (r.unsure) return null;
+  if (r.unsure) { ah.unable('task-guard:state_unsure'); return { hash: '', blocks: 0 }; }
   if (!r.invalid && r.v !== null && typeof r.v === 'object') {
     var h = r.v[ah.cfg('task_guard.state_hash_key')], b = r.v[ah.cfg('task_guard.state_blocks_key')];
     return { hash: typeof h === 'string' ? h : '', blocks: typeof b === 'number' && isFinite(b) ? b : 0 };
@@ -182,13 +175,13 @@ function tgSmallJson(path, max) {
   return r.invalid ? { none: true } : { v: r.v };
 }
 
-// true / false, or null when only V8 could tell.
+// true / false; a settings file the script cannot parse exactly counts as absent (counted).
 function tgOmcEnabled(home, cwd) {
   var files = [home + '/' + ah.cfg('task_guard.omc_claude_dir') + '/' + ah.cfg('task_guard.omc_settings_file')];
   if (cwd) ah.cfg('task_guard.omc_project_settings').forEach(function (f) { files.push(cwd + '/' + ah.cfg('task_guard.omc_claude_dir') + '/' + f); });
   for (var i = 0; i < files.length; i++) {
     var r = tgSmallJson(files[i], ah.cfgNum('task_guard.omc_settings_max_bytes'));
-    if (r.unsure) return null;
+    if (r.unsure) { ah.unable('task-guard:omc_settings_unsure'); continue; }
     if (r.none) continue;
     var plugins = jx.field(r.v, ah.cfg('task_guard.omc_plugins_key'));
     if (plugins && plugins[ah.cfg('task_guard.omc_plugin_id')] === true) return true;
@@ -200,16 +193,15 @@ function tgOmcActive(home, cwd, sid, now) {
   if (ah.env.get(ah.cfg('task_guard.omc_disable_env')) === ah.cfg('task_guard.omc_disable_value')) return false;
   var skip = ah.env.get(ah.cfg('task_guard.omc_skip_env')) || '';
   if (skip.split(',').some(function (s) { return s.trim() === ah.cfg('task_guard.omc_skip_token'); })) return false;
-  if (cwd && (cwd.charAt(0) !== '/' || cwd.split('/').some(function (s) { return s === '.' || s === '..'; }))) return null; // Node resolves it against its own directory
+  if (cwd && (cwd.charAt(0) !== '/' || cwd.split('/').some(function (s) { return s === '.' || s === '..'; }))) { ah.unable('task-guard:omc_relative_cwd'); cwd = null; } // Node resolves it against its own directory; only the home's files are read
   var enabled = tgOmcEnabled(home, cwd);
-  if (enabled === null) return null;
   if (!enabled) return false;
   var rel = ah.cfg('task_guard.omc_state_dir').join('/');
   var root = cwd && ah.fs.isDir(cwd + '/' + rel) ? cwd + '/' + rel : home + '/' + rel;
   var files = ah.cfg('task_guard.omc_state_files');
   for (var i = 0; i < files.length; i++) {
     var r = tgSmallJson(root + '/' + files[i], ah.cfgNum('task_guard.omc_state_max_bytes'));
-    if (r.unsure) return null;
+    if (r.unsure) { ah.unable('task-guard:omc_state_unsure'); continue; }
     if (r.none || !jx.isObj(r.v) || r.v[ah.cfg('task_guard.omc_active_key')] !== true) continue;
     var found = false, keys = ah.cfg('task_guard.omc_ts_keys');
     for (var k = 0; k < keys.length && !found; k++) {
@@ -217,7 +209,7 @@ function tgOmcActive(home, cwd, sid, now) {
       if (typeof v === 'number') n = v;
       else if (typeof v === 'string') {
         n = jx.isoMs(v);
-        if (n === undefined) return null; // a form only V8's date parser reads
+        if (n === undefined) { ah.unable('task-guard:omc_ts_form'); n = 0; } // a form only V8's date parser reads counts as no time
       }
       if (!isFinite(n)) n = 0;
       if (n > 0 && now - n <= ah.cfgNum('task_guard.omc_fresh_ms')) found = true;
@@ -226,7 +218,6 @@ function tgOmcActive(home, cwd, sid, now) {
     var s = r.v[ah.cfg('task_guard.omc_session_key')];
     if (s === undefined || s === null) return true;
     if (!sid) continue;
-    if (Array.isArray(s)) return null;
     if (String(s) === sid) return true;
   }
   return false;
@@ -234,7 +225,8 @@ function tgOmcActive(home, cwd, sid, now) {
 
 // ---- the per-prompt Stop budget (hooks/lib/stop-policy.js budgetSpent) ----
 
-// The payload's prompt_id, else the uuid of the newest real user entry in the tail: a string, '' (none) or null (defer).
+// The payload's prompt_id, else the uuid of the newest real user entry in the tail: a string or '' (none). A line the script cannot parse
+// exactly is skipped (counted).
 function tgPromptKey(p, transcript) {
   var pid = p[ah.cfg('task_guard.prompt_id_key')];
   if (typeof pid === 'string' && pid) return pid;
@@ -246,7 +238,7 @@ function tgPromptKey(p, transcript) {
     var t = lines[i].trim();
     if (!t || t.indexOf('"' + user + '"') < 0) continue;
     var r = jx.parse(t);
-    if (r.unsure) return null;
+    if (r.unsure) { ah.unable('task-guard:prompt_line_unsure'); continue; }
     if (r.invalid) continue;
     var e = r.v;
     if (!e || e.type !== user || e.isMeta === true || e.isSidechain === true) continue;
@@ -259,21 +251,21 @@ function tgPromptKey(p, transcript) {
   return '';
 }
 
-// {spent: true}, {rel, body} (the bucket file to write before the block) or {} (no budget applies); null defers.
+// {spent: true}, {rel, body} (the bucket file to write before the block) or {} (no budget applies). A bucket file over the read cap or
+// one the script cannot parse exactly counts as empty (counted).
 function tgBudget(guard, p, transcript, safeSession, now) {
   if (guard.status !== 'ok') return {};
   var v = ah.settings.num('task_guard.budget_setting'), budget = isFinite(v) && v > 0 ? Math.floor(v) : 0;
   if (budget === 0) return {};
   var key = tgPromptKey(p, transcript);
-  if (key === null) return null;
   if (key === '') return {};
   var rel = ah.cfg('paths.base_dir') + '/' + ah.cfg('task_guard.stop_policy_dir').join('/') + '/' + safeSession + ah.cfg('task_guard.stop_policy_ext');
   var buckets = {}, f = jx.read(guard.home + '/' + rel);
-  if (f.big) return null;
-  if (f.text !== undefined) {
+  if (f.big) ah.unable('task-guard:budget_big');
+  else if (f.text !== undefined) {
     var r = jx.parse(f.text);
-    if (r.unsure) return null;
-    if (!r.invalid && jx.isObj(r.v)) buckets = r.v;
+    if (r.unsure) ah.unable('task-guard:budget_unsure');
+    else if (!r.invalid && jx.isObj(r.v)) buckets = r.v;
   }
   var bk = safeSession + '|' + ah.cfg('task_guard.guard_name') + '|' + ah.cfg('task_guard.budget_bucket');
   var kk = ah.cfg('task_guard.budget_key_field'), kc = ah.cfg('task_guard.budget_count_field'), ka = ah.cfg('task_guard.budget_at_field');
@@ -284,15 +276,16 @@ function tgBudget(guard, p, transcript, safeSession, now) {
   return { rel: rel, body: JSON.stringify(buckets) };
 }
 
-// The idle-neglect metrics file after `recordIdleNeglect`: {rel, body}; null defers.
+// The idle-neglect metrics file after `recordIdleNeglect`: {rel, body}. A file over the read cap, one the script cannot parse exactly
+// or an array starts the counters afresh (counted; the write repairs it).
 function tgMetrics(guard) {
   var rel = ah.cfg('paths.base_dir') + '/' + ah.cfg('task_guard.metrics_file');
   var m = {}, f = jx.read(guard.home + '/' + rel);
-  if (f.big) return null;
-  if (f.text !== undefined) {
+  if (f.big) ah.unable('task-guard:metrics_big');
+  else if (f.text !== undefined) {
     var r = jx.parse(f.text);
-    if (r.unsure) return null;
-    if (!r.invalid && r.v !== null && typeof r.v === 'object') { if (Array.isArray(r.v)) return null; m = r.v; }
+    if (r.unsure) ah.unable('task-guard:metrics_unsure');
+    else if (!r.invalid && r.v !== null && typeof r.v === 'object') { if (Array.isArray(r.v)) ah.unable('task-guard:metrics_array'); else m = r.v; }
   }
   ah.cfg('task_guard.metrics_counters').forEach(function (k) { if (!(typeof m[k] === 'number' && isFinite(m[k]) && m[k] >= 0)) m[k] = 0; });
   var pk = ah.cfg('task_guard.metrics_pending_key');
@@ -306,18 +299,16 @@ function tgBlockReason(p, idle, demand, nudge, home) {
   var upd = ah.cfg(tgCodex(p) ? 'task_guard.update_codex' : 'task_guard.update_claude'), guard = ah.cfg('task_guard.guard_name');
   if (idle) {
     var max = ah.cfgNum('task_guard.dispatch_list_max'), labels = [];
-    for (var i = 0; i < Math.min(max, demand.dispatch.length); i++) { var l = tgLabel(demand.dispatch[i]); if (l === null) return null; labels.push(l); }
+    for (var i = 0; i < Math.min(max, demand.dispatch.length); i++) labels.push(tgLabel(demand.dispatch[i]));
     var n = demand.dispatch.length;
     var more = n > max ? text.render(ah.cfg('task_guard.more'), { n: n - max }) : '';
     var cap = demand.cap !== null && demand.cap !== 0 ? String(demand.cap) : ah.cfg('task_guard.cap_formula');
-    if (tk.appDbPresent(home)) return null;
     var what = text.render(ah.cfg('task_guard.idle_what'), { n: n, list: labels.join(ah.cfg('task_guard.label_sep')), more: more });
-    var instead = text.render(ah.cfg('task_guard.idle_instead'), { cap: cap, upd: upd, devswarm: '' });
+    var instead = text.render(ah.cfg('task_guard.idle_instead'), { cap: cap, upd: upd, devswarm: tk.anyLiveChildren() ? text.render(ah.cfg('task_guard.devswarm_hint'), { upd: upd }) : '' });
     return text.message('block', guard, { what: what, why: ah.cfg('task_guard.idle_why'), instead: instead, allowed: ah.cfg('task_guard.idle_allowed') });
   }
   var lmax = ah.cfgNum('task_guard.list_max'), cnt = nudge.length;
   var list = tgRenderList(nudge);
-  if (list === null) return null;
   var gmore = cnt > lmax ? text.render(ah.cfg('task_guard.more'), { n: cnt - lmax }) : '';
   return text.message('block', guard, {
     what: text.render(ah.cfg('task_guard.generic_what'), { list: list, more: gmore }), why: ah.cfg('task_guard.generic_why'),
@@ -334,7 +325,6 @@ function tgExact(note, json) {
 
 function tgQuiet(out, tasks, home, sessionId) {
   var plan = tk.unknownNote(tasks, home, sessionId, ah.cfg('task_guard.unknown_tag'));
-  if (plan === null) return 'defer';
   var note = plan.write();
   if (note) out += text.render(ah.cfg('task_guard.note_line'), { note: note });
   return tgExact(out);
@@ -347,16 +337,15 @@ function decide(p) {
   var transcript = p.transcript_path;
   if (!transcript || typeof transcript !== 'string') return 'allow';
   var home = ah.home();
-  if (!home) return 'defer';
+  if (!home) { ah.unable('task-guard:no_home'); return 'allow'; } // no home: no state to read or write, and nothing to guard it with
   var given = p.session_id ? String(p.session_id) : '';
   var sessionId = given === '' ? ah.sha1(transcript).slice(0, ah.cfgNum('task_guard.session_hash_len')) : given;
   var safeSession = tk.safeKey(sessionId);
   var stateRel = ah.cfg('paths.base_dir') + '/' + ah.cfg('task_guard.state_prefix') + safeSession;
   var tasks = tk.tasks(transcript);
-  if (tasks === null) return 'defer';
   var completed = tasks.filter(tk.isDone).length, out = '';
   var pruneAfter = ah.settings.num('task_guard.prune_setting');
-  if (isFinite(pruneAfter) && pruneAfter > 0 && completed > pruneAfter) out += text.render(ah.cfg('task_guard.prune_advisory'), { n: completed, limit: String(pruneAfter) });
+  if (isFinite(pruneAfter) && pruneAfter > 0 && completed > pruneAfter) { if (adv.gate(ah.cfg('advisory.kind_task_guard_prune'), sessionId)) out += text.render(ah.cfg('task_guard.prune_advisory'), { n: completed, limit: String(pruneAfter) }); }
   var open = tasks.filter(tk.isOpen);
   if (open.length === 0) {
     ah.state.remove(stateRel);
@@ -368,14 +357,12 @@ function decide(p) {
   function tgAgents() { if (agMemo === undefined) agMemo = ah.transcript.agents(transcript); return agMemo; }
   var actionable = tgActionable(open, tasks);
   var haveAgents = tgAgentsRunning(home, now);
-  if (haveAgents === null) return 'defer';
   var demand = { fire: false, proven: false, unknown: false, dispatch: [], cap: null };
   if (actionable.length > 0) {
     if (ah.settings.bool('task_guard.dispatch_demand_setting')) {
       var ag = tgAgents();
-      if (ag !== null && ag.unsure) return 'defer';
+      if (ag !== null && ag.unsure) { ah.unable('task-guard:agents_unsure'); ag = null; } // an agent list read inexactly is read as unreadable
       demand = tgEvaluate(actionable, tasks, open, ag === null ? null : ag.rows, now);
-      if (demand === null) return 'defer';
       if (ah.settings.bool('task_guard.proven_only_setting') && !demand.unknown) demand.fire = demand.proven;
     } else {
       demand = { fire: !haveAgents, proven: false, unknown: false, dispatch: actionable, cap: null };
@@ -386,36 +373,30 @@ function decide(p) {
   var rows = null;
   if (open.some(function (t) { return t.owner && !tgCoordinator(t.owner); })) {
     var own = tgAgents();
-    if (own !== null && own.unsure) return 'defer';
+    if (own !== null && own.unsure) { ah.unable('task-guard:owner_agents_unsure'); own = null; }
     rows = own === null ? null : own.rows;
   }
   var nudge = tgUnblocked(open, tasks, rows);
-  if (nudge === null) return 'defer';
   if (!idle && nudge.length === 0) return tgQuiet(out, tasks, home, sessionId);
 
   var sep = ah.cfg('task_guard.hash_sep');
   var hash = idle ? ah.sha1(ah.cfg('task_guard.idle_hash_tags').join(sep) + sep + tgIds(demand.dispatch)) : ah.sha1(tgIds(nudge));
   var prior = tgReadState(home + '/' + stateRel);
-  if (prior === null) return 'defer';
   if (hash === prior.hash || prior.blocks >= ah.cfgNum('task_guard.max_blocks')) return tgQuiet(out, tasks, home, sessionId);
   var cwd = typeof p.cwd === 'string' ? p.cwd : null;
   var sid = p.session_id ? String(p.session_id) : null;
   var omc = tgOmcActive(home, cwd, sid || null, now);
-  if (omc === null) return 'defer';
-  if (omc) return tgExact(out + ah.cfg('task_guard.omc_line'));
-  if (!idle && haveAgents) return tgExact(out + ah.cfg('task_guard.agents_line'));
+  if (omc) return tgExact(out + (adv.gate(ah.cfg('advisory.kind_task_guard_omc'), sessionId) ? ah.cfg('task_guard.omc_line') : ''));
+  if (!idle && haveAgents) return tgExact(out + (adv.gate(ah.cfg('advisory.kind_task_guard_agents'), sessionId) ? ah.cfg('task_guard.agents_line') : ''));
 
   // from here the Stop blocks unless the budget is spent; everything that can defer is settled before the first write
   var guard = ah.homeGuard();
-  if (guard.status === 'unknown') return 'defer';
+  if (guard.status === 'unknown') ah.unable('task-guard:home_unknown'); // no usable home: no budget or metrics state, the block itself stands
   var budget = tgBudget(guard, p, transcript, safeSession, now);
-  if (budget === null) return 'defer';
   var reason = tgBlockReason(p, idle, demand, nudge, home);
-  if (reason === null) return 'defer';
   var metrics = null;
-  if (guard.status === 'ok' && idle) { metrics = tgMetrics(guard); if (metrics === null) return 'defer'; }
+  if (guard.status === 'ok' && idle) metrics = tgMetrics(guard);
   var plan = tk.unknownNote(tasks, home, sessionId, ah.cfg('task_guard.unknown_tag'));
-  if (plan === null) return 'defer';
   if (budget.spent) return tgExact(out);
   if (budget.rel !== undefined && !ah.state.op(guard.home, 'after_reply', budget.rel, budget.body)) return tgExact(out);
   var state = {}; state[ah.cfg('task_guard.state_hash_key')] = hash; state[ah.cfg('task_guard.state_blocks_key')] = prior.blocks + 1;
