@@ -5,18 +5,18 @@
 //!  1. Pick the entries of the event's table (`defaults/dispatch.toml`, generated from `hooks.json`) whose matcher
 //!     selects this payload, in `hooks.json` order. None: say nothing (an event no hook cares about never wakes the
 //!     engine).
-//!  2. Start every entry without a built-in check as its Node hook, all at once, as the host would.
+//!  2. An entry without a built-in check is not launched: it ends as a hook that could not run (`native_unable`).
 //!  3. Ask the daemon for the built-in checks (`D` request; or run them here when `dispatch.in_process` is 1). An
-//!     entry whose check defers, and every check when the daemon cannot answer, runs as its Node hook too (D11).
+//!     entry whose check defers, and every check when the daemon cannot answer, likewise ends as a hook that could not run.
 //!  4. Combine the results in table order the way the host combines separate hooks ([`combine`]).
 //!
-//! A guard event (`dispatch.guard_events`) whose Node hook is known not to exist (no runnable command, a module Node
-//! cannot resolve) or was killed by a signal fails CLOSED: exit 2 with `dispatch.msg_fail_closed`, never a silent allow
-//! (D74). An infrastructure fault (a hook the OS would not start, stdin that cannot be read or spooled, an unreadable
-//! `--fallback-map`, a usage error, the event's budget spent, a panic) is no verdict: the event is handed to the
-//! wrapper's Node hooks with `dispatch.defer_exit` ([`defer`]), never a block and never a skip. Any other event runs the hooks it can and logs the ones it cannot. Results one output cannot express are
-//! delivered one after another ([`combine::sequential`]); a join over the host's context cap is handed back to the
-//! wrapper with `dispatch.defer_exit` so the hooks run separately, as the host runs them.
+//! A guard event (`dispatch.guard_events`) with a hook that could not run fails CLOSED: exit 2 with
+//! `dispatch.msg_fail_closed`, never a silent allow (D74). An infrastructure fault (stdin that cannot be read or spooled, an
+//! unreadable `--fallback-map`, a usage error, the event's budget spent, a panic) is no verdict: the event follows the
+//! failure mode of its path (`dispatch.failure_mode`, [`defer`]): `closed` blocks, `open` lets the call through loudly, never a silent
+//! skip. Any other event runs the hooks it can and logs the ones it cannot. Results one output cannot express are
+//! delivered one after another ([`combine::sequential`]); a join over the host's context cap is spilled to a file or left for the host.
+//! No hook command is launched by the dispatcher: an entry its check does not answer ends as a hook that could not run.
 // Discard triage (E3): every `.ok()` / `unwrap_or_default()` in this file is a deliberate keep, for these reasons:
 // - an absent field is the empty value
 // - text that does not parse or decode is the absent value (Node Number()/JSON.parse catch parity)
@@ -400,30 +400,18 @@ pub fn closed(event: &str, payload: Option<&Value>, why: &str) -> Outcome {
 }
 
 /// The answer when an infrastructure fault keeps the dispatcher from deciding (a hook the OS would not start, stdin that
-/// cannot be read or spooled, a usage error, an unreadable `--fallback-map`, the event's budget spent): the event is handed
-/// to the wrapper's Node hooks with `dispatch.defer_exit`, logged with its reason. Never a block (a transient fault must not
-/// lock the user out) and never an allow (a skipped guard).
-///
-/// With `dispatch.defer_to_node` 0 there is no Node to hand the event to, and [`no_node_answer`] answers instead.
+/// cannot be read or spooled, a usage error, an unreadable `--fallback-map`, the event's budget spent): the event's configured
+/// failure mode answers ([`no_node_answer`]), logged with its reason. There is no Node to hand the event to.
 pub fn defer(event: &str, why: &str) -> Outcome {
-    if let Some(o) = no_node_answer(event, None, "infra", why) {
-        return o;
-    }
-    log_defer(event, why);
-    let note = defaults::render("dispatch.msg_infra_defer", &[("event", &event), ("why", &why)]);
-    Outcome { out: String::new(), code: defaults::num("dispatch.defer_exit") as i32, err: format!("{note}\n") }
+    no_node_answer(event, None, "infra", why).unwrap_or_else(|| Outcome { out: String::new(), code: 0, err: String::new() })
 }
 
-/// The answer of a path that would hand the event to the wrapper's Node hooks (`path`: `budget`, `infra` or `panic`) when
-/// `dispatch.defer_to_node` is 0 and there is no Node: `None` while deferring is still the way. An event that cannot block skips
-/// its hooks (logged, counted, one stderr line); a guard event follows `dispatch.failure_mode` for the path: `closed` blocks
+/// The answer of a path the engine cannot decide (`path`: `budget`, `infra` or `panic`). An event that cannot block skips its
+/// hooks (logged, counted, one stderr line); a guard event follows `dispatch.failure_mode` for the path: `closed` blocks
 /// ([`closed`], bounded on Stop), `open` lets the call through with a loud stderr line. Every answer is logged and counted
-/// in telemetry as the `dispatcher-<path>` hook.
+/// in telemetry as the `dispatcher-<path>` hook. Always `Some` (the launcher client still calls it as an `Option`).
 pub fn no_node_answer(event: &str, payload: Option<&Value>, path: &str, why: &str) -> Option<Outcome> {
-    crate::obs::counters::handback(crate::obs::counters::Handback::FallbackIntent, &format!("dispatch:{path}"));
-    if defaults::num("dispatch.defer_to_node") != 0 {
-        return None;
-    }
+    crate::obs::counters::handback(crate::obs::counters::Handback::NativeUnable, &format!("dispatch:{path}"));
     use crate::telemetry::event::Outcome as T;
     let guard = guarded(event);
     let closed_mode = guard && defaults::raw("dispatch.failure_mode").get(path).and_then(|v| v.as_str()).unwrap_or("closed") != "open";
@@ -443,18 +431,10 @@ pub fn no_node_answer(event: &str, payload: Option<&Value>, path: &str, why: &st
     Some(Outcome { out: String::new(), code: 0, err: format!("{}\n", defaults::render(msg, &[("event", &event), ("why", &why)])) })
 }
 
-/// Whether the wrapper's Node rerun (a deferral) can still finish inside the host's timeout for this event: what is left of
-/// `host_timeout_s` after `elapsed` must cover `dispatch.rerun_reserve_ms`.
-fn rerun_fits(elapsed: std::time::Duration, host_timeout_s: u64) -> bool {
-    std::time::Duration::from_secs(host_timeout_s).saturating_sub(elapsed) >= defaults::millis("dispatch.rerun_reserve_ms")
-}
-
-/// The answer when the event's budget passes before every entry could start. Exit `dispatch.defer_exit` makes the wrapper run
-/// EVERY Node hook again, so it is given only while nothing has happened that a rerun would repeat: no Node hook started and no
-/// built-in check answered (`native_answered`; an answer may already have stamped state). Otherwise the hooks already started
-/// are finished, a genuine block among them decides, and anything else fails closed ([`closed`], bounded on Stop): the entries
-/// that never ran may have blocked, so an allow would be weaker than Node (review P1-1).
-#[allow(clippy::too_many_arguments)] // one decision point; grouping the six flags into a struct would only rename them
+/// The answer when the event's budget passes before every entry could start. While nothing has happened yet (no hook started and no
+/// built-in check answered, `native_answered`) the budget path's configured failure mode answers ([`no_node_answer`]). Otherwise the
+/// hooks already started are finished, a genuine block among them decides, and anything else fails closed ([`closed`], bounded on
+/// Stop): the entries that never ran may have blocked, so an allow would be weaker (review P1-1).
 fn finish_then_defer(
     event: &str,
     payload: Option<&Value>,
@@ -462,20 +442,11 @@ fn finish_then_defer(
     mut done: Vec<Option<combine::HookResult>>,
     shadow: &[bool],
     native_answered: bool,
-    rerun_fits: bool,
     why: &str,
 ) -> Outcome {
     if !started.iter().any(|(_, r)| r.started()) && !native_answered {
         node::finish(started.into_iter().map(|(_, r)| r).collect()); // only spawn failures: nothing to wait for
-        if let Some(o) = no_node_answer(event, payload, "budget", why) {
-            return o;
-        }
-        if rerun_fits {
-            return defer(event, why);
-        }
-        // the wrapper's rerun of every Node hook would not fit in what is left of the host's timeout, and the host treats a
-        // timed-out hook as an allow: fail closed instead of a deferral that cannot finish (P2-9)
-        return closed(event, payload, why);
+        return no_node_answer(event, payload, "budget", why).unwrap_or_else(|| closed(event, payload, why));
     }
     let (slots, running): (Vec<usize>, Vec<node::Running>) = started.into_iter().unzip();
     for (i, f) in slots.iter().zip(node::finish(running)) {
@@ -518,9 +489,12 @@ pub fn run(raw: &str, args: &Args) -> Outcome {
     o
 }
 
-fn start_node(e: &table::Entry, raw: &[u8], payload: Option<&File>) -> node::Running {
-    crate::obs::counters::handback(crate::obs::counters::Handback::FallbackIntent, &format!("dispatch:hook:{}", e.id));
-    payload.map_or_else(|| node::start(e, raw), |p| node::start_file(e, p))
+/// An entry whose built-in check gave no answer (or that has none): its hook command is NOT launched any more. The hook ends as one
+/// that could not run, counted `native_unable` at `dispatch:hook:<id>`; a guard event then follows its configured failure mode
+/// (`dispatch.failure_mode`), any other event goes on without it.
+fn start_node(e: &table::Entry, _raw: &[u8], _payload: Option<&File>) -> node::Running {
+    crate::obs::counters::handback(crate::obs::counters::Handback::NativeUnable, &format!("dispatch:hook:{}", e.id));
+    node::unavailable(e)
 }
 
 /// [`start_node`] for a hook that runs for `event`, so its telemetry event says which.
@@ -557,11 +531,7 @@ fn unlisted(host: &str, event: &str) -> Option<Outcome> {
         table::Row::Entries(_) | table::Row::Missing if table::trigger_only(host, event) => Some(Outcome { out: String::new(), code: 0, err: String::new() }),
         _ => {
             let why = defaults::render("dispatch.msg_no_row", &[("host", &host), ("event", &event)]);
-            if let Some(o) = no_node_answer(event, None, "infra", &why) {
-                return Some(o);
-            }
-            log_defer(event, &why);
-            Some(Outcome { out: String::new(), code: defaults::num("dispatch.defer_exit") as i32, err: format!("{why}\n") })
+            no_node_answer(event, None, "infra", &why)
         }
     }
 }
@@ -589,9 +559,20 @@ fn cold_start_kick(args: &Args) -> Option<Outcome> {
     Some(Outcome { out: String::new(), code: 0, err: String::new() })
 }
 
+/// The answer of a dispatcher that is switched off (`dispatch.native` 0, the diagnostic switch): no check and no hook runs, the event
+/// is let through, and that is loud: a stderr line, a log line and a `disabled` count. Nothing is silently skipped.
+fn switched_off(event: &str) -> Outcome {
+    crate::obs::counters::account("verb", "dispatch", crate::obs::counters::Outcome::Disabled, 0, 0);
+    health::log_event("dispatch_disabled", event, &defaults::render("dispatch.msg_disabled_event", &[("event", &event)]));
+    Outcome { out: String::new(), code: 0, err: format!("{}\n", defaults::render("dispatch.msg_disabled", &[("event", &event)])) }
+}
+
 fn run_core(raw: &str, args: &Args, payload: Option<&File>, complete: bool, tele: &mut plan::Tele) -> Outcome {
     if let Some(o) = cold_start_kick(args) {
         return o;
+    }
+    if defaults::num("dispatch.native") == 0 {
+        return switched_off(&args.event);
     }
     if let Some(o) = unlisted(&args.host, &args.event) {
         return o;
@@ -663,8 +644,6 @@ fn run_core(raw: &str, args: &Args, payload: Option<&File>, complete: bool, tele
     // the Node hooks start first, so they run while the built-in checks are answered; once the event's budget has passed no
     // further entry starts (a guard event then fails closed after the ones already running have finished)
     let mut started: Vec<(usize, node::Running)> = Vec::new();
-    // the host's timeout for this event's thin trigger is the longest of its entries' (hooks.json), counted from the dispatcher's start
-    let host_s = entries.iter().map(|e| e.timeout_s).max().unwrap_or(0);
     for (i, e) in entries.iter().enumerate().filter(|(_, e)| e.check.is_none()) {
         if budget.exceeded() {
             if guard {
@@ -677,7 +656,6 @@ fn run_core(raw: &str, args: &Args, payload: Option<&File>, complete: bool, tele
                     vec![None; entries.len()],
                     &shadow,
                     false,
-                    rerun_fits(budget.elapsed(), host_s),
                     &why,
                 );
             }
@@ -740,7 +718,6 @@ fn run_core(raw: &str, args: &Args, payload: Option<&File>, complete: bool, tele
                         results.clone(),
                         &shadow,
                         !answers.is_empty(),
-                        rerun_fits(budget.elapsed(), host_s),
                         &why,
                     );
                 }
@@ -812,9 +789,8 @@ fn run_core(raw: &str, args: &Args, payload: Option<&File>, complete: bool, tele
             if node::module_resolution_error(&bad.result) {
                 return closed(&args.event, parsed.as_ref(), &no_command(&bad.result.id));
             }
-            // the OS would not start it (EAGAIN, EMFILE, ENOMEM: a transient fault, logged with its errno by `node`): the
-            // wrapper's Node hooks decide, never a block (review finding 2), but only while nothing ran that the wrapper's rerun
-            // of every hook would repeat: no other hook started and no built-in check answered (review P1-1)
+            // the hook could not be started (it is no longer launched at all, or the OS refused): while nothing else ran or answered,
+            // the infra failure mode answers (review P1-1)
             let nothing_ran = finished.iter().all(|f| f.fate == node::Fate::Spawn) && answers.is_empty();
             if bad.fate == node::Fate::Spawn && nothing_ran {
                 return defer(&args.event, &defaults::render("dispatch.msg_why_spawn", &[("id", &bad.result.id)]));
@@ -873,11 +849,7 @@ fn run_core(raw: &str, args: &Args, payload: Option<&File>, complete: bool, tele
                 o.out = s.out;
                 return o;
             }
-            if defaults::num("dispatch.defer_to_node") == 0 {
-                return o; // no Node to run the hooks separately: the host spills the over-cap context itself
-            }
-            let err = format!("{}{}", pre_err, defaults::render("dispatch.msg_defer_separately", &[("event", &args.event), ("len", &len), ("cap", &cap)]));
-            Outcome { out: String::new(), code: defaults::num("dispatch.defer_exit") as i32, err: format!("{err}\n") }
+            o // nothing runs the hooks separately: the host spills the over-cap context itself
         }
         combine::Combined::Conflict { ids, why } => {
             crate::discard::harmless(crate::limits::ensure_private_dir(&crate::paths::dir())); // keep: a failure surfaces at the next create in that directory
@@ -991,23 +963,18 @@ pub fn hook_main(args: &[String]) -> i32 {
     })
 }
 
-/// The answer after a panic in [`hook_main`]: the engine cannot say what the hooks decide, so a guard event is handed to the
-/// Node hooks (`dispatch.defer_exit`), never blocked (which locked the user out of tools) and never allowed. The defer code is
-/// read under its own guard: when the panic came from the defaults themselves, the wrapper's fixed protocol code stands in.
+/// The answer after a panic in [`hook_main`]: the engine cannot say what the hooks decide, so a guard event follows the `panic` failure
+/// mode (every read guarded: the panic may have come from the defaults). `open` by default, so a bug of the engine's own never locks
+/// the user out of tools; never a silent allow (a loud stderr line, counted).
 fn on_panic(event: &str, guard: bool) -> Outcome {
     if !guard {
         return Outcome { out: String::new(), code: 0, err: String::new() };
     }
-    // with no Node to defer to the configured failure mode answers (every read guarded: the panic may have come from the defaults)
     if let Ok(Some(o)) = std::panic::catch_unwind(|| no_node_answer(event, None, "panic", defaults::text("dispatch.msg_panic"))) {
         return o;
     }
-    let read = std::panic::catch_unwind(|| (defaults::num("dispatch.defer_exit") as i32, defaults::text("dispatch.msg_panic").to_string()));
-    let (code, why) = read.unwrap_or_else(|_| (crate::bootstrap::UNAVAILABLE_EXIT, String::new()));
-    if !why.is_empty() {
-        crate::discard::harmless(std::panic::catch_unwind(|| log_defer(event, &why))); // keep: the deferral stands without its log line
-    }
-    Outcome { out: String::new(), code, err: if why.is_empty() { why } else { format!("{why}\n") } }
+    let code = std::panic::catch_unwind(|| defaults::num("dispatch.defer_exit") as i32).unwrap_or(crate::bootstrap::UNAVAILABLE_EXIT);
+    Outcome { out: String::new(), code, err: String::new() }
 }
 
 #[cfg(test)]
@@ -1015,31 +982,32 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_panic_in_a_guard_event_defers_to_node_instead_of_blocking() {
+    fn a_panic_in_a_guard_event_follows_the_panic_failure_mode_and_never_locks_the_user_out() {
         // review P1 #2: a panic went to fail_closed (exit 2), locking the user out of tools on a bug of the engine's own
         let o = on_panic("PreToolUse", true);
-        assert_eq!(o.code, defaults::num("dispatch.defer_exit") as i32, "a guard-event panic must defer, not block: {o:?}");
-        assert_ne!(o.code, 2);
+        assert!(o.code == 0 && o.err.contains("UNGUARDED") && o.out.is_empty(), "a guard-event panic is open, loudly: {o:?}");
         assert_eq!(on_panic("Notification", false).code, 0, "a non-guard event stays the neutral no-op");
     }
 
     #[test]
-    fn without_node_the_paths_answer_by_their_failure_mode_and_with_node_they_defer() {
-        // nextest runs each test in its own process, so setting the variable here touches no other test
-        assert!(no_node_answer("PreToolUse", None, "infra", "x").is_none(), "Node exists: the caller defers");
-        // SAFETY: single-threaded test process (see paths.rs)
-        unsafe { std::env::set_var("AH_ENGINE_DEFER_TO_NODE", "0") };
+    fn the_paths_answer_by_their_failure_mode() {
         let closed = no_node_answer("PreToolUse", None, "infra", "disk gone").expect("answered");
         assert_eq!(closed.code, 2, "{closed:?}");
         let open = no_node_answer("PreToolUse", None, "panic", "boom").expect("answered");
         assert!(open.code == 0 && open.err.contains("UNGUARDED") && open.out.is_empty(), "{open:?}");
         let skip = no_node_answer("SessionStart", None, "infra", "disk gone").expect("answered");
         assert!(skip.code == 0 && skip.err.contains("skipped") && skip.out.is_empty(), "{skip:?}");
-        assert_eq!(on_panic("PreToolUse", true).code, 0, "a panic is open by default: it must not lock the user out");
-        let o = finish_then_defer("PreToolUse", None, Vec::new(), vec![None], &[false], false, true, "slow");
+        let o = finish_then_defer("PreToolUse", None, Vec::new(), vec![None], &[false], false, "slow");
         assert_eq!(o.code, 2, "a spent budget is closed by default: {o:?}");
-        // SAFETY: as above
-        unsafe { std::env::remove_var("AH_ENGINE_DEFER_TO_NODE") };
+    }
+
+    #[test]
+    fn a_hook_that_is_not_launched_ends_as_one_that_could_not_run() {
+        let e = entry("a", "echo never");
+        let r = node::unavailable(&e);
+        assert!(!r.started());
+        let f = node::finish(vec![r]);
+        assert_eq!(f[0].fate, node::Fate::Spawn, "no child, no decision");
     }
 
     fn entry(id: &str, command: &str) -> table::Entry {
@@ -1047,43 +1015,25 @@ mod tests {
     }
 
     #[test]
-    fn a_spent_budget_defers_only_while_nothing_has_run() {
-        // review P1-1: exit 75 makes the wrapper rerun every Node hook, so it is only given when no hook started and no built-in
-        // check answered; otherwise what ran decides, or the event fails closed (never a second run of a hook's side effects)
-        let defer_exit = defaults::num("dispatch.defer_exit") as i32;
+    fn a_spent_budget_answers_by_its_failure_mode_only_while_nothing_has_run() {
+        // review P1-1: what ran decides, or the event fails closed (never a second run of a hook's side effects)
         let none = vec![None, None];
         let shadow = [false, false];
-        assert_eq!(finish_then_defer("PreToolUse", None, Vec::new(), none.clone(), &shadow, false, true, "slow").code, defer_exit, "nothing ran yet");
-        let o = finish_then_defer("PreToolUse", None, Vec::new(), none.clone(), &shadow, true, true, "slow");
-        assert_eq!(o.code, 2, "a built-in check already answered: no rerun, fail closed: {o:?}");
+        assert_eq!(finish_then_defer("PreToolUse", None, Vec::new(), none.clone(), &shadow, false, "slow").code, 2, "nothing ran yet: the budget mode answers");
+        let o = finish_then_defer("PreToolUse", None, Vec::new(), none.clone(), &shadow, true, "slow");
+        assert_eq!(o.code, 2, "a built-in check already answered: fail closed: {o:?}");
         let dir = std::env::temp_dir().join(format!("ah-p1-1-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let mark = dir.join("ran");
         let started = vec![(0, node::start(&entry("a", &format!("echo x >> '{}'", mark.display())), b"{}"))];
-        let o = finish_then_defer("PreToolUse", None, started, none.clone(), &shadow, false, true, "slow");
-        assert_eq!(o.code, 2, "a Node hook already ran: fail closed, never 75: {o:?}");
+        let o = finish_then_defer("PreToolUse", None, started, none.clone(), &shadow, false, "slow");
+        assert_eq!(o.code, 2, "a hook already ran: fail closed: {o:?}");
         assert_eq!(std::fs::read_to_string(&mark).unwrap(), "x\n", "the hook ran exactly once");
-        let started = vec![(1, node::start(&entry("b", "echo node-says-no >&2; exit 2"), b"{}"))];
-        let o = finish_then_defer("PreToolUse", None, started, none.clone(), &shadow, false, true, "slow");
-        assert!(o.code == 2 && o.err.contains("node-says-no"), "a genuine block among the started hooks decides: {o:?}");
+        let started = vec![(1, node::start(&entry("b", "echo says-no >&2; exit 2"), b"{}"))];
+        let o = finish_then_defer("PreToolUse", None, started, none.clone(), &shadow, false, "slow");
+        assert!(o.code == 2 && o.err.contains("says-no"), "a genuine block among the started hooks decides: {o:?}");
         let started = vec![(0, node::start(&entry("c", "a\0b"), b"{}"))];
-        assert_eq!(finish_then_defer("PreToolUse", None, started, none, &shadow, false, true, "slow").code, defer_exit, "a spawn failure started nothing");
+        assert_eq!(finish_then_defer("PreToolUse", None, started, none, &shadow, false, "slow").code, 2, "a spawn failure started nothing: the budget mode answers");
         crate::discard::harmless(std::fs::remove_dir_all(&dir));
-    }
-
-    #[test]
-    fn a_deferral_that_cannot_finish_inside_the_host_timeout_fails_closed() {
-        // P2-9: exit 75 reruns every Node hook; with little host time left the host kills the run and treats that as an allow
-        let reserve = std::time::Duration::from_millis(defaults::num("dispatch.rerun_reserve_ms"));
-        assert!(rerun_fits(std::time::Duration::ZERO, 45));
-        assert!(rerun_fits(std::time::Duration::from_secs(45) - reserve, 45), "exactly the reserve left still fits");
-        assert!(!rerun_fits(std::time::Duration::from_secs(45) - reserve + std::time::Duration::from_millis(1), 45));
-        assert!(!rerun_fits(std::time::Duration::from_secs(60), 45), "already past the host timeout");
-        let none = vec![None, None];
-        let shadow = [false, false];
-        let o = finish_then_defer("PreToolUse", None, Vec::new(), none.clone(), &shadow, false, false, "slow");
-        assert_eq!(o.code, 2, "no time for the rerun: fail closed: {o:?}");
-        let o = finish_then_defer("PreToolUse", None, Vec::new(), none, &shadow, false, true, "slow");
-        assert_eq!(o.code, defaults::num("dispatch.defer_exit") as i32);
     }
 }

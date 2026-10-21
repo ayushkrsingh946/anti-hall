@@ -29,7 +29,7 @@ use crate::checks::guardkit::text::js_trim;
 use crate::defaults;
 use crate::dsact::runner::Runner;
 use crate::dssup::appsync::{plan, snap, state};
-use crate::dssup::tick::{Ctx, node, parse};
+use crate::dssup::tick::Ctx;
 use crate::meshw::common::Inv;
 use crate::meshw::ident::{self, Defer, R, defer};
 use crate::meshw::idlock::{devswarm_root, is_safe_id};
@@ -335,52 +335,11 @@ fn stranded_exists(home: &Path, repo_key: &str) -> R<bool> {
     Ok(false)
 }
 
-// ---- Node's `inbox pull` for a workspace the engine does not answer ------------------------------------------------------------
+// ---- a workspace the engine does not answer is held ------------------------------------------------------------------------------
 
-/// What Node's `defaultSpawnReconcile` returned.
-#[derive(Debug, Clone, Default)]
-struct NodeRun {
-    stdout: Option<String>,
-    stderr: String,
-    status: Option<i64>,
-    signal: Option<String>,
-    err_code: Option<String>,
-    err_msg: Option<String>,
-    worktree_missing: bool,
-}
-
-fn run_node_pull(ctx: &Ctx, runner: &dyn Runner, id: &str, worktree: &str) -> NodeRun {
-    let r = node(runner, ctx, defaults::text("devswarm_recon.node_pull_snippet"), &[id, worktree], defaults::num("devswarm_recon.node_pull_timeout_ms"));
-    if !r.ok {
-        return NodeRun { err_msg: Some(r.error.clone().unwrap_or_else(|| crate::dssup::tick::cut(&r.stderr))), ..NodeRun::default() };
-    }
-    let v = parse(&r.stdout);
-    let s = |k: &str| v.get(k).and_then(Value::as_str).map(str::to_string);
-    NodeRun {
-        stdout: s("stdout"),
-        stderr: s("stderr").unwrap_or_default(),
-        status: v.get("status").and_then(Value::as_i64),
-        signal: s("signal"),
-        err_code: v.pointer("/error/code").and_then(Value::as_str).map(str::to_string),
-        err_msg: v.pointer("/error/message").and_then(Value::as_str).map(str::to_string),
-        worktree_missing: v.get("worktreeMissing").and_then(Value::as_bool).unwrap_or(false),
-    }
-}
-
-fn parsed_of(r: &NodeRun) -> Option<Value> {
-    if r.err_msg.is_some() || r.err_code.is_some() {
-        return None;
-    }
-    r.stdout.as_deref().and_then(|t| serde_json::from_str::<Value>(t).ok())
-}
-
-/// `isNativeTimeoutRun(r, parsed)`: the pull's own native-timeout marker with no loss and no import, or the spawn killed on its
-/// timeout with nothing parseable.
-fn is_native_timeout(parsed: Option<&Value>, r: Option<&NodeRun>) -> bool {
-    match parsed {
-        Some(p) => p.get("ok") == Some(&json!(false)) && p.get("nativeTimeout") == Some(&json!(true)) && !truthy(p.get("lost")) && !truthy(p.get("imported")),
-        None => r.is_some_and(|r| r.err_code.as_deref() == Some(defaults::text("devswarm_recon.code_timeout"))),
-    }
+/// `isNativeTimeoutRun(r, parsed)`: the pull's own native-timeout marker with no loss and no import.
+fn is_native_timeout(parsed: Option<&Value>) -> bool {
+    parsed.is_some_and(|p| p.get("ok") == Some(&json!(false)) && p.get("nativeTimeout") == Some(&json!(true)) && !truthy(p.get("lost")) && !truthy(p.get("imported")))
 }
 
 // ---- cmdReconcile -------------------------------------------------------------------------------------------------------------
@@ -388,7 +347,7 @@ fn is_native_timeout(parsed: Option<&Value>, r: Option<&NodeRun>) -> bool {
 enum Slot {
     /// A row decided without a pull: its result.
     Done(Value),
-    /// A row to drain: the engine's staged pull (an index into the staged list) or Node's.
+    /// A row to drain: the engine's staged pull (an index into the staged list), or none (held).
     Pull { t: Target, root: String, staged: Option<usize> },
 }
 
@@ -600,7 +559,6 @@ fn reconcile(ctx: &Ctx, runner: &dyn Runner, cwd: &str, o: &Opts, hooks: &Hooks)
     }
     // the witnessed apply of every captured drain
     let mut drained: Vec<Option<Result<Value, String>>> = pull::drain(ctx, runner, &repo_key, staged, hooks).into_iter().map(Some).collect();
-    let backoff = o.backoff_ms.unwrap_or_else(|| defaults::num("devswarm_recon.timeout_retry_backoff_ms"));
     let mut results: Vec<Value> = Vec::new();
     let unknown_re = re("devswarm_recon.re_repo_unknown_line");
     let ansi = regex::Regex::new(defaults::text("devswarm_recon.ansi_re")).map_err(|e| Defer(e.to_string()))?;
@@ -611,16 +569,15 @@ fn reconcile(ctx: &Ctx, runner: &dyn Runner, cwd: &str, o: &Opts, hooks: &Hooks)
             .any(|t| ansi.replace_all(t, "").split(['\n']).any(|l| unknown_re.as_ref().is_some_and(|r| r.is_match(js_trim(l.trim_end_matches('\r'))))))
     };
     for slot in slots {
-        let (t, root, staged_ix) = match slot {
+        let (t, _root, staged_ix) = match slot {
             Slot::Done(v) => {
                 results.push(v);
                 continue;
             }
             Slot::Pull { t, root, staged } => (t, root, staged),
         };
-        // the answer: the engine's recorded result, or Node's own pull
+        // the answer: the engine's recorded result; a workspace it did not answer is held (counted, nothing imported, a skipped row)
         let mut parsed: Option<Value> = None;
-        let mut run: Option<NodeRun> = None;
         if let Some(i) = staged_ix {
             match drained[i].take() {
                 Some(Ok(v)) => parsed = Some(v),
@@ -629,29 +586,23 @@ fn reconcile(ctx: &Ctx, runner: &dyn Runner, cwd: &str, o: &Opts, hooks: &Hooks)
             }
         }
         if parsed.is_none() {
-            let mut r = run_node_pull(ctx, runner, &t.id, &root);
-            let mut p = parsed_of(&r);
-            if is_native_timeout(p.as_ref(), Some(&r)) && !over() {
-                std::thread::sleep(std::time::Duration::from_millis(backoff));
-                r = run_node_pull(ctx, runner, &t.id, &root);
-                p = parsed_of(&r);
-            }
-            parsed = p;
-            run = Some(r);
+            crate::dssup::tick::held("dssup:recon:pull", defaults::text("devswarm_recon.why_pull_held"));
+            results.push(skip_row(&t, "devswarm_recon.msg_skip_held", &[("held", json!(true))]));
+            continue;
         }
         let pv = |k: &str| parsed.as_ref().and_then(|p| p.get(k));
-        let native_timeout = is_native_timeout(parsed.as_ref(), run.as_ref());
+        let native_timeout = is_native_timeout(parsed.as_ref());
         // repository-unknown bookkeeping
         let scope = scope_of(&t);
         // a success, or a different error, ends the streak of the repository-unknown error
         if parsed.as_ref().is_some_and(|p| truthy(p.get("ok")))
-            || !is_unknown_text(&[pv("error").map(js_str), pv("reason").map(js_str), run.as_ref().map(|r| r.stderr.clone())])
+            || !is_unknown_text(&[pv("error").map(js_str), pv("reason").map(js_str)])
         {
             apply_side(ctx, runner, defaults::text("devswarm_recon.job_repo_unknown"), side::plan_repo_unknown_clear(home, &repo_key, &scope), &[]);
         } else if row_terminal(&inv, &t, &held)? {
             let reason = match pv("error").filter(|v| truthy(Some(v))).or_else(|| pv("reason").filter(|v| truthy(Some(v)))) {
                 Some(v) => js_str(v),
-                None => run.as_ref().map(|r| r.stderr.clone()).unwrap_or_default(),
+                None => String::new(),
             };
             let planned = side::plan_repo_unknown_record(home, &repo_key, &scope, &reason, ctx.now)?;
             let rec = apply_side(ctx, runner, defaults::text("devswarm_recon.job_repo_unknown"), planned, &[])
@@ -678,25 +629,11 @@ fn reconcile(ctx: &Ctx, runner: &dyn Runner, cwd: &str, o: &Opts, hooks: &Hooks)
         let not_ok = parsed.as_ref().is_some_and(|p| p.get("ok") == Some(&json!(false)));
         let locked = not_ok && pv("locked") == Some(&json!(false)) && re_match("devswarm_recon.re_locked", &err_text);
         let hc_missing = not_ok && re_match("devswarm_recon.re_hc_missing", &err_text);
-        let wt_missing = run.as_ref().is_some_and(|r| r.worktree_missing);
+        let wt_missing = false;
         let error: Value = if truthy(pv("error")) {
             pv("error").cloned().unwrap_or(Value::Null)
         } else if truthy(pv("reason")) {
             pv("reason").cloned().unwrap_or(Value::Null)
-        } else if let Some(m) = run.as_ref().and_then(|r| r.err_msg.clone().or_else(|| r.err_code.clone())) {
-            json!(m)
-        } else if let Some(r) = run.as_ref().filter(|r| parsed.is_none() && (r.status.is_some() || r.signal.is_some() || !js_trim(&r.stderr).is_empty())) {
-            let mut text = defaults::text("devswarm_recon.msg_err_exited").to_string();
-            if let Some(c) = r.status {
-                text.push_str(&defaults::render("devswarm_recon.msg_err_code", &[("code", &c)]));
-            }
-            if let Some(s) = &r.signal {
-                text.push_str(&defaults::render("devswarm_recon.msg_err_signal", &[("signal", s)]));
-            }
-            if !js_trim(&r.stderr).is_empty() {
-                text.push_str(&defaults::render("devswarm_recon.msg_err_stderr", &[("stderr", &js_trim(&r.stderr))]));
-            }
-            json!(text)
         } else if parsed.is_some() {
             Value::Null
         } else {
@@ -740,21 +677,12 @@ fn reconcile(ctx: &Ctx, runner: &dyn Runner, cwd: &str, o: &Opts, hooks: &Hooks)
         },
         None => 0,
     };
-    let missing: Vec<&str> = targets.iter().filter(|t| state::read_name(home, &t.id).is_none()).map(|t| t.id.as_str()).collect();
-    let mut backfilled = 0u64;
-    if !missing.is_empty() {
-        let ids = json!(missing).to_string();
-        let r = node(
-            runner,
-            ctx,
-            defaults::text("devswarm_recon.node_names_snippet"),
-            &[cwd, &ids, &ctx.now.to_string()],
-            defaults::num("devswarm_recon.node_names_timeout_ms"),
-        );
-        if r.ok {
-            backfilled = parse(&r.stdout).get("backfilled").and_then(Value::as_u64).unwrap_or(0);
-        }
+    // a name still missing after the app's titles would come from hivecontrol's workspace list, which has no native reader: held
+    let missing = targets.iter().filter(|t| state::read_name(home, &t.id).is_none()).count();
+    if missing > 0 {
+        crate::dssup::tick::held("dssup:recon:names", defaults::text("devswarm_recon.why_names_held"));
     }
+    let backfilled = 0u64;
     // the resume marker: what is still deferred goes first next time, and a drained sweep leaves no marker
     let marker = view::exists(home, &side::resume_rel());
     if !deferred_ids.is_empty() || marker {
@@ -795,62 +723,57 @@ fn reconcile(ctx: &Ctx, runner: &dyn Runner, cwd: &str, o: &Opts, hooks: &Hooks)
 
 // ---- the sweep duty -------------------------------------------------------------------------------------------------------------
 
-/// Who runs the reconcile duty: `node` (the default, Node's `reconcileSweepIfDue` whole) or `engine` (the engine reconciles each
-/// project natively and Node does the rest of the sweep).
+/// Whether the reconcile duty is on (`devswarm_sup.reconcile_mode` is `engine`, the default); anything else is off.
 pub fn engine_mode() -> bool {
     mode_is_engine(&crate::dswire::effective_text("devswarm_sup.reconcile_mode"))
 }
 
-/// Whether the `devswarm_sup.reconcile_mode` word means the engine; anything but the engine word is Node.
+/// Whether the `devswarm_sup.reconcile_mode` word means the engine; anything but the engine word is off, so a typo never starts a second actor.
 pub fn mode_is_engine(word: &str) -> bool {
     defaults::list("devswarm_sup.reconcile_mode_words").get(1).is_some_and(|e| word.trim().eq_ignore_ascii_case(e))
 }
 
-/// The duty's record. `fallback` runs Node's whole `reconcileSweepIfDue` (the duty as Node has it) and is what the engine does
-/// whenever it cannot start the sweep itself.
-pub fn duty(ctx: &Ctx, runner: &dyn Runner, hooks: &Hooks, fallback: &dyn Fn() -> Value) -> Value {
+/// The duty's record: the engine reconciles each project natively (the cool-down state is persisted first). The rest of Node's sweep
+/// (the mesh fold, the active-workspace probe, start-up sampling) has no native port: it is `held` and counted.
+pub fn duty(ctx: &Ctx, runner: &dyn Runner, hooks: &Hooks) -> Value {
     let (descs, projects) = match read_descriptors(ctx.home).and_then(|d| distinct_repo_keys(&d).map(|p| (d, p))) {
         Ok(x) => x,
-        Err(_) => return fallback(),
+        Err(Defer(why)) => return json!({"duty": "reconcile", "outcome": "held", "detail": crate::dssup::tick::held("dssup:reconcile:read", &why)}),
     };
     let cap = defaults::num("devswarm_recon.max_projects_per_tick") as usize;
     let mut pre = Map::new();
+    let mut folds = Map::new();
     if !descs.is_empty() && !projects.is_empty() {
         // persisted BEFORE the work, so a slow or crashed sweep still honours the cool-down
         if apply_side(ctx, runner, defaults::text("devswarm_recon.job_sweep_state"), side::plan_sweep_state(ctx.home, ctx.now), &[]).is_none() {
-            return fallback();
+            return json!({"duty": "reconcile", "outcome": "held", "detail": crate::dssup::tick::held("dssup:reconcile:state", defaults::text("devswarm_recon.why_state_held"))});
         }
         for p in projects.iter().take(cap) {
             match cmd_reconcile(ctx, runner, &p.worktree, &Opts::real(), hooks) {
                 ProjectEnd::Result(v) => {
+                    // Node folds each project's duplicate mesh rows right after its reconcile (the store is then current)
+                    let fold = match super::fold::run(ctx, runner, &p.repo_key, hooks) {
+                        Ok(f) => json!({"ok": true, "folded": f.result.folded, "retired": f.result.retired.len(), "forwarded": f.result.forwarded, "pending": f.result.pending.len(), "held": f.deferred.len()}),
+                        Err(Defer(why)) => json!({"ok": false, "held": crate::dssup::tick::held("dssup:reconcile:fold", &why)["held"]}),
+                    };
+                    folds.insert(p.worktree.clone(), fold);
                     pre.insert(p.worktree.clone(), v);
                 }
                 ProjectEnd::Node(why) => {
+                    crate::dssup::tick::held("dssup:reconcile:project", &why);
                     let rec = json!({"ts": ctx.now, "job": defaults::text("devswarm_recon.job_project_handback"), "repoKey": p.repo_key, "why": why});
                     crate::dsact::exec::append_line(&ctx.home.join(defaults::text("devswarm_recon.witness_file")), &rec);
                 }
             }
         }
     }
-    let scratch = ctx.home.join(defaults::text("devswarm_sup.witness_dir")).join(format!(
-        "{}{}-{}.json",
-        defaults::text("devswarm_recon.pre_file_prefix"),
-        ctx.now,
-        std::process::id()
-    ));
-    if let Some(d) = scratch.parent() {
-        crate::discard::harmless(std::fs::create_dir_all(d)); // keep: the write below reports the failure
-    }
-    if std::fs::write(&scratch, Value::Object(pre.clone()).to_string()).is_err() {
-        return fallback();
-    }
-    let timeout = defaults::raw("devswarm_sup.duty.reconcile").get("timeout_ms").and_then(crate::defaults::V::as_integer).unwrap_or(0).max(1) as u64;
-    let r = node(runner, ctx, defaults::text("devswarm_recon.node_tail_snippet"), &[&scratch.to_string_lossy()], timeout);
-    crate::discard::harmless(std::fs::remove_file(&scratch)); // keep: the engine's own scratch file
-    if r.ok {
-        json!({"duty": "reconcile", "outcome": "ran", "detail": parse(&r.stdout), "engineProjects": pre.len()})
-    } else {
-        let why = r.error.clone().unwrap_or_else(|| crate::dssup::tick::cut(&r.stderr));
-        json!({"duty": "reconcile", "outcome": "failed", "error": why, "status": r.status, "timedOut": r.timed_out})
-    }
+    let results: Vec<Value> = pre
+        .iter()
+        .map(|(wt, r)| {
+            json!({"worktree": wt, "ok": r.get("ok"), "count": r.get("count"), "imported": r.get("imported"), "lost": r.get("lost"), "fold": folds.get(wt)})
+        })
+        .collect();
+    // the active-workspace probe and the start-up sampling of Node's sweep have no native port: held, counted once per sweep
+    let rest = crate::dssup::tick::held("dssup:reconcile:rest", defaults::text("devswarm_recon.why_rest_held"));
+    json!({"duty": "reconcile", "outcome": "ran", "detail": {"projects": pre.len(), "results": results, "rest": rest}, "engineProjects": pre.len()})
 }

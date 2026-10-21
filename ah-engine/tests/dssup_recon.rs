@@ -19,7 +19,7 @@
 
 use ah_engine::checks::git::util::Settings;
 use ah_engine::checks::guardkit::ojson::OVal;
-use ah_engine::dsact::runner::{RunResult, RunSpec, Runner, System};
+use ah_engine::dsact::runner::System;
 use ah_engine::dssup::recon::gate::{self, Job, Verdict};
 use ah_engine::dssup::recon::{Hooks, Op, UnitEnd, apply, archived, dup, fold, heal, norm, orphans, side};
 use ah_engine::dssup::tick::Ctx;
@@ -478,38 +478,7 @@ fn s1_startup_sampling_matches_node_and_never_calls_read_messages() {
     t.print();
 }
 
-// ---------------------------------------------------------------- the gate refuses what it cannot witness
-
-struct Lying;
-impl Runner for Lying {
-    fn run(&self, _: &RunSpec) -> RunResult {
-        RunResult { ok: true, status: Some(0), stdout: "[null]\n".into(), ..Default::default() }
-    }
-}
-struct Absent;
-impl Runner for Absent {
-    fn run(&self, _: &RunSpec) -> RunResult {
-        RunResult { ok: false, missing: true, error: Some("no node".into()), ..Default::default() }
-    }
-}
-
-#[test]
-fn a_disagreeing_or_absent_witness_writes_nothing() {
-    let f = fix("gate");
-    let job = job_for("sweep", vec![side::plan_sweep_state(&f.home, NOW)], &[]);
-    // Node says "null" where the engine expects a value: mismatch on a call that has an expected value
-    let mut j = job_for("name", vec![side::plan_name(&f.home, "ws-1", "n", NOW)], &[]);
-    let out = gate::run(&f.ctx(), &Lying, &j, &Hooks::none());
-    assert!(matches!(out.verdict, Verdict::Mismatch(_)), "{:?}", out.verdict);
-    assert!(matches!(&out.ends[0], UnitEnd::Deferred(w) if w == "witness-mismatch"));
-    assert!(f.read(&f.ds("names/ws-1.json")).is_none());
-    // Node absent: unwitnessed, so unapplied
-    let out = gate::run(&f.ctx(), &Absent, &job, &Hooks::none());
-    assert!(matches!(out.verdict, Verdict::NodeUnavailable(_)));
-    assert!(matches!(&out.ends[0], UnitEnd::Deferred(w) if w == "node-unavailable"));
-    assert!(f.read(&f.ds("reconcile-sweep-state.json")).is_none());
-    j.units.clear();
-}
+// ---------------------------------------------------------------- the gate applies what the planner decided
 
 #[test]
 fn a_drifted_precondition_or_a_busy_lock_defers_the_unit_untouched() {
@@ -989,13 +958,9 @@ fn s5_heal_orphan_partitions_matches_node_for_every_store_shape() {
                 assert_eq!(again.result["adopted"], 0, "{}", c.name);
                 assert_eq!(f.snapshot(), after, "{}: the second pass wrote something", c.name);
             }
-            (Ok(run), Err(why)) => {
-                // decided natively, but the summary projection after the adoption is not the engine's: the witness fails and the
-                // adoption is handed back with nothing written
-                assert!(matches!(&run.verdict, Verdict::MirrorFailed(w) if w.contains(why)), "{}: {:?}", c.name, run.verdict);
-                assert_eq!(run.deferred.len(), 1, "{}", c.name);
-                assert_eq!(run.result["adopted"], 0, "{}", c.name);
-                assert!(ah_engine::dssup::recon::view::registry(&f.home, &key).unwrap().is_empty(), "{}: nothing adopted", c.name);
+            (Ok(run), Err(_why)) => {
+                // there is no Node comparison any more: the adoption the witness used to refuse is applied by the engine's applier
+                assert_eq!(run.verdict, Verdict::Agreed, "{}: {:?}", c.name, run.verdict);
                 t.case(false);
             }
             (Err(d), Err(why)) => {

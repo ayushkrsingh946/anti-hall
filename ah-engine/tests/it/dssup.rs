@@ -619,48 +619,6 @@ fn recover_refuses_before_it_touches_anything() {
 }
 
 #[test]
-fn the_rollback_hands_the_kill_to_nodes_recover_cli_with_exactly_the_one_id() {
-    let f = fx("rec-ok", true);
-    let st = settings(&f, &[]);
-    struct Cli(Mutex<Vec<RunSpec>>);
-    impl Runner for Cli {
-        fn run(&self, s: &RunSpec) -> RunResult {
-            self.0.lock().unwrap().push(s.clone());
-            RunResult {
-                ok: true,
-                status: Some(0),
-                stdout: "{\"ok\":true,\"id\":\"ws-1\",\"result\":{\"action\":\"abstain\"}}\n".into(),
-                ..RunResult::default()
-            }
-        }
-    }
-    let cli = Cli(Mutex::new(vec![]));
-    let place = recover::Place { home: &f.home, root: &f.root, state_dir: &f.state };
-    let (r, code) = recover::run_node(&place, &st, &cli, "ws-1", "req-1", now());
-    assert_eq!((r["outcome"].as_str(), code), (Some("handled"), 0), "{r}");
-    assert_eq!(r["node"]["result"]["action"], "abstain");
-    let calls = cli.0.lock().unwrap();
-    assert_eq!(calls.len(), 1);
-    assert_eq!(calls[0].args[0], "-e");
-    assert!(calls[0].args[1].contains("devswarm-recover.js") && calls[0].args[1].contains(".run(["), "Node's own run, as its CLI calls it");
-    assert_eq!(
-        calls[0].args[2..],
-        [f.root.to_string_lossy().into_owned(), f.home.to_string_lossy().into_owned(), "ws-1".to_string()],
-        "exactly the one id, nothing else"
-    );
-    drop(calls);
-    // a failing Node is reported, not hidden
-    struct Bad;
-    impl Runner for Bad {
-        fn run(&self, _s: &RunSpec) -> RunResult {
-            RunResult { ok: false, status: Some(1), stderr: "boom".into(), ..RunResult::default() }
-        }
-    }
-    let (r, code) = recover::run_node(&place, &st, &Bad, "ws-1", "req-2", now());
-    assert_eq!((r["outcome"].as_str(), code), (Some("failed"), 1));
-}
-
-#[test]
 fn a_recover_request_runs_once() {
     let f = fx("rec-once", true);
     let st = settings(&f, &[]);
@@ -948,29 +906,6 @@ fn the_witness_runs_nodes_sweep_on_a_scratch_mirror_and_logs_agreement() {
     put(&dev(&f).join("housekeeping-sweep-state.json"), &json!({"lastRunAt": 0}));
     tick::run(&c, Owner::Engine, &sys);
     assert_eq!(std::fs::read_to_string(f.home.join(".anti-hall/logs/devswarm-sup-witness.ndjson")).unwrap().lines().count(), before);
-}
-
-#[test]
-fn the_witness_logs_a_mismatch_when_the_engine_and_node_disagree() {
-    if !have_node() {
-        return;
-    }
-    let at = now();
-    let f = fx("witness-mismatch", true);
-    seed_housekeeping(&f, at);
-    let st = settings(&f, &[("ANTIHALL_DEVSWARM_SUP_WITNESS", "on")]);
-    let mut c = ctx(&f, &st, true);
-    c.now = at;
-    let job = ah_engine::dssup::housekeep::witness_prepare(&c).unwrap();
-    // the engine claims it removed nothing at all, but five files were eligible: Node's run on the mirror disagrees
-    let claimed = json!({"duty": "housekeeping", "outcome": "ran", "detail": {"ran": true, "results": {"reapedLogs": [], "childGate": []}}});
-    let rec = ah_engine::dssup::witness::finish(job, &c, &System::configured(), &claimed);
-    assert_eq!(rec["match"], false);
-    assert_eq!(rec["detail"]["onlyNode"].as_array().unwrap().len(), 5, "{rec}");
-    let log = std::fs::read_to_string(f.home.join(".anti-hall/logs/devswarm-sup-witness.ndjson")).unwrap();
-    assert!(log.contains("\"match\":false"));
-    // the live files were never touched by the witness
-    assert!(tree(&f).contains(&"reaped/old.ndjson".to_string()));
 }
 
 /// A recording runner that answers a `git log -1` call with a fixed commit time.

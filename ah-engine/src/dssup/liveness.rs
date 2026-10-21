@@ -729,9 +729,8 @@ fn inv_of(ctx: &Ctx) -> Inv {
     }
 }
 
-/// The record of the `verdicts` duty and, when a comparison is due, the witness job (finished after the sweep lock is released).
-pub fn duty(ctx: &Ctx, runner: &dyn Runner) -> (Value, Option<super::witness::Job>) {
-    let d = defaults::raw("devswarm_sup.duty.verdicts");
+/// The record of the `verdicts` duty.
+pub fn duty(ctx: &Ctx, runner: &dyn Runner) -> Value {
     let dry = super::setting(ctx.st, "devswarm_sup.set_dry_run_verdicts").as_bool().unwrap_or(false);
     let t = Thresholds::read(ctx);
     let inv = inv_of(ctx);
@@ -764,21 +763,14 @@ pub fn duty(ctx: &Ctx, runner: &dyn Runner) -> (Value, Option<super::witness::Jo
         "drain": out.drain,
         "dryRun": dry,
     });
-    if !dry && (!out.tail.is_empty() || !out.full.is_empty()) {
-        let spec = json!({"tail": out.tail, "full": out.full.iter().map(|(id, _)| id).collect::<Vec<_>>()}).to_string();
-        let owner = if ctx.engine_pokes { defaults::text("devswarm_sup.owner_engine") } else { defaults::text("devswarm_sup.owner_node") };
-        let timeout = d.get("timeout_ms").and_then(crate::defaults::V::as_integer).unwrap_or(0).max(1) as u64;
-        let r = super::tick::node(runner, ctx, d.str_field("tail_snippet"), &[owner, &spec], timeout);
-        detail["node"] = if r.ok {
-            super::tick::parse(&r.stdout)
-        } else if r.missing {
-            // no Node on this machine: the tail work (Jev blocker label, straying signals, deferred workspaces) is not done; the
-            // verdicts, the forced notices and the parked notices above are
-            json!({"skipped": defaults::text("devswarm_sup.msg_no_node"), "tail": out.tail.len(), "full": out.full.len()})
-        } else {
-            json!({"error": r.error.clone().unwrap_or_else(|| super::tick::cut(&r.stderr)), "status": r.status, "timedOut": r.timed_out})
-        };
+    // the per-workspace tail work (Jev blocker label, straying signals, a stale workspace nobody else pokes) and the workspaces the
+    // engine defers on have no native port: they are held, counted per kind, and named in the record; the verdicts, the forced notices
+    // and the parked notices above are done
+    if !dry && !out.tail.is_empty() {
+        detail["tailHeld"] = json!({"count": out.tail.len(), "held": super::tick::held("dssup:verdicts:tail", defaults::text("devswarm_sup.lv_why_tail"))["held"]});
     }
-    let job = if dry || out.written.is_empty() { None } else { super::witness::prepare_verdicts(ctx, &out, t) };
-    (json!({"duty": "verdicts", "outcome": if dry { "dry-run" } else { "ran" }, "detail": detail}), job)
+    if !dry && !out.full.is_empty() {
+        detail["fullHeld"] = json!({"count": out.full.len(), "held": super::tick::held("dssup:verdicts:full", defaults::text("devswarm_sup.lv_why_full"))["held"]});
+    }
+    json!({"duty": "verdicts", "outcome": if dry { "dry-run" } else { "ran" }, "detail": detail})
 }
