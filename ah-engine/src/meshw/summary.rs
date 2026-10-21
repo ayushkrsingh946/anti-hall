@@ -5,7 +5,8 @@
 //! parent-inbox hook and the Stop gates read it. So the engine refreshes it too, byte for byte.
 //!
 //! Boundary (defer, never guess): every branch whose evidence the engine does not read is a [`Defer`] — an orphan
-//! partition with unread mail (its classification needs the archive gate and liveness ranking), a durable NDJSON inbox
+//! partition with unread mail that `meshw::orphan` cannot sort (the archive gate's liveness proof, the forwarded-drained
+//! proof), a durable NDJSON inbox
 //! with unread lines (the loss-free union count), a settings tier the engine cannot resolve. A verb calls [`check`]
 //! BEFORE it writes, so such a store is handed to Node whole; after its write it calls [`derive_after_write`], which can
 //! no longer hand anything to Node (that would write twice) and therefore logs a failure instead of returning it.
@@ -915,25 +916,38 @@ pub fn compute(st: &MeshStore, inv: &Inv, touched: Option<&str>) -> R<OVal> {
             OVal::Obj(e)
         })
         .collect();
-    // orphans: a partition with unread mail and no live registry row. Classifying it (archived-stranded, forwarded-
-    // drained, held, plain) needs the archive gate and liveness ranking, which stay with Node.
+    // orphans: a partition with unread mail and no live registry row, sorted the way `computeSummary` does (archived-stranded,
+    // forwarded-drained, owner-held, plain). The archive gate's liveness proof and the forwarded-drained proof stay with Node.
     let mut candidates: Vec<String> = st.reader().workspace_ids();
     if let Some(t) = touched
         && !candidates.iter().any(|c| c == t)
     {
         candidates.push(t.to_string());
     }
+    let (mut orphans, mut stranded, mut held_out): (Vec<OVal>, Vec<OVal>, Vec<OVal>) = (Vec::new(), Vec::new(), Vec::new());
+    let mut sorter = crate::meshw::orphan::Classifier::new(home, rows.iter().filter_map(|r| r.worktree_path.clone()).filter(|w| !w.is_empty()).collect());
     for id in &candidates {
         if id == bpart || registry_ids.contains(id) || !is_safe_id(id) {
             continue;
         }
         let total = st.reader().message_count(id).or_else(|e| err("count", e))? as f64;
         let floor = floor_of(st, &mut cur, home, id, false)?;
-        if total - floor > 0.0 || touched == Some(id.as_str()) {
-            return defer("summary-orphan");
+        if touched == Some(id.as_str()) {
+            return defer("summary-orphan"); // the write would create an orphan
+        }
+        let unread = (total - floor).max(0.0);
+        if unread <= 0.0 {
+            continue;
+        }
+        let entry = OVal::Obj(vec![("id".into(), s(id)), ("messageCount".into(), n(total)), ("unread".into(), n(unread))]);
+        if sorter.classify(id)? == crate::meshw::orphan::Class::Stranded {
+            stranded.push(entry);
+        } else if held.contains(id) {
+            held_out.push(entry);
+        } else {
+            orphans.push(entry);
         }
     }
-    let _ = held; // held ids only divert orphans, and any orphan defers above
     let mut stale: Vec<OVal> = Vec::new();
     for d in &rows {
         if d.id == bpart || !is_safe_id(&d.id) || archived.contains(&d.id) {
@@ -957,6 +971,11 @@ pub fn compute(st: &MeshStore, inv: &Inv, touched: Option<&str>) -> R<OVal> {
         ("recent".into(), OVal::Arr(recent)),
         ("archivedRegistryRows".into(), OVal::Arr(archived_rows)),
     ];
+    for (key, list) in [("orphans", orphans), ("archivedStranded", stranded), ("heldPartitions", held_out)] {
+        if !list.is_empty() {
+            out.push((key.into(), OVal::Arr(list)));
+        }
+    }
     if !stale.is_empty() {
         out.push(("staleRegistryPartitions".into(), OVal::Arr(stale)));
     }

@@ -261,7 +261,7 @@ function ctDecide(p, opts) {
         var arch = ctArchivedNow(builder, top, sid);
         if (arch !== false) return ctDefer(arch === null ? 'archived-unsure' : 'archived'); // an archived workspace gets the banner, the handover marker and the metrics from Node
         var prep = JSON.parse(ahHost.ctPrepare(cwd, builder, sid));
-        if (prep.unsure) return ctDefer('prepare');
+        if (prep.unsure) return ctDefer('prepare:' + prep.why);
       }
       // the ingest daemon of the project: its banner (once per episode) when it is stopped or its monitor fails
       wkey = wroot === null ? null : ah.mesh.repoKey(wroot);

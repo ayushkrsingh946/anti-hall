@@ -360,6 +360,39 @@ fn both(a: impl Fn(&Path) + 'static, b: impl Fn(&Path) + 'static) -> impl Fn(&Pa
     }
 }
 
+/// `count` unread messages in the partition of `id`, which has no registry row: an orphan.
+fn orphan(id: &'static str, count: usize) -> impl Fn(&Path) {
+    move |h| {
+        for i in 0..count {
+            sql(
+                h,
+                &[(
+                    "INSERT INTO messages (workspace_id, ts, hash, body, sender, recipient, mtype, urgency, is_heartbeat, needs_reply, orig_hash, instance_nonce, seq) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,(SELECT COALESCE(MAX(seq),0)+1 FROM messages))",
+                    vec![
+                        t(id),
+                        (now_ms() - 5_000 - i as i64).into(),
+                        t(format!("h-{id}-{i}")),
+                        t("lost"),
+                        t("primary-x"),
+                        t(id),
+                        t("direct"),
+                        t("normal"),
+                        0i64.into(),
+                        0i64.into(),
+                        rusqlite::types::Value::Null,
+                        rusqlite::types::Value::Null,
+                    ],
+                )],
+            );
+        }
+    }
+}
+
+/// A descriptor file of the orphan `id`, live (`workspaces/`) or the archive marker (`archived/`).
+fn orphan_file(dir: &'static str, id: &'static str, body: Value) -> impl Fn(&Path) {
+    move |h| write(&ds(h).join(format!("{dir}/{id}.json")), &body.to_string())
+}
+
 fn scenes() -> Vec<Scene> {
     use Want::{Defer, DeferLate, Same};
     let archived = |sid: &'static str| {
@@ -443,6 +476,57 @@ fn scenes() -> Vec<Scene> {
         scene("archived-marker-superseded", Same).seed(archived("older-session")),
         scene("archived-marker-setting-off", Same)
             .seed(both(archived("s1"), |h| write(&h.join(".anti-hall/settings.json"), r#"{"devswarm":{"archivedChildStop":false}}"#))),
+        // orphan partitions in the summary the registration refreshes: sorted natively, or handed to Node whole
+        scene("orphan-no-descriptor", Same).seed(orphan("orph-1", 2)),
+        scene("orphan-live-descriptor-not-archived", Same)
+            .seed(both(orphan("orph-1", 1), orphan_file("workspaces", "orph-1", json!({"id": "orph-1", "worktreePath": "/nonexistent/wt-a", "sessionId": "x"})))),
+        scene("orphan-archived-no-family", Same)
+            .seed(both(orphan("orph-1", 3), orphan_file("archived", "orph-1", json!({"id": "orph-1", "worktreePath": "/nonexistent/wt-b", "sessionId": "x"})))),
+        scene("orphan-archived-no-worktree-field", Same).seed(both(orphan("orph-1", 1), orphan_file("archived", "orph-1", json!({"id": "orph-1", "sessionId": "x"})))),
+        scene("orphan-archived-no-session", Same)
+            .seed(both(orphan("orph-1", 1), orphan_file("archived", "orph-1", json!({"id": "orph-1", "worktreePath": "/nonexistent/wt-c"})))),
+        scene("orphan-archived-existing-dir-no-family", Same).seed(both(orphan("orph-1", 2), |h| {
+            let dir = h.join("elsewhere");
+            std::fs::create_dir_all(&dir).unwrap();
+            write(&ds(h).join("archived/orph-1.json"), &json!({"id": "orph-1", "worktreePath": dir, "sessionId": "x"}).to_string());
+        })),
+        scene("orphan-marker-unreadable-live-descriptor", Same).seed(both(
+            both(orphan("orph-1", 1), orphan_file("workspaces", "orph-1", json!({"id": "orph-1", "worktreePath": "/nonexistent/wt-d", "sessionId": "x"}))),
+            |h| write(&ds(h).join("archived/orph-1.json"), "{not json"),
+        )),
+        scene("orphan-marker-of-another-worktree", Same).seed(both(
+            both(orphan("orph-1", 1), orphan_file("workspaces", "orph-1", json!({"id": "orph-1", "worktreePath": "/nonexistent/wt-e", "sessionId": "x"}))),
+            orphan_file("archived", "orph-1", json!({"id": "orph-1", "worktreePath": "/nonexistent/wt-other", "sessionId": "x"})),
+        )),
+        scene("orphan-worktree-group-sibling", Same).seed(both(
+            both(orphan("orph-1", 2), orphan_file("workspaces", "orph-1", json!({"id": "orph-1", "worktreePath": "/nonexistent/wt-f", "sessionId": "x"}))),
+            orphan_file("archived", "other-1", json!({"id": "other-1", "worktreePath": "/nonexistent/wt-f", "sessionId": "x"})),
+        )),
+        scene("orphan-held", Same).seed(both(orphan("orph-1", 1), |h| write(&h.join(".anti-hall/settings.json"), r#"{"devswarm":{"heldPartitions":"orph-1, other"}}"#))),
+        scene("orphan-held-and-stranded", Same).seed(both(
+            both(orphan("orph-1", 1), orphan_file("archived", "orph-1", json!({"id": "orph-1", "worktreePath": "/nonexistent/wt-g", "sessionId": "x"}))),
+            |h| write(&h.join(".anti-hall/settings.json"), r#"{"devswarm":{"heldPartitions":"orph-1"}}"#),
+        )),
+        scene("orphan-drained-is-not-listed", Same).seed(both(orphan("orph-1", 2), |h| {
+            sql(h, &[("INSERT INTO reader_cursors (partition, ns, reader, value, retired_line, updated_at) VALUES (?,?,?,?,NULL,?)", vec![t("orph-1"), t("store"), t("floor"), 2i64.into(), 1i64.into()])]);
+        })),
+        scene("orphans-mixed", Same).seed(both(
+            both(orphan("orph-1", 1), orphan("orph-2", 4)),
+            both(
+                orphan_file("archived", "orph-2", json!({"id": "orph-2", "worktreePath": "/nonexistent/wt-h", "sessionId": "x"})),
+                orphan_file("workspaces", "orph-3", json!({"id": "orph-3", "worktreePath": "/nonexistent/wt-i"})),
+            ),
+        )),
+        scene("orphan-archived-family-has-a-survivor", Defer)
+            .seed(both(orphan("orph-1", 1), |h| write(&ds(h).join("archived/orph-1.json"), &json!({"id": "orph-1", "worktreePath": h.join("proj"), "sessionId": "x"}).to_string()))),
+        scene("orphan-sessions-differ-needs-liveness", Defer).seed(both(
+            both(orphan("orph-1", 1), orphan_file("workspaces", "orph-1", json!({"id": "orph-1", "worktreePath": "/nonexistent/wt-j", "sessionId": "live-1"}))),
+            orphan_file("archived", "orph-1", json!({"id": "orph-1", "worktreePath": "/nonexistent/wt-j", "sessionId": "old-1"})),
+        )),
+        scene("orphan-descriptor-session-not-text", Defer).seed(both(
+            orphan("orph-1", 1),
+            orphan_file("archived", "orph-1", json!({"id": "orph-1", "worktreePath": "/nonexistent/wt-k", "sessionId": 7})),
+        )),
         // the cases that stay with Node, each decided before anything is written
         scene("archived-marker", Defer).seed(archived("s1")),
         scene("descriptor-array", Defer).seed(descriptor("[1,2]")),
