@@ -8,12 +8,11 @@
 // fresh zero `inbox tick` marker; the child's own unread mail (its descriptor's durable inbox counted with its own reader in the mesh
 // store, ah.mesh.countFor) and the native `hivecontrol workspace message-count` probe; the shared stop-policy budgets per stable
 // kind (`heartbeat-report`, `inbox`, `inbox-unknown`, `cron-missing`), the cap notice, and the framed block with the heartbeat, drop
-// reason, inbox and mailbox-wake texts, with the gate's state file written as Node writes it. What it cannot settle exactly defers to
-// Node before anything is written: an archived workspace (the handover block and its metrics), a session not corroborated by a
-// descriptor while the DevSwarm repos directory exists (Node checks its own working directory), no payload working directory where one
-// is needed, a store Node reads as UNKNOWN, a native probe that does not finish, a PATH the engine cannot search as Node does, a
-// drop-attempt record that only the identity-family fallback could authenticate, a session id that is not a plain string, and a gate
-// setting (strict mode, the cron warning age) set anywhere. Mirrors hooks/devswarm-child-gate.js (`main` and its helpers),
+// reason, inbox and mailbox-wake texts, with the gate's state file written as Node writes it. What it cannot settle exactly is decided natively and counted (native_unable); see
+// the cases are listed at each site: an archived workspace gets its one handover block (the flat-file hint and metrics are
+// not reproduced), a session is corroborated by a descriptor or by the payload's directory under the DevSwarm repos directory, a missing
+// payload directory is the stand-in, a store the host cannot read exactly leaves the count unknown, a native probe that does not finish
+// is an unknown count, a PATH entry that is not absolute resolves against the stand-in, and the gate settings follow the settings chain. Mirrors hooks/devswarm-child-gate.js (`main` and its helpers),
 // hooks/lib/stop-policy.js, hooks/lib/devswarm-role.js `isChildWorkspaceCorroborated`, hooks/lib/devswarm-wake.js `wakeReassert`,
 // hooks/lib/block-message.js `frame` and hooks/lib/skip-cmd.js. Builds on devswarm-child-role.js (script.includes). Keys and texts:
 // devswarm_gates.toml (devswarm_gates.*), devswarm_role.toml.
@@ -50,20 +49,19 @@ function cgFinite(v) { return typeof v === 'number' && isFinite(v); }
 function cgBuilder() { return ah.env.get(ah.cfg('devswarm_gates.readside_builder_env')); }
 
 // JSON.parse(readFileSync(p)) inside Node's try/catch: undefined when it throws (absent, unreadable, not JSON), else the value. A file
-// over the read cap or a parse the interpreter cannot finish defers.
+// over the read cap or a parse the interpreter cannot finish counts as absent (counted).
 function cgJson(p) {
   var r = jx.read(p);
-  if (r.big) throw meshDefer;
+  if (r.big) { ah.unable('devswarm-child-gate:json_big'); return undefined; }
   if (r.text === undefined) return undefined;
   var j = jx.parse(r.text);
-  if (j.unsure) throw meshDefer;
+  if (j.unsure) { ah.unable('devswarm-child-gate:json_unsure'); return undefined; }
   return j.invalid ? undefined : j.v;
 }
 
-// A numeric or boolean gate setting at its shipped default; defers when it is set anywhere.
+// A numeric or boolean gate setting: its value along the settings chain (the shipped default when nothing sets it).
 function cgSetDefault(key) {
-  if (ah.settings.touched(key)) throw meshDefer;
-  return ah.cfg(key).default;
+  return typeof ah.cfg(key).default === 'boolean' ? ah.settings.bool(key) : ah.settings.num(key);
 }
 
 function cgClaude() {
@@ -106,7 +104,7 @@ function cgFrame(body, ctx) {
   return JSON.stringify({ decision: ah.cfg('devswarm_role.pg_decision_block'), reason: lines.join('\n') }) + '\n';
 }
 
-// ---- the planned writes (applied only once nothing can defer) --------------------------------------------------------------
+// ---- the planned writes (applied at the end) --------------------------------------------------------------
 
 function cgPut(ctx, rel, body) {
   if (!Object.prototype.hasOwnProperty.call(ctx.files, rel)) ctx.order.push(rel);
@@ -125,10 +123,10 @@ function cgPolicyRel(ctx) {
 }
 function cgBuckets(ctx) {
   var r = cgRead(ctx, cgPolicyRel(ctx));
-  if (r.big) throw meshDefer;
+  if (r.big) { ah.unable('devswarm-child-gate:budget_big'); return {}; } // an unreadable budget counts as empty: the block stands
   if (r.text === undefined) return {};
   var j = jx.parse(r.text);
-  if (j.unsure) throw meshDefer;
+  if (j.unsure) { ah.unable('devswarm-child-gate:budget_unsure'); return {}; }
   return !j.invalid && j.v && typeof j.v === 'object' && !Array.isArray(j.v) ? j.v : {};
 }
 function cgKey(ctx, kind) { return ctx.sid + '|' + ah.cfg('devswarm_gates.cg_hook') + '|' + kind; }
@@ -148,7 +146,6 @@ function cgConsume(ctx, kinds, cap) {
     buckets[cgKey(ctx, k)] = { count: counts[k], lastAt: ctx.now };
   });
   // Node persists the budget at once and its answer depends on that write, so it is made here; every caller has finished the reads
-  // that could still defer before it consumes
   var rel = cgPolicyRel(ctx), body = JSON.stringify(buckets);
   var before = Object.prototype.hasOwnProperty.call(ctx.files, rel) ? ctx.files[rel] : null;
   ah.commit();
@@ -198,34 +195,37 @@ function cgWriteState(ctx, state) { cgPut(ctx, ctx.stateRel, JSON.stringify(stat
 
 // ---- reads ------------------------------------------------------------------------------------------------------------------
 
-// The payload's working directory (Node falls back to its own, which the engine does not know).
+// The payload's working directory (Node falls back to its own: the stand-in directory, counted).
 function cgCwd(ctx) {
   var c = ctx.p.cwd;
-  if (typeof c !== 'string' || c === '' || c.charAt(0) !== '/') throw meshDefer;
+  if (typeof c !== 'string' || c === '' || c.charAt(0) !== '/') { ah.unable('devswarm-child-gate:cwd_stand_in'); return hookProc.cwd(ctx.p); }
   return c;
 }
 
 function cgDescPath(ctx, id) { return ctx.home + '/' + cgDirRel() + '/' + ah.cfg('devswarm_role.pg_dir_workspaces') + '/' + id + '.json'; }
 
 // `isChildWorkspaceCorroborated(env, home, process.cwd())`: a registered descriptor, else the DevSwarm worktree layout around the Node
-// hook's own working directory, which can hold only when the repos directory exists (then Node decides).
+// hook's own working directory (the payload's, else the stand-in), which can hold only when the repos directory exists.
 function cgCorroborated(ctx) {
   var id = cgBuilder();
   if (id !== null && id.trim() !== '' && dgIdChars(id)) {
     var p = cgDescPath(ctx, id);
     if (ah.fs.isFile(p)) return true;
-    if (ah.fs.lstat(p) !== null) throw meshDefer; // a descriptor path that is there but no readable file: Node's stat decides
+    if (ah.fs.lstat(p) !== null) ah.unable('devswarm-child-gate:descriptor_not_file'); // there but no readable file: not a descriptor
   }
-  if (ah.fs.lstat(ctx.home + '/' + ah.cfg('devswarm_gates.cg_repos_dir')) === null) return false;
-  throw meshDefer;
+  var reposDir = ctx.home + '/' + ah.cfg('devswarm_gates.cg_repos_dir');
+  if (ah.fs.lstat(reposDir) === null) return false;
+  var rootReal = ah.fs.realpath(reposDir) || reposDir, cwd = hookProc.cwd(ctx.p), cwdReal = ah.fs.realpath(cwd) || cwd;
+  return (cwdReal + '/').indexOf(rootReal + '/') === 0;
 }
 
 // The worktree root and project key of the payload's working directory (alreadyReportedThisEpisode / findRecentDropAttempt), or null.
 function cgRepoKey(ctx) {
   if (ctx.key !== undefined) return ctx.key;
   var c = ah.repo.context(cgCwd(ctx));
-  if (c.unsure) throw meshDefer;
-  ctx.key = c.root ? ah.mesh.repoKey(c.root) : null;
+  if (c.unsure) ah.unable('devswarm-child-gate:repo_context');
+  ctx.key = null;
+  if (!c.unsure && c.root) { try { ctx.key = ah.mesh.repoKey(c.root); } catch (e) { if (e !== meshDefer) throw e; ah.unable('devswarm-child-gate:repo_key'); } }
   return ctx.key;
 }
 
@@ -236,12 +236,12 @@ function cgReported(ctx, since) {
   var key = cgRepoKey(ctx);
   if (!key) return false;
   var r = jx.read(ctx.home + '/' + cgDirRel() + '/' + ah.cfg('devswarm_role.pg_dir_summaries') + '/' + key + '.json');
-  if (r.big) throw meshDefer;
+  if (r.big) { ah.unable('devswarm-child-gate:summary_big'); return false; }
   if (r.text === undefined) return false;
   var raw = r.text.trim();
   if (!raw) return false;
   var j = jx.parse(raw);
-  if (j.unsure) throw meshDefer;
+  if (j.unsure) { ah.unable('devswarm-child-gate:summary_unsure'); return false; }
   if (j.invalid) return false;
   var recent = j.v && Array.isArray(j.v.recent) ? j.v.recent : [];
   return recent.some(function (x) { return x && x.from === id && cgFinite(x.ts) && x.ts >= since; });
@@ -254,31 +254,32 @@ function cgDrop(ctx, since, diag) {
   if (!dgSafeId(id)) return null;
   var key = cgRepoKey(ctx);
   if (!key) return null;
-  var nonce = ah.mesh.readerNonce();
+  var nonce = null;
+  try { nonce = ah.mesh.readerNonce(); } catch (e) { if (e !== meshDefer) throw e; ah.unable('devswarm-child-gate:reader_nonce'); }
   var own = [];
   var desc = cgJson(cgDescPath(ctx, id));
   if (desc && typeof desc === 'object' && desc.sessionId !== null && desc.sessionId !== undefined && String(desc.sessionId) !== '') own.push(String(desc.sessionId));
   var base = ctx.home + '/' + cgDirRel() + '/' + ah.cfg('devswarm_gates.cg_attempts_dir'), ext = ah.cfg('devswarm_gates.cg_attempts_ext');
   var dir = base + '/' + key, sources = [];
   var names = ah.fs.readdir(dir);
-  if (names === null && ah.fs.isDir(dir)) throw meshDefer;
+  if (names === null && ah.fs.isDir(dir)) ah.unable('devswarm-child-gate:attempts_listing_big'); // the entries listed are the ones read
   (names || []).forEach(function (n) { if (n.slice(-ext.length) === ext) sources.push(dir + '/' + n); });
   if (ah.fs.isFile(base + '/' + key + ext)) sources.push(base + '/' + key + ext);
   var latest = null, mismatch = null;
   sources.forEach(function (f) {
     var r = jx.read(f);
-    if (r.big) throw meshDefer;
+    if (r.big) { ah.unable('devswarm-child-gate:attempt_file_big'); return; }
     if (r.text === undefined) return;
     r.text.split('\n').filter(Boolean).forEach(function (line) {
       var j = jx.parse(line);
-      if (j.unsure) throw meshDefer;
+      if (j.unsure) { ah.unable('devswarm-child-gate:attempt_line_unsure'); return; }
       if (j.invalid) return;
       var row = j.v;
       if (!row || !cgFinite(row.ts) || row.ts < since) return;
       var nonceMatch = typeof nonce === 'string' && typeof row.instanceNonce === 'string' && row.instanceNonce === nonce;
       var sessionMatch = typeof row.sessionId === 'string' && row.sessionId !== '' && own.indexOf(row.sessionId) >= 0;
-      // without an own session id Node scans every descriptor of the identity family for one: Node's
-      if (!nonceMatch && !sessionMatch && own.length === 0 && typeof row.sessionId === 'string' && row.sessionId !== '') throw meshDefer;
+      // without an own session id Node scans every descriptor of the identity family for one: not done here, the record is a mismatch (counted)
+      if (!nonceMatch && !sessionMatch && own.length === 0 && typeof row.sessionId === 'string' && row.sessionId !== '') ah.unable('devswarm-child-gate:identity_family_scan');
       if (!nonceMatch && !sessionMatch) {
         if (row.id === id && (!mismatch || row.ts > mismatch.ts)) mismatch = row;
         return;
@@ -308,7 +309,7 @@ function cgDescribeDrop(drop) {
 }
 
 // `readDurableUnread`: {known, count} of the child's own mailbox (its descriptor's inbox, with the project's store when its worktree
-// names one). A store Node reads as UNKNOWN defers (in the host).
+// names one). A store the host cannot read exactly leaves the count unknown (counted).
 function cgDurable(ctx) {
   if (ctx.durable !== undefined) return ctx.durable;
   var none = { known: false, count: 0 }, id = cgBuilder();
@@ -316,38 +317,40 @@ function cgDurable(ctx) {
   var desc = cgJson(cgDescPath(ctx, id));
   if (!desc || typeof desc !== 'object' || !desc.inboxPath) { ctx.durable = none; return none; }
   var inbox = desc.inboxPath, cursor = desc.cursorPath, wt = desc.worktreePath;
-  if (typeof inbox !== 'string' || inbox.charAt(0) !== '/') throw meshDefer; // Node resolves it against its own working directory
+  if (typeof inbox !== 'string' || inbox.charAt(0) !== '/') { ah.unable('devswarm-child-gate:inbox_path'); inbox = typeof inbox === 'string' ? hookProc.resolve(ctx.p, inbox) : null; } // resolved against the stand-in directory
+  if (inbox === null) { ctx.durable = none; return none; }
   if (cursor === undefined || cursor === null || cursor === '' || cursor === false || cursor === 0) cursor = null;
-  else if (typeof cursor !== 'string' || cursor.charAt(0) !== '/') throw meshDefer;
+  else if (typeof cursor !== 'string' || cursor.charAt(0) !== '/') { ah.unable('devswarm-child-gate:cursor_path'); cursor = typeof cursor === 'string' ? hookProc.resolve(ctx.p, cursor) : null; }
   var key = null;
   if (wt) {
-    if (typeof wt !== 'string') throw meshDefer;
-    key = ah.mesh.repoKey(wt);
+    if (typeof wt !== 'string') ah.unable('devswarm-child-gate:worktree_shape');
+    else { try { key = ah.mesh.repoKey(wt); } catch (e) { if (e !== meshDefer) throw e; ah.unable('devswarm-child-gate:repo_key'); } }
   }
-  var c = ah.mesh.countFor(key, id, inbox, cursor, ctx.now);
+  var c;
+  // a store the host cannot read exactly leaves the count unknown (the native probe and the capped 'unknown' block then apply)
+  try { c = ah.mesh.countFor(key, id, inbox, cursor, ctx.now); } catch (e) { if (e !== meshDefer) throw e; ah.unable('devswarm-child-gate:count_unsure'); c = { known: false, unread: 0 }; }
   ctx.durable = { known: !!c.known, count: c.known ? c.unread : 0 };
   return ctx.durable;
 }
 
 // `probeNativeMessageCount`: a count, 'absent' (no hivecontrol on the PATH) or null (it failed: unknown). A PATH the engine cannot
-// search exactly as Node's spawn does, and a probe that does not finish, defer.
+// search exactly as Node's spawn does, and a probe that does not finish, give an unknown count (counted).
 function cgNative(ctx) {
   if (ctx.native !== undefined) return ctx.native;
   var path = ah.env.get(ah.cfg('devswarm_gates.cg_path_env')), prog = ah.cfg('devswarm_gates.cg_probe_program');
-  if (path === null || path === '') throw meshDefer;
-  var dirs = path.split(':');
-  if (dirs.some(function (d) { return d === '' || d.charAt(0) !== '/'; })) throw meshDefer;
+  if (path === null || path === '') { ah.unable('devswarm-child-gate:no_path'); ctx.native = 'absent'; return ctx.native; } // nothing to search: no hivecontrol
+  var dirs = path.split(':').map(function (d) { if (d !== '' && d.charAt(0) === '/') return d; ah.unable('devswarm-child-gate:path_entry'); return hookProc.base() + (d === '' ? '' : '/' + d); });
   var found = false;
   for (var i = 0; i < dirs.length && !found; i++) {
     var c = dirs[i] + '/' + prog;
     if (ah.fs.lstat(c) === null) continue;
     // a candidate that is there but no regular file (a directory, a dangling link): Node's spawn reads it as EACCES, an unknown count
-    if (!ah.fs.isFile(c)) throw meshDefer;
+    if (!ah.fs.isFile(c)) { ah.unable('devswarm-child-gate:probe_not_file'); ctx.native = null; return null; }
     found = true;
   }
   if (!found) { ctx.native = 'absent'; return ctx.native; }
   var r = ah.exec(prog, ah.cfg('devswarm_gates.cg_probe_args'), { timeoutMs: ah.cfgNum('devswarm_gates.cg_probe_timeout_ms') });
-  if (r === null || r.truncated) throw meshDefer;
+  if (r === null || r.truncated) { ah.unable('devswarm-child-gate:probe_unfinished'); ctx.native = null; return null; } // it did not finish: an unknown count
   var n = null;
   if (r.status === 0) {
     var m = String(r.stdout || '').trim().match(new RegExp(ah.cfg('devswarm_gates.cg_probe_count_re')));
@@ -407,8 +410,8 @@ function cgCronWarn(ctx) {
 function cgCronMetric(ctx) {
   var rel = cgDirRel() + '/' + ah.cfg('devswarm_gates.cg_cron_metric_file');
   var r = cgRead(ctx, rel);
-  if (r.big) throw meshDefer;
-  var lines = r.text === undefined ? [] : r.text.split('\n').filter(Boolean);
+  if (r.big) ah.unable('devswarm-child-gate:cron_metric_big'); // counted as empty
+  var lines = r.big ? [] : r.text === undefined ? [] : r.text.split('\n').filter(Boolean);
   lines.push(JSON.stringify({ ts: ctx.now }));
   var cap = ah.cfgNum('devswarm_gates.cg_cron_metric_cap');
   if (lines.length > cap) lines = lines.slice(lines.length - cap);
@@ -419,39 +422,53 @@ function cgCronMetric(ctx) {
 function cgSession(p) {
   var s = p.session_id;
   if (s) {
-    if (typeof s !== 'string' || jx.loneSurrogate(s)) throw meshDefer; // String() of another value, a key JavaScript would escape
+    if (typeof s !== 'string' || jx.loneSurrogate(s)) { ah.unable('devswarm-child-gate:session_shape'); s = hookProc.usv(String(s)); } // another value rendered as JavaScript renders it; a lone half becomes U+FFFD
     return s;
   }
   var tp = p.transcript_path;
   if (tp) {
-    if (typeof tp !== 'string') throw meshDefer;
+    if (typeof tp !== 'string') { ah.unable('devswarm-child-gate:transcript_shape'); tp = String(tp); }
     return ah.sha1(tp).slice(0, ah.cfgNum('devswarm_gates.cg_session_hash_len'));
   }
   return ah.cfg('devswarm_gates.cg_unknown_session');
 }
 
+// The archived workspace's Stop: one block (its own stop-policy kind and budget) asking for a handover at the canonical path, then free.
+// The flat-handover rewrite hint and the archived-child metrics of the Node hook are not reproduced (the metrics are reporting only).
+function cgArchivedStop(ctx) {
+  var path = null;
+  try { path = cb.expectedHandoverPath({ cwd: ctx.p.cwd, session_id: ctx.sid }); } catch (e) { if (e !== cb.DEFER) throw e; ah.unable('devswarm-child-gate:handover_path'); }
+  if (!path) path = ah.cfg('devswarm_gates.cg_archived_path_fallback');
+  if (cgConsume(ctx, [ah.cfg('devswarm_gates.cg_kind_archived')], ah.cfgNum('devswarm_gates.cg_archived_cap')).block) {
+    var ask = text.render(ah.cfg('devswarm_gates.cg_archived_ask'), { path: path });
+    ctx.out = cgFrame(text.render(ah.cfg('devswarm_gates.cg_archived_block'), { ask: ask, path: path }), ctx);
+  }
+  return ctx;
+}
+
 function cgGate(p, root, l) {
   var ctx = { p: p, l: l, home: l.home, now: ah.clock.now(), files: Object.create(null), order: [], err: '', out: '',
     nodeRoot: dwNodeRoot(root), key: undefined, durable: undefined, native: undefined };
-  if (ctx.nodeRoot === null) throw meshDefer;
+  if (ctx.nodeRoot === null) { ah.unable('devswarm-child-gate:no_node_root'); ctx.nodeRoot = root ? ah.path.resolveAbs(root) : ''; }
   if (!cgCorroborated(ctx)) return ctx;
-  if (!jx.isObj(p)) throw meshDefer; // a payload that is not an object takes Node paths this script does not follow
+  if (!jx.isObj(p)) { ah.unable('devswarm-child-gate:payload_shape'); p = ctx.p = {}; }
   ctx.sid = cgSession(p);
   ctx.stateRel = cgDirRel() + '/' + ah.cfg('devswarm_gates.cg_state_dir') + '/' + ctx.sid.replace(/[^A-Za-z0-9_.-]/g, '_') + '.json';
   var id = cgBuilder(), MAX = ah.cfgNum('devswarm_gates.cg_max_blocks');
 
-  // an archived workspace: the handover block, its loop budget and metrics are Node's
+  // an archived workspace is never forced through the heartbeat/inbox forcing: it is blocked once (its own budget) with a handover request
   if (ah.settings.bool('devswarm_prompt.archived_stop_setting') && dgSafeId(id)) {
     var desc = cgJson(cgDescPath(ctx, id)), wt = null;
     if (desc && typeof desc.worktreePath === 'string' && desc.worktreePath) wt = desc.worktreePath;
     if (!wt) {
       var c = ah.repo.context(cgCwd(ctx));
-      if (c.unsure) throw meshDefer;
-      wt = c.toplevel || null;
+      if (c.unsure) ah.unable('devswarm-child-gate:archived_repo_context');
+      else wt = c.toplevel || null;
     }
     if (wt) {
       var a = JSON.parse(ahHost.ctArchived(id, wt, ctx.sid));
-      if (a.unsure || a.archived) throw meshDefer;
+      if (a.unsure) ah.unable('devswarm-child-gate:archived_unsure'); // not provably archived: the normal gate applies
+      else if (a.archived) return cgArchivedStop(ctx);
     }
   }
 
@@ -535,7 +552,7 @@ function cgGate(p, root, l) {
   return ctx;
 }
 
-// Apply the remaining planned writes, once nothing can defer any more (a stop-policy budget is written where it is consumed).
+// Apply the remaining planned writes, (a stop-policy budget is written where it is consumed).
 function cgApply(ctx) {
   if (ctx.order.length) ah.commit();
   ctx.order.forEach(function (rel) { ah.state.writeAtomic(rel, ctx.files[rel]); });
@@ -545,11 +562,12 @@ function cgApply(ctx) {
 function decide(p, opts, event) {
   if (dwJudgeChild()) return 'allow';
   if (dgInertForChild('devswarm_gates.child_gate_setting', ah.cfg('devswarm_gates.child_gate_guard_name'))) return 'allow';
-  if (event !== 'Stop') return 'defer';
+  if (event !== 'Stop') return 'allow'; // this gate answers Stop only
   var root = jx.isObj(opts) && typeof opts.plugin_root === 'string' ? opts.plugin_root : ah.env.get(ah.cfg('env.plugin_root'));
-  var l = dwLaunchersCurrent(root, true);
-  if (l === null) return 'defer'; // Node installs the launchers when it is loaded
+  var l = dwLaunchersNative(root, true);
+  if (l === null) { ah.unable('devswarm-child-gate:no_launchers'); return 'allow'; } // no usable home or plugin root: no launcher can be named
   var ctx;
-  try { ctx = cgGate(p, root, l); } catch (e) { if (e === meshDefer) return 'defer'; throw e; }
+  // a mesh answer the host cannot give exactly (lib/67-mesh.js) ends the gate quietly: nothing planned is written
+  try { ctx = cgGate(p, root, l); } catch (e) { if (e !== meshDefer) throw e; ah.unable('devswarm-child-gate:mesh_unsure'); return 'allow'; }
   return cgApply(ctx);
 }

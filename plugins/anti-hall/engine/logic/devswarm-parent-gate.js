@@ -9,10 +9,10 @@
 // question ceiling and its one escalation), the Primary's own summary count corrected by this reader's own position in the store
 // (devswarm-own-reader.js: the delta, the live recheck with its summary refresh, the stale-cache unknown, the urgent prefix) and the
 // in-flight drain marker (a fresh one of this session: a stderr notice, the loop state unchanged; a stale one removed). Whatever it
-// cannot settle exactly defers to the Node gate before anything is written: a Jev question candidate (jev-assist's trust math and
-// log), a parked escalation, a stale or escalated verdict, a workspace the app database has no opinion on under the DevSwarm repos
-// root, a straying-plan advisory, a live child on the clean pass (the wake-coverage line), the conservation hold, a non-sqlite store,
-// and any setting of the gate that is set anywhere. Mirrors hooks/devswarm-parent-gate.js (`main`, `readOwnUnread`, `buildReason` and helpers), the companion's
+// cannot settle exactly is decided natively and counted (native_unable at devswarm-parent-gate:*), towards the stricter reading where it
+// is the evidence of a block (an unreadable count is unknown, a Jev question candidate counts as unread, an unreadable marker leaves an
+// asker live, the limit-conservation hold is not applied). Not reproduced here: the Jev trust math of question candidates, parked
+// escalation notices, stale/escalated liveness verdicts, the owner's held partitions and the supervisor's active-list cache. Mirrors hooks/devswarm-parent-gate.js (`main`, `readOwnUnread`, `buildReason` and helpers), the companion's
 // inbox cursor, reader cursors, identity family, row eligibility, archived and live-children readers, hooks/lib/devswarm-wake.js
 // `wakeReassert`, hooks/lib/block-message.js `frame`, hooks/lib/skip-cmd.js and hooks/lib/stop-version-gate.js. Builds on
 // devswarm-child-role.js (script.includes). Keys and texts: devswarm_role.toml (devswarm_role.pg_*, sw_*), devswarm_cli.toml (rr_tr_*).
@@ -28,20 +28,20 @@ function pgSafeId(id) {
 }
 
 // JSON.parse(readFileSync(p)) inside Node's try/catch: null when the file cannot be read or does not parse; a file over the read cap or a
-// parse the interpreter cannot finish defers.
+// parse the interpreter cannot finish counts as unreadable (counted).
 function pgJson(p) {
   var r = jx.read(p);
-  if (r.big) throw meshDefer;
+  if (r.big) { ah.unable('devswarm-parent-gate:json_big'); return null; }
   if (r.text === undefined) return null;
   var j = jx.parse(r.text);
-  if (j.unsure) throw meshDefer;
+  if (j.unsure) { ah.unable('devswarm-parent-gate:json_unsure'); return null; }
   return j.invalid ? null : j.v;
 }
 
-// The sorted names in a directory; null when it is not one. A directory too big to list defers.
+// The sorted names in a directory; null when it is not one. A directory too big to list reads as empty (counted).
 function pgNames(dir) {
   var n = ah.fs.readdir(dir);
-  if (n === null && ah.fs.isDir(dir)) throw meshDefer;
+  if (n === null && ah.fs.isDir(dir)) { ah.unable('devswarm-parent-gate:listing_big'); return []; }
   return n;
 }
 
@@ -52,13 +52,16 @@ function pgPathField(o, k) {
   var v = o[k];
   if (v === undefined || v === null || v === false || v === '' || v === 0 || (typeof v === 'number' && isNaN(v))) return null;
   if (typeof v === 'string') return v;
-  throw meshDefer;
+  ah.unable('devswarm-parent-gate:path_field_shape');
+  return String(v);
 }
 
-// A numeric setting of the gate at its shipped default; defers when it is set anywhere.
-function pgSetNum(key) {
-  if (ah.settings.touched(key)) throw meshDefer;
-  return ah.cfg(key).default;
+// A numeric setting of the gate: its value along the settings chain (the shipped default when nothing sets it).
+function pgSetNum(key) { return ah.settings.num(key); }
+
+// A mesh answer the host cannot give exactly (lib/67-mesh.js throws meshDefer) takes `dflt` (counted).
+function pgMesh(site, dflt, fn) {
+  try { return fn(); } catch (e) { if (e !== meshDefer) throw e; ah.unable('devswarm-parent-gate:' + site); return dflt; }
 }
 
 function pgShQuote(s) { return "'" + s.replace(/'/g, "'\\''") + "'"; }
@@ -76,29 +79,29 @@ function pgReadOwn(home, idn, selfKey) {
   var hash;
   if (selfKey !== null) hash = selfKey;
   else if (id.indexOf(prefix) === 0) hash = id.slice(prefix.length);
-  else throw meshDefer;
+  else { ah.unable('devswarm-parent-gate:own_key'); own.unknown = true; return own; } // no key to read the summary by: unknown (the stricter reading)
   own.id = id;
   var p = pgDir(home) + '/' + ah.cfg('devswarm_role.pg_dir_summaries') + '/' + hash + '.json';
   var st = ah.fs.lstat(p);
   if (st === null || (st.kind === 'link' && ah.fs.realpath(p) === null)) return own; // absent: not unknown
   var r = jx.read(p);
-  if (r.big) throw meshDefer;
+  if (r.big) { ah.unable('devswarm-parent-gate:own_summary_big'); own.unknown = true; return own; }
   if (r.text === undefined) { own.unknown = true; return own; }
   var trimmed = r.text.trim();
   if (trimmed === '') { own.unknown = true; return own; }
   var j = jx.parse(trimmed);
-  if (j.unsure) throw meshDefer;
+  if (j.unsure) { ah.unable('devswarm-parent-gate:own_summary_unsure'); own.unknown = true; return own; }
   var summary = j.v;
   if (j.invalid || !jx.isObj(summary)) { own.unknown = true; return own; }
   var ws = summary.workspaces;
-  if (Array.isArray(ws)) throw meshDefer;
   if (!jx.isObj(ws)) { own.unknown = true; return own; }
   var e = ws[id];
   var raw = 0;
   if (jx.isObj(e)) {
     // a Jev-confirmed question candidate is folded in through jev-assist's trust math and its log: Node's
-    if (Array.isArray(e.jevQuestionCandidates) && e.jevQuestionCandidates.length > 0) throw meshDefer;
     raw = piFinite(e.unread) && e.unread > 0 ? e.unread : 0;
+    // the Jev trust math of these candidates is not run here: each counts as unread (the stricter reading)
+    if (Array.isArray(e.jevQuestionCandidates) && e.jevQuestionCandidates.length > 0) { ah.unable('devswarm-parent-gate:jev_question_candidates'); raw += e.jevQuestionCandidates.length; }
   }
   // the entry's count corrected by this reader's own position (devswarm-own-reader.js)
   var c = pgOwnCount(selfKey, id, e, raw);
@@ -129,19 +132,19 @@ function pgReadOwn(home, idn, selfKey) {
 
 // This hook's own reader on the Primary's partition (ah.mesh.ownReader), with the entry's inbox and cursor paths (`|| null`).
 function pgOwnReader(selfKey, id, e, count) {
-  if (selfKey === null) throw meshDefer; // Node opens the store by the work tree's own key
+  if (selfKey === null) { ah.unable('devswarm-parent-gate:no_self_key'); return { reader: false }; } // Node opens the store by the work tree's own key: no reader here
   return ah.mesh.ownReader(selfKey, id, pgPathField(e, 'inboxPath'), pgPathField(e, 'cursorPath'), count, ah.clock.now());
 }
 
 // The live count of an own reader view read with `count`: `Math.max(countFor, messageCount - own)`.
 function pgOwnLive(v, own) {
-  if (v.state !== 'ok' || v.own === null || !piFinite(v.unread) || !piFinite(v.total)) throw meshDefer;
+  if (v.state !== 'ok' || v.own === null || !piFinite(v.unread) || !piFinite(v.total)) { ah.unable('devswarm-parent-gate:own_live'); return -1; } // not settled: the caller reads it as unknown
   return Math.max(v.unread, Math.max(0, v.total - own));
 }
 
 // readOwnUnread's own-instance projection of the summary count `raw` (companion/lib/devswarm-own-reader.js `ownReaderDelta`, then
 // `ownReaderLiveUnread` before a cached count may block): {unread, stale, live, rawZero, derive}. `derive`: the live count is 0
-// after a positive summary count, so Node refreshes the summary (deriveSummary). A read the engine cannot settle exactly defers.
+// after a positive summary count, so Node refreshes the summary (deriveSummary). A read the engine cannot settle exactly makes the count unknown (the stricter reading).
 function pgOwnCount(selfKey, id, e, raw) {
   var r = { unread: 0, stale: false, live: false, rawZero: false, derive: false };
   if (!(raw > 0)) { r.rawZero = true; return r; }
@@ -155,6 +158,7 @@ function pgOwnCount(selfKey, id, e, raw) {
       else live = pgOwnLive(pgOwnReader(selfKey, id, e, true), v.own); // the ambiguous branch: one live count settles it
     }
   }
+  if (live !== null && live < 0) { r.stale = true; return r; }
   if (live !== null) { r.unread = live; r.live = true; return r; }
   if (r.stale) return r;
   r.unread = delta > 0 ? Math.max(0, raw - delta) : raw;
@@ -162,7 +166,9 @@ function pgOwnCount(selfKey, id, e, raw) {
     // ownReaderLiveUnread: never block on a cached count when this reader's own row can be read live
     var w = pgOwnReader(selfKey, id, e, true);
     if (w.reader && w.state === 'ok' && w.own !== null) {
-      r.unread = pgOwnLive(w, w.own);
+      var lv = pgOwnLive(w, w.own);
+      if (lv < 0) { r.stale = true; r.unread = 0; return r; }
+      r.unread = lv;
       r.live = true;
       r.derive = r.unread === 0;
     }
@@ -175,10 +181,10 @@ function pgSummaryWs(text) {
   var ws = null, t = text.trim();
   if (t !== '') {
     var j = jx.parse(t);
-    if (j.unsure) throw meshDefer;
-    if (!j.invalid && jx.isObj(j.v) && j.v.workspaces !== null && typeof j.v.workspaces === 'object') ws = j.v.workspaces;
+    if (j.unsure) ah.unable('devswarm-parent-gate:summary_ws_unsure');
+    else if (!j.invalid && jx.isObj(j.v) && j.v.workspaces !== null && typeof j.v.workspaces === 'object') ws = j.v.workspaces;
   }
-  if (Array.isArray(ws)) throw meshDefer;
+  if (Array.isArray(ws)) { ah.unable('devswarm-parent-gate:summary_ws_array'); ws = null; }
   return ws;
 }
 
@@ -207,8 +213,8 @@ function pgQuestions(home, own, descriptors, selfKey, fx) {
   if (raw.length && rows.length) {
     var meshIds = Object.create(null);
     var resolve = function (wt) {
-      if (typeof wt !== 'string') throw meshDefer;
-      if (!has(meshIds, wt)) meshIds[wt] = ah.mesh.canonicalId(wt);
+      if (typeof wt !== 'string') { ah.unable('devswarm-parent-gate:worktree_shape'); return null; }
+      if (!has(meshIds, wt)) { try { meshIds[wt] = ah.mesh.canonicalId(wt); } catch (e) { if (e !== meshDefer) throw e; ah.unable('devswarm-parent-gate:canonical_id'); meshIds[wt] = null; } }
       return meshIds[wt];
     };
     var families = piFamilies(rows, resolve);
@@ -254,24 +260,25 @@ function pgQuestions(home, own, descriptors, selfKey, fx) {
     if (row === null) return !own.archivedKnown;
     var wt = piStrField(row.worktreePath), sid = piStrField(row.sessionId);
     var mk = JSON.parse(ahHost.piMarker(from, wt, sid));
-    if (mk.unsure) throw meshDefer;
-    var app = ah.mesh.appArchived(from, wt === null ? '' : wt, true);
+    if (mk.unsure) { ah.unable('devswarm-parent-gate:marker_unsure'); mk = { archived: false }; } // an unreadable marker leaves the asker live (the stricter reading)
+    var app = pgMesh('app_archived', { verdict: null, cache: null }, function () { return ah.mesh.appArchived(from, wt === null ? '' : wt, true); });
     if (app.cache !== null) fx.cacheOwed = true;
     var appArchived = false;
     if (app.verdict !== null) appArchived = app.verdict;
     else if (selfKey && from !== '' && wt !== null) {
       // the supervisor's active-list cache, for a worktree the DevSwarm app could own
-      if (wt.charAt(0) !== '/') throw meshDefer;
-      var rp = ah.fs.realpath(wt), marker = ah.cfg('devswarm_role.pg_repos_root_marker');
-      if (ah.path.resolveAbs(rp === null ? wt : rp).indexOf(marker) >= 0 || wt.indexOf(marker) >= 0) throw meshDefer;
+      if (wt.charAt(0) !== '/') ah.unable('devswarm-parent-gate:asker_worktree_relative');
+      else {
+        var rp = ah.fs.realpath(wt), marker = ah.cfg('devswarm_role.pg_repos_root_marker');
+        if (ah.path.resolveAbs(rp === null ? wt : rp).indexOf(marker) >= 0 || wt.indexOf(marker) >= 0) ah.unable('devswarm-parent-gate:asker_cache'); // the supervisor's active-list cache is not consulted
+      }
     }
-    if (ah.settings.touched('devswarm_role.pg_set_held')) throw meshDefer; // the owner's held partitions
-    if (!pgSafeId(from)) throw meshDefer;
-    if (pgExists(pgDir(home) + '/' + ah.cfg('devswarm_role.pg_dir_archive_ignore') + '/' + from + '.json')) return false;
+    if (!pgSafeId(from)) ah.unable('devswarm-parent-gate:asker_unsafe_id');
+    else if (pgExists(pgDir(home) + '/' + ah.cfg('devswarm_role.pg_dir_archive_ignore') + '/' + from + '.json')) return false;
     if (!(mk.archived === true || appArchived === true)) return true;
     var st = sid ? JSON.parse(ahHost.piSessionPid(sid)) : { alive: null };
-    if (st.unsure) throw meshDefer;
-    return st.alive !== false;
+    if (st.unsure) ah.unable('devswarm-parent-gate:session_pid'); // alive unknown: the asker stays live (the stricter reading)
+    return st.unsure || st.alive !== false;
   });
   return { blocking: live, informational: informational };
 }
@@ -326,7 +333,7 @@ function pgDescriptors(home) {
     if (!/\.json$/.test(n)) return;
     var d = pgJson(dir + '/' + n);
     if (!d || !d.worktreePath || !d.sessionId || typeof d.id !== 'string' || !pgSafeId(d.id)) return;
-    if (typeof d.worktreePath !== 'string' || typeof d.sessionId !== 'string') throw meshDefer;
+    if (typeof d.worktreePath !== 'string' || typeof d.sessionId !== 'string') { ah.unable('devswarm-parent-gate:descriptor_shape'); return; }
     out.push({ id: d.id, worktree: d.worktreePath, session: d.sessionId, inbox: pgPathField(d, 'inboxPath'), cursor: pgPathField(d, 'cursorPath'), raw: d });
   });
   return out;
@@ -339,8 +346,8 @@ function pgReadFile(p, missing, unreadable) {
   if (st === null || (st.kind === 'link' && ah.fs.realpath(p) === null)) return { bad: { unknown: missing, path: p, errno: 'ENOENT' } };
   if (st.kind === 'dir') return { bad: { unknown: unreadable, path: p, errno: 'EISDIR' } };
   var r = jx.read(p);
-  if (r.big) throw meshDefer;
-  if (r.text === undefined) throw meshDefer; // an error code this script cannot name exactly
+  if (r.big) { ah.unable('devswarm-parent-gate:backlog_big'); return { bad: { unknown: unreadable, path: p, errno: 'EFBIG' } }; }
+  if (r.text === undefined) { ah.unable('devswarm-parent-gate:backlog_read'); return { bad: { unknown: unreadable, path: p, errno: 'EIO' } }; } // an error code this script cannot name exactly
   return { text: r.text };
 }
 
@@ -356,19 +363,18 @@ function pgBacklog(inbox, cursor) {
   if (raw !== '' && /^[0-9]+$/.test(raw)) c = Number(raw);
   else {
     var j = jx.parse(raw);
-    if (j.unsure) throw meshDefer;
+    if (j.unsure) { ah.unable('devswarm-parent-gate:cursor_unsure'); return { unknown: 'cursor-unreadable', path: cursor, errno: null }; }
     if (j.invalid || j.v === null) return { unknown: 'cursor-unreadable', path: cursor, errno: null };
     var line = jx.isObj(j.v) ? j.v.line : undefined;
     if (line === undefined) c = NaN;
     else if (line === null) c = 0;
     else if (typeof line === 'number') c = line;
-    else throw meshDefer; // Number() of a string, boolean or object: JavaScript's coercions
+    else c = Number(line); // a string, boolean or object: JavaScript's coercions, the same here
   }
   if (!isFinite(c) || c < 0) return { unknown: 'cursor-invalid', path: cursor, errno: null };
-  if (c !== Math.floor(c)) throw meshDefer;
   var rows = lines.slice(c).map(function (l) {
     var q = jx.parse(l);
-    if (q.unsure) throw meshDefer;
+    if (q.unsure) { ah.unable('devswarm-parent-gate:backlog_line_unsure'); return null; }
     return !q.invalid && q.v !== null && typeof q.v === 'object' ? q.v : null;
   });
   return { rows: rows };
@@ -397,8 +403,8 @@ function pgArchiveReady(home, id, repoKey, memo) {
   if (repoKey === null) return false;
   if (!Object.prototype.hasOwnProperty.call(memo, repoKey)) {
     var r = jx.read(pgDir(home) + '/' + ah.cfg('devswarm_role.pg_dir_summaries') + '/' + repoKey + '.json');
-    if (r.big) throw meshDefer;
-    memo[repoKey] = r.text !== undefined ? pgSummaryWs(r.text) : null;
+    if (r.big) ah.unable('devswarm-parent-gate:archive_summary_big');
+    memo[repoKey] = r.big ? null : r.text !== undefined ? pgSummaryWs(r.text) : null;
   }
   var w = memo[repoKey];
   return w !== null && jx.isObj(w[id]) && w[id].archive_ready === true;
@@ -420,7 +426,6 @@ function pgMarkerArchived(home, d) {
     if ((x === null ? v.worktreePath : x) !== (y === null ? d.worktree : y)) return false;
   }
   var m = v.sessionId;
-  if (m !== undefined && m !== null && typeof m !== 'string') throw meshDefer;
   return !(typeof m === 'string' && m !== '' && d.session !== m);
 }
 
@@ -480,24 +485,26 @@ function pgGate(p, root, l) {
   var sidRaw = p.session_id, sid;
   if (sidRaw === undefined || sidRaw === null || sidRaw === false || sidRaw === '') sid = ah.cfg('devswarm_role.pg_no_session');
   else if (typeof sidRaw === 'string') sid = sidRaw;
-  else throw meshDefer;
+  else { ah.unable('devswarm-parent-gate:session_shape'); sid = String(sidRaw); }
   var cwd = p.cwd;
-  if (typeof cwd !== 'string' || cwd === '' || cwd.charAt(0) !== '/') throw meshDefer; // Node falls back to its own working directory
-  var idn = ah.mesh.ident(cwd), selfKey = idn.key;
+  if (typeof cwd !== 'string' || cwd === '' || cwd.charAt(0) !== '/') { ah.unable('devswarm-parent-gate:cwd_stand_in'); cwd = hookProc.cwd(p); } // Node falls back to its own working directory: the stand-in
+  var idn = pgMesh('ident', { top: null, own: null, key: null }, function () { return ah.mesh.ident(cwd); }), selfKey = idn.key;
   var own = pgReadOwn(home, idn, selfKey);
   // the live count is 0 after a positive summary count: Node refreshes the summary from the store (deriveSummary), before any
   // later read of it
   var derived = null;
   if (own.derive) {
     var dr = JSON.parse(ahHost.piDerive(selfKey, ah.clock.now()));
-    if (dr.unsure || typeof dr.text !== 'string') throw meshDefer;
+    if (dr.unsure || typeof dr.text !== 'string') ah.unable('devswarm-parent-gate:derive_summary'); // the summary is not refreshed this Stop
+    else {
     derived = dr.text;
     fx.extra.push({ rel: ah.cfg('devswarm_role.pg_devswarm_dir') + '/' + ah.cfg('devswarm_role.pg_dir_summaries') + '/' + selfKey + '.json', body: derived });
+    }
   }
   var descriptors = pgDescriptors(home);
   var qs = pgQuestions(home, own, descriptors, selfKey, fx);
   var unanswered = qs.blocking, informational = qs.informational, truncated = own.truncated;
-  if (own.id !== null && pgHasJson(pgDir(home) + '/' + ah.cfg('devswarm_role.pg_dir_escalation'))) throw meshDefer; // a parked escalation notice
+  if (own.id !== null && pgHasJson(pgDir(home) + '/' + ah.cfg('devswarm_role.pg_dir_escalation'))) ah.unable('devswarm-parent-gate:parked_escalation'); // a parked escalation notice is not shown here; the gate goes on
   var stateRel = ah.cfg('devswarm_role.pg_devswarm_dir') + '/' + ah.cfg('devswarm_role.pg_dir_gate') + '/' + sid.replace(/[^A-Za-z0-9_.-]/g, '_') + '.json';
   var stateFile = home + '/' + stateRel;
   if (descriptors.length === 0 && own.unread === 0 && !own.unknown && unanswered.length === 0 && !truncated) { fx.unlink = stateRel; return fx; }
@@ -512,12 +519,12 @@ function pgGate(p, root, l) {
     entries.push(oe);
   }
   var now = ah.clock.now();
-  if (ah.settings.touched('devswarm_role.pg_set_held')) throw meshDefer; // the owner's held partitions
+  if (ah.settings.touched('devswarm_role.pg_set_held')) ah.unable('devswarm-parent-gate:held_partitions'); // the owner's held partitions are not applied here
   var ignore = pgIgnoreIds(home), keyMemo = Object.create(null), readyMemo = Object.create(null), goneMemo = Object.create(null);
   keyMemo[cwd] = selfKey;
   if (derived !== null) readyMemo[selfKey] = pgSummaryWs(derived);
   function keyOf(wt) {
-    if (!Object.prototype.hasOwnProperty.call(keyMemo, wt)) keyMemo[wt] = ah.mesh.repoKey(wt);
+    if (!Object.prototype.hasOwnProperty.call(keyMemo, wt)) keyMemo[wt] = pgMesh('repo_key', null, function () { return ah.mesh.repoKey(wt); });
     return keyMemo[wt];
   }
   descriptors.forEach(function (d) {
@@ -526,7 +533,7 @@ function pgGate(p, root, l) {
     if (isOwn && !(own.parsed && own.rawZero)) return;
     var fresh = selfKey !== null ? keyOf(d.worktree) : null;
     if (selfKey !== null && fresh !== null && selfKey !== fresh) return;
-    var registered = selfKey !== null && fresh === null ? ah.mesh.registeredKey(d.raw, d.id) : fresh;
+    var registered = selfKey !== null && fresh === null ? pgMesh('registered_key', null, function () { return ah.mesh.registeredKey(d.raw, d.id); }) : fresh;
     var foreign = selfKey !== null && fresh === null && registered !== null && registered !== selfKey;
     if (ignore[d.id] === true) return;
     var done = !isOwn && pgArchiveReady(home, d.id, fresh, readyMemo);
@@ -540,7 +547,7 @@ function pgGate(p, root, l) {
       else if (bl.unknown === 'inbox-missing' && pgWorktreeGone(d.worktree, goneMemo)) dead = true;
       else if (bl.unknown === 'inbox-missing' && !foreign) {
         var conclusive = false;
-        if (fresh !== null) { var mc = ah.mesh.messageCount(fresh, d.id); conclusive = mc.state === 'ok' && mc.count > 0; }
+        if (fresh !== null) { var mc = pgMesh('message_count', { state: 'none' }, function () { return ah.mesh.messageCount(fresh, d.id); }); conclusive = mc.state === 'ok' && mc.count > 0; }
         if (!conclusive) { e.unknown = true; e.reason = bl.unknown; e.reasonPath = bl.path; e.reasonErrno = bl.errno; }
       } else { e.unknown = true; e.reason = bl.unknown; e.reasonPath = bl.path; e.reasonErrno = bl.errno; }
     } else {
@@ -556,8 +563,9 @@ function pgGate(p, root, l) {
     }
     var unionKey = fresh !== null ? fresh : (dead ? registered : null);
     if (!e.unknown && unionKey !== null && !foreign) {
-      var u = ah.mesh.union(unionKey, d.id, d.inbox, d.cursor, isOwn, now);
-      if (u.state === 'ok') {
+      var u = pgMesh('store_union', { state: 'unsure' }, function () { return ah.mesh.union(unionKey, d.id, d.inbox, d.cursor, isOwn, now); });
+      if (u.state === 'unsure') { e.unknown = true; e.reason = 'store-unreadable'; e.reasonPath = null; e.reasonErrno = null; } // the store cannot be counted: unknown (the stricter reading)
+      else if (u.state === 'ok') {
         ownStoreCounted = true;
         var allOwn = true, real = 0;
         u.storeOnly.forEach(function (row) {
@@ -580,25 +588,25 @@ function pgGate(p, root, l) {
     if (ownNoInbox && !ownStoreCounted && !e.unknown) fx.err += text.render(ah.cfg('devswarm_role.pg_err_own_no_key'), { id: d.id });
     if (!foreign) {
       var lv = pgJson(pgDir(home) + '/' + ah.cfg('devswarm_role.pg_dir_liveness') + '/' + d.id + '.json');
-      if (lv !== null && typeof lv === 'object' && (lv.status === ah.cfg('devswarm_role.pg_status_stale') || lv.status === ah.cfg('devswarm_role.pg_status_escalated'))) throw meshDefer;
+      if (lv !== null && typeof lv === 'object' && (lv.status === ah.cfg('devswarm_role.pg_status_stale') || lv.status === ah.cfg('devswarm_role.pg_status_escalated'))) ah.unable('devswarm-parent-gate:liveness_verdict'); // a stale or escalated verdict is not reported here; the child is judged by its mail
     }
     // the eligibility projection (row-eligibility.js `of`, liveness on, the cross-invocation app cache on)
     e.archived = pgMarkerArchived(home, d);
-    var app = ah.mesh.appArchived(d.id, d.worktree, true);
+    var app = pgMesh('app_archived', { verdict: null, cache: null }, function () { return ah.mesh.appArchived(d.id, d.worktree, true); });
     if (app.cache !== null) fx.cacheOwed = true;
     if (app.verdict !== null) e.appArchived = app.verdict;
     else {
       var rp = ah.fs.realpath(d.worktree);
-      if (fresh !== null && ah.path.resolveAbs(rp === null ? d.worktree : rp).indexOf(ah.cfg('devswarm_role.pg_repos_root_marker')) >= 0) throw meshDefer; // the supervisor's active-list cache
-      if (fresh !== null && d.worktree.indexOf(ah.cfg('devswarm_role.pg_repos_root_marker')) >= 0) throw meshDefer;
+      if (fresh !== null && ah.path.resolveAbs(rp === null ? d.worktree : rp).indexOf(ah.cfg('devswarm_role.pg_repos_root_marker')) >= 0) ah.unable('devswarm-parent-gate:active_cache'); // the supervisor's active-list cache is not consulted
+      else if (fresh !== null && d.worktree.indexOf(ah.cfg('devswarm_role.pg_repos_root_marker')) >= 0) ah.unable('devswarm-parent-gate:active_cache');
       e.appArchived = false;
     }
     e.ignored = pgExists(pgDir(home) + '/' + ah.cfg('devswarm_role.pg_dir_archive_ignore') + '/' + d.id + '.json');
-    if (d.session !== '') e.live = ah.mesh.sessionAlive(d.session);
+    if (d.session !== '') e.live = pgMesh('session_alive', true, function () { return ah.mesh.sessionAlive(d.session); }); // unknown: taken as alive
     if (e.archived || e.appArchived || e.ignored) e.stateSkipped = true; // only a member of the Primary's own family could still need it (checked there)
     else if (d.id !== '' && d.session !== '' && d.worktree !== '') {
       var fresh_ms = pgSetNum('devswarm_role.pg_set_busy_fresh') * pgMin();
-      var b = ah.mesh.childBusy(d.id, d.worktree, d.session, now, fresh_ms);
+      var b = pgMesh('child_busy', { none: true }, function () { return ah.mesh.childBusy(d.id, d.worktree, d.session, now, fresh_ms); });
       if (b.none !== true) {
         e.waiting = b.waiting && e.live;
         e.waitingQ = e.waiting ? b.question : null;
@@ -637,7 +645,7 @@ function pgGate(p, root, l) {
     var famChild = own.id !== entries[fam.survivor].id;
     var union = 0, unknown = false, archivedMemberUnread = 0, liveMembers = 0;
     var unknownMembers = [], contributors = [], foreignAll = fam.members.length > 0, gone = false, allDoneOrIdle = true;
-    if (!famChild && fam.members.some(function (mi) { return entries[mi].stateSkipped; })) throw meshDefer; // an archived twin of the Primary's own row
+    if (!famChild && fam.members.some(function (mi) { return entries[mi].stateSkipped; })) ah.unable('devswarm-parent-gate:archived_twin'); // an archived twin of the Primary's own row: listed with the family
     var famBusy = false, famWaiting = false, famAgeUnknown = false, famStoreOnly = false, famOldest = null, famUrgency = null;
     for (var mj = 0; mj < fam.members.length; mj++) {
       var mi = fam.members[mj], m = entries[mi];
@@ -667,7 +675,7 @@ function pgGate(p, root, l) {
     // the busy downgrade and the fresh-mail grace window: a child family whose only reason to report is a plain backlog
     var busyStaleAgeMin = null;
     if (famChild && !unknown && union > 0) {
-      if (fam.members.some(function (x) { return entries[x].ageOdd; })) throw meshDefer;
+      if (fam.members.some(function (x) { return entries[x].ageOdd; })) ah.unable('devswarm-parent-gate:age_odd'); // a time only V8 reads: taken as the engine reads it
       var survId = entries[fam.survivor].id, ageKnown = !famAgeUnknown && famOldest !== null;
       if (famBusy && !famWaiting) {
         if (ageKnown) {
@@ -689,7 +697,7 @@ function pgGate(p, root, l) {
       }
     }
     if (!(unknown || union > 0)) continue;
-    if (famWaiting && fam.members.some(function (x) { return entries[x].stateSkipped; })) throw meshDefer; // the waiting members are listed by id, archived ones included
+    if (famWaiting && fam.members.some(function (x) { return entries[x].stateSkipped; })) ah.unable('devswarm-parent-gate:waiting_archived'); // the waiting members are listed by id, archived ones included
     blocking.push({
       id: entries[fam.survivor].id, unread: union, unknown: unknown, unknownMembers: unknownMembers, contributors: contributors,
       notOwnCountOnly: contributors.some(function (c) { return own.id !== c[0]; }), foreign: foreignAll, worktreeGone: gone,
@@ -746,8 +754,7 @@ function pgGate(p, root, l) {
   // an unanswered question or a truncated question list bypasses the neglect cap; the question set has its own ceiling
   var bypassCap = unanswered.length > 0 || !!truncated;
   if (!bypassCap && effEscalated) return fx; // already escalated once: quiet
-  if (ah.settings.touched('devswarm_role.pg_set_cap')) throw meshDefer;
-  var cap = ah.cfg('devswarm_role.pg_set_cap').default;
+  var cap = ah.settings.num('devswarm_role.pg_set_cap');
   var nextBlocks = effBlocks + 1, nextEscalated = effEscalated, nextAcks = effAcks;
   var effQBlocks = qSig === lastQSig ? qBlocks : 0, effQEscalated = qSig === lastQSig && qEscalated;
   var nextQBlocks = effQBlocks, nextQEscalated = effQEscalated;
@@ -760,7 +767,7 @@ function pgGate(p, root, l) {
     var effCap = hasIntent ? cap * ah.cfgNum('devswarm_role.pg_intent_multiplier') : cap;
     if (hasIntent) nextAcks = effAcks + 1;
     if (effBlocks >= effCap) {
-      if (own.id !== null && blocking.every(function (b) { return own.id === b.id; })) throw meshDefer; // the conservation hold
+      if (own.id !== null && blocking.every(function (b) { return own.id === b.id; })) ah.unable('devswarm-parent-gate:conservation_hold'); // the limit-conservation hold is not applied: the escalation goes ahead (the stricter reading)
       escalateTimes = nextBlocks;
       nextEscalated = true;
     }
@@ -844,11 +851,11 @@ function pgStray(home, sidRaw, selfKey, keyOf, now, fx) {
   var sidText = String(sidRaw || ah.cfg('devswarm_role.pg_stray_no_session'));
   var rel = ah.cfg('devswarm_role.pg_devswarm_dir') + '/' + ah.cfg('devswarm_role.pg_dir_stray_seen') + '/' + ah.sha1(sidText).slice(0, ah.cfgNum('devswarm_role.pg_stray_seen_hash_len')) + '.json';
   var seen = {}, sr = jx.read(home + '/' + rel);
-  if (sr.big) throw meshDefer;
-  if (sr.text !== undefined) {
+  if (sr.big) ah.unable('devswarm-parent-gate:stray_seen_big'); // read as nothing seen
+  if (sr.text !== undefined && !sr.big) {
     var j = jx.parse(sr.text);
-    if (j.unsure) throw meshDefer;
-    if (!j.invalid) seen = j.v || {};
+    if (j.unsure) ah.unable('devswarm-parent-gate:stray_seen_unsure');
+    else if (!j.invalid) seen = j.v || {};
   }
   var fresh = entries.filter(function (e) { return !seen[e.seenKey]; });
   if (!fresh.length) return;
@@ -904,8 +911,7 @@ function pgWakeBlock(home, cwd, ownId, now, l, stateFile, stateRel, fx) {
   var prev = pgJson(stateFile);
   if (prev && typeof prev === 'object') prevState = prev;
   if (prev && prev.sig === wsig && Number.isFinite(prev.blocks)) wblocks = prev.blocks;
-  if (ah.settings.touched('devswarm_role.pg_set_cap')) throw meshDefer;
-  if (wblocks >= ah.cfg('devswarm_role.pg_set_cap').default) return true; // the budget of this unchanged condition is spent: quiet
+  if (wblocks >= ah.settings.num('devswarm_role.pg_set_cap')) return true; // the budget of this unchanged condition is spent: quiet
   var next = Object.assign({ qSig: '', qBlocks: 0, qEscalated: false, intents: {}, intentAcks: 0 }, prevState, { sig: wsig, blocks: wblocks + 1, escalated: false });
   fx.write = { rel: stateRel, body: JSON.stringify(next) };
   fx.out = JSON.stringify({ decision: ah.cfg('devswarm_role.pg_decision_block'), reason: wakeText }) + '\n';
@@ -915,10 +921,10 @@ function pgWakeBlock(home, cwd, ownId, now, l, stateFile, stateRel, fx) {
 // `isStale(pluginRoot)` of hooks/lib/stop-version-gate.js.
 function pgVersionStale(root) {
   var guard = ah.homeGuard();
-  if (guard.status !== 'ok') throw meshDefer;
+  if (guard.status !== 'ok') { ah.unable('devswarm-parent-gate:version_home'); return false; } // no usable home: no newer build is known
   if (!ah.settings.bool('silent_nudge.version_gate_setting')) return false;
   var v = ah.plugin.versions(root);
-  if (v.unsure) throw meshDefer;
+  if (v.unsure) { ah.unable('devswarm-parent-gate:version_unsure'); return false; }
   if (!v.registered || !v.running || !jx.isSemver(v.registered) || !jx.isSemver(v.running)) return false;
   return jx.cmpVersions(v.running, v.registered) < 0;
 }
@@ -1041,7 +1047,7 @@ function pgReason(blocking, own, escalate, hasIntent, q) {
 
 // ---- the entry ---------------------------------------------------------------------------------------------------------
 
-// Apply what the gate decided, only once nothing can defer any more.
+// Apply what the gate decided.
 function pgApply(fx) {
   if (fx.unlink !== null || fx.write !== null || fx.extra.length || fx.cacheOwed || fx.drainClear !== null) ah.commit();
   if (fx.drainClear !== null) ah.state.remove(fx.drainClear); // clearDrainMarker, best-effort
@@ -1057,7 +1063,7 @@ function pgApply(fx) {
 }
 
 function decide(p, opts, event) {
-  if (event !== 'Stop') return 'defer';
+  if (event !== 'Stop') return 'allow'; // this gate answers Stop only
   if (dwJudgeChild()) return 'allow';
   if (dwUsableHome() !== null) {
     if (!ah.settings.bool('devswarm_role.sw_parent_gate')) return 'allow';
@@ -1065,10 +1071,12 @@ function decide(p, opts, event) {
     if (!dwActive() || dwNonBlank(ah.cfg('devswarm_role.branch_env'))) return 'allow';
   }
   var root = jx.isObj(opts) && typeof opts.plugin_root === 'string' ? opts.plugin_root : ah.env.get(ah.cfg('env.plugin_root'));
-  var l = dwLaunchersCurrent(root, true);
-  if (l === null || !jx.isObj(p)) return 'defer';
+  var l = dwLaunchersNative(root, true);
+  if (l === null) { ah.unable('devswarm-parent-gate:no_launchers'); return 'allow'; } // no usable home or plugin root: no launcher can be named
+  if (!jx.isObj(p)) { ah.unable('devswarm-parent-gate:payload_shape'); p = {}; }
   if (p[ah.cfg('devswarm_gates.readside_stop_field')] === true) return 'allow';
   var fx;
-  try { fx = pgGate(p, root, l); } catch (e) { if (e === meshDefer) return 'defer'; throw e; }
+  // a mesh answer the host cannot give exactly (lib/67-mesh.js) ends the gate quietly: nothing planned is written
+  try { fx = pgGate(p, root, l); } catch (e) { if (e !== meshDefer) throw e; ah.unable('devswarm-parent-gate:mesh_unsure'); return 'allow'; }
   return pgApply(fx);
 }

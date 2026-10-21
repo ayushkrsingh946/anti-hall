@@ -334,3 +334,23 @@ value = "-replies.json"
 [devswarm_gates.rt_record_cap]
 doc = "Largest appended reply record in bytes (the separating newline included); a larger one is skipped so the append stays one atomic write."
 value = 480
+
+[devswarm_gates.cg_kind_archived]
+doc = "The stop-policy kind of the archived-workspace block (its own budget, never shared with the heartbeat-report or inbox kinds)."
+value = "archived-stop"
+
+[devswarm_gates.cg_archived_cap]
+doc = "How many times an archived workspace's Stop is blocked (once, then it may stop freely)."
+value = 1
+
+[devswarm_gates.cg_archived_block]
+doc = "The reason an archived workspace's Stop is blocked ({ask} is the handover request, {path} the canonical handover path)."
+value = "Archived: this workspace was archived. {ask}, THEN stop — this workspace is no longer tracked and you will not be asked again. Delete your own `inbox tick` cron (CronList, CronDelete); the mailbox watcher is already silent."
+
+[devswarm_gates.cg_archived_ask]
+doc = "The handover request in the archived block ({path} is the canonical handover path)."
+value = "Save a handover (`/anti-hall:handover`) to `{path}` (never a flat file) if you have not already"
+
+[devswarm_gates.cg_archived_path_fallback]
+doc = "The handover path named when the canonical one cannot be worked out."
+value = ".anti-hall/handovers/<YYYY-MM-DD>/<session_id>/HANDOVER.md"
