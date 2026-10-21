@@ -125,7 +125,7 @@ fn opt(_c: &Case) -> Opt {
     Opt { ds: true, no_upstream_move: true, live: true, ..Opt::default() }
 }
 
-fn cwd_of<'a>(c: &Case, w: &'a World) -> std::path::PathBuf {
+fn cwd_of(c: &Case, w: &World) -> std::path::PathBuf {
     if c.in_repo { repo().to_path_buf() } else { w.home.clone() }
 }
 
