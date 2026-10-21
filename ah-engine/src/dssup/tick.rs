@@ -52,6 +52,7 @@ pub fn node(runner: &dyn Runner, ctx: &Ctx, snippet: &str, extra: &[&str], timeo
     args.push(ctx.root.to_string_lossy().into_owned());
     args.push(ctx.home.to_string_lossy().into_owned());
     args.extend(extra.iter().map(|a| (*a).to_string()));
+    crate::obs::counters::handback(crate::obs::counters::Handback::NodeLaunch, "dssup:node");
     runner.run(&RunSpec { bin: Some(defaults::text("devswarm_sup.node_bin").to_string()), args, cwd: None, timeout_ms, ..RunSpec::default() })
 }
 
@@ -204,6 +205,7 @@ fn timed_duty(name: &str, ctx: &Ctx, runner: &dyn Runner) -> (Value, Option<supe
         }
     };
     let ms = t.elapsed().as_millis() as u64;
+    crate::obs::counters::account_record("duty", name, &rec, crate::limits::thread_cpu_us().saturating_sub(cpu), t.elapsed().as_micros() as u64);
     emit_act(
         ctx.home,
         &defaults::render("devswarm_sup.act_duty", &[("duty", &name)]),

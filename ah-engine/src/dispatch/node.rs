@@ -178,7 +178,10 @@ fn start_with_input(entry: &Entry, input: std::io::Result<Input>) -> Running {
             .process_group(0)
             .spawn()
         {
-            Ok(child) => Some((child, input)),
+            Ok(child) => {
+                crate::obs::counters::handback(crate::obs::counters::Handback::NodeLaunch, &format!("dispatch:hook:{}", entry.id));
+                Some((child, input))
+            }
             Err(e) => {
                 spawn_err = Some(e);
                 None

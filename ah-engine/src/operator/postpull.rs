@@ -45,6 +45,8 @@ pub(super) struct Run<'a> {
     pub synced: bool,
     /// The overall post-pull budget, ms (0: unlimited).
     pub budget_ms: u64,
+    /// Set by a stage whose Node function could not run, read (and cleared) by [`run`] to account the stage as an error.
+    pub failed: std::cell::Cell<bool>,
 }
 
 fn now_ms() -> u64 {
@@ -141,6 +143,7 @@ impl Run<'_> {
         argv.push(snippet.to_string());
         argv.push(self.paths.plugin_src.clone());
         argv.extend(args.iter().cloned());
+        crate::obs::counters::handback(crate::obs::counters::Handback::NodeLaunch, "postpull:node_call");
         let r = run_child(&node, &argv, None, &[], self.node_timeout());
         let line = r.stdout.lines().rev().find(|l| !l.trim().is_empty());
         match (r.status, line) {
@@ -152,7 +155,10 @@ impl Run<'_> {
     fn node_stage(&self, name: &str, func: &str, opts: J) -> J {
         match self.node_call(text("update_post.stage_snippet"), &[func.to_string(), stringify(&opts)]) {
             Ok(v) => v,
-            Err(why) => fill(parse_json(text("update_post.node_failed_json")), &[("name", name), ("why", &why)]),
+            Err(why) => {
+                self.failed.set(true);
+                fill(parse_json(text("update_post.node_failed_json")), &[("name", name), ("why", &why)])
+            }
         }
     }
 
@@ -530,19 +536,24 @@ pub(super) fn run(r: &Run) -> Vec<(String, J)> {
         let name = row.str_field("name");
         if row.get("enabled").and_then(defaults::V::as_bool) == Some(false) {
             answers.push((row.str_field("key").to_string(), fill(parse_json(text("update_post.disabled_json")), &[("name", name)])));
+            crate::obs::counters::account("stage", name, crate::obs::counters::Outcome::Disabled, 0, 0);
             continue;
         }
         let budgeted = row.get("budget").and_then(defaults::V::as_bool).unwrap_or(false);
         if budgeted && deadline.is_some_and(|d| now_ms() >= d) {
             let budget = r.budget_ms.to_string();
             answers.push((row.str_field("key").to_string(), fill(parse_json(text("update_post.deferred_json")), &[("name", name), ("budget", &budget)])));
+            crate::obs::counters::account("stage", name, crate::obs::counters::Outcome::Held, 0, 0);
             continue;
         }
         if !quiet {
             progress(&defaults::render("update_msg.stage_start", &[("name", &name)]));
         }
         let t0 = Instant::now();
+        let cpu0 = crate::limits::thread_cpu_us();
         let v = r.stage(row, deadline, &mut hashes);
+        let outcome = if r.failed.take() { crate::obs::counters::Outcome::Error } else { crate::obs::counters::Outcome::Ok };
+        crate::obs::counters::account("stage", name, outcome, crate::limits::thread_cpu_us().saturating_sub(cpu0), t0.elapsed().as_micros() as u64);
         if !quiet {
             progress(&defaults::render("update_msg.stage_done", &[("name", &name), ("ms", &t0.elapsed().as_millis())]));
         }

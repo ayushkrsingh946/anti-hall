@@ -228,6 +228,7 @@ pub fn compare(dir: &Path) -> i32 {
             cmd.env(k, v);
         }
     }
+    crate::obs::counters::handback(crate::obs::counters::Handback::NodeLaunch, "ops:shadow");
     let stdin = if job.get("stdin").and_then(|v| v.as_bool()) == Some(true) {
         std::fs::File::open(dir.join(defaults::text("ops.shadow_stdin_file"))).map_or(Stdio::null(), Stdio::from)
     } else {

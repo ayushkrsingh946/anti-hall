@@ -429,6 +429,7 @@ pub(crate) fn bounded_output(c: &mut Command) -> std::io::Result<std::process::O
     use std::io::Read;
     c.stdout(Stdio::piped()).process_group(0);
     let mut child = c.spawn()?;
+    crate::obs::counters::handback(crate::obs::counters::Handback::NodeLaunch, "meshw:witness");
     let mut stdout = child.stdout.take();
     let reader = std::thread::spawn(move || {
         let mut buf = Vec::new();

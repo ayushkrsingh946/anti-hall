@@ -420,6 +420,7 @@ pub fn defer(event: &str, why: &str) -> Outcome {
 /// ([`closed`], bounded on Stop), `open` lets the call through with a loud stderr line. Every answer is logged and counted
 /// in telemetry as the `dispatcher-<path>` hook.
 pub fn no_node_answer(event: &str, payload: Option<&Value>, path: &str, why: &str) -> Option<Outcome> {
+    crate::obs::counters::handback(crate::obs::counters::Handback::FallbackIntent, &format!("dispatch:{path}"));
     if defaults::num("dispatch.defer_to_node") != 0 {
         return None;
     }
@@ -518,6 +519,7 @@ pub fn run(raw: &str, args: &Args) -> Outcome {
 }
 
 fn start_node(e: &table::Entry, raw: &[u8], payload: Option<&File>) -> node::Running {
+    crate::obs::counters::handback(crate::obs::counters::Handback::FallbackIntent, &format!("dispatch:hook:{}", e.id));
     payload.map_or_else(|| node::start(e, raw), |p| node::start_file(e, p))
 }
 

@@ -317,6 +317,7 @@ fn exec_node(argv: &[String]) -> i32 {
         eprintln!("{}", defaults::text("mesh_write.msg_no_node_cli"));
         return defaults::num("mesh_write.exit_defer") as i32;
     };
+    crate::obs::counters::handback(crate::obs::counters::Handback::NodeLaunch, "meshw:exec");
     let e = c.exec();
     eprintln!("{}", defaults::render("mesh_write.msg_node_exec_failed", &[("err", &e)]));
     defaults::num("mesh_write.exit_defer") as i32
@@ -325,6 +326,7 @@ fn exec_node(argv: &[String]) -> i32 {
 /// Run Node as a child, feeding `stdin` when given, passing its stderr through; returns (exit code, stdout bytes).
 fn spawn_node(argv: &[String], stdin: Option<&str>) -> Option<(i32, Vec<u8>)> {
     let mut c = node_cmd(argv)?;
+    crate::obs::counters::handback(crate::obs::counters::Handback::NodeLaunch, "meshw:spawn");
     c.stdout(Stdio::piped()).stderr(Stdio::inherit());
     c.stdin(if stdin.is_some() { Stdio::piped() } else { Stdio::inherit() });
     let mut child = c.spawn().ok()?;
@@ -359,6 +361,7 @@ pub fn run_front(raw: &[std::ffi::OsString]) -> i32 {
     let Some(argv) = raw.iter().map(|a| a.to_str().map(str::to_string)).collect::<Option<Vec<String>>>() else {
         // a non-UTF-8 argument: Node reads it its own way
         let lossy: Vec<String> = raw.iter().map(|a| a.to_string_lossy().into_owned()).collect();
+        crate::obs::counters::handback(crate::obs::counters::Handback::NativeUnable, "meshw:non_utf8_argument");
         return exec_node(&lossy);
     };
     if argv.first().map(String::as_str) == Some(defaults::text("mesh_write.verify_flag")) {
@@ -370,6 +373,8 @@ pub fn run_front(raw: &[std::ffi::OsString]) -> i32 {
     let a = args::parse(&argv);
     let m = mode();
     if m == Mode::Off || verb_of(&a).is_none() {
+        let site = if m == Mode::Off { "meshw:native_off" } else { "meshw:unhandled_verb" };
+        crate::obs::counters::handback(crate::obs::counters::Handback::NativeUnable, site);
         return exec_node(&argv);
     }
     // a help request (or any verb of `simple`) never reads fd 0

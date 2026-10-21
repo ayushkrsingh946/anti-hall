@@ -864,6 +864,7 @@ fn run_fallback(input: FallbackInput, path: &Path, cfg: &ClientConfig) -> Option
     let node = std::env::var_os(defaults::env_name("node")).unwrap_or_else(|| "node".into());
     // its own process group, so a timeout can take its helpers down with it (they would otherwise hold the pipes open)
     let mut child = Command::new(node).arg(path).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).process_group(0).spawn().ok()?;
+    crate::obs::counters::handback(crate::obs::counters::Handback::NodeLaunch, "client:fallback_hook");
     let mut stdin = child.stdin.take()?;
     std::thread::spawn(move || match input {
         FallbackInput::Bytes(bytes) => {
@@ -1102,6 +1103,9 @@ fn run_bytes(raw: Vec<u8>, force_fallback: bool, fallback: Option<&Path>, rest: 
             Outcome { out: String::new(), code: 0, err: String::new() }
         }
     };
+    if fallback.is_some() {
+        crate::obs::counters::handback(crate::obs::counters::Handback::FallbackIntent, "client:fallback_hook");
+    }
     let mut o = match fallback.and_then(|p| run_fallback(input, p, &cfg)) {
         Some(FallbackResult::Answer(o)) => o,
         Some(FallbackResult::NoDecision(mut o)) if force_fallback && fail_closed_unavailable => {
