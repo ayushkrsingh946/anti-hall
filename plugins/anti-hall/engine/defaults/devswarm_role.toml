@@ -750,10 +750,6 @@ value = { "no-inbox-path" = "descriptor has no inboxPath", "no-cursor-path" = "d
 doc = "Setting devswarm.heldPartitions: owner-held partition ids. The engine answers only while it is unset everywhere (an empty set)."
 value = { section = "devswarm", key = "heldPartitions", env = "ANTIHALL_DEVSWARM_HELD_PARTITIONS", option = "", default = "" }
 
-[devswarm_role.pg_wake_total_prefix]
-doc = "Filename prefix of the per-session count of mailbox-wake blocks. No clean pass clears it, so a flapping condition cannot re-arm the block."
-value = "wake-total-"
-
 [devswarm_role.pg_set_cap]
 doc = "Setting devswarm.parentGateCap: forced acknowledgements per blocking signature before the one escalation (Node clamps it to 2..5). The engine answers only while it is unset, with this default."
 value = { section = "devswarm", key = "parentGateCap", env = "ANTIHALL_DEVSWARM_PARENT_GATE_CAP", option = "", default = 3 }

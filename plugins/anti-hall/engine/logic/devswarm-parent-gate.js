@@ -977,12 +977,6 @@ function pgWakeBlock(home, cwd, ownId, now, l, stateFile, stateRel, fx, entries)
   if (prev && typeof prev === 'object') prevState = prev;
   if (prev && prev.sig === wsig && Number.isFinite(prev.blocks)) wblocks = prev.blocks;
   if (wblocks >= ah.settings.num('devswarm_role.pg_set_cap')) return true; // the budget of this unchanged condition is spent: quiet
-  // the per-session budget: a count no clean pass clears, so a condition that flaps cannot re-arm the block again and again
-  var totalRel = ah.cfg('devswarm_role.pg_devswarm_dir') + '/' + ah.cfg('devswarm_role.pg_dir_gate') + '/' + ah.cfg('devswarm_role.pg_wake_total_prefix') + stateRel.split('/').pop();
-  var total = pgJson(home + '/' + totalRel);
-  var spent = total && Number.isFinite(total.blocks) ? total.blocks : 0;
-  if (spent >= ah.settings.num('devswarm_role.pg_set_cap')) return false;
-  fx.extra.push({ rel: totalRel, body: JSON.stringify({ blocks: spent + 1 }) });
   var next = Object.assign({ qSig: '', qBlocks: 0, qEscalated: false, intents: {}, intentAcks: 0 }, prevState, { sig: wsig, blocks: wblocks + 1, escalated: false });
   fx.write = { rel: stateRel, body: JSON.stringify(next) };
   fx.out = JSON.stringify({ decision: ah.cfg('devswarm_role.pg_decision_block'), reason: wakeText }) + '\n';

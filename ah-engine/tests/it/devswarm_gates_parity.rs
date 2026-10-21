@@ -1234,7 +1234,7 @@ const PG_WAKE_BLOCK: &str = "NO MAILBOX WAKE PATH";
 
 /// The mailbox-wake block fired at a Primary whose workspaces were all idle, done or archive-pending, and every Stop was blocked
 /// again. Node keeps that false positive; the engine counts only a workspace that can still send mail, caps the block per session
-/// (a count no clean pass clears) and honours `devswarm.wakeWatch` off. Each case: a live linked workspace, no watcher, no tick.
+/// (per condition, as Node) and honours `devswarm.wakeWatch` off. Each case: a live linked workspace, no watcher, no tick.
 fn pg_wake_cases() -> Vec<PgCase> {
     use PgWant::Answer as A;
     let wake = |name: &'static str, steps: &[PgWant]| {
@@ -1252,10 +1252,12 @@ fn pg_wake_cases() -> Vec<PgCase> {
         wake("wake-no-block-for-a-done-gated-workspace", &[A])
             .seed(".anti-hall/devswarm/summaries/{key}.json", r#"{"workspaces":{"c-3":{"gates":{"done":true}}}}"#)
             .diverge(&["!NO MAILBOX"]),
-        wake("wake-per-session-budget-survives-a-clean-pass", &[A, A])
-            .seed(".anti-hall/devswarm/parent-gate/wake-total-s1.json", r#"{"blocks":2}"#)
-            .diverge(&[PG_WAKE_BLOCK, "!NO MAILBOX"]),
-        wake("wake-spent-session-budget-is-quiet", &[A]).seed(".anti-hall/devswarm/parent-gate/wake-total-s1.json", r#"{"blocks":3}"#).diverge(&["!NO MAILBOX"]),
+        // #240: the block budget belongs to the condition (Node's per-signature cap): it is spent, then quiet, and a clean pass re-arms it.
+        // A leftover per-session count file (an earlier engine's lifetime cap) is not read any more.
+        wake("wake-block-budget-is-per-condition", &[A, A, A, A]).diverge(&[PG_WAKE_BLOCK, PG_WAKE_BLOCK, PG_WAKE_BLOCK, "!NO MAILBOX"]),
+        wake("wake-block-ignores-a-lifetime-count-file", &[A])
+            .seed(".anti-hall/devswarm/parent-gate/wake-total-s1.json", r#"{"blocks":3}"#)
+            .diverge(&[PG_WAKE_BLOCK]),
         wake("wake-watch-off-is-quiet", &[A]).seed(".anti-hall/settings.json", r#"{"devswarm":{"wakeWatch":false}}"#).diverge(&["!NO MAILBOX"]),
     ]
 }

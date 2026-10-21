@@ -4244,7 +4244,6 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_role.pg_waiting_q` | ` — "{q}"` |  |  | The question phrase of that line: {q}. |
 | `devswarm_role.pg_wake_line` | ` MAILBOX WAKE CHECK (CLI={cli}): CronList must show `{cron}` running {tick}{w...` |  |  | The mailbox-wake re-verify line (devswarm-wake.js wakeReassert): {cli}, {cron}, {tick}, {watch}, {id}. |
 | `devswarm_role.pg_wake_tick` | ``node "$CLI" inbox tick {id} --quiet`` |  |  | The tick command of the wake re-verify line: {id}. |
-| `devswarm_role.pg_wake_total_prefix` | `wake-total-` |  |  | Filename prefix of the per-session count of mailbox-wake blocks. No clean pass clears it, so a flapping condition cannot re-arm the block. |
 | `devswarm_role.pg_wake_watch` | `; WATCH={watcher}, `Monitor` on `node "$WATCH"` armed (never two)` |  |  | The watcher part of the wake re-verify line: {watcher} (double-quoted). |
 | `devswarm_role.pg_why` | `Unanswered questions or unread mail would be dropped if this turn ended now.` |  |  | Why line of the block. |
 | `devswarm_role.pg_you` | ` (you)` |  |  | Marks the Primary's own row. |
