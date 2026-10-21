@@ -369,7 +369,7 @@ function cmdBuildTables() {
   t.niceValue = cmdSet('command.nice_value_flags'); t.taskpolicyValue = cmdSet('command.taskpolicy_value_flags');
   t.shellVerbs = cmdSet('command.shell_verbs'); t.testKeywords = cmdSet('command.test_keywords');
   t.nodeEvalFlags = cmdSet('command.node_eval_flags'); t.nodeEvalDeny = ah.cfg('command.node_eval_deny').map(function (s) { return cmdRe(s); });
-  t.nodeFsCall = new RegExp(ah.cfg('command.node_fs_method_call'), 'g'); t.nodeFsRead = cmdSet('command.node_fs_read_allowlist');
+  t.nodeSafeBracket = new RegExp(ah.cfg('command.node_eval_safe_bracket'), 'g'); t.nodeFsCall = new RegExp(ah.cfg('command.node_fs_method_call'), 'g'); t.nodeFsRead = cmdSet('command.node_fs_read_allowlist');
   t.fetchDangerous = cmdSet('command.git_fetch_dangerous_flags'); t.gitGlobalValue = cmdSet('command.git_global_value_opts'); t.gitGlobalFlag = cmdSet('command.git_global_flag_opts');
   t.gitHeavySubs = cmdSet('command.git_heavy_subs');
   t.sqliteDangerous = cmdRe(ah.cfg('command.sqlite_dangerous'));
@@ -410,7 +410,7 @@ function cmdBuildTables() {
   t.classifyPushSubs = cmdSet('command.classify_push_subs'); t.classifyPullSubs = cmdSet('command.classify_pull_subs');
   t.stashReadSubs = cmdSet('command.stash_read_subs'); t.stashMutatingSubs = cmdSet('command.stash_mutating_subs');
   t.pluginWalkLevels = ah.cfgNum('command.plugin_walk_levels'); t.pluginManifestRel = ah.cfg('command.plugin_manifest_rel'); t.pluginName = ah.cfg('command.plugin_name');
-  t.gitBranchArgv = ah.cfg('command.git_branch_argv'); t.gitTimeout = ah.cfgNum('command.git_timeout_ms'); t.gitStatusTimeout = ah.cfgNum('command.git_status_timeout_ms');
+  t.gitBranchArgv = ah.cfg('command.git_branch_argv'); t.gitLocalBranchArgv = ah.cfg('command.git_local_branch_argv'); t.gitLocalBranchPrefix = ah.cfg('command.git_local_branch_prefix'); t.plainPushProtected = cmdSet('command.plain_push_protected_refs'); t.gitTimeout = ah.cfgNum('command.git_timeout_ms'); t.gitStatusTimeout = ah.cfgNum('command.git_status_timeout_ms');
   t.gcloudSinkVerbs = cmdSet('command.gcloud_sink_verbs');
   // The settings the script reads by section and key (`settings.get(section, key)` of the Node hooks): each entry's own section and key say
   // which setting it is.
@@ -1982,7 +1982,9 @@ function blankPatternArgument(text, verb) {
 
 function isSafeNodeEvalPayload(payload) {
   if (!payload) return false;
-  for (const re of T.nodeEvalDeny) if (re.test(payload)) return false;
+  // a quoted key with a character no method name has (`j["git-guard"]`) cannot reach an fs or process API: it is data access
+  const scanned = payload.replace(T.nodeSafeBracket, '[]');
+  for (const re of T.nodeEvalDeny) if (re.test(scanned)) return false;
   T.nodeFsCall.lastIndex = 0;
   let m;
   while ((m = T.nodeFsCall.exec(payload))) {
@@ -3326,10 +3328,10 @@ function appendProjectCommandAllowAudit(entry) {
 // A bare remote/ref token: no leading '-' or '+' (rules out every flag and
 // force-refspec form), and no ':' anywhere (rules out `src:dst`/delete
 // refspecs) — enforced by the character class simply never including ':'.
-// The one optional flag slot right after `push` matches ONLY `-q`/`--quiet`/
+// The (up to two) flag slots right after `push` match ONLY `-q`/`--quiet`/
 // `-u`/`--set-upstream` verbatim (not a character class), so `--force`/`-f`/anything else there
 // still fails the whole regex, same as before this carve-out was widened.
-const PLAIN_PUSH_SEGMENT_RE = /^git\s+push(?:\s+(-q|--quiet|-u|--set-upstream))?(?:\s+((?![-+])[A-Za-z0-9_.\/-]+))?(?:\s+((?![-+])[A-Za-z0-9_.\/-]+(?::[A-Za-z0-9_.\/-]+)?))?\s*$/;
+const PLAIN_PUSH_SEGMENT_RE = /^git\s+push(?:\s+(-q|--quiet|-u|--set-upstream))?(?:\s+(-q|--quiet|-u|--set-upstream))?(?:\s+((?![-+])[A-Za-z0-9_.\/-]+))?(?:\s+((?![-+])[A-Za-z0-9_.\/-]+(?::[A-Za-z0-9_.\/-]+)?))?\s*$/;
 // (d) The one accepted trailing output filter, piped from the last segment.
 const PLAIN_OUTPUT_FILTER_RE = /^(?:tail|head)(?:\s+(?:-n\s*)?-?\d+)?\s*$/;
 // (d) A trailing `2>&1` (stderr merged into stdout) - no other redirect.
@@ -3412,14 +3414,15 @@ function classifyPlainGitChainSegment(segment) {
     // isPlainPushRefAllowed's SRC===DST===<current branch> check while git
     // itself pushes over ssh to host `evil.com`). Reject the segment outright
     // rather than let isPlainPushRefAllowed's ref-shaped check vouch for it.
-    if (m[3] && m[3].indexOf(':') !== -1 && !m[2]) return null;
+    if (m[4] && m[4].indexOf(':') !== -1 && !m[3]) return null;
     // `-u`/`--set-upstream` is the ONLY upstream flag accepted, and only with
     // BOTH an explicit remote and an explicit ref (`git push -u origin
     // <branch>`) - a bare `git push -u`/`-u origin` never qualifies. Remote/ref
     // are then vetted exactly like the plain form. It shares the single flag
     // slot, so `-q -u`/`-u -q`/`-uf` never match the regex.
-    if ((m[1] === '-u' || m[1] === '--set-upstream') && !(m[2] && m[3])) return null;
-    return { kind: 'push', remote: m[2] || null, ref: m[3] || null };
+    const upstream = [m[1], m[2]].some((f) => f === '-u' || f === '--set-upstream');
+    if (upstream && !(m[3] && m[4])) return null;
+    return { kind: 'push', remote: m[3] || null, ref: m[4] || null };
   }
   if (PLAIN_LOG_SEGMENT_RE.test(trimmed)) return { kind: 'log' };
   if (PLAIN_STATUS_SEGMENT_RE.test(trimmed)) return { kind: 'status' };
@@ -3443,7 +3446,13 @@ function classifyLeadingCdSegment(segment) {
   const tokens = tokenizeQuoted(trimmed);
   if (tokens.length !== 2 || tokens[0] !== 'cd') return null;
   const p = tokens[1];
-  if (!p || p === '-' || p.startsWith('~')) return null;
+  if (!p || p === '-') return null;
+  // `~/dir` is the home directory spelled for the shell; the same-repository check on the resolved path is the boundary
+  if (p.startsWith('~/')) {
+    const home = io.homeOf();
+    return home ? home.replace(RX8, '') + p.slice(1) : null;
+  }
+  if (p.startsWith('~')) return null;
   return p;
 }
 
@@ -3519,6 +3528,17 @@ function currentBranchName(cwd) {
   }
 }
 
+// localBranchExists(name, cwd) -> true iff `refs/heads/<name>` exists in the repository of `cwd`; every failure reads as false (fail closed).
+function localBranchExists(name, cwd) {
+  try {
+    const { spawnSync } = require('child_process');
+    const res = spawnSync('git', ['-C', cwd || process.cwd()].concat(T.gitLocalBranchArgv, [T.gitLocalBranchPrefix + name]), { encoding: 'utf8', timeout: T.gitTimeout });
+    return !!res && res.status === 0;
+  } catch (_) {
+    return false;
+  }
+}
+
 // configuredRemotes(cwd) -> array of `git -C <cwd> remote` names, or null
 // on any failure (not a repo, spawn error/timeout) — the caller treats null
 // as FAIL CLOSED.
@@ -3553,7 +3573,9 @@ function isPlainPushRefAllowed(ref, cwd) {
   const branch = currentBranchName(cwd);
   if (!branch) return false; // fail closed: could not resolve the current branch
   const colon = ref.indexOf(':');
-  if (colon === -1) return ref === branch;
+  // another branch of this repository (an existing local branch, checked out in a sibling worktree or not) pushes the same way;
+  // the protected names (main, master) are never carved out
+  if (colon === -1) return ref === branch || (!T.plainPushProtected.has(ref) && localBranchExists(ref, cwd));
   // (d) `SRC:DST`: SRC is HEAD or the current branch, DST is the current
   // branch (bare or refs/heads/-qualified). Anything else never qualifies.
   const src = ref.slice(0, colon);
