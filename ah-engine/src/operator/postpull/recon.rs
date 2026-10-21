@@ -1,11 +1,10 @@
 //! The six DevSwarm reconcile-family stages of the post-pull run (`reconcile`, `fold`, `fold-all-stores`, `heal-orphan-partitions`,
-//! `fold-archived-rows`, `heal-registry-rows`) run by the engine's witnessed ports when the engine-mode switch says engine.
+//! `fold-archived-rows`, `heal-registry-rows`) run by the engine's ports when the engine-mode switch says engine (the default).
 //!
-//! Nothing here decides a state change. Each stage hands the work to the recon ports (`dssup::recon`), which plan it, run Node's own
-//! function on a scratch mirror (the witness) and apply the plan to the real home only when the two ended in the same state; a
-//! unit the witness did not agree on, or that the ports do not reproduce, is Node's. The switch is the supervisor's own:
-//! `devswarm_sup.reconcile_mode` for `reconcile`, `devswarm_sup.sweep_tail_mode` for the rest. In `node` mode (the default) none of
-//! this runs and the stage's Node function answers as before.
+//! Each stage hands the work to the recon ports (`dssup::recon`), which plan it and apply the plan to the real home unit by unit,
+//! each under its own lock with its preconditions re-checked; a unit the ports do not reproduce is `held` (counted, tried again on
+//! the next pass). The switch is the supervisor's own: `devswarm_sup.reconcile_mode` for `reconcile`,
+//! `devswarm_sup.sweep_tail_mode` for the rest; set to `off` the stage is `disabled`.
 //!
 //! What this module adds around the ports is the update wrapper's own part: the answer in the script's shape and key order, the
 //! enumeration of the stores of a first run (the listing smallest store first), the stage's sweep budget and the overall post-pull
@@ -136,13 +135,13 @@ impl Run<'_> {
         }
     }
 
-    /// The stage run by the engine's ports behind the switch, shaped as the script shapes it. `None`: Node's function answers (the
-    /// switch says node, a plugin file is missing, or the ports hand the work back).
+    /// The stage run by the engine's ports behind the switch, shaped as the script shapes it. With the switch off the stage is
+    /// `disabled`. `None`: the ports hand the work back (the caller holds the stage).
     pub(super) fn recon_stage(&self, row: &'static defaults::V, deadline: Option<u64>) -> Option<J> {
         let kind = row.get("recon").and_then(defaults::V::as_str)?;
         let st = crate::checks::git::util::Settings { home: self.home.to_string(), env: self.env.to_map() };
         if !self.recon_engine(kind, &st) {
-            return None;
+            return Some(self.off_stage(row.str_field("name")));
         }
         let root = Path::new(&self.paths.plugin_src);
         let home = Path::new(self.home);
@@ -164,7 +163,7 @@ impl Run<'_> {
                 deadline_cap: deadline.map(|d| d as i64),
             };
             let out = stage::run_update(&ctx, &runner, stage_name, &hooks, &up)?;
-            for rec in out.items.iter().filter(|r| r["by"] == defaults::text("devswarm_recon.by_node")) {
+            for rec in out.items.iter().filter(|r| r["by"] == defaults::text("devswarm_recon.by_held")) {
                 crate::discard::note("update_post_note", &format!("{stage_name}: {rec}"));
             }
             out.result
@@ -251,8 +250,13 @@ impl Run<'_> {
     /// `foldMeshPostUpdate`: the mesh fold of the store of the working directory's project.
     fn fold_answer(&self, ctx: &Ctx, runner: &System, hooks: &Hooks) -> Option<Value> {
         let cwd = std::env::current_dir().ok()?.to_string_lossy().into_owned();
-        // a working directory that is not a project is Node's (it answers the empty fold without opening a store)
-        let repo_key = crate::meshw::ident::repo_key_for_worktree(&cwd).ok().flatten()?;
+        // a working directory that is not a project folds nothing: the empty fold, with no store opened
+        let Some(repo_key) = crate::meshw::ident::repo_key_for_worktree(&cwd).ok().flatten() else {
+            return Some(json!({
+                "attempted": true, "pendingRows": 0, "retired": 0, "forwarded": 0, "folded": 0, "left": 0, "rekeyed": 0,
+                "detail": defaults::render("update_post.fold_done", &[("retired", &count_text(0.0))]),
+            }));
+        };
         let end = crate::dssup::recon::fold::run(ctx, runner, &repo_key, hooks).ok()?;
         if end.verdict != crate::dssup::recon::gate::Verdict::Agreed || !end.deferred.is_empty() {
             crate::discard::note("update_post_note", &defaults::render("update_post.recon_note_fold", &[("verdict", &format!("{:?}", end.verdict)), ("deferred", &format!("{:?}", end.deferred))]));

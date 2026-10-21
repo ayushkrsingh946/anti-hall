@@ -56,9 +56,6 @@ value = "CHANGELOG.md"
 doc = "The manifest as git names it on a remote ref (`--check` reads the remote version from it)."
 value = "plugins/anti-hall/.claude-plugin/plugin.json"
 
-[update.node_script_rel]
-doc = "The Node update script inside the plugin directory; its exported stage functions run (bounded) only for the DevSwarm store stages the engine does not answer itself."
-value = "skills/update/scripts/update.js"
 
 [update.max_bytes]
 doc = "Largest manifest, registry or changelog `update` reads; a larger file counts as unread."
@@ -88,10 +85,6 @@ doc = "The post-pull stages' overall budget when the environment does not set on
 value = 90000
 unit = "ms"
 
-[update.reexec_margin_ms]
-doc = "Extra wait for the Node stage run beyond its budget and the harness registration (one overrunning stage plus process start)."
-value = 60000
-unit = "ms"
 
 [update.poll_ms]
 doc = "How often `update` checks a child process it waits for."
@@ -301,9 +294,6 @@ value = "copied {version}"
 doc = "Cache sync reason."
 value = "copy failed: {error}"
 
-[update_msg.stage_script_missing]
-doc = "Why a post-pull stage could not run in Node. Placeholder: script."
-value = "{script} is not there"
 
 [update_msg.stage_start]
 doc = "Progress line on stderr before a stage."
