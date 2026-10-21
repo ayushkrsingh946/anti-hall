@@ -1153,6 +1153,56 @@ fn run_scene(s: &Scene) -> Result<bool, String> {
     }
 }
 
+
+/// A scratch Primary checkout for an engine-only test: (the scratch root, the home, the checkout).
+fn solo_primary(tag: &str) -> (PathBuf, PathBuf, PathBuf) {
+    let root = std::env::var_os("AH_ENGINE_IT_ROOT").map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
+    let base = root.join(format!("ah-pip-{tag}-{}-{}", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
+    ah_engine::discard::harmless(std::fs::remove_dir_all(&base));
+    let home = base.join("h");
+    for d in [".anti-hall", "engine"] {
+        std::fs::create_dir_all(home.join(d)).unwrap();
+    }
+    let repo = home.join("proj");
+    assert!(Command::new("git").args(["init", "-q"]).arg(&repo).status().unwrap().success());
+    git(&repo, &["commit", "-q", "--allow-empty", "-m", "x"]);
+    let (home, cwd) = (home.canonicalize().unwrap(), repo.canonicalize().unwrap());
+    (base, home, cwd)
+}
+
+/// The live table is fixed against two false positives Node still has: it is never sent when no workspace is live (archived rows
+/// only: "+N archived"), and an activity flap (active, idle, dormant) alone is not a change that sends it again.
+#[test]
+fn the_workspace_table_is_quiet_without_live_rows_and_on_activity_flaps_alone() {
+    // (1) only archived rows
+    let (base, home, cwd) = solo_primary("tbl-archived");
+    rows_of(vec![("w1", json!({})), ("w2", json!({}))])(&home);
+    for id in ["w1", "w2"] {
+        write(&ds(&home).join(format!("archived/{id}.json")), &json!({"worktreePath": home.join(format!("{id}-wt")), "sessionId": format!("sess-{id}")}).to_string());
+    }
+    let tp = home.join(".claude/projects/-p/t.jsonl");
+    write(&tp, "");
+    let pl = payload(&cwd, "s1", Some(&tp.to_string_lossy()), false);
+    let (code, out, err) = engine(&home, &pl, &[]);
+    assert_eq!(code, 0, "{err}");
+    assert!(!out.contains("devswarm-workspaces"), "no live row, no table: {out}");
+    ah_engine::discard::harmless(std::fs::remove_dir_all(&base));
+
+    // (2) a live row whose only change is its activity label
+    let (base, home, cwd) = solo_primary("tbl-flap");
+    rows_of(vec![("w1", json!({}))])(&home);
+    let tp = home.join(".claude/projects/-p/t.jsonl");
+    write(&tp, "");
+    let pl = payload(&cwd, "s1", Some(&tp.to_string_lossy()), false);
+    transcript_aged("w1", 5 * 60_000)(&home);
+    let (_, first, err) = engine(&home, &pl, &[]);
+    assert!(first.contains("devswarm-workspaces") && first.contains("| active |"), "the first turn sends the table: {first} {err}");
+    transcript_aged("w1", 45 * 60_000)(&home);
+    let (_, second, err) = engine(&home, &pl, &[]);
+    assert!(!second.contains("devswarm-workspaces"), "active to dormant alone is not a change: {second} {err}");
+    ah_engine::discard::harmless(std::fs::remove_dir_all(&base));
+}
+
 #[test]
 fn engine_and_node_agree_for_a_primary_in_a_checkout() {
     let all = scenes();

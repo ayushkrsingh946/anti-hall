@@ -231,10 +231,12 @@ function piTable(rows, now, capped, hidden, hiddenRows, archivedHidden, maxRows)
 
 // `normalizeTableAges`: the volatile cells of a table row are dropped before the text is hashed.
 function piNormTable(t) {
-  return String(t).split('\n').map(function (l) {
+  // the dormant legend appears with an activity-only label, so it is dropped with the label
+  return String(t).split('\n').filter(function (l) { return l !== ah.cfg('devswarm_parent.legend_dormant'); }).map(function (l) {
     return /^\|.*\|\s*$/.test(l)
       ? l.replace(/\|[^|]*\|\s*$/, '| |').replace(/\|\s*\d+\s*\|\s*\|\s*$/, '| | |').replace(/ · \d+[mhd](?= · (?:progress|no progress))/g, '').replace(/ · progress \d+[mhd] ago/g, '')
         .replace(/ · [\d.]+[kM]? tok\b/g, '')
+        .replace(new RegExp(ah.cfg('devswarm_parent.re_table_activity_label')), '$1' + ah.cfg('devswarm_parent.table_activity_token') + '$2')
       : l;
   }).join('\n');
 }
@@ -1375,7 +1377,7 @@ function piDecide(p, opts) {
     var shownRows = capped ? activeRows.slice(0, cap) : activeRows;
     var evicted = capped ? activeRows.slice(cap) : [];
     if (capped) tableWrites.push({ event: 'table-cap', total: activeRows.length, shown: shownRows.length, hidden: activeRows.length - shownRows.length });
-    if (shownRows.length || archivedHidden) {
+    if (shownRows.length) { // no live row: nothing to show (a table of only "+N archived" is not sent)
       tableText = piTable(shownRows, now, capped, activeRows.length - shownRows.length, evicted, archivedHidden, maxRows); // the text names the default cap, as Node's does
       pending.push({ kind: 'dedupe', rank: 60, o: { sessionId: sid, key: 'parent-inbox-table', content: tableText, transcriptPath: tp, keepaliveTurns: repeat, normalize: piNormTable }, text: tableText, after: ah.cfg('devswarm_parent.title_instruction') });
     }

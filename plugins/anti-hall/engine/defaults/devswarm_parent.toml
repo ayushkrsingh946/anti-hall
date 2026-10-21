@@ -123,6 +123,14 @@ value = "—"
 doc = "The head of the live workspace table: the title line and the column header."
 value = "💡 anti-hall · devswarm-workspaces: (re-sent on change, else every 10 turns):\n| workspace | status | finish | unread | last |\n|---|---|---|---|---|"
 
+[devswarm_parent.re_table_activity_label]
+doc = "A table row's status cell when it only reflects recent activity (active, idle, idle (alive), dormant): capture 1 is the row up to the cell, capture 2 the cell's closing bar. The hash treats these as one label, so an activity flap alone does not re-send the table (JavaScript regex)."
+value = '^(\|(?:[^|\\]|\\.)*\|\s*)(?:active|idle \(alive\)|idle|dormant)(\s*\|)'
+
+[devswarm_parent.table_activity_token]
+doc = "What the activity-only status labels are replaced with before the table is hashed."
+value = "live"
+
 [devswarm_parent.table_row]
 doc = "One table row. Placeholders: {workspace}, {label}, {finish}, {unread}, {last}."
 value = "| {workspace} | {label} | {finish} | {unread} | {last} |"
