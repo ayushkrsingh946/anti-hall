@@ -108,8 +108,6 @@ pub struct ClientConfig {
     pub spawn_n: usize,
     /// Window in which daemon starts are counted.
     pub spawn_window: Duration,
-    /// Node fallback hook is killed after this long (then plain allow: it is unavailable).
-    pub fallback_timeout: Duration,
 }
 
 impl ClientConfig {
@@ -126,7 +124,6 @@ impl ClientConfig {
             crash_cooldown: secs("client.crash_cooldown_s"),
             spawn_n: num("client.spawn_n") as usize,
             spawn_window: secs("client.spawn_window_s"),
-            fallback_timeout: millis("client.fallback_ms"),
         }
     }
 }

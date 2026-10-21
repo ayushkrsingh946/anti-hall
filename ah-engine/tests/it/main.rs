@@ -54,7 +54,7 @@ mod durability;
 mod e2e;
 mod engine_update;
 mod fail_closed_matrix;
-mod fallback_read;
+mod client_no_hooks;
 mod flip_parity;
 mod gitcache_parity;
 mod gitcheck;
