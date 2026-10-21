@@ -252,7 +252,8 @@ function tgPromptKey(p, transcript) {
 }
 
 // {spent: true}, {rel, body} (the bucket file to write before the block) or {} (no budget applies). A bucket file over the read cap or
-// one the script cannot parse exactly counts as empty (counted).
+// one the script cannot parse exactly is neither counted against nor rewritten (its other buckets are other hooks' counts): the budget
+// reads as spent, so the Stop fails open as it does for a budget that cannot be persisted.
 function tgBudget(guard, p, transcript, safeSession, now) {
   if (guard.status !== 'ok') return {};
   var v = ah.settings.num('task_guard.budget_setting'), budget = isFinite(v) && v > 0 ? Math.floor(v) : 0;
@@ -261,11 +262,11 @@ function tgBudget(guard, p, transcript, safeSession, now) {
   if (key === '') return {};
   var rel = ah.cfg('paths.base_dir') + '/' + ah.cfg('task_guard.stop_policy_dir').join('/') + '/' + safeSession + ah.cfg('task_guard.stop_policy_ext');
   var buckets = {}, f = jx.read(guard.home + '/' + rel);
-  if (f.big) ah.unable('task-guard:budget_big');
-  else if (f.text !== undefined) {
+  if (f.big) { ah.unable('task-guard:budget_big'); return { spent: true }; }
+  if (f.text !== undefined) {
     var r = jx.parse(f.text);
-    if (r.unsure) ah.unable('task-guard:budget_unsure');
-    else if (!r.invalid && jx.isObj(r.v)) buckets = r.v;
+    if (r.unsure) { ah.unable('task-guard:budget_unsure'); return { spent: true }; }
+    if (!r.invalid && jx.isObj(r.v)) buckets = r.v;
   }
   var bk = safeSession + '|' + ah.cfg('task_guard.guard_name') + '|' + ah.cfg('task_guard.budget_bucket');
   var kk = ah.cfg('task_guard.budget_key_field'), kc = ah.cfg('task_guard.budget_count_field'), ka = ah.cfg('task_guard.budget_at_field');

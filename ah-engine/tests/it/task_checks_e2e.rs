@@ -206,6 +206,23 @@ fn a_line_only_javascript_can_parse_does_not_hide_an_open_task_from_the_stop_gua
     assert!(out.contains("\"decision\":\"block\""), "the open task still blocks: {out}");
 }
 
+/// #238: a valid budget file the engine cannot read exactly (over the script read cap) is never replaced by a partial map of this
+/// check's own bucket: the other hooks' counts in it survive, and the Stop fails open as for any budget that cannot be persisted.
+#[test]
+fn the_stop_budget_never_overwrites_a_valid_file_it_could_not_read_exactly() {
+    let w = World::new("task-guard-big-budget");
+    let dir = w.path("home/.anti-hall/devswarm/stop-policy");
+    std::fs::create_dir_all(&dir).unwrap();
+    let big = format!("{{\"other|child-gate|inbox\":{{\"count\":2,\"lastAt\":1}}}}{}", " ".repeat(4_300_000));
+    std::fs::write(dir.join("s1.json"), &big).unwrap();
+    std::fs::write(w.path("t.jsonl"), task_lines("pending")).unwrap();
+    let payload = serde_json::json!({"hook_event_name": "Stop", "session_id": "s1", "prompt_id": "p1", "cwd": w.path("proj"), "transcript_path": w.path("t.jsonl")}).to_string();
+    let (code, out, _) = stop_run_env(&w, "task-guard", &payload, &[("ANTIHALL_STOP_NAG_BUDGET", "1")]);
+    assert_eq!(code, 0);
+    assert!(!out.contains("\"decision\":\"block\""), "a budget that cannot be updated exactly fails open: {out}");
+    assert_eq!(std::fs::read_to_string(dir.join("s1.json")).unwrap(), big, "the file was rewritten");
+}
+
 /// stdout is nothing or one JSON object: the host reads anything else as plain text (a block next to a note is lost) and the
 /// dispatcher cannot merge plain text with another Stop hook's JSON (`dispatch_conflict`).
 fn assert_stdout_is_json_or_empty(out: &str, what: &str) {

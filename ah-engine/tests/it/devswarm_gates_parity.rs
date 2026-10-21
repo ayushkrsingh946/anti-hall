@@ -1316,6 +1316,9 @@ struct Cx {
     /// The payload text (`{cwd}`, `{now}` filled in); None: a plain event of the hook in the checkout.
     payload: Option<String>,
     expect: Option<&'static str>,
+    /// Engine alone: the home file (relative) must be byte for byte what was seeded after the engine's answer, which allows (the engine
+    /// could not read it exactly, so it neither counts nor overwrites it; Node would read and count it).
+    keeps: Option<&'static str>,
     /// Run as a Claude and as a Codex workspace (else Claude only).
     agents: bool,
 }
@@ -1338,6 +1341,7 @@ fn cx(name: &'static str, hook: &'static str, steps: &[PgWant]) -> Cx {
         hc_dir: false,
         payload: None,
         expect: None,
+        keeps: None,
         agents: hook == CG,
     }
 }
@@ -1377,6 +1381,10 @@ impl Cx {
     }
     fn expect(mut self, t: &'static str) -> Cx {
         self.expect = Some(t);
+        self
+    }
+    fn keeps(mut self, rel: &'static str) -> Cx {
+        self.keeps = Some(rel);
         self
     }
     fn claude_only(mut self) -> Cx {
@@ -1527,6 +1535,13 @@ fn cx_exec(case: &Cx, agent: &str) -> CxTally {
             continue;
         }
         assert_eq!(*want, PgWant::Answer, "{label}: the engine answered {:?} {:?}, the case expects a deferral", String::from_utf8_lossy(&eout), String::from_utf8_lossy(&eerr));
+        if let Some(rel) = case.keeps {
+            let rel = fill(rel);
+            assert_eq!(snapshot(&home).get(&rel), before.get(&rel), "{label}: the engine rewrote {rel}, a file it could not read exactly");
+            assert!(!String::from_utf8_lossy(&eout).contains("\"decision\":\"block\""), "{label}: an unpersistable budget fails open, as Node's does: {}", String::from_utf8_lossy(&eout));
+            t.answered += 1;
+            continue;
+        }
         let after_engine = snapshot(&home);
         pg_restore(&home, &before, &times);
         let (ncode, nout, nerr) = node_run(&input);
@@ -1584,6 +1599,11 @@ const CX_ATTEMPT: &str = ".anti-hall/devswarm/summary-attempts/{key}/b-1.ndjson"
 const CX_POLICY: &str = ".anti-hall/devswarm/stop-policy/s1.json";
 const CX_STORE_DB: &str = ".anti-hall/devswarm/store/{key}/devswarm.db";
 const CX_DESC: &str = ".anti-hall/devswarm/workspaces/b-1.json";
+
+/// A valid stop-policy file bigger than `script.read_max_bytes` (4 MiB): other sessions' buckets, then whitespace padding.
+fn big_policy() -> String {
+    format!("{{\"other|child-gate|inbox\":{{\"count\":2,\"lastAt\":1}}}}{}", " ".repeat(4_300_000))
+}
 
 fn cg_cases() -> Vec<Cx> {
     use PgWant::{Answer as A, Defer as D};
@@ -1659,6 +1679,8 @@ fn cg_cases() -> Vec<Cx> {
             .seed(CX_POLICY, r#"{"s1|child-gate|heartbeat-report":{"count":2,"lastAt":1},"s1|other|x":{"count":9,"lastAt":1}}"#)
             .expect("forced-ack cap (2 per kind)"),
         cg("budget-file-corrupt", &[A]).seed(CX_POLICY, "[1"),
+        // #238: a valid budget file the engine cannot read exactly (over the read cap) is never overwritten with a partial map
+        cg("budget-file-over-the-read-cap-is-kept", &[A]).claude_only().keeps(CX_POLICY).seed(CX_POLICY, &big_policy()),
         cg("state-file-array", &[A]).seed(".anti-hall/devswarm/child-gate/s1.json", "[1,2]"),
         cg("state-file-with-block-time", &[A]).seed(".anti-hall/devswarm/child-gate/s1.json", r#"{"blocks":1,"lastBlockAt":{five},"totalBlocks":4,"lastCheckAt":{five},"extra":1}"#),
         cg("descriptor-not-json", &[A]).seed(CX_DESC, "{not json"),

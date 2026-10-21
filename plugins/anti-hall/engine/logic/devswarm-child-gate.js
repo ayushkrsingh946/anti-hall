@@ -121,12 +121,14 @@ function cgRead(ctx, rel) {
 function cgPolicyRel(ctx) {
   return cgDirRel() + '/' + ah.cfg('devswarm_gates.cg_policy_dir') + '/' + ctx.sid.replace(/[^A-Za-z0-9_.-]/g, '_') + '.json';
 }
+// The budget map, {} for an absent or corrupt file (Node's readBuckets), or null for a valid file this engine cannot read exactly (over the
+// read cap, or a value only JavaScript reads): its buckets are other hooks' counts too, so it is neither counted against nor rewritten.
 function cgBuckets(ctx) {
   var r = cgRead(ctx, cgPolicyRel(ctx));
-  if (r.big) { ah.unable('devswarm-child-gate:budget_big'); return {}; } // an unreadable budget counts as empty: the block stands
+  if (r.big) { ah.unable('devswarm-child-gate:budget_big'); return null; }
   if (r.text === undefined) return {};
   var j = jx.parse(r.text);
-  if (j.unsure) { ah.unable('devswarm-child-gate:budget_unsure'); return {}; }
+  if (j.unsure) { ah.unable('devswarm-child-gate:budget_unsure'); return null; }
   return !j.invalid && j.v && typeof j.v === 'object' && !Array.isArray(j.v) ? j.v : {};
 }
 function cgKey(ctx, kind) { return ctx.sid + '|' + ah.cfg('devswarm_gates.cg_hook') + '|' + kind; }
@@ -134,6 +136,8 @@ function cgKey(ctx, kind) { return ctx.sid + '|' + ah.cfg('devswarm_gates.cg_hoo
 // `consume(home, sessionId, hook, kinds, cap, now)`: {block, persisted}. The write is planned; its failure is handled at apply time.
 function cgConsume(ctx, kinds, cap) {
   var buckets = cgBuckets(ctx), counts = {}, open = [];
+  // a budget that cannot be updated exactly is not persisted: the gate fails open, as it does for a budget the disk refuses (no loop)
+  if (buckets === null) return { block: false, persisted: false };
   kinds.forEach(function (k) {
     if (Object.prototype.hasOwnProperty.call(counts, k)) return;
     var b = buckets[cgKey(ctx, k)];
@@ -163,7 +167,9 @@ function cgForget(ctx, rel) {
 
 // `clear(home, sessionId, hook, kinds?)`.
 function cgClear(ctx, kinds) {
-  var buckets = cgBuckets(ctx), prefix = ctx.sid + '|' + ah.cfg('devswarm_gates.cg_hook') + '|', changed = false;
+  var buckets = cgBuckets(ctx);
+  if (buckets === null) return; // never rewrite a budget file that was not read in full
+  var prefix = ctx.sid + '|' + ah.cfg('devswarm_gates.cg_hook') + '|', changed = false;
   var only = kinds ? kinds.map(function (k) { return prefix + k; }) : null;
   Object.keys(buckets).forEach(function (k) {
     if (k.indexOf(prefix) !== 0) return;
