@@ -181,10 +181,6 @@ fn choose(p: &Plan, s: &Settings, bytes_before: u64) -> (Chosen, Choice) {
     (chosen, Choice { age, size, bytes, over })
 }
 
-/// Retention comparisons skipped because the store and its plan were unchanged: always 0 now that no Node witness is asked (the
-/// `status --threads` work counter keeps its name).
-pub static WITNESS_SKIPS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-
 /// How one store ended.
 pub(super) enum Ended {
     Pruned(Box<Pruned>),
