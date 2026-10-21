@@ -43,6 +43,7 @@ function hrFreshness(cwd, sinceMs) {
 function hrWriterLine(cwd, root, cand, home) {
   var sid = String(cand.sessionId || '');
   if (!/^[A-Za-z0-9._-]+$/.test(sid)) return '';
+  if (!home) { ah.unable('handover-resume:no_home'); return ''; } // no usable home: no session transcript to compare with
   var repo = ah.path.join(root, '../..'), roots = [repo];
   if (cwd && roots.indexOf(cwd) === -1) roots.push(cwd);
   for (var i = 0; i < roots.length; i++) {
@@ -117,6 +118,7 @@ function decide(p) {
     return !found && compactOrClear ? hrNegative(event) : 'allow';
   }
   var prefix = compactOrClear ? hrC('codex_handover.prefix_continuation') : hrC('codex_handover.prefix_previous');
+  var home = ah.home();
   var ctx = hrBuild(found, hrIndexOutcome(root, found.date, found.sessionId, found.seq), prefix, hrFreshness(cwd, found.mtimeMs), cb.codexPayload(p), hrWriterLine(cwd, root, found, home));
   if (snap) ctx += '\n\n' + hrR(snap.mtimeMs > found.mtimeMs ? 'codex_handover.snap_newer' : 'codex_handover.snap_older', { path: snap.filePath });
   if (rawSid) {
