@@ -677,12 +677,9 @@ fn reconcile(ctx: &Ctx, runner: &dyn Runner, cwd: &str, o: &Opts, hooks: &Hooks)
         },
         None => 0,
     };
-    // a name still missing after the app's titles would come from hivecontrol's workspace list, which has no native reader: held
-    let missing = targets.iter().filter(|t| state::read_name(home, &t.id).is_none()).count();
-    if missing > 0 {
-        crate::dssup::tick::held("dssup:recon:names", defaults::text("devswarm_recon.why_names_held"));
-    }
-    let backfilled = 0u64;
+    // a name still missing after the app's titles comes from ONE `hivecontrol workspace list all` call (best-effort: no binary, a
+    // failed or unparseable answer backfills nothing and never fails the sweep)
+    let backfilled = backfill_names(ctx, cwd, &targets);
     // the resume marker: what is still deferred goes first next time, and a drained sweep leaves no marker
     let marker = view::exists(home, &side::resume_rel());
     if !deferred_ids.is_empty() || marker {
@@ -719,6 +716,25 @@ fn reconcile(ctx: &Ctx, runner: &dyn Runner, cwd: &str, o: &Opts, hooks: &Hooks)
         crate::meshw::clog::refusal(&inv, defaults::text("devswarm_recon.action_reconcile"), Some(&repo_key), None, &msg, None);
     }
     Ok(ProjectEnd::Result(out))
+}
+
+/// The task-6 name backfill of `cmdReconcile`: the labels hivecontrol lists for the targets that have no cached name.
+fn backfill_names(ctx: &Ctx, cwd: &str, targets: &[Target]) -> u64 {
+    let missing: Vec<&Target> = targets.iter().filter(|t| state::read_name(ctx.home, &t.id).is_none()).collect();
+    if missing.is_empty() {
+        return 0;
+    }
+    let env = pull::sweep_env(&ctx.st.env, ctx.home);
+    let args = defaults::list("devswarm_recon.list_all_args");
+    let call = crate::meshw::hivecontrol::call_in(&args, &env, Some(cwd), defaults::millis("devswarm_recon.list_timeout_ms"));
+    if !call.ok {
+        return 0;
+    }
+    let labels = state::parse_labels(&call.raw);
+    missing
+        .iter()
+        .filter(|t| labels.iter().find(|(id, _)| *id == t.id).and_then(|(_, l)| l.as_deref()).is_some_and(|l| state::write_name(ctx.home, &t.id, l, ctx.now)))
+        .count() as u64
 }
 
 // ---- the sweep duty -------------------------------------------------------------------------------------------------------------

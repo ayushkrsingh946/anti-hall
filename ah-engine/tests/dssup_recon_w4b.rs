@@ -118,3 +118,22 @@ fn dssup_recon_w4b_retire_marker_leaves_the_marker_when_restore_fails() {
     assert!(f.read(&f.ds("archived/W.json")).is_some());
     assert!(f.read(&f.ds(&format!("archived-retired/W.{NOW}.json"))).is_none());
 }
+
+#[test]
+fn dssup_recon_w4b_name_backfill_reads_labels_and_writes_the_cache() {
+    use ah_engine::dssup::appsync::state;
+    let f = fix("names");
+    let raw = r#"[{"id":"a1","label":"First title"},{"id":"b2","label":""},{"id":7,"label":"numeric id"},"junk",{"label":"no id"},{"id":"c3"}]"#;
+    let got = state::parse_labels(raw);
+    assert_eq!(got, vec![("a1".to_string(), Some("First title".to_string())), ("b2".to_string(), None), ("c3".to_string(), None)]);
+    // the `{children: [...]}` shape is read too, anything else is an empty list
+    assert_eq!(state::parse_labels(r#"{"children":[{"id":"x","label":"L"}]}"#).len(), 1);
+    assert!(state::parse_labels("not json").is_empty());
+    // writing the cache: Node's `{name, updatedAt}`, an empty name writes nothing
+    assert!(state::write_name(&f.home, "a1", "First title", NOW));
+    assert!(!state::write_name(&f.home, "b2", "", NOW));
+    assert_eq!(state::read_name(&f.home, "a1").as_deref(), Some("First title"));
+    assert!(state::read_name(&f.home, "b2").is_none());
+    let text = f.read(&f.ds("names/a1.json")).unwrap();
+    assert_eq!(text, format!("{{\"name\":\"First title\",\"updatedAt\":{NOW}}}"));
+}

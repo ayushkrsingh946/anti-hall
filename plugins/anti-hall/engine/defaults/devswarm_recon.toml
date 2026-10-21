@@ -901,10 +901,6 @@ value = "held: no native pull for this workspace; retried on the next sweep"
 doc = "Why a workspace's pull is held (event count `native_unable` at dssup:recon:pull)."
 value = "the engine's staged pull did not answer this workspace"
 
-[devswarm_recon.why_names_held]
-doc = "Why a missing workspace name is not backfilled: hivecontrol's workspace list has no native reader."
-value = "name backfill from hivecontrol's workspace list has no native reader"
-
 [devswarm_recon.why_state_held]
 doc = "Why the reconcile duty holds its tick: the cool-down state could not be persisted first."
 value = "the sweep cool-down state could not be written; the sweep is held"
@@ -913,3 +909,13 @@ value = "the sweep cool-down state could not be written; the sweep is held"
 doc = "Why the rest of Node's reconcile sweep is held: the active-workspace probe and the start-up sampling have no native port."
 value = "the active-workspace probe and start-up sampling have no native port"
 
+[devswarm_recon.list_all_args]
+doc = "The hivecontrol arguments of the one workspace listing the name backfill reads (every workspace's current label)."
+value = ["workspace", "list", "all"]
+
+[devswarm_recon.list_timeout_ms]
+doc = "How long the name backfill and the active-workspace probe wait for hivecontrol's workspace listing."
+value = 5000
+min = 500
+max = 120000
+unit = "ms"
