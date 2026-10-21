@@ -143,6 +143,15 @@ pub enum Op {
         /// The rows, already addressed to `dest`.
         rows: Vec<MeshRow>,
     },
+    /// `importLegacy` of one partition that has no floor rows yet (`raiseAllLossFree` makes the same import inside its own transaction): the
+    /// legacy read positions become the `#floor` rows and the live readers' rows, once; a second run finds the floors and writes nothing. A
+    /// session the engine cannot place hands the unit back before anything of it was written.
+    ImportCursors {
+        /// The store (repo key).
+        store: String,
+        /// The partition whose cursors are imported.
+        partition: String,
+    },
     /// `readerCursors.raiseAllLossFree` on the store namespace, then the legacy projection (the shared cursor file, then the
     /// `cursors` table, both upward only). Only valid after a forward that made every row below `value` reachable elsewhere.
     RaiseCursors {

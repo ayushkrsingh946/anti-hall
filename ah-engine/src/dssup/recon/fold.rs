@@ -15,8 +15,8 @@
 //!   activity, a session-authored heartbeat and recency);
 //! * a candidate whose id is its worktree's mesh id (the anchor) stays when its session is live (`isSiblingPartitionLive`), a descriptor
 //!   exists or a reader has drained it; a cross-referenced anchor keeps only the unforgeable half (a heartbeat of its own right now);
-//! * a candidate partition without floor rows whose cursor would have to move needs the legacy-cursor import with a session's
-//!   working directory only git can classify;
+//! * a candidate partition without floor rows whose cursor has to move is imported first (`Op::ImportCursors`, what `raiseAllLossFree` does
+//!   inside its transaction); a session whose working directory git could not classify reads as "keep", as Node's `null` does;
 //! * a cursor journal that would roll over waits unless `devswarm_recon.cursor_log_rotation` is on (rotation replaces the journal's
 //!   `.1` file); a partition message of a type the engine does not model; a deadline.
 //!
@@ -297,11 +297,25 @@ pub(super) fn plan_group(cx: &Cx, sim: &mut Sim, survivor: &str, cands: &[RegRow
             ops.push(Op::Forward { store: cx.store.to_string(), dest: survivor.to_string(), rows: batch });
         }
         if advance_to > since {
-            if crate::meshw::cursors::needs_import(&rows_c) {
-                return defer("cursor-import-needed");
-            }
+            // a partition without floor rows is imported first (`raiseAllLossFree` does the same inside its transaction); the rows the
+            // raise will find are the imported ones
+            let rows_now: Vec<CursorRow> = if crate::meshw::cursors::needs_import(&rows_c) {
+                let h = crate::migrate::readercur::Handle::Ro(
+                    crate::mesh::MeshReader::open(&view::store_db(cx.home, cx.store)).map_err(|e| Defer(format!("store-open:{e}")))?,
+                );
+                let mut icx = crate::migrate::readercur::Cx::new(&cx.home.to_string_lossy());
+                icx.now = cx.now;
+                let after = crate::migrate::readercur::simulate_import(&mut icx, &h, &id, &rows_c);
+                if icx.deferred {
+                    return defer("cursor-import-needed");
+                }
+                ops.insert(0, Op::ImportCursors { store: cx.store.to_string(), partition: id.clone() });
+                after
+            } else {
+                rows_c.clone()
+            };
             let ns = defaults::text("mesh_write.ns_store");
-            let moved = rows_c.iter().filter(|r: &&CursorRow| r.ns == ns && r.value < advance_to).count();
+            let moved = rows_now.iter().filter(|r: &&CursorRow| r.ns == ns && r.value < advance_to).count();
             let key = crate::meshw::send::hash_from_workspace_id(&id);
             let journal = crate::meshw::cursors::log_path(cx.home, Some(&key));
             let lines = if moved > 0 { 2 } else { 1 };

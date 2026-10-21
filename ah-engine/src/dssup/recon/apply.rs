@@ -106,6 +106,7 @@ pub fn check(env: &Env, ops: &[Op]) -> Result<(), String> {
             | Op::UnlinkLinked { .. }
             | Op::Forward { .. }
             | Op::RaiseCursors { .. }
+            | Op::ImportCursors { .. }
             | Op::Pull { .. } => {}
         }
     }
@@ -209,6 +210,19 @@ fn forward(env: &Env, store: &str, dest: &str, rows: &[crate::meshw::store::Mesh
         Ok(false) => Err(skip(defaults::text("devswarm_recon.why_dest_gone"))),
         Err(e) => Err(e),
     }
+}
+
+/// `importLegacy` for a partition whose floor rows are missing (see [`Op::ImportCursors`]).
+fn import_cursors(env: &Env, store: &str, partition: &str) -> Result<(), String> {
+    use crate::migrate::readercur::{Cx, Handle, import_legacy};
+    let h = Handle::Rw(open_store(env, store)?);
+    let mut cx = Cx::new(&env.home.to_string_lossy());
+    cx.now = env.now;
+    import_legacy(&mut cx, &h, partition, None, false)?;
+    if cx.deferred {
+        return Err(skip(defaults::text("devswarm_recon.why_import_undecided")));
+    }
+    Ok(())
 }
 
 /// `raiseAllLossFree` (store namespace) and the legacy projection after it, with the clock the witness pinned.
@@ -338,6 +352,7 @@ fn run_op(env: &Env, op: &Op, hook: &dyn Fn(&str)) -> Result<(), String> {
         }
         Op::Upsert { store, row, pre } => upsert(env, store, row, pre),
         Op::Forward { store, dest, rows } => forward(env, store, dest, rows),
+        Op::ImportCursors { store, partition } => import_cursors(env, store, partition),
         Op::RaiseCursors { store, partition, value } => raise(env, store, partition, *value),
         Op::RemoveRegistryIf { store, id, session_id, updated_at, write_seq, .. } => remove_if(env, store, id, session_id, *updated_at, *write_seq),
         Op::Guard { .. } => Ok(()),
@@ -422,5 +437,38 @@ mod rotation_tests {
         rotate_tail(&p, 2).unwrap();
         assert_eq!(std::fs::read_to_string(&p).unwrap(), "{\"n\":3}\n{\"n\":4}\n");
         assert_eq!(std::fs::read_to_string(&older).unwrap(), "{\"n\":1}\n{\"n\":2}\n");
+    }
+}
+
+#[cfg(test)]
+mod import_tests {
+    use super::*;
+
+    #[test]
+    fn dssup_recon_import_cursors_creates_the_floors_once_so_the_raise_can_run() {
+        crate::defaults::init().unwrap();
+        let dir = crate::db::TempDir::new("import-cursors");
+        let home = dir.0.join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        let st = Settings { home: home.to_string_lossy().into_owned(), env: std::collections::HashMap::new() };
+        let env = Env { home: &home, now: 1_760_000_000_000, st: &st, log_dir: None };
+        let rows = |partition: &str| crate::meshw::cursors::rows_of(&open_store(&env, "store").unwrap(), partition).unwrap();
+        // a partition nobody imported yet: the raise refuses (it would have to import first) ...
+        assert!(crate::meshw::cursors::needs_import(&rows("p1")));
+        assert!(raise(&env, "store", "p1", 5).is_err());
+        // ... the import op creates the floor of every namespace ...
+        run_op(&env, &Op::ImportCursors { store: "store".into(), partition: "p1".into() }, &|_| {}).unwrap();
+        let after = rows("p1");
+        assert!(!crate::meshw::cursors::needs_import(&after), "{after:?}");
+        let floor = defaults::text("mesh_write.floor_reader");
+        assert_eq!(after.iter().filter(|r| r.reader == floor).count(), defaults::list("mesh_write.cursor_namespaces").len());
+        // ... a second import writes nothing (the floors are the gate) ...
+        run_op(&env, &Op::ImportCursors { store: "store".into(), partition: "p1".into() }, &|_| {}).unwrap();
+        assert_eq!(rows("p1"), after);
+        // ... and the raise lifts every row of the namespace, floor included
+        run_op(&env, &Op::RaiseCursors { store: "store".into(), partition: "p1".into(), value: 5 }, &|_| {}).unwrap();
+        let ns = defaults::text("mesh_write.ns_store");
+        let raised = rows("p1");
+        assert!(raised.iter().filter(|r| r.ns == ns).all(|r| r.value == 5), "{raised:?}");
     }
 }

@@ -1143,3 +1143,7 @@ value = "[options]"
 [devswarm_recon.cp_required_open]
 doc = "The bracket that opens a required argument in a usage line."
 value = "<"
+
+[devswarm_recon.why_import_undecided]
+doc = "Why a unit was handed back: the legacy cursor import met a session the engine could not place, so nothing of the unit was written."
+value = "cursor-import-undecided"

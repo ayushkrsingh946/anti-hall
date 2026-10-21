@@ -530,6 +530,7 @@ pub fn touched(u: &Unit) -> Vec<String> {
             | Op::Remove { .. }
             | Op::Forward { .. }
             | Op::RaiseCursors { .. }
+            | Op::ImportCursors { .. }
             | Op::RemoveRegistryIf { .. }
             | Op::Guard { .. }
             | Op::Pull { .. } => {}
