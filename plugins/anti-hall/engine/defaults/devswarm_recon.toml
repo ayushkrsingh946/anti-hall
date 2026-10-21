@@ -1003,3 +1003,57 @@ value = { type = "bool", section = "devswarm", key = "startupSampling", env = "A
 [devswarm_recon.set_paused_probe_max]
 doc = "Most `workspace info` probes of the start-up sampling per sweep. Node: devswarm.pausedProbeMax."
 value = { type = "number", section = "devswarm", key = "pausedProbeMax", env = "ANTIHALL_DEVSWARM_PAUSED_PROBE_MAX", min = 1, max = 20, default = 8 }
+
+[devswarm_recon.reason_no_descriptors]
+doc = "The reconcile duty's reason when no workspace descriptor exists."
+value = "no-descriptors"
+
+[devswarm_recon.reason_no_projects]
+doc = "The reconcile duty's reason when no descriptor resolves to a project."
+value = "no-resolvable-projects"
+
+[devswarm_recon.failure_text_max]
+doc = "Most characters of one failure's text in the reconcile duty's record."
+value = 200
+min = 20
+max = 100000
+
+[devswarm_recon.word_unknown_error]
+doc = "The failure text of a row that failed without an error."
+value = "unknown error"
+
+[devswarm_recon.word_reconcile_failed]
+doc = "The failure text of a project whose reconcile failed without a row or an error."
+value = "reconcile failed"
+
+[devswarm_recon.word_failed]
+doc = "The failure text of a step that failed without saying why."
+value = "failed"
+
+[devswarm_recon.prefix_fold]
+doc = "The start of a failure that comes from the fold of a project's duplicate mesh rows."
+value = "fold: "
+
+[devswarm_recon.prefix_held]
+doc = "The start of a failure for a project whose reconcile the engine could not decide."
+value = "held: "
+
+[devswarm_recon.prefix_active_probe]
+doc = "The start of a failure that comes from the active-workspace probe."
+value = "active-probe: "
+
+[devswarm_recon.msg_sweep_summary]
+doc = "The log line of one reconcile pass. Placeholder: {n}, the projects attempted."
+value = "reconcile-sweep: {n} project(s) attempted"
+
+[devswarm_recon.msg_sweep_deferred]
+doc = "Added to the reconcile-pass log line when projects were left for a later tick. Placeholder: {n}."
+value = ", {n} deferred to a later tick"
+
+[devswarm_recon.msg_failures_unchanged]
+doc = "The note that replaces a failure list identical to the last pass's. Placeholder: {n}."
+value = "{n} unchanged failures (same as last run)"
+
+[devswarm_recon.file_log_sig]
+doc = "The file, under the DevSwarm state directory, holding the signature of the last logged failure list."
+value = "reconcile-log-sig.json"

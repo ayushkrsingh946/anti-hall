@@ -757,52 +757,131 @@ pub fn mode_is_engine(word: &str) -> bool {
     defaults::list("devswarm_sup.reconcile_mode_words").get(1).is_some_and(|e| word.trim().eq_ignore_ascii_case(e))
 }
 
-/// The duty's record: the engine reconciles each project natively (the cool-down state is persisted first). The rest of Node's sweep
-/// (the mesh fold, the active-workspace probe, start-up sampling) has no native port: it is `held` and counted.
+/// The duty's record. `ran`, `projects` (attempted), `skipped` (deferred to a later tick), `results` (per project: `repoKey`, `ok`,
+/// `count`, `imported`, `lost`, `skipped`, `repoUnknown`, `fold`, `active`), `activeProbe`, `activeScope` and `failures` are the fields
+/// Node's supervisor logged for its reconcile pass; `sampling` and the per-project `worktree` and `held` are the engine's own.
+/// A project whose reconcile the engine could not decide is a result with `held: true` and a failure naming the reason.
 pub fn duty(ctx: &Ctx, runner: &dyn Runner, hooks: &Hooks) -> Value {
     let (descs, projects) = match read_descriptors(ctx.home).and_then(|d| distinct_repo_keys(&d).map(|p| (d, p))) {
         Ok(x) => x,
         Err(Defer(why)) => return json!({"duty": "reconcile", "outcome": "held", "detail": crate::dssup::tick::held("dssup:reconcile:read", &why)}),
     };
     let cap = defaults::num("devswarm_recon.max_projects_per_tick") as usize;
-    let mut pre = Map::new();
-    let mut folds = Map::new();
-    let mut actives = Map::new();
-    let mut acc = probe::Acc::default();
-    if !descs.is_empty() && !projects.is_empty() {
-        // persisted BEFORE the work, so a slow or crashed sweep still honours the cool-down
-        if apply_side(ctx, runner, defaults::text("devswarm_recon.job_sweep_state"), side::plan_sweep_state(ctx.home, ctx.now), &[]).is_none() {
-            return json!({"duty": "reconcile", "outcome": "held", "detail": crate::dssup::tick::held("dssup:reconcile:state", defaults::text("devswarm_recon.why_state_held"))});
-        }
-        for p in projects.iter().take(cap) {
-            match cmd_reconcile(ctx, runner, &p.worktree, &Opts::real(), hooks) {
-                ProjectEnd::Result(v) => {
-                    // Node folds each project's duplicate mesh rows right after its reconcile (the store is then current)
-                    let fold = match super::fold::run(ctx, runner, &p.repo_key, hooks) {
-                        Ok(f) => json!({"ok": true, "folded": f.result.folded, "retired": f.result.retired.len(), "forwarded": f.result.forwarded, "pending": f.result.pending.len(), "held": f.deferred.len()}),
-                        Err(Defer(why)) => json!({"ok": false, "held": crate::dssup::tick::held("dssup:reconcile:fold", &why)["held"]}),
-                    };
-                    folds.insert(p.worktree.clone(), fold);
-                    pre.insert(p.worktree.clone(), v);
-                }
-                ProjectEnd::Node(why) => {
-                    crate::dssup::tick::held("dssup:reconcile:project", &why);
-                    let rec = json!({"ts": ctx.now, "job": defaults::text("devswarm_recon.job_project_handback"), "repoKey": p.repo_key, "why": why});
-                    crate::dsact::exec::append_line(&ctx.home.join(defaults::text("devswarm_recon.witness_file")), &rec);
-                }
-            }
-            // the active-workspace probe runs for every project, whatever became of its reconcile
-            actives.insert(p.worktree.clone(), probe::probe_project(ctx, runner, &descs, p, &mut acc));
-        }
+    if descs.is_empty() || projects.is_empty() {
+        let why = defaults::text(if descs.is_empty() { "devswarm_recon.reason_no_descriptors" } else { "devswarm_recon.reason_no_projects" });
+        return json!({"duty": "reconcile", "outcome": "ran", "detail": {"ran": false, "reason": why, "projects": 0, "results": []}, "engineProjects": 0});
     }
-    // the active-workspace probe (per project) and the start-up sampling (all descriptors)
+    // persisted BEFORE the work, so a slow or crashed sweep still honours the cool-down
+    if apply_side(ctx, runner, defaults::text("devswarm_recon.job_sweep_state"), side::plan_sweep_state(ctx.home, ctx.now), &[]).is_none() {
+        return json!({"duty": "reconcile", "outcome": "held", "detail": crate::dssup::tick::held("dssup:reconcile:state", defaults::text("devswarm_recon.why_state_held"))});
+    }
+    let ansi = regex::Regex::new(defaults::text("devswarm_recon.ansi_re")).ok();
+    let clean = |t: &str| -> String { crate::checks::jsport::text::slice16_lossy(&ansi.as_ref().map_or_else(|| t.to_string(), |r| r.replace_all(t, "").into_owned()), defaults::num("devswarm_recon.failure_text_max") as usize) };
+    let mut acc = probe::Acc::default();
+    let mut results: Vec<Value> = Vec::new();
+    let mut failures: Vec<Value> = Vec::new();
+    let (mut any_lost, mut engine_projects) = (false, 0usize);
+    let targets: Vec<&Project> = projects.iter().take(cap).collect();
+    for p in &targets {
+        let mut rec = Map::new();
+        rec.insert("repoKey".into(), json!(p.repo_key));
+        rec.insert("worktree".into(), json!(p.worktree));
+        match cmd_reconcile(ctx, runner, &p.worktree, &Opts::real(), hooks) {
+            ProjectEnd::Result(v) => {
+                engine_projects += 1;
+                // Node folds each project's duplicate mesh rows right after its reconcile (the store is then current)
+                let fold = match super::fold::run(ctx, runner, &p.repo_key, hooks) {
+                    Ok(f) => json!({"ok": true, "folded": f.result.folded, "retired": f.result.retired.len(), "forwarded": f.result.forwarded, "pending": f.result.pending.len(), "held": f.deferred.len()}),
+                    Err(Defer(why)) => {
+                        crate::dssup::tick::held("dssup:reconcile:fold", &why);
+                        json!({"ok": false, "error": why})
+                    }
+                };
+                let rows = v.get("results").and_then(Value::as_array).cloned().unwrap_or_default();
+                let flag = |r: &Value, k: &str| r.get(k).is_some_and(|x| truthy(Some(x)));
+                let mut skipped = 0u64;
+                for x in &rows {
+                    if flag(x, "skipped") {
+                        skipped += 1;
+                    } else if x.get("ok") == Some(&json!(false)) && !flag(x, "locked") && !flag(x, "hivecontrolMissing") && !flag(x, "nativeTimeout") {
+                        let err = x.get("error").filter(|e| truthy(Some(e))).map_or_else(|| defaults::text("devswarm_recon.word_unknown_error").to_string(), js_str);
+                        failures.push(json!({"repoKey": p.repo_key, "id": x.get("id"), "error": clean(&err)}));
+                    }
+                }
+                if v.get("ok") == Some(&json!(false)) && rows.is_empty() {
+                    let err = ["error", "reason"].iter().find_map(|k| v.get(*k).filter(|e| truthy(Some(e)))).map_or_else(|| defaults::text("devswarm_recon.word_reconcile_failed").to_string(), js_str);
+                    failures.push(json!({"repoKey": p.repo_key, "error": clean(&err)}));
+                }
+                if fold.get("ok") == Some(&json!(false)) {
+                    let err = fold.get("error").map_or_else(|| defaults::text("devswarm_recon.word_failed").to_string(), js_str);
+                    failures.push(json!({"repoKey": p.repo_key, "error": format!("{}{}", defaults::text("devswarm_recon.prefix_fold"), clean(&err))}));
+                }
+                any_lost |= truthy(v.get("lost"));
+                rec.insert("ok".into(), json!(truthy(v.get("ok"))));
+                rec.insert("count".into(), or_zero(v.get("count")));
+                rec.insert("imported".into(), or_zero(v.get("imported")));
+                rec.insert("lost".into(), or_zero(v.get("lost")));
+                rec.insert("skipped".into(), json!(skipped));
+                rec.insert("repoUnknown".into(), or_zero(v.get("repoUnknown")));
+                rec.insert("fold".into(), fold);
+            }
+            ProjectEnd::Node(why) => {
+                crate::dssup::tick::held("dssup:reconcile:project", &why);
+                let witness = json!({"ts": ctx.now, "job": defaults::text("devswarm_recon.job_project_handback"), "repoKey": p.repo_key, "why": why});
+                crate::dsact::exec::append_line(&ctx.home.join(defaults::text("devswarm_recon.witness_file")), &witness);
+                failures.push(json!({"repoKey": p.repo_key, "error": format!("{}{}", defaults::text("devswarm_recon.prefix_held"), clean(&why))}));
+                rec.insert("ok".into(), json!(false));
+                rec.insert("held".into(), json!(why));
+                rec.insert("fold".into(), Value::Null);
+            }
+        }
+        // the active-workspace probe runs for every project, whatever became of its reconcile
+        rec.insert("active".into(), probe::probe_project(ctx, runner, &descs, p, &mut acc));
+        results.push(Value::Object(rec));
+    }
+    // the start-up sampling (all descriptors), then the snapshot and the probe's own report
     let sampled = probe::sampling(ctx, runner, &descs);
     let (active_probe, active_scope) = probe::finish(ctx, runner, acc);
-    let results: Vec<Value> = pre
+    if let Some(pf) = active_probe.get("failure").filter(|f| f.is_object()) {
+        let err = pf.get("error").filter(|e| truthy(Some(e))).or_else(|| pf.get("reason")).map_or_else(String::new, js_str);
+        failures.push(json!({"repoKey": pf.get("repoKey"), "error": format!("{}{}", defaults::text("devswarm_recon.prefix_active_probe"), clean(&err))}));
+    }
+    // one log line for the pass, `warn` when some project reported a real shortfall
+    let deferred = projects.len() - targets.len();
+    let mut msg = defaults::render("devswarm_recon.msg_sweep_summary", &[("n", &targets.len())]);
+    if deferred > 0 {
+        msg.push_str(&defaults::render("devswarm_recon.msg_sweep_deferred", &[("n", &deferred)]));
+    }
+    let brief: Vec<Value> = results.iter().map(|r| json!({"repoKey": r["repoKey"], "ok": r["ok"], "imported": r.get("imported").cloned().unwrap_or(json!(0)), "lost": r.get("lost").cloned().unwrap_or(json!(0))})).collect();
+    log_line(
+        ctx,
+        defaults::text("devswarm_recon.log_component_supervisor"),
+        defaults::text("devswarm_recon.log_op_reconcile_sweep"),
+        defaults::text(if any_lost { "devswarm_recon.log_level_warn_word" } else { "devswarm_recon.log_level_info" }),
+        &msg,
+        &json!({"results": brief}),
+    );
+    // failures are listed in full once; an identical list on the next pass is only counted (Node: reconcile-log-sig.json)
+    let sig_file = devswarm_root(ctx.home).join(defaults::text("devswarm_recon.file_log_sig"));
+    let prev_sig = std::fs::read(&sig_file).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()).and_then(|v| v.get("sig").and_then(Value::as_str).map(str::to_string));
+    let mut lines: Vec<String> = failures
         .iter()
-        .map(|(wt, r)| {
-            json!({"worktree": wt, "ok": r.get("ok"), "count": r.get("count"), "imported": r.get("imported"), "lost": r.get("lost"), "fold": folds.get(wt), "active": actives.get(wt)})
-        })
+        .map(|f| [f.get("repoKey").map_or_else(String::new, |v| if v.is_null() { String::new() } else { js_str(v) }), f.get("id").filter(|v| truthy(Some(v))).map_or_else(String::new, js_str), js_str(&f["error"])].join("|"))
         .collect();
-    json!({"duty": "reconcile", "outcome": "ran", "detail": {"projects": pre.len(), "results": results, "activeProbe": active_probe, "activeScope": active_scope, "sampling": sampled}, "engineProjects": pre.len()})
+    lines.sort();
+    let sig = lines.join("\n");
+    let failures_out = if failures.is_empty() {
+        json!(0)
+    } else if prev_sig.as_deref() == Some(sig.as_str()) {
+        json!({"unchanged": failures.len(), "note": defaults::render("devswarm_recon.msg_failures_unchanged", &[("n", &failures.len())])})
+    } else {
+        Value::Array(failures.clone())
+    };
+    if prev_sig.as_deref() != Some(sig.as_str()) {
+        crate::discard::logged("reconcile_log_sig", crate::atomic::write(&sig_file, json!({"sig": sig}).to_string()));
+    }
+    json!({"duty": "reconcile", "outcome": "ran", "detail": {
+        "ran": true, "projects": targets.len(), "skipped": deferred, "results": results,
+        "activeProbe": active_probe, "activeScope": active_scope, "failures": failures_out, "sampling": sampled,
+    }, "engineProjects": engine_projects})
 }

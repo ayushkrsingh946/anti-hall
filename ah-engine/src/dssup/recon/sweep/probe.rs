@@ -447,4 +447,39 @@ mod tests {
         assert_eq!(sampling(&f.ctx(1), &runner, &[]), Value::Null);
         assert_eq!(*runner.calls.borrow(), 0);
     }
+
+    #[test]
+    fn dssup_recon_duty_record_carries_node_fields_and_dedupes_repeated_failures() {
+        use super::super::{Hooks, duty};
+        let f = fix("duty-record");
+        // a project with one registered workspace, and a hivecontrol that fails every listing
+        let ws = devswarm_root(&f.home).join("workspaces");
+        std::fs::create_dir_all(&ws).unwrap();
+        let desc = json!({"id": "w1", "worktreePath": f.repo, "sessionId": "s1", "inboxPath": null, "cursorPath": null, "nudgeCommand": null});
+        std::fs::write(ws.join("w1.json"), desc.to_string()).unwrap();
+        let runner = failing("hivecontrol exited 3");
+        let ctx = f.ctx(1_760_000_000_000);
+        let first = duty(&ctx, &runner, &Hooks::none());
+        let d = &first["detail"];
+        assert_eq!(d["ran"], true);
+        assert_eq!(d["projects"], 1);
+        assert_eq!(d["skipped"], 0);
+        let r = &d["results"][0];
+        assert_eq!(r["repoKey"], f.key);
+        for k in ["ok", "count", "imported", "lost", "skipped", "repoUnknown", "fold", "active"] {
+            assert!(r.get(k).is_some() || r.get("held").is_some(), "{k} missing in {r}");
+        }
+        assert_eq!(r["active"]["ok"], false);
+        assert_eq!(d["activeScope"], json!({"kept": 0, "dropped": 0}));
+        // the failed listing is a failure of the pass, listed in full the first time and only counted the second
+        let list = d["failures"].as_array().expect("failures listed in full the first time");
+        assert!(list.iter().any(|x| x["error"].as_str().is_some_and(|e| e.starts_with("active-probe: "))), "{list:?}");
+        let second = duty(&f.ctx(1_760_000_000_500), &runner, &Hooks::none());
+        assert_eq!(second["detail"]["failures"]["unchanged"], list.len());
+        // nothing to reconcile: the pass says so and does not touch the cool-down file
+        let empty = fix("duty-empty");
+        let rec = duty(&empty.ctx(1), &runner, &Hooks::none());
+        assert_eq!(rec["detail"]["ran"], false);
+        assert_eq!(rec["detail"]["reason"], "no-descriptors");
+    }
 }
