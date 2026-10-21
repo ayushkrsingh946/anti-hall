@@ -104,6 +104,7 @@ mod spool;
 mod stop_scripts_guardrail;
 mod task_checks_e2e;
 mod task_tracker_parity;
+mod w2_behaviour_matrix;
 mod telemetry;
 mod temp_leaks;
 mod template_drift;
