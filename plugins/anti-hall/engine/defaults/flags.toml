@@ -85,6 +85,10 @@ value = "--fix"
 doc = "Go past the usual skip: `gh poll` polls now, `handovers index` rebuilds every day, `devswarm register-primary` overrides the existing registration."
 value = "--force"
 
+[flag.for]
+doc = "How long a runtime switch stays on (`ctl profile on --for 10m`: a number with an optional ms, s, m or h suffix; a bare number is seconds)."
+value = "--for"
+
 [flag.format]
 doc = "Output format; `md` prints the Markdown reference (`docs`)."
 value = "--format"

@@ -17,7 +17,7 @@ fn main() {
     ah_engine::crash::install_panic_hook();
     let args: Vec<String> = std::env::args().skip(1).collect();
     #[cfg(feature = "diag")]
-    if args.first().map(String::as_str) == Some("diag") {
+    if args.first().map(String::as_str) == Some("diag") && args.get(1).map(String::as_str) == Some("heap") {
         std::process::exit(ah_engine::diag::run(&args[1..]));
     }
     // a panic is recorded by the hook; a write to a closed pipe (`ah-engine docs | head`) is the reader leaving, so exit
