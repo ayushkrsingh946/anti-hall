@@ -425,7 +425,6 @@ pub enum Run {
         out: Vec<u8>,
         err: Vec<u8>,
         overflow: bool,
-        payload_complete: bool,
     },
     TimedOut,
     GroupAlive,
@@ -680,7 +679,7 @@ pub fn run_child(o: &Opts) -> Run {
     let (chunk, out_cap, err_cap) = (o.feed.chunk, o.out_cap, o.err_cap);
     let (wtx, wrx) = mpsc::channel();
     let st = Arc::new(PumpState::default());
-    let (dtx, drx) = mpsc::channel();
+    let (dtx, _drx) = mpsc::channel(); // keep: the pump reports its end here; nothing waits for it any more (no replay runner exists)
     let pumped = go({
         let st = st.clone();
         move || pump(stdin, feed, st, dtx)
@@ -746,21 +745,11 @@ pub fn run_child(o: &Opts) -> Run {
     let (Ok((out, o1)), Ok((err, o2))) = (orx.recv_timeout(wait), erx.recv_timeout(wait)) else {
         return Run::GroupAlive;
     };
-    let payload_complete = if !o.feed.more {
-        true
-    } else if o.feed.spool.is_some() {
-        // the pump may still be copying the rest of the payload into the spool (the engine need not have read it all)
-        let _ = drx.recv_timeout(o.feed.idle);
-        st.eof.load(AO::SeqCst) && !st.spool_failed.load(AO::SeqCst)
-    } else {
-        false
-    };
     Run::Exited {
         code,
         out,
         err,
         overflow: o1 || o2,
-        payload_complete,
     }
 }
 

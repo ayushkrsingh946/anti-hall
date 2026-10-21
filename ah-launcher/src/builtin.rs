@@ -92,7 +92,6 @@ pub const STRS: &[(&str, &str)] = &[
     ("launcher.stats_env", "AH_LAUNCHER_STATS"),
     ("launcher.knob_engine_bin", "AH_ENGINE_BIN"),
     ("launcher.knob_fallback_list", "AH_FALLBACK_LIST"),
-    ("launcher.knob_fallback_map", "AH_FALLBACK_MAP"),
     ("launcher.knob_timeout_s", "AH_HOOK_TIMEOUT_S"),
     ("launcher.knob_timeout_ms", "AH_HOOK_TIMEOUT_MS"),
     ("launcher.knob_kill_grace_s", "AH_KILL_GRACE_S"),
@@ -101,10 +100,7 @@ pub const STRS: &[(&str, &str)] = &[
     ("launcher.diag_env", "AH_ENGINE_WRAPPER_DIAG"),
     ("launcher.in_process_env", "AH_ENGINE_DISPATCH_IN_PROCESS"),
     ("launcher.fallback_list_claude", "ah-fallback.list"),
-    ("launcher.fallback_map_claude", "ah-fallback.map.json"),
     ("launcher.fallback_list_codex", "ah-fallback.codex.list"),
-    ("launcher.fallback_map_codex", "ah-fallback.codex.map.json"),
-    ("launcher.script_hook", "ah-hook.sh"),
     ("launcher.script_integrity", "ah-engine-integrity.sh"),
     ("launcher.script_bootstrap", "ah-engine-bootstrap.sh"),
     ("launcher.script_doctor", "ah-doctor.sh"),
@@ -151,15 +147,6 @@ pub const STRS: &[(&str, &str)] = &[
         "AH_HOOK_TIMEOUT_MS must be a positive integer",
     ),
     (
-        "msg.launcher_why_fallback_unavailable",
-        "fallback runner unavailable",
-    ),
-    ("msg.launcher_why_fallback_died", "fallback runner died"),
-    (
-        "msg.launcher_why_fallback_payload",
-        "payload too large to replay to the fallback runner",
-    ),
-    (
         "msg.launcher_internal",
         "anti-hall: launcher internal failure, hook let through: {what}",
     ),
@@ -196,10 +183,15 @@ pub const STRS: &[(&str, &str)] = &[
     ("files.breaker_until", "breaker.until"),
     ("files.crashloop_until", "crashloop.until"),
     ("files.cold_guard_notice", "cold-guard.notice"),
+    ("files.unreachable_notice", "unreachable.notice"),
     ("client.cold_guard_kick_event", "ColdStartKick"),
     (
         "msg.cold_guard_notice",
         "anti-hall: the engine was still starting, so this {event} was not checked; the guards apply again once it is up",
+    ),
+    (
+        "msg.engine_unreachable_notice",
+        "anti-hall: the engine did not answer this {event} call ({why}); it went through unchecked. Run `ah-engine doctor` if it keeps happening.",
     ),
 ];
 

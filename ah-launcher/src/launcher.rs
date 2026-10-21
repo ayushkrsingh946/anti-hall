@@ -62,7 +62,6 @@ struct L {
     payload: Arc<Vec<u8>>,
     more: bool,
     list: PathBuf,
-    map: PathBuf,
     timeout_s: u64,
     timeout_ms: u64,
     grace: Duration,
@@ -139,25 +138,6 @@ impl L {
         let line = text.lines().find(|l| l.starts_with(&want))?;
         let t = positive(line.get(want.len()..)?.split('\t').next()?)?;
         Some(t.min(self.timeout_s))
-    }
-
-    /// Sum of the row timeouts (seconds) listed under this event in the fallback list.
-    fn rows_total_s(&self) -> u64 {
-        let Ok(text) = std::fs::read_to_string(&self.list) else {
-            return 0;
-        };
-        let header = format!("@{}\t", self.event);
-        let mut inside = false;
-        let mut total = 0u64;
-        for line in text.lines() {
-            if line.starts_with('@') {
-                inside = line.starts_with(&header);
-            } else if inside {
-                total =
-                    total.saturating_add(line.split('\t').nth(1).and_then(positive).unwrap_or(0));
-            }
-        }
-        total
     }
 
     fn integrity(&self, verb: &str) {
@@ -240,12 +220,23 @@ impl L {
     }
 
     fn cold_notice(&self) {
-        let text = self.key("msg.cold_guard_notice");
+        self.session_notice("msg.cold_guard_notice", "files.cold_guard_notice", &[("event", self.event.as_str())]);
+    }
+
+    /// The engine is unreachable (not installed, crashed, timed out, marked down, handed the call back): the call passes
+    /// through unchecked and the session hears it once (msg.engine_unreachable_notice).
+    fn unreachable_notice(&self, why: &str) {
+        self.session_notice("msg.engine_unreachable_notice", "files.unreachable_notice", &[("event", self.event.as_str()), ("why", why)]);
+    }
+
+    /// One stderr notice per session: the state dir remembers the session id that already got the notice named by `file_key`.
+    fn session_notice(&self, text_key: &str, file_key: &str, subs: &[(&str, &str)]) {
+        let text = self.key(text_key);
         if text.is_empty() {
             return;
         }
         let sid = json_str_field(&self.payload, "session_id").unwrap_or_else(|| "none".into());
-        let name = self.key("files.cold_guard_notice");
+        let name = self.key(file_key);
         if !name.is_empty() && !self.state_dir.as_os_str().is_empty() {
             let p = self.state_dir.join(name);
             if std::fs::read_to_string(&p).is_ok_and(|s| s.trim_end() == sid) {
@@ -254,7 +245,7 @@ impl L {
             let _ = std::fs::create_dir_all(&self.state_dir);
             let _ = std::fs::write(&p, format!("{sid}\n"));
         }
-        say(&fill(&text, &[("event", &self.event)]));
+        say(&fill(&text, subs));
     }
 
     fn retry(&self) -> Retry {
@@ -427,69 +418,13 @@ impl L {
         Some(0)
     }
 
-    /// dispatch.defer_exit: the fallback rows run in the shell wrapper (rare path; removed with the Node hooks).
-    fn fallback(&self, payload_complete: bool, spool: Option<PathBuf>) -> i32 {
-        if !payload_complete {
-            self.log_line(&format!(
-                "fallback_payload_unavailable event={}",
-                self.event
-            ));
-            return self.closed_if_guard("msg.launcher_why_fallback_payload");
-        }
-        let script = self.hooks_dir.join(self.key("launcher.script_hook"));
-        let argv = [
-            "sh".to_string(),
-            script.display().to_string(),
-            self.event.clone(),
-            "--host".into(),
-            self.host.clone(),
-            "--fallback-only".into(),
-        ];
-        // the rows keep their own timeouts (the shell runner enforces each); the whole run is bounded by the larger of the
-        // event's hook timeout and the sum of its rows
-        let ev_ms = self
-            .event_timeout_s()
-            .unwrap_or(self.timeout_s)
-            .max(self.rows_total_s())
-            .saturating_mul(1000);
-        let left = ev_ms
-            .saturating_sub(self.t0.elapsed().as_millis() as u64)
-            .max(1);
-        let mut feed = self.feed_memory(&self.payload);
-        feed.file = spool.filter(|_| self.more);
-        // the fallback rows have their own watchdogs; the wall backstop moves out to cover them
-        limits::arm_wall(left.saturating_add(self.s.num("launcher.wall_hard_margin_ms")));
-        let removals = self.removals();
-        let r = proc::run_child(&Opts {
-            argv: &argv,
-            envs: &[],
-            env_remove: &removals,
-            feed,
-            budget: Duration::from_millis(left),
-            wait_file: None,
-            done_file: None,
-            slow_max: Duration::ZERO,
-            grace: self.grace,
-            drain: Duration::from_millis(self.s.num("launcher.io_drain_ms")),
-            strict_group: false,
-            out_cap: self.s.num("launcher.out_cap_bytes") as usize,
-            err_cap: self.s.num("launcher.err_cap_bytes") as usize,
-            retry: self.retry(),
-            reaper: self.reaper_on().then(Vec::new),
-        });
-        match r {
-            Run::Exited { code, out, err, .. } => {
-                write_out(&out, &err);
-                code
-            }
-            Run::SpawnFailed { .. } => {
-                self.closed_if_guard("msg.launcher_why_fallback_unavailable")
-            }
-            Run::TimedOut | Run::GroupAlive => {
-                self.log_line(&format!("fallback_timed event={}", self.event));
-                0
-            }
-        }
+    /// dispatch.defer_exit: the engine handed the call back. No hook command exists to run, so the call passes through
+    /// unchecked with one notice per session, like every other unreachable-engine outcome.
+    fn handed_back(&self) -> i32 {
+        self.log_line(&format!("engine_handed_back event={}", self.event));
+        self.integrity("fail");
+        self.unreachable_notice("the engine handed the call back");
+        0
     }
 
     fn stats_value(&self) -> String {
@@ -553,8 +488,6 @@ impl L {
             self.event.clone(),
             "--host".into(),
             self.host.clone(),
-            "--fallback-map".into(),
-            self.map.display().to_string(),
         ];
         let cleanup = run_dir.and_then(|d| {
             let c = |p: &Path| CString::new(p.as_os_str().as_bytes()).ok();
@@ -612,11 +545,7 @@ impl L {
                 write_out(&out, &err);
                 c
             }
-            Run::Exited {
-                code,
-                payload_complete,
-                ..
-            } if code == defer => self.fallback(payload_complete, spool),
+            Run::Exited { code, .. } if code == defer => self.handed_back(),
             Run::Exited {
                 code,
                 out,
@@ -637,6 +566,7 @@ impl L {
                     self.event
                 ));
                 self.integrity("fail");
+                self.unreachable_notice("the engine exited without an answer");
                 0
             }
             Run::TimedOut => {
@@ -652,6 +582,7 @@ impl L {
                     u8::from(done_marked)
                 ));
                 self.integrity("fail");
+                self.unreachable_notice("the engine did not answer in time");
                 0
             }
             Run::GroupAlive => {
@@ -661,6 +592,7 @@ impl L {
                 ));
                 self.log_line(&format!("engine_group_alive event={}", self.event));
                 self.integrity("fail");
+                self.unreachable_notice("the engine did not finish");
                 0
             }
             Run::SpawnFailed { errno } => {
@@ -672,6 +604,7 @@ impl L {
                 if errno != Some(libc::ENOENT) {
                     self.integrity("fail"); // present but cannot start (corrupt, wrong format): the rollback counts it
                 }
+                self.unreachable_notice("the engine could not be started");
                 0
             }
         }
@@ -922,7 +855,6 @@ pub fn run() -> i32 {
     let knob_keys = [
         "launcher.knob_engine_bin",
         "launcher.knob_fallback_list",
-        "launcher.knob_fallback_map",
         "launcher.knob_timeout_s",
         "launcher.knob_timeout_ms",
         "launcher.knob_kill_grace_s",
@@ -976,7 +908,6 @@ pub fn run() -> i32 {
     let host_key = |what: &str| format!("launcher.{what}_{host}");
     let mut l = L {
         list: PathBuf::new(),
-        map: PathBuf::new(),
         s,
         event,
         host: host.clone(),
@@ -1000,10 +931,6 @@ pub fn run() -> i32 {
         .knob("launcher.knob_fallback_list")
         .map(PathBuf::from)
         .unwrap_or_else(|| l.hooks_dir.join(l.key(&host_key("fallback_list"))));
-    l.map = l
-        .knob("launcher.knob_fallback_map")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| l.hooks_dir.join(l.key(&host_key("fallback_map"))));
 
     // budgets: the test knobs, else the shipped client deadline + slack + wrapper margin
     let knob_s = l.knob("launcher.knob_timeout_s");

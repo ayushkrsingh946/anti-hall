@@ -196,6 +196,10 @@ value = "integrity.log"
 doc = "Written while a daemon runs; a leftover one with a dead pid is logged as one crash."
 value = "daemon.run"
 
+[files.unreachable_notice]
+doc = "Holds the session id that already got the engine-unreachable notice, so the notice is shown once per session (the next session overwrites it)."
+value = "unreachable.notice"
+
 [files.cold_guard_notice]
 doc = "Holds the session id that already got the cold-start notice, so the notice is shown once per session (the next session overwrites it)."
 value = "cold-guard.notice"
@@ -563,7 +567,7 @@ value = 10
 unit = "ms"
 
 [client.slow_fallback_max_ms]
-doc = "How long, measured from the engine start, a hook call keeps waiting for the daemon's own reply once client.deadline_ms has passed (a daemon that is alive answers late rather than never). The wrapper's watchdog waits the same bound (never past the hook's own timeout), so a delayed block still blocks. A reply that arrives in the window is used as is: the daemon's decision, no Node hook run (the daemon has already processed the request). Nothing by then fails the call open and counts toward client.slow_down_n; a late call never runs its Node hooks. A normal or unavailable daemon keeps the short fail-fast budget (client.deadline_ms + client.deadline_slack_ms + client.wrapper_extra_ms). 0 disables the extension."
+doc = "How long, measured from the engine start, a hook call keeps waiting for the daemon's own reply once client.deadline_ms has passed (a daemon that is alive answers late rather than never). The wrapper's watchdog waits the same bound (never past the hook's own timeout), so a delayed block still blocks. A reply that arrives in the window is used as is: the daemon's decision. Nothing by then fails the call open and counts toward client.slow_down_n. A normal or unavailable daemon keeps the short fail-fast budget (client.deadline_ms + client.deadline_slack_ms + client.wrapper_extra_ms). 0 disables the extension."
 value = 3000
 env = "AH_ENGINE_SLOW_FALLBACK_MAX_MS"
 min = 0
@@ -667,12 +671,6 @@ env = "AH_ENGINE_SPAWN_WINDOW_S"
 unit = "s"
 
 
-[client.fallback_ms]
-doc = "The Node fallback hook must finish, and its stdout and stderr must reach EOF, within this long. A hook still running at the deadline is killed (then plain allow, since it is unavailable); one that finished with output still unread is an error outcome, never an empty stdout."
-value = 8000
-env = "AH_ENGINE_FALLBACK_MS"
-unit = "ms"
-
 [client.cold_guard_wait_ms]
 doc = "How long a guard event (PreToolUse, PermissionRequest, Stop, SubagentStop) waits for a cold-starting daemon before it is let through with one notice per session; 0 turns the wait off. The engine client keeps the same bound: a guard-event call that still finds no daemon (it starts one, or finds another call starting it) waits for it within this budget and then sends its request once, so it is never answered with nothing while a daemon starts. Prompts and advisories never wait. The wait never exceeds what the hook's own timeout leaves after the engine attempt. It is one absolute deadline: the kick, its kill grace and the socket poll all end within it, so a cold guard call takes at most this plus the normal engine attempt."
 value = 2000
@@ -739,7 +737,7 @@ value = 1500
 unit = "ms"
 
 [client.fallback_poll_ms]
-doc = "Poll interval while the Node fallback runs."
+doc = "Poll interval of short waits on a child process or a reply (the GitHub runtime, the Jev sweep and the scheduler use it)."
 value = 2
 unit = "ms"
 
@@ -1386,10 +1384,6 @@ value = "AH_ENGINE_BIN"
 doc = "Test-only: environment variable that replaces the fallback list file."
 value = "AH_FALLBACK_LIST"
 
-[launcher.knob_fallback_map]
-doc = "Test-only: environment variable that replaces the fallback map file."
-value = "AH_FALLBACK_MAP"
-
 [launcher.knob_timeout_s]
 doc = "Test-only: environment variable that sets the hook budget in whole seconds."
 value = "AH_HOOK_TIMEOUT_S"
@@ -1434,21 +1428,9 @@ value = ["claude", "codex"]
 doc = "File name, inside the plugin's hooks directory, of the Claude fallback list (per-event timeouts)."
 value = "ah-fallback.list"
 
-[launcher.fallback_map_claude]
-doc = "File name, inside the plugin's hooks directory, of the Claude fallback map."
-value = "ah-fallback.map.json"
-
 [launcher.fallback_list_codex]
 doc = "File name, inside the plugin's hooks directory, of the Codex fallback list."
 value = "ah-fallback.codex.list"
-
-[launcher.fallback_map_codex]
-doc = "File name, inside the plugin's hooks directory, of the Codex fallback map."
-value = "ah-fallback.codex.map.json"
-
-[launcher.script_hook]
-doc = "Shell wrapper in the plugin's hooks directory; the launcher runs its fallback rows through it."
-value = "ah-hook.sh"
 
 [launcher.script_integrity]
 doc = "Integrity script in the plugin's hooks directory (failure counting and rollback)."

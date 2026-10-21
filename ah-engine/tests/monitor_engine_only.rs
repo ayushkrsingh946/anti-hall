@@ -1,8 +1,6 @@
-//! The DevSwarm wake-watch monitor (monitors/monitors.json) keeps its Node fallback until the runtime cutover (v1.0 lane L17):
-//! when the engine answers "leave this to Node" (75), cannot load its defaults (70) or is not runnable (126/127), the command
-//! hands over to the launcher `scripts/ah-run.sh`, which runs the Node watcher; any other engine exit is the watcher's own and
-//! is passed on without a fallback. Scratch HOME and a fake plugin root with stub programs, so neither the real engine nor the
-//! user's home is touched.
+//! The DevSwarm wake-watch monitor (monitors/monitors.json) runs the engine and nothing else: every engine exit is the
+//! watcher's own and is passed on, and with no engine installed nothing starts in its place. Scratch HOME and a fake plugin
+//! root with stub programs, so neither the real engine nor the user's home is touched.
 #![allow(clippy::unwrap_used, clippy::expect_used)] // a test crate: a panic is the failure report
 #![allow(clippy::panic, clippy::unreachable)] // integration tests: a panic is the failure report; production crates deny these in Cargo.toml
 
@@ -28,7 +26,7 @@ struct Run {
     out: String,
 }
 
-/// Run the monitor command with a stub engine (`engine_body`, absent when None) and a stub launcher that prints what it got.
+/// Run the monitor command with a stub engine (`engine_body`, absent when None) and a stub launcher that must never run.
 fn run(tag: &str, engine_body: Option<&str>) -> Run {
     let root: PathBuf = std::env::temp_dir().join(format!("ah-monfb-{tag}-{}", std::process::id()));
     std::fs::remove_dir_all(&root).ok();
@@ -39,6 +37,7 @@ fn run(tag: &str, engine_body: Option<&str>) -> Run {
         script(&home.join(".anti-hall/ah-engine/bin/ah-engine"), b);
     }
     script(&plugin.join("scripts/ah-run.sh"), "echo \"LAUNCHER $*\"");
+    script(&plugin.join("companion/lib/devswarm-wake-watch.js"), "echo NODE-WATCHER");
     let o = Command::new("/bin/sh")
         .arg("-c")
         .arg(monitor_command())
@@ -54,26 +53,19 @@ fn run(tag: &str, engine_body: Option<&str>) -> Run {
 }
 
 #[test]
-fn engine_exit_75_falls_back_to_the_launcher() {
-    let r = run("e75", Some("exit 75"));
-    assert_eq!(r.code, Some(0), "{}", r.out);
-    assert!(r.out.contains("LAUNCHER devswarm wake-watch -- ") && r.out.contains("companion/lib/devswarm-wake-watch.js --auto"), "{}", r.out);
-}
-
-#[test]
-fn engine_not_loadable_or_not_runnable_falls_back_too() {
-    for (tag, body) in [("e70", Some("exit 70")), ("e127", Some("exit 127")), ("missing", None)] {
-        let r = run(tag, body);
-        assert!(r.out.contains("LAUNCHER devswarm wake-watch"), "{tag}: {} (exit {:?})", r.out, r.code);
+fn every_engine_exit_is_the_watchers_own_and_no_launcher_or_node_runs() {
+    for (tag, body, code) in [("e75", "exit 75", 75), ("e70", "exit 70", 70), ("e127", "exit 127", 127), ("e0", "echo WATCH; exit 0", 0), ("e3", "echo WATCH; exit 3", 3)] {
+        let r = run(tag, Some(body));
+        assert_eq!(r.code, Some(code), "{tag}: {}", r.out);
+        assert!(!r.out.contains("LAUNCHER") && !r.out.contains("NODE-WATCHER"), "{tag}: nothing else runs: {}", r.out);
     }
 }
 
 #[test]
-fn engine_own_exit_is_passed_on_without_a_fallback() {
-    let r = run("e0", Some("echo WATCH; exit 0"));
-    assert_eq!((r.code, r.out.trim()), (Some(0), "WATCH"), "a clean end is not retried in Node");
-    let r = run("e3", Some("echo WATCH; exit 3"));
-    assert_eq!((r.code, r.out.trim()), (Some(3), "WATCH"), "the watcher's own failure code is kept");
+fn a_missing_engine_starts_nothing_in_its_place() {
+    let r = run("missing", None);
+    assert_ne!(r.code, Some(0), "{}", r.out);
+    assert!(!r.out.contains("LAUNCHER") && !r.out.contains("NODE-WATCHER"), "{}", r.out);
 }
 
 #[test]
