@@ -1810,3 +1810,30 @@ fn every_script_without_hand_backs_loads_and_answers_a_minimal_call() {
         assert!(errors.is_empty(), "{check}: script errors {errors:?}");
     }
 }
+
+// ---- v0.301 W3b: the speculation judge in the daemon ------------------------------------------------------------------
+
+/// The opt-in judge block works again: the daemon (a process that may not wait for a model) hands the check to the one-shot dispatcher
+/// ({dispatcher: true}, nothing counted as a script error), and the dispatcher, where the call may be made, blocks on the model's verdict.
+#[test]
+fn the_speculation_judge_is_handed_to_the_dispatcher_and_blocks_there() {
+    use crate::jev::cascade::{MODEL_LOCK, TEST_MODEL};
+    let _g = MODEL_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let case = json!({
+        "env": {"HOME": "{HOME}", "ANTIHALL_SEMANTIC_JUDGE": "1", "ANTIHALL_JUDGE_BACKEND": "cli"},
+        "event": "Stop", "files": {"t.jsonl": "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"why is it slow?\"}}\n"},
+        "payload": {"hook_event_name": "Stop", "session_id": "s1", "transcript_path": "{HOME}/t.jsonl", "last_assistant_message": "The cause is the old build artifact."},
+    });
+    assert!(!crate::judge::blocking_calls_allowed(), "the test starts as the daemon is: not allowed to wait for a model");
+    let l = golden::lay(&case);
+    let in_daemon = golden::verdict_json(&golden::run_case("speculation-judge", &l, 1).expect("a shipped script"), &l);
+    assert_eq!(in_daemon, json!({"v": "defer"}), "the daemon hands the check to the dispatcher");
+    assert!(crate::discard::captured().iter().all(|(code, _)| code != "script_error"), "{:?}", crate::discard::captured());
+    crate::judge::allow_blocking_calls();
+    *TEST_MODEL.lock().unwrap() = Some(Box::new(|_| crate::judge::cli::CliOutcome { result: Ok(r#"{"decision":"block","claim":"the cause is stated, not shown"}"#.into()), ms: 5 }));
+    let l = golden::lay(&case);
+    let in_dispatcher = golden::verdict_json(&golden::run_case("speculation-judge", &l, 1).expect("a shipped script"), &l);
+    *TEST_MODEL.lock().unwrap() = None;
+    assert_eq!(in_dispatcher["v"], "exact", "{in_dispatcher}");
+    assert!(in_dispatcher["out"].as_str().unwrap_or_default().contains("the cause is stated, not shown"), "{in_dispatcher}");
+}

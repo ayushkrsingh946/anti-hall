@@ -51,6 +51,7 @@ mod host_io;
 pub mod host_childturn;
 pub mod host_mesh;
 pub mod host_parentinbox;
+mod host_seat;
 pub mod host_port;
 pub mod host_proc;
 pub mod host_spawn;
@@ -434,6 +435,9 @@ fn verdict_of(v: &Value) -> Result<Option<Verdict>, String> {
         Value::Null => None,
         Value::String(t) if t == "allow" => Some(Verdict::Allow),
         Value::String(t) if t == "defer" => Some(Verdict::Defer),
+        // `{dispatcher: true}`: this process cannot wait for the model call the check needs (the daemon); the one-shot dispatcher runs the
+        // check itself (`judge.dispatch_blocking_checks`). It is the one hand-over that stays: nothing of it goes to Node.
+        Value::Object(o) if o.get("dispatcher") == Some(&Value::Bool(true)) => Some(Verdict::Defer),
         Value::Object(_) if s("block").is_some() => Some(Verdict::Block(s("block").unwrap_or_default())),
         Value::Object(_) if s("advisory").is_some() => Some(Verdict::Advisory(s("advisory").unwrap_or_default())),
         Value::Object(o) if o.get("exact").is_some_and(Value::is_object) => {

@@ -4,8 +4,8 @@
 // the Node order: the judge-child guard, the switch, the skip file, the backend switch (jev.speculationBackend `jev` leaves the
 // question to speculation-guard's Jev path), Jev's own speculation integration being fully on, a payload without a transcript, a
 // judge backend with no Anthropic key (Node makes no call), an empty reply, a reply already blocked and the block cap. A reply that
-// needs the model makes the call through the Claude CLI (ah.judge.cli); where the process cannot wait seconds for it the call is
-// unavailable and the reply is allowed (counted, speculation-judge:model_call_unavailable). An API call (a visible key) is not made:
+// needs the model makes the call through the Claude CLI (ah.judge.cli); the resident daemon cannot wait seconds for it, so it hands the
+// check to the one-shot dispatcher process ({dispatcher: true}), which runs this script again and makes the call there. An API call (a visible key) is not made:
 // the engine never sends a key anywhere (counted). Keys and
 // texts: judge.toml (speculation_judge.*, judge.*).
 'use strict';
@@ -100,9 +100,11 @@ function decide(p) {
   var prior = sjPrior(home + '/' + stateRel);
   if (prior === null) { ah.unable('speculation-judge:state_unreadable'); prior = { hash: '', blocks: 0 }; }
   if (hash === prior.hash || prior.blocks >= ah.cfgNum('speculation_judge.max_blocks')) return 'allow';
-  // The model call takes seconds: where the process cannot wait for it ah.judge.cli answers null and the reply is allowed (counted).
+  // The model call takes seconds: the resident daemon cannot wait for it (its exchange deadline and watchdog), so it hands the check to the
+  // one-shot dispatcher process (judge.dispatch_blocking_checks), which runs this same script where the call may be made.
+  if (!ah.judge.canBlock()) return { dispatcher: true };
   var call = ah.judge.cli({ transcript: tpOpen, message: last });
-  if (call === null) { ah.unable('speculation-judge:model_call_unavailable'); return 'allow'; }
+  if (call === null) { ah.unable('speculation-judge:model_call_unavailable'); return 'allow'; } // a transcript line only V8 reads: no verdict on this reply
   var d = call.decision;
   // fail-open: no answer, a non-object, a missing decision field or "allow"
   if (d === null || typeof d !== 'object' || d.decision !== ah.cfg('speculation_judge.decision_block')) return 'allow';

@@ -480,5 +480,5 @@ value = "verify it with a tool, or say what is unverified ('I don't know, here i
 # ---- tool evidence and the user request (hooks/lib/inference-check.js collectEvidence, lastUserPrompt) -------------
 
 [judge.dispatch_blocking_checks]
-doc = "The checks the dispatcher process runs itself, once, when the daemon deferred them: their answer needs a model call of seconds, which the daemon's exchange deadline cannot wait for, but the dispatcher is a one-shot process under the hook's own timeout (the Stop hook allows 30 s; the CLI judge is cut at speculation_judge.timeout_ms). A check that still defers there is left to its Node hook."
+doc = "The checks the dispatcher process runs itself, once, when the daemon deferred them: their answer needs a model call of seconds, which the daemon's exchange deadline cannot wait for, but the dispatcher is a one-shot process under the hook's own timeout (the Stop hook allows 30 s; the CLI judge is cut at speculation_judge.timeout_ms). The speculation-judge script never defers in that process (a call it cannot make there is counted and allowed), so no Node hook is started for it."
 value = ["speculation-judge"]
