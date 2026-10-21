@@ -548,3 +548,7 @@ value = 384
 [jevrep.audit_backup_gen]
 doc = "The suffix of the audit log backup."
 value = "1"
+
+[jevrep.weekly_argv]
+doc = "The arguments the weekly scorecard check hands to the report (the 7-day scorecard as JSON), so a script reads the verdicts without printing a report."
+value = ["--weekly", "--json"]

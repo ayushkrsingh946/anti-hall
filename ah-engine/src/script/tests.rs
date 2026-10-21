@@ -1685,3 +1685,36 @@ fn an_idle_worker_frees_its_interpreter_and_the_next_call_rebuilds_it() {
     assert_eq!(seen.0, seen.1, "the rebuilt interpreter answers the same");
     crate::discard::harmless(std::fs::remove_dir_all(&h)); // keep: cleanup
 }
+
+// ---- v0.301 W3b: the weekly Jev scorecard ----------------------------------------------------------------------------
+
+/// The weekly scorecard is built again: a KEEP verdict whose integration is not on is named, and the week is consumed only once the
+/// scorecard exists. A Jev that is off hears nothing and stamps nothing.
+#[test]
+fn the_weekly_scorecard_names_an_integration_whose_mode_lags_its_keep_verdict() {
+    let rows: String = (0..60)
+        .flat_map(|i| {
+            [
+                format!("{{\"ts\":\"{{ISO}}\",\"id\":\"zz-test\",\"h\":\"h{i}\",\"backend\":\"jev\",\"mode\":\"on\",\"changed\":\"added\",\"ms\":100}}"),
+                format!("{{\"type\":\"outcome\",\"ts\":\"{{ISO}}\",\"id\":\"zz-test\",\"h\":\"h{i}\",\"outcome\":\"ok\"}}"),
+            ]
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let case = |enabled: bool| {
+        json!({
+            "env": {"HOME": "{HOME}"}, "event": "SessionStart", "opts": {"plugin_root": "{PLUGIN}"},
+            "files": {".anti-hall/jev.json": format!("{{\"enabled\":{enabled}}}"), ".anti-hall/logs/jev-assist.ndjson": rows.clone()},
+            "payload": {"hook_event_name": "SessionStart", "session_id": "s1"},
+        })
+    };
+    let latch = defaults::text("jev_weekly.latch_file");
+    let on = golden::lay(&case(true));
+    let got = golden::verdict_json(&golden::run_case("jev-weekly-scorecard", &on, 1).expect("a shipped script"), &on);
+    assert_eq!(got["v"], "advisory", "{got}");
+    assert!(got["text"].as_str().unwrap_or_default().contains("zz-test is ready to switch ON."), "{got}");
+    assert!(Path::new(&on.home).join(".anti-hall").join(latch).is_file(), "the week is consumed once the scorecard is built");
+    let off = golden::lay(&case(false));
+    assert_eq!(golden::verdict_json(&golden::run_case("jev-weekly-scorecard", &off, 1).expect("a shipped script"), &off)["v"], "allow");
+    assert!(!Path::new(&off.home).join(".anti-hall").join(latch).exists(), "a Jev that is off consumes nothing");
+}

@@ -157,6 +157,9 @@ var ah = {
     // Record that the review reminder named these integration ids.
     reviewShown: function (ids) { ahHost.jevReviewShown(JSON.stringify(ids)); },
     // The one-time legacy-key notice: {notice: string|null}, or {unsure: true} when only Node can say.
+    // The 7-day verdict scorecard {generatedAt, integrations: [{id, calls, suggestion, reason, mode}], transports} (the jev-report data), or null
+    // when it could not be built. Read-only.
+    weeklyScorecard: function () { var r = ahHost.jevWeeklyScorecard(); return r === null || r === undefined ? null : JSON.parse(r); },
     keyNotice: function (jevOn, judgeOn, allowAnthropic) { return JSON.parse(ahHost.jevKeyNotice(!!jevOn, !!judgeOn, !!allowAnthropic)); },
   },
   sys: {

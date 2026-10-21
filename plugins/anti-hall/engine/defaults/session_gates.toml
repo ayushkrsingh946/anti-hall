@@ -71,7 +71,7 @@ value = "ANTIHALL_ALLOW_REAL_HOME_TEST"
 
 [jev_weekly.summary]
 doc = "One-line description of the jev-weekly-scorecard check in the generated reference."
-value = "Stays silent when the weekly Jev scorecard notice cannot be due (Jev off, notice off, child workspace, checked within a week); when the check is due and the Jev decision log holds no rows it stamps the weekly latch itself; otherwise defers to the Node hook, which builds the report (port of jev-weekly-scorecard.js)."
+value = "Stays silent when the weekly Jev scorecard notice cannot be due (Jev off, notice off, child workspace, checked within a week); when it is due it builds the 7-day verdicts (the jev-report scorecard), names the first integration whose mode does not yet match its KEEP or REMOVE verdict and stamps the weekly latch; a week whose scorecard could not be built is not consumed (port of jev-weekly-scorecard.js)."
 
 [jev_weekly.notice_setting]
 doc = "The setting jev.weeklyNotice (on by default; a legacy jev.json value is honoured)."
@@ -85,16 +85,40 @@ value = "state/jev-weekly-notice.json"
 doc = "The key of the weekly latch that holds the time of the last check."
 value = "lastCheckedTs"
 
-[jev_weekly.decision_log]
-doc = "The Jev decision log the weekly report reads, relative to the anti-hall directory; its rotated generations are this name plus a dot and a number."
-value = "logs/jev-assist.ndjson"
-
 [jev_weekly.period_ms]
 doc = "How often the scorecard check may run."
 value = 604800000
 unit = "ms"
 min = 1000
 max = 31536000000
+
+[jev_weekly.guard]
+doc = "The guard name on the weekly scorecard notice."
+value = "jev-scorecard"
+
+[jev_weekly.notice_what]
+doc = "What the weekly scorecard notice says: {id} (the integration), {to} (jev_weekly.to_on or jev_weekly.to_off)."
+value = "{id} is ready to switch {to}."
+
+[jev_weekly.notice_instead]
+doc = "What the weekly scorecard notice tells the reader to do."
+value = "run /anti-hall:jev."
+
+[jev_weekly.to_on]
+doc = "The direction word of a KEEP verdict whose integration is not yet on."
+value = "ON"
+
+[jev_weekly.to_off]
+doc = "The direction word of a REMOVE verdict whose integration is not yet off."
+value = "OFF"
+
+[jev_weekly.mode_on]
+doc = "The Jev mode name of an integration that is on."
+value = "on"
+
+[jev_weekly.mode_off]
+doc = "The Jev mode name of an integration that is off."
+value = "off"
 
 # ---- jev-review-reminder -----------------------------------------------------------------------------------
 

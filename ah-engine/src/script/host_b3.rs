@@ -18,6 +18,7 @@
 //! | `jevAskSpec(spec)` | ask Jev (`spec`: JSON text, see [`jev_ask`]): detached (returns `null`) or synchronous (returns the outcome as JSON text) |
 //! | `fnv(text)` / `contentHash(parts)` | the 64-bit FNV-1a hex of a text (the spawn key) / the Jev content hash of a list of texts |
 //! | `localTime(ms)` | JSON local calendar fields of an instant with the zone offset |
+//! | `jevWeeklyScorecard()` | JSON `{generatedAt, integrations: [{id, calls, suggestion, reason, mode}], transports}`: the 7-day Jev verdicts with each integration's current mode (the `jev-report --weekly --json` scorecard), or `null` when it could not be built |
 //! | `stateUpdate(ns, key, fn)` | atomic read-modify-write: `fn(current or null)` returns the new text, or `null` to leave it; stale files are pruned after a write |
 // Discard triage (E3): every `.ok()` / `unwrap_or_default()` in this file is a deliberate keep, for these reasons:
 // - an unreadable optional file is the same as an absent one (fail-open, as Node's try/catch)
@@ -314,6 +315,12 @@ pub fn install<'a>(c: &Ctx<'a>, h: &Object<'a>) -> rquickjs::Result<()> {
     h.set(
         "judgeCliCall",
         Function::new(c.clone(), |spec: String| -> rquickjs::Result<Option<String>> { with_settings(|st| crate::judge::host::call(st, &spec)) })?,
+    )?;
+    h.set(
+        "jevWeeklyScorecard",
+        Function::new(c.clone(), || -> rquickjs::Result<Option<String>> {
+            with_settings(|st| crate::jev::report::weekly_scorecard(std::path::Path::new(&st.home)).map(|v| v.to_string()))
+        })?,
     )?;
     h.set("fnv", Function::new(c.clone(), |t: String| format!("{:016x}", crate::health::fnv(&t)))?)?;
     h.set(
