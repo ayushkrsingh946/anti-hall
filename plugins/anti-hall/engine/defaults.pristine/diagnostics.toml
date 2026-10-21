@@ -190,3 +190,113 @@ min = 8
 doc = "Hard limit on the labelled work counters (and on exited-thread names): a new key past it is dropped and counted in `tally_dropped`; the existing keys keep counting."
 value = 256
 min = 16
+
+# ---- observability contract (v0.301 W1): switchable profiling, shipped diag verbs, trace ring, uniform accounting, per-site counters ----
+
+[diagnostics.profile]
+doc = "Baseline profiling mode: off (default; the cost is one atomic load per call), sample (record one call in diagnostics.profile_sample_every) or full (record every call). Per-check CPU and allocation spans go to the bounded file diagnostics.profile_file. `ah-engine ctl profile on --for <dur>` raises the mode for a limited time and falls back to this value when the time is up."
+value = "off"
+
+[diagnostics.profile_sample_every]
+doc = "In `sample` mode one check call in this many is recorded."
+value = 10
+min = 1
+
+[diagnostics.profile_on_mode]
+doc = "Mode `ctl profile on` switches to when none is named: sample or full."
+value = "full"
+
+[diagnostics.profile_file]
+doc = "Name (in the state directory) of the profile span file: one JSON line per recorded check call."
+value = "profile.jsonl"
+
+[diagnostics.profile_max_bytes]
+doc = "Size limit of the profile span file. When it is reached recording stops and the mode falls back to off (counted and logged); the file is never rotated or grown past this."
+value = 4194304
+min = 4096
+unit = "bytes"
+
+[diagnostics.profile_max_secs]
+doc = "Longest a runtime `ctl profile on` stays on; a longer `--for` is cut to this, and an `on` without `--for` runs this long."
+value = 600
+min = 1
+unit = "s"
+
+[diagnostics.duration_units]
+doc = "Suffixes the `--for` duration of `ctl profile on` accepts, each with its length in milliseconds (a bare number is seconds)."
+value = { ms = 1, s = 1000, m = 60000, h = 3600000 }
+
+[diagnostics.diag_topics]
+doc = "The topics of `ah-engine diag <topic>`: read-only reports over state the engine already keeps (not feature-gated). `trace` dumps the always-on trace ring."
+value = ["cpu", "mem", "threads", "hooks", "mesh", "jev", "fs", "locks", "trace"]
+
+[diagnostics.diag_top]
+doc = "Rows shown per ranking in `diag hooks` and `diag fs`."
+value = 15
+min = 1
+
+[diagnostics.trace_entries]
+doc = "Size of the always-on trace ring (the most recent check, duty, stage and hand-back records kept in memory). Dumped by `diag trace` and written to diagnostics.trace_dump_file when a hard limit trips. Read at daemon start."
+value = 512
+min = 16
+max = 65536
+
+[diagnostics.trace_dump_file]
+doc = "Name (in the state directory) of the file the trace ring is written to when a hard limit trips; each dump replaces the previous one."
+value = "trace-dump.jsonl"
+
+[diagnostics.counters_file]
+doc = "Name (in the state directory) of the shared counter journal: processes that are not the daemon (hook calls, one-shot commands, post-update stages) append their hand-back and accounting counts here, and `status` folds them in. Never created by a read-only command."
+value = "obs-counters.log"
+
+[diagnostics.counters_max_bytes]
+doc = "Size at which the counter journal is folded into one line per counter (atomically, under the journal lock), so it never grows without bound."
+value = 262144
+min = 4096
+unit = "bytes"
+
+[diagnostics.counters_soft_keys]
+doc = "Soft limit on distinct counters (kind, key and outcome) the journal fold keeps; past it each new counter adds one to `counters_soft_hits`."
+value = 512
+min = 8
+
+[diagnostics.counters_hard_keys]
+doc = "Hard limit on distinct counters in the journal fold: a new counter past it is folded into `other` and counted in `counters_dropped`."
+value = 2048
+min = 16
+
+[diagnostics.counters_other_key]
+doc = "The key under which counters past diagnostics.counters_hard_keys are folded."
+value = "other"
+
+[diagnostics.outcome_map]
+doc = "How a duty or stage record's own outcome word maps onto the five accounting outcomes (ok, error, disabled, held, refused). A record that also names a gate is looked up as `<word>+gate`. A word not listed here counts as `error` so a new outcome cannot hide."
+value = { ran = "ok", ok = "ok", "skipped+gate" = "ok", skipped = "disabled", disabled = "disabled", failed = "error", error = "error", held = "held", deferred = "held", refused = "refused" }
+
+
+[diagnostics.counter_name_max]
+doc = "Longest site, duty or stage name kept in the counter journal (characters); longer names are cut. Whitespace and control characters in a name become `_`."
+value = 96
+min = 8
+
+[diagnostics.fd_dir]
+doc = "Directory that lists this process's open file descriptors (`diag fs` counts its entries)."
+value = "/dev/fd"
+
+[diagnostics.trace_dump_min_ms]
+doc = "Shortest time between two automatic trace-ring dumps (a hard limit that trips again inside this time does not rewrite the file)."
+value = 60000
+min = 0
+unit = "ms"
+
+[diagnostics.trace_reason_mem]
+doc = "Reason recorded in a trace-ring dump taken when the memory registry's hard limit trips."
+value = "memory-hard-limit"
+
+[diagnostics.trace_reason_rss]
+doc = "Reason recorded in a trace-ring dump taken when the resident-set cap trips."
+value = "rss-cap"
+
+[diagnostics.trace_reason_cpu]
+doc = "Reason recorded in a trace-ring dump taken when a request trips its CPU budget."
+value = "cpu-budget"

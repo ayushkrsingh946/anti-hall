@@ -895,3 +895,39 @@ value = "request shed under load"
 doc = "Exchange text: the daemon closed the connection before it acknowledged the request."
 value = "closed before ACK(req)"
 
+
+[msg.obs_diag_usage]
+doc = "Usage of `ah-engine diag`; {topics} is the list in diagnostics.diag_topics."
+value = "usage: ah-engine diag <{topics}>"
+
+[msg.obs_diag_unknown]
+doc = "Printed when `diag` is given a topic that is not in diagnostics.diag_topics."
+value = "unknown diag topic: {topic}"
+
+[msg.obs_profile_usage]
+doc = "Usage of `ah-engine ctl profile`."
+value = "usage: ah-engine ctl profile <on [sample|full] [--for <duration>]|off|status>"
+
+[msg.obs_profile_bad_duration]
+doc = "Reply to a `--for` value that is not a number with an optional unit suffix."
+value = "bad duration: {value}"
+
+[msg.obs_profile_on]
+doc = "Log line when a runtime profiling window starts."
+value = "profiling on: mode {mode} for {ms} ms"
+
+[msg.obs_profile_off]
+doc = "Log line when a runtime profiling window ends or is switched off; {why} is off, expired or full-file."
+value = "profiling back to {mode} ({why})"
+
+[msg.obs_trace_dumped]
+doc = "Log line when the trace ring is written because a hard limit tripped."
+value = "trace ring dumped ({reason}, {entries} entries) to {path}"
+
+[msg.obs_trace_dump_failed]
+doc = "Log line when the trace ring could not be written."
+value = "trace ring dump failed ({reason}): {err}"
+
+[msg.obs_counter_write_failed]
+doc = "Log line when a counter could not be appended to the journal (the count is lost; nothing else changes)."
+value = "counter journal write failed: {err}"
