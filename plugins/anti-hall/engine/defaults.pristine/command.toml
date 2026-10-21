@@ -845,18 +845,6 @@ value = ".claude/plans"
 doc = "The permission mode in which non-source files may be edited."
 value = "plan"
 
-[command.git_local_branch_argv]
-doc = "The git arguments (before the ref) that succeed only when a local branch exists (plain-push carve-out for another branch of the repository)."
-value = ["rev-parse", "--verify", "--quiet"]
-
-[command.git_local_branch_prefix]
-doc = "What a branch name is prefixed with to name its ref for the existence check."
-value = "refs/heads/"
-
-[command.plain_push_protected_refs]
-doc = "Branch names a plain push never carves out when they are not the current branch (the plain push of the current branch is unchanged)."
-value = ["main", "master"]
-
 [command.git_branch_argv]
 doc = "The git arguments that print the current branch (plain-push carve-out)."
 value = ["symbolic-ref", "--short", "HEAD"]

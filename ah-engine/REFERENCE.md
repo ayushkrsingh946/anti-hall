@@ -969,8 +969,6 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `command.git_global_flag_opts` | `8 items` |  |  | git global options without a value, skipped to find the subcommand (command-guard.js GIT_GLOBAL_FLAG_OPTS). |
 | `command.git_global_value_opts` | `8 items` |  |  | git global options that take a value (command-guard.js GIT_GLOBAL_VALUE_OPTS). |
 | `command.git_heavy_subs` | `push, pull, clone` |  |  | git subcommands that are always heavy (command-guard.js isHeavyGitSegment). |
-| `command.git_local_branch_argv` | `rev-parse, --verify, --quiet` |  |  | The git arguments (before the ref) that succeed only when a local branch exists (plain-push carve-out for another branch of the repository). |
-| `command.git_local_branch_prefix` | `refs/heads/` |  |  | What a branch name is prefixed with to name its ref for the existence check. |
 | `command.git_status_timeout_ms` | `2000` |  | ms | How long the `git status` question about a script file may take (command-guard.js gitCleanTracked: 2000 ms). |
 | `command.git_tag_value_flags` | `10 items` |  |  | git tag options that take a value (command-guard.js GIT_TAG_VALUE_FLAGS). |
 | `command.git_timeout_ms` | `5000` |  | ms | How long a git question of the plain-push carve-out may take (command-guard.js: 5000 ms). |
@@ -1059,7 +1057,6 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `command.node_script_ext` | `(?i)\.(?:js\|mjs\|cjs)$` |  |  | Script file extensions of node for the flagged-interpreter test (command-guard.js isFlaggedInterpreterScript). |
 | `command.pattern_first_verbs` | `grep, sed, awk` |  |  | Verbs whose first operand is a pattern, blanked before the heavy patterns run (command-guard.js PATTERN_FIRST_VERBS). |
 | `command.pipeline_ends` | `end, ;, &&, \\|\\|, \n` |  |  | The delimiters that end a pipeline in the bounded verification scan (command-guard.js PIPELINE_ENDS). |
-| `command.plain_push_protected_refs` | `main, master` |  |  | Branch names a plain push never carves out when they are not the current branch (the plain push of the current branch is unchanged). |
 | `command.plain_read_git_kinds` | `log, status, show, revparse` |  |  | classifyPlainGitChainSegment kinds that count as one read-only unit of a chain whose other units are whole read-only forms (command-guard.js isPlainReadGitSegment). |
 | `command.plugin_manifest_rel` | `.claude-plugin/plugin.json` |  |  | The plugin manifest, relative to a plugin root. |
 | `command.plugin_name` | `anti-hall` |  |  | The name anti-hall's manifest carries. |

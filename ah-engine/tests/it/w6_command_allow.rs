@@ -71,9 +71,9 @@ fn single_small_state_changing_commands_are_allowed_and_the_real_cases_still_blo
     // #236: the remote write `gh issue create` stays heavy, as in the Node guard
     blocked(r#"gh issue create --repo o/r --title "x" --body-file /tmp/f.md"#);
     blocked(&format!("cd {} && gh issue create --repo o/r --title x --body-file /tmp/f.md 2>&1 | tail -1", main.display()));
-    allowed("git push -u origin feat2");
-    allowed(&format!("cd {} && git push -q -u origin feat2 2>&1 | tail -2", wt2.display()));
-    allowed("cd ~/wt2 && git push -q -u origin feat2 2>&1 | tail -2");
+    // #235: a plain push exempts the CURRENT branch only; another existing local branch (a sibling worktree's) does not
+    blocked("git push -u origin feat2");
+    blocked("git push origin feat2");
     blocked("git push -u origin main");
     blocked("git push -u origin no-such-branch");
     blocked("git push --force origin feat2");

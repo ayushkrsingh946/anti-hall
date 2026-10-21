@@ -410,7 +410,7 @@ function cmdBuildTables() {
   t.classifyPushSubs = cmdSet('command.classify_push_subs'); t.classifyPullSubs = cmdSet('command.classify_pull_subs');
   t.stashReadSubs = cmdSet('command.stash_read_subs'); t.stashMutatingSubs = cmdSet('command.stash_mutating_subs');
   t.pluginWalkLevels = ah.cfgNum('command.plugin_walk_levels'); t.pluginManifestRel = ah.cfg('command.plugin_manifest_rel'); t.pluginName = ah.cfg('command.plugin_name');
-  t.gitBranchArgv = ah.cfg('command.git_branch_argv'); t.gitLocalBranchArgv = ah.cfg('command.git_local_branch_argv'); t.gitLocalBranchPrefix = ah.cfg('command.git_local_branch_prefix'); t.plainPushProtected = cmdSet('command.plain_push_protected_refs'); t.gitTimeout = ah.cfgNum('command.git_timeout_ms'); t.gitStatusTimeout = ah.cfgNum('command.git_status_timeout_ms');
+  t.gitBranchArgv = ah.cfg('command.git_branch_argv'); t.gitTimeout = ah.cfgNum('command.git_timeout_ms'); t.gitStatusTimeout = ah.cfgNum('command.git_status_timeout_ms');
   t.gcloudSinkVerbs = cmdSet('command.gcloud_sink_verbs');
   // The settings the script reads by section and key (`settings.get(section, key)` of the Node hooks): each entry's own section and key say
   // which setting it is.
@@ -3528,17 +3528,6 @@ function currentBranchName(cwd) {
   }
 }
 
-// localBranchExists(name, cwd) -> true iff `refs/heads/<name>` exists in the repository of `cwd`; every failure reads as false (fail closed).
-function localBranchExists(name, cwd) {
-  try {
-    const { spawnSync } = require('child_process');
-    const res = spawnSync('git', ['-C', cwd || process.cwd()].concat(T.gitLocalBranchArgv, [T.gitLocalBranchPrefix + name]), { encoding: 'utf8', timeout: T.gitTimeout });
-    return !!res && res.status === 0;
-  } catch (_) {
-    return false;
-  }
-}
-
 // configuredRemotes(cwd) -> array of `git -C <cwd> remote` names, or null
 // on any failure (not a repo, spawn error/timeout) — the caller treats null
 // as FAIL CLOSED.
@@ -3573,9 +3562,7 @@ function isPlainPushRefAllowed(ref, cwd) {
   const branch = currentBranchName(cwd);
   if (!branch) return false; // fail closed: could not resolve the current branch
   const colon = ref.indexOf(':');
-  // another branch of this repository (an existing local branch, checked out in a sibling worktree or not) pushes the same way;
-  // the protected names (main, master) are never carved out
-  if (colon === -1) return ref === branch || (!T.plainPushProtected.has(ref) && localBranchExists(ref, cwd));
+  if (colon === -1) return ref === branch;
   // (d) `SRC:DST`: SRC is HEAD or the current branch, DST is the current
   // branch (bare or refs/heads/-qualified). Anything else never qualifies.
   const src = ref.slice(0, colon);
