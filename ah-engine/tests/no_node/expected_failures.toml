@@ -20,11 +20,6 @@ reason = "a slow git check-ignore (past session.gitignore_probe_ms) on a loaded 
 optional = true
 [[node]]
 surface = "hook/claude/SessionStart"
-script = "hooks/devswarm-child-role.js"
-lane = "L14b"
-reason = "the engine runs the Node twin of the child-role SessionStart check"
-[[node]]
-surface = "hook/claude/SessionStart"
 script = "hooks/verify-first-orch.js"
 lane = "L14b"
 reason = "the DevSwarm-active verify-first-orch path defers to the Node hook"
@@ -87,18 +82,3 @@ reason = "the Node shadow witness of a sampled engine status line run (ops.shado
 
 
 # --- sup/<duty>: the DevSwarm supervisor tick (tests/no_node/sup.rs, minimal fixture: one workspace descriptor)
-[[node]]
-surface = "sup/log_rotate"
-script = "companion/devswarm-supervisor.js#rotateSupervisorLogIfNeeded"
-lane = "#64"
-reason = "the non-acting Node witness of the native log rotation (devswarm_sup.set_witness); it fails harmlessly without Node (match null) and goes with the shadows"
-[[node]]
-surface = "sup/housekeeping"
-script = "companion/devswarm-supervisor.js#housekeepingSweepIfDue"
-lane = "#64"
-reason = "the non-acting Node witness of the native housekeeping sweep (devswarm_sup.set_witness); it fails harmlessly without Node (match null) and goes with the shadows"
-[[node]]
-surface = "sup/reconcile"
-script = "companion/devswarm-supervisor.js#reconcileSweepIfDue"
-lane = "#14"
-reason = "the reconcile duty is Node's reconcileSweepIfDue until devswarm_sup.reconcile_mode is engine and the sweep is native; without Node it records failed (exit 127)"

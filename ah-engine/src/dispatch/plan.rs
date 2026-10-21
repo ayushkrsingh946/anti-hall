@@ -145,12 +145,9 @@ pub fn build(event: &str, matched: Vec<Entry>, cfg: &HookCfg, occ: &Occurrence<'
         let mode = if ecfg.mode == Mode::Shadow { Mode::Shadow } else { ec.mode };
         let mode = if guard && e.check.is_none() { Mode::On } else { mode }; // a guard entry with no engine check only has its Node hook
         if mode == Mode::Off {
+            // a check switched off is disabled: dropped from the plan, recorded as `off` in the event's telemetry (no Node hook
+            // takes its place any more)
             plan.dropped.push((e.id.clone(), Outcome::Off));
-            if guard && e.check.is_some() {
-                // the engine's check is off; the Node hook is the decider and still runs
-                kept += 1;
-                plan.items.push(Item { entry: Entry { check: None, ..e }, shadow: false });
-            }
             continue;
         }
         if let Some(w) = ec.when.as_ref().or(e.when.as_ref())
@@ -166,10 +163,8 @@ pub fn build(event: &str, matched: Vec<Entry>, cfg: &HookCfg, occ: &Occurrence<'
         }
         kept += 1;
         match mode {
-            Mode::Shadow if guard && e.check.is_some() => {
-                plan.items.push(Item { entry: Entry { check: None, ..e.clone() }, shadow: false });
-                plan.items.push(Item { entry: e, shadow: true });
-            }
+            // a guard entry is never only measured: with no Node hook to decide beside it, its check decides
+            Mode::Shadow if guard => plan.items.push(Item { entry: e, shadow: false }),
             Mode::Shadow => plan.items.push(Item { entry: e, shadow: true }),
             _ => plan.items.push(Item { entry: e, shadow: false }),
         }
