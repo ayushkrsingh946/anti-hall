@@ -249,6 +249,7 @@ impl Shared {
         lk(&self.sessions).set_rate(c.session_rps, c.session_burst);
         lk(&self.projects).set_rate(c.project_rps, c.project_burst);
         self.telemetry.set_enabled(c.effective.boolean("telemetry.enabled"));
+        crate::obs::profile::apply_config(&c.effective.text("diagnostics.profile"));
     }
 
     /// Keep impact events (and, through later layers, project state) in `db` instead of memory.
@@ -312,6 +313,35 @@ impl Shared {
             ]);
         }
         self.telemetry.metrics_json(&check, &gauges)
+    }
+
+    /// The `diag` control verb: one read-only report over state the daemon already keeps (the topics are `diagnostics.diag_topics`).
+    fn diag_json(&self, topic: &str) -> serde_json::Value {
+        let cfg = self.cfg();
+        match topic {
+            "cpu" => serde_json::json!({
+                "cpu_s": (limits::process_cpu_secs() * 1000.0).round() / 1000.0,
+                "cpu": cpu_json(&self.telemetry),
+                "budget": lk(&self.budget).report(cfg.effective.num("diagnostics.budget_cpu_pct"), cfg.effective.num("diagnostics.budget_mem_mb")),
+                "profile": crate::obs::profile::status(),
+            }),
+            "mem" => self.memory_with_ledger(),
+            "threads" => crate::threads::snapshot_json(),
+            "hooks" => serde_json::json!({"summary": self.telemetry.headline(), "phases": phases_json(&self.telemetry), "handback": crate::obs::counters::snapshot()}),
+            "mesh" => {
+                let reply = crate::dswire::cli::ctl("");
+                serde_json::from_str(&reply).unwrap_or_else(|_| serde_json::json!({"status": reply}))
+            }
+            "jev" => self.telemetry.with_metrics(|m| {
+                let snap = m.snapshot("");
+                let keep = |k: &str| {
+                    snap.get(k).and_then(serde_json::Value::as_array).into_iter().flatten().filter(|r| r.get("name").and_then(serde_json::Value::as_str).is_some_and(|n| n.starts_with("jev"))).cloned().collect::<Vec<_>>()
+                };
+                serde_json::json!({"counters": keep("counters"), "histograms": keep("histograms")})
+            }),
+            "trace" => serde_json::json!({"running": true, "entries": crate::obs::trace::snapshot()}),
+            other => crate::obs::diagverbs::local(other).unwrap_or_else(|| serde_json::json!({"error": defaults::render("msg.obs_diag_unknown", &[("topic", &other)])})),
+        }
     }
 
     /// The `impact` control verb: `kind=<kind>`, `project=<hash>`, `recent=<n>`.
@@ -443,7 +473,7 @@ impl Shared {
         let mut health_summary = health::summary();
         let degraded = health::overall_degraded(&health_summary, crate::failopen::state(crate::failopen::window().0) != defaults::text("fail_open.state_ok"));
         health_summary["degraded"] = serde_json::Value::Bool(degraded);
-        serde_json::json!({
+        let mut v = serde_json::json!({
             "running": true,
             "pid": std::process::id(),
             "version": self.own,
@@ -499,8 +529,13 @@ impl Shared {
             "inject_gate": {"sessions": gs.sessions, "slots": gs.slots, "bytes": gs.bytes, "evictions": gs.evictions,
                 "max_sessions": defaults::num("inject_gate.max_sessions"), "max_slots": defaults::num("inject_gate.max_slots")},
             "config": {"version": cfg.version, "pending_restart": cfg.pending_restart, "last_error": cfg.last_error},
-        })
-        .to_string()
+            "profile": crate::obs::profile::status(),
+        });
+        // the hand-back and accounting counters (the daemon's own plus every other process's journal)
+        if let (Some(m), Some(o)) = (v.as_object_mut(), crate::obs::counters::snapshot().as_object()) {
+            m.extend(o.clone());
+        }
+        v.to_string()
     }
 }
 
@@ -641,6 +676,8 @@ pub fn handle_request_with(req: &[u8], sh: &Shared, cfg: &crate::cfgstore::Snaps
         Some("devswarm") => (Reply::Ok(crate::dswire::cli::ctl(args)), After::Continue),
         Some("gate") => (Reply::Ok(crate::gate::global().report().to_string()), After::Continue),
         Some("telemetry") => (Reply::Ok(sh.telemetry_json(args).to_string()), After::Continue),
+        Some("profile") => (Reply::Ok(crate::obs::profile::ctl(args)), After::Continue),
+        Some("diag") => (Reply::Ok(sh.diag_json(args.trim()).to_string()), After::Continue),
         Some("ping") => (Reply::Ok(format!("pong {} {}", sh.own, std::process::id())), After::Continue),
         Some("reload") => {
             sh.reload();
@@ -691,6 +728,16 @@ pub fn observe_check_cost_in(t: &Telemetry, event: &str, check: &str, micros: u6
     let mem = crate::load::take_check_mem();
     let notes = crate::load::take_counts();
     let size = crate::load::size_bucket(crate::load::transcript_size());
+    if crate::obs::profile::active() {
+        crate::obs::profile::span(&crate::obs::profile::Span {
+            event,
+            check,
+            wall_us: micros,
+            cpu_us: cpu,
+            alloc_bytes: mem.map_or(0, |d| d.alloc),
+            peak_bytes: mem.map_or(0, |d| d.peak),
+        });
+    }
     t.with_metrics(|m| {
         let l = [("check", check), ("size", size.as_str())];
         m.add("check_bytes_read", &l, bytes);
@@ -714,6 +761,10 @@ impl crate::hookio::Observer for DaemonObserver<'_> {
     fn check(&self, check: &str, rule_id: &str, verdict: &crate::checks::Verdict, micros: u64) {
         crate::memdiag::note_check(check);
         observe_check_cost_in(self.t, self.event, check, micros);
+        crate::obs::trace::push("check", check, telemetry::decision_name(verdict), micros);
+        if matches!(verdict, crate::checks::Verdict::Defer) {
+            crate::obs::counters::handback(crate::obs::counters::Handback::NativeUnable, &format!("check:{check}"));
+        }
         self.t.observe_check_in(self.event, check, rule_id, verdict, micros, self.project);
     }
 
@@ -811,6 +862,7 @@ fn record_budget_trip(sh: &Shared, project: &str, detail: &str) {
     sh.telemetry.with_metrics(|m| m.inc("budget_trips", &[]));
     sh.telemetry.fallback("budget", project);
     health::log_event("budget", "-", detail);
+    crate::obs::trace::dump(defaults::text("diagnostics.trace_reason_cpu"));
 }
 
 fn hook(body: &str, env: &crate::reqenv::RequestEnv, sh: &Shared, cfg: &Config) -> Reply {
@@ -1594,12 +1646,14 @@ fn watchdog(sh: Arc<Shared>) {
             // the memory registry's process-wide check: shrink at the global soft limit, recycle at the hard one, and a clean
             // restart (the same drain as the cap below, with the reason recorded) when it stays over the hard limit
             if let Some(r) = crate::mem::global().tick(mem.saturating_mul(1024), now) {
+                crate::obs::trace::dump(defaults::text("diagnostics.trace_reason_mem"));
                 health::log_event("memory", "breakdown", &sh.memory_line());
                 begin_drain(&sh, &crate::mem::restart_reason(&r), true);
                 continue;
             }
             if cfg.rss_cap_kb > 0 && mem > cfg.rss_cap_kb && !sh.rss_tripped.swap(true, SeqCst) {
                 health::log_event("rss", "rss", &defaults::render("msg.log_rss", &[("rss", &mem), ("cap", &cfg.rss_cap_kb)]));
+                crate::obs::trace::dump(defaults::text("diagnostics.trace_reason_rss"));
                 // its own kind: the cap trip above is the one the crash-loop rule counts, this line only explains it
                 health::log_event("memory", "breakdown", &sh.memory_line());
                 if cfg_snapshot_on(&sh) {

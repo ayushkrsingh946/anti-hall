@@ -2,10 +2,11 @@
 // nothing (a Jev judge child, not a child workspace, the integration killed or switched off, DevSwarm inactive) and every active child's
 // turn: the heartbeat (with the git push state when the child runs in a checkout), the registration of the child's descriptor and registry
 // row under its lock (host_childturn.rs), the ingest-health banners, the fixed reminder block (through the emit-dedupe store), the step
-// plan, the unread parent mail of the durable inbox and the archive request. What stays with Node, each decided before anything is written
-// or (for the mesh-direct count) before the first emit: an archived workspace, a truncated builder id, an ingest daemon that is not
-// healthy (the banners), a mesh-direct unread count (the reader-identity correction), a project whose store Node would first create or
-// that holds a second row of the worktree or a phantom descriptor, and a workspace lock that stays busy.
+// plan, the unread parent mail of the durable inbox and the archive request. What this script cannot settle exactly is decided natively and counted
+// (native_unable): an archived workspace gets no turn text (its one handover block is the Stop gate's), a truncated builder id is not
+// reported on stderr, an unhealthy ingest daemon adds no banner when its health is unsure, a mesh-direct unread count that needs the
+// reader-identity correction is left out, a project whose store Node would first create or that holds a second row of the worktree or a
+// phantom descriptor, or a workspace lock that stays busy, is not registered this turn.
 // Builds on devswarm-child-role.js (script.includes) for the plugin root and the stable launcher. Keys and texts: small_guards.toml (devswarm_prompt.*).
 'use strict';
 
@@ -46,24 +47,25 @@ function ctRead(path) {
 }
 
 // `unreadInfo(env, home)`: the unread lines of the child's own durable inbox (`workspaces/<id>.json` -> inboxPath / cursorPath), or null
-// when there are none, the inbox or its cursor cannot be read, or the descriptor names no inbox. A file the engine cannot read whole, and
-// a relative path (Node resolves it against its own working directory), are Node's.
+// when there are none, the inbox or its cursor cannot be read, or the descriptor names no inbox. A file the engine cannot read whole says
+// nothing, and a relative path resolves against the stand-in directory (both counted).
 function ctUnread(id, home) {
   if (!ctSafeId(id)) return null;
   var raw = ctRead(home + '/' + ah.cfg('paths.base_dir') + '/' + ah.cfg('devswarm_prompt.descriptor_dir') + '/' + id + '.json');
-  if (raw === undefined) throw gates.UNDECIDABLE;
+  if (raw === undefined) { ah.unable('devswarm-child-turn:descriptor_big'); return null; }
   if (raw === null) return null;
   var desc;
   try { desc = JSON.parse(raw); } catch (e) { return null; }
   if (!desc || typeof desc !== 'object' || !desc.inboxPath) return null;
-  if (typeof desc.inboxPath !== 'string' || (desc.cursorPath !== undefined && desc.cursorPath !== null && typeof desc.cursorPath !== 'string')) throw gates.UNDECIDABLE;
-  if (desc.inboxPath.charAt(0) !== '/' || (desc.cursorPath && desc.cursorPath.charAt(0) !== '/')) throw gates.UNDECIDABLE;
+  if (typeof desc.inboxPath !== 'string' || (desc.cursorPath !== undefined && desc.cursorPath !== null && typeof desc.cursorPath !== 'string')) { ah.unable('devswarm-child-turn:inbox_shape'); return null; }
+  if (desc.inboxPath.charAt(0) !== '/') { ah.unable('devswarm-child-turn:inbox_relative'); desc.inboxPath = ah.path.resolveAbs(hookProc.base() + '/' + desc.inboxPath); }
+  if (desc.cursorPath && desc.cursorPath.charAt(0) !== '/') { ah.unable('devswarm-child-turn:cursor_relative'); desc.cursorPath = ah.path.resolveAbs(hookProc.base() + '/' + desc.cursorPath); }
   var inbox = ctRead(desc.inboxPath);
-  if (inbox === undefined) throw gates.UNDECIDABLE;
+  if (inbox === undefined) { ah.unable('devswarm-child-turn:inbox_big'); return null; }
   if (inbox === null) return null; // missing or unreadable: the count is not known, so nothing is said
   if (!desc.cursorPath) return null;
   var cur = ctRead(desc.cursorPath);
-  if (cur === undefined) throw gates.UNDECIDABLE;
+  if (cur === undefined) { ah.unable('devswarm-child-turn:cursor_big'); return null; }
   if (cur === null) return null;
   var trimmed = cur.trim(), cursor;
   if (/^\d+$/.test(trimmed)) cursor = parseInt(trimmed, 10);
@@ -77,21 +79,21 @@ function ctUnread(id, home) {
 function ctPlanSegment(id, home, root, cli, wroot) {
   try {
     if (!ctSafeId(id)) return null;
-    if (gates.setting('devswarm_prompt.plan_tracking_setting', true, root) === false) return null;
+    if (ctSetting('devswarm_prompt.plan_tracking_setting', true, root) === false) return null;
     var plan = null;
     if (wroot) {
       // in a checkout the plan is found by the worktree's key first, then by id (`findPlan`)
       var fp = JSON.parse(ahHost.ctFindPlan(id, wroot));
-      if (fp.unsure) throw gates.UNDECIDABLE;
+      if (fp.unsure) { ah.unable('devswarm-child-turn:plan_unsure'); return null; }
       plan = fp.plan === null ? null : JSON.parse(fp.plan);
     } else {
       var raw = ctRead(home + '/' + ah.cfg('paths.base_dir') + '/' + ah.cfg('devswarm_prompt.plan_dir') + '/' + id + '.json');
-      if (raw === undefined) throw gates.UNDECIDABLE;
+      if (raw === undefined) { ah.unable('devswarm-child-turn:plan_big'); return null; }
       if (raw !== null) { try { plan = JSON.parse(raw); } catch (e) { plan = null; } }
     }
     var found = plan && typeof plan === 'object' && !Array.isArray(plan) && Array.isArray(plan.steps) ? plan : null;
     if (!found || !found.steps.length) {
-      if (gates.setting('devswarm_prompt.plan_required_setting', false, root) !== true) return null;
+      if (ctSetting('devswarm_prompt.plan_required_setting', false, root) !== true) return null;
       return text.render(ah.cfg('devswarm_prompt.plan_none'), { cli: cli, id: id });
     }
     var open = found.steps.filter(function (s) { return s.status !== 'done'; }), cur = null;
@@ -107,7 +109,6 @@ function ctPlanSegment(id, home, root, cli, wroot) {
       : text.render(ah.cfg('devswarm_prompt.plan_all_done'), { total: found.steps.length, cli: cli });
     return head + text.render(ah.cfg('devswarm_prompt.plan_tail'), { cli: cli, id: id });
   } catch (e) {
-    if (e === gates.UNDECIDABLE) throw e;
     return null;
   }
 }
@@ -216,59 +217,65 @@ function ctForget(sid, key) {
 
 // Whether the archive marker or the DevSwarm app names this child's workspace archived (`isArchivedChildTurn`): true / false, null when only Node can say.
 function ctArchivedNow(builder, top, sid) {
-  if (!gates.setting('devswarm_prompt.archived_stop_setting', true, undefined)) return false;
+  if (!ah.settings.bool('devswarm_prompt.archived_stop_setting')) return false;
   var r = JSON.parse(ahHost.ctArchived(builder, top, sid));
   return r.unsure ? null : r.archived;
 }
 
-// Hand the turn to the Node hook, saying why in the engine's event log (a deferral costs a Node start, so every cause is countable).
-function ctDefer(why) {
+// A case this script cannot settle exactly, counted (native_unable) and logged with its cause.
+function ctUnsure(why) {
+  ah.unable('devswarm-child-turn:' + why.split(':')[0]);
   ah.log(ah.cfg('devswarm_prompt.defer_log_kind'), why);
-  return 'defer';
 }
 
-function ctDecide(p, opts) {
+// A setting of the chain; one that needs a plugin root the request lacks counts as unset (the default applies).
+function ctSetting(key, dflt, root) {
+  return gates.setting(key, dflt, root);
+}
+
+function decide(p, opts) {
   if (devswarmGate.silent(true, 'devswarm_prompt.child_setting')) return 'allow';
-  return gates.run(function () {
+  return (function () {
     // An active child. Its working directory must be known.
     var cwd = jx.isObj(p) ? p.cwd : undefined;
-    if (typeof cwd !== 'string' || cwd === '' || cwd.charAt(0) !== '/') return ctDefer('cwd');
+    if (typeof cwd !== 'string' || cwd === '' || cwd.charAt(0) !== '/') { ctUnsure('cwd'); cwd = hookProc.cwd(p); } // the stand-in directory
     var c = ah.repo.context(cwd);
-    if (c.unsure) return ctDefer('repo-context');
+    if (c.unsure) { ctUnsure('repo-context'); c = { toplevel: null, root: null }; }
     var top = c.toplevel, wroot = c.root; // both null: no git checkout around the working directory
     var guard = ah.homeGuard();
-    if (guard.status !== 'ok') return ctDefer('home');
+    if (guard.status !== 'ok') { ctUnsure('home'); return 'allow'; } // no usable home: no state to keep
     var home = guard.home;
     var root = gates.pluginRoot(opts);
     var cli = ctCli(opts, home);
-    if (cli === null) return ctDefer('cli');
+    if (cli === null) { ctUnsure('cli'); return 'allow'; } // no plugin root: no CLI to name in the reminders
     var sidRaw = jx.isObj(p) ? p.session_id : undefined;
-    if (sidRaw && typeof sidRaw !== 'string') return ctDefer('session-id'); // a number or an object as a session id: Node keys the store on its text
+    if (sidRaw && typeof sidRaw !== 'string') { ctUnsure('session-id'); sidRaw = String(sidRaw); } // a number or an object as a session id: keyed on its text
     var sid = typeof sidRaw === 'string' && sidRaw !== '' ? sidRaw : null;
     var tpRaw = jx.isObj(p) ? p.transcript_path : undefined;
-    if (tpRaw && typeof tpRaw !== 'string') return ctDefer('transcript-path');
+    if (tpRaw && typeof tpRaw !== 'string') { ctUnsure('transcript-path'); tpRaw = String(tpRaw); }
     var tp = typeof tpRaw === 'string' && tpRaw !== '' ? tpRaw : null;
-    if (tp !== null && tp.charAt(0) !== '/') return ctDefer('transcript-path');
+    if (tp !== null && tp.charAt(0) !== '/') { ctUnsure('transcript-path'); tp = hookProc.open(p, tp); }
     var builder = ah.env.get(ah.cfg('devswarm_prompt.builder_env'));
     var branch = ah.env.get(ah.cfg('devswarm_prompt.branch_env'));
     // an id shaped like a cut-short UUID makes Node say so on stderr while it registers the descriptor
-    if (ctSafeId(builder) && sid !== null && new RegExp(ah.cfg('devswarm_prompt.uuid_truncated_re'), 'i').test(builder) && !new RegExp(ah.cfg('devswarm_prompt.uuid_full_re'), 'i').test(builder)) return ctDefer('truncated-builder-id');
+    if (ctSafeId(builder) && sid !== null && new RegExp(ah.cfg('devswarm_prompt.uuid_truncated_re'), 'i').test(builder) && !new RegExp(ah.cfg('devswarm_prompt.uuid_full_re'), 'i').test(builder)) ctUnsure('truncated-builder-id'); // Node only says so on stderr
     var inCheckout = top !== null;
     var reg = inCheckout && ctSafeId(builder) && sid !== null; // the hook registers the child's descriptor and registry row
     var wkey = null, banner = null;
     if (inCheckout) {
       if (reg) {
         var arch = ctArchivedNow(builder, top, sid);
-        if (arch !== false) return ctDefer(arch === null ? 'archived-unsure' : 'archived'); // an archived workspace gets the banner, the handover marker and the metrics from Node
+        if (arch === null) ctUnsure('archived-unsure'); // not provably archived: the turn goes on
+        else if (arch) { ctUnsure('archived'); return 'allow'; } // an archived workspace gets no turn text here: its handover block is the Stop gate's
         var prep = JSON.parse(ahHost.ctPrepare(cwd, builder, sid));
-        if (prep.unsure) return ctDefer('prepare:' + prep.why);
+        if (prep.unsure) { ctUnsure('prepare:' + prep.why); reg = false; } // not registered this turn
       }
       // the ingest daemon of the project: its banner (once per episode) when it is stopped or its monitor fails
       wkey = wroot === null ? null : ah.mesh.repoKey(wroot);
       if (wkey !== null) {
         var health = JSON.parse(ahHost.ctIngest(wkey));
-        if (health.unsure) return ctDefer('ingest-health');
-        banner = ctIngestBanner(health, wkey, ah.clock.now(), sid, tp);
+        if (health.unsure) ctUnsure('ingest-health'); // no banner when the health is unsure
+        else banner = ctIngestBanner(health, wkey, ah.clock.now(), sid, tp);
       }
     }
     var plan = ctPlanSegment(builder, home, root, cli, wroot);
@@ -281,10 +288,10 @@ function ctDecide(p, opts) {
     var staticOpts = { sessionId: sid, key: ah.cfg('devswarm_prompt.child_static_key'), content: block.join(ah.cfg('devswarm_prompt.child_block_joiner')), transcriptPath: tp, keepaliveTurns: isFinite(every) && every > 0 ? every : 0 };
     var planOpts = plan === null ? null : { sessionId: sid, key: ah.cfg('devswarm_prompt.child_plan_key'), content: plan, transcriptPath: tp, keepaliveTurns: ah.cfgNum('devswarm_prompt.child_plan_keepalive') };
     var dedupeOn = sid !== null && !dedupe.disabled();
-    if (dedupeOn && ((banner !== null && banner.opts !== null && banner.content !== null && !dedupe.canDecide(banner.opts)) || !dedupe.canDecide(staticOpts) || (planOpts !== null && !dedupe.canDecide(planOpts)))) return ctDefer('dedupe-undecidable');
+    if (dedupeOn && ((banner !== null && banner.opts !== null && banner.content !== null && !dedupe.canDecide(banner.opts)) || !dedupe.canDecide(staticOpts) || (planOpts !== null && !dedupe.canDecide(planOpts)))) ctUnsure('dedupe-undecidable'); // a timestamp only V8 reads: decided on what the engine reads
     // the durable inbox as it is now: a path or a file the engine cannot read as Node does hands the turn over before anything is written
     var preInfo;
-    try { preInfo = ctUnread(builder, home); } catch (e) { if (e === gates.UNDECIDABLE) return ctDefer('inbox'); throw e; }
+    preInfo = ctUnread(builder, home);
     // the push state of the checkout (a read), then the writes: the heartbeat first (its failure never stops the turn), the registration, the dedupe records
     var push = inCheckout ? ctPushState(top) : null;
     ah.commit();
@@ -295,7 +302,7 @@ function ctDecide(p, opts) {
     try { ah.state.writeAtomic(ah.cfg('script.write_root') + '/' + ah.cfg('devswarm_prompt.heartbeat_dir') + '/' + key + '.json', JSON.stringify(beatObj)); } catch (e) { /* never stops a turn */ }
     if (reg) {
       var done = JSON.parse(ahHost.ctRegister(cwd, builder, sid));
-      if (done.unsure) return ctDefer('register'); // before the first registration write (the lock stayed busy, or the state changed since the plan)
+      if (done.unsure) ctUnsure('register'); // the lock stayed busy, or the state changed since the plan: not registered this turn
     }
     var bannerText = null;
     if (banner !== null) {
@@ -307,8 +314,9 @@ function ctDecide(p, opts) {
     if (wkey !== null && ctSafeId(builder)) {
       var spath = home + '/' + ah.cfg('paths.base_dir') + '/' + ah.cfg('devswarm_prompt.summary_dir') + '/' + wkey + '.json';
       var ssize = ah.fs.size(spath);
-      if (ssize !== null && ssize > ah.cfgNum('script.read_max_bytes')) throw gates.UNDECIDABLE;
-      var sraw = ssize === null ? null : ah.fs.readText(spath);
+      var sbig = ssize !== null && ssize > ah.cfgNum('script.read_max_bytes');
+      if (sbig) ctUnsure('summary-big'); // the mailbox summary is left out
+      var sraw = ssize === null || sbig ? null : ah.fs.readText(spath);
       if (sraw !== null) {
         var entry = null;
         try { var summary = sraw.trim() ? JSON.parse(sraw.trim()) : null; entry = summary && summary.workspaces && summary.workspaces[builder]; } catch (e) { entry = null; }
@@ -318,8 +326,8 @@ function ctDecide(p, opts) {
             // Node corrects the count by this reader's own cursor, which it finds from its process ancestry; the daemon sees another tree. The
             // correction can only change the count when some reader of the partition has a cursor of its own, so only then is the turn Node's.
             var rd = JSON.parse(ahHost.ctReaders(wkey, builder));
-            if (rd.unsure || rd.declared) return ctDefer('own-reader');
-            meshDirect = ctMeshDirect(rawDirect, builder, entry, cli);
+            if (rd.unsure || rd.declared) ctUnsure('own-reader'); // the reader-identity correction is not made: the mesh-direct line is left out
+            else meshDirect = ctMeshDirect(rawDirect, builder, entry, cli);
           }
           if (entry.archive_requested) archiveRequested = true;
         }
@@ -342,9 +350,5 @@ function ctDecide(p, opts) {
     if (archiveRequested && !archiveSegment) segments.push(text.render(ah.cfg('devswarm_prompt.archive_request'), { cli: cli, id: builder }));
     if (!segments.length) return 'allow';
     return { advisory: text.advisoryJson(ah.cfg('devswarm_prompt.event'), segments.join(ah.cfg('devswarm_prompt.child_block_joiner'))) };
-  });
-}
-
-function decide(p, opts) {
-  try { return ctDecide(p, opts); } catch (e) { if (e === meshDefer) return 'defer'; throw e; }
+  })();
 }

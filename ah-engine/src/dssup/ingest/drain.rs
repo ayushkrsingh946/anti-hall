@@ -185,7 +185,6 @@ pub struct Drainer {
     quarantine_suppressed: u64,
     started_at: i64,
     code_version: Option<String>,
-    witness: Option<super::witness::Mirror>,
     last_refusal: Option<String>,
 }
 
@@ -258,7 +257,6 @@ impl Drainer {
             quarantine_suppressed: 0,
             started_at: now_ms(),
             code_version,
-            witness: None,
             last_refusal: None,
         }
     }
@@ -316,7 +314,6 @@ impl Drainer {
             self.log(&defaults::render("devswarm_ingest.msg_hc_unusable", &[("bin", &self.hc.bin), ("src", &self.hc.source)]));
         }
         self.self_register();
-        self.witness = super::witness::Mirror::open(&self.home, &self.project.repo_key);
         Start::Started
     }
 
@@ -657,9 +654,6 @@ impl Drainer {
                             self.wal_replay_needed = true;
                         }
                     }
-                    if let Some(m) = &mut self.witness {
-                        m.record(&poll.raw, now, &ing);
-                    }
                     if ing.lossy {
                         self.quarantine(&poll.raw, now);
                     }
@@ -687,16 +681,6 @@ impl Drainer {
         let interval_ms = (self.cfg.interval_sec.max(1) * 1000).min(defaults::num("devswarm_ingest.max_pace_ms"));
         let elapsed = started.elapsed().as_millis() as u64;
         Step { wait_ms: interval_ms.saturating_sub(elapsed), stop: false }
-    }
-
-    /// Run the Node witness when it is due: Node's `ingestPayload` over the mirrored batches in a scratch HOME, compared with the
-    /// mirror and with the live store. Bounded; never changes what the drain did.
-    pub fn maybe_witness(&mut self, runner: &dyn Runner) {
-        let now = now_ms();
-        let (Some(m), Some(store), Some(root)) = (&mut self.witness, &self.store, defaults::root()) else { return };
-        if m.due(now) {
-            m.compare(runner, &root, store, &self.project, now);
-        }
     }
 
     /// The monitor outcome and counters, for the status verb.

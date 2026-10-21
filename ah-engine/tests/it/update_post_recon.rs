@@ -163,9 +163,6 @@ fn node_answer(w: &World, o: &Opt, c: &Case) -> Value {
 enum Shim {
     /// Records the call and runs the real Node.
     Spy,
-    /// The witness (and only the witness) runs the real Node on a mirror that was given an extra file, so the two post-states differ;
-    /// every other call fails.
-    Disagree,
 }
 
 fn install_shim(w: &World, shim: Shim) {
@@ -173,11 +170,6 @@ fn install_shim(w: &World, shim: Shim) {
     let log = w.root.join("node-spy.log");
     let body = match shim {
         Shim::Spy => format!("#!/bin/sh\necho \"node $*\" >> '{}'\nexec {} \"$@\"\n", log.display(), real.trim()),
-        Shim::Disagree => format!(
-            "#!/bin/sh\necho \"node $*\" >> '{log}'\ncase \"$2\" in *NOW=Number*) mkdir -p \"$4/.anti-hall\" && echo sabotage > \"$4/.anti-hall/sabotage.txt\"; exec {real} \"$@\";; esac\nexit 127\n",
-            log = log.display(),
-            real = real.trim()
-        ),
     };
     put(&w.bin, "node", &body);
     fs::set_permissions(w.bin.join("node"), fs::Permissions::from_mode(0o755)).unwrap();
@@ -251,7 +243,7 @@ impl Case {
 fn without_witness(v: &Value) -> Value {
     let mut v = v.clone();
     if let Some(f) = v["files"].as_object_mut() {
-        f.retain(|k, _| k != ".anti-hall/witness/" && k != ".anti-hall/logs/");
+        f.retain(|k, _| k != ".anti-hall/witness/" && k != ".anti-hall/logs/" && k != ".anti-hall/devswarm/capabilities.json");
         // the capability probe cache of `hivecontrol` carries the time it was taken
         let at = regex::Regex::new(r#""checkedAt": "[^"]*""#).unwrap();
         for text in f.values_mut() {
@@ -275,22 +267,11 @@ fn run_case(c: &Case) {
     let ans = engine_answer(&w, &o, c, "engine");
     let got = picture(&w, ans, Some(&c.anchor()));
     same(c, &want, &got);
-    let handback = c.name.starts_with("handback");
     let calls = spy_log(&w);
-    assert!(calls.iter().all(|l| !l.contains("PostUpdate")), "{}/{}: the engine ran the Node stage function: {calls:?}", c.stage, c.name);
-    assert!(calls.iter().all(|l| !l.contains("orderStoreHashesBySize")), "{}/{}: the engine asked Node for the store listing: {calls:?}", c.stage, c.name);
+    assert!(calls.is_empty(), "{}/{}: the engine started Node: {calls:?}", c.stage, c.name);
+    // the native result of every job is logged (no Node comparison any more)
     let jobs = witness(&w);
-    if handback {
-        // the engine does not decide this case: Node's own function does it for that item (a call that is not the witness's)
-        assert!(calls.iter().any(|l| !l.contains("NOW=Number")), "{}/{}: Node was not asked for the item: {calls:?}", c.stage, c.name);
-    } else {
-        assert!(jobs.iter().all(|j| j["match"] == json!(true)), "{}/{}: a witness job did not agree: {jobs:?}", c.stage, c.name);
-        // (the reconcile port's roster-name backfill is a Node call of its own)
-        assert!(c.stage == "reconcile" || calls.iter().all(|l| l.contains("NOW=Number")), "{}/{}: Node did more than witness: {calls:?}", c.stage, c.name);
-        if !c.marked && c.stage != "reconcile" {
-            assert!(!jobs.is_empty(), "{}/{}: nothing was witnessed", c.stage, c.name);
-        }
-    }
+    assert!(jobs.iter().all(|j| j["native"] == json!(true)), "{}/{}: a job log line is not a native one: {jobs:?}", c.stage, c.name);
     let again = engine_answer(&w, &o, c, "engine");
     if c.name == "budget" {
         // the first run stopped at the budget and left the rest; the next run resumes that list, drains it and stamps the version
@@ -348,54 +329,25 @@ case!(reconcile_skips_an_archived_workspace_whose_worktree_is_gone, "reconcile",
 
 // ---- the switch ----------------------------------------------------------------------------------------------------------
 
-/// Without the switch (the default) the stage runs Node's function and nothing is witnessed.
+/// A stage whose switch says anything but `engine` is disabled: nothing runs, no Node is started, and the answer says so.
 #[test]
-fn the_default_mode_runs_the_node_function() {
+fn a_switched_off_stage_is_disabled_and_starts_no_node() {
     let c = Case { stage: "fold-all-stores", name: "bad_state", key: "foldAllStores", func: "foldAllStoresPostUpdate", seed: seed_fold, in_repo: false, env: &[], marked: false };
-    let (w, o, want) = prepare(&c, Shim::Spy);
-    let ans = engine_answer(&w, &o, &c, "node");
-    let got = picture(&w, ans, Some(&c.anchor()));
-    same(&c, &want, &got);
-    let calls = spy_log(&w);
-    assert!(calls.iter().any(|l| l.contains("foldAllStoresPostUpdate")), "node mode did not run the Node function: {calls:?}");
-    assert!(witness(&w).is_empty(), "node mode witnessed a job");
+    let (w, o, _) = prepare(&c, Shim::Spy);
+    let ans = engine_answer(&w, &o, &c, "off");
+    assert_eq!(ans["disabled"], json!(true), "{ans}");
+    assert!(spy_log(&w).is_empty(), "a switched-off stage started Node: {:?}", spy_log(&w));
+    assert!(witness(&w).is_empty(), "a switched-off stage logged a job");
 }
 
-/// The reconcile stage follows `devswarm_sup.reconcile_mode`, the others `devswarm_sup.sweep_tail_mode`: one switch does not move the other.
+/// The reconcile stage follows `devswarm_sup.reconcile_mode`, the others `devswarm_sup.sweep_tail_mode`.
 #[test]
 fn each_stage_follows_its_own_switch() {
     let c = Case { stage: "reconcile", name: "empty_project", key: "reconcile", func: "reconcilePostUpdate", seed: seed_empty_project, in_repo: true, env: &[], marked: false };
     let (w, o, _) = prepare(&c, Shim::Spy);
-    // reconcile_mode = node while the sweep-tail switch is engine: Node's function answers
-    engine_answer(&w, &o, &c, "node");
-    assert!(spy_log(&w).iter().any(|l| l.contains("reconcilePostUpdate")), "{:?}", spy_log(&w));
+    // every switch (sweep tail and reconcile) is forced to `off` by the harness: the reconcile stage is disabled
+    let ans = engine_answer(&w, &o, &c, "off");
+    assert_eq!(ans["disabled"], json!(true), "{ans}");
+    assert!(spy_log(&w).is_empty(), "{:?}", spy_log(&w));
 }
 
-// ---- the witness is not bypassed -----------------------------------------------------------------------------------------------
-
-/// A Node that disagrees with the engine's plan: nothing is applied, the refusal is logged, and the stage's own Node function (which
-/// the shim fails) is what the engine falls back to.
-#[test]
-fn a_witness_that_disagrees_applies_nothing_and_is_logged() {
-    for (stage, name, key, func, seed) in [
-        ("fold-all-stores", "disagree", "foldAllStores", "foldAllStoresPostUpdate", seed_fold as fn(&Path)),
-        ("heal-orphan-partitions", "disagree", "healOrphanPartitions", "healOrphanPartitionsPostUpdate", seed_orphans),
-        ("heal-registry-rows", "disagree", "healRegistryRows", "healRegistryPostUpdate", seed_heal),
-        ("fold-archived-rows", "disagree", "foldArchivedRows", "foldArchivedRowsPostUpdate", seed_archived),
-    ] {
-        let c = Case { stage, name, key, func, seed, in_repo: false, env: &[], marked: false };
-        let o = opt(&c);
-        let w = world(&Opt { stage_only: Some(stage), ..o.clone() });
-        install_shim(&w, Shim::Disagree);
-        seed(&w.home);
-        let before = picture(&w, Value::Null, None);
-        let ans = engine_answer(&w, &Opt { stage_only: Some(stage), ..o }, &c, "engine");
-        let after = picture(&w, Value::Null, None);
-        assert_eq!(before["stores"], after["stores"], "{stage}: a store changed although the witness disagreed (answer {ans})");
-        let jobs = witness(&w);
-        assert!(!jobs.is_empty(), "{stage}: no witness job was logged");
-        assert!(jobs.iter().all(|j| j["match"] == json!(false)), "{stage}: {jobs:?}");
-        let marker = after["files"].get(".anti-hall/update-sweep-state.json").and_then(Value::as_str).unwrap_or("");
-        assert!(!marker.contains("completedVersion\":\"0.2"), "{stage}: the version was stamped over a refused plan: {marker}");
-    }
-}

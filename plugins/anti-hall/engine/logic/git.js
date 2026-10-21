@@ -5,7 +5,7 @@
 // hooks/lib/git-alias-scan.js; every table, pattern, limit and text is in git.toml / limits.toml (git.*), the engine supplies
 // only the file system, `git` process, settings and Jev primitives (`ah.*`).
 //
-// A script failure (an exception, a stack overflow on a pathological command, the time limit) defers to the Node hook.
+// A script failure (an exception, a stack overflow on a pathological command, the time limit) is the engine's fail-open/fail-closed policy, never a hand-back.
 // What the Node hook read from its own process (its working directory) is answered by lib/78-hook-proc.js; a file over one read is
 // scanned at its head and tail; a Jev consult gets the time the request has left.
 'use strict';
@@ -2538,7 +2538,7 @@ function gitBackstop(cmd, d, heredocBodies, baseCwd) {
 // ---------------------------------------------------------------------------------------------------------------------
 // entry
 
-// a stack overflow, memory or time-limit exception must reach the engine (it then defers), never be swallowed by a fail-open catch
+// a stack overflow, memory or time-limit exception must reach the engine (its policy applies), never be swallowed by a fail-open catch
 function gitFatal(e) {
   return e instanceof RangeError || (e && /stack|memory|interrupt/i.test(String(e.message || e)));
 }
@@ -2563,8 +2563,8 @@ function decideScan(p, opts, event) {
   const cmd = ti.command;
   if (cmd === '') return 'allow';
   // `payload.cwd || process.cwd()`: without one, the hook process's own directory (lib/78-hook-proc.js)
-  // a relative payload cwd resolves against the hook process's own directory, which the daemon cannot know: Node decides
-  if (typeof p.cwd === 'string' && p.cwd !== '' && p.cwd.charAt(0) !== '/') return 'defer';
+  // a relative payload cwd resolves against the stand-in for the hook process's directory (counted)
+  if (typeof p.cwd === 'string' && p.cwd !== '' && p.cwd.charAt(0) !== '/') ah.unable('git:relative_cwd'); // resolved against the stand-in directory (hookProc.cwd)
   const cwdIn = hookProc.cwd(p);
   let home = ah.env.get(ah.cfg('env.home'));
   if (home === null) home = ah.env.get(ah.cfg('env.home_alt'));

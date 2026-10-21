@@ -1,7 +1,7 @@
 // check = "handover-resume" (SessionStart). Points a fresh or compacted session at the newest handover of the project with git facts
 // measured now, a note when the session that wrote it kept running, and the PreCompact snapshot when one exists; reports the lack of a
-// handover on a clear or a compaction. A request without an absolute HOME, a relative working directory, a time zone of the request's
-// own or a repository root the host cannot settle defers to Node. Mirrors hooks/handover-resume.js and lib/handover-find.js
+// handover on a clear or a compaction. A relative working directory resolves against the stand-in directory and a repository root the host
+// cannot settle is read as the directory itself (both counted). Mirrors hooks/handover-resume.js and lib/handover-find.js
 // (lib/73-handover.js). Keys and texts: codex_handover.toml (codex_handover.*).
 'use strict';
 
@@ -90,12 +90,11 @@ function decide(p) {
   if (!ah.settings.bool('codex_handover.setting_resume') || !p || typeof p !== 'object' || Array.isArray(p)) return 'allow';
   var cwd = p.cwd;
   if (!cwd || typeof cwd !== 'string') return 'allow';
-  var home = spawn.osHome();
-  if (home === null || !ah.path.isAbsolute(cwd)) return 'defer';
+  if (!ah.path.isAbsolute(cwd)) { ah.unable('handover-resume:relative_cwd'); cwd = hookProc.cwd(p); } // resolved against the stand-in directory
   var source = typeof p.source === 'string' ? p.source : '', compactOrClear = hrC('codex_handover.resume_sources').indexOf(source) >= 0;
   var event = typeof p.hook_event_name === 'string' && p.hook_event_name ? p.hook_event_name : hrC('codex_handover.resume_event');
   var rr = ho.repoRoot(cwd);
-  if (rr === null) return 'defer';
+  if (rr === null) { ah.unable('handover-resume:repo_unsure'); rr = cwd; } // a checkout the host cannot classify is read as the directory itself
   var root = ah.path.join(rr, hrC('codex_handover.handovers_dir'));
   if (!ah.fs.isDir(root)) return compactOrClear ? hrNegative(event) : 'allow';
   var rawSid = p.session_id !== undefined && p.session_id !== null ? String(p.session_id) : '';

@@ -156,9 +156,6 @@ value = "\"decision\"\\s*:\\s*\"block\""
 doc = "The pattern of the version nudge in what the version-alert check prints; {stale} is the cached newer version, already escaped."
 value = "\"additionalContext\"\\s*:\\s*\"[^\"]*version-alert: v{stale} is available \\(you are running v"
 
-[doctor.node_default]
-doc = "The Node binary the update post-pull stage runs when the engine's own variable for it is not set. Not used by the doctor, which never starts Node."
-value = "node"
 
 [doctor.version_check_file]
 doc = "The cached latest-version file the version-alert self-test seeds, under the anti-hall directory."

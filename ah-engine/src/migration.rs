@@ -94,11 +94,11 @@ fn hooks() -> Vec<Entry> {
 }
 
 /// The status of one supervisor duty from its row (`None`: no row or an unknown kind).
-fn duty_status(name: &str, d: Option<&V>) -> (Option<&'static str>, Vec<String>) {
+fn duty_status(_name: &str, d: Option<&V>) -> (Option<&'static str>, Vec<String>) {
     let Some(d) = d else { return (None, vec![]) };
     let kind = d.str_field("kind");
     let has_native = d.get("native").and_then(V::as_bool) == Some(true);
-    let rolled_back = defaults::list("devswarm_sup.node_duties").contains(&name);
+    let rolled_back = false; // the Node rollback of a duty is gone (devswarm_sup.duties_off switches a duty off instead)
     if kind == native() {
         return (Some(native()), vec![]);
     }

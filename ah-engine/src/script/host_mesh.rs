@@ -336,7 +336,17 @@ fn touched(st: &Settings, entry: &defaults::Entry) -> bool {
         .is_some_and(|o| o.get(e.str_field("section")).and_then(Value::as_object).is_some_and(|s| s.contains_key(e.str_field("key"))))
 }
 
+/// `meshAppBuilders()`: the app database's workspaces as JSON `[{id, archived, branch, label}]` (read straight from the database,
+/// never from the cross-process cache, which holds neither branch nor title); `null` when there is no readable database.
+fn app_builders(st: &Settings) -> Option<String> {
+    let file = crate::meshw::ident::app_db_path(Path::new(&st.home), &st.env)?;
+    let states = crate::meshw::appdb::read_states(&file).ok().flatten()?;
+    let rows: Vec<Value> = states.iter().map(|s| json!({"id": s.id, "archived": s.archived, "branch": s.branch, "label": s.label})).collect();
+    Some(Value::Array(rows).to_string())
+}
+
 pub(super) fn install<'js>(c: &Ctx<'js>, h: &Object<'js>) -> rquickjs::Result<()> {
+    h.set("meshAppBuilders", Function::new(c.clone(), || -> rquickjs::Result<Option<String>> { with_settings(app_builders) })?)?;
     h.set("meshIdent", Function::new(c.clone(), |cwd: String| answer(ident_of(&cwd)))?)?;
     h.set("meshRepoKey", Function::new(c.clone(), |wt: String| answer(ident::repo_key_for_worktree(&wt).map(|k| json!({"key": k})).map_err(|_| No)))?)?;
     h.set("meshCanonicalId", Function::new(c.clone(), |wt: String| answer(ident::canonical_mesh_id(&wt).map(|k| json!({"id": k})).map_err(|_| No)))?)?;

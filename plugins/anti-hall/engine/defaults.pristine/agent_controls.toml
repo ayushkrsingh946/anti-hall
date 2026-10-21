@@ -509,10 +509,6 @@ min = 1
 doc = "Rust regex source of the control characters turned into spaces in a name the nudge shows."
 value = '[\x00-\x1f\x7f-\u{9f}]'
 
-[silent_nudge.unsure_quiet]
-doc = "What a Stop does when an input cannot be read exactly as V8 reads it (a transcript line or heartbeat file too deep for the interpreter, the nudge state or the ack file over script.read_max_bytes or too deep). false (default): a logged defer to the Node twin, which reads it and decides, so the engine is never weaker than Node. true: say nothing for that Stop and write nothing (no nudge = allow). The engine-only stuck-agent advisory (UserPromptSubmit, no Node twin) is always quiet for such an input. Each case is logged under silent_nudge.unsure_log_kind."
-value = false
-
 [silent_nudge.unsure_log_kind]
 doc = "Engine log kind of a silent-agent-nudge decision taken without Node's exact reading: transcript, heartbeat, state_big, state_parse, ack_big, ack_parse (silent_nudge.unsure_quiet decides: defer to the Node twin, or nothing said), relative_home (a defer to the Node twin: the directory is the hook process's), no_plugin_root (a defer to the Node twin, which judges the stale-build gate against its own install directory; only while the gate is on), plugin_versions (the stale-build gate passes: no newer build is known)."
 value = "silent_nudge_unsure"

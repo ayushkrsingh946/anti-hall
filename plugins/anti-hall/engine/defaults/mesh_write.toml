@@ -661,69 +661,17 @@ value = "stale"
 
 # ---- the front door and the shadow ---------------------------------------------------------------------------------
 
-[mesh_write.node_bin]
-doc = "The Node binary the engine hands a verb to."
-value = "node"
+[mesh_write.msg_unable]
+doc = "stderr line when the engine cannot answer a mesh verb (an unported verb, a case it defers, no plugin context). Nothing was written; the exit code is mesh_write.exit_defer."
+value = "ah-engine mesh: this verb or case is not available natively; nothing was done"
 
-[mesh_write.node_cli]
-doc = "Node's mesh CLI, relative to the plugin root."
-value = "scripts/devswarm.js"
-
-[mesh_write.exit_signal_base]
-doc = "A Node child killed by signal N exits as this plus N (the shell convention)."
-value = 128
-min = 0
-max = 255
-
-[mesh_write.msg_no_node_cli]
-doc = "stderr line when the plugin root (and so Node's CLI) is unknown."
-value = "ah-engine mesh: cannot find scripts/devswarm.js (no plugin root); run the verb with node directly"
-
-[mesh_write.msg_node_exec_failed]
-doc = "stderr line when starting Node failed. Placeholder: {err}."
-value = "ah-engine mesh: could not start node: {err}"
-
-[mesh_write.shadow_dir]
-doc = "Scratch directory (under the engine state directory) of one shadow replay; removed when it ends."
-value = "mesh-shadow"
-
-[mesh_write.shadow_home]
-doc = "The scratch home the replay writes its side files into (receipts), under that directory."
-value = "home"
+[mesh_write.msg_disabled]
+doc = "stderr line when the mesh write verbs are switched off (mesh.engine_writes = off). Nothing was done; the exit code is mesh_write.exit_defer."
+value = "ah-engine mesh: the mesh write verbs are switched off (mesh.engine_writes = off); nothing was done"
 
 [mesh_write.shadow_log]
 doc = "The shadow log, one JSON line per replayed call, under the engine state directory."
 value = "mesh-shadow.jsonl"
-
-[mesh_write.shadow_log_cap]
-doc = "Most characters of each side's stdout a mismatch record keeps."
-value = 2000
-min = 0
-max = 1048576
-
-[mesh_write.shadow_backup_pages]
-doc = "Pages per step of the store snapshot (SQLite online backup); large means one step."
-value = 1000000
-min = 1
-max = 2147483647
-
-[mesh_write.shadow_backup_pause_ms]
-doc = "Pause between snapshot steps, in milliseconds."
-value = 0
-min = 0
-max = 10000
-
-[mesh_write.shadow_match]
-doc = "Shadow result: stdout, exit code and the written row all equal Node's."
-value = "match"
-
-[mesh_write.shadow_mismatch]
-doc = "Shadow result: something differs and no other writer touched the store meanwhile."
-value = "mismatch"
-
-[mesh_write.shadow_concurrent]
-doc = "Shadow result: something differs, but another writer added rows between the snapshot and Node's write (the seq can differ)."
-value = "concurrent"
 
 [mesh_write.shadow_defer]
 doc = "Shadow result: the engine would have handed this call to Node (the reason says why)."
@@ -733,10 +681,6 @@ value = "defer"
 doc = "Shadow result: the engine path panicked (caught; Node's result was unaffected)."
 value = "panic"
 
-[mesh_write.shadow_no_store]
-doc = "Defer reason when the project has no store file yet."
-value = "no-store"
-
 [env.mesh_now]
 doc = "Pins `Date.now()` of an `ah-engine mesh` verb, in epoch milliseconds (the parity tests pin Node's `ctx.now` the same way). Never set in production."
 value = "AH_ENGINE_MESH_NOW_MS"
@@ -744,10 +688,6 @@ value = "AH_ENGINE_MESH_NOW_MS"
 [mesh_write.mode_on]
 doc = "The `mode` of an on-mode record in the shadow log."
 value = "on"
-
-[mesh_write.mode_shadow]
-doc = "The `mode` of a shadow record in the shadow log."
-value = "shadow"
 
 [mesh_write.on_native]
 doc = "On-mode result: the engine answered the call itself."
@@ -1077,10 +1017,6 @@ value = "sibling"
 doc = "The `k` of a read-receipt op that moves the NDJSON inbox cursor (Node's)."
 value = "nd"
 
-[mesh_write.shadow_skipped]
-doc = "Log result of a shadow-mode call for a verb that cannot be replayed on a store copy: Node ran it, the engine only counted it."
-value = "skipped"
-
 [mesh_write.ps_poll_ms]
 doc = "How often the process snapshot checks whether `ps` has finished."
 value = 5
@@ -1189,47 +1125,9 @@ value = "createdAt"
 
 # ---- the Node shadow of an answered writing verb (owner rule: Node stays as a background check until the port is proven) ----
 
-[mesh_write.verify_flag]
-doc = "The word after `mesh` that makes the engine run as the background verifier of an answered heartbeat (never a devswarm.js verb)."
-value = "--shadow-verify"
-
 [mesh_write.verify_log]
 doc = "File in the state directory that receives one JSON line per background verification (`verb`, `result` match or mismatch, `ms`; on a mismatch both outputs, capped)."
 value = "mesh-verify.jsonl"
-
-[mesh_write.verify_dir]
-doc = "Directory in the state directory that holds the scratch homes of pending verifications."
-value = "mesh-verify"
-
-[mesh_write.verify_copy_dirs]
-doc = "Directories of the DevSwarm root copied into the scratch home before the engine writes (what Node reads or writes for a heartbeat)."
-value = ["workspaces", "heartbeats", "liveness", "cursors", "archived", "cache", "plans"]
-
-[mesh_write.verify_link_dirs]
-doc = "Directories of the DevSwarm root linked, not copied, into the scratch home (read only for a heartbeat)."
-value = ["store"]
-
-[mesh_write.verify_node_snippet]
-doc = "The Node program of the verifier: runs the real devswarm.js `run()` with the engine's clock, prints the result object the CLI would print. Arguments: the CLI path, the clock, then the verb's argv."
-value = "const c=require(process.argv[1]);const r=c.run(process.argv.slice(3),{now:Number(process.argv[2])});process.stdout.write(JSON.stringify(r.result)+'\\n');"
-
-[mesh_write.verify_match]
-doc = "Log result of a verification whose Node output and written files equal the engine's."
-value = "match"
-
-[mesh_write.verify_mismatch]
-doc = "Log result of a verification that found a difference."
-value = "mismatch"
-
-[mesh_write.verify_error]
-doc = "Log result of a verification that could not run Node."
-value = "error"
-
-[mesh_write.verify_cap]
-doc = "Characters of each output kept in a mismatch record."
-value = 600
-min = 50
-max = 100000
 
 [mesh_write.cursor_max_digits]
 doc = "Longest all-digit NDJSON cursor file the engine reads (parseInt of a longer digit string is only approximated by the specification, so such a file goes to Node)."
@@ -1519,24 +1417,6 @@ value = "blocked"
 doc = "The heartbeat flag that names a step's status."
 value = "status"
 
-[mesh_write.verify_nonce_col]
-doc = "Index of the instance_nonce column in the row query of the background check (left out of the comparison)."
-value = 11
-
-[mesh_write.verify_row_name]
-doc = "The name the background check gives the appended mesh row when it differs."
-value = "row"
-
-[mesh_write.verify_window_before]
-doc = "Bytes before the first difference that the background check logs from a differing file."
-value = 60
-
-[mesh_write.verify_window_after]
-doc = "Bytes from the first difference on that the background check logs from a differing file."
-value = 100
-
-# ---- inbox tick --quiet (scripts/devswarm-lib/inbox-cmd.js cmdInboxTick, inboxTickQuietLine) ----
-
 [mesh_write.verb_tick]
 doc = "The tick subverb of `inbox`."
 value = "tick"
@@ -1613,18 +1493,6 @@ value = "ANTIHALL_DEVSWARM_TICK_ROSTER_EVERY"
 doc = "The settings files, relative to the home directory, in which a trace of the roster setting sends a tick to Node."
 value = [".anti-hall/settings.json", ".claude/settings.json"]
 
-[mesh_write.verify_tick_node_snippet]
-doc = "The Node program of the tick verifier: runs the real devswarm.js `run()` with the engine's clock and prints what `main()` prints for the tick (the line under `--quiet` without `--json`, else the JSON). Arguments: the CLI path, the clock, then the verb's argv."
-value = "const c=require(process.argv[1]);const a=process.argv.slice(3);const r=c.run(a,{now:Number(process.argv[2]),instanceNonce:process.env.AH_ENGINE_VERIFY_NONCE||undefined});const q=a.includes('--quiet')&&!a.includes('--json');process.stdout.write((q?c.inboxTickQuietLine(r.result):JSON.stringify(r.result))+'\\n');"
-
-[mesh_write.verify_tick_copy_dirs]
-doc = "Directories of the DevSwarm root copied into the scratch home before the engine writes for a tick (what Node reads or writes for it)."
-value = ["workspaces", "heartbeats", "liveness", "cursors", "archived", "cache", "plans", "wake-tick", "locks", "wal", "wal-spill"]
-
-[mesh_write.verify_tick_copy_files]
-doc = "Files of the DevSwarm root copied into the scratch home before the engine writes for a tick."
-value = ["cron-found-mail.jsonl"]
-
 [mesh_write.js_true]
 doc = "JavaScript's text for true, as a tick line prints a boolean."
 value = "true"
@@ -1632,20 +1500,6 @@ value = "true"
 [mesh_write.js_false]
 doc = "JavaScript's text for false, as a tick line prints a boolean."
 value = "false"
-
-[mesh_write.env_verify_nonce]
-doc = "The environment variable that hands the engine's reader nonce to the tick verifier (the detached verifier does not share the caller's process ancestry, which Node derives the reader from); it is the name the verify_tick_node_snippet reads."
-value = "AH_ENGINE_VERIFY_NONCE"
-
-[mesh_write.verify_names_heartbeat]
-doc = "The names under which a heartbeat verification mismatch reports whether the heartbeat record, the liveness verdict and the app-state cache are equal."
-value = ["sameHeartbeat", "sameVerdict", "sameCache"]
-
-[mesh_write.verify_names_tick]
-doc = "The names under which a tick verification mismatch reports whether the heartbeat record, the wake-tick marker and the cron-found-mail file are equal."
-value = ["sameHeartbeat", "sameMarker", "sameCronFound"]
-
-# ---- inbox read-primary (scripts/devswarm-lib/inbox-read.js cmdInboxMessagesInner, inbox-cmd.js, cursors.js writeReadReceipt) ----
 
 [mesh_write.verb_read_primary]
 doc = "The read-primary subverb of `inbox`."
@@ -1743,18 +1597,6 @@ value = "status"
 doc = "ARCHIVED_FORWARD_PREFIX_RE's literal start: a row whose body begins so is a forward whose original hash Node derives; the engine leaves such a row to Node."
 value = "[forwarded from archived "
 
-[mesh_write.verify_read_primary_node_snippet]
-doc = "The Node program of the read-primary verifier: runs the real devswarm.js `run()` with the engine's clock and reader nonce and prints what `main()` prints for the verb (the JSON, or the text rendering under `--format text` without `--json`). Arguments: the CLI path, the clock, then the verb's argv."
-value = "const c=require(process.argv[1]);const a=process.argv.slice(3);Date.now=()=>Number(process.argv[2]);const r=c.run(a,{now:Number(process.argv[2]),instanceNonce:process.env.AH_ENGINE_VERIFY_NONCE||undefined});const t=(a.includes('--format=text')||(a.includes('--format')&&a[a.indexOf('--format')+1]==='text'))&&!a.includes('--json');process.stdout.write((t?c.inboxReadPrimaryTextLines(r.result):JSON.stringify(r.result))+'\\n');"
-
-[mesh_write.verify_read_primary_copy_dirs]
-doc = "Directories of the DevSwarm root copied into the scratch home before the engine writes a read receipt (what Node reads or writes for a read-primary)."
-value = ["workspaces", "heartbeats", "liveness", "cursors", "archived", "cache", "plans", "read-receipts", "locks"]
-
-[mesh_write.verify_names_read_primary]
-doc = "The names under which a read-primary verification mismatch reports whether the receipt file is equal."
-value = ["sameReceipt"]
-
 [mesh_write.known_warning]
 doc = "The stderr line `emitKnownWarning` prints for an inbox result that reports `known: false`: `{label}` is `inbox <subverb> <JSON-quoted id>`, `{reasons}` the reason list."
 value = "⚠️ anti-hall · devswarm: {label} reported known:false ({reasons}) — totals may be incomplete or stale"
@@ -1805,26 +1647,6 @@ value = 500
 doc = "spawnSync's default maxBuffer: a call that prints more fails."
 value = 1048576
 
-[mesh_write.verify_roster_node_snippet]
-doc = "The Node program of the roster verifier: runs the real devswarm.js `run()` and prints what `main()` prints for a plain roster (the text table unless `--json`). Arguments: the CLI path, the clock, then the verb's argv."
-value = "const p=require('path');const c=require(process.argv[1]);const a=process.argv.slice(3);const r=c.run(a,{now:Number(process.argv[2])});const t=!a.includes('--json')&&!!r.result&&r.result.ok===true&&r.result.action==='roster';const R=require(p.join(p.dirname(process.argv[1]),'devswarm-lib','roster-diag.js'));process.stdout.write((t?R.rosterHumanText(r.result,{all:a.includes('--all')||process.env.ANTIHALL_ROSTER_HIDE_ARCHIVED==='0',home:process.env.HOME,now:Number(process.argv[2])}):JSON.stringify(r.result))+'\\n');"
-
-[mesh_write.verify_roster_copy_dirs]
-doc = "Directories of the DevSwarm root copied into the scratch home for the roster verifier (what Node reads for a roster)."
-value = ["workspaces", "heartbeats", "liveness", "archived", "cache", "plans", "summaries", "names", "retired"]
-
-[mesh_write.verify_roster_copy_files]
-doc = "Files of the DevSwarm root copied into the scratch home for the roster verifier: the supervisor's active-list cache and what the capability gate of hivecontrol reads."
-value = ["hivecontrol-active.json", "capabilities.json", "hivecontrol-path.json"]
-
-[mesh_write.verify_roster_home_links]
-doc = "Paths under the home linked, not copied, into the scratch home for the roster verifier (read only): Claude's transcripts and session records, and the DevSwarm app's database directory on macOS and on Linux."
-value = [".claude/projects", ".claude/sessions", "Library/Application Support/DevSwarm", ".config/DevSwarm"]
-
-[mesh_write.verify_names_roster]
-doc = "The names under which a roster verification mismatch reports further equalities (a roster writes nothing, so none)."
-value = []
-
 [mesh_write.env_hivecontrol]
 doc = "The environment variable that names the hivecontrol binary explicitly (an absolute path to a file)."
 value = "ANTIHALL_DEVSWARM_HIVECONTROL"
@@ -1852,14 +1674,6 @@ value = "workspace.list"
 [mesh_write.hivecontrol_dormant_line]
 doc = "The line Node records for `workspace list` when the build's --help does not list the verb."
 value = "feature workspace.list is dormant: `hivecontrol workspace list` not in this build's --help"
-
-[mesh_write.verify_node_timeout_ms]
-doc = "How long the background Node check of a verb may run before its whole process group is killed (a hung hivecontrol would otherwise hold it for ever); the check is then logged as an error."
-value = 60000
-
-[mesh_write.verify_node_poll_ms]
-doc = "How often the background Node check looks at the running Node."
-value = 20
 
 [mesh_write.hivecontrol_read_chunk]
 doc = "How many bytes the engine reads from a hivecontrol pipe at a time."
@@ -1985,6 +1799,10 @@ value = "repoId"
 doc = "What follows the workspace id in the name of a legacy per-instance cursor file under `cursors/` (`<id>#inst-<short>.json`, `<id>#nd-<short>.json`)."
 value = ["#inst-", "#nd-"]
 
+[mesh_write.app_col_label]
+doc = "The `builders` title column (the workspace title a Primary sees; the script that matches a task owner against a live workspace reads it)."
+value = "label"
+
 [mesh_write.app_col_branch]
 doc = "The `builders` branch column (the archive verb's branch fallback and its side-effect report)."
 value = "branchName"
@@ -2108,3 +1926,15 @@ value = 10000
 unit = "ms"
 min = 100
 max = 600000
+
+[mesh_write.shadow_backup_pages]
+doc = "Pages per step of the store snapshot (SQLite online backup); large means one step."
+value = 1000000
+min = 1
+max = 2147483647
+
+[mesh_write.shadow_backup_pause_ms]
+doc = "Pause between snapshot steps, in milliseconds."
+value = 0
+min = 0
+max = 10000

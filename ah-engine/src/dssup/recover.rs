@@ -5,9 +5,8 @@
 //! (the role matrix, then the automated-caller rule), an id that is not a plain workspace id, a request id that already ran, a
 //! descriptor without a worktree and a session, a workspace already recovered `maxRecoveries` times. What then runs is the
 //! engine's own [`super::kill`]: it resolves the process (exactly one match or it abstains), confirms its identity and working
-//! directory right before SIGTERM and again before SIGKILL, and resumes the session headless. Node's `findTarget` runs as a
-//! read-only witness on the same process table first, and the engine stands down when it would signal a process Node does not
-//! confirm. `devswarm_sup.node_duties` can name `recover` to hand the whole kill back to Node's `devswarm-recover.js`.
+//! directory right before SIGTERM and again before SIGKILL, and resumes the session headless. There is no Node rollback of the kill
+//! (owner decision F): `devswarm_sup.duties_off` naming `recover` switches the recovery off, and a request is then `refused`.
 // Discard triage (E3): every `.ok()` / `unwrap_or_default()` in this module is a deliberate keep, for these reasons:
 // - an unreadable descriptor or verdict is an absent one: the first is a refusal, the second counts as no recoveries
 use super::setting;
@@ -55,11 +54,13 @@ pub fn run(at: &Place, st: &Settings, runner: &dyn Runner, id: &str, request: &s
         Err(r) => {
             let reason = defaults::raw("devswarm_sup.act_recover_reasons").str_field(r.code);
             super::tick::emit_act(at.home, defaults::text("devswarm_sup.recover_duty"), id, "refused", reason, t0.elapsed().as_millis() as u64, request);
+            crate::obs::counters::account("duty", defaults::text("devswarm_sup.recover_duty"), crate::obs::counters::Outcome::Refused, 0, t0.elapsed().as_micros() as u64);
             (json!({"outcome": "refused", "why": r.why}), defaults::num("devswarm_wire.usage_exit") as i32)
         }
     };
     if report["outcome"] == "handled" {
         super::tick::emit_act(at.home, defaults::text("devswarm_sup.recover_duty"), id, "ran", "", t0.elapsed().as_millis() as u64, request);
+        crate::obs::counters::account("duty", defaults::text("devswarm_sup.recover_duty"), crate::obs::counters::Outcome::Ok, 0, t0.elapsed().as_micros() as u64);
     }
     (report, code)
 }
@@ -96,17 +97,13 @@ fn decide(at: &Place, st: &Settings, runner: &dyn Runner, id: &str, request: &st
     if done >= max {
         return Err(refuse("max", defaults::render("devswarm_sup.msg_recover_max", &[("id", &id), ("n", &done), ("max", &max)])));
     }
-    // the rollback lever (`node_duties` names recover) hands the kill to Node's own CLI; on a machine with no Node the engine
-    // does NOT fall back to its own kill (the owner asked for it not to signal): it refuses before anything is recorded or touched
-    let rollback = defaults::list("devswarm_sup.node_duties").contains(&defaults::text("devswarm_sup.recover_duty"));
-    if rollback && !node_available(st) {
-        return Err(refuse("rollback_no_node", defaults::text("devswarm_sup.msg_recover_rollback_no_node").into()));
+    // `devswarm_sup.duties_off` naming `recover` switches the on-demand recovery off: it is refused before anything is recorded or
+    // touched (owner decision F: there is no Node rollback of the kill, and the engine's kill does not run while the switch is off)
+    if defaults::list("devswarm_sup.duties_off").contains(&defaults::text("devswarm_sup.recover_duty")) {
+        return Err(refuse("switched_off", defaults::text("devswarm_sup.msg_recover_off").into()));
     }
     // the request is recorded BEFORE the run: a run that dies half way is never repeated by the same request
     crate::dsact::exec::append_line(&ledger(state_dir), &json!({"ts": now, "request": request, "id": id}));
-    if rollback {
-        return Ok(run_node(at, st, runner, id, request, now));
-    }
     let desc = desc.unwrap_or(Value::Null);
     let wt = desc.get(keys.str_field("worktree")).and_then(Value::as_str).unwrap_or_default();
     let session = desc.get(keys.str_field("session")).and_then(Value::as_str).unwrap_or_default();
@@ -116,72 +113,8 @@ fn decide(at: &Place, st: &Settings, runner: &dyn Runner, id: &str, request: &st
         readiness_ms: defaults::num("devswarm_sup.kill_readiness_ms"),
     };
     let target = super::kill::find_target(&sys, home, wt, session, true);
-    // the Node witness: Node's own (read-only) target lookup on the same process table, compared with the engine's. It never acts;
-    // when the engine would signal a process that Node does not confirm, the engine stands down instead (never weaker than Node).
-    let seen = witness(at, st, runner, wt, session, &target, now);
-    if seen == Some(false) {
-        super::tick::emit_mistake(home, defaults::text("devswarm_sup.recover_duty"), id, defaults::text("devswarm_sup.act_witness_mismatch"), request);
-    }
-    let target = match (&target, seen) {
-        (super::kill::Target::One { .. }, Some(false)) if defaults::num("devswarm_sup.recover_witness_veto") == 1 => {
-            super::kill::Target::Ambiguous { reason: defaults::text("devswarm_sup.kill_witness_disagrees").to_string(), candidates: vec![] }
-        }
-        _ => target,
-    };
     let grace = setting(st, "devswarm_sup.set_grace_sec").as_u64().unwrap_or_default().max(1) * 1000; // keep: the shipped default always resolves
     let job = super::kill::Job { home, id, descriptor: &desc, now, max_recoveries: max, grace_ms: grace, allow_interactive: true };
     let result = super::kill::recover(&sys, &job, &target);
     Ok((json!({"outcome": "handled", "id": id, "request": request, "target": target.to_json(wt), "result": result}), 0))
-}
-
-/// Whether the Node executable of the rollback can be found (an absolute `node_bin`, or one on the caller's PATH).
-fn node_available(st: &Settings) -> bool {
-    let bin = defaults::text("devswarm_sup.node_bin");
-    if bin.contains('/') {
-        return Path::new(bin).is_file();
-    }
-    let path = st.env.get(defaults::text("devswarm_ingest.env_path")).cloned().unwrap_or_default();
-    path.split(':').filter(|d| !d.is_empty()).any(|d| Path::new(d).join(bin).is_file())
-}
-
-/// Node's read-only `findTarget` for the same worktree and session, compared with `engine`. `Some(agree)`, or `None` when Node
-/// could not be run (the witness is then silent: it is advisory). One line of the witness log either way.
-fn witness(at: &Place, st: &Settings, runner: &dyn Runner, wt: &str, session: &str, engine: &super::kill::Target, now: i64) -> Option<bool> {
-    let ctx = super::tick::Ctx { home: at.home, root: at.root, st, now, engine_pokes: true };
-    let r = super::tick::node(
-        runner,
-        &ctx,
-        defaults::text("devswarm_sup.recover_witness_snippet"),
-        &[wt, session],
-        defaults::num("devswarm_sup.recover_witness_timeout_ms"),
-    );
-    let theirs: Value = r.stdout.lines().rev().find(|l| !l.trim().is_empty()).and_then(|l| serde_json::from_str(l).ok())?;
-    let agree = match engine {
-        super::kill::Target::One { pid, uuid } => {
-            theirs.get("pid").and_then(Value::as_i64) == Some(*pid) && theirs.get("uuid").and_then(Value::as_str) == Some(uuid.as_str())
-        }
-        super::kill::Target::Ambiguous { reason, .. } => {
-            theirs.get("ambiguous") == Some(&Value::Bool(true)) && theirs.get("reason").and_then(Value::as_str) == Some(reason.as_str())
-        }
-    };
-    crate::dsact::exec::append_line(
-        &at.home.join(defaults::text("devswarm_sup.witness_file")),
-        &json!({"ts": now, "duty": defaults::text("devswarm_sup.recover_duty"), "match": agree, "engine": engine.to_json(wt), "node": theirs}),
-    );
-    Some(agree)
-}
-
-/// The rollback: Node's own `devswarm-recover.js` `run` does the kill (named in `devswarm_sup.node_duties`).
-pub fn run_node(at: &Place, st: &Settings, runner: &dyn Runner, id: &str, request: &str, now: i64) -> (Value, i32) {
-    let Place { home, root, .. } = *at;
-    let ctx = super::tick::Ctx { home, root, st, now, engine_pokes: true };
-    let r = super::tick::node(runner, &ctx, defaults::text("devswarm_sup.recover_snippet"), &[id], defaults::num("devswarm_sup.recover_timeout_ms"));
-    let body: Option<Value> = r.stdout.lines().rev().find(|l| !l.trim().is_empty()).and_then(|l| serde_json::from_str(l).ok());
-    match body {
-        Some(b) if r.ok => (json!({"outcome": "handled", "id": id, "request": request, "node": b}), 0),
-        _ => {
-            let why = r.error.clone().unwrap_or_else(|| r.stderr.chars().take(defaults::num("devswarm_sup.detail_chars") as usize).collect());
-            (json!({"outcome": "failed", "id": id, "request": request, "why": defaults::render("devswarm_sup.msg_recover_failed", &[("why", &why)])}), 1)
-        }
-    }
 }

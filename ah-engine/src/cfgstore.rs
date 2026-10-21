@@ -1043,13 +1043,11 @@ mod tests {
             "tier.",
             "dispatch.in_process",
             "dispatch.max_timeout_s",
-            "dispatch.defer_to_node", // the Node-cutover switch of the dispatcher: one value for the whole daemon, read per path the engine cannot decide
             "dispatch.spill_over_cap", // the over-cap SessionStart spill switch: one value for the whole daemon
             "session.gitignore_probe_ms",
             "statusline.total_deadline_ms", // the status line command is its own process: its overall deadline is read once per run
             "realtime.",                    // the file-watch facility's debounce and poll intervals: daemon-wide, not per request
             "script.",                      // the interpreter switch and deadline are process-wide, not per request
-            "ops.shadow_rate_",             // the shadow sampling rates of the operator command-line tools: each run is its own process
             "mcp_reaper.job_every_ms",      // the interval of the scheduled reaper job: the daemon's scheduler reads it, not a request
             "engine_update.every_ms",       // the interval of the scheduled engine-update job: the daemon's scheduler reads it, not a request
             "rollback.", // the binary roll-back and install lock: read by the integrity script and the install paths once per run, not per request

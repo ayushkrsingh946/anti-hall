@@ -4,10 +4,6 @@
 # The message texts are the Node scripts' own, word for word: the parity tests compare the commands' output with the scripts'
 # byte for byte. A `{name}` in a text is filled in at run time.
 
-[env.dispatcher_override]
-doc = "Test-only switch of the installer: names the dispatcher path to embed without checking that it exists (Node: ANTIHALL_DISPATCHER_OVERRIDE)."
-value = "ANTIHALL_DISPATCHER_OVERRIDE"
-
 [slcfg.tmp_env]
 doc = "The environment variables the operating system's temporary directory is read from, in order."
 value = ["TMPDIR", "TMP", "TEMP"]
@@ -63,18 +59,6 @@ value = "settings.local.json"
 [slcfg.backup_suffix]
 doc = "Appended to a settings file's name for its one-time backup."
 value = ".bak-antihall"
-
-[slcfg.stable_dir]
-doc = "The status line directory of the marketplace installation, relative to the home directory (stable across plugin updates)."
-value = ".claude/plugins/marketplaces/anti-hall/plugins/anti-hall/statusline"
-
-[slcfg.dispatcher_file]
-doc = "The status line dispatcher script."
-value = "statusline.js"
-
-[slcfg.uninstall_file]
-doc = "The uninstaller script named in the installer's closing hint."
-value = "uninstall-statusline.js"
 
 [slcfg.install_retired]
 doc = "Message printed by install-statusline after the anti-hall statusline was retired; the command is kept as a no-op so old docs and habits do not re-add statusLine."
@@ -156,26 +140,6 @@ value = "{err}, mkdir '{path}'"
 doc = "Node's wording of a failed file copy. Placeholders: err from to."
 value = "{err}, copyfile '{from}' -> '{to}'"
 
-[slcfg.dispatcher_line]
-doc = "The first line of the installer. Placeholders: path note."
-value = "Dispatcher: {path}{note}"
-
-[slcfg.dispatcher_stable]
-doc = "After the dispatcher path when it is the marketplace one."
-value = "  (stable marketplace path)"
-
-[slcfg.dispatcher_dev]
-doc = "After the dispatcher path when it is the one next to the installer."
-value = "  (dev/__dirname fallback)"
-
-[slcfg.inst_not_found_1]
-doc = "stderr: the dispatcher is missing. Placeholders: path."
-value = "❌ anti-hall · install-statusline: statusline.js not found at: {path}"
-
-[slcfg.inst_not_found_2]
-doc = "stderr: what to do about it."
-value = "Do instead: keep the installer in the same directory as statusline.js."
-
 [slcfg.inst_refused]
 doc = "stderr: the installer refuses to write user configuration under a test. Placeholders: path."
 value = "⛔ anti-hall · install-statusline: refused under a test: {path} is outside a temp dir."
@@ -215,10 +179,6 @@ value = "NOTE: ~/.claude/settings.json (user/global) defines a statusLine:"
 [slcfg.note_user_2]
 doc = "What the local file will do to it."
 value = "  Installing into settings.local.json will take precedence over it."
-
-[slcfg.already_1]
-doc = "The effective statusLine already is the dispatcher."
-value = "Already installed — the effective statusLine already points at anti-hall statusline.js."
 
 [slcfg.source_local]
 doc = "Where an installed statusLine came from."
@@ -400,10 +360,6 @@ value = "Old statusLine:"
 doc = "There was no old value."
 value = "No existing statusLine."
 
-[slcfg.unsafe_1]
-doc = "stderr: the dispatcher path has shell metacharacters."
-value = "⛔ anti-hall · install-statusline: dispatcher path contains shell metacharacters — refusing to embed in statusLine.command."
-
 [slcfg.unsafe_2]
 doc = "stderr: the path. Placeholders: path."
 value = "  Path: {path}"
@@ -412,10 +368,6 @@ value = "  Path: {path}"
 doc = "stderr: manual installation. Placeholders: path."
 value = "  To install manually, add to {path}:"
 
-[slcfg.unsafe_4]
-doc = "stderr: the manual entry."
-value = '    "statusLine": { "type": "command", "command": "node \"/path/to/statusline.js\"" }'
-
 [slcfg.write_failed_1]
 doc = "stderr: the settings file could not be written. Placeholders: path msg."
 value = "❌ anti-hall · install-statusline: Could not write {path}: {msg}"
@@ -423,10 +375,6 @@ value = "❌ anti-hall · install-statusline: Could not write {path}: {msg}"
 [slcfg.write_failed_2]
 doc = "stderr: how to get back."
 value = "Do instead: restore from backup:"
-
-[slcfg.write_failed_3]
-doc = "stderr: the restore command. Placeholders: path."
-value = '  node "{path}"'
 
 [slcfg.new_statusline]
 doc = "Heading of the new value."
@@ -471,10 +419,6 @@ value = "  The bar appears in every repo on this machine."
 [slcfg.to_uninstall]
 doc = "Heading of the uninstall hint."
 value = "To uninstall:"
-
-[slcfg.uninstall_hint]
-doc = "The uninstall command. Placeholders: path."
-value = '  node "{path}"'
 
 [slcfg.u_not_found]
 doc = "stderr: the settings file does not exist. Placeholders: path."
@@ -611,25 +555,6 @@ value = ["code", "desc", "done", "total", "started"]
 [slcfg.phase_proto_key]
 doc = "A field name the engine does not merge (JavaScript treats it as the object's prototype); `update` with it is left to the Node script."
 value = "__proto__"
-
-[ops.verb_phase]
-doc = "The shadow name of the phase command."
-value = "phase"
-
-[ops.script_phase]
-doc = "The Node phase script, relative to the plugin root."
-value = "statusline/phase.js"
-
-[ops.shadow_rate_phase]
-doc = "How many runs in a thousand of the phase command are also run by the Node version in the background and compared (0 turns the shadow off). The engine result is always the real one."
-value = 1000
-env = "AH_ENGINE_SHADOW_RATE_PHASE"
-min = 0
-max = 1000
-
-[env.statusline_node_only]
-doc = "Legacy env name from the retired installer; it no longer re-enables statusLine writes."
-value = "ANTIHALL_STATUSLINE_NODE_ONLY"
 
 [slcfg.launcher_rel]
 doc = "The launcher an earlier engine installer named in the statusLine command, relative to the directory of the status line dispatcher. Legacy recognition only; no migration writes it."

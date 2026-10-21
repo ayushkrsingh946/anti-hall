@@ -55,6 +55,7 @@ fn handlers() -> &'static [(&'static str, Handler)] {
         ("gen-hooks", cmd_gen_hooks),
         ("version", cmd_version),
         ("ctl", cmd_ctl),
+        ("diag", cmd_diag),
         ("stop", cmd_stop),
         ("reset", cmd_reset),
         ("proj", cmd_proj),
@@ -87,7 +88,6 @@ fn handlers() -> &'static [(&'static str, Handler)] {
         ("phase", crate::ops::cmd_phase),
         ("install-statusline", crate::ops::cmd_install_statusline),
         ("uninstall-statusline", crate::ops::cmd_uninstall_statusline),
-        ("shadow-compare", crate::ops::cmd_shadow_compare),
         ("update", crate::operator::update::run),
         ("engine-update", crate::operator::engine_update::run),
         ("install-codex", crate::operator::install_codex::run),
@@ -329,6 +329,12 @@ fn cmd_status(p: &Parsed) -> i32 {
     let mut v = client::status_value();
     // the v1.0 gate of D88, from this binary's own registry (the daemon may be an older build)
     if let Some(m) = v.as_object_mut() {
+        // the hand-back and accounting counters: the daemon's reply carries them; with no daemon (or an older one) the journal does
+        if !m.contains_key("node_handback")
+            && let Some(o) = crate::obs::counters::snapshot().as_object()
+        {
+            m.extend(o.clone());
+        }
         m.insert("compiled_logic_checks_remaining".to_string(), json!(crate::checks::compiled_logic_checks_remaining()));
     }
     // `--memory`: just the memory breakdown (live heap against RSS, and the size of every long-lived in-memory structure)
@@ -437,9 +443,47 @@ fn cmd_version(p: &Parsed) -> i32 {
 }
 
 fn cmd_ctl(p: &Parsed) -> i32 {
-    let verb = p.rest.first().map(String::as_str).unwrap_or("ping");
-    match client::ctl(verb) {
+    // the whole request goes to the daemon (`ctl profile on --for 10m`); `--for <dur>` travels as `for=<dur>`
+    let mut words: Vec<String> = Vec::new();
+    let mut args = p.rest.iter();
+    while let Some(a) = args.next() {
+        match (a.as_str(), args.as_slice().first()) {
+            ("--for", Some(v)) => {
+                words.push(format!("for={v}"));
+                args.next();
+            }
+            _ => words.push(a.clone()),
+        }
+    }
+    let verb = if words.is_empty() { "ping".to_string() } else { words.join(" ") };
+    match client::ctl(&verb) {
         Some(r) => emit(p, r.clone(), json!({"reply": r})),
+        None => return no_daemon(p),
+    }
+    0
+}
+
+/// `ah-engine diag <topic>`: a read-only report over state the engine already keeps. `fs` and `locks` read the state directory
+/// here; the others come from the daemon, except `trace`, which falls back to the last dump on disk.
+fn cmd_diag(p: &Parsed) -> i32 {
+    let topics = crate::obs::diagverbs::topics();
+    let topic = p.rest.first().map(String::as_str).unwrap_or("");
+    if !topics.contains(&topic) {
+        let msg = if topic.is_empty() {
+            defaults::render("msg.obs_diag_usage", &[("topics", &topics.join("|"))])
+        } else {
+            defaults::render("msg.obs_diag_unknown", &[("topic", &topic)])
+        };
+        emit(p, msg.clone(), json!({"error": msg}));
+        return 64;
+    }
+    let report = crate::obs::diagverbs::local(topic).or_else(|| client::ctl_json(&format!("diag {topic}")));
+    match report {
+        Some(v) => emit(p, human(&v), v),
+        None if topic == "trace" => {
+            let v = crate::obs::diagverbs::last_trace_dump();
+            emit(p, human(&v), v);
+        }
         None => return no_daemon(p),
     }
     0

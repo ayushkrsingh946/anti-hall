@@ -66,7 +66,7 @@ doc = "The hook event name to dispatch (`hook --event`)."
 value = "--event"
 
 [flag.fallback]
-doc = "Path of the Node hook to run when the engine cannot answer (`hook`), or the fallback transport (`jev-setup`)."
+doc = "The fallback transport of the Jev classifier (`jev-setup enable`). Older versions of `hook` took a Node script here; it is ignored now."
 value = "--fallback"
 
 [flag.fallback-map]
@@ -84,6 +84,10 @@ value = "--fix"
 [flag.force]
 doc = "Go past the usual skip: `gh poll` polls now, `handovers index` rebuilds every day, `devswarm register-primary` overrides the existing registration."
 value = "--force"
+
+[flag.for]
+doc = "How long a runtime switch stays on (`ctl profile on --for 10m`: a number with an optional ms, s, m or h suffix; a bare number is seconds)."
+value = "--for"
 
 [flag.format]
 doc = "Output format; `md` prints the Markdown reference (`docs`)."

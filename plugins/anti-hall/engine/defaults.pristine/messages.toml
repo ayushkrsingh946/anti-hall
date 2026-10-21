@@ -81,33 +81,13 @@ value = "daemon killed while starting"
 doc = "Log detail when the hook client hit an internal error (a panic) and failed open."
 value = "hook client internal error; failing open"
 
-[msg.log_fallback_timeout]
-doc = "Log detail when the Node fallback did not finish in time."
-value = "node fallback did not finish"
-
 [msg.log_fallback_read_timeout]
 doc = "Log detail when the Node fallback finished but its stdout or stderr was still open at the deadline."
 value = "node fallback output not read to the end"
 
-[msg.log_fallback_read_error]
-doc = "Log detail when reading the Node fallback's stdout or stderr failed part-way."
-value = "node fallback output could not be read to the end (read error)"
-
-[msg.fallback_read_error]
-doc = "Printed on stderr when reading the Node fallback's output failed part-way, so the output is incomplete and no decision exists (exit 1)."
-value = "anti-hall: the Node hook's output could not be read to the end; no decision was made for this call"
-
 [msg.fallback_read_timeout]
 doc = "Printed on stderr when the Node fallback finished but its output could not be read to the end in time, so no decision exists. In the legacy direct forced-fallback path this exits 2 for guard events and 0 for non-guard events; otherwise it exits 1."
 value = "anti-hall: the Node hook finished but its output was not complete before the deadline; no decision was made for this call"
-
-[msg.log_fallback_signal]
-doc = "Log detail when the Node fallback was killed by a signal (out of memory, a crash)."
-value = "node fallback was killed by signal {signal}"
-
-[msg.fallback_signal]
-doc = "Printed on stderr when the Node fallback was killed by a signal, so no decision exists. In the legacy direct forced-fallback path this exits 2 for guard events and 0 for non-guard events; otherwise it exits 1. Placeholder: {signal}."
-value = "anti-hall: the Node hook was killed by signal {signal}; no decision was made for this call"
 
 [msg.log_operator_reset]
 doc = "Log detail for `reset`."
@@ -333,6 +313,14 @@ value = "test panic"
 doc = "Exchange failure when the socket path is not a socket owned by this user."
 value = "socket is not a socket owned by this user"
 
+[msg.run_engine_missing]
+doc = "Printed on stderr by the plugin's launcher script (scripts/ah-run.sh) when no engine can run the command, which exits 127: nothing else runs in its place. Placeholder: {what} (the verb or command words)."
+value = "anti-hall: the engine is not installed or not runnable, so `{what}` did not run. Start a new session to reinstall it, or run `ah-hook.sh --doctor`."
+
+[msg.engine_unreachable_notice]
+doc = "Printed once per session on stderr by the hook wrapper when the engine is unreachable (not installed, crashed, did not answer in time, marked down): the call passes through unchecked because no fallback hooks exist. Placeholders: {event}, {why}."
+value = "anti-hall: the engine did not answer this {event} call ({why}); it went through unchecked. Run `ah-engine doctor` if it keeps happening."
+
 [msg.cold_guard_notice]
 doc = "Printed once per session on stderr when a guard event gave up waiting for a cold-starting daemon and was let through unchecked; {event} is the event name."
 value = "anti-hall: the engine was still starting, so this {event} was not checked; the guards apply again once it is up"
@@ -377,9 +365,9 @@ value = "bad reply frame: {err}"
 doc = "The step named in msg.client_io when the socket path cannot be examined (a permission or path error, not a missing socket)."
 value = "stat"
 
-[msg.client_no_fallback_guard]
-doc = "Printed on stderr (exit dispatch.defer_exit) when the legacy `hook` command gets a guard event, the engine cannot answer and no Node fallback was given: the caller must run the Node hook, never take silence as an allow."
-value = "anti-hall: the engine could not answer this guard event and no Node fallback was given; run the Node hook"
+[msg.client_no_verdict]
+doc = "Event-log detail and stderr reason when the engine answered a hook call with no verdict (BUSY, ERR or a damaged reply) on a guard event: the event's configured failure mode (dispatch.failure_mode, path infra) answers."
+value = "anti-hall: the engine gave no verdict for this guard event"
 
 [msg.log_malloc_decay_applied]
 doc = "Event-log detail (kind malloc_decay) when the daemon, started without the allocator tuning in its environment, applied the decay settings of daemon.malloc_conf at runtime. Placeholder: {settings} (key=value list)."
@@ -397,9 +385,9 @@ value = "diagnostics.allocator={value} is not an accepted allocator; using jemal
 doc = "Event-log detail (kind spawn_fail, code os<n>) when the client could not start the daemon (fork or exec failed: EAGAIN, ENOMEM, a missing executable). Placeholder: {err}."
 value = "could not start the daemon: {err}"
 
-[msg.client_fallback_unavailable]
-doc = "Printed on stderr when stdin cannot safely be sent to the engine and the Node fallback cannot answer. Guard events exit 2; non-guard events exit 0 with this note."
-value = "hook fallback unavailable for undecodable or oversized stdin\n"
+[msg.client_unavailable]
+doc = "Printed on stderr when stdin cannot safely be sent to the engine (undecodable or oversized). Guard events exit 2; non-guard events exit 0 with this note."
+value = "hook input unavailable for the engine (undecodable or oversized stdin)\\n"
 
 [msg.dispatch_stdin_utf8]
 doc = "Reason in dispatch.msg_fail_closed when a guard event's stdin payload is not valid UTF-8."
@@ -791,18 +779,6 @@ value = "AH_HOOK_TIMEOUT_S must be a positive integer"
 doc = "Reason: the milliseconds budget knob is not a positive integer."
 value = "AH_HOOK_TIMEOUT_MS must be a positive integer"
 
-[msg.launcher_why_fallback_unavailable]
-doc = "Reason: the fallback runner could not be started."
-value = "fallback runner unavailable"
-
-[msg.launcher_why_fallback_died]
-doc = "Reason: the fallback runner died without an exit code."
-value = "fallback runner died"
-
-[msg.launcher_why_fallback_payload]
-doc = "Reason: the payload was larger than the launcher keeps, so the fallback runner cannot be given it."
-value = "payload too large to replay to the fallback runner"
-
 [msg.launcher_internal]
 doc = "Printed (once) when the launcher itself failed and let the hook through; {what} is the failure."
 value = "anti-hall: launcher internal failure, hook let through: {what}"
@@ -895,3 +871,39 @@ value = "request shed under load"
 doc = "Exchange text: the daemon closed the connection before it acknowledged the request."
 value = "closed before ACK(req)"
 
+
+[msg.obs_diag_usage]
+doc = "Usage of `ah-engine diag`; {topics} is the list in diagnostics.diag_topics."
+value = "usage: ah-engine diag <{topics}>"
+
+[msg.obs_diag_unknown]
+doc = "Printed when `diag` is given a topic that is not in diagnostics.diag_topics."
+value = "unknown diag topic: {topic}"
+
+[msg.obs_profile_usage]
+doc = "Usage of `ah-engine ctl profile`."
+value = "usage: ah-engine ctl profile <on [sample|full] [--for <duration>]|off|status>"
+
+[msg.obs_profile_bad_duration]
+doc = "Reply to a `--for` value that is not a number with an optional unit suffix."
+value = "bad duration: {value}"
+
+[msg.obs_profile_on]
+doc = "Log line when a runtime profiling window starts."
+value = "profiling on: mode {mode} for {ms} ms"
+
+[msg.obs_profile_off]
+doc = "Log line when a runtime profiling window ends or is switched off; {why} is off, expired or full-file."
+value = "profiling back to {mode} ({why})"
+
+[msg.obs_trace_dumped]
+doc = "Log line when the trace ring is written because a hard limit tripped."
+value = "trace ring dumped ({reason}, {entries} entries) to {path}"
+
+[msg.obs_trace_dump_failed]
+doc = "Log line when the trace ring could not be written."
+value = "trace ring dump failed ({reason}): {err}"
+
+[msg.obs_counter_write_failed]
+doc = "Log line when a counter could not be appended to the journal (the count is lost; nothing else changes)."
+value = "counter journal write failed: {err}"

@@ -48,8 +48,8 @@ doc = "Print the version this build reports."
 value = { args = "", read_only = true, status = "implemented" }
 
 [cmd.ctl]
-doc = "Send a control verb to the daemon: ping, reload, stop or status."
-value = { args = "<ping|reload|stop|status>", read_only = false, status = "implemented" }
+doc = "Send a control verb (with its arguments) to the daemon: ping, reload, stop, status, or profile (switch per-check CPU and allocation profiling on for a limited time, off, or report it)."
+value = { args = "<ping|reload|stop|status|profile on [sample|full] [--for <dur>]|profile off|profile status>", read_only = false, status = "implemented" }
 
 [cmd.stop]
 doc = "Ask the daemon to drain and exit."
@@ -157,10 +157,6 @@ value = { args = "", read_only = false, status = "implemented" }
 doc = "Take an older anti-hall status line out of the host's settings (L9a, the port of statusline/uninstall-statusline.js): restores the saved original statusLine, else the settings backup, else removes the key; `--project` for ./.claude/settings.local.json, `--purge-base` to also remove the shared base configuration."
 value = { args = "[--user|--project] [--purge-base]", read_only = false, status = "implemented" }
 
-[cmd.shadow-compare]
-doc = "Internal: the detached half of a Node shadow (L9a). Runs the Node version of a sampled operator command on a scratch home and logs a mismatch to telemetry; started by the engine, not by people."
-value = { args = "<scratch dir>", read_only = false, status = "implemented" }
-
 [cmd.schedule]
 doc = "The scheduler (D33): `list` the jobs with their next run and last result, `run <job>` now (waits briefly for the result), or show the run `history` from hot.db; adding and removing jobs from the command line is planned (D33), today they come from schedules.toml and schedules.json."
 value = { args = "<list|run <job>|history> [--job <name>] [--limit <n>]", read_only = false, read_only_args = ["list", "history"], status = "implemented" }
@@ -196,3 +192,7 @@ value = { args = "[--global] [--dry-run] [--root <plugin dir>]", read_only = fal
 [cmd.handovers]
 doc = "The handover brief tree: `index` rebuilds the root brief and the per-day briefs (BRIEF.md plus a typed BRIEF.json) of the changed days under .anti-hall/handovers (`--registered` walks every project the SessionStart check has seen, `--force` rebuilds all days), `check` reports unindexed or stale handovers, missing briefs, malformed handovers and broken references without writing (exit 3 when there are any), `search <words> [date:..] [session:..] [decision:..] [file:..]` ranks entries from the sidecars. Never edits a handover file and never deletes. The logic is the plugin script handover-hygiene.js; the scheduled job `handovers` runs `index --registered`."
 value = { args = "<index|check|search> [query] [--project <dir>] [--registered] [--force] [--limit <n>]", read_only = false, status = "implemented" }
+
+[cmd.diag]
+doc = "Read-only diagnostic reports over state the engine already keeps: cpu, mem, threads, hooks, mesh, jev, fs, locks and the trace ring. Needs no feature flag and changes nothing."
+value = { args = "<cpu|mem|threads|hooks|mesh|jev|fs|locks|trace>", read_only = true, status = "implemented" }

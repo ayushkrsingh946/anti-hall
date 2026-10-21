@@ -38,11 +38,6 @@ value = { claude = ["CLAUDE_PLUGIN_ROOT"], codex = ["PLUGIN_ROOT", "CLAUDE_PLUGI
 doc = "The shell a Node hook command runs under, with its command flag (hooks.json commands are shell-form strings)."
 value = ["/bin/sh", "-c"]
 
-[dispatch.rerun_reserve_ms]
-doc = "The least host time that must be left (the event's longest hooks.json timeout minus the time the dispatcher has used) for a spent budget to defer to the wrapper's Node rerun (dispatch.defer_exit). With less left the rerun would be killed by the host, which treats a timed-out hook as an allow, so a guard event fails closed instead."
-value = 5000
-unit = "ms"
-
 [dispatch.default_timeout_s]
 doc = "The timeout of a Node hook whose hooks.json entry has none (0 in the table): the host's own default for a command hook (600 s on Claude per docs/KB-claude-code-hooks.md; Codex's default is not verified here, so the same bound is used). Never zero: a zero timeout would kill the hook at its first poll."
 value = 600
@@ -181,7 +176,7 @@ doc = "Printed on stderr (exit 0) when a Stop or SubagentStop would fail closed 
 value = "anti-hall: the engine could not run the guards for {event} ({why}) and cannot count its blocks, so the agent is let finish rather than risk a loop. Repair the install (`doctor --repair`)."
 
 [dispatch.spill_over_cap]
-doc = "1 = a SessionStart (or any event that cannot block) whose joined additionalContext is over dispatch.context_cap is delivered natively: the hooks' contexts that fit stay inline whole and in hook order, the rest is written to a file under dispatch.spill_dir and a pointer line (dispatch.msg_spill_pointer) names it, so nothing is cut and no Node hook runs. The host would spill an over-cap value itself but keeps only about 2000 characters of it inline. 0 = the previous answer: hand the event to the wrapper's Node hooks (dispatch.defer_exit) while dispatch.defer_to_node is 1, else deliver the join and let the host spill it. Used only when the join is exactly the hooks' contexts joined by dispatch.context_joiner and the file can be written; otherwise the previous answer stands."
+doc = "1 = a SessionStart (or any event that cannot block) whose joined additionalContext is over dispatch.context_cap is delivered natively: the hooks' contexts that fit stay inline whole and in hook order, the rest is written to a file under dispatch.spill_dir and a pointer line (dispatch.msg_spill_pointer) names it, so nothing is cut and no Node hook runs. The host would spill an over-cap value itself but keeps only about 2000 characters of it inline. 0 = deliver the join and let the host spill it. Used only when the join is exactly the hooks' contexts joined by dispatch.context_joiner and the file can be written; otherwise the previous answer stands."
 value = 1
 env = "AH_ENGINE_SPILL_OVER_CAP"
 min = 0
@@ -218,15 +213,26 @@ value = "context spill file not written: {err}"
 doc = "Event-log detail after stale spill files were removed. Placeholder: {n}."
 value = "removed {n} stale context spill file(s)"
 
-[dispatch.defer_to_node]
-doc = "1 (until the Node cutover) = a path the engine cannot decide (infrastructure fault, spent event budget, panic) hands the event to the wrapper's Node hooks with dispatch.defer_exit. 0 = no Node exists: advisory events skip their hooks (logged, counted in telemetry as dispatcher-<path>, one stderr line) and guard events follow dispatch.failure_mode; an over-cap context is delivered for the host to spill when it cannot be spilled natively."
+[dispatch.native]
+doc = "1 (the default) = the dispatcher decides every event itself: its built-in checks answer, no hook command is launched, and a path it cannot decide answers by dispatch.failure_mode. 0 = the diagnostic switch is off: the dispatcher runs nothing, every event is let through with a loud stderr line (dispatch.msg_disabled), a log line and a `disabled` count; guards are NOT running while it is 0."
 value = 1
-env = "AH_ENGINE_DEFER_TO_NODE"
 min = 0
 max = 1
 
+[dispatch.msg_disabled]
+doc = "Printed on stderr (exit 0) for each event while the dispatcher is switched off (dispatch.native 0). Placeholder: {event}."
+value = "anti-hall: the dispatcher is switched off (dispatch.native = 0); the {event} hooks did not run and this call went through UNGUARDED"
+
+[dispatch.msg_disabled_event]
+doc = "Event-log detail for an event let through by a switched-off dispatcher. Placeholder: {event}."
+value = "dispatcher switched off: {event} not dispatched"
+
+[dispatch.msg_hook_not_launched]
+doc = "The reason a hook entry ends as one that could not run: the dispatcher launches no hook command; only a built-in check decides."
+value = "no hook command is launched; the built-in check did not answer"
+
 [dispatch.failure_mode]
-doc = "With dispatch.defer_to_node 0, what a GUARD event does when the engine cannot decide, per path: `budget` (the event's budget_ms passed before every hook could start), `infra` (an unreadable payload or map, a hook the OS would not start, a lost table row, no engine answer and no fallback) and `panic` (the dispatcher hit an internal error). `closed` blocks (exit 2, dispatch.msg_fail_closed, bounded on Stop events by dispatch.stop_block_cap), `open` lets the call through with a loud stderr line (dispatch.msg_no_node_open). A panic is `open` because a bug of the engine's own must not lock the user out of every tool."
+doc = "What a GUARD event does when the engine cannot decide, per path: `budget` (the event's budget_ms passed before every hook could start), `infra` (an unreadable payload or map, an entry whose check gave no answer, a lost table row, no engine answer) and `panic` (the dispatcher hit an internal error). `closed` blocks (exit 2, dispatch.msg_fail_closed, bounded on Stop events by dispatch.stop_block_cap), `open` lets the call through with a loud stderr line (dispatch.msg_no_node_open). A panic is `open` because a bug of the engine's own must not lock the user out of every tool."
 value = { budget = "closed", infra = "closed", panic = "open" }
 
 [dispatch.msg_no_node_skipped]
@@ -247,9 +253,6 @@ value = 75
 min = 1
 max = 255
 
-[dispatch.msg_infra_defer]
-doc = "Printed on stderr with dispatch.defer_exit when an infrastructure fault (a hook the OS would not start, an unreadable payload or fallback map, a usage error, the event's budget spent) keeps the dispatcher from deciding: the wrapper then runs the Node hooks. Placeholders: {event}, {why}."
-value = "anti-hall: the engine could not dispatch {event} ({why}); the Node hooks decide"
 
 [dispatch.msg_fail_closed]
 doc = "Printed on stderr (exit 2) when a guard event's Node hooks cannot run. Placeholders: {event}, {why}."
@@ -262,10 +265,6 @@ value = "anti-hall: the engine could not run the guards for {event} ({why}). The
 [dispatch.msg_panic]
 doc = "Deferral reason (event log and stderr) when the dispatcher panicked on a guard event: the Node hooks answer instead of a block."
 value = "the dispatcher hit an internal error: the Node hooks decide"
-
-[dispatch.msg_defer_separately]
-doc = "Printed on stderr with dispatch.defer_exit when the joined output is over the host's cap. Placeholders: {event}, {len}, {cap}."
-value = "anti-hall: the joined {event} context is {len} characters, over the {cap} the host delivers inline; the hooks must run separately"
 
 [dispatch.msg_skipped_entry]
 doc = "Event-log detail when a non-guard event goes on without an entry that has no runnable Node command. Placeholder: {id}."

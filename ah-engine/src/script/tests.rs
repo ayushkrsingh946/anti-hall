@@ -1685,3 +1685,195 @@ fn an_idle_worker_frees_its_interpreter_and_the_next_call_rebuilds_it() {
     assert_eq!(seen.0, seen.1, "the rebuilt interpreter answers the same");
     crate::discard::harmless(std::fs::remove_dir_all(&h)); // keep: cleanup
 }
+
+// ---- v0.301 W3b: no hand-backs in the shared libs --------------------------------------------------------------------
+
+/// The scripts hand nothing back to Node: no deferral sentinel or token is left in an executable line of the plugin logic.
+#[test]
+fn no_script_hands_a_case_back_to_node() {
+    let _ = defaults::text("script.ext"); // the root is known once the defaults are loaded
+    let root = defaults::root().expect("plugin root").join("engine/logic");
+    let banned = ["'defer'", "meshDefer", "UNDECIDABLE", "cb.DEFER", "cb.defer(", "gates.run("];
+    let mut stack = vec![root];
+    let mut seen = 0;
+    while let Some(d) = stack.pop() {
+        for e in std::fs::read_dir(&d).expect("logic directory").flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                stack.push(p);
+            } else if p.extension().is_some_and(|x| x == "js") {
+                seen += 1;
+                for (i, line) in std::fs::read_to_string(&p).expect("script").lines().enumerate() {
+                    if line.trim_start().starts_with("//") {
+                        continue;
+                    }
+                    for b in banned {
+                        assert!(!line.contains(b), "{}:{} still hands a case back ({b}): {line}", p.display(), i + 1);
+                    }
+                }
+            }
+        }
+    }
+    assert!(seen > 50, "the scan reached the scripts ({seen})");
+}
+
+/// A DevSwarm child whose message store the host cannot read exactly (a forced backend it does not read) is told its mailbox could
+/// not be counted, instead of being passed in silence; with the store simply absent the same child hears nothing.
+#[test]
+fn a_child_mailbox_the_host_cannot_count_gets_the_drain_nudge_with_an_unknown_count() {
+    let case = |forced: bool| {
+        let mut env = json!({"DEVSWARM_BUILDER_ID": "ws-1", "DEVSWARM_REPO_ID": "r1", "DEVSWARM_SOURCE_BRANCH": "b", "HOME": "{HOME}"});
+        if forced {
+            env[defaults::text("mesh_write.env_store_backend")] = json!("journal");
+        }
+        json!({
+            "env": env, "event": "PostToolUse", "opts": {"plugin_root": "{PLUGIN}"},
+            "files": {
+                ".anti-hall/devswarm/workspaces/ws-1.json": "{\"inboxPath\":\"{HOME}/inbox\",\"worktreePath\":\"{HOME}/wt\"}",
+                "wt/.git/HEAD": "ref: refs/heads/main\n",
+            },
+            "payload": {"hook_event_name": "PostToolUse", "session_id": "s1", "tool_input": {"command": "ls"}, "tool_name": "Bash"},
+        })
+    };
+    let run = |forced: bool| {
+        let l = golden::lay(&case(forced));
+        let got = golden::run_case("devswarm-child-drain", &l, 1).expect("a shipped script");
+        golden::verdict_json(&got, &l)
+    };
+    let unknown = run(true);
+    assert_eq!(unknown["v"], "exact", "{unknown}");
+    let out = unknown["out"].as_str().unwrap_or_default();
+    assert!(out.contains("could not be read here"), "{out}");
+    assert_eq!(run(false)["v"], "allow", "an absent store is a count of zero, not an unknown one");
+}
+
+// ---- v0.301 W3b: the weekly Jev scorecard ----------------------------------------------------------------------------
+
+/// The weekly scorecard is built again: a KEEP verdict whose integration is not on is named, and the week is consumed only once the
+/// scorecard exists. A Jev that is off hears nothing and stamps nothing.
+#[test]
+fn the_weekly_scorecard_names_an_integration_whose_mode_lags_its_keep_verdict() {
+    let rows: String = (0..60)
+        .flat_map(|i| {
+            [
+                format!("{{\"ts\":\"{{ISO}}\",\"id\":\"zz-test\",\"h\":\"h{i}\",\"backend\":\"jev\",\"mode\":\"on\",\"changed\":\"added\",\"ms\":100}}"),
+                format!("{{\"type\":\"outcome\",\"ts\":\"{{ISO}}\",\"id\":\"zz-test\",\"h\":\"h{i}\",\"outcome\":\"ok\"}}"),
+            ]
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let case = |enabled: bool| {
+        json!({
+            "env": {"HOME": "{HOME}"}, "event": "SessionStart", "opts": {"plugin_root": "{PLUGIN}"},
+            "files": {".anti-hall/jev.json": format!("{{\"enabled\":{enabled}}}"), ".anti-hall/logs/jev-assist.ndjson": rows.clone()},
+            "payload": {"hook_event_name": "SessionStart", "session_id": "s1"},
+        })
+    };
+    let latch = defaults::text("jev_weekly.latch_file");
+    let on = golden::lay(&case(true));
+    let got = golden::verdict_json(&golden::run_case("jev-weekly-scorecard", &on, 1).expect("a shipped script"), &on);
+    assert_eq!(got["v"], "advisory", "{got}");
+    assert!(got["text"].as_str().unwrap_or_default().contains("zz-test is ready to switch ON."), "{got}");
+    assert!(Path::new(&on.home).join(".anti-hall").join(latch).is_file(), "the week is consumed once the scorecard is built");
+    let off = golden::lay(&case(false));
+    assert_eq!(golden::verdict_json(&golden::run_case("jev-weekly-scorecard", &off, 1).expect("a shipped script"), &off)["v"], "allow");
+    assert!(!Path::new(&off.home).join(".anti-hall").join(latch).exists(), "a Jev that is off consumes nothing");
+}
+
+/// Script load check (every script a hand-back removal touched): each loads in the interpreter and answers a minimal call on its
+/// own event without a script error (a script error would otherwise pass as a quiet allow).
+#[test]
+fn every_script_without_hand_backs_loads_and_answers_a_minimal_call() {
+    let checks = [
+        ("auto-handover", "UserPromptSubmit"),
+        ("auto-handover-pause-nag", "Stop"),
+        ("limit-conserve-inject", "UserPromptSubmit"),
+        ("devswarm-child-gate", "Stop"),
+        ("devswarm-child-drain", "PostToolUse"),
+        ("devswarm-child-turn", "UserPromptSubmit"),
+        ("devswarm-parent-gate", "Stop"),
+        ("devswarm-parent-inbox", "UserPromptSubmit"),
+        ("devswarm-parent-reply-tracker", "PostToolUse"),
+        ("jev-review-reminder", "SessionStart"),
+        ("jev-weekly-scorecard", "SessionStart"),
+        ("repair-on-reload", "SessionStart"),
+        ("speculation-judge", "Stop"),
+        ("devswarm-child-role", "SessionStart"),
+    ];
+    for (check, event) in checks {
+        let case = json!({
+            "env": {"HOME": "{HOME}"}, "event": event, "opts": {"plugin_root": "{PLUGIN}"},
+            "payload": {"hook_event_name": event, "session_id": "s1", "cwd": "{HOME}", "prompt": "hello", "tool_name": "Bash", "tool_input": {"command": "ls"}},
+        });
+        let l = golden::lay(&case);
+        let got = golden::run_case(check, &l, 1).unwrap_or_else(|| panic!("{check}: no shipped script"));
+        assert!(!matches!(got, Some(Verdict::Defer)), "{check}: handed a minimal call back");
+        let errors: Vec<(String, String)> = crate::discard::captured().into_iter().filter(|(code, _)| code == "script_error").collect();
+        assert!(errors.is_empty(), "{check}: script errors {errors:?}");
+    }
+}
+
+// ---- v0.301 W3b: the speculation judge in the daemon ------------------------------------------------------------------
+
+/// The opt-in judge block works again: the daemon (a process that may not wait for a model) hands the check to the one-shot dispatcher
+/// ({dispatcher: true}, nothing counted as a script error), and the dispatcher, where the call may be made, blocks on the model's verdict.
+#[test]
+fn the_speculation_judge_is_handed_to_the_dispatcher_and_blocks_there() {
+    use crate::jev::cascade::{MODEL_LOCK, TEST_MODEL};
+    let _g = MODEL_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let case = json!({
+        "env": {"HOME": "{HOME}", "ANTIHALL_SEMANTIC_JUDGE": "1", "ANTIHALL_JUDGE_BACKEND": "cli"},
+        "event": "Stop", "files": {"t.jsonl": "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"why is it slow?\"}}\n"},
+        "payload": {"hook_event_name": "Stop", "session_id": "s1", "transcript_path": "{HOME}/t.jsonl", "last_assistant_message": "The cause is the old build artifact."},
+    });
+    assert!(!crate::judge::blocking_calls_allowed(), "the test starts as the daemon is: not allowed to wait for a model");
+    let l = golden::lay(&case);
+    let in_daemon = golden::verdict_json(&golden::run_case("speculation-judge", &l, 1).expect("a shipped script"), &l);
+    assert_eq!(in_daemon, json!({"v": "defer"}), "the daemon hands the check to the dispatcher");
+    assert!(crate::discard::captured().iter().all(|(code, _)| code != "script_error"), "{:?}", crate::discard::captured());
+    crate::judge::allow_blocking_calls();
+    *TEST_MODEL.lock().unwrap() = Some(Box::new(|_| crate::judge::cli::CliOutcome { result: Ok(r#"{"decision":"block","claim":"the cause is stated, not shown"}"#.into()), ms: 5 }));
+    let l = golden::lay(&case);
+    let in_dispatcher = golden::verdict_json(&golden::run_case("speculation-judge", &l, 1).expect("a shipped script"), &l);
+    *TEST_MODEL.lock().unwrap() = None;
+    assert_eq!(in_dispatcher["v"], "exact", "{in_dispatcher}");
+    assert!(in_dispatcher["out"].as_str().unwrap_or_default().contains("the cause is stated, not shown"), "{in_dispatcher}");
+}
+
+// ---- v0.301 W3b: the Primary seat and the stable launchers ------------------------------------------------------------
+
+/// A Primary checkout registers its seat on its first run in real DevSwarm, adopts it from a closed session, says nothing on its own
+/// seat again, and the SessionStart check writes the two stable launchers (executable) before anything else.
+#[test]
+fn a_primary_session_registers_adopts_and_keeps_its_seat_and_the_launchers_are_installed() {
+    let case = json!({
+        "env": {"HOME": "{HOME}", "DEVSWARM_REPO_ID": "r1"}, "event": "SessionStart", "opts": {"plugin_root": "{PLUGIN}"},
+        // a readable sessions directory that names no session: every other session counts as closed
+        "files": {"wt/.git/HEAD": "ref: refs/heads/main\n", ".claude/sessions/other.json": "{\"sessionId\":\"unrelated\",\"pid\":1}"},
+        "payload": {"hook_event_name": "SessionStart", "session_id": "new-session", "cwd": "{HOME}/wt"},
+    });
+    let run = |l: &golden::Laid| golden::verdict_json(&golden::run_case("devswarm-child-role", l, 1).expect("a shipped script"), l);
+    // first run: nothing registered yet
+    let l = golden::lay(&case);
+    let first = run(&l);
+    let out = first["out"].as_str().unwrap_or_default().to_string();
+    assert!(out.contains("registered Primary primary-"), "{first} {:?}", crate::discard::captured());
+    let home = Path::new(&l.home);
+    let desc: Vec<_> = std::fs::read_dir(home.join(".anti-hall/devswarm/workspaces")).expect("workspaces dir").flatten().collect();
+    assert_eq!(desc.len(), 1, "the Primary's descriptor is written");
+    for launcher in ["devswarm.js", "wake-watch.js"] {
+        let m = std::fs::metadata(home.join(".anti-hall/bin").join(launcher)).expect("a stable launcher");
+        assert_eq!(std::os::unix::fs::PermissionsExt::mode(&m.permissions()) & 0o111, 0o111, "{launcher} is executable");
+    }
+    // the same session again: its own seat, no notice
+    let second = run(&l);
+    assert!(!second["out"].as_str().unwrap_or_default().contains("devswarm-primary-seat"), "{second}");
+    // a closed holder is replaced by this session
+    let file = desc[0].path();
+    let mut d: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    d["sessionId"] = json!("old-session");
+    std::fs::write(&file, d.to_string()).unwrap();
+    let adopted = run(&l);
+    let text = adopted["out"].as_str().unwrap_or_default();
+    assert!(text.contains("adopted Primary") && text.contains("old-session"), "{adopted}");
+}

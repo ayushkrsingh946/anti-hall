@@ -186,6 +186,30 @@ pub fn open_store(inv: &Inv, repo_key: &str) -> R<MeshStore> {
     MeshStore::open(&db).map_err(|e| Defer(format!("store-open:{e}")))
 }
 
+/// The first creation of a project's store (`resolveStoreBackend` on a fresh directory): the directory and the sqlite marker, so that
+/// [`open_store`] then opens (creating) the database. A directory that already holds a journal store, or any other backend, defers.
+pub fn init_new_store(inv: &Inv, repo_key: &str) -> R<()> {
+    let dir = devswarm_root(&inv.home).join(defaults::text("mesh_write.dir_store")).join(repo_key);
+    let forced = inv.env("mesh_write.env_store_backend").map(|s| s.trim().to_lowercase()).unwrap_or_default();
+    if !forced.is_empty() && forced != defaults::text("mesh.backend_sqlite") {
+        return defer("journal-backend");
+    }
+    let has_db = std::fs::metadata(dir.join(defaults::text("mesh_write.store_file"))).is_ok_and(|m| m.len() > 0);
+    let has_journal = std::fs::read_dir(dir.join(defaults::text("devswarm_role.pg_journal_dir"))).is_ok_and(|mut r| r.next().is_some());
+    if has_journal || (!has_db && std::fs::metadata(dir.join(defaults::text("mesh.backend_marker"))).is_ok_and(|m| m.len() > 0) && !dir_marker_is_sqlite(&dir)) {
+        return defer("store-backend");
+    }
+    std::fs::create_dir_all(&dir).map_err(|e| Defer(format!("store-dir:{e}")))?;
+    if !dir_marker_is_sqlite(&dir) {
+        std::fs::write(dir.join(defaults::text("mesh.backend_marker")), defaults::text("mesh.backend_sqlite")).map_err(|e| Defer(format!("store-marker:{e}")))?;
+    }
+    Ok(())
+}
+
+fn dir_marker_is_sqlite(dir: &Path) -> bool {
+    std::fs::read_to_string(dir.join(defaults::text("mesh.backend_marker"))).is_ok_and(|m| m.trim().to_lowercase() == defaults::text("mesh.backend_sqlite"))
+}
+
 /// Jev triage might label an arrival (`jev-triage.js` `loadTriageConfig(home).enabled` can be true): Node then appends
 /// to the arrival queue and may spawn a worker, which the engine does not; the send defers.
 pub fn jev_maybe_enabled(inv: &Inv) -> bool {

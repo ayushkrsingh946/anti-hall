@@ -7,8 +7,8 @@
 // waits and signals the pids this script names (ah.proc.signal refuses anything its own listing did not show, a forced signal before a
 // polite one, the engine itself and its parent, pids below 2). Nothing is written or signalled before the selection is complete. Every
 // home is Node's os.homedir() (hookProc.adoptHome: HOME unset adopts the passwd home). What the host cannot read the way Node would
-// leaves the state as it was and defers, logged under mcp_reaper.unsure_log_kind: a relative or empty HOME, no home, the real home
-// under a test marker, a process id past the exact range, a probe it cannot read, an ambiguous local time. Mirrors hooks/session-end-mcp-reaper.js and companion/mcp-reaper.js. Keys and texts: mcp_reaper.toml, host_proc.toml.
+// leaves the state as it was and kills nothing (counted, native_unable, logged under mcp_reaper.unsure_log_kind): no home, the real home
+// under a test marker, a process id past the exact range, a probe it cannot read. Mirrors hooks/session-end-mcp-reaper.js and companion/mcp-reaper.js. Keys and texts: mcp_reaper.toml, host_proc.toml.
 'use strict';
 
 function mrArgv0(cmd) {
@@ -87,11 +87,24 @@ function mrLog(rel, abs, fields) {
 
 function mrProc(p, action) { return { pid: p.pid, ppid: p.ppid, cmd: p.cmd, action: action }; }
 
-function mrDefer(why) { ah.log(ah.cfg('mcp_reaper.unsure_log_kind'), why); return 'defer'; }
+// Node's os.homedir() for this call: false when there is none or it is the real home under a test marker (Node's own guard then writes nothing);
+// a relative HOME is resolved against the stand-in directory (counted).
+function mrAdopt(p) {
+  var why = hookProc.adoptHome();
+  if (why === null) return true;
+  ah.unable('mcp-reaper:' + why);
+  if (why !== 'relative_home') return false;
+  var h = hookProc.home(p);
+  if (h === null) return false;
+  ah.useHome(h);
+  return true;
+}
+
+// A selection the host cannot prove exactly kills nothing (counted and logged).
+function mrHold(why) { ah.unable('mcp-reaper:' + why); ah.log(ah.cfg('mcp_reaper.unsure_log_kind'), why); return 'allow'; }
 
 function decide(p) {
-  var noHome = hookProc.adoptHome();
-  if (noHome !== null) return mrDefer(noHome);
+  if (!mrAdopt(p)) return 'allow';
   if (!ah.settings.bool('mcp_reaper.setting')) return 'allow';
   var reason = p && typeof p === 'object' ? mrReason(p) : null;
   if (reason === null || ah.cfg('mcp_reaper.act_reasons').indexOf(reason) === -1) return 'allow';
@@ -114,13 +127,13 @@ function decide(p) {
   var matcher = mrMatcher(), raw = rows.filter(function (q) { return mrInvariant(matcher, q, extra, exclude); }), kept = [], skipped = [];
   if (raw.length) {
     var exact = ah.cfgNum('hostproc.max_exact_id');
-    if (raw.some(function (q) { return !(q.pid >= 0 && q.pid < exact); })) return mrDefer('pid_range');
+    if (raw.some(function (q) { return !(q.pid >= 0 && q.pid < exact); })) return mrHold('pid_range');
     var ages = ah.proc.ages(raw.map(function (q) { return q.pid; }));
-    if (ages.unsure) return mrDefer('ages');
+    if (ages.unsure) return mrHold('ages');
     var aged = raw.filter(function (q) { var a = ages.ages[String(q.pid)]; return typeof a === 'number' && a >= minAge; });
     if (aged.length) {
       var m = ah.proc.managed(aged.map(function (q) { return q.pid; }));
-      if (m.unsure) return mrDefer('managed');
+      if (m.unsure) return mrHold('managed');
       if (m.unverifiable) {
         skipped = aged.map(function (q) { return { proc: q, reason: ah.cfg('mcp_reaper.reason_launchd_unverifiable') }; });
       } else {

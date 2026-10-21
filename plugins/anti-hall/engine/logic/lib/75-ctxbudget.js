@@ -22,13 +22,11 @@ var cb = {
     if (p && typeof p.transcript_path === 'string' && p.transcript_path) return ah.sha1(p.transcript_path).slice(0, cb.n('ctxbudget.ah_hash_tag_len'));
     return null;
   },
-  // A case only Node decides exactly (what it is is `why`): logged under ctxbudget.ah_unsure_log_kind, then the decision defers. The
-  // checks collect every write and make them at the end, so `run` turns the throw into 'defer' before anything is written.
-  DEFER: { defer: true },
-  defer: function (why) { ah.log(ah.cfg('ctxbudget.ah_unsure_log_kind'), why); throw cb.DEFER; },
-  run: function (f) { try { return f(); } catch (e) { if (e === cb.DEFER) return 'defer'; throw e; } },
-  // The transcript path to open (hookProc.openKnown); a relative one without an absolute payload cwd defers.
-  open: function (p, tp) { var o = hookProc.openKnown(p, tp); if (o === null) cb.defer('relative_transcript'); return o; },
+  // A case only Node's own process state settles exactly (what it is is `why`): logged under ctxbudget.ah_unsure_log_kind and counted
+  // (native_unable at ctxbudget:<why>); the caller goes on with the stated stand-in.
+  unsure: function (why) { ah.log(ah.cfg('ctxbudget.ah_unsure_log_kind'), why); ah.unable('ctxbudget:' + why); },
+  // The transcript path to open (hookProc.openKnown); a relative one without an absolute payload cwd opens against the stand-in directory.
+  open: function (p, tp) { var o = hookProc.openKnown(p, tp); if (o === null) { cb.unsure('relative_transcript'); o = hookProc.open(p, tp); } return o; },
   rel: function (dir, name) { return cb.c('ctxbudget.state_root') + '/' + dir + '/' + name; },
   readObj: function (rel) {
     var raw = ah.state.readText(rel);
@@ -161,24 +159,25 @@ var cb = {
     var names = ah.fs.readdir(sessionDir) || [], count = names.filter(function (f) { return ho.handoverRe.test(f); }).length, seq = count + 1;
     return seq > 1 ? text.render(cb.c('ctxbudget.ah_handover_name_n'), { n: seq }) : cb.c('ctxbudget.ah_handover_name');
   },
-  // The payload's working directory, or null without one; a relative one (resolved by Node against its own directory) defers.
+  // The payload's working directory, or null without one; a relative one (resolved by Node against its own directory) resolves
+  // against the stand-in directory (counted).
   cwdOf: function (p) {
     if (!p || typeof p.cwd !== 'string' || !p.cwd) return null;
-    if (!ah.path.isAbsolute(p.cwd)) cb.defer('relative_cwd');
+    if (!ah.path.isAbsolute(p.cwd)) { cb.unsure('relative_cwd'); return hookProc.cwd(p); }
     return p.cwd;
   },
-  // ho.localDate(); a request time zone other than UTC (which only Node applies) defers.
+  // ho.localDate(); a request time zone other than UTC (which only Node applies) takes the UTC date (counted).
   localDate: function () {
     var d = ho.localDate();
-    if (d === null) cb.defer('local_date');
+    if (d === null) { cb.unsure('local_date'); d = new Date(ah.clock.now()).toISOString().slice(0, 10); }
     return d;
   },
   // handover-find repoRoot(cwd): the git top level unless it is the home directory, else cwd. The home compared is the call's own
   // (ah.home(): HOME, or the passwd home hookProc.adoptHome made it), as Node's realHome(). A checkout the resolver cannot classify
-  // exactly defers.
+  // exactly is read as the directory itself (counted).
   repoRoot: function (cwd) {
     var ctx = ho.context(cwd), h = ah.home(), rh = ah.fs.realpath(h || '') || h;
-    if (ctx.unsure) cb.defer('repo_root');
+    if (ctx.unsure) { cb.unsure('repo_root'); ctx = { unsure: false, toplevel: null, root: null }; }
     return ctx.toplevel && ctx.toplevel !== rh ? ctx.toplevel : cwd;
   },
   // `expectedHandoverPath(payload)`: the repo-relative path of the next handover; null with no cwd.
@@ -301,15 +300,16 @@ var cb = {
   },
   // `isFresh(lines, handoverMtimeMs, cwd)`: null (unknown), true (no counted work after the handover) or false. `cwd` is the hook's
   // physical directory (the payload's absolute cwd, links resolved; null without one): Node's isUnderTmpRoot resolves a relative
-  // written path against it with path.resolve, which is exactly the lexical resolution below; with no cwd known that path defers. A
-  // line or a timestamp only V8 reads defers.
+  // written path against it with path.resolve, which is exactly the lexical resolution below; with no cwd known that path resolves
+  // against the stand-in directory (counted). A line or a timestamp only V8 reads leaves the freshness unknown (null, counted).
   isFresh: function (lines, mtime, cwd) {
     if (typeof mtime !== 'number' || !isFinite(mtime)) return null;
     var under = wd.underTmp;
     wd.underTmp = function (q, c) {
       if (!q) return false;
-      if (q.charAt(0) !== '/' && !c.cwd) cb.defer('fresh_path');
-      return wd.isUnder(ah.path.resolveAbs(q.charAt(0) === '/' ? q : c.cwd + '/' + q), c.tmp);
+      var base = c.cwd;
+      if (q.charAt(0) !== '/' && !base) { cb.unsure('fresh_path'); base = hookProc.base(); }
+      return wd.isUnder(ah.path.resolveAbs(q.charAt(0) === '/' ? q : base + '/' + q), c.tmp);
     };
     try { return cb.freshScan(lines, mtime, { tmp: wd.tmpdir(), cwd: cwd }); } finally { wd.underTmp = under; }
   },
@@ -319,14 +319,14 @@ var cb = {
       var line = lines[i];
       if (!line) continue;
       var r = jx.parse(line);
-      if (r.unsure) cb.defer('fresh_line');
+      if (r.unsure) { cb.unsure('fresh_line'); return null; }
       if (r.invalid) continue;
       var e = r.v;
       if (!e || typeof e !== 'object' || !e.message || typeof e.message !== 'object') continue;
       recognized = true;
       var ts = typeof e.timestamp === 'string' ? jx.isoMs(e.timestamp) : NaN;
       if (ts === undefined) ts = jx.dateParse(e.timestamp);
-      if (ts === undefined) cb.defer('fresh_timestamp');
+      if (ts === undefined) { cb.unsure('fresh_timestamp'); return null; }
       if (!isFinite(ts)) continue;
       var uses = [];
       cb.toolUses(e, uses);
@@ -344,10 +344,11 @@ var cb = {
     return (next === -1 ? rest : rest.slice(0, next)).trim();
   },
   wholeWords: function (key) { return new RegExp('^(?:' + cb.c(key).map(function (w) { return w.replace(/[.*+?^${}()|[\]\\\/-]/g, '\\$&'); }).join('|') + ')\\.?$', 'i'); },
-  // `isTaskCompleteFromFile(filePath)`: false on any read problem; a file over the read cap (a capped read shows another file) defers.
+  // `isTaskCompleteFromFile(filePath)`: false on any read problem; a file over the read cap (a capped read shows another file) is not
+  // complete (counted).
   taskComplete: function (file) {
     var f = jx.read(file);
-    if (f.big) cb.defer('handover_big');
+    if (f.big) { cb.unsure('handover_big'); return false; }
     if (f.absent || !f.text) return false;
     var open = cb.extractSection(f.text, cb.c('ctxbudget.ah_heading_open'));
     if (open !== null && cb.wholeWords('ctxbudget.ah_open_empty_words').test(open)) return true;
@@ -365,7 +366,7 @@ var cb = {
       if (!tools.some(function (t) { return line.indexOf(t) !== -1; })) continue;
       var r = jx.parse(line);
       if (r.invalid) continue;
-      if (r.unsure) cb.defer('task_line');
+      if (r.unsure) { cb.unsure('task_line'); continue; }
       var e = r.v;
       if (!e || e.type !== 'assistant' || e.isSidechain === true) continue;
       var content = e.message && Array.isArray(e.message.content) ? e.message.content : [];
@@ -400,11 +401,12 @@ var cb = {
     var open = cb.c('ctxbudget.ah_open_statuses');
     return Object.keys(map).some(function (key) { return open.indexOf(map[key]) !== -1; });
   },
-  // `hasRecentSpawn(tag, now)`: a `<ms> <tag>` line of the spawn log within the activity window; a log over the read cap defers.
+  // `hasRecentSpawn(tag, now)`: a `<ms> <tag>` line of the spawn log within the activity window; a log over the read cap shows no
+  // spawn (counted).
   recentSpawn: function (tag, now) {
     if (!tag) return false;
     var rel = cb.c('ctxbudget.ah_spawn_log'), size = ah.fs.size(ah.home() + '/' + rel);
-    if (size !== null && size > ah.cfgNum('script.read_max_bytes')) cb.defer('spawn_log_big');
+    if (size !== null && size > ah.cfgNum('script.read_max_bytes')) { cb.unsure('spawn_log_big'); return false; }
     var txt = ah.state.readText(rel);
     if (txt === null) return false;
     var lines = txt.trim().split(/\r?\n/), win = cb.n('ctxbudget.ah_spawn_activity_ms');

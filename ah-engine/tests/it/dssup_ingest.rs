@@ -9,7 +9,6 @@ use ah_engine::dssup::ingest::drain::{Drainer, Project, Start};
 use ah_engine::dssup::ingest::import::{self, Refused};
 use ah_engine::dssup::ingest::monitor::{Breaker, Poll};
 use ah_engine::dssup::ingest::wal;
-use ah_engine::meshw::store::MeshStore;
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -640,64 +639,6 @@ fn the_workspace_identity_of_the_daemon_never_reaches_the_monitor_child() {
     unsafe { std::env::remove_var("DEVSWARM_BUILDER_ID") };
     let line = std::fs::read_to_string(&x.log).unwrap();
     assert!(line.trim_end().ends_with("|unset"), "{line}");
-}
-
-#[test]
-fn the_node_witness_agrees_with_the_engine_on_a_scratch_store_and_never_touches_the_live_one() {
-    if !have_node() {
-        return;
-    }
-    let x = ix("witness");
-    let sys = System::configured();
-    let mut d = Drainer::new(&x.home, &st(&x), x.project.clone());
-    assert_eq!(d.start(&sys), Start::Started);
-    enqueue(&x, "1", &format!("[{MSG}]"));
-    enqueue(&x, "2", r#"{"data":[{"message":"no created at","n":[1,2,{"k":"v"}]},{"message":"b","createdAt":"2026-10-09T05:02:03.5+04:00"}]}"#);
-    enqueue(&x, "3", "garbage {");
-    enqueue(&x, "4", "[]");
-    for _ in 0..4 {
-        d.step(&sys);
-    }
-    let before = rows(&x);
-    assert_eq!(before.len(), 3);
-    // run the comparison now (the interval gate is for the loop; the comparison itself is what is tested)
-    let store = MeshStore::open(&db(&x)).unwrap();
-    let mirror = x.home.join(format!(".anti-hall/witness/ingest-{}.ndjson", x.project.repo_key));
-    assert_eq!(std::fs::read_to_string(&mirror).unwrap().lines().count(), 3, "two batches with messages and the lossy one; the quiet polls are not mirrored");
-    let mut m = ah_engine::dssup::ingest::witness::Mirror::open(&x.home, &x.project.repo_key).unwrap();
-    let root = ah_engine::defaults::root().unwrap();
-    let rec = m.compare(&sys, &root, &store, &x.project, now()).unwrap();
-    assert_eq!(rec["match"], true, "{rec}");
-    assert_eq!(rec["batches"], 3);
-    assert!(!mirror.exists(), "the mirror was consumed");
-    assert_eq!(std::fs::read_dir(x.home.join(".anti-hall/witness")).unwrap().count(), 0, "scratch removed");
-    assert_eq!(rows(&x), before, "the live store was not touched");
-    let log = std::fs::read_to_string(x.home.join(".anti-hall/logs/devswarm-ingest-witness.ndjson")).unwrap();
-    assert!(log.contains("\"match\":true"));
-    d.stop();
-}
-
-#[test]
-fn the_witness_reports_a_row_the_engine_claims_but_the_store_does_not_have() {
-    if !have_node() {
-        return;
-    }
-    let x = ix("witness-loss");
-    let sys = System::configured();
-    let mut d = Drainer::new(&x.home, &st(&x), x.project.clone());
-    assert_eq!(d.start(&sys), Start::Started);
-    enqueue(&x, "1", &format!("[{MSG}]"));
-    d.step(&sys);
-    // someone deletes the row behind the engine's back: the mirror says it was written, the store has no such row
-    let c = rusqlite::Connection::open(db(&x)).unwrap();
-    c.execute("DELETE FROM messages WHERE hash LIKE 'native:%'", []).unwrap();
-    drop(c);
-    let store = MeshStore::open(&db(&x)).unwrap();
-    let mut m = ah_engine::dssup::ingest::witness::Mirror::open(&x.home, &x.project.repo_key).unwrap();
-    let rec = m.compare(&sys, &ah_engine::defaults::root().unwrap(), &store, &x.project, now()).unwrap();
-    assert_eq!(rec["match"], false);
-    assert_eq!(rec["diffs"][0]["what"], "store");
-    d.stop();
 }
 
 // ---- discovery and the switch ---------------------------------------------------------------------------------------------------

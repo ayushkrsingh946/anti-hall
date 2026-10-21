@@ -7,7 +7,7 @@
 //!   moment the holder is gone. Nothing is ever double-drained.
 //! * [`drain`] is one project's drain, [`wal`] its delivery write-ahead log (Node's format, so a WAL left open by either side is
 //!   replayed by the other), [`import`] the loss-free import into the store, [`monitor`] the bounded `hivecontrol workspace
-//!   monitor` call with Node's circuit breaker, and [`witness`] the non-acting Node comparison on a mirror.
+//!   monitor` call with Node's circuit breaker.
 //! * Which projects: the explicit `devswarm_ingest.projects` setting (paths separated by `:`), the worktrees of the registered
 //!   DevSwarm workspaces (so a new project is drained without a Node ingest unit), the working directories of fresh Node ingest
 //!   heartbeats (so a project served today is served after the cutover), and what an earlier run remembered. Unless
@@ -22,7 +22,6 @@ pub mod drain;
 pub mod import;
 pub mod monitor;
 pub mod wal;
-pub mod witness;
 
 use crate::checks::git::util::Settings;
 use crate::checks::guardkit::nodelock;
@@ -554,7 +553,6 @@ pub fn run_project(home: &Path, st: &Settings, project: Project, runner: &dyn Ru
                 why = "devswarm_ingest.reason_lock_lost";
                 break;
             }
-            d.maybe_witness(runner);
             if !wait(&mut d, step.wait_ms, stop) {
                 why = "devswarm_ingest.reason_lock_lost";
                 break;

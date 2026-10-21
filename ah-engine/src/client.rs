@@ -1,12 +1,12 @@
 //! Hook client. Contract: NEVER fail the host and NEVER mistake a bad reply for "allow".
 //!
-//! Order of events for `engine hook [--fallback <hook.js>]`:
+//! Order of events for `engine hook`:
 //!  1. ask the daemon (short deadline, framed reply, size-capped input);
 //!  2. a complete OK frame is the answer (its body may be empty = nothing to say);
 //!  3. no daemon, timeout, breaker open, or crash-loop stop fails open: print nothing and exit 0;
-//!  4. BUSY, ERR, and malformed verdict bodies are healthy negative replies, so the caller keeps its fallback/no-node policy.
+//!  4. BUSY, ERR, and malformed verdict bodies are healthy negative replies, so the event's configured failure mode answers.
 //!
-//! The fallback command is chosen by the caller (argument or env), never by anything in the payload.
+//! The client launches nothing: there is no hook command to fall back to.
 use crate::config::ClientConfig;
 use crate::frame::{self, Kind};
 use crate::{defaults, health, paths};
@@ -573,25 +573,25 @@ pub struct Outcome {
 }
 
 /// Ask the engine. `None` = no daemon verdict within the deadline.
-fn engine_attempt(raw: &str, cfg: &ClientConfig, have_fallback: bool) -> Option<String> {
+fn engine_attempt(raw: &str, cfg: &ClientConfig) -> Option<String> {
     if raw.len() as u64 > crate::defaults::num("daemon.max_request") || health::breaker_remaining().is_some() || health::crashloop_remaining().is_some() {
         return None;
     }
     let payload = format!("V {}\n{}\n{}", crate::version(), crate::reqenv::RequestEnv::capture().to_line(), raw);
-    attempt(payload.as_bytes(), cfg, have_fallback)
+    attempt(payload.as_bytes(), cfg, false)
 }
 
 /// Send one request (a hook `V` or a dispatch `D` request) to the daemon, starting it when none answers. `None` =
-/// fail open for hook callers; with `have_fallback` a cold start does not wait.
-pub(crate) fn attempt(payload: &[u8], cfg: &ClientConfig, have_fallback: bool) -> Option<String> {
-    attempt_with(payload, cfg, have_fallback, false)
+/// fail open for hook callers; with `answer_now` a cold start does not wait (the dispatcher's own callers).
+pub(crate) fn attempt(payload: &[u8], cfg: &ClientConfig, answer_now: bool) -> Option<String> {
+    attempt_with(payload, cfg, answer_now, false)
 }
 
 /// [`attempt`] for a caller that may still run Node hooks after an OK reply (its answers can contain a deferral): the wait marker
 /// stays in place after the reply, so the wrapper's watchdog keeps its extended window while that work is unresolved. The caller
 /// ends it with [`release_wait_marker`] once its final result is ready.
-pub(crate) fn attempt_holding_wait(payload: &[u8], cfg: &ClientConfig, have_fallback: bool) -> Option<String> {
-    attempt_with(payload, cfg, have_fallback, true)
+pub(crate) fn attempt_holding_wait(payload: &[u8], cfg: &ClientConfig, answer_now: bool) -> Option<String> {
+    attempt_with(payload, cfg, answer_now, true)
 }
 
 /// Remove the wait marker: the call's final result is ready.
@@ -599,7 +599,7 @@ pub(crate) fn release_wait_marker() {
     wait_marker(false);
 }
 
-fn attempt_with(payload: &[u8], cfg: &ClientConfig, have_fallback: bool, hold_wait_on_ok: bool) -> Option<String> {
+fn attempt_with(payload: &[u8], cfg: &ClientConfig, answer_now: bool, hold_wait_on_ok: bool) -> Option<String> {
     LAST_NON_OK_REPLY.set(false);
     LAST_UNAVAILABLE.set(false);
     if health::breaker_remaining().is_some() || health::crashloop_remaining().is_some() || daemon_down_marked() {
@@ -675,7 +675,7 @@ fn attempt_with(payload: &[u8], cfg: &ClientConfig, have_fallback: bool, hold_wa
             // a guard call waits only for a daemon that is really starting; with spawning disabled (no daemon will come) it keeps
             // the unavailable contract: fail open, run no hooks
             if !GUARD_CALL.get() || defaults::env_var("nospawn").is_some() {
-                return absent_unguarded(&sock, payload, cfg, have_fallback);
+                return absent_unguarded(&sock, payload, cfg, answer_now);
             }
             absent_guarded(&sock, payload, cfg, hold_wait_on_ok)
         }
@@ -755,9 +755,9 @@ fn absent_guarded(sock: &Path, payload: &[u8], cfg: &ClientConfig, hold_wait_on_
     None
 }
 
-/// No daemon listens and the call is not a guard event's: start one and answer at once (prompts and advisories never wait; with a
-/// fallback the Node hooks answer this call). A call without a fallback waits `client.cold_start_wait_ms` for the new daemon.
-fn absent_unguarded(sock: &Path, payload: &[u8], cfg: &ClientConfig, have_fallback: bool) -> Option<String> {
+/// No daemon listens and the call is not a guard event's: start one and answer at once (prompts and advisories never wait; with `answer_now`
+/// the call gets no answer). Otherwise the call waits `client.cold_start_wait_ms` for the new daemon.
+fn absent_unguarded(sock: &Path, payload: &[u8], cfg: &ClientConfig, answer_now: bool) -> Option<String> {
     wait_marker(false);
     note_unavailable();
     let _spawn_lock = spawn_lock()?;
@@ -766,8 +766,8 @@ fn absent_unguarded(sock: &Path, payload: &[u8], cfg: &ClientConfig, have_fallba
         mark_daemon_down("spawn");
         return None;
     };
-    if have_fallback {
-        return None; // the Node hook answers this call; the daemon is up for the next one
+    if answer_now {
+        return None; // no answer for this call (the caller lets it through); the daemon is up for the next one
     }
     let start = Instant::now();
     let cold_wait = defaults::millis("client.cold_start_wait_ms");
@@ -824,110 +824,15 @@ fn replace_hung_daemon(cfg: &ClientConfig, why: &str) -> bool {
     spawn_daemon().is_some()
 }
 
-/// Log a fallback failure; the state dir may not exist yet (no daemon ever ran here), and the event must still be on record.
+/// Log a client-side failure; the state dir may not exist yet (no daemon ever ran here), and the event must still be on record.
 fn log_fallback(kind: &str, code: &str, detail: &str) {
     crate::discard::harmless(crate::limits::ensure_private_dir(&paths::dir())); // keep: a failure surfaces at the next create in that directory
     health::log_event(kind, code, detail);
 }
 
-/// Read `stream` to EOF on a thread; the bytes arrive on the returned channel once, at EOF, with whether the read reached
-/// the end cleanly (a read error leaves a partial buffer, which must never be taken for the whole output).
-fn read_to_eof(mut stream: impl Read + Send + 'static) -> mpsc::Receiver<(Vec<u8>, bool)> {
-    let (tx, rx) = mpsc::channel();
-    std::thread::spawn(move || {
-        let mut b = Vec::new();
-        let clean = stream.read_to_end(&mut b).is_ok();
-        // the receiver is gone only when the caller already gave up at its deadline
-        crate::discard::harmless(tx.send((b, clean))); // keep: the receiver is gone; nobody is waiting for the result
-    });
-    rx
-}
-
-enum FallbackInput {
-    Bytes(Vec<u8>),
-    BytesThenStdin(Vec<u8>, std::io::Stdin),
-}
-
-enum FallbackResult {
-    Answer(Outcome),
-    NoDecision(Outcome),
-}
-
-/// Run the Node hook: stdin = the payload; stdout, stderr and the exit code are returned. Both streams are read to EOF,
-/// bounded only by the overall deadline (`client.fallback_ms`), because a hook can exit before its output is complete
-/// (a background process of its own holds the pipe) and an empty stdout would read as an allow.
-///
-/// `None` when it cannot run or does not finish in time (= the fallback is unavailable, as when the host's own timeout
-/// kills a hook). A hook that finished but whose output was still unread at the deadline is an explicit error outcome
-/// (exit 1, a message on stderr): never an empty stdout.
-fn run_fallback(input: FallbackInput, path: &Path, cfg: &ClientConfig) -> Option<FallbackResult> {
-    let node = std::env::var_os(defaults::env_name("node")).unwrap_or_else(|| "node".into());
-    // its own process group, so a timeout can take its helpers down with it (they would otherwise hold the pipes open)
-    let mut child = Command::new(node).arg(path).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).process_group(0).spawn().ok()?;
-    let mut stdin = child.stdin.take()?;
-    std::thread::spawn(move || match input {
-        FallbackInput::Bytes(bytes) => {
-            crate::discard::harmless(stdin.write_all(&bytes)); // keep: best effort, fail-open
-        }
-        FallbackInput::BytesThenStdin(bytes, mut rest) => {
-            crate::discard::harmless(stdin.write_all(&bytes)); // keep: best effort, fail-open
-            crate::discard::harmless(std::io::copy(&mut rest, &mut stdin)); // keep: best effort, fail-open
-        }
-    });
-    let (out_rx, err_rx) = (read_to_eof(child.stdout.take()?), read_to_eof(child.stderr.take()?));
-    let deadline = Instant::now() + cfg.fallback_timeout;
-    let (mut status, mut out, mut err) = (None, None, None);
-    loop {
-        status = status.or_else(|| child.try_wait().ok().flatten());
-        out = out.or_else(|| out_rx.try_recv().ok());
-        err = err.or_else(|| err_rx.try_recv().ok());
-        if let (Some(st), Some((o, o_clean)), Some((e, e_clean))) = (status, &out, &err) {
-            use std::os::unix::process::ExitStatusExt;
-            if !(*o_clean && *e_clean) {
-                // an unreadable pipe is an incomplete answer: say so (exit 1), never an empty or partial stdout that reads as an allow
-                log_fallback("fallback_fail", "read", defaults::text("msg.log_fallback_read_error"));
-                return Some(FallbackResult::NoDecision(Outcome {
-                    out: String::new(),
-                    code: 1,
-                    err: format!("{}\n", defaults::text("msg.fallback_read_error")),
-                }));
-            }
-            let Some(code) = st.code() else {
-                // killed by a signal (out of memory, a crash): no decision, never an exit 0 that reads as an allow
-                let sig = st.signal().unwrap_or(0);
-                log_fallback("fallback_fail", &format!("sig{sig}"), &defaults::render("msg.log_fallback_signal", &[("signal", &sig)]));
-                return Some(FallbackResult::NoDecision(Outcome {
-                    out: String::new(),
-                    code: 1,
-                    err: format!("{}\n", defaults::render("msg.fallback_signal", &[("signal", &sig)])),
-                }));
-            };
-            return Some(FallbackResult::Answer(Outcome { out: String::from_utf8_lossy(o).to_string(), code, err: String::from_utf8_lossy(e).to_string() }));
-        }
-        if Instant::now() >= deadline {
-            break;
-        }
-        std::thread::sleep(defaults::millis("client.fallback_poll_ms"));
-    }
-    let finished = status.is_some();
-    // the whole group, as `dispatch::node` does: a helper the hook left behind holds its pipes and must not outlive the deadline
-    // SAFETY: killpg only sends a signal; the group id is the child we spawned as its own group leader
-    unsafe {
-        libc::killpg(child.id() as libc::pid_t, libc::SIGKILL);
-    }
-    if !finished {
-        crate::discard::harmless(child.kill()); // keep: reaping or draining a child or thread that already ended
-        crate::discard::harmless(child.wait()); // keep: reaping or draining a child or thread that already ended
-        log_fallback("fallback_fail", "timeout", defaults::text("msg.log_fallback_timeout"));
-        return None;
-    }
-    log_fallback("fallback_read_timeout", "-", defaults::text("msg.log_fallback_read_timeout"));
-    Some(FallbackResult::NoDecision(Outcome { out: String::new(), code: 1, err: format!("{}\n", defaults::text("msg.fallback_read_timeout")) }))
-}
-
 /// What an OK reply body means: exact bytes, an exit-2 block, or plain stdout. `None` when the body claims to be exact
 /// bytes but does not parse as such: a damaged verdict must never reach the host as plain stdout (an allow), so the caller
-/// runs the Node fallback instead.
+/// treats the call as one without a verdict.
 fn reply_outcome(body: String) -> Option<Outcome> {
     if let Some(j) = body.strip_prefix(crate::hookio::EXACT) {
         let x = serde_json::from_str::<(i32, String, String)>(j).ok()?;
@@ -1051,23 +956,22 @@ fn event_from_prefix(text: &str) -> Option<String> {
 }
 
 /// Core of `engine hook`. Pure of process exit.
-pub fn run(raw: &str, fallback: Option<&Path>) -> Outcome {
-    run_bytes(raw.as_bytes().to_vec(), false, fallback, None, false)
+pub fn run(raw: &str) -> Outcome {
+    run_bytes(raw.as_bytes().to_vec(), false, false)
 }
 
-/// Core of `engine hook` for raw stdin bytes. `force_fallback` means the client cannot safely ask the engine (invalid
-/// UTF-8, a capped read, or a stdin read error), so the Node fallback receives the exact bytes the client read.
-fn run_bytes(raw: Vec<u8>, force_fallback: bool, fallback: Option<&Path>, rest: Option<std::io::Stdin>, fail_closed_unavailable: bool) -> Outcome {
-    if raw.is_empty() && !force_fallback {
+/// Core of `engine hook` for raw stdin bytes. `unaskable` means the client cannot safely ask the engine (invalid UTF-8, a capped
+/// read, or a stdin read error); `fail_closed_unavailable` then blocks (exit 2) instead of letting the call through.
+fn run_bytes(raw: Vec<u8>, unaskable: bool, fail_closed_unavailable: bool) -> Outcome {
+    if raw.is_empty() && !unaskable {
         return Outcome { out: String::new(), code: 0, err: String::new() };
     }
     let cfg = ClientConfig::from_env();
-    // Fail fast: an engine that cannot answer is no verdict, so hook callers fail open instead of waiting for fallback work.
+    // Fail fast: an engine that cannot answer is no verdict, so hook callers fail open instead of waiting.
     let event_name = event_from_lossy(&raw);
-    let guard_without_fallback = fallback.is_none() && event_name.as_deref().is_some_and(guarded);
     let text = std::str::from_utf8(&raw).ok();
-    if !force_fallback && let Some(raw) = text {
-        if let Some(body) = engine_attempt(raw, &cfg, fallback.is_some())
+    if !unaskable && let Some(raw) = text {
+        if let Some(body) = engine_attempt(raw, &cfg)
             && let Some(o) = reply_outcome(body)
         {
             return o;
@@ -1078,42 +982,18 @@ fn run_bytes(raw: Vec<u8>, force_fallback: bool, fallback: Option<&Path>, rest: 
             return Outcome { out: env_advisory_output(raw, "").unwrap_or_default(), code: 0, err: String::new() };
         }
     }
-    let advisory_raw = if force_fallback { None } else { text.map(str::to_owned) };
-    let input = match rest {
-        Some(rest) => FallbackInput::BytesThenStdin(raw, rest),
-        None => FallbackInput::Bytes(raw),
-    };
-    let unavailable = || {
-        if guard_without_fallback {
-            let why = defaults::text("msg.client_no_fallback_guard");
-            log_fallback("fallback_fail", "none", why);
-            // no Node to run the hook (dispatch.defer_to_node 0): the event's configured failure mode answers
-            if let Some(ev) = event_name.as_deref()
-                && let Some(o) = crate::dispatch::no_node_answer(ev, None, "infra", why)
-            {
-                return o;
-            }
-            Outcome { out: String::new(), code: defaults::num("dispatch.defer_exit") as i32, err: format!("{why}\n") }
-        } else if fail_closed_unavailable {
-            Outcome { out: String::new(), code: 2, err: defaults::text("msg.client_fallback_unavailable").into() }
-        } else if force_fallback {
-            Outcome { out: String::new(), code: 0, err: defaults::text("msg.client_fallback_unavailable").into() }
-        } else {
-            Outcome { out: String::new(), code: 0, err: String::new() }
-        }
-    };
-    let mut o = match fallback.and_then(|p| run_fallback(input, p, &cfg)) {
-        Some(FallbackResult::Answer(o)) => o,
-        Some(FallbackResult::NoDecision(mut o)) if force_fallback && fail_closed_unavailable => {
-            o.code = 2;
-            o
-        }
-        Some(FallbackResult::NoDecision(mut o)) if force_fallback => {
-            o.code = 0;
-            o
-        }
-        Some(FallbackResult::NoDecision(o)) => o,
-        None => unavailable(),
+    let advisory_raw = if unaskable { None } else { text.map(str::to_owned) };
+    let mut o = if unaskable && fail_closed_unavailable {
+        Outcome { out: String::new(), code: 2, err: defaults::text("msg.client_unavailable").into() }
+    } else if unaskable {
+        Outcome { out: String::new(), code: 0, err: defaults::text("msg.client_unavailable").into() }
+    } else if let Some(ev) = event_name.as_deref().filter(|ev| guarded(ev)) {
+        // the engine answered with no verdict (a healthy negative reply): the event's configured failure mode answers
+        let why = defaults::text("msg.client_no_verdict");
+        log_fallback("no_verdict", "none", why);
+        crate::dispatch::no_node_answer(ev, None, "infra", why).unwrap_or(Outcome { out: String::new(), code: 0, err: String::new() })
+    } else {
+        Outcome { out: String::new(), code: 0, err: String::new() }
     };
     // We are running on the built-in checks: tell the agent once per session if the engine is in a known-bad state.
     if o.code == 0
@@ -1144,29 +1024,19 @@ fn env_advisory_output(raw: &str, existing: &str) -> Option<String> {
     advisory_output(raw, existing)
 }
 
-fn fallback_arg(args: &[String]) -> Option<PathBuf> {
-    args.iter()
-        .position(|a| a == "--fallback")
-        .and_then(|i| args.get(i + 1))
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os(defaults::env_name("fallback")).map(PathBuf::from))
-}
-
-/// `engine hook`: read stdin, print the result, exit with the Node hook's code (0 when the engine answered).
+/// `engine hook`: read stdin, print the result and exit with its code (0 when the engine answered or could not).
 pub fn hook_main(args: &[String]) -> i32 {
     let res = std::panic::catch_unwind(|| {
-        let fallback = fallback_arg(args);
         let max = defaults::num("client.max_stdin");
         let mut raw = Vec::new();
         let mut stdin = std::io::stdin();
         let read = stdin.by_ref().take(max + 1).read_to_end(&mut raw);
         let cap_hit = raw.len() as u64 > max;
-        let force_fallback = read.is_err() || cap_hit || std::str::from_utf8(&raw).is_err();
-        let rest = (force_fallback && cap_hit).then_some(stdin);
+        let unaskable = read.is_err() || cap_hit || std::str::from_utf8(&raw).is_err();
         // a stdin I/O error is an internal fault and fails open; an oversize or non-UTF-8 payload is deliberate and stays fail-closed on guards
-        let fail_closed_unavailable = force_fallback && read.is_ok() && event_from_lossy(&raw).is_none_or(|event| guarded(&event));
+        let fail_closed_unavailable = unaskable && read.is_ok() && event_from_lossy(&raw).is_none_or(|event| guarded(&event));
         let started = std::time::Instant::now();
-        let o = run_bytes(raw, force_fallback, fallback.as_deref(), rest, fail_closed_unavailable);
+        let o = run_bytes(raw, unaskable, fail_closed_unavailable);
         crate::debug_log!(
             "client/hook",
             defaults::render("msg.dbg_hook", &[("code", &o.code), ("out", &o.out.len()), ("err", &o.err.len()), ("us", &started.elapsed().as_micros())])
@@ -1425,8 +1295,8 @@ mod tests {
     }
 
     #[test]
-    fn a_panic_fails_open_even_with_a_node_fallback_given() {
-        assert_eq!(panic_code(&["--fallback".into(), "/x/hook.js".into()]), 0);
+    fn a_panic_fails_open_whatever_the_arguments() {
+        assert_eq!(panic_code(&["whatever".into(), "/x/hook.sh".into()]), 0);
         assert_eq!(panic_code(&[]), 0);
     }
 
@@ -1445,7 +1315,7 @@ mod tests {
     }
 
     #[test]
-    fn a_damaged_exact_verdict_is_no_answer_so_the_fallback_runs() {
+    fn a_damaged_exact_verdict_is_no_answer() {
         for body in [
             format!("{}not json", crate::hookio::EXACT),
             format!("{}[2,\"out\"]", crate::hookio::EXACT),

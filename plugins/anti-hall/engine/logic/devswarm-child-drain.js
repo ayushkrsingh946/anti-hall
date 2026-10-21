@@ -3,9 +3,10 @@
 // inbox, when the workspace id is unusable or its descriptor names no inbox, and when its own unread count is zero; otherwise the nudge
 // with the unread count and the oldest message's age, throttled by its state file (child-drain/<id>.json: re-shown when the count
 // changed or the throttle window passed). The count is the child's own mailbox: the descriptor's durable inbox and, when its worktree
-// names a project with a store, the store rows no inbox line covers, read with this hook's own reader (ah.mesh.countFor). Defers when
-// the stable launcher Node would install is not current, the payload is not an object, a path is relative or not a string, or the
-// store is one Node reads as UNKNOWN. Mirrors hooks/devswarm-child-drain.js `main`. This script builds on devswarm-child-gate.js and
+// names a project with a store, the store rows no inbox line covers, read with this hook's own reader (ah.mesh.countFor). A case it cannot
+// settle exactly is decided natively and counted (native_unable): no usable home or plugin root, a payload that is not an object or a
+// path that is not a string say nothing; a relative path resolves against the stand-in directory; a project or store the host cannot read exactly
+// gets the nudge with an unknown count. Mirrors hooks/devswarm-child-drain.js `main`. This script builds on devswarm-child-gate.js and
 // devswarm-child-role.js (script.includes). Keys: devswarm_gates.toml (devswarm_gates.*) and devswarm_role.toml (the launchers).
 'use strict';
 
@@ -37,31 +38,33 @@ function cdDecide(p, st) {
   var desc = cgJson(st.home + '/' + ah.cfg('devswarm_gates.readside_descriptor_dir') + '/' + id + ah.cfg('devswarm_gates.readside_descriptor_ext'));
   if (!desc || typeof desc !== 'object' || !desc[ah.cfg('devswarm_gates.readside_inbox_field')]) return 'allow';
   var inbox = desc.inboxPath, cursor = desc.cursorPath, wt = desc.worktreePath;
-  if (typeof inbox !== 'string' || inbox.charAt(0) !== '/') throw meshDefer; // Node resolves it against its own working directory
+  if (typeof inbox !== 'string' || inbox.charAt(0) !== '/') { ah.unable('devswarm-child-drain:inbox_path'); if (typeof inbox !== 'string') return 'allow'; inbox = hookProc.resolve(p, inbox); } // resolved against the stand-in directory
   if (cursor === undefined || cursor === null || cursor === '' || cursor === false || cursor === 0) cursor = null;
-  else if (typeof cursor !== 'string' || cursor.charAt(0) !== '/') throw meshDefer;
-  var key = null;
+  else if (typeof cursor !== 'string' || cursor.charAt(0) !== '/') { ah.unable('devswarm-child-drain:cursor_path'); cursor = typeof cursor === 'string' ? hookProc.resolve(p, cursor) : null; }
+  var key = null, keyUnsure = false;
   if (wt) {
-    if (typeof wt !== 'string') throw meshDefer;
-    key = ah.mesh.repoKey(wt);
+    if (typeof wt !== 'string') ah.unable('devswarm-child-drain:worktree_shape');
+    else { var kd = ah.mesh.repoKeyDetail(wt); key = kd.key; keyUnsure = kd.unsure === true; }
   }
   var now = ah.clock.now();
-  var c = ah.mesh.countFor(key, id, inbox, cursor, now);
+  // a project or a store the host cannot read exactly: the count is unknown, and the nudge says so (never a silent pass)
+  var c = keyUnsure ? { state: 'nd', unread: 0, known: false, unsure: true } : ah.mesh.countFor(key, id, inbox, cursor, now);
+  var unknown = c.unsure === true;
   var unread = c.state === 'ok' ? c.unread : (c.known ? c.unread : 0), age = c.state === 'ok' ? c.age : null;
-  if (!(unread > 0)) return 'allow';
-  var w = cdThrottle(st.home, id, unread, now);
+  if (!unknown && !(unread > 0)) return 'allow';
+  var w = cdThrottle(st.home, id, unknown ? ah.cfgNum('devswarm_gates.cd_unknown_count') : unread, now);
   if (w === null) return 'allow';
   ah.commit();
   ah.state.writeAtomic(w.rel, w.body); // best-effort: a failed persist still lets this one nudge through
-  var msg = text.render(ah.cfg('devswarm_gates.cd_message'), { n: String(unread), age: cdAge(age), cli: st.cli, id: id });
+  var msg = text.render(ah.cfg(unknown ? 'devswarm_gates.cd_message_unknown' : 'devswarm_gates.cd_message'), { n: String(unread), age: cdAge(age), cli: st.cli, id: id });
   return { exact: { code: 0, out: JSON.stringify({ hookSpecificOutput: { hookEventName: ah.cfg('devswarm_gates.cd_event'), additionalContext: msg } }) + '\n', err: '' } };
 }
 
 function decide(p, opts) {
   if (dgInertForChild('devswarm_gates.child_drain_setting', null)) return 'allow';
   var root = jx.isObj(opts) && typeof opts.plugin_root === 'string' ? opts.plugin_root : ah.env.get(ah.cfg('env.plugin_root'));
-  var st = dwLaunchersCurrent(root, false);
-  if (!st) return 'defer';
-  if (!jx.isObj(p)) return 'defer'; // a payload that is not an object takes Node paths this script does not follow
-  try { return cdDecide(p, st); } catch (e) { if (e === meshDefer) return 'defer'; throw e; }
+  var st = dwLaunchersNative(root, false);
+  if (!st) { ah.unable('devswarm-child-drain:no_launchers'); return 'allow'; } // no usable home or plugin root: no launcher can be named
+  if (!jx.isObj(p)) { ah.unable('devswarm-child-drain:payload_shape'); return 'allow'; }
+  return cdDecide(p, st);
 }

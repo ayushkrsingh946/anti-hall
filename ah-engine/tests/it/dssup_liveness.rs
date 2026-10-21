@@ -301,7 +301,7 @@ struct NoNode(System);
 
 impl ah_engine::dsact::runner::Runner for NoNode {
     fn run(&self, spec: &ah_engine::dsact::runner::RunSpec) -> ah_engine::dsact::runner::RunResult {
-        if spec.bin.as_deref() == Some(ah_engine::defaults::text("devswarm_sup.node_bin")) {
+        if spec.bin.as_deref() == Some("node") {
             return ah_engine::dsact::runner::RunResult { missing: true, error: Some("No such file or directory (os error 2)".into()), ..Default::default() };
         }
         self.0.run(spec)

@@ -1,16 +1,15 @@
 // check = "verify-first-orch" (SessionStart, the Claude hook entry; verify-first-orch-codex.js is the Codex entry). Emits the
 // orchestration discipline text: the full text, or the compact text plus a marker that makes the first spawn deliver the rest (an
 // opt-in mode), and keeps that marker in step with what it sent. Everything is decided here, a DevSwarm Primary included (the gate is
-// `vf.tierTextOn`: DevSwarm active, not a child workspace, the dispatch-tier switch on, the repository not forbidding workspaces); only
-// a repository layout or working directory the engine cannot classify defers to Node, before any file is touched. Mirrors hooks/verify-first-orch.js `main` and hooks/lib/auto-handover-text.js `isClaudeConfident`.
+// `vf.tierTextOn`: DevSwarm active, not a child workspace, the dispatch-tier switch on, the repository not forbidding workspaces); a
+// repository layout or working directory the engine cannot classify counts as not a Primary (native_unable). Mirrors hooks/verify-first-orch.js `main` and hooks/lib/auto-handover-text.js `isClaudeConfident`.
 // Keys, texts and switches: spawn_context.toml (verify_first_orch.*, orch_state.*).
 'use strict';
 
 var vfoDecisions = ah.cfg('orch_state.decisions');
 
 // `isClaudeConfident(payload, ['--host=claude'])`: positive evidence that the session runs under Claude Code, namely a session id and a
-// transcript path that lies, after resolving links, under the host's `projects` directory. 'defer' when the answer depends on Node's
-// own working directory (a relative config directory).
+// transcript path that lies, after resolving links, under the host's `projects` directory. A relative config directory resolves against the stand-in directory (counted); no home is not confident.
 function vfoConfident(p) {
   if (!jx.isObj(p) || typeof p.session_id !== 'string' || p.session_id === '' || vf.codexPayload(p)) return false;
   var tp = p.transcript_path;
@@ -19,10 +18,10 @@ function vfoConfident(p) {
   if (cfg === null || cfg === '') {
     var h = spawn.stateHome();
     if (h.guarded) return false;
-    if (h.unknown) return 'defer';
+    if (h.unknown) { ah.unable('verify-first-orch:confident_no_home'); return false; }
     cfg = h.ok + '/' + ah.cfg('verify_first_orch.config_dir_default');
   }
-  if (!ah.path.isAbsolute(cfg)) return 'defer';
+  if (!ah.path.isAbsolute(cfg)) { ah.unable('verify-first-orch:relative_config_dir'); cfg = hookProc.base() + '/' + cfg; }
   var base = ah.fs.realpath(ah.path.resolveAbs(cfg + '/' + ah.cfg('verify_first_orch.projects_dir')));
   if (base === null) return false;
   var segs = tp.slice(1).split('/');
@@ -80,9 +79,8 @@ function vfoRoot(opts) {
 
 function vfoDecide(p, opts, claudeHost) {
   if (spawn.judgeChild()) return null;
-  if (spawn.osHome() === null) return 'defer';
+  if (spawn.osHome() === null) { ah.unable('verify-first-orch:no_home'); return null; } // no absolute HOME: no marker to keep, nothing said
   var confident = claudeHost ? vfoConfident(p) : false;
-  if (confident === 'defer') return 'defer';
   var state = spawn.stateHome();
   var none = vfoDecisions[1], pending = vfoDecisions[0];
   var sid = jx.isObj(p) && typeof p.session_id === 'string' && p.session_id !== '' ? p.session_id : null;
@@ -96,7 +94,7 @@ function vfoDecide(p, opts, claudeHost) {
   var codex = vf.codexPayload(p);
   // `primaryTierTextOn(env, cwd)`: null = the answer needs what the engine does not reproduce, so Node decides (nothing written yet).
   var primary = vf.tierTextOn(p);
-  if (primary === null) return 'defer';
+  if (primary === null) { ah.unable('verify-first-orch:tier_text_unsure'); primary = false; } // a layout the host cannot classify: not a Primary
   function emit(t) { return { advisory: text.advisoryJson(ah.cfg('verify_first_orch.event'), t) }; }
   if (ah.settings.enum('orch_state.protocol_setting') === ah.cfg('orch_state.full_level') || primary) { writeNone(); return emit(vfoFull(codex, primary)); }
   var mode = ah.settings.enum('orch_state.orch_full_on_setting');
@@ -107,10 +105,10 @@ function vfoDecide(p, opts, claudeHost) {
     if (sid !== null && ah.settings.enum('orch_state.codex_orch_full_on_setting') === 'spawn') mode = 'spawn';
   }
   if (mode === 'spawn' && ah.settings.skipped(ah.cfg('orch_state.skip_name'))) mode = 'session';
-  // The compact text names the plugin root: without it nothing may be written, so the deferral comes first.
-  if (mode === 'off' || mode === 'spawn') {
-    var root = vfoRoot(opts);
-    if (root === null) return 'defer';
+  // The compact text names the plugin root: without it the full text is sent (counted).
+  var root = mode === 'off' || mode === 'spawn' ? vfoRoot(opts) : null;
+  if (root === null && (mode === 'off' || mode === 'spawn')) ah.unable('verify-first-orch:no_plugin_root');
+  if (root !== null) {
     if (mode === 'off') { writeNone(); return emit(vfoCompact(false, root, codex)); }
     if (state.ok !== undefined && sid !== null && vfoWriteMarker(sid, pending)) return emit(vfoCompact(true, root, codex));
   }

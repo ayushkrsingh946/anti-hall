@@ -583,11 +583,11 @@ value = "planned"
 
 [opcli.migration_verb_node_keys]
 doc = "Migration report: per command, the defaults keys whose presence means a Node path of that command remains (the command is then partial). A lane that removes the Node path removes the key, and the report follows."
-value = { update = ["update.node_script_rel"] }
+value = {}
 
 [opcli.migration_switches]
 doc = "Migration report: the Node switches, name to defaults key; native when the key is 0, partial otherwise."
-value = { dispatch = "dispatch.defer_to_node" }
+value = {}
 
 [opcli.migration_heading]
 doc = "Migration report heading. Placeholders: {native}, {partial}, {node}, {missing}."

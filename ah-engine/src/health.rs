@@ -63,7 +63,7 @@ fn log_lock(log: &std::path::Path) -> Option<std::fs::File> {
     std::fs::OpenOptions::new().create(true).truncate(false).read(true).write(true).open(crate::paths::lock_for(log)).ok()
 }
 
-fn flock(f: &std::fs::File, op: libc::c_int) -> bool {
+pub(crate) fn flock(f: &std::fs::File, op: libc::c_int) -> bool {
     use std::os::unix::io::AsRawFd;
     // SAFETY: `f` is an open file owned by the caller, so its descriptor is valid; flock takes only it and a flag.
     unsafe { libc::flock(f.as_raw_fd(), op) == 0 }

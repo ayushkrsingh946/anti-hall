@@ -425,7 +425,8 @@ arguments, is in the generated reference.
 | `ah-engine gen-hooks --host claude\|codex [--kind hooks\|registry\|list\|map]` | yes | Print a file generated from the dispatch table: the thin `hooks.json` (one trigger per event), the per-hook registry, the wrapper's fallback list or its fallback map (D87). |
 | `ah-engine check <name>` | yes | Run one check on a payload from stdin (parity harness). |
 | `ah-engine version` | yes | The version this build reports. |
-| `ah-engine ctl <verb>` | no | `ping`, `reload` (also re-reads the config files), `stop`, `status`, `config`. |
+| `ah-engine ctl <verb> [args]` | no | `ping`, `reload` (also re-reads the config files), `stop`, `status`, `config`, and `profile on [sample\|full] [--for <dur>]` / `profile off` / `profile status`: per-check CPU and allocation spans to a bounded file (`diagnostics.profile*` keys), off by default (one atomic load per call), auto-expiring when switched on at run time. |
+| `ah-engine diag <topic>` | yes | Read-only reports over state the engine already keeps, not feature-gated: `cpu`, `mem`, `threads`, `hooks`, `mesh`, `jev` (from the daemon), `fs` and `locks` (the state directory; they work with the daemon down) and `trace` (the always-on ring of the latest check, duty, stage and hand-back records; also written to `diagnostics.trace_dump_file` when a hard limit trips). The heap-replay `diag heap` stays behind `--features diag`. |
 | `ah-engine stop` | no | Drain and exit. |
 | `ah-engine reset` | no | Clear the breaker, crash-loop stop and failure record. |
 | `ah-engine maintain` | no | Size control: move inactive rows to `archive.db`, prune derived bookkeeping, checkpoint and VACUUM; prints a report. |
@@ -1297,6 +1298,8 @@ Files:
 | `messages.toml` | every message the engine produces (failure hints, advisories, replies, errors, command-line text) |
 | `git.toml` | every table, limit, setting name and block message of the git check |
 | `task_guards.toml` | switches, limits, file layout and messages of the task checks and their shared helpers |
+| `advisory.toml` | the advisory layer (GitHub #225): fixed text once per session, state tables once per content change, per-session soft and hard caps per advisory kind, the rule-fallback rate limit and the metric names counted under `advisory` in `status --json` |
+| `inference.toml` | the unsupported-inference scan of the speculation guard (`guards.inferenceCheck`): the causal connectives, the word lists, the identifier and stem rules and the block text |
 | `roles.toml` | the role matrix (which role may run which engine verb), role detection names, the engine skill areas and their size budgets, and the role note texts; the `anti-hall:engine` skills are generated from it and the registry (`ah-engine/scripts/gen-engine-skills.sh`) |
 | `broad_kill.toml` | the broad-kill guard: blocked commands, the scoped `pkill -P` form, lookup patterns, wrappers and shells it looks through, and the block texts |
 | `devswarm_parent.toml` | the DevSwarm Primary prompt hook (`devswarm-parent-inbox`, for a Primary inside a git checkout): the event-log kind of a deferral to the Node hook, the maintainer-notice feed name and the hook's texts |

@@ -1006,6 +1006,10 @@ pub fn install(c: &Ctx<'_>) -> rquickjs::Result<()> {
             Ok(())
         })?,
     )?;
+    // a case the script could not model exactly and decided natively instead of handing back (counted per site)
+    h.set("unable", Function::new(c.clone(), |site: String| crate::obs::counters::handback(crate::obs::counters::Handback::NativeUnable, &format!("{}{site}", defaults::text("script.unable_prefix"))))?)?;
+    // one advisory event for advisory kind `kind` (flagged, asked, confirmed, injected, suppressed, jev_error)
+    h.set("advisory", Function::new(c.clone(), |kind: String, metric: String| crate::obs::counters::advisory(&kind, &metric))?)?;
     h.set("log", Function::new(c.clone(), |kind: String, text: String| crate::discard::note("script_log", &format!("{kind}: {text}")))?)?;
     h.set("deadlineLeftMs", Function::new(c.clone(), deadline_left_ms)?)?;
     h.set("realpathEx", Function::new(c.clone(), |p: String| realpath_ex(&p))?)?;
@@ -1062,6 +1066,7 @@ pub fn install(c: &Ctx<'_>) -> rquickjs::Result<()> {
     super::host_mesh::install(c, &h)?;
     super::host_childturn::install(c, &h)?;
     super::host_parentinbox::install(c, &h)?;
+    super::host_seat::install(c, &h)?;
     super::host_port::install(c, &h)?;
     super::host_proc::install(c, &h)?;
     super::host_spawn::install(c, &h)?;

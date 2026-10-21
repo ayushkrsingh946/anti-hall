@@ -2,8 +2,9 @@
 // (available memory under a few percent of the total blocks the spawn) and the spawn rate (the cap per rolling window, counted
 // in ~/.anti-hall/swarm-spawns.log under the lock file the Node hook shares). An allowed spawn is recorded, a blocked one is not
 // (a blocked retry must never extend the window) but is noted in the trip log, which the decision never reads. The shared-tree
-// advisory (a write-capable agent started while another runs in the same tree) rides an allowed spawn. Anything this script
-// cannot reproduce exactly defers BEFORE the spawn is recorded, so the Node hook counts it once. Any trouble taking the lock,
+// advisory (a write-capable agent started while another runs in the same tree) rides an allowed spawn. What this script cannot
+// reproduce exactly is decided natively and counted (native_unable): a log over the read cap is read from its tail (entries ascend,
+// so the window is at the end), a shared-tree note it cannot settle says nothing, and the rate cap still applies. Any trouble taking the lock,
 // reading the memory figures or writing the log allows the spawn. Mirrors hooks/swarm-guard.js and lib/shared-tree-note.js.
 // Keys and messages: spawn_guards.toml (swarm_guard.*).
 'use strict';
@@ -39,7 +40,7 @@ function swgIsolated(inp) {
   return ah.cfg('swarm_guard.isolation_values').indexOf(v) >= 0;
 }
 
-// The session's working tree: {dirs} (its cwd and git toplevel, lexical and real), null when there is no cwd (the named-tree reading is then off), or 'unsure' (defer).
+// The session's working tree: {dirs} (its cwd and git toplevel, lexical and real), null when there is no cwd (the named-tree reading is then off), or 'unsure' (counted).
 function swgTree(cwd) {
   if (!cwd || typeof cwd !== 'string') return null;
   var ctx = ah.repo.context(cwd);
@@ -95,7 +96,7 @@ function swgSharesTree(inp, tree) { return swgWriteCapable(inp) && !swgIsolated(
 
 function swgDirname(d) { var i = d.lastIndexOf('/'); return i <= 0 ? '/' : d.slice(0, i); }
 
-// true / false, or null when the answer needs something this script cannot reproduce (the caller defers).
+// true / false, or null when the answer needs something this script cannot reproduce (counted by the caller).
 function swgRepoDocsMatch(dir0, re) {
   var ctx = ah.repo.context(dir0);
   if (ctx.unsure) return null;
@@ -117,7 +118,7 @@ function swgRepoDocsMatch(dir0, re) {
   return false;
 }
 
-// The advisory text, '' when silent, null when the answer cannot be reproduced (defer).
+// The advisory text, '' when silent, null when the answer cannot be reproduced (counted; no note).
 function swgSharedTreeNote(p) {
   if (!ah.settings.bool('swarm_guard.shared_tree_setting')) return '';
   var inp = swgIsObj(p.tool_input) ? p.tool_input : null;
@@ -153,8 +154,9 @@ function swgBlock(reason) { return { exact: { code: 2, out: text.blockJson(reaso
 
 function decide(p) {
   if (p === null || typeof p !== 'object') p = {};
-  var home = ah.env.get(ah.cfg('env.home'));
-  if (home === null || !ah.path.isAbsolute(home)) return 'defer';
+  var home = hookProc.home(p);
+  if (home === null) { ah.unable('swarm-guard:no_home'); return 'allow'; } // no home at all: no log to count in (Node's own fail-open)
+  if (!ah.path.isAbsolute(ah.env.get(ah.cfg('env.home')) || '')) ah.unable('swarm-guard:home_resolved'); // HOME unset or relative: the passwd/stand-in home is used
   if (!ah.settings.bool('swarm_guard.setting')) return 'allow';
   if (ah.settings.skipped(ah.cfg('swarm_guard.guard_name'))) return 'allow';
   var now = Date.now(), label = swgDescribe(p);
@@ -165,9 +167,8 @@ function decide(p) {
     return swgBlock(text.render(ah.cfg('swarm_guard.msg_mem'), { avail: mb(mem.available), total: mb(mem.total) }));
   }
 
-  // Decided before the spawn is recorded: a deferral then leaves the count to the Node hook.
   var note = swgSharedTreeNote(p);
-  if (note === null) return 'defer';
+  if (note === null) { ah.unable('swarm-guard:shared_tree_note_unsure'); note = ''; }
 
   var dir = ah.cfg('swarm_guard.state_dir');
   var logRel = dir + '/' + ah.cfg('swarm_guard.log_file');
@@ -178,8 +179,11 @@ function decide(p) {
   var cutoff = now - ah.cfgNum('swarm_guard.window_ms'), cap = ah.cfgNum('swarm_guard.spawn_cap');
   var recent = [], logPath = ah.path.join(home, logRel);
   var raw = null, size = ah.fs.size(logPath);
-  if (size !== null && size > ah.cfgNum('script.read_max_bytes')) { ah.state.unlock(lock); return 'defer'; }
-  if (size !== null) raw = ah.fs.readText(logPath, size + 1);
+  if (size !== null && size > ah.cfgNum('script.read_max_bytes')) {
+    ah.unable('swarm-guard:log_big'); // the window is at the end of the log: read its tail, without the partly cut first line
+    raw = ah.fs.readEnd(logPath, ah.cfgNum('script.read_max_bytes'));
+    if (raw !== null) raw = raw.slice(raw.indexOf('\n') + 1);
+  } else if (size !== null) raw = ah.fs.readText(logPath, size + 1);
   if (raw !== null) {
     recent = raw.trim().split(/\r?\n/).map(function (l) { return parseInt(l.trim(), 10); })
       .filter(function (n) { return isFinite(n) && n > 0; }).filter(function (t) { return t > cutoff; });
@@ -191,10 +195,8 @@ function decide(p) {
       what: text.render(ah.cfg('swarm_guard.msg_rate_what'), { count: recent.length, cap: cap }),
       why: ah.cfg('swarm_guard.msg_rate_why'), instead: ah.cfg('swarm_guard.msg_rate_instead'),
     });
-  } else if (recent.some(function (t) { return t > ah.cfgNum('swarm_guard.exact_int_limit'); })) {
-    ah.state.unlock(lock);
-    return 'defer';
   } else {
+    if (recent.some(function (t) { return t > ah.cfgNum('swarm_guard.exact_int_limit'); })) ah.unable('swarm-guard:int_past_exact'); // kept in the window as they are
     recent.push(now);
     ah.state.writeAtomic(logRel, recent.join('\n') + '\n'); // a failed write allows the spawn unrecorded, as Node
   }

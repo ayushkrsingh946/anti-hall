@@ -3,22 +3,25 @@
 // ones with the file effects Node has there (the progress directory made, the progress and history indexes kept, the one
 // resume-verification nudge and its marker), the plan-mode advisory, and the block itself with its loop state, dedupe and cap,
 // handover advisories, stop-policy budget, acknowledgement and Jev consult. The task part of the transcript pass is the engine's
-// (ah.transcript.tasks, variant scan); the work counting is wd (lib/72-workdetect.js). Anything this script cannot reproduce exactly
-// (a form only V8 reads, a cut through a surrogate pair, a relative working directory) is decided before the first effect and
-// deferred to the Node hook. Keys and texts: task_guards.toml and agent_controls.toml (tasklist_guard.*, workdetect.*, taskkit.*).
+// (ah.transcript.tasks, variant scan); the work counting is wd (lib/72-workdetect.js). Nothing is handed back to Node: a case this
+// script cannot model exactly (a form only V8 reads, a cut through a surrogate pair, a relative working directory) is counted
+// (native_unable at `tasklist-guard.*`) and decided natively before the first effect, towards the same block or a stricter one when
+// the unreadable part is the evidence for a block, and towards a quiet Stop when it is the evidence of a stall. The fixed stderr notes
+// pass the advisory gate (once per session, again after N calls). Keys and texts: task_guards.toml and agent_controls.toml
+// (tasklist_guard.*, workdetect.*, taskkit.*), advisory.toml.
 'use strict';
 
 function tlN(k) { return ah.cfgNum('tasklist_guard.' + k); }
 function tlT(k) { return ah.cfg('tasklist_guard.' + k); }
 
 // `sanitizeReason(s)`: controls become spaces (newlines survive), runs of blanks collapse, blanks around a newline go, the text is
-// trimmed and cut with an ellipsis; null when the cut would split a surrogate pair.
+// trimmed and cut with an ellipsis; a cut through a surrogate pair drops the half pair.
 function tlSanitize(s) {
   var t = s.replace(/[\x00-\x09\x0b-\x1f\x7f-\x9f]/g, ' ').replace(/[ \t]+/g, ' ').replace(/ ?\n ?/g, '\n').trim();
   var max = tlN('reason_max');
   if (t.length > max) {
     var cut = t.slice(0, max), last = cut.charCodeAt(cut.length - 1);
-    if (last >= 0xd800 && last <= 0xdbff) return null;
+    if (last >= 0xd800 && last <= 0xdbff) { ah.unable('tasklist-guard:sanitize_pair_cut'); cut = cut.slice(0, -1); }
     return cut.replace(/\s+$/, '') + '…';
   }
   return t;
@@ -84,11 +87,12 @@ function tlCountUse(tu, ts, out, progressAbs, cx) {
   }
 }
 
-// An entry's `timestamp` in ms: null when it is not a string or spells no time; undefined when only V8 could read it (defer).
+// An entry's `timestamp` in ms: null when it is not a string, spells no time, or is a form only V8 could read (counted).
 function tlEntryTime(timestamp) {
   if (typeof timestamp !== 'string') return null;
   var ms = jx.isoMs(timestamp);
-  return ms === undefined ? undefined : (isNaN(ms) ? null : ms);
+  if (ms === undefined) { ah.unable('tasklist-guard:entry_ts_form'); return null; }
+  return isNaN(ms) ? null : ms;
 }
 
 // The lines the work count reads: those that hold a tool use (or an escape that could spell one) or a null.
@@ -104,17 +108,16 @@ function tlScanHost(path, progressAbs, cx) {
   cx.requested = [];
   for (var i = 0; i < items.length; i++) {
     var it = items[i];
-    if (it.length === 1) return it[0] === 'n' ? 'quiet' : 'defer';
+    if (it.length === 1) { if (it[0] === 'n') return 'quiet'; ah.unable('tasklist-guard:scan_line_unsure'); continue; } // a line only JavaScript reads exactly is skipped
     var ts = tlEntryTime(it[0]);
-    if (ts === undefined) return 'defer';
     var uses = it[1];
     for (var u = 0; u < uses.length; u++) tlCountUse({ name: uses[u][0], input: { file_path: uses[u][1], command: uses[u][2] } }, ts, out, progressAbs, cx);
   }
   return out;
 }
 
-// The work counting of the transcript pass: {work, lastWork, lastProgressWrite}, 'quiet' (a JSON null entry makes the Node hook
-// throw, so it decides nothing) or 'defer'.
+// The work counting of the transcript pass: {work, lastWork, lastProgressWrite} or 'quiet' (a JSON null entry makes the Node hook
+// throw, so it decides nothing).
 function tlScanWork(path, progressAbs, cx) {
   var out = { work: 0, lastWork: 0, lastProgressWrite: 0 };
   // a session with ONE user request: a write under a path that request names is the requested output (workdetect.request_path_re);
@@ -133,12 +136,11 @@ function tlScanWork(path, progressAbs, cx) {
     var t = raw.trim();
     if (!t) continue;
     var r = jx.parse(t);
-    if (r.unsure) return 'defer';
+    if (r.unsure) { ah.unable('tasklist-guard:work_line_unsure'); continue; }
     if (r.invalid) continue;
     var entry = r.v;
     if (entry === null) return 'quiet';
     var ts = entry !== undefined ? tlEntryTime(entry.timestamp) : null;
-    if (ts === undefined) return 'defer';
     var uses = [];
     tlToolUses(entry, uses);
     for (var u = 0; u < uses.length; u++) tlCountUse(uses[u], ts, out, progressAbs, cx);
@@ -146,7 +148,8 @@ function tlScanWork(path, progressAbs, cx) {
   return out;
 }
 
-// `checkResumeVerification`: the nudge text when a resumed handover was never verified, after recording that it was sent; null defers.
+// `checkResumeVerification`: the nudge text when a resumed handover was never verified, after recording that it was sent. A marker or
+// handover file over the read cap or one the script cannot parse exactly sends no nudge (counted).
 // A state stamp lands only once the reply was delivered (an undelivered nudge/block stays unsent and is sent again).
 function tlStamp(home, rel, text) { return ah.state.op(home, 'after_reply', rel, text); }
 
@@ -154,13 +157,13 @@ function tlResume(home, sid, work, threshold, now) {
   if (!home || !sid || work < threshold) return '';
   var base = ah.cfg('paths.base_dir');
   var f = jx.read(home + '/' + base + '/' + tlT('resume_marker_prefix') + sid + '.json');
-  if (f.big) return null;
+  if (f.big) { ah.unable('tasklist-guard:resume_marker_big'); return ''; }
   if (f.text === undefined) return '';
   var m = jx.parse(f.text);
-  if (m.unsure) return null;
+  if (m.unsure) { ah.unable('tasklist-guard:resume_marker_unsure'); return ''; }
   if (m.invalid || !m.v || typeof m.v.handoverFile !== 'string' || !m.v.handoverFile) return '';
   var h = jx.read(m.v.handoverFile);
-  if (h.text === undefined) return h.big ? null : '';
+  if (h.text === undefined) { if (h.big) ah.unable('tasklist-guard:resume_handover_big'); return ''; }
   if (h.text.indexOf(tlT('resume_verified_marker')) >= 0) return '';
   var firedRel = base + '/' + tlT('resume_nudged_prefix') + sid + '.json';
   if (ah.fs.kind(home + '/' + firedRel) !== null) return '';
@@ -192,62 +195,63 @@ function tlEvidenceEntry(e) {
   return false;
 }
 
-// `hasEvidence(transcriptPath)`: some line of the last 16 MB proves the session has task tools. null defers. The host picks the lines
+// `hasEvidence(transcriptPath)`: some line of the last 16 MB proves the session has task tools (a tail the script cannot read exactly
+// counts as proof: the fuller nag form). The host picks the lines
 // that name a task tool (a 16 MB window is far past the script's time limit line by line); the entries are read here.
 function tlHasEvidence(path) {
   var pre = tlT('evidence_names');
   var g = ah.transcript.grep(path, tlN('wide_window_bytes'), [], pre.map(function (p) { return p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }).join('|'), '');
   if (g === null) return false;
-  if (g.unsure) return null;
+  if (g.unsure) { ah.unable('tasklist-guard:evidence_unsure'); return true; }
   for (var i = 0; i < g.lines.length; i++) {
     var r = jx.parse(g.lines[i].trim());
-    if (r.unsure) return null;
+    if (r.unsure) { ah.unable('tasklist-guard:evidence_line_unsure'); return true; }
     if (!r.invalid && tlEvidenceEntry(r.v)) return true;
   }
   return false;
 }
 
-// `nagForm`: 'full', 'reduced' or 'skip'; null defers.
+// `nagForm`: 'full', 'reduced' or 'skip'. A setting the chain cannot decide exactly gives the full form (counted).
 function tlNagForm(f) {
   var full = tlT('form_full'), unset = '\u0000';
   var s = ah.settings.get('tasklist_guard.no_task_tools_setting', unset, f.pluginRoot);
-  if (s.status === 'undecidable') return null;
+  if (s.status === 'undecidable') { ah.unable('tasklist-guard:nag_setting_undecidable'); return full; }
   var explicit = !(s.status === 'value' && s.value === unset);
   var v = explicit ? (s.status === 'value' && typeof s.value === 'string' ? s.value : '') : tlT('form_reduced');
   if (!explicit) {
     var level = ah.settings.get('tasklist_guard.protocol_setting', undefined, f.pluginRoot);
-    if (level.status === 'undecidable') return null;
+    if (level.status === 'undecidable') { ah.unable('tasklist-guard:protocol_undecidable'); return full; }
     if (level.status === 'value' && level.value === full) return full;
   }
   var cfg = v === full ? full : (v === tlT('form_skip') ? tlT('form_skip') : tlT('form_reduced'));
   if (cfg === full || !f.codex) return full;
-  var ev = tlHasEvidence(f.transcript);
-  if (ev === null) return null;
-  return ev ? full : cfg;
+  return tlHasEvidence(f.transcript) ? full : cfg;
 }
 
-// {hash, blocks, started} of the loop-state file; null defers.
+// {hash, blocks, started} of the loop-state file; a file over the read cap or one the script cannot parse exactly reads as no earlier
+// block (counted).
 function tlReadState(path) {
   var out = { hash: '', blocks: 0, started: '' };
   var f = jx.read(path);
-  if (f.big) return null;
+  if (f.big) { ah.unable('tasklist-guard:state_big'); return out; }
   if (f.text === undefined) return out;
   var raw = f.text.trim();
   if (!raw) return out;
   var r = jx.parse(raw);
-  if (r.unsure) return null;
+  if (r.unsure) { ah.unable('tasklist-guard:state_unsure'); return out; }
   if (r.invalid || r.v === null || typeof r.v !== 'object') return out;
   if (typeof r.v.hash === 'string') out.hash = r.v.hash;
   if (typeof r.v.blocks === 'number' && isFinite(r.v.blocks)) out.blocks = r.v.blocks;
   if (typeof r.v.started === 'string') {
     var ms = jx.isoMs(r.v.started);
-    if (ms === undefined) return null;
-    if (!isNaN(ms)) out.started = r.v.started;
+    if (ms === undefined) ah.unable('tasklist-guard:state_started_form');
+    else if (!isNaN(ms)) out.started = r.v.started;
   }
   return out;
 }
 
-// `firstTranscriptIso(path)`: the first timestamped entry of the transcript head, as ISO text; '' when none; null defers.
+// `firstTranscriptIso(path)`: the first timestamped entry of the transcript head, as ISO text; '' when none (a line the script cannot
+// read exactly is skipped, counted).
 function tlFirstIso(path) {
   var head = ah.fs.readText(path, tlN('head_bytes'));
   if (head === null) return '';
@@ -255,10 +259,10 @@ function tlFirstIso(path) {
   for (var i = 0; i < lines.length; i++) {
     if (!lines[i].trim()) continue;
     var r = jx.parse(lines[i].trim());
-    if (r.unsure) return null;
+    if (r.unsure) { ah.unable('tasklist-guard:head_line_unsure'); continue; }
     if (r.invalid || !r.v || typeof r.v.timestamp !== 'string') continue;
     var ms = jx.isoMs(r.v.timestamp);
-    if (ms === undefined) return null;
+    if (ms === undefined) { ah.unable('tasklist-guard:head_ts_form'); continue; }
     if (!isNaN(ms)) return new Date(ms).toISOString();
   }
   return '';
@@ -272,13 +276,13 @@ function tlOmcState(path, sid, now) {
   var f = jx.read(path);
   if (f.text === undefined) return false;
   var r = jx.parse(f.text);
-  if (r.unsure) return null;
+  if (r.unsure) { ah.unable('tasklist-guard:omc_state_unsure'); return false; }
   if (r.invalid || r.v === null || typeof r.v !== 'object' || r.v.active !== true) return false;
   var keys = tlT('omc_ts_keys'), found = false;
   for (var i = 0; i < keys.length && !found; i++) {
     var v = r.v[keys[i]], n = 0;
     if (typeof v === 'number') n = v;
-    else if (typeof v === 'string') { n = jx.isoMs(v); if (n === undefined) return null; }
+    else if (typeof v === 'string') { n = jx.isoMs(v); if (n === undefined) { ah.unable('tasklist-guard:omc_ts_form'); n = 0; } }
     if (!isFinite(n)) n = 0;
     if (n > 0 && now - n <= tlN('omc_fresh_ms')) found = true;
   }
@@ -286,7 +290,6 @@ function tlOmcState(path, sid, now) {
   var s = r.v.session_id;
   if (s === undefined || s === null) return true;
   if (!sid) return false;
-  if (typeof s === 'object') return null;
   return String(s) === sid;
 }
 
@@ -305,7 +308,7 @@ function tlOmcActive(p, home, now) {
     var f = jx.read(sources[i]);
     if (f.text === undefined) continue;
     var r = jx.parse(f.text);
-    if (r.unsure) return null;
+    if (r.unsure) { ah.unable('tasklist-guard:omc_settings_unsure'); continue; }
     if (r.invalid || r.v === null || typeof r.v !== 'object') continue;
     var pl = r.v.enabledPlugins;
     if (pl && pl[tlT('omc_plugin')] === true) enabled = true;
@@ -316,9 +319,7 @@ function tlOmcActive(p, home, now) {
   var sid = p.session_id ? String(p.session_id) : null;
   var names = tlT('omc_state_files');
   for (var k = 0; k < names.length; k++) {
-    var a = tlOmcState(root + '/' + names[k], sid, now);
-    if (a === null) return null;
-    if (a) return true;
+    if (tlOmcState(root + '/' + names[k], sid, now)) return true;
   }
   return false;
 }
@@ -339,15 +340,14 @@ function tlPriorState(root, date, sid) {
   return best;
 }
 
-// The handover advisory that rides this block, if one is due: {marker (relative to the home), body, text}, null (none) or 'defer'.
+// The handover advisory that rides this block, if one is due: {marker (relative to the home), body, text} or null (none).
 function tlHandover(f, state, safe, reason) {
   var segs = tlT('handovers_dir').concat([f.date, f.sid]);
   var dir = f.root + '/' + segs.join('/'), ext = tlT('state_ext');
   if (!ah.fs.isDir(dir)) {
     var marker = ah.cfg('paths.base_dir') + '/' + tlT('advisory_prefix') + safe + ext;
     if (ah.fs.kind(f.home + '/' + marker) !== null) return null;
-    var t = tlSanitize(reason + tlT('advisory_text'));
-    return t === null ? 'defer' : { marker: marker, body: tlT('advisory_body'), text: t };
+    return { marker: marker, body: tlT('advisory_body'), text: tlSanitize(reason + tlT('advisory_text')) };
   }
   var names = ah.fs.listDir(dir) || [], newest = 0, re = new RegExp(tlT('handover_file_re'));
   for (var i = 0; i < names.length; i++) {
@@ -359,11 +359,11 @@ function tlHandover(f, state, safe, reason) {
   if (newest <= 0 || last <= 0 || last <= newest + tlN('handover_grace_ms')) return null;
   var smarker = ah.cfg('paths.base_dir') + '/' + tlT('stale_prefix') + safe + ext;
   if (ah.fs.kind(f.home + '/' + smarker) !== null) return null;
-  var st = tlSanitize(reason + tlT('stale_text'));
-  return st === null ? 'defer' : { marker: smarker, body: tlT('stale_body'), text: st };
+  return { marker: smarker, body: tlT('stale_body'), text: tlSanitize(reason + tlT('stale_text')) };
 }
 
-// The newest real user entry's uuid in the policy window (stop-policy.js promptKey): a string, '' (none) or null (defer).
+// The newest real user entry's uuid in the policy window (stop-policy.js promptKey): a string or '' (none); a line the script cannot
+// parse exactly is skipped (counted).
 function tlPromptKey(f) {
   var pid = f.p.prompt_id;
   if (typeof pid === 'string' && pid) return pid;
@@ -374,7 +374,7 @@ function tlPromptKey(f) {
     var t = lines[i].trim();
     if (!t || t.indexOf(tlT('policy_user_marker')) < 0) continue;
     var r = jx.parse(t);
-    if (r.unsure) return null;
+    if (r.unsure) { ah.unable('tasklist-guard:prompt_line_unsure'); continue; }
     if (r.invalid || !jx.isObj(r.v)) continue;
     var e = r.v;
     if (e.type !== 'user' || e.isMeta === true || e.isSidechain === true) continue;
@@ -399,17 +399,16 @@ function tlJev(f, jevState) {
 
 function tlFire(f) {
   var home = f.home, p = f.p;
-  if (!ah.env.get(ah.cfg('env.home'))) return 'defer';
+  if (!ah.env.get(ah.cfg('env.home'))) ah.unable('tasklist-guard:no_home_env'); // Node falls back to the passwd home; ah.home() already did
   var stale = false;
   if (f.needsAgents) {
     var ag = ah.transcript.agents(f.transcript);
-    if (ag !== null && ag.unsure) return 'defer';
+    if (ag !== null && ag.unsure) { ah.unable('tasklist-guard:agents_unsure'); ag = null; } // an agent list read inexactly shows no stall
     stale = ag !== null && ag.rows.length === 0;
   }
   var scan = f.scan;
   if (scan.sawTaskActivity && !stale && f.progressFresh) return 'allow';
   var form = tlNagForm(f);
-  if (form === null) return 'defer';
   if (form === tlT('form_skip')) return 'allow';
   var reduced = form === tlT('form_reduced');
   var work = scan.work;
@@ -427,36 +426,33 @@ function tlFire(f) {
   var signal = [String(bucket), bit(scan.sawTaskActivity), bit(stale), bit(f.progressFresh), openHash].join(tlT('signal_sep'));
   var hash = ah.sha1(signal);
   var prior = tlReadState(home + '/' + stateRel);
-  if (prior === null) return 'defer';
   if (hash === prior.hash || prior.blocks >= tlN('max_blocks')) { tlJev(f, jevState); return 'allow'; }
 
   // everything below is read or computed before the first effect
   var started = prior.started;
   if (!started) {
     var first = tlFirstIso(f.transcript);
-    if (first === null) return 'defer';
     started = first ? first : new Date(f.now).toISOString();
   }
   var guard = ah.homeGuard();
-  if (guard.status === 'unknown') return 'defer';
+  if (guard.status === 'unknown') ah.unable('tasklist-guard:home_unknown'); // no usable home: no ack, policy or version state; the block itself stands
   var hm = guard.status === 'ok' ? guard.home : null;
   var versionStale = false;
   if (hm !== null && ah.settings.bool('tasklist_guard.version_setting')) {
-    if (!f.pluginRoot) return 'defer';
-    var v = ah.plugin.versions(f.pluginRoot);
-    if (v.unsure) return 'defer';
-    versionStale = !!(v.registered && v.running && jx.isSemver(v.registered) && jx.isSemver(v.running) && jx.cmpVersions(v.running, v.registered) < 0);
+    var v = f.pluginRoot ? ah.plugin.versions(f.pluginRoot) : { unsure: true };
+    if (v.unsure) ah.unable('tasklist-guard:version_unsure'); // the plugin versions cannot be read exactly: not stale
+    else versionStale = !!(v.registered && v.running && jx.isSemver(v.registered) && jx.isSemver(v.running) && jx.cmpVersions(v.running, v.registered) < 0);
   }
   var sig = ah.sha1(hash).slice(0, tlN('ack_sig_len'));
   var ackKey = tlT('guard_name') + ':' + sig;
   var acked = false;
   if (hm !== null && ah.settings.bool('tasklist_guard.ack_setting')) {
     var a = jx.read(tlAckPath(hm, session));
-    if (a.big) return 'defer';
-    if (a.text !== undefined) {
+    if (a.big) ah.unable('tasklist-guard:ack_big');
+    else if (a.text !== undefined) {
       var ar = jx.parse(a.text);
-      if (ar.unsure) return 'defer';
-      acked = !ar.invalid && jx.isObj(ar.v) && typeof ar.v[ackKey] === 'number' && isFinite(ar.v[ackKey]) && ar.v[ackKey] > 0;
+      if (ar.unsure) ah.unable('tasklist-guard:ack_unsure');
+      else acked = !ar.invalid && jx.isObj(ar.v) && typeof ar.v[ackKey] === 'number' && isFinite(ar.v[ackKey]) && ar.v[ackKey] > 0;
     }
   }
   var codex = p.tool_name === tlT('codex_tool') || tlT('codex_fields').every(function (k) { return typeof p[k] === 'string' && p[k] !== ''; });
@@ -485,25 +481,23 @@ function tlFire(f) {
   }
   var base = text.message('block', tlT('guard_name'), { what: what, why: why, instead: instead });
   var reason = tlSanitize(base);
-  if (reason === null) return 'defer';
   var omc = tlOmcActive(p, home, f.now);
-  if (omc === null) return 'defer';
   var advisory = null;
-  if (f.root && !reduced) { advisory = tlHandover(f, stateDirRel, safe, reason); if (advisory === 'defer') return 'defer'; }
+  if (f.root && !reduced) advisory = tlHandover(f, stateDirRel, safe, reason);
   // the stop-policy state for this Stop, read before anything is written
   var policy = null;
   if (hm !== null) {
     var bv = ah.settings.num('tasklist_guard.budget_setting'), budget = isFinite(bv) && bv > 0 ? Math.floor(bv) : 0;
     var promptKey = '';
-    if (budget > 0) { promptKey = tlPromptKey(f); if (promptKey === null) return 'defer'; }
+    if (budget > 0) promptKey = tlPromptKey(f);
     if (promptKey || reduced) {
       var prel = stateDirRel + '/' + tlT('policy_dir').join('/') + '/' + safe + ext, buckets = {};
       var pf = jx.read(hm + '/' + prel);
-      if (pf.big) return 'defer';
-      if (pf.text !== undefined) {
+      if (pf.big) ah.unable('tasklist-guard:policy_big');
+      else if (pf.text !== undefined) {
         var pr = jx.parse(pf.text);
-        if (pr.unsure) return 'defer';
-        if (!pr.invalid && jx.isObj(pr.v)) buckets = pr.v;
+        if (pr.unsure) ah.unable('tasklist-guard:policy_unsure');
+        else if (!pr.invalid && jx.isObj(pr.v)) buckets = pr.v;
       }
       policy = { rel: prel, buckets: buckets, budget: budget, key: promptKey };
     } else policy = { rel: null, buckets: {}, budget: 0, key: '' };
@@ -512,7 +506,6 @@ function tlFire(f) {
   if (hm !== null) {
     var hint = text.render(tlT('ack_hint'), { key: ackKey, now: String(ah.clock.now()), path: tlAckPath(hm, session) });
     finalReason = tlSanitize(finalReason + '\n' + hint);
-    if (finalReason === null) return 'defer';
   }
   var out = JSON.stringify({ decision: 'block', reason: finalReason }) + '\n';
 
@@ -520,7 +513,7 @@ function tlFire(f) {
   var relaxed = tlJev(f, jevState);
   if (relaxed || versionStale || acked) return 'allow';
   // the advisories go to stderr: stdout stays empty or ONE JSON object, which the dispatcher can merge with another Stop hook's JSON
-  if (omc) return { exact: { code: 0, out: '', err: tlT('omc_text') } };
+  if (omc) return { exact: { code: 0, out: '', err: adv.gate(ah.cfg('advisory.kind_tasklist_omc'), session) ? tlT('omc_text') : '' } };
   if (advisory) { try { tlStamp(home, advisory.marker, advisory.body); } catch (e) { /* best-effort cap */ } }
   if (policy !== null && policy.rel !== null) {
     var now = ah.clock.now(), bk = function (kind) { return safe + '|' + tlT('guard_name') + '|' + kind; };
@@ -553,12 +546,13 @@ function decide(p, opts) {
   if (!ah.settings.bool('tasklist_guard.setting') || ah.settings.skipped(tlT('guard_name'))) return 'allow';
   if (p === null || typeof p !== 'object') p = {};
   if (typeof p.permission_mode === 'string' && p.permission_mode.toLowerCase() === tlT('plan_mode_value')) {
-    return { exact: { code: 0, out: '', err: tlT('plan_mode_text') } };
+    var planSession = p.session_id !== undefined && p.session_id !== null ? String(p.session_id) : '';
+    return { exact: { code: 0, out: '', err: adv.gate(ah.cfg('advisory.kind_tasklist_plan_mode'), planSession) ? tlT('plan_mode_text') : '' } };
   }
   var transcript = p.transcript_path;
   if (!transcript || typeof transcript !== 'string') return 'allow';
   var home = ah.home();
-  if (!home) return 'defer';
+  if (!home) { ah.unable('tasklist-guard:no_home'); return 'allow'; } // no home: no state, ledgers or progress files to judge
   var rawSid = p.session_id !== undefined && p.session_id !== null ? String(p.session_id) : '';
   var sid = rawSid.replace(new RegExp(ah.cfg('taskkit.session_id_unsafe'), 'g'), '') || ah.cfg('taskkit.unknown_session');
   var now = ah.clock.now();
@@ -566,16 +560,15 @@ function decide(p, opts) {
   var progressSegs = tlT('progress_dir').concat([date, sid + '.md']), historySegs = tlT('history_dir').concat([date, sid + '.md']);
   var cwd = typeof p.cwd === 'string' && p.cwd ? p.cwd : null;
   var root = null;
-  if (cwd !== null) { root = ah.project.root(cwd); if (root === null) return 'defer'; }
+  if (cwd !== null) { root = ah.project.root(cwd); if (root === null) ah.unable('tasklist-guard:no_project_root'); } // no project root: no progress or history ledgers
   var progressAbs = root !== null ? tlJoin(root, progressSegs) : null, historyAbs = root !== null ? tlJoin(root, historySegs) : null;
   var codexPlat = typeof p.turn_id === 'string' && p.turn_id !== '' || new RegExp(ah.cfg('taskkit.codex_rollout')).test(transcript) || new RegExp(ah.cfg('taskkit.codex_dir')).test(transcript);
   var cx = { tmp: wd.tmpdir(), cwd: cwd !== null && cwd.charAt(0) === '/' ? cwd : null };
   var work;
-  try { work = tlScanWork(transcript, progressAbs, cx); } catch (e) { if (e === wd.UNSURE) return 'defer'; throw e; }
-  if (work === 'defer') return 'defer';
+  work = tlScanWork(transcript, progressAbs, cx);
   if (work === 'quiet') return 'allow';
   var t = ah.transcript.tasks(transcript, 'scan', tlN('window_bytes'), tlN('wide_window_bytes'));
-  if (t.unsure) return 'defer';
+  if (t.unsure) { ah.unable('tasklist-guard:tasks_unsure'); return 'allow'; } // the task state cannot be read exactly: no claim of untracked work
   if (t.quiet) return 'allow';
   var scan = {
     work: work.work, lastWork: work.lastWork, lastProgressWrite: work.lastProgressWrite,
@@ -588,8 +581,8 @@ function decide(p, opts) {
   // progress-file freshness (fail-open layering: an unreadable cwd or progress directory never blocks)
   var progressFresh = true;
   if (cwd !== null && root !== null) {
-    if (cwd.charAt(0) !== '/') return 'defer';
-    if (ah.fs.isDir(cwd)) {
+    if (cwd.charAt(0) !== '/') ah.unable('tasklist-guard:relative_cwd'); // Node resolves it against its own directory; the progress file is not judged
+    else if (ah.fs.isDir(cwd)) {
       var dirRel = tlT('progress_dir').concat([date]).join('/');
       if (ah.state.op(root, 'mkdir', dirRel)) {
         var ps = ah.fs.lstat(progressAbs);
@@ -603,10 +596,8 @@ function decide(p, opts) {
   if (root !== null) { var hs = ah.fs.lstat(historyAbs); if (hs && hs.kind === 'file') tlIndex(root, date, sid, 'history'); }
   // the resume-verification nudge: independent of the block decision below
   var resume = tlResume(home, sid, scan.work, threshold, now);
-  if (resume === null) return 'defer';
   if (resume) {
     var rr = tlSanitize(resume);
-    if (rr === null) return 'defer';
     return { exact: { code: 0, out: JSON.stringify({ decision: 'block', reason: rr }) + '\n', err: '' } };
   }
   if (scan.work < threshold) return 'allow';
@@ -618,5 +609,5 @@ function decide(p, opts) {
     progressRel: progressSegs.join('/'), historyRel: historySegs.join('/'), progressAbs: progressAbs, historyAbs: historyAbs,
     scan: scan, needsAgents: needsAgents, progressFresh: progressFresh, threshold: threshold, codex: codexPlat,
   };
-  try { return tlFire(f); } catch (e2) { if (e2 === wd.UNSURE) return 'defer'; throw e2; }
+  return tlFire(f);
 }

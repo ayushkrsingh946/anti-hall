@@ -275,10 +275,6 @@ value = "ingest-"
 doc = "The suffix of a JSON file."
 value = ".json"
 
-[devswarm_ingest.ndjson_suffix]
-doc = "The suffix of an NDJSON file."
-value = ".ndjson"
-
 [devswarm_ingest.log_file]
 doc = "The ingest log, relative to the home directory (the file the Node daemon's unit writes its output to); one `[ISO time] line` each."
 value = ".anti-hall/devswarm-ingest.log"
@@ -449,48 +445,9 @@ value = "[object Object]"
 # the live store.
 
 
-[devswarm_ingest.witness_every_ms]
-doc = "Least time between two witness comparisons of one project."
-value = 21600000
-min = 1000
-max = 31536000000
-unit = "ms"
-
-[devswarm_ingest.witness_max_bytes]
-doc = "The mirror of one project stops growing at this size until a comparison consumes it."
-value = 8388608
-min = 1024
-max = 1073741824
-
-[devswarm_ingest.witness_timeout_ms]
-doc = "Bound of one witness run. The drain of that project waits while it runs (messages queue up natively, nothing is lost), so it stays far under the three minutes after which a daemon's heartbeat reads stale."
-value = 60000
-min = 1000
-max = 900000
-unit = "ms"
-
-[devswarm_ingest.witness_prefix]
-doc = "The start of a project's mirror file name, under the witness directory (devswarm_sup.witness_dir)."
-value = "ingest-"
-
-[devswarm_ingest.witness_scratch]
-doc = "The start of the scratch HOME's name for one comparison."
-value = "ingest-scratch-"
-
-[devswarm_ingest.witness_file]
-doc = "The witness log, one JSON line per comparison, relative to the home directory."
-value = ".anti-hall/logs/devswarm-ingest-witness.ndjson"
-
 [devswarm_ingest.status_scratch]
 doc = "The start of the temporary directory the read-only status verb uses so it remembers nothing."
 value = "ah-ingest-status-"
-
-[devswarm_ingest.witness_snippet]
-doc = "What Node runs for the witness: ingestPayload over each mirrored batch against a scratch store, printing per batch {total, lossy, rows: [{hash, ts, body}]}. Arguments: the plugin root, the scratch HOME, the Primary's id, the repo key, the mirror file, the worktree."
-value = 'const fs=require("fs");process.env.HOME=process.argv[2];const root=process.argv[1],h=process.argv[2],ws=process.argv[3],key=process.argv[4],mp=process.argv[5],wt=process.argv[6];const I=require(root+"/companion/devswarm-ingest.js");const store=require(root+"/companion/lib/devswarm-store.js");const s=store.openStore({home:h,workspaceId:ws,hash:key,backend:"sqlite"});s.upsertRegistry({id:ws,worktreePath:wt,sessionId:ws,inboxPath:null,cursorPath:null,nudgeCommand:null});const out=[];for(const line of fs.readFileSync(mp,"utf8").split("\n")){if(!line)continue;let l;try{l=JSON.parse(line)}catch(e){continue}const rows=I.normalizeMonitorPayload(l.raw).map((m)=>{const t=Date.parse(m.createdAt);return{hash:I.messageHash(ws,m),ts:Number.isFinite(t)?t:l.now,body:m.message!=null?String(m.message):I.stableJson(m)}});const r=I.ingestPayload(s,l.raw,{workspaceId:ws,home:h,now:l.now});out.push({total:r.total,lossy:r.lossy,rows})}console.log(JSON.stringify(out))'
-
-# ---- log lines -------------------------------------------------------------------------------------------------------------
-
 
 [devswarm_ingest.msg_refused_prefix]
 doc = "The start of the log line when a drain does not start."

@@ -1,7 +1,7 @@
 // check = "failure-root-cause-nudge" (PostToolUseFailure on Bash; advisory only, never blocks). When a Bash call fails, one short
 // line points at the root-cause skill. The noise filter (guards.failureNudgeFilter, default on) stays silent for an interrupt, a
 // harness refusal, an expected exit 1 from a predicate command, and for every nudge after the first in one turn (the state is the
-// file the Node hook keeps). A request without a home directory defers; a payload whose answer the script cannot give defers.
+// file the Node hook keeps). A request without a home directory shows the nudge (the gate cannot persist).
 // Mirrors hooks/failure-root-cause-nudge.js, hooks/lib/expected-failure.js and hooks/lib/turn-gate.js (lib/70-guardkit.js).
 // Tables, patterns and texts: small_guards.toml (failure_nudge.*, expected_failure.*, turn_gate.*).
 'use strict';

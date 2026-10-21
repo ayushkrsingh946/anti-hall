@@ -192,32 +192,12 @@ fn install(env: &BTreeMap<String, String>, args: &[String], log: &mut Log) -> Re
     }
 
     let pa = paths(env)?;
-    let node_only = node_only(env);
-    // what the command will run: the engine itself, or (Node-only form) the dispatcher script
-    let target = if node_only {
-        let stable = join(&pa.home, &format!("{}/{}", t("slcfg.stable_dir"), t("slcfg.dispatcher_file")));
-        let override_var = env.get(defaults::env_name("dispatcher_override"));
-        let dispatcher = match override_var {
-            Some(o) => o.clone(),
-            None if exists(&stable) => stable.clone(),
-            None => join(&pa.script_dir, t("slcfg.dispatcher_file")),
-        };
-        if override_var.is_none_or(String::is_empty) && !exists(&dispatcher) {
-            log.err(fill("slcfg.inst_not_found_1", &[("path", &dispatcher)]));
-            log.err(t("slcfg.inst_not_found_2"));
-            return Ok(1);
-        }
-        let note = if dispatcher == stable { t("slcfg.dispatcher_stable") } else { t("slcfg.dispatcher_dev") };
-        log.out(fill("slcfg.dispatcher_line", &[("path", &dispatcher), ("note", &note)]));
-        dispatcher
-    } else {
-        let Some(engine) = engine_path(&pa.home) else {
-            log.err(fill("slcfg.engine_not_found", &[("path", &engine_home_path(&pa.home))]));
-            return Ok(1);
-        };
-        log.out(fill("slcfg.engine_line", &[("path", &engine)]));
-        engine
+    // what the command will run: the engine itself
+    let Some(target) = engine_path(&pa.home) else {
+        log.err(fill("slcfg.engine_not_found", &[("path", &engine_home_path(&pa.home))]));
+        return Ok(1);
     };
+    log.out(fill("slcfg.engine_line", &[("path", &target)]));
 
     let project = args.iter().any(|a| a == t("slcfg.flag_project"));
     let consolidate = args.iter().any(|a| a == t("slcfg.flag_consolidate"));
@@ -264,7 +244,7 @@ fn install(env: &BTreeMap<String, String>, args: &[String], log: &mut Log) -> Re
             || (cmd.contains(t("slcfg.installed_marker")) && (cmd.contains(t("slcfg.installed_dir_install")) || cmd.contains(&pa.script_dir)))
     });
     if let Some(cmd) = ours {
-        log.out(t(if node_only { "slcfg.already_1" } else { "slcfg.already_engine" }));
+        log.out(t("slcfg.already_engine"));
         log.out(fill("slcfg.indent_line", &[("text", &cmd)]));
         let same = |sl: &Option<J>| command_of(sl.as_ref()).is_some_and(|c| !c.is_empty() && c == cmd);
         log.out(if same(&sl_local) {
@@ -282,7 +262,7 @@ fn install(env: &BTreeMap<String, String>, args: &[String], log: &mut Log) -> Re
         }
         // an older anti-hall form (Node-only or launcher) is moved to the engine's command, in place, by the same migration
         // `update` runs
-        let upgraded = if node_only || is_engine_command(cmd) { Vec::new() } else { upgrade_commands(&pa.home, &pa.cwd, env, false) };
+        let upgraded = if is_engine_command(cmd) { Vec::new() } else { upgrade_commands(&pa.home, &pa.cwd, env, false) };
         if upgraded.is_empty() {
             log.out(t("slcfg.no_changes"));
         }
@@ -424,13 +404,13 @@ fn install(env: &BTreeMap<String, String>, args: &[String], log: &mut Log) -> Re
     log.out("");
 
     if !shell_safe(&target) {
-        log.err(t(if node_only { "slcfg.unsafe_1" } else { "slcfg.engine_unsafe_1" }));
+        log.err(t("slcfg.engine_unsafe_1"));
         log.err(fill("slcfg.unsafe_2", &[("path", &target)]));
         log.err(fill("slcfg.unsafe_3", &[("path", &settings_path)]));
-        log.err(t(if node_only { "slcfg.unsafe_4" } else { "slcfg.engine_unsafe_4" }));
+        log.err(t("slcfg.engine_unsafe_4"));
         return Ok(1);
     }
-    let command = if node_only { node_command(&target) } else { engine_command(&target) };
+    let command = engine_command(&target);
     let new_line = J::Obj(vec![
         ("type".into(), J::Str(t("slcfg.type_command").into())),
         ("command".into(), J::Str(command)),
@@ -438,14 +418,11 @@ fn install(env: &BTreeMap<String, String>, args: &[String], log: &mut Log) -> Re
         ("refreshInterval".into(), J::Num(defaults::num("slcfg.refresh_interval") as f64)),
     ]);
     settings.set("statusLine", new_line.clone());
-    let uninstall_js = join(&pa.script_dir, t("slcfg.uninstall_file"));
-    let hint = |node_key: &str| {
-        if node_only { fill(node_key, &[("path", &uninstall_js)]) } else { fill("slcfg.engine_uninstall_hint", &[("engine", &target)]) }
-    };
+    let hint = || fill("slcfg.engine_uninstall_hint", &[("engine", &target)]);
     if let Err(msg) = jsio::write_file(&settings_path, (pretty(&settings) + "\n").as_bytes()) {
         log.err(fill("slcfg.write_failed_1", &[("path", &settings_path), ("msg", &msg)]));
         log.err(t("slcfg.write_failed_2"));
-        log.err(hint("slcfg.write_failed_3"));
+        log.err(hint());
         return Ok(1);
     }
     log.out(t("slcfg.new_statusline"));
@@ -463,7 +440,7 @@ fn install(env: &BTreeMap<String, String>, args: &[String], log: &mut Log) -> Re
     log.out(t("slcfg.scope_phase_2"));
     log.out("");
     log.out(t("slcfg.to_uninstall"));
-    log.out(hint("slcfg.uninstall_hint"));
+    log.out(hint());
     Ok(0)
 }
 
@@ -503,11 +480,6 @@ fn launcher_for(dispatcher: &str) -> String {
     crate::meshw::ident::resolve_abs(&Path::new(&dir).join(t("slcfg.launcher_rel")).to_string_lossy())
 }
 
-/// The Node-only form: `node "<dispatcher>"`.
-fn node_command(dispatcher: &str) -> String {
-    format!("{}{dispatcher}{}", t("slcfg.command_prefix"), t("slcfg.command_suffix"))
-}
-
 /// The engine's own form: `"<engine>" statusline`.
 fn engine_command(engine: &str) -> String {
     fill("slcfg.command_engine", &[("engine", &engine)])
@@ -516,11 +488,6 @@ fn engine_command(engine: &str) -> String {
 /// A statusLine command in the engine's own form.
 fn is_engine_command(cmd: &str) -> bool {
     crate::checks::guardkit::jsre::compile(t("slcfg.engine_command_re"), false).is_match(cmd)
-}
-
-/// The Node installer's command is wanted (`slcfg.node_only_env`; the parity tests set it).
-fn node_only(env: &BTreeMap<String, String>) -> bool {
-    env.get(defaults::env_name("statusline_node_only")).is_some_and(|v| !v.is_empty())
 }
 
 /// Where the hook wrappers look for the engine first: `<home>/<paths.base_dir>/<paths.state_dir>/<slcfg.engine_bin_rel>`.

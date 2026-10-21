@@ -8,24 +8,22 @@
 //! * the stage is a **one-time per-version migration** whose markers in `update-sweep-state.json` already say it is done for
 //!   the new version.
 //!
-//! The stages whose work the engine owns run natively (`native` in the stage table): the state-file migrations
-//! (`migrate-state.js`), the settings forward-migration with the legacy Jev key opt-in and the triage cache repair, and the
-//! Codex hooks.json graphify cleanup. The store repairs marked `empty_when` are answered natively when the machine has nothing
-//! for them to walk (no DevSwarm store, no DevSwarm app database), stamped as the Node pass stamps them.
-//!
-//! Anything else is the stage's real work on the DevSwarm stores. Those run by the script's own exported stage function in a
-//! bounded Node subprocess, exactly as `update.js` calls it (so the answer is the script's, key order and all). A stage whose
-//! plugin files are not all there is also left to the script, which reports the missing file.
-use super::update::{Paths, progress, run_child, stage_quiet};
+//! Every stage is native (`native` or `recon` in the stage table): the state-file migrations (`migrate-state.js`), the settings
+//! forward-migration with the legacy Jev key opt-in and the triage cache repair, the Codex hooks.json graphify cleanup, the store
+//! repairs, and the six reconcile-family stages (the engine's ports in `dssup::recon`). No Node runs. A stage the native path
+//! cannot decide this time is `held` (`update_post.held_json`, counted `native_unable` at `postpull:<name>`; it runs again on the
+//! NEXT update or doctor pass); a stage switched off (`enabled = false`, or the engine-mode switch of a reconcile-family stage)
+//! is `disabled` (`update_post.disabled_json`). Each outcome has its own counter; none is a silent success.
+use super::update::{Paths, progress, stage_quiet};
 use crate::checks::guardkit::ojson::OVal;
-use crate::checks::jsport::json::{self, J, stringify};
+use crate::checks::jsport::json::{self, J};
 use crate::checks::spawnctx::devswarm_active;
 use crate::defaults;
 use crate::jev::settings::Env;
 use crate::migrate;
 use crate::setup::jsfmt::js_string;
 use std::path::Path;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 mod recon;
 mod wake;
@@ -45,6 +43,8 @@ pub(super) struct Run<'a> {
     pub synced: bool,
     /// The overall post-pull budget, ms (0: unlimited).
     pub budget_ms: u64,
+    /// Set by a stage that did not run to its end (`held`, `disabled`), read (and cleared) by [`run`] to account the stage.
+    pub outcome: std::cell::Cell<Option<crate::obs::counters::Outcome>>,
 }
 
 fn now_ms() -> u64 {
@@ -120,95 +120,41 @@ impl Run<'_> {
         keys.iter().all(|k| matches!(m.get(k).and_then(|e| e.get("completedVersion")), Some(OVal::Str(c)) if c == v))
     }
 
-    fn node_timeout(&self) -> Duration {
-        let wide = Duration::from_millis(self.budget_ms + defaults::num("update.harness_timeout_ms") + defaults::num("update.reexec_margin_ms"));
-        wide.max(defaults::millis("update_post.stage_timeout_ms"))
-    }
-
-    /// The Node binary, or why the script cannot run.
-    fn node(&self) -> Result<String, String> {
-        let script = Path::new(&self.paths.plugin_src).join(text("update.node_script_rel"));
-        if !script.is_file() {
-            return Err(defaults::render("update_msg.stage_script_missing", &[("script", &script.display())]));
-        }
-        Ok(self.env.get(defaults::text("env.node")).filter(|n| !n.is_empty()).unwrap_or_else(|| text("doctor.node_default")).to_string())
-    }
-
-    /// Node code run with the plugin dir and the arguments; its answer is the last JSON line it printed.
-    fn node_call(&self, snippet: &str, args: &[String]) -> Result<J, String> {
-        let node = self.node()?;
-        let mut argv: Vec<String> = defaults::list("update_post.node_args").iter().map(|a| (*a).to_string()).collect();
-        argv.push(snippet.to_string());
-        argv.push(self.paths.plugin_src.clone());
-        argv.extend(args.iter().cloned());
-        let r = run_child(&node, &argv, None, &[], self.node_timeout());
-        let line = r.stdout.lines().rev().find(|l| !l.trim().is_empty());
-        match (r.status, line) {
-            (Some(0), Some(l)) => json::parse(l, defaults::num("update.json_max_depth") as usize).map_err(|e| format!("{e:?}")),
-            _ => Err(if r.reason.is_empty() { text("update_msg.unknown_error").to_string() } else { r.reason }),
-        }
-    }
-
-    fn node_stage(&self, name: &str, func: &str, opts: J) -> J {
-        match self.node_call(text("update_post.stage_snippet"), &[func.to_string(), stringify(&opts)]) {
-            Ok(v) => v,
-            Err(why) => fill(parse_json(text("update_post.node_failed_json")), &[("name", name), ("why", &why)]),
-        }
-    }
-
-    /// The shared store-hash listing, only when a DevSwarm session is active and its files are there.
-    fn hashes(&self, cache: &mut Option<Option<J>>) -> Option<J> {
-        if cache.is_none() {
-            let files = defaults::list("update_post.hash_files");
-            let got = if self.files_there(&files) && self.active() {
-                self.node_call(text("update_post.hashes_snippet"), &[]).ok().filter(|h| matches!(h, J::Arr(_)))
-            } else {
-                None
-            };
-            *cache = Some(got);
-        }
-        cache.clone().flatten()
-    }
-
-    fn version_opts(&self) -> J {
-        let mut o = vec![];
-        if let Some(v) = self.latest.filter(|v| !v.is_empty()) {
-            o.push(("version".to_string(), J::Str(v.to_string())));
-        }
-        J::Obj(o)
-    }
-
     /// The engine owns the ingest daemons (`devswarm_ingest.mode` is engine: its drain runs in the daemon and `units heal`, the next
-    /// stage of the update, retires the Node ingest units), so re-baking a Node unit would only resurrect what is retired. Switchable
-    /// with `update_post.ingest_native`; witness mode (the Node daemons drain) keeps the Node functions.
+    /// stage of the update, retires the Node ingest units). Switchable with `update_post.ingest_native`.
     fn engine_owns_ingest(&self) -> bool {
         defaults::num("update_post.ingest_native") == 1 && crate::setup::units::engine_runs(text("units.duty_ingest"))
     }
 
+    /// The ingest heal step: answered by the engine. While the engine does not own the ingest daemons (the switch is off, or the
+    /// Node daemons drain) the step is `disabled`: nothing is healed or re-installed, and it says so.
     fn ingest(&self) -> J {
-        if self.engine_owns_ingest() {
-            let key = if !self.synced {
-                "update_post.ingest_idle_json"
-            } else if !self.active() {
-                "update_post.ingest_gate_json"
-            } else {
-                "update_post.ingest_engine_json"
-            };
-            return parse_json(text(key));
+        if !self.engine_owns_ingest() {
+            self.outcome.set(Some(crate::obs::counters::Outcome::Disabled));
+            return parse_json(text("update_post.ingest_off_json"));
         }
-        let files = defaults::list("update_post.ingest_files");
-        let heal = || self.node_stage("ingest heal", text("update_post.ingest_heal_fn"), self.version_opts());
-        if self.files_there(&files) && !self.active() {
-            // with nothing synced the trigger is false before the heal is asked; synced, the heal's own gate answers
-            return parse_json(text(if self.synced { "update_post.ingest_gate_json" } else { "update_post.ingest_idle_json" }));
-        }
-        if self.synced {
-            return heal();
-        }
-        match self.node_call(text("update_post.stage_snippet"), &[text("update_post.ingest_needs_fn").to_string(), "{}".to_string()]) {
-            Ok(J::Bool(true)) => heal(),
-            _ => parse_json(text("update_post.ingest_idle_json")),
-        }
+        let key = if !self.synced {
+            "update_post.ingest_idle_json"
+        } else if !self.active() {
+            "update_post.ingest_gate_json"
+        } else {
+            "update_post.ingest_engine_json"
+        };
+        parse_json(text(key))
+    }
+
+    /// A stage the native path cannot decide this time: counted `native_unable` at `postpull:<name>`, accounted `held`, answered with
+    /// `update_post.held_json`. Nothing is run or written for it; the next update or doctor pass tries it again.
+    fn held_stage(&self, name: &str, why: &str) -> J {
+        crate::obs::counters::handback(crate::obs::counters::Handback::NativeUnable, &format!("postpull:{name}"));
+        self.outcome.set(Some(crate::obs::counters::Outcome::Held));
+        fill(parse_json(text("update_post.held_json")), &[("name", name), ("why", why)])
+    }
+
+    /// A stage that is switched off: accounted `disabled`, answered with `update_post.disabled_json`.
+    fn off_stage(&self, name: &str) -> J {
+        self.outcome.set(Some(crate::obs::counters::Outcome::Disabled));
+        fill(parse_json(text("update_post.disabled_json")), &[("name", name)])
     }
 
     /// The migration context of the engine's own ports: this home, this process's environment and working directory, the new
@@ -450,7 +396,7 @@ impl Run<'_> {
         Some(J::Obj(out))
     }
 
-    fn stage(&self, row: &'static defaults::V, deadline: Option<u64>, hashes: &mut Option<Option<J>>) -> J {
+    fn stage(&self, row: &'static defaults::V, deadline: Option<u64>) -> J {
         let name = row.str_field("name");
         let files: Vec<&str> = row.get("files").map(|f| f.strings()).unwrap_or_default();
         let version = self.latest.unwrap_or_default();
@@ -465,16 +411,12 @@ impl Run<'_> {
             }
         }
         if row.get("empty_when").is_some()
-            && !self.env.get(text("update_post.node_test_env")).is_some_and(|v| !v.is_empty())
             && let Some(v) = self.empty_store_stage(row)
         {
             return v;
         }
-        if row.get("recon").is_some()
-            && self.files_there(&files)
-            && let Some(v) = self.recon_stage(row, deadline)
-        {
-            return v;
+        if row.get("recon").is_some() {
+            return self.recon_stage(row, deadline).unwrap_or_else(|| self.held_stage(name, text("update_post.why_native_unable")));
         }
         match row.get("native").and_then(defaults::V::as_str) {
             Some("settings") => return self.settings_stage(),
@@ -496,53 +438,47 @@ impl Run<'_> {
             }
             None => {}
         }
-        let passes: Vec<&str> = row.get("passes").map(|f| f.strings()).unwrap_or_default();
-        let mut o: Vec<(String, J)> = Vec::new();
-        if passes.contains(&"version") && !version.is_empty() {
-            o.push(("version".into(), J::Str(version.to_string())));
-        }
-        if passes.contains(&"hashes")
-            && let Some(h) = self.hashes(hashes)
-        {
-            o.push(("hashes".into(), h));
-        }
-        if passes.contains(&"deadline")
-            && let Some(d) = deadline
-        {
-            o.push(("postPullDeadline".into(), J::Num(d as f64)));
-        }
-        let func = match row.str_field("fn") {
-            "" => row.str_field("fallback"),
-            f => f,
-        };
-        self.node_stage(name, func, J::Obj(o))
+        self.held_stage(name, text("update_post.why_native_unable"))
     }
 }
 
 /// Every stage, in the script's order; the answers come back in the script's status order.
 pub(super) fn run(r: &Run) -> Vec<(String, J)> {
     let quiet = stage_quiet(r.env, r.home);
-    let mut answers: Vec<(String, J)> = vec![("ingestHeal".into(), r.ingest())];
+    let t_ingest = Instant::now();
+    let ingest = r.ingest();
+    crate::obs::counters::account(
+        "stage",
+        text("update_post.ingest_stage_name"),
+        r.outcome.take().unwrap_or(crate::obs::counters::Outcome::Ok),
+        0,
+        t_ingest.elapsed().as_micros() as u64,
+    );
+    let mut answers: Vec<(String, J)> = vec![("ingestHeal".into(), ingest)];
     let rows = defaults::raw("update_post.stages").as_array().unwrap_or(&[]);
     let deadline = (r.budget_ms > 0).then(|| now_ms() + r.budget_ms);
-    let mut hashes: Option<Option<J>> = None;
     for row in rows {
         let name = row.str_field("name");
         if row.get("enabled").and_then(defaults::V::as_bool) == Some(false) {
             answers.push((row.str_field("key").to_string(), fill(parse_json(text("update_post.disabled_json")), &[("name", name)])));
+            crate::obs::counters::account("stage", name, crate::obs::counters::Outcome::Disabled, 0, 0);
             continue;
         }
         let budgeted = row.get("budget").and_then(defaults::V::as_bool).unwrap_or(false);
         if budgeted && deadline.is_some_and(|d| now_ms() >= d) {
             let budget = r.budget_ms.to_string();
             answers.push((row.str_field("key").to_string(), fill(parse_json(text("update_post.deferred_json")), &[("name", name), ("budget", &budget)])));
+            crate::obs::counters::account("stage", name, crate::obs::counters::Outcome::Held, 0, 0);
             continue;
         }
         if !quiet {
             progress(&defaults::render("update_msg.stage_start", &[("name", &name)]));
         }
         let t0 = Instant::now();
-        let v = r.stage(row, deadline, &mut hashes);
+        let cpu0 = crate::limits::thread_cpu_us();
+        let v = r.stage(row, deadline);
+        let outcome = r.outcome.take().unwrap_or(crate::obs::counters::Outcome::Ok);
+        crate::obs::counters::account("stage", name, outcome, crate::limits::thread_cpu_us().saturating_sub(cpu0), t0.elapsed().as_micros() as u64);
         if !quiet {
             progress(&defaults::render("update_msg.stage_done", &[("name", &name), ("ms", &t0.elapsed().as_millis())]));
         }

@@ -522,7 +522,7 @@ fn run_core(rx: &Rx, env: &Env, home: &str, paths: &Paths, skip_pull: bool) -> C
     }
     let latest = version_from_marketplace(rx, &paths.plugin_json).or_else(|| installed.clone().filter(|v| is_semver(rx, v)));
     let (synced, _) = sync_cache(paths, latest.as_deref());
-    let stages = super::postpull::run(&super::postpull::Run { env, home, paths, latest: latest.as_deref(), synced, budget_ms: postpull_budget_ms(env) });
+    let stages = super::postpull::run(&super::postpull::Run { env, home, paths, latest: latest.as_deref(), synced, budget_ms: postpull_budget_ms(env), outcome: Default::default() });
     units_heal(env, home);
     if !semver_opt(rx, installed.as_deref()) {
         return Core {

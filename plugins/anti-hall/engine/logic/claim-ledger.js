@@ -7,10 +7,9 @@
 // text, in order) is walked by the engine (ah.transcript.evidenceWalk: the merge of one message's text, the payload skip, the join) and
 // stays there; this script asks it whether a token is in it (walkHas) and for its numbers (walkNumbers), so no megabyte string is
 // ever built in the interpreter; the rest is decided here. The home is Node's os.homedir() (hookProc.adoptHome: HOME unset adopts
-// the passwd home); a relative transcript path is opened from the absolute payload cwd. Only what the engine cannot reproduce exactly
-// defers, before anything is written, logged under claim_ledger.unsure_log_kind: a relative or empty HOME, no home, the real home
-// under a test marker, a relative transcript path with no absolute cwd, a transcript record only JavaScript reads exactly (an unsure
-// walk). Mirrors hooks/claim-ledger.js. Keys and texts: response_guards.toml
+// the passwd home); a relative transcript path is opened from the absolute payload cwd. What the engine cannot reproduce exactly
+// records nothing (counted, native_unable): no home, the real home under a test marker, a transcript record only JavaScript reads
+// exactly (an unsure walk); a relative HOME or transcript path resolves against the stand-in directory (counted). Mirrors hooks/claim-ledger.js. Keys and texts: response_guards.toml
 // (claim_ledger.*).
 'use strict';
 
@@ -76,21 +75,32 @@ function clAsk(flag, sessionId, projectFrom, transcript) {
   try { ah.jev.ask(spec); } catch (e) { /* shadow only */ }
 }
 
-function clDefer(why) { ah.log(ah.cfg('claim_ledger.unsure_log_kind'), why); return 'defer'; }
+// Node's os.homedir() for this call: false when there is none or it is the real home under a test marker (Node's own guard then writes nothing);
+// a relative HOME is resolved against the stand-in directory (counted).
+function clAdopt(p) {
+  var why = hookProc.adoptHome();
+  if (why === null) return true;
+  ah.unable('claim-ledger:' + why);
+  ah.log(ah.cfg('claim_ledger.unsure_log_kind'), why);
+  if (why !== 'relative_home') return false;
+  var h = hookProc.home(p);
+  if (h === null) return false;
+  ah.useHome(h);
+  return true;
+}
 
 function decide(p) {
   if (ah.env.get(ah.cfg('session.judge_child_env')) === ah.cfg('session.judge_child_on')) return 'allow';
-  var noHome = hookProc.adoptHome();
-  if (noHome !== null) return clDefer(noHome);
+  if (!clAdopt(p)) return 'allow';
   if (!ah.settings.bool('claim_ledger.setting') || ah.settings.skipped(ah.cfg('claim_ledger.guard_name'))) return 'allow';
   var tp = p && p.transcript_path;
   if (!tp || typeof tp !== 'string') return 'allow';
-  var tpOpen = hookProc.openKnown(p, tp); // Node reads a relative path from its own directory; the session hash below keeps the payload's
-  if (tpOpen === null) return clDefer('relative_transcript');
+  var tpOpen = hookProc.open(p, tp); // a relative path opens against the stand-in directory; the session hash below keeps the payload's
+  if (hookProc.openKnown(p, tp) === null) ah.unable('claim-ledger:relative_transcript');
   var payloadText = typeof p.last_assistant_message === 'string' && p.last_assistant_message.trim() !== '' ? p.last_assistant_message : null;
   var ev = ah.transcript.evidenceWalk(tpOpen, ah.cfgNum('claim_ledger.window_bytes'), payloadText);
   if (ev === null) return 'allow';
-  if (ev.unsure) return clDefer('transcript');
+  if (ev.unsure) { ah.unable('claim-ledger:transcript_unsure'); return 'allow'; } // a transcript JavaScript reads differently: no ledger entry
   if (!ev.walked) return 'allow';
   var reply = ev.lastText, which = 'evidence', evidenceChars = ev.evidenceChars, tools = ev.toolsThisTurn, fromPayload = false;
   if (payloadText !== null) {

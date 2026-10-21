@@ -53,10 +53,6 @@ const ALLOW: &[(&str, &str)] = &[
         "the operator command-line tools (`settings`, `defect`, `statusline`): one-shot processes whose own environment IS the caller's, snapshotted once at the command line (the daemon is not involved, D76)",
     ),
     (
-        "src/ops/shadow.rs",
-        "the Node shadow of those tools: the detached child inherits the command's environment on purpose, so the Node script sees what the real run saw; its only switch is its own recursion guard",
-    ),
-    (
         "src/meshw/simple.rs",
         "the detached `ah-engine mesh --verify` checker (same process as meshw/verify.rs): the real home it hands to the Node check it compares against",
     ),

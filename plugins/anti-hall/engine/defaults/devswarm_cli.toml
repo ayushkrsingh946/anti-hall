@@ -501,12 +501,6 @@ value = " — "
 doc = "The remedy named by a gate refused for a project mismatch."
 value = "run this from within that project's worktree to gate it"
 
-[devswarm_cli.gates_dump_table]
-doc = "The label of the gates table in the witness's comparison record."
-value = "gates"
-
-# ---- logs -----------------------------------------------------------------------------------------------------------------
-
 [devswarm_cli.verb_logs]
 doc = "The verb that reads the shared devswarm JSONL log."
 value = "logs"
@@ -574,28 +568,6 @@ doc = "The unit of a --since number with none."
 value = "ms"
 
 # ---- the Node witness ---------------------------------------------------------------------------------------------------
-
-[devswarm_cli.witness_flag]
-doc = "The word after `mesh` that makes the engine run as the background Node witness of an answered devswarm CLI verb (never a devswarm.js verb)."
-value = "--shadow-verify-cli"
-
-[devswarm_cli.witness_dir]
-doc = "Directory in the state directory that holds the scratch homes of pending witnesses of the devswarm CLI verbs."
-value = "devswarm-cli-verify"
-
-[devswarm_cli.witness_copy_paths]
-doc = "Files and directories under the home copied into the witness's scratch home before the engine writes: what Node reads or rewrites for these verbs, and what the summary projection reads."
-value = [".anti-hall/bin", ".anti-hall/skip.json", ".anti-hall/settings.json", ".anti-hall/cache", ".anti-hall/devswarm/archive-ignore", ".anti-hall/devswarm/parent-gate", ".anti-hall/devswarm/maintainer-notices.jsonl", ".anti-hall/devswarm/plans", ".anti-hall/devswarm/stray", ".anti-hall/devswarm/workspaces", ".anti-hall/devswarm/heartbeats", ".anti-hall/devswarm/liveness", ".anti-hall/devswarm/cursors", ".anti-hall/devswarm/archived", ".anti-hall/devswarm/token-usage", ".anti-hall/devswarm/names", ".anti-hall/devswarm/app-state.json", ".anti-hall/devswarm/cache", ".anti-hall/devswarm/sender-aliases.json", ".anti-hall/logs/devswarm.jsonl", ".anti-hall/logs/devswarm.jsonl.1", ".anti-hall/logs/devswarm-supervision.ndjson", ".anti-hall/logs/devswarm-supervision.ndjson.1", ".anti-hall/logs/devswarm-supervision.ndjson.2", ".anti-hall/logs/devswarm-supervision.ndjson.3", ".anti-hall/logs/devswarm-supervision.ndjson.4", ".anti-hall/logs/devswarm-supervision.ndjson.5", ".anti-hall/logs/devswarm-supervision-daily"]
-
-[devswarm_cli.witness_link_paths_with_store]
-doc = "Paths the witness's scratch home links to the real ones for the verbs that copy the store as well: inputs Node only reads (the session records the Primary's live-holder check asks about)."
-value = [".claude"]
-
-[devswarm_cli.witness_node_snippet]
-doc = "The Node program of the witness: pins the clock, then loads the real devswarm.js as the main module so its own main() prints and exits. Arguments: the CLI path, the clock, then the verb's argv."
-value = "const c=process.argv[1],n=Number(process.argv[2]);Date.now=()=>n;process.argv=[process.argv[0],c].concat(process.argv.slice(3));require('module')._load(c,null,true);"
-
-# ---- ready-check (lane l8b) ---------------------------------------------------------------------------------------------
 
 [devswarm_cli.verb_ready_check]
 doc = "The verb that gives a readiness verdict for a child's READY <sha> claim (read-only; git)."
@@ -836,20 +808,6 @@ value = "| {rank} | {title} | {type} | {finish} | {brief} | {session} |"
 doc = "The title cell: the label and the short id."
 value = "{label} ({id})"
 
-[devswarm_cli.witness_mask]
-doc = "A pattern the Node witness blanks in both outputs before it compares them: a measured duration is never the same twice."
-value = "\"elapsedMs\":[0-9.]+"
-
-[devswarm_cli.witness_mask_to]
-doc = "What the masked text becomes."
-value = "\"elapsedMs\":0"
-
-# ---- witness links (lane l8b) -------------------------------------------------------------------------------------------
-
-[devswarm_cli.witness_link_paths]
-doc = "Paths under the home the witness's scratch home links to the real ones instead of copying them: inputs Node only reads and that are too large to copy (the session transcripts the app-state table checks sessions against)."
-value = [".claude", ".devswarm", ".anti-hall/devswarm/store"]
-
 [devswarm_cli.ready_diff]
 doc = "The git subcommand that lists the changed files."
 value = "diff"
@@ -961,12 +919,6 @@ value = "done"
 [devswarm_cli.done_tokens_dir]
 doc = "The directory under the DevSwarm root that keeps each workspace's token usage state."
 value = "token-usage"
-
-[devswarm_cli.message_row_name]
-doc = "What the Node witness reports as different when the message row Node wrote is not the row the engine wrote."
-value = "messages"
-
-# ---- primary (lane l8c) -------------------------------------------------------------------------------------------------
 
 [devswarm_cli.verb_primary]
 doc = "The verb that shows who holds the Primary seat of this worktree (and takes it over)."
@@ -1499,12 +1451,6 @@ value = ["^\\{\"ts\":\"[^\"]*\"", "\"pid\":[0-9]+,\"msg\""]
 [devswarm_cli.log_masks_to]
 doc = "What each pattern of `log_masks` becomes, in the same order."
 value = ["{\"ts\":\"T\"", "\"pid\":0,\"msg\""]
-
-[devswarm_cli.log_witness_files]
-doc = "Files under the home copied into a witness's scratch home so that the log lines Node appends there can be compared with the engine's."
-value = [".anti-hall/logs/devswarm.jsonl", ".anti-hall/logs/devswarm.jsonl.1"]
-
-# ---- read-primary window refusal (lane l8d) ------------------------------------------------------------------------------
 
 [devswarm_cli.window_flags]
 doc = "The window flags of the inbox verbs, in the order Node checks them (INBOX_WINDOW_FLAGS)."

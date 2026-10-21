@@ -406,6 +406,10 @@ value = "#base.json"
 doc = "The infix of a legacy per-instance cursor file (reader-cursors.js listLegacy)."
 value = "#inst-"
 
+[devswarm_role.pg_ident_unsure_id]
+doc = "The partition id the Primary's Stop gate names when the work tree around its directory could not be resolved exactly (a nested checkout git did not answer for): the gate blocks on an unreadable own mailbox under this id instead of passing."
+value = "primary-unresolved"
+
 [devswarm_role.pg_no_session]
 doc = "The state-file name used when the payload has no session id (stateFileFor)."
 value = "nosession"
@@ -895,3 +899,71 @@ value = "⚠️ anti-hall · devswarm-parent-gate: "
 [devswarm_role.pg_drain_suffix]
 doc = "Ends the drain notice: the Stop is not blocked while this session's drain marker is fresh."
 value = " — not blocking (in-flight drain marker fresh for this session)\n"
+
+[devswarm_role.seat_handover_re]
+doc = "A handover file name the Primary seat check counts when it names the newest handover of a worktree (HANDOVER.md or HANDOVER-<n>.md)."
+value = "^HANDOVER(?:-(\\d+))?\\.md$"
+
+[devswarm_role.seat_heartbeat_stale_ms]
+doc = "A Primary anchor whose heartbeat is older than this has a closed session when the sessions directory cannot be read (SEAT_HEARTBEAT_STALE_MS)."
+value = 600000
+unit = "ms"
+min = 1000
+max = 86400000
+
+[devswarm_role.seat_notice_registered]
+doc = "The notice of a first-ever Primary registration: {id}."
+value = "💡 anti-hall · devswarm-primary-seat: registered Primary {id} for this worktree (first run — no prior anchor found)."
+
+[devswarm_role.seat_notice_adopted]
+doc = "The notice of a Primary seat adopted from a closed session: {id}, {holder} (the closed holder), {handover} (the handover sentence)."
+value = "💡 anti-hall · devswarm-primary-seat: adopted Primary {id} from {holder} (closed) — same identity, partitions and cursors; handover {handover}"
+
+[devswarm_role.seat_holder_unclaimed]
+doc = "How the notice names the holder of an unclaimed anchor."
+value = "an unclaimed anchor"
+
+[devswarm_role.seat_handover_none]
+doc = "The handover sentence when the worktree has no handover."
+value = "(none found for this worktree)."
+
+[devswarm_role.seat_handover_found]
+doc = "The handover sentence when the worktree has one: {path}."
+value = "{path} — read it first."
+
+[devswarm_role.seat_notice_conflict]
+doc = "The notice of a seat held by another live session: {holder}, {id}, {cli}."
+value = "⚠️ anti-hall · devswarm-primary-seat-conflict: Another live Primary session {holder} owns this worktree — continue here (it will be demoted) or switch to it? (Primary id {id}.) To continue here run `node {cli} primary takeover`; to switch, close this session and use {holder}. Until you choose, mesh send/ack/spawn from this session are refused. Never two sessions sending as the same Primary."
+
+[devswarm_role.seat_notice_corrupt]
+doc = "The notice of an anchor descriptor that exists but cannot be parsed: {id}, {path}, {cli}."
+value = "⚠️ anti-hall · devswarm-primary-seat: the anchor descriptor for Primary {id} is corrupt/unparseable ({path}) — NOT re-registering over it. Inspect or repair that file, then run `node {cli} primary takeover`."
+
+[devswarm_role.seat_notice_unknown]
+doc = "The notice of a recorded Primary session whose liveness cannot be verified: {holder}, {cli}."
+value = "⚠️ anti-hall · devswarm-primary-seat: could not verify whether session {holder} (the recorded Primary) is still running — NOT adopting. If it is closed, run `node {cli} primary takeover`."
+
+[devswarm_role.seat_holder_unknown]
+doc = "How the notice names a recorded holder that is not known."
+value = "?"
+
+[devswarm_role.seat_notice_stale]
+doc = "The notice of a session resumed stale: {current}, {other} (the session active since), {until} (its last activity, ISO), {handover} (the handover clause)."
+value = "💡 anti-hall · devswarm-primary-seat: you resumed {current} but {other} was active until {until}{handover}. A `primary-<hash>` sender label is a worktree id, not proof of another Primary — never stand down on a label alone."
+
+[devswarm_role.seat_stale_handover]
+doc = "The clause naming the newest handover of the worktree in a stale-resume notice: {path}."
+value = "; newest handover for this worktree: {path}"
+
+[devswarm_role.seat_current_session]
+doc = "How the stale-resume notice names the current session when its id is not known."
+value = "this session"
+
+[devswarm_role.seat_notice_joiner]
+doc = "What joins the seat notices and the directive."
+value = "\n\n"
+
+[devswarm_role.seat_marker_shown]
+doc = "The count a fresh seat-conflict marker starts at."
+value = 1
+

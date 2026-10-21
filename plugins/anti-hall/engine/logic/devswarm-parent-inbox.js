@@ -8,10 +8,11 @@
 // urgent and normal unread nudges with grace, trend and the not-draining / stale-build labels; the archive recommendation with its
 // cooldown and the supervisor's auto-archive record; the orphaned-mesh, stale-registry and broadcast segments; the Primary's own inbox
 // with the questions it was asked (reply records, identity families, retired senders, live askers); the screenshot-sync ask and the
-// app-still-open note; and the supervisor escalations parked for this Primary. What stays with Node is decided before anything is written
-// and logged with its cause (devswarm_parent.defer_log_kind): a seat conflict still owed its repeat, a setting of the hook set anywhere, an
-// unseen maintainer notice, a row the supervisor's auto-archive owns, a store the hook would read through another backend, Jev switched on
-// for the broadcast feed, a path or a payload shape only JavaScript reads, and the dedupe state when it cannot be decided. Keys and texts:
+// app-still-open note; and the supervisor escalations parked for this Primary. What this script cannot settle exactly is decided natively
+// and counted (native_unable at devswarm-parent-inbox:*, logged with its cause under devswarm_parent.defer_log_kind): a seat conflict
+// still owed its repeat, a seat or identity it cannot resolve, a summary that is empty or unreadable, and a mesh answer or setting the host
+// cannot give exactly add nothing that turn; the owner's held partitions, a row the supervisor's auto-archive owns, the Jev labels of the
+// broadcast feed and the reader-identity correction are not applied. Keys and texts:
 // small_guards.toml (devswarm_prompt.*), devswarm_parent.toml, mesh_write.toml (the plan labels).
 'use strict';
 
@@ -33,10 +34,11 @@ function dpSeatMarker(home, sid) {
   return Number(mark.shown) < ah.cfgNum('devswarm_prompt.seat_shown_max') ? 'repeat' : 'none';
 }
 
-// Hand the turn to the Node hook, saying why in the engine's event log (a deferral costs a Node start, so every cause is countable).
+// A turn this script cannot settle exactly adds nothing (an advisory, repeated on the next prompt): counted (native_unable) and logged with its cause.
 function piDefer(why) {
+  ah.unable('devswarm-parent-inbox:' + String(why).split(':')[0]);
   ah.log(ah.cfg('devswarm_parent.defer_log_kind'), why);
-  return 'defer';
+  return 'allow';
 }
 
 function piDevswarmDir(home) { return home + '/' + ah.cfg('devswarm_role.pg_devswarm_dir'); }
@@ -48,20 +50,20 @@ function piSafeId(id) {
 }
 
 // `JSON.parse(readFileSync(p))` inside Node's try/catch: null for a file that cannot be read or does not parse; a file over the read cap
-// or a parse the interpreter cannot finish defers.
+// or a parse the interpreter cannot finish counts as unreadable (counted).
 function piJson(p) {
   var r = jx.read(p);
-  if (r.big) throw meshDefer;
+  if (r.big) { ah.unable('devswarm-parent-inbox:json_big'); return null; }
   if (r.text === undefined) return null;
   var j = jx.parse(r.text);
-  if (j.unsure) throw meshDefer;
+  if (j.unsure) { ah.unable('devswarm-parent-inbox:json_unsure'); return null; }
   return j.invalid ? null : j.v;
 }
 
-// The sorted names in a directory; null when it is not one. A directory too big to list defers.
+// The sorted names in a directory; null when it is not one. A directory too big to list reads as empty (counted).
 function piNames(dir) {
   var n = ah.fs.readdir(dir);
-  if (n === null && ah.fs.isDir(dir)) throw meshDefer;
+  if (n === null && ah.fs.isDir(dir)) { ah.unable('devswarm-parent-inbox:listing_big'); return []; }
   return n;
 }
 
@@ -71,11 +73,12 @@ function piPresent(p) {
   return !(st === null || (st.kind === 'link' && ah.fs.realpath(p) === null));
 }
 
-// A summary or descriptor field read with JavaScript truthiness as a string: a non-empty string, null for a falsy value; another type defers.
+// A summary or descriptor field read with JavaScript truthiness as a string: a non-empty string, null for a falsy value; another type is its text (counted).
 function piStrField(v) {
   if (v === undefined || v === null || v === false || v === '' || v === 0 || (typeof v === 'number' && isNaN(v))) return null;
   if (typeof v === 'string') return v;
-  throw meshDefer;
+  ah.unable('devswarm-parent-inbox:field_shape');
+  return String(v);
 }
 
 function piFinite(v) { return typeof v === 'number' && isFinite(v); }
@@ -107,11 +110,11 @@ function piParked(home, primaryId, cli) {
     if (!/\.json$/.test(n)) return;
     var it = piJson(dir + '/' + n);
     if (!it || !it.parentId || !it.row || it.delivered) return;
-    if (typeof it.parentId !== 'string') throw meshDefer; // String() of another type
+    if (typeof it.parentId !== 'string') { ah.unable('devswarm-parent-inbox:parent_id_shape'); return; } // another type matches no Primary id
     if (it.parentId === primaryId) mine.push(it);
   });
   if (!mine.length) return null;
-  var kids = mine.map(function (i) { if (typeof i.childId !== 'string') throw meshDefer; return i.childId; }).sort();
+  var kids = mine.map(function (i) { return typeof i.childId === 'string' ? i.childId : String(i.childId); }).sort();
   return text.render(ah.cfg('devswarm_parent.escalation_banner'), { count: mine.length, kids: kids.map(function (k) { return JSON.stringify(k); }).join(', '), parent: primaryId, cli: cli });
 }
 
@@ -153,11 +156,8 @@ function piTruncate(s, max) {
   return str.length > limit ? str.slice(0, limit) + '…' : str;
 }
 
-// A setting the hook reads at its shipped default; defers when it is set anywhere (its value is then Node's to resolve).
-function piSetDefault(key) {
-  if (ah.settings.touched(key)) throw meshDefer;
-  return ah.cfg(key).default;
-}
+// A setting the hook reads: its value along the settings chain (the shipped default when nothing sets it).
+function piSetDefault(key) { return typeof ah.cfg(key).default === 'boolean' ? ah.settings.bool(key) : ah.settings.num(key); }
 
 // ---- labels, the finish cell and the markers ---------------------------------------------------------------------------
 
@@ -252,7 +252,7 @@ function piLastInjected(home, id) {
   var size = ah.fs.size(p);
   if (size === null || size === 0 || size > ah.cfgNum('devswarm_parent.trend_log_max_bytes')) return null;
   var raw = ah.fs.readText(p, size);
-  if (raw === null) throw meshDefer;
+  if (raw === null) { ah.unable('devswarm-parent-inbox:trend_log'); return null; }
   var lines = raw.split('\n');
   for (var i = lines.length - 1; i >= 0; i--) {
     var line = lines[i];
@@ -424,7 +424,7 @@ function piParseSummary(raw) {
   var t = raw.trim();
   if (t === '') return { cause: 'summary-empty' };
   var j = jx.parse(t);
-  if (j.unsure) throw meshDefer;
+  if (j.unsure) return { cause: 'summary-unsure' };
   if (j.invalid) return { cause: 'summary-invalid' };
   if (j.v === null || typeof j.v !== 'object') return { absent: true }; // a scalar reads as no summary
   if (Array.isArray(j.v)) return { cause: 'summary-shape' }; // a list is an object of its own: Node's
@@ -436,7 +436,7 @@ function piReadSummary(home, key) {
   var p = piDevswarmDir(home) + '/' + ah.cfg('devswarm_role.pg_dir_summaries') + '/' + key + '.json';
   if (!piPresent(p)) return { absent: true };
   var r = jx.read(p);
-  if (r.big) throw meshDefer;
+  if (r.big) return { cause: 'summary-big' };
   if (r.text === undefined) return { cause: 'summary-unreadable' };
   return piParseSummary(r.text);
 }
@@ -446,7 +446,7 @@ function piReadSummary(home, key) {
 function piRoster(ctx, summary) {
   var home = ctx.home, key = ctx.key, now = ctx.now;
   var ws = summary.workspaces;
-  if (Array.isArray(ws)) throw meshDefer;
+  if (Array.isArray(ws)) { ah.unable('devswarm-parent-inbox:workspaces_array'); ws = null; }
   var summaryWorkspaces = ws !== null && typeof ws === 'object' ? ws : {};
   var ids = Object.keys(summaryWorkspaces);
   var out = { rows: [], attention: [], archiveList: [], ownExtra: 0, ownExtraUrgency: null, deferral: null, snapUnreadable: false };
@@ -455,13 +455,13 @@ function piRoster(ctx, summary) {
   var focusRaw = Number(focusEnv === null ? undefined : focusEnv); // Number(undefined) is NaN, Number(null) would be 0
   var windowMs = isFinite(focusRaw) && focusRaw >= 0 ? focusRaw : ah.cfgNum('devswarm_parent.focus_default_ms');
   var snapInfo = JSON.parse(ahHost.piSnap(windowMs, now));
-  if (snapInfo.unsure) throw meshDefer;
+  if (snapInfo.unsure) { ah.unable('devswarm-parent-inbox:app_snapshot'); snapInfo = { unsure: false, readable: false, file: false, focused: null }; } // the app database cannot be read: no focus or app facts
   var focusedId = windowMs > 0 && snapInfo.focused ? snapInfo.focused : null;
   out.snapUnreadable = snapInfo.file && !snapInfo.readable;
   function appWs(id, wt) {
     if (!snapInfo.readable) return null;
     var r = JSON.parse(ahHost.piWs(id, wt, now));
-    if (r !== null && r.unsure) throw meshDefer;
+    if (r !== null && r.unsure) { ah.unable('devswarm-parent-inbox:app_workspace'); return null; }
     return r;
   }
   var graceMs = piSetDefault('devswarm_parent.set_grace') * 1000;
@@ -480,7 +480,7 @@ function piRoster(ctx, summary) {
     var w = wt ? appWs(null, wt) : null;
     var appBuilderId = w && w.builderType !== ah.cfg('devswarm_sup.as_primary_type') ? w.id : null;
     var f = JSON.parse(ahHost.piFold(id, JSON.stringify(present), appBuilderId, key, now));
-    if (f.unsure) throw meshDefer;
+    if (f.unsure) { ah.unable('devswarm-parent-inbox:ghost_fold'); return; }
     if (!f.to) return;
     ghostFoldTo[id] = f.to;
     var gu = piFinite(entry.directUnread) ? entry.directUnread : (piFinite(entry.unread) ? entry.unread : 0);
@@ -500,7 +500,7 @@ function piRoster(ctx, summary) {
       var bw = appWs(id, null);
       if (bw && bw.builderType === ah.cfg('devswarm_sup.as_primary_type')) {
         var wc = ah.repo.context(wtPath);
-        if (wc.unsure) throw meshDefer;
+        if (wc.unsure) { ah.unable('devswarm-parent-inbox:row_context'); wc = { root: null }; }
         if (wc.root === ctx.top) {
           // the app's own builder row of this checkout is the Primary's inbound mail, shown through the own-inbox segment
           var rowUnread = piFinite(entry.directUnread) ? entry.directUnread : (piFinite(entry.unread) ? entry.unread : 0);
@@ -551,7 +551,7 @@ function piRoster(ctx, summary) {
     }
     var unreadForNag = unread > 0 && !graced;
     var st = JSON.parse(ahHost.piRow(id, wtPath, sessionId, key, now));
-    if (st.unsure) throw meshDefer;
+    if (st.unsure) { ah.unable('devswarm-parent-inbox:row_state'); st = { unsure: false, marker: false, app: false }; } // taken as not put away
     var archivedRow = st.marker;
     var appArchivedRow = st.app;
     var rowWs = appWs(id, wtPath);
@@ -577,7 +577,7 @@ function piRoster(ctx, summary) {
     var dormant = false, idleAlive = false, idleMs = 0;
     if (!archivedRow) {
       var act = JSON.parse(ahHost.piActivity(id, wtPath, sessionId, lastOut, key, now));
-      if (act.unsure) throw meshDefer;
+      if (act.unsure) { ah.unable('devswarm-parent-inbox:row_activity'); act = { idleMs: 0, ts: null, dormant: false, idleAlive: false }; }
       idleMs = act.idleMs;
       if (act.ts !== null && (!piFinite(activityTs) || act.ts > activityTs)) activityTs = act.ts;
       dormant = act.dormant;
@@ -594,7 +594,7 @@ function piRoster(ctx, summary) {
     var finishCell = piDoneState(entry, heartbeat);
     if (/^working\b/.test(finishCell) && gates.setting('devswarm_prompt.plan_tracking_setting', true, ctx.pluginRoot) !== false) {
       var pf = JSON.parse(ahHost.piFinish(id, wtPath, now));
-      if (pf.unsure) throw meshDefer;
+      if (pf.unsure) { ah.unable('devswarm-parent-inbox:row_finish'); pf = { label: null }; }
       if (pf.label !== null) finishCell = piPlanCell(home, pf, dormant, finishCell);
     }
     var appMarks = '';
@@ -619,13 +619,14 @@ function piArchiveCooldown(home, id, now) {
   return (now - last) >= ah.cfgNum('devswarm_parent.archive_cooldown_ms');
 }
 
-// `autoArchiveOwnsRow(home, id, now)`: the supervisor's last sweep owns the row. A record that could say yes needs the capability check: Node's.
+// `autoArchiveOwnsRow(home, id, now)`: the supervisor's last sweep owns the row. A record that could say yes needs the capability check, which is not made here: the row is not taken as owned (counted).
 function piAutoArchiveOwns(home, id, now) {
-  if (ah.settings.touched('devswarm_parent.set_auto_archive')) throw meshDefer;
+  if (ah.settings.str('devswarm_parent.set_auto_archive') === 'off') return false; // the supervisor does not archive on its own
   var st = piJson(piDevswarmDir(home) + '/' + ah.cfg('devswarm_parent.file_auto_archive'));
   if (!st || !Array.isArray(st.owned) || !(now - Number(st.at) < ah.cfgNum('devswarm_parent.auto_archive_window_ms'))) return false;
   if (st.owned.indexOf(String(id)) < 0) return false;
-  throw meshDefer;
+  ah.unable('devswarm-parent-inbox:auto_archive_capability');
+  return false;
 }
 
 // ---- wake coverage --------------------------------------------------------------------------------------------------------
@@ -637,7 +638,7 @@ function piDescriptors(home) {
     if (!/\.json$/.test(n)) return;
     var d = piJson(dir + '/' + n);
     if (!d || !d.worktreePath || !d.sessionId || !piSafeId(d.id)) return;
-    if (typeof d.worktreePath !== 'string' || typeof d.sessionId !== 'string') throw meshDefer;
+    if (typeof d.worktreePath !== 'string' || typeof d.sessionId !== 'string') { ah.unable('devswarm-parent-inbox:descriptor_shape'); return; }
     out.push(d);
   });
   return out;
@@ -649,10 +650,10 @@ function piSkipped(ctx, id, wt, sid, marker, appKey) {
   if (marker && JSON.parse(ahHost.piMarker(id, wt, sid)).archived === true) return true;
   if (appKey !== undefined) {
     var a = JSON.parse(ahHost.piApp(id, wt, appKey, ctx.now));
-    if (a.unsure) throw meshDefer;
-    if (a.archived) return true;
+    if (a.unsure) ah.unable('devswarm-parent-inbox:app_verdict');
+    else if (a.archived) return true;
   }
-  if (ah.settings.touched('devswarm_parent.set_held')) throw meshDefer; // the owner's held partitions
+  if (ah.settings.touched('devswarm_parent.set_held')) ah.unable('devswarm-parent-inbox:held_partitions'); // the owner's held partitions are not applied here
   if (ahHost.piIgnored(id)) return true;
   var live = sid ? ah.mesh.sessionAlive(sid) : false;
   if (id !== '' && sid && wt) {
@@ -686,7 +687,7 @@ function piLiveChildren(ctx, cwd) {
   if (d.known && d.live) return d;
   // a live child no descriptor names, found in the app database
   var ac = JSON.parse(ahHost.piAppChildren(cwd, ctx.now));
-  if (ac.unsure) throw meshDefer;
+  if (ac.unsure) { ah.unable('devswarm-parent-inbox:app_children'); ac = { children: [] }; }
   for (var j = 0; j < ac.children.length; j++) {
     var w = ac.children[j];
     if (!piSkipped(ctx, w.id, w.worktreePath, w.sessionId, true, undefined)) return { live: true, known: true };
@@ -743,7 +744,7 @@ function piWakeLine(ctx, cwd, cli, opts) {
   var cron = text.render(ah.cfg('devswarm_parent.wake_cron_part'), { cron: dwWakeCron(), cli: cli, id: ctx.primaryId });
   if (noWatcher) {
     var watcher = piWatcherPath(opts, ctx.home);
-    if (watcher === null) throw meshDefer;
+    if (watcher === null) { ah.unable('devswarm-parent-inbox:watcher_path'); return null; } // no watcher path to name: no wake line
     return text.render(ah.cfg('devswarm_parent.wake_both'), { mon: text.render(ah.cfg('devswarm_parent.wake_monitor'), { watcher: watcher }), cron: cron });
   }
   return text.render(ah.cfg('devswarm_parent.wake_tick'), { cron: cron });
@@ -765,14 +766,14 @@ function piWatcherPath(opts, home) {
 
 // ---- the maintainer notices and the session drift -----------------------------------------------------------------------
 
-// `buildMaintainerNoticeSegment(home, repoKey, now)` for a feed with nothing unseen: no segment and nothing written. A notice this project has
-// not seen is shown once and marked seen (a write and a metrics line): Node's.
+// `buildMaintainerNoticeSegment(home, repoKey, now)`: null for a feed with nothing unseen, else {text, lastId}: the unseen notices of
+// this project, shown once and marked seen (the caller writes the cursor `lastSeenId` after the turn is settled).
 function piNotices(home, key, now) {
   var file = piDevswarmDir(home) + '/' + ah.cfg('devswarm_parent.notices_file');
-  if (!piPresent(file)) return;
-  if (ah.settings.touched('devswarm_parent.set_notice_show')) throw meshDefer;
+  if (!piPresent(file)) return null;
+  if (!ah.settings.bool('devswarm_parent.set_notice_show')) return null;
   var size = ah.fs.size(file);
-  if (size !== null && size > ah.cfgNum('script.read_max_bytes')) throw meshDefer;
+  if (size !== null && size > ah.cfgNum('script.read_max_bytes')) { ah.unable('devswarm-parent-inbox:notices_big'); return null; }
   var raw = size === null ? null : ah.fs.readText(file);
   var rows = [];
   if (raw !== null) raw.split('\n').forEach(function (line) {
@@ -785,7 +786,7 @@ function piNotices(home, key, now) {
   var live = rows.filter(function (r) { return !(piFinite(r.expiresAt) && r.expiresAt <= now); });
   live.sort(function (a, b) { return (Number(a.ts) || 0) - (Number(b.ts) || 0); });
   var shown = live.slice(Math.max(0, live.length - ah.cfgNum('devswarm_parent.notice_max_shown')));
-  if (!shown.length) return;
+  if (!shown.length) return null;
   var cursor = null;
   if (/^[A-Za-z0-9._-]+$/.test(key)) {
     var cv = piJson(piDevswarmDir(home) + '/' + ah.cfg('devswarm_parent.dir_notice_cursor') + '/' + key + '.json');
@@ -797,7 +798,9 @@ function piNotices(home, key, now) {
     for (var i = 0; i < shown.length; i++) if (shown[i].id === cursor) { idx = i; break; }
     unseen = idx === -1 ? shown : shown.slice(idx + 1);
   }
-  if (unseen.length) throw meshDefer;
+  if (!unseen.length) return null;
+  var lines = unseen.map(function (n) { return text.render(ah.cfg('devswarm_parent.notice_text'), { text: n.text }); });
+  return { text: lines.join('\n') + '\n' + ah.cfg('devswarm_parent.notice_relay'), lastId: unseen[unseen.length - 1].id };
 }
 
 // The session-drift notice (`driftNotice(anchorSessionDrift(...))`), or null: a newer session of this worktree is active than the Primary's anchor.
@@ -806,7 +809,7 @@ function piDriftNotice(home, top, primaryId, sid, tp) {
   var anchorRaw = desc && desc.sessionId;
   var anchor = anchorRaw != null ? String(anchorRaw) : '';
   var d = JSON.parse(ahHost.piDrift(top, anchor, sid != null ? String(sid) : '', tp));
-  if (d !== null && d.unsure) throw meshDefer;
+  if (d !== null && d.unsure) { ah.unable('devswarm-parent-inbox:drift'); return null; }
   if (d === null) return null;
   if (sid && String(sid) === d.newest) return null;
   return text.render(ah.cfg('devswarm_parent.drift_notice'), { newest: d.newest, anchor: d.anchor });
@@ -997,7 +1000,7 @@ function piReplyState(home, key) {
   var p = piDevswarmDir(home) + '/' + ah.cfg('devswarm_parent.dir_reply_state') + '/' + String(key).replace(/[^A-Za-z0-9_.-]/g, '_') + ah.cfg('devswarm_parent.reply_state_suffix');
   var size = ah.fs.size(p);
   if (size === null) return out;
-  if (size > ah.cfgNum('script.read_max_bytes')) throw meshDefer;
+  if (size > ah.cfgNum('script.read_max_bytes')) { ah.unable('devswarm-parent-inbox:reply_state_big'); return out; }
   var raw = ah.fs.readText(p);
   if (raw === null) return out;
   var bump = function (meshId, ts) {
@@ -1082,7 +1085,7 @@ function piQuestions(ctx, summary, pending) {
   var resolve = function (wt) {
     if (!Object.prototype.hasOwnProperty.call(meshIds, wt)) {
       var r = JSON.parse(ahHost.piMeshId(wt));
-      if (r.unsure) throw meshDefer;
+      if (r.unsure) { ah.unable('devswarm-parent-inbox:mesh_id'); r = { id: null }; }
       meshIds[wt] = r.id;
     }
     return meshIds[wt];
@@ -1147,23 +1150,23 @@ function piQuestions(ctx, summary, pending) {
     var row = Object.prototype.hasOwnProperty.call(byId, from) ? byId[from] : null;
     if (!row) return !archivedKnown;
     var wt = piStrField(row.worktreePath), sid = piStrField(row.sessionId);
-    if (ah.settings.touched('devswarm_parent.set_held')) throw meshDefer;
+    if (ah.settings.touched('devswarm_parent.set_held')) ah.unable('devswarm-parent-inbox:held_partitions');
     if (piSafeId(from) && ahHost.piIgnored(from)) return false;
     var archived = false;
     if (wt || true) {
       var mk = JSON.parse(ahHost.piMarker(from, wt, sid));
-      if (mk.unsure) throw meshDefer;
+      if (mk.unsure) ah.unable('devswarm-parent-inbox:marker_unsure'); // an unreadable marker leaves the asker live
       archived = mk.archived === true;
     }
     if (!archived) {
       var a = JSON.parse(ahHost.piApp(from, wt, key, ctx.now));
-      if (a.unsure) throw meshDefer;
+      if (a.unsure) ah.unable('devswarm-parent-inbox:app_verdict');
       archived = a.archived === true;
     }
     if (!archived) return true;
     var st = sid ? JSON.parse(ahHost.piSessionPid(sid)) : { alive: null };
-    if (st.unsure) throw meshDefer;
-    return st.alive !== false;
+    if (st.unsure) ah.unable('devswarm-parent-inbox:session_pid');
+    return st.unsure || st.alive !== false;
   });
   return { blocking: live, informational: informational };
 }
@@ -1184,7 +1187,7 @@ function piAwaitingLine(list, titleFor, now, previews) {
   var rawp = oldest && previews && piFinite(oldest.seq) ? previews[oldest.seq] : null;
   if (typeof rawp === 'string') {
     var clean = rawp.replace(/[\x00-\x1f\x7f-\x9f]+/g, ' ').replace(/\s+/g, ' ').trim();
-    if (jx.loneSurrogate(clean)) throw meshDefer;
+    if (jx.loneSurrogate(clean)) { ah.unable('devswarm-parent-inbox:preview_surrogate'); clean = hookProc.usv(clean); }
     preview = ahHost.scrubSecrets(clean).slice(0, ah.cfgNum('devswarm_parent.preview_max'));
   }
   if (who || preview) line += text.render(ah.cfg('devswarm_parent.awaiting_who'), { who: who, sep: preview ? (who ? ah.cfg('devswarm_parent.awaiting_sep') : '') : '', preview: preview });
@@ -1241,7 +1244,7 @@ function piDecide(p, opts) {
   var cwd = jx.isObj(p) && typeof p.cwd === 'string' && p.cwd !== '' ? p.cwd : null;
   var top = null, primaryId = null;
   if (cwd !== null) {
-    if (cwd.charAt(0) !== '/') return piDefer('relative-cwd'); // Node resolves it against its own working directory
+    if (cwd.charAt(0) !== '/') { ah.unable('devswarm-parent-inbox:relative_cwd'); cwd = hookProc.cwd(p); } // resolved against the stand-in directory
     var c = ah.repo.context(cwd);
     if (c.unsure) return piDefer('repo-context');
     if (c.root !== null) {
@@ -1255,13 +1258,13 @@ function piDecide(p, opts) {
   if (home === null) return piDefer('home');
   var sid = dpSession(p);
   var tp = jx.isObj(p) && typeof p.transcript_path === 'string' ? p.transcript_path : null;
-  if (tp !== null && tp !== '' && tp.charAt(0) !== '/') return piDefer('transcript-path'); // a relative transcript path is Node's to resolve
+  if (tp !== null && tp !== '' && tp.charAt(0) !== '/') { ah.unable('devswarm-parent-inbox:relative_transcript'); tp = hookProc.open(p, tp); } // opened against the stand-in directory
   // the seat marker is read before anything is written: a marker still owed a repeat is Node's
   if (sid !== null && dpSeatMarker(home, sid) === 'repeat') return piDefer('seat-marker');
   var now = ah.clock.now();
   var every = ah.settings.num('verify_first.num_repeat_every');
   var repeat = isFinite(every) && every > 0 ? every : 0;
-  var summaryForTitle = null, ownUnanswered = [], ownInfo = [], ownPreviews = {}, syncNotes = null, ownUnread = 0, ownUrgency = null, orphansSeg = null, staleRegSeg = null, broadcastRows = null, parked = null, roster = null, key = null, health = null, banner = null, wakeLine = null, driftNotice = null, derived = null;
+  var noticeSeg = null, summaryForTitle = null, ownUnanswered = [], ownInfo = [], ownPreviews = {}, syncNotes = null, ownUnread = 0, ownUrgency = null, orphansSeg = null, staleRegSeg = null, broadcastRows = null, parked = null, roster = null, key = null, health = null, banner = null, wakeLine = null, driftNotice = null, derived = null;
   if (top !== null) {
     var cli = piCli(opts, home);
     if (cli === null) return piDefer('cli');
@@ -1270,29 +1273,28 @@ function piDecide(p, opts) {
     var dev = piDevswarmDir(home);
     // the ingest daemon: when it is not healthy the hook refreshes the summary from the store (a write), which the engine leaves to Node
     health = JSON.parse(ahHost.ctIngest(key));
-    if (health.unsure) return piDefer('ingest-health');
+    if (health.unsure) { ah.unable('devswarm-parent-inbox:ingest_health'); health = { unsure: false, status: 'healthy' }; } // no ingest banner when the health is unsure
     // when it is not healthy the hook refreshes the summary from the store first; the refresh is written once the turn is settled
     if (health.status !== 'healthy') {
       var dr = JSON.parse(ahHost.piDerive(key, now));
-      if (dr.unsure) return piDefer('summary-refresh');
-      derived = dr.text;
+      if (dr.unsure) ah.unable('devswarm-parent-inbox:summary_refresh'); // the summary is not refreshed this turn
+      else derived = dr.text;
     }
     var sm = derived !== null ? piParseSummary(derived) : piReadSummary(home, key);
-    if (sm.cause) return piDefer(sm.cause);
+    if (sm.cause) { ah.unable('devswarm-parent-inbox:' + sm.cause.replace(/-/g, '_')); ah.log(ah.cfg('devswarm_parent.defer_log_kind'), sm.cause); sm = {}; } // an empty, invalid or unreadable summary is no summary
     var summary = sm.summary || null;
     summaryForTitle = summary;
     if (summary !== null) {
-      if (Array.isArray(summary)) return piDefer('summary-shape');
+      if (Array.isArray(summary)) return piDefer('summary-shape'); // a list is not a summary: nothing to show
       var ctx = { home: home, key: key, top: top, primaryId: primaryId, now: now, sid: sid, pluginRoot: gates.pluginRoot(opts), newest: { known: false, value: null } };
       roster = piRoster(ctx, summary);
-      if (roster.deferral !== null) return piDefer(roster.deferral);
       // the Primary's own inbound mail, the questions it was asked, and what the summary lists beside the rows
       var own = summary.workspaces && summary.workspaces[primaryId] ? summary.workspaces[primaryId] : summary[primaryId];
       if (own && typeof own === 'object') {
         if (piFinite(own.unread) && own.unread > 0) {
           // the unread count is corrected by this reader's own cursor, found from the hook's process ancestry, which the daemon does not share
           var rd = JSON.parse(ahHost.ctReaders(key, primaryId));
-          if (rd.unsure || rd.declared) return piDefer('own-reader');
+          if (rd.unsure || rd.declared) ah.unable('devswarm-parent-inbox:own_reader'); // the reader-identity correction is not made: the summary count is shown as it is
           ownUnread = own.unread;
           ownUrgency = own.urgencyMax || null;
         }
@@ -1306,17 +1308,17 @@ function piDecide(p, opts) {
         }
       }
       if (roster.ownExtra > 0) { ownUnread += roster.ownExtra; if (!ownUrgency) ownUrgency = roster.ownExtraUrgency; }
-      if (Array.isArray(summary.recent) && summary.recent.length && ahHost.piJev()) return piDefer('broadcast-jev'); // Jev may label the feed
+      if (Array.isArray(summary.recent) && summary.recent.length && ahHost.piJev()) ah.unable('devswarm-parent-inbox:broadcast_jev'); // Jev may label the feed: shown unlabelled
       if (roster.rows.length) syncNotes = piSyncNotes({ home: home, key: key }, roster.rows, roster.snapUnreadable, jx.isObj(p) ? p.session_id : undefined);
     }
-    piNotices(home, key, now);
+    noticeSeg = /^[A-Za-z0-9._-]+$/.test(key) ? piNotices(home, key, now) : null;
     if (summary !== null) {
       if (Array.isArray(summary.orphans) && summary.orphans.length) orphansSeg = piIssueSegment(summary.orphans, 'devswarm_parent.orphans_head');
       if (Array.isArray(summary.staleRegistryPartitions) && summary.staleRegistryPartitions.length) {
         var visible = summary.staleRegistryPartitions.filter(function (row) {
           if (!row || row.id == null) return true;
           var a = JSON.parse(ahHost.piApp(String(row.id), piStrField(row.worktreePath), key, now));
-          if (a.unsure) throw meshDefer;
+          if (a.unsure) { ah.unable('devswarm-parent-inbox:stale_reg_app'); return true; } // not provably archived: still listed
           return !a.archived;
         });
         if (visible.length) staleRegSeg = piIssueSegment(visible, 'devswarm_parent.stale_registry_head');
@@ -1336,6 +1338,7 @@ function piDecide(p, opts) {
   var text0 = ah.cfg('devswarm_prompt.override_reassert');
   var overrideOpts = { sessionId: sid, key: ah.cfg('devswarm_prompt.override_key'), content: text0, transcriptPath: tp, keepaliveTurns: repeat };
   var pending = []; // {kind, rank, o?, text}
+  if (noticeSeg !== null) pending.push({ kind: 'plain', rank: ah.cfgNum('devswarm_parent.notice_rank'), text: noticeSeg.text });
   if (banner !== null) {
     if (banner.fault) {
       pending.push({ kind: 'dedupe', rank: 10, o: banner.fault, text: banner.fault.content, onSuppress: function () { piForget(sid, ah.cfg('devswarm_prompt.stale_key')); } });
@@ -1404,12 +1407,13 @@ function piDecide(p, opts) {
   // every dedupe record must be decidable before the first write
   var dedupeOn = sid !== null && !dedupe.disabled();
   for (var i = 0; i < pending.length; i++) {
-    if (pending[i].kind === 'dedupe' && dedupeOn && !dedupe.canDecide(pending[i].o)) return piDefer('dedupe-undecidable');
+    if (pending[i].kind === 'dedupe' && dedupeOn && !dedupe.canDecide(pending[i].o)) ah.unable('devswarm-parent-inbox:dedupe_undecidable'); // decided on what the engine reads
   }
   ah.commit();
   if (syncNotes !== null) syncNotes.writes.forEach(function (w) { ah.state.writeAtomic(w.rel, JSON.stringify({ at: now, ids: w.ids })); });
   if (broadcastRows !== null && broadcastRows.seen !== null) ah.state.writeAtomic(piBroadcastSeenRel(jx.isObj(p) ? p.session_id : undefined), JSON.stringify({ keys: broadcastRows.seen.slice(-ah.cfgNum('devswarm_parent.broadcast_seen_max')) }));
   if (derived !== null) ah.state.writeAtomic(piRel(ah.cfg('devswarm_role.pg_dir_summaries') + '/' + key + '.json'), derived);
+  if (noticeSeg !== null) ah.state.writeAtomic(piRel(ah.cfg('devswarm_parent.dir_notice_cursor') + '/' + key + '.json'), JSON.stringify({ lastSeenId: noticeSeg.lastId })); // shown once, marked seen
   var emitted = [];
   pending.forEach(function (s) {
     if (s.kind === 'forget') { piForget(sid, s.key); return; }
@@ -1431,5 +1435,5 @@ function piDecide(p, opts) {
 }
 
 function decide(p, opts) {
-  try { return piDecide(p, opts); } catch (e) { if (e === meshDefer || e === gates.UNDECIDABLE) return piDefer('unsure'); throw e; }
+  return piDecide(p, opts);
 }

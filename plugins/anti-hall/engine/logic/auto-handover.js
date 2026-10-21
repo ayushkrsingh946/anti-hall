@@ -1,10 +1,9 @@
 // check = "auto-handover" (UserPromptSubmit). The threshold fire, the soft advisory, the milestone nag, the latch re-arm and the
 // post-handover new-work gate with its backstop. The hooks share one per-session latch (<home>/.anti-hall/auto-handover/<tag>.json);
-// it is read and written in Node's shape. Every write is collected while deciding and done at the end, so a case that defers does so
-// before anything is written. The home is Node's os.homedir() (hookProc.adoptHome: HOME unset adopts the passwd home); a relative
-// transcript path is opened from the absolute payload cwd. Only what the engine cannot reproduce exactly defers, logged under
-// ctxbudget.ah_unsure_log_kind (cb.defer): a relative or empty HOME, no home, the real home under a test marker, a relative path with
-// no absolute cwd, a request time zone other than UTC, a checkout the resolver cannot classify. A prompt with text on an armed gate also asks the
+// it is read and written in Node's shape. Every write is collected while deciding and done at the end. The home is Node's os.homedir() (hookProc.adoptHome: HOME unset adopts the passwd home); a relative
+// transcript path is opened from the payload cwd or the stand-in directory. What the engine cannot reproduce exactly adds nothing
+// (counted, native_unable): no home, the real home under a test marker, a relative cwd, a request time zone other than UTC, a checkout
+// the resolver cannot classify. A prompt with text on an armed gate also asks the
 // postHandoverGate Jev integration without waiting. Mirrors hooks/auto-handover.js and lib/auto-handover-*.js, lib/context-pct.js
 // (lib/75-ctxbudget.js). Keys and texts: ctxbudget.toml (ctxbudget.*).
 'use strict';
@@ -25,13 +24,23 @@ function ahConsultJev(p, cfg, result) {
   ah.jev.ask(spec);
 }
 
-function decide(p) { return cb.run(function () { return ahDecide(p); }); }
+// Node's os.homedir() for this call: false when there is none or it is the real home under a test marker (Node's own guard then writes
+// nothing); a relative HOME is resolved against the stand-in directory (counted).
+function ahAdopt(p) {
+  var why = hookProc.adoptHome();
+  if (why === null) return true;
+  ah.unable('auto-handover:' + why);
+  if (why !== 'relative_home') return false;
+  var h = hookProc.home(p);
+  if (h === null) return false;
+  ah.useHome(h);
+  return true;
+}
 
-function ahDecide(p) {
+function decide(p) {
   if (ah.env.get(ah.cfg('ctxbudget.judge_child_env')) === ah.cfg('ctxbudget.judge_child_on')) return 'allow';
   if (!p || typeof p !== 'object' || ah.cfg('coordinator_work.agent_markers').some(function (k) { return p[k] !== undefined && p[k] !== null; })) return ahEmpty();
-  var noHome = hookProc.adoptHome();
-  if (noHome !== null) cb.defer(noHome);
+  if (!ahAdopt(p)) return ahEmpty();
   if (ah.settings.skipped(ah.cfg('ctxbudget.skip_auto_handover'))) return ahEmpty();
   var cfg = cb.resolveEffective(), tag = cb.sessionTag(p);
   if (!tag) return ahEmpty();
@@ -41,7 +50,8 @@ function ahDecide(p) {
     return ahEmpty();
   }
   var tp = typeof p.transcript_path === 'string' ? p.transcript_path : null;
-  var result = cb.getContextPct(tp ? cb.open(p, tp) : tp, p.session_id, w);
+  if (tp && hookProc.openKnown(p, tp) === null) ah.unable('auto-handover:relative_transcript');
+  var result = cb.getContextPct(tp ? hookProc.open(p, tp) : tp, p.session_id, w);
   if (result && isFinite(result.pct)) {
     var now = ah.clock.now(), over = cb.overThreshold(result, cfg);
     if (!over) {

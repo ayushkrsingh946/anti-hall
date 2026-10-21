@@ -21,7 +21,7 @@ use super::{Hooks, archive, fold, heal, orphans};
 use crate::checks::guardkit::ojson::OVal;
 use crate::defaults;
 use crate::dsact::runner::Runner;
-use crate::dssup::tick::{Ctx, node, parse};
+use crate::dssup::tick::Ctx;
 use serde_json::{Map, Value, json};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -264,23 +264,17 @@ struct Walk<'a> {
     hooks: &'a Hooks<'a>,
     stage: &'a str,
     deadline_ms: i64,
-    timeout_ms: u64,
 }
 
 impl Walk<'_> {
-    /// Node's own function for one item, bounded. A subprocess that fails is the stage function's `{ok:false}` catch.
-    fn node_item(&self, item: &str) -> Value {
-        let deadline = self.deadline_ms.to_string();
-        let r = node(self.runner, self.ctx, defaults::text("devswarm_recon.node_item_snippet"), &[self.stage, item, &deadline], self.timeout_ms);
-        if r.ok {
-            parse(&r.stdout)
-        } else {
-            let why = r.error.clone().unwrap_or_else(|| crate::dssup::tick::cut(&r.stderr));
-            json!({"ok": false, "error": why})
-        }
+    /// An item the engine did not take: held (counted `native_unable`), it counts as an error of the stage so its marker stays and the
+    /// item is tried again on the next pass. Nothing was written for it.
+    fn held_item(&self, why: &str) -> Value {
+        let held = crate::dssup::tick::held(&format!("dssup:recon:{}", self.stage), why);
+        json!({"ok": false, "error": held["held"]})
     }
 
-    /// The engine's witnessed result for one item, shaped like Node's; `Err(why)` sends the item to Node.
+    /// The engine's result for one item, shaped like Node's; `Err(why)` holds the item.
     fn engine_item(&self, item: &str) -> Result<Value, String> {
         let agreed = |v: &Verdict, deferred: &[(String, String)]| -> Result<(), String> {
             if *v != Verdict::Agreed {
@@ -412,14 +406,13 @@ fn pause(ms: u64) {
 }
 
 /// Run one deferred stage natively. `None`: the engine does not take this stage now (not engine mode, an unknown stage, a marker
-/// the engine will not interpret) and Node's `runDeferredStage` runs it whole.
+/// the engine will not interpret) and the duty holds it.
 pub fn run(ctx: &Ctx, runner: &dyn Runner, stage: &str, hooks: &Hooks) -> Option<StageOut> {
     if !archive::engine_mode(ctx.st) {
         return None;
     }
-    let timeout_ms = defaults::raw("devswarm_sup.duty.deferred").get("timeout_ms").and_then(crate::defaults::V::as_integer).unwrap_or(0).max(1) as u64;
     let budget = budget_ms(ctx);
-    let w = Walk { ctx, runner, hooks, stage, deadline_ms: ctx.now + budget as i64, timeout_ms };
+    let w = Walk { ctx, runner, hooks, stage, deadline_ms: ctx.now + budget as i64 };
     if stage == defaults::text("devswarm_recon.stage_archived") {
         return Some(archived(&w, budget, None));
     }
@@ -449,15 +442,14 @@ pub struct UpdateRun<'a> {
 
 /// The update's store stages run natively behind the same switch as the supervisor's (`devswarm_sup.sweep_tail_mode`): the
 /// `sweepItemsFor` of the wrapper (a prior partial run's list, else the enumeration), the throttled walk, `recordSweepResult` and
-/// `recordRun`. `None`: Node's stage function runs whole (not engine mode, an unknown stage, a stage already stamped).
+/// `recordRun`. `None`: the stage is not run here (not engine mode, an unknown stage, a stage already stamped).
 pub fn run_update(ctx: &Ctx, runner: &dyn Runner, stage: &str, hooks: &Hooks, up: &UpdateRun) -> Option<StageOut> {
     if !archive::engine_mode(ctx.st) {
         return None;
     }
-    let timeout_ms = defaults::raw("devswarm_sup.duty.deferred").get("timeout_ms").and_then(crate::defaults::V::as_integer).unwrap_or(0).max(1) as u64;
     let own = ctx.now + up.budget_ms as i64;
     let deadline_ms = up.deadline_cap.map_or(own, |c| own.min(c));
-    let w = Walk { ctx, runner, hooks, stage, deadline_ms, timeout_ms };
+    let w = Walk { ctx, runner, hooks, stage, deadline_ms };
     if stage == defaults::text("devswarm_recon.stage_archived") {
         return Some(archived(&w, up.budget_ms, Some(up)));
     }
@@ -489,7 +481,7 @@ fn walk(w: &Walk, record: Option<(&str, &str, &OVal)>, items: &[String], budget:
         (hooks.at)(&format!("stage:{stage}:{i}:before"));
         let (r, by, why) = match w.engine_item(item) {
             Ok(r) => (r, defaults::text("devswarm_recon.by_engine"), String::new()),
-            Err(why) => (w.node_item(item), defaults::text("devswarm_recon.by_node"), why),
+            Err(why) => (w.held_item(&why), defaults::text("devswarm_recon.by_held"), why),
         };
         acc.take(stage, item, &r);
         records.push(json!({"item": item, "by": by, "why": why}));
@@ -594,7 +586,7 @@ fn walk(w: &Walk, record: Option<(&str, &str, &OVal)>, items: &[String], budget:
 
 // ---- fold-archived-rows -----------------------------------------------------------------------------------------------------
 
-/// One half of the archived stage: the engine's witnessed plan, else Node's function for that half.
+/// One half of the archived stage: the engine's plan, else the half is held (counted, nothing written, tried again).
 fn half(w: &Walk, label: &str, plan: crate::meshw::ident::R<archive::Plan>, records: &mut Vec<Value>) -> Value {
     let engine = plan.map_err(|d| d.0).and_then(|p| {
         let run = archive::run_plan(w.ctx, w.runner, &p, w.hooks);
@@ -608,7 +600,7 @@ fn half(w: &Walk, label: &str, plan: crate::meshw::ident::R<archive::Plan>, reco
     });
     let (r, by, why) = match engine {
         Ok(r) => (r, defaults::text("devswarm_recon.by_engine"), String::new()),
-        Err(why) => (w.node_item(label), defaults::text("devswarm_recon.by_node"), why),
+        Err(why) => (w.held_item(&why), defaults::text("devswarm_recon.by_held"), why),
     };
     records.push(json!({"item": label, "by": by, "why": why}));
     r

@@ -723,10 +723,10 @@ fn a_journal_store_is_left_to_the_node_function() {
     fs::write(ds(&w.home).join("store").join(STORE).join("BACKEND"), "journal\n").unwrap();
     let ans = engine_answer(&w, &o, "readerFloorRepair");
     assert_eq!(ans["attempted"], json!(false), "{ans}");
-    assert!(ans["detail"].as_str().unwrap().starts_with("reader-floor-repair skipped: the Node stage could not run"), "{ans}");
+    assert!(ans["detail"].as_str().unwrap().starts_with("reader-floor-repair: held"), "{ans}");
     let calls = stage_node_calls(&w);
-    assert_eq!(calls.len(), 1, "{calls:?}");
-    assert!(calls[0].contains("readerFloorRepairPostUpdate"), "{calls:?}");
+    assert!(calls.is_empty(), "the engine started Node: {calls:?}");
+    assert_eq!(ans["held"], json!(true), "{ans}");
     let db = fs::read(ds(&w.home).join("store").join(STORE).join("devswarm.db")).unwrap();
     assert!(!db.is_empty());
 }
@@ -811,8 +811,8 @@ fn a_store_needing_the_node_fallback_is_left_untouched_by_the_engine() {
     let ans = engine_answer(&w, &o, "readerCursorsImport");
     assert_eq!(ans["attempted"], json!(false), "{ans}");
     let calls = stage_node_calls(&w);
-    assert_eq!(calls.len(), 1, "{calls:?}");
-    assert!(calls[0].contains("readerCursorsImportPostUpdate"), "{calls:?}");
+    assert!(calls.is_empty(), "the engine started Node: {calls:?}");
+    assert_eq!(ans["held"], json!(true), "{ans}");
     let after = picture(&w, Value::Null, None);
     assert_eq!(before["stores"], after["stores"], "the engine wrote rows for a store it handed to Node");
     assert!(before["stores"][STORE]["reader_cursors"].as_array().unwrap().is_empty(), "seed must start without reader rows");
@@ -828,7 +828,7 @@ fn the_repairs_leave_a_store_needing_the_node_fallback_untouched() {
         (seed_dual_deferred, "dual-partition-acks", "dualPartitionAcks", "dualPartitionAcksPostUpdate"),
         (seed_dual_import_deferred, "dual-partition-acks", "dualPartitionAcks", "dualPartitionAcksPostUpdate"),
     ];
-    for (seed, row, key, func) in cases {
+    for (seed, row, key, _func) in cases {
         let o = Opt { ds: true, no_upstream_move: true, live: true, no_node: true, stage_only: Some(row), ..Opt::default() };
         let w = world(&o);
         seed(&w.home);
@@ -836,8 +836,8 @@ fn the_repairs_leave_a_store_needing_the_node_fallback_untouched() {
         let ans = engine_answer(&w, &o, key);
         assert_eq!(ans["attempted"], json!(false), "{row}: {ans}");
         let calls = stage_node_calls(&w);
-        assert_eq!(calls.len(), 1, "{row}: {calls:?}");
-        assert!(calls[0].contains(func), "{row}: {calls:?}");
+        assert!(calls.is_empty(), "{row}: the engine started Node: {calls:?}");
+        assert_eq!(ans["held"], json!(true), "{row}: {ans}");
         let after = picture(&w, Value::Null, None);
         assert_eq!(before["stores"], after["stores"], "{row}: the engine wrote to a store it handed to Node");
     }
@@ -873,8 +873,8 @@ fn a_split_store_is_left_to_the_node_function_untouched() {
     let ans = engine_answer(&w, &o, "mergeSplitBackendStores");
     assert_eq!(ans["attempted"], json!(false), "{ans}");
     let calls = stage_node_calls(&w);
-    assert_eq!(calls.len(), 1, "{calls:?}");
-    assert!(calls[0].contains("mergeSplitBackendStoresPostUpdate"), "{calls:?}");
+    assert!(calls.is_empty(), "the engine started Node: {calls:?}");
+    assert_eq!(ans["held"], json!(true), "{ans}");
     let after = picture(&w, Value::Null, None);
     assert_eq!(before, after, "the engine changed a split store it handed to Node");
 }
@@ -893,8 +893,8 @@ fn child_label_repairs_are_left_to_the_node_function_untouched() {
         let ans = engine_answer(&w, &o, "childSenderLabels");
         assert_eq!(ans["attempted"], json!(false), "{ans}");
         let calls = stage_node_calls(&w);
-        assert_eq!(calls.len(), 1, "{calls:?}");
-        assert!(calls[0].contains("childSenderLabelsPostUpdate"), "{calls:?}");
+        assert!(calls.is_empty(), "the engine started Node: {calls:?}");
+        assert_eq!(ans["held"], json!(true), "{ans}");
         let after = picture(&w, Value::Null, None);
         assert_eq!(before, after, "the engine changed a store it handed to Node");
     }
@@ -984,14 +984,15 @@ fn ingest_with_a_stale_unit_in_a_worktree_is_not_reinstalled_while_the_engine_ow
     assert_eq!(before, unit_bytes(&w.home), "a unit file was changed");
 }
 
-/// Witness mode (the Node daemons drain) and `ingest_native = 0` both leave the stage to the Node functions.
+/// Witness mode (the Node daemons drain) and `ingest_native = 0` both switch the ingest heal off: it is `disabled`, nothing is healed and no Node is asked.
 #[test]
-fn ingest_is_left_to_node_in_witness_mode_and_when_switched_off() {
+fn ingest_heal_is_disabled_in_witness_mode_and_when_switched_off() {
     let o = ingest_opt(true);
     let w = world(&o);
     put(&w.home, ".anti-hall/settings.json", r#"{"devswarm_ingest":{"mode":"witness"}}"#);
-    engine_answer(&w, &o, "ingestHeal");
-    assert!(node_calls(&w).contains("ingestUnitNeedsHeal"), "witness mode did not ask Node: {}", node_calls(&w));
+    let ans = engine_answer(&w, &o, "ingestHeal");
+    assert_eq!(ans["disabled"], json!(true), "{ans}");
+    assert_eq!(node_calls(&w), "", "witness mode asked Node");
     let w = world(&o);
     let toml = w.mp.join("plugins/anti-hall/engine/defaults/update_post.toml");
     let text = fs::read_to_string(&toml).unwrap();
@@ -1000,8 +1001,9 @@ fn ingest_is_left_to_node_in_witness_mode_and_when_switched_off() {
     let off = format!("{head}{}", tail.replacen("value = 1", "value = 0", 1));
     assert_ne!(text, off);
     fs::write(&toml, off).unwrap();
-    engine_answer(&w, &o, "ingestHeal");
-    assert!(node_calls(&w).contains("ingestUnitNeedsHeal"), "the switch did not hand the stage to Node: {}", node_calls(&w));
+    let ans = engine_answer(&w, &o, "ingestHeal");
+    assert_eq!(ans["disabled"], json!(true), "{ans}");
+    assert_eq!(node_calls(&w), "", "the switched-off stage asked Node");
 }
 
 
@@ -1145,8 +1147,8 @@ fn owner_keys_needing_a_rehome_are_left_to_the_node_function_untouched() {
     let ans = engine_answer(&w, &o, "ownerKeyMigrate");
     assert_eq!(ans["attempted"], json!(false), "{ans}");
     let calls = stage_node_calls(&w);
-    assert_eq!(calls.len(), 1, "{calls:?}");
-    assert!(calls[0].contains("ownerKeyMigratePostUpdate"), "{calls:?}");
+    assert!(calls.is_empty(), "the engine started Node: {calls:?}");
+    assert_eq!(ans["held"], json!(true), "{ans}");
     assert_eq!(before["files"], picture(&w, Value::Null, None)["files"], "the engine wrote for a stage it handed to Node");
 }
 
