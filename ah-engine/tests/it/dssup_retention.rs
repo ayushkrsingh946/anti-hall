@@ -883,6 +883,35 @@ fn a_journal_is_folded_only_when_nodes_dry_run_names_the_same_files() {
     assert_eq!(before, journals(&h));
 }
 
+/// #234: with the owner gate on, the raw journal is removed only for a store whose merge is proven complete: sqlite chosen, the merge
+/// recorded (MERGE-STATE.json) and a fresh dry run of the merge finding nothing left to carry over. Node's `foldLegacyJournal` checks
+/// exactly this before it compresses and unlinks; byte-equality of the archive copy proves nothing about the messages in SQLite.
+#[test]
+fn a_journal_is_folded_only_for_a_store_whose_merge_is_recorded_and_has_nothing_pending() {
+    if !have_node_sqlite() {
+        return;
+    }
+    ah_engine::defaults::init().unwrap();
+    let c = generate_multi("rt-fold-proof", 74, 0, 3);
+    let h = copy_home(&c, "proof");
+    let (no_marker, folded, pending) = ("projfold-f01d00", "projfold-f01d01", "projfold-f01d02");
+    let marker = |hash: &str| h.join(".anti-hall/devswarm/store").join(hash).join("MERGE-STATE.json");
+    assert!(marker(no_marker).exists() && marker(folded).exists(), "the fixture records the merge of the settled stores");
+    std::fs::remove_file(marker(no_marker)).unwrap();
+    let before = journals(&h);
+    let mut env = env_of("30", "5", "100", "true");
+    env.insert("ANTIHALL_DEVSWARM_SUP_RETENTION_FOLD_ALONE".into(), "true".into());
+    for i in 0..6 {
+        engine_duty(&h, c.now + i * 1000, &env, &System::configured());
+    }
+    let after = journals(&h);
+    let of = |m: &BTreeMap<String, u64>, hash: &str| m.iter().filter(|(k, _)| k.contains(hash)).map(|(k, v)| (k.clone(), *v)).collect::<BTreeMap<_, _>>();
+    assert!(!of(&before, no_marker).is_empty() && !of(&before, pending).is_empty());
+    assert_eq!(of(&after, no_marker), of(&before, no_marker), "a store whose merge was never recorded was folded");
+    assert_eq!(of(&after, pending), of(&before, pending), "a store whose merge is pending was folded");
+    assert!(of(&after, folded).len() < of(&before, folded).len(), "the settled store was not folded at all");
+}
+
 #[test]
 fn a_journal_file_that_changed_after_it_was_read_is_kept_and_a_bad_archive_copy_is_dropped() {
     if !have_node_sqlite() {

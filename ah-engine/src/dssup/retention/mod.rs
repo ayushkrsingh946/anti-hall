@@ -283,6 +283,12 @@ fn legacy_fold(ctx: &Ctx, hash: &str) -> Value {
     if !alone(ctx, "devswarm_sup.set_rt_fold_alone") {
         return held_alone(ctx, defaults::text("devswarm_sup.rt_step_fold"), Some(hash), "devswarm_sup.rt_why_fold_off");
     }
+    // Node's `foldLegacyJournal` eligibility, now the engine's own: only a store whose merge into sqlite is PROVEN complete has its raw
+    // journal removed; the archive copy being byte-equal says nothing about the messages having reached the database
+    if let Some(reason) = fold::ineligible(ctx.home, hash) {
+        witness_log(ctx, &json!({"ts": ctx.now, "duty": "retention-fold", "store": hash, "native": true, "held": reason}));
+        return json!({"hash": hash, "eligible": false, "reason": reason, "files": [], "dryRun": false});
+    }
     witness_log(ctx, &json!({"ts": ctx.now, "duty": "retention-fold", "store": hash, "native": true, "files": mine.len()}));
     fold::run(ctx.home, hash, &mine)
 }

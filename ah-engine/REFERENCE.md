@@ -8178,6 +8178,10 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_sup.rt_ev_over_limit` | `over-limit` |  |  | The log event of a store still over its limit after a visit. |
 | `devswarm_sup.rt_ev_over_limit_protected` | `over-limit-protected` |  |  | The log event of a store over its limit with nothing more that may be pruned. |
 | `devswarm_sup.rt_ev_prune_batch` | `prune-batch` |  |  | The log event of one committed batch. |
+| `devswarm_sup.rt_fold_merge_check_failed` | `merge-check-failed` |  |  | Why a journal is not folded: the dry run of the merge could not be made (foldLegacyJournal reason). |
+| `devswarm_sup.rt_fold_merge_not_recorded` | `merge-not-recorded` |  |  | Why a journal is not folded: no merge marker records that the journal was merged into sqlite (foldLegacyJournal reason). |
+| `devswarm_sup.rt_fold_merge_pending` | `merge-pending` |  |  | Why a journal is not folded: the journal side holds messages or registry rows sqlite lacks, so removing it would lose them (foldLegacyJournal reason). |
+| `devswarm_sup.rt_fold_not_sqlite` | `not-sqlite-store` |  |  | Why a journal is not folded: the store's chosen backend is not sqlite, or its database is empty (foldLegacyJournal reason). |
 | `devswarm_sup.rt_gunzip_args` | `-d, -c` |  |  | Arguments that make gzip decompress stdin to stdout. |
 | `devswarm_sup.rt_gz_ext` | `.ndjson.gz` |  |  | The extension of a folded journal's archive file. |
 | `devswarm_sup.rt_gzip_args` | `-c, -n` |  |  | Arguments that make gzip compress stdin to stdout without a name or timestamp. |

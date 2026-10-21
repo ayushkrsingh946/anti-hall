@@ -240,6 +240,22 @@ value = "retention_fold"
 doc = "The accounting name of the owner-gated archive-cap eviction."
 value = "retention_cap"
 
+[devswarm_sup.rt_fold_not_sqlite]
+doc = "Why a journal is not folded: the store's chosen backend is not sqlite, or its database is empty (foldLegacyJournal reason)."
+value = "not-sqlite-store"
+
+[devswarm_sup.rt_fold_merge_not_recorded]
+doc = "Why a journal is not folded: no merge marker records that the journal was merged into sqlite (foldLegacyJournal reason)."
+value = "merge-not-recorded"
+
+[devswarm_sup.rt_fold_merge_check_failed]
+doc = "Why a journal is not folded: the dry run of the merge could not be made (foldLegacyJournal reason)."
+value = "merge-check-failed"
+
+[devswarm_sup.rt_fold_merge_pending]
+doc = "Why a journal is not folded: the journal side holds messages or registry rows sqlite lacks, so removing it would lose them (foldLegacyJournal reason)."
+value = "merge-pending"
+
 [devswarm_sup.rt_why_fold_off]
 doc = "Why the journal fold is held: removing the raw journal needs devswarm_sup.rt_fold_alone, which is off."
 value = "held: the journal fold removes raw files and is owner-gated (devswarm_sup.rt_fold_alone is off)"

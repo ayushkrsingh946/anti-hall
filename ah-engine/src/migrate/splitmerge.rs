@@ -223,6 +223,24 @@ struct StoreResult {
 
 /// `mergeSplitBackendStore(home, hash, { dryRun: false })` for a store whose chosen side is sqlite.
 fn merge_store(ctx: &super::Ctx, hash: &str, now: i64) -> StoreResult {
+    merge_store_with(ctx, hash, now, false)
+}
+
+/// `mergeSplitBackendStore(home, hash, { dryRun: true })` reduced to what the retention fold asks: `Some(pending)` for a store whose
+/// merge could be checked (`pending`: the journal side holds a message or registry row the sqlite side lacks), `None` when it could not
+/// (the store cannot be opened). Nothing is written: no row, no summary, no marker.
+pub(crate) fn merge_pending(ctx: &super::Ctx, hash: &str, now: i64) -> Option<bool> {
+    let r = merge_store_with(ctx, hash, now, true);
+    r.ok.then_some(r.pending)
+}
+
+/// [`merge_pending`] for a store in `home`, with a throwaway context (the retention fold has none of the migration's).
+pub fn merge_pending_at(home: &Path, hash: &str) -> Option<bool> {
+    let ctx = super::Ctx::new(home.to_string_lossy().into_owned(), String::new(), std::collections::BTreeMap::new(), false, None, None);
+    merge_pending(&ctx, hash, crate::health::now_ms() as i64)
+}
+
+fn merge_store_with(ctx: &super::Ctx, hash: &str, now: i64, dry: bool) -> StoreResult {
     let home = Path::new(&ctx.home);
     let dir = rc::store_dir(home, hash);
     let jdir = dir.join(defaults::text("update_post.journal_dir"));
@@ -232,7 +250,7 @@ fn merge_store(ctx: &super::Ctx, hash: &str, now: i64) -> StoreResult {
         return out;
     }
     let journal = Journal { dir: jdir };
-    let chosen = match rc::open(home, hash, false) {
+    let chosen = match rc::open(home, hash, dry) {
         Ok(h) => h,
         Err(e) => {
             super::poststages::swallowed(ctx, "merge-split-backend-stores", hash, &e);
@@ -243,7 +261,7 @@ fn merge_store(ctx: &super::Ctx, hash: &str, now: i64) -> StoreResult {
     };
     let (mut only_in_other, mut registry_merged, mut merged) = (0u64, 0u64, 0u64);
     let result = (|| -> Result<(), String> {
-        let st = chosen.rw()?;
+        let st = if dry { None } else { Some(chosen.rw()?) };
         let mut ids: Vec<String> = journal.workspace_ids();
         for id in chosen.rd().workspace_ids() {
             if !ids.contains(&id) {
@@ -282,7 +300,9 @@ fn merge_store(ctx: &super::Ctx, hash: &str, now: i64) -> StoreResult {
                 if row.ts < 0 {
                     row.ts = now;
                 }
-                if st.append_mesh_row(&row).map_err(|e| e.to_string())?.inserted {
+                if let Some(st) = st
+                    && st.append_mesh_row(&row).map_err(|e| e.to_string())?.inserted
+                {
                     merged += 1;
                 }
                 match &row.hash {
@@ -302,14 +322,18 @@ fn merge_store(ctx: &super::Ctx, hash: &str, now: i64) -> StoreResult {
             match existing.get(&d.row.id) {
                 None => {
                     registry_merged += 1;
-                    st.upsert_registry(&d.row, now, |_, _| false).map_err(|e| e.to_string())?;
+                    if let Some(st) = st {
+                        st.upsert_registry(&d.row, now, |_, _| false).map_err(|e| e.to_string())?;
+                    }
                 }
                 Some(e) => {
                     let newer = d.updated_at.unwrap_or(-1.0) > e.updated_at.map_or(-1.0, |u| u as f64)
                         || matches!((d.write_seq, e.write_seq), (Some(a), Some(b)) if a > b as f64);
                     if newer {
                         registry_merged += 1;
-                        st.upsert_registry(&d.row, now, |_, _| true).map_err(|e| e.to_string())?;
+                        if let Some(st) = st {
+                            st.upsert_registry(&d.row, now, |_, _| true).map_err(|e| e.to_string())?;
+                        }
                     }
                 }
             }
@@ -323,7 +347,7 @@ fn merge_store(ctx: &super::Ctx, hash: &str, now: i64) -> StoreResult {
         out.ok = false;
     }
     out.pending = only_in_other > 0 || registry_merged > 0;
-    if out.ok {
+    if out.ok && !dry {
         // the summary reflects the merged rows at once, and the marker records what happened; both are best-effort (the merge itself is durable)
         let inv = Inv {
             home: home.to_path_buf(),
