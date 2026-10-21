@@ -1066,6 +1066,7 @@ pub fn install(c: &Ctx<'_>) -> rquickjs::Result<()> {
     super::host_mesh::install(c, &h)?;
     super::host_childturn::install(c, &h)?;
     super::host_parentinbox::install(c, &h)?;
+    super::host_seat::install(c, &h)?;
     super::host_port::install(c, &h)?;
     super::host_proc::install(c, &h)?;
     super::host_spawn::install(c, &h)?;

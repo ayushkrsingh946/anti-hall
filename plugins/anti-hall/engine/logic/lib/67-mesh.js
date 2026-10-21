@@ -41,6 +41,15 @@ ah.mesh = {
   performCache: function () { ahHost.meshPerformCache(); },
   sessionAlive: function (session) { return meshNeed('session_alive', ahHost.meshSessionAlive(session), { alive: true, unsure: true }).alive; },
   // {none: true} (no transcript to read) or {busy, waiting, question}.
+  // The Primary seat of the checkout around `cwd` for `session` (companion/lib/primary-seat.js seatVerdict): {state: 'n/a' | 'none' | 'own' |
+  // 'adopt' | 'conflict' | 'unknown', id, worktree, holder, handover: {path, sessionId, mtimeMs} | null, stale: {sessionId, activeUntilMs} | null,
+  // reason, descriptorPath, evidence}. Read-only.
+  seat: function (cwd, session, now) { return meshNeed('seat', ahHost.meshSeat(cwd, session, now), { state: 'unknown', reason: 'unsure', unsure: true }); },
+  // `adoptPrimarySeat`: {verdict, adopted}: the seat taken over from a closed holder, or registered for the first time when `real` (a real
+  // DevSwarm session). Writes the Primary's descriptor and registry row: call `ah.commit()` first.
+  adoptSeat: function (cwd, session, now, real) {
+    return meshNeed('adopt_seat', ahHost.meshAdoptSeat(cwd, session, now, !!real), { verdict: { state: 'unknown', reason: 'unsure' }, adopted: false, unsure: true });
+  },
   childBusy: function (id, wt, session, now, freshMs) { return meshNeed('child_busy', ahHost.meshChildBusy(id, wt, session, now, freshMs), { none: true, unsure: true }); },
 };
 // Whether the setting described by defaults entry `key` has a value anywhere in its chain (environment, plugin option, settings file).

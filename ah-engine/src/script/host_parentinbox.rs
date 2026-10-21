@@ -387,13 +387,13 @@ fn derive_text(inv: &Inv, key: &str) -> R<Value> {
 // ---------------------------------------------------------------------------------------------------------------------
 
 /// A session of the worktree: its id and the last time its transcript was written.
-struct Session {
-    id: String,
-    last_ms: f64,
+pub(super) struct Session {
+    pub(super) id: String,
+    pub(super) last_ms: f64,
 }
 
 /// `projectDirFor(worktree, home)`.
-fn project_dir(home: &Path, worktree: &str) -> std::path::PathBuf {
+pub(super) fn project_dir(home: &Path, worktree: &str) -> std::path::PathBuf {
     let from = defaults::text("devswarm_sup.lv_encode_chars");
     let enc: String =
         worktree.chars().map(|c| if from.contains(c) { defaults::text("devswarm_sup.lv_encode_to").to_string() } else { c.to_string() }).collect();
@@ -429,7 +429,7 @@ fn head_cwd(file: &Path) -> R<Option<String>> {
 }
 
 /// `sessionsForWorktree(worktree, { home })`, newest activity first.
-fn sessions_for(home: &Path, worktree: &str) -> R<Vec<Session>> {
+pub(super) fn sessions_for(home: &Path, worktree: &str) -> R<Vec<Session>> {
     let dir = project_dir(home, worktree);
     let Ok(rd) = std::fs::read_dir(&dir) else { return Ok(Vec::new()) };
     let mut names: Vec<String> = rd.flatten().filter_map(|e| e.file_name().into_string().ok()).collect();

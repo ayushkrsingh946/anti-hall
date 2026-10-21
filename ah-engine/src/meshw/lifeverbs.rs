@@ -504,8 +504,16 @@ fn register_core(inv: &Inv, a: &Args, require_new: bool, primary: Option<&str>) 
     if has_duplicate_rows(inv, &current, id, wt_text.as_deref())? {
         return defer("duplicate-registry-rows");
     }
-    let Some(reader) = crate::meshw::tick::open_reader(inv, &current)? else { return defer("no-store") };
-    if !create {
+    let reader = match crate::meshw::tick::open_reader(inv, &current)? {
+        Some(r) => Some(r),
+        // the Primary's first registration of a project creates its store, as Node's `openStore` does
+        None if primary.is_some() => {
+            common::init_new_store(inv, &current)?;
+            None
+        }
+        None => return defer("no-store"),
+    };
+    if !create && let Some(reader) = &reader {
         // the ensure's upsert keeps the collision guard: a row at another worktree is left alone (the descriptor is still written)
         let rows = ident::rows_of(&reader.roster().map_err(|e| ident::Defer(format!("registry:{e}")))?);
         if let (Some(have), Some(incoming)) = (rows.iter().find(|r| r.id == id).and_then(|r| r.worktree_path.clone()), row.worktree_path.as_deref())
@@ -624,8 +632,11 @@ pub fn register_primary(inv: &Inv, a: &Args) -> R<Answer> {
     if !force {
         // the live-holder check reads the registry row of the worktree's project; the app database may name the caller as the holder
         let Some(key) = ident::repo_key_for_worktree(&worktree)? else { return defer("no-project") };
-        let Some(reader) = crate::meshw::tick::open_reader(inv, &key)? else { return defer("no-store") };
-        let rows = ident::rows_of(&reader.roster().map_err(|e| ident::Defer(format!("registry:{e}")))?);
+        // a project with no store has no registry row to hold the seat: the first registration creates the store below
+        let rows = match crate::meshw::tick::open_reader(inv, &key)? {
+            Some(reader) => ident::rows_of(&reader.roster().map_err(|e| ident::Defer(format!("registry:{e}")))?),
+            None => Vec::new(),
+        };
         if let Some(existing) = rows.iter().find(|r| r.id == id)
             && let Some(held) = existing.session_id.as_deref().filter(|x| !x.is_empty() && *x != session)
             && crate::dssup::liveness::session_alive(&inv.home, held)?

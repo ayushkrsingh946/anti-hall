@@ -1797,6 +1797,8 @@ fn every_script_without_hand_backs_loads_and_answers_a_minimal_call() {
         ("jev-review-reminder", "SessionStart"),
         ("jev-weekly-scorecard", "SessionStart"),
         ("repair-on-reload", "SessionStart"),
+        ("speculation-judge", "Stop"),
+        ("devswarm-child-role", "SessionStart"),
     ];
     for (check, event) in checks {
         let case = json!({
@@ -1836,4 +1838,42 @@ fn the_speculation_judge_is_handed_to_the_dispatcher_and_blocks_there() {
     *TEST_MODEL.lock().unwrap() = None;
     assert_eq!(in_dispatcher["v"], "exact", "{in_dispatcher}");
     assert!(in_dispatcher["out"].as_str().unwrap_or_default().contains("the cause is stated, not shown"), "{in_dispatcher}");
+}
+
+// ---- v0.301 W3b: the Primary seat and the stable launchers ------------------------------------------------------------
+
+/// A Primary checkout registers its seat on its first run in real DevSwarm, adopts it from a closed session, says nothing on its own
+/// seat again, and the SessionStart check writes the two stable launchers (executable) before anything else.
+#[test]
+fn a_primary_session_registers_adopts_and_keeps_its_seat_and_the_launchers_are_installed() {
+    let case = json!({
+        "env": {"HOME": "{HOME}", "DEVSWARM_REPO_ID": "r1"}, "event": "SessionStart", "opts": {"plugin_root": "{PLUGIN}"},
+        // a readable sessions directory that names no session: every other session counts as closed
+        "files": {"wt/.git/HEAD": "ref: refs/heads/main\n", ".claude/sessions/other.json": "{\"sessionId\":\"unrelated\",\"pid\":1}"},
+        "payload": {"hook_event_name": "SessionStart", "session_id": "new-session", "cwd": "{HOME}/wt"},
+    });
+    let run = |l: &golden::Laid| golden::verdict_json(&golden::run_case("devswarm-child-role", l, 1).expect("a shipped script"), l);
+    // first run: nothing registered yet
+    let l = golden::lay(&case);
+    let first = run(&l);
+    let out = first["out"].as_str().unwrap_or_default().to_string();
+    assert!(out.contains("registered Primary primary-"), "{first} {:?}", crate::discard::captured());
+    let home = Path::new(&l.home);
+    let desc: Vec<_> = std::fs::read_dir(home.join(".anti-hall/devswarm/workspaces")).expect("workspaces dir").flatten().collect();
+    assert_eq!(desc.len(), 1, "the Primary's descriptor is written");
+    for launcher in ["devswarm.js", "wake-watch.js"] {
+        let m = std::fs::metadata(home.join(".anti-hall/bin").join(launcher)).expect("a stable launcher");
+        assert_eq!(std::os::unix::fs::PermissionsExt::mode(&m.permissions()) & 0o111, 0o111, "{launcher} is executable");
+    }
+    // the same session again: its own seat, no notice
+    let second = run(&l);
+    assert!(!second["out"].as_str().unwrap_or_default().contains("devswarm-primary-seat"), "{second}");
+    // a closed holder is replaced by this session
+    let file = desc[0].path();
+    let mut d: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    d["sessionId"] = json!("old-session");
+    std::fs::write(&file, d.to_string()).unwrap();
+    let adopted = run(&l);
+    let text = adopted["out"].as_str().unwrap_or_default();
+    assert!(text.contains("adopted Primary") && text.contains("old-session"), "{adopted}");
 }
