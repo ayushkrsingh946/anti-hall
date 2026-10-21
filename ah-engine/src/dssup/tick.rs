@@ -172,10 +172,20 @@ fn run_node_duty(name: &str, d: &V, ctx: &Ctx, runner: &dyn Runner) -> Value {
     let r = node(runner, ctx, d.str_field("snippet"), &[owner], timeout);
     if r.ok {
         json!({"duty": name, "outcome": "ran", "detail": parse(&r.stdout)})
+    } else if r.missing {
+        no_node_skip(ctx, name, defaults::text("devswarm_sup.act_defer_node_duty"))
     } else {
-        let why = r.error.clone().unwrap_or_else(|| if r.missing { defaults::text("devswarm_sup.msg_no_node").into() } else { cut(&r.stderr) });
+        let why = r.error.clone().unwrap_or_else(|| cut(&r.stderr));
         json!({"duty": name, "outcome": "failed", "error": why, "status": r.status, "timedOut": r.timed_out})
     }
+}
+
+/// The record of a duty whose Node fallback (`code` names why the engine handed over: a deferral code) could not start because there
+/// is no Node on this machine: nothing ran, so there is no half-run to clean up; the duty is skipped, and a mistake event carries the
+/// deferral code so the missing native path is counted.
+pub fn no_node_skip(ctx: &Ctx, name: &str, code: &str) -> Value {
+    emit_mistake(ctx.home, &defaults::render("devswarm_sup.act_duty", &[("duty", &name)]), "", code, "");
+    json!({"duty": name, "outcome": "skipped", "reason": defaults::text("devswarm_sup.msg_no_node"), "node": code})
 }
 
 /// [`run_duty_w`] with the duty's wall time and this thread's CPU time (ms) added to its record as `ms` and `cpuMs`. A gated duty
