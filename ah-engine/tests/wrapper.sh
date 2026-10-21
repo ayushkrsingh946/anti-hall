@@ -81,6 +81,24 @@ check() {
   fi
 }
 
+# only_notice <err-file>: the file is empty, or holds exactly the one engine-unreachable notice line (the wrapper passes the
+# call through unchecked and says so once per session; with an unwritable HOME it cannot remember, so it says so every time).
+only_notice() {
+  [ ! -s "$1" ] && return 0
+  [ "$(wc -l <"$1" | tr -d ' ')" -eq 1 ] && grep -q '^anti-hall: the engine did not answer this ' "$1"
+}
+
+# engine_script <name> <body>: a stand-in engine that runs <body> (stdin is the hook payload).
+engine_script() {
+  p=$tmp/engine-$1.sh
+  {
+    printf '#!/bin/sh\n'
+    printf '%s\n' "$2"
+  } >"$p"
+  chmod +x "$p"
+  printf '%s\n' "$p"
+}
+
 make_engine() {
   p=$tmp/engine-$1.sh
   mode=$2
@@ -288,13 +306,17 @@ test_tool_from_payload_reaches_engine() {
 }
 
 test_exit_75_fallback() {
-  h=$(hook_script h75 'cat; printf "node-err\n" >&2; exit 0')
+  # the engine hands the call back (exit 75): no hook command exists to run, so the call passes through unchecked with the notice
+  sentinel=$tmp/75-ran
+  rm -f "$sentinel"
+  h=$(hook_script h75 "printf ran >\"$sentinel\"")
   printf '@PreToolUse\t%s\nBash\t%s\t%s\n' "$large_timeout" "$large_timeout" "$h" >"$tmp/75.list"
   e=$(make_engine seventyfive seventyfive)
   out=$tmp/75.out
   err=$tmp/75.err
   AH_ENGINE_BIN="$e" AH_FALLBACK_LIST="$tmp/75.list" sh "$wrapper" PreToolUse --tool-from-payload <"$payload" >"$out" 2>"$err"
-  cmp -s "$payload" "$out" && grep -q 'engine fallback' "$err" && ! grep -q 'node-err' "$err"
+  rc=$?
+  [ "$rc" -eq 0 ] && [ ! -s "$out" ] && [ ! -e "$sentinel" ] && grep -q '^anti-hall: the engine did not answer this PreToolUse call' "$err"
 }
 
 test_a_hooks_own_exit_code_passes_through_once_the_engine_marked_the_dispatch_done() {
@@ -322,7 +344,7 @@ test_an_engine_exit_code_without_the_done_mark_is_an_engine_failure() {
   AH_ENGINE_BIN="$e" AH_FALLBACK_LIST="$tmp/nomark.list" sh "$wrapper" PreToolUse --tool-from-payload <"$payload" >"$tmp/nomark.out" 2>"$tmp/nomark.err"
   rc=$?
   set -e
-  [ "$rc" -eq 0 ] && [ ! -e "$sentinel" ] && [ ! -s "$tmp/nomark.out" ] && [ ! -s "$tmp/nomark.err" ]
+  [ "$rc" -eq 0 ] && [ ! -e "$sentinel" ] && [ ! -s "$tmp/nomark.out" ] && only_notice "$tmp/nomark.err"
 }
 
 test_missing_binary_fallback() {
@@ -331,7 +353,7 @@ test_missing_binary_fallback() {
   out=$tmp/missing.out
   err=$tmp/missing.err
   AH_ENGINE_BIN=/no/such/engine AH_FALLBACK_LIST="$tmp/missing.list" sh "$wrapper" PreToolUse --tool-from-payload <"$payload" >"$out" 2>"$err"
-  [ ! -s "$out" ] && [ ! -s "$err" ]
+  [ ! -s "$out" ] && only_notice "$err"
 }
 
 test_signal_fallback() {
@@ -341,8 +363,8 @@ test_signal_fallback() {
   out=$tmp/sig.out
   err=$tmp/sig.err
   AH_ENGINE_BIN="$e" AH_FALLBACK_LIST="$tmp/sig.list" sh "$wrapper" PreToolUse --tool-from-payload <"$payload" >"$out" 2>"$err"
-  # Contract: an engine killed by a signal fails open silently (exit 0, no output, no Node handoff).
-  if [ -s "$out" ] || [ -s "$err" ]; then
+  # Contract: an engine killed by a signal fails open with the notice (exit 0, no output, no Node handoff).
+  if [ -s "$out" ] || ! only_notice "$err"; then
     printf 'signal_fallback: out=[%s] err=[%s]\n' "$(cat "$out")" "$(cat "$err")" >&2
     return 1
   fi
@@ -356,7 +378,7 @@ test_engine_odd_exits_fallback() {
     out=$tmp/odd-$mode.out
     err=$tmp/odd-$mode.err
     AH_ENGINE_BIN="$e" AH_FALLBACK_LIST="$tmp/odd-$mode.list" sh "$wrapper" PreToolUse --tool-from-payload <"$payload" >"$out" 2>"$err" || return 1
-    [ ! -s "$out" ] && [ ! -s "$err" ] || return 1
+    [ ! -s "$out" ] && only_notice "$err" || return 1
   done
 }
 
@@ -372,7 +394,7 @@ test_timeout_fallback() {
   wait_for_file "$started" "$poll_limit" && wait_for_nonempty_file "$pidfile" "$poll_limit" || return 1
   pid=$(cat "$pidfile")
   wait_for_pids_gone "$poll_limit" "$pid" &&
-    [ ! -s "$out" ] && [ ! -s "$err" ]
+    [ ! -s "$out" ] && only_notice "$err"
 }
 
 test_timeout_kills_engine_process() {
@@ -389,179 +411,19 @@ test_timeout_kills_engine_process() {
   wait_for_file "$started" "$poll_limit" && wait_for_nonempty_file "$pidfile" "$poll_limit" || return 1
   set -- $(cat "$pidfile")
   wait_for_pids_gone "$poll_limit" "$1" "$2" &&
-    [ ! -s "$out" ] && [ ! -e "$marker" ] && [ ! -e "$grand_marker" ] && [ ! -s "$err" ]
+    [ ! -s "$out" ] && [ ! -e "$marker" ] && [ ! -e "$grand_marker" ] && only_notice "$err"
 }
 
-test_timeout_kills_fallback_process() {
-  started=$tmp/fallback-timeout.started
-  marker=$tmp/fallback-timeout.marker
-  grand_marker=$tmp/fallback-timeout-grand.marker
-  pidfile=$tmp/fallback-timeout.pid
-  slow=$(hook_script slow 'printf started >"$AH_STARTED"; ( sleep "$AH_SLEEP_S"; printf late >"$AH_MARKER" ) & child=$!; ( sleep "$AH_SLEEP_S"; printf grand >"$AH_GRAND_MARKER" ) & grand=$!; printf "%s %s\n" "$child" "$grand" >"$AH_PIDFILE"; wait')
-  fast=$(hook_script fast 'printf fast')
-  printf '@PreToolUse\t%s\nBash\t%s\t%s\nBash\t%s\t%s\n' "$short_timeout" "$short_timeout" "$slow" "$large_timeout" "$fast" >"$tmp/fallback-timeout-kill.list"
-  e=$(make_engine seventyfive-timeout seventyfive)
-  out=$tmp/fallback-timeout-kill.out
-  err=$tmp/fallback-timeout-kill.err
-  run_with_cap fallback-timeout-kill 15 "$out" "$err" env AH_STARTED="$started" AH_SLEEP_S="$long_sleep" AH_MARKER="$marker" AH_GRAND_MARKER="$grand_marker" AH_PIDFILE="$pidfile" AH_ENGINE_BIN="$e" AH_FALLBACK_LIST="$tmp/fallback-timeout-kill.list" sh "$wrapper" PreToolUse --tool-from-payload <"$payload" || return 1
-  wait_for_file "$started" "$poll_limit" && wait_for_nonempty_file "$pidfile" "$poll_limit" || return 1
-  set -- $(cat "$pidfile")
-  wait_for_pids_gone "$poll_limit" "$1" "$2" &&
-    [ "$(cat "$out")" = fast ] && [ ! -e "$marker" ] && [ ! -e "$grand_marker" ] && ! grep -q 'Terminated\|Killed' "$err"
-}
 
-test_invalid_bytes_reach_fallback() {
-  raw=$tmp/raw.bin
-  printf '\377{"tool_name":"Bash"}\000tail' >"$raw"
-  expect=$tmp/expect.bin
-  cp "$raw" "$expect"
-  h=$(hook_script bytes "cmp -s - '$expect' && printf same")
-  printf '@PreToolUse\t%s\n*\t%s\t%s\n' "$large_timeout" "$large_timeout" "$h" >"$tmp/bytes.list"
-  e=$(make_engine seventyfive seventyfive)
-  out=$tmp/bytes.out
-  err=$tmp/bytes.err
-  AH_ENGINE_BIN="$e" AH_FALLBACK_LIST="$tmp/bytes.list" sh "$wrapper" PreToolUse --tool-from-payload <"$raw" >"$out" 2>"$err"
-  [ "$(cat "$out")" = same ]
-}
 
-test_matcher_selection() {
-  bash_h=$(hook_script bash 'printf bash')
-  edit_h=$(hook_script edit 'printf edit')
-  printf '@PreToolUse\t%s\nBash\t%s\t%s\nEdit\t%s\t%s\n' "$large_timeout" "$large_timeout" "$bash_h" "$large_timeout" "$edit_h" >"$tmp/match.list"
-  e=$(make_engine seventyfive seventyfive)
-  out=$tmp/match.out
-  err=$tmp/match.err
-  AH_ENGINE_BIN="$e" AH_FALLBACK_LIST="$tmp/match.list" sh "$wrapper" PreToolUse --tool-from-payload <"$payload" >"$out" 2>"$err"
-  [ "$(cat "$out")" = bash ]
-}
 
-run_selection_payload() {
-  name=$1
-  json=$2
-  expected=$3
-  input=$tmp/$name.json
-  printf '%s' "$json" >"$input"
-  bash_h=$(hook_script "$name-bash" 'printf bash')
-  edit_h=$(hook_script "$name-edit" 'printf edit')
-  printf '@PreToolUse\t%s\nBash\t%s\t%s\nEdit\t%s\t%s\n' "$large_timeout" "$large_timeout" "$bash_h" "$large_timeout" "$edit_h" >"$tmp/$name.list"
-  e=$(make_engine "$name-engine" seventyfive)
-  out=$tmp/$name.out
-  err=$tmp/$name.err
-  AH_ENGINE_BIN="$e" AH_FALLBACK_LIST="$tmp/$name.list" sh "$wrapper" PreToolUse --tool-from-payload <"$input" >"$out" 2>"$err"
-  [ "$(cat "$out")" = "$expected" ]
-}
 
-test_tool_name_structural_scanner() {
-  run_selection_payload nested_decoy '{"tool_input":{"tool_name":"Edit"},"prompt":"\"tool_name\":\"Write\"","tool_name":"Bash"}' bash || return 1
-  run_selection_payload noisy_prefix_1 'x{"tool_name":"Bash"}' bashedit || return 1
-  run_selection_payload noisy_prefix_3 'xyz{"tool_name":"Bash"}' bashedit || return 1
-  run_selection_payload duplicate_diff '{"tool_name":"Bash","tool_name":"Edit"}' bashedit || return 1
-  run_selection_payload root_array '[{"tool_name":"Bash"}]' bashedit || return 1
-  run_selection_payload bom "$(printf '\357\273\277{"tool_name":"Bash"}')" bash || return 1
-  run_selection_payload unicode '{"tool_name":"\u0042\u0061\u0073\u0068"}' bash || return 1
-  run_selection_payload tool_last "$(printf '{"tool_input":{"x":1},"pad":"%05000d","tool_name":"Bash"}' 0)" bash || return 1
-}
 
-test_tool_name_invalid_selects_all_non_guard() {
-  input=$tmp/nonguard-array.json
-  printf '[{"tool_name":"Bash"}]' >"$input"
-  bash_h=$(hook_script nonguard-bash 'printf bash')
-  edit_h=$(hook_script nonguard-edit 'printf edit')
-  printf '@PostToolUse\t%s\nBash\t%s\t%s\nEdit\t%s\t%s\n' "$large_timeout" "$large_timeout" "$bash_h" "$large_timeout" "$edit_h" >"$tmp/nonguard.list"
-  out=$tmp/nonguard.out
-  err=$tmp/nonguard.err
-  AH_ENGINE_BIN=/no/such/engine AH_FALLBACK_LIST="$tmp/nonguard.list" sh "$wrapper" PostToolUse --tool-from-payload <"$input" >"$out" 2>"$err"
-  [ ! -s "$out" ] && [ ! -s "$err" ]
-}
 
-test_tool_name_huge_payload_fast() {
-  input=$tmp/huge.json
-  {
-    printf '{"pad":"'
-    head -c 5000000 /dev/zero | tr '\0' a
-    printf '","tool_name":"Bash"}'
-  } >"$input"
-  h=$(hook_script huge 'printf bash')
-  printf '@PreToolUse\t%s\nBash\t%s\t%s\nEdit\t%s\t%s\n' "$large_timeout" "$large_timeout" "$h" "$large_timeout" "$h" >"$tmp/huge.list"
-  e=$(make_engine huge-engine seventyfive)
-  out=$tmp/huge.out
-  err=$tmp/huge.err
-  AH_ENGINE_BIN="$e" AH_FALLBACK_LIST="$tmp/huge.list" sh "$wrapper" PreToolUse --tool-from-payload <"$input" >"$out" 2>"$err" || return 1
-  [ "$(cat "$out")" = bash ]
-}
 
-test_fallback_exit_code_matrix_rows() {
-  for rc in 0 1 3 126 127; do
-    h=$(hook_script "exit-$rc" "printf rc$rc; exit $rc")
-    printf '@PreToolUse\t%s\nBash\t%s\t%s\n' "$large_timeout" "$large_timeout" "$h" >"$tmp/exit-$rc.list"
-    out=$tmp/exit-$rc.out
-    err=$tmp/exit-$rc.err
-    set +e
-    AH_ENGINE_BIN=/no/such/engine AH_FALLBACK_LIST="$tmp/exit-$rc.list" sh "$wrapper" PreToolUse --tool-from-payload <"$payload" >"$out" 2>"$err"
-    got=$?
-    set -e
-    [ "$got" -eq 0 ] && [ ! -s "$out" ] && [ ! -s "$err" ] || return 1
-  done
-}
 
-# Several fallback hooks that each print one JSON object must reach the host as ONE valid JSON object.
-fb_merge_run() {
-  name=$1; shift
-  i=0; rows=
-  for body in "$@"; do
-    i=$((i + 1))
-    h=$(hook_script "$name-$i" "printf '%s\\n' '$body'")
-    rows="$rows*	$large_timeout	$h
-"
-  done
-  printf '@UserPromptSubmit\t%s\n%s' "$large_timeout" "$rows" >"$tmp/$name.list"
-  printf '{"hook_event_name":"UserPromptSubmit","prompt":"x"}' >"$tmp/$name.in"
-  # the fallback runs when the engine asks for it (exit 75); a missing engine now fails open silently (#159)
-  fe=$(make_engine "$name-engine" seventyfive)
-  AH_ENGINE_BIN="$fe" AH_FALLBACK_LIST="$tmp/$name.list" sh "$wrapper" UserPromptSubmit <"$tmp/$name.in" >"$tmp/$name.out" 2>"$tmp/$name.err"
-}
 
-test_fallback_merges_json_outputs() {
-  command -v jq >/dev/null 2>&1 || { echo 'jq missing: skipping' >&2; return 0; }
-  a='{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"A"}}'
-  b='{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"B"}}'
-  fb_merge_run fbm "$a" "$b" || return 1
-  [ "$(jq -s length <"$tmp/fbm.out")" = 1 ] || return 1
-  [ "$(jq -r '.hookSpecificOutput.additionalContext' <"$tmp/fbm.out")" = "$(printf 'A\n\nB')" ] || return 1
-  [ "$(jq -r '.hookSpecificOutput.hookEventName' <"$tmp/fbm.out")" = UserPromptSubmit ] || return 1
-  # a systemMessage, a quote and a backslash survive; an empty context between them is dropped
-  c='{"systemMessage":"m1","hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"say \"hi\" \\ x"}}'
-  e='{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":""}}'
-  d='{"systemMessage":"m2","hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"D"}}'
-  fb_merge_run fbm3 "$c" "$e" "$d" || return 1
-  [ "$(jq -s length <"$tmp/fbm3.out")" = 1 ] || return 1
-  [ "$(jq -r '.hookSpecificOutput.additionalContext' <"$tmp/fbm3.out")" = "$(printf 'say "hi" \\ x\n\nD')" ] || return 1
-  [ "$(jq -r '.systemMessage' <"$tmp/fbm3.out")" = "$(printf 'm1\nm2')" ] || return 1
-}
 
-test_fallback_merges_pretty_printed_json_outputs() {
-  command -v jq >/dev/null 2>&1 || { echo 'jq missing: skipping' >&2; return 0; }
-  a='{
-  "hookSpecificOutput": {
-    "hookEventName": "UserPromptSubmit",
-    "additionalContext": "A"
-  }
-}'
-  b='{
-  "hookSpecificOutput": {
-    "hookEventName": "UserPromptSubmit",
-    "additionalContext": "B"
-  }
-}'
-  fb_merge_run fbpp "$a" "$b" || return 1
-  [ "$(jq -s length <"$tmp/fbpp.out")" = 1 ] || return 1
-  [ "$(jq -r '.hookSpecificOutput.additionalContext' <"$tmp/fbpp.out")" = "$(printf 'A\n\nB')" ] || return 1
-  # a comma after the pair, with whitespace in between, must go too
-  c='{ "systemMessage" : "m" , "hookSpecificOutput": { "additionalContext" : "C" , "hookEventName": "UserPromptSubmit" } }'
-  fb_merge_run fbpp2 "$c" "$a" || return 1
-  [ "$(jq -s length <"$tmp/fbpp2.out")" = 1 ] || return 1
-  [ "$(jq -r '.hookSpecificOutput.additionalContext' <"$tmp/fbpp2.out")" = "$(printf 'C\n\nA')" ] || return 1
-}
 
 test_cold_engine_does_not_hold_host_stderr_open() {
   # A host that collects the hook's stderr waits for EOF on that pipe. The wrapper keeps the host's stderr on fd 4 while the
@@ -592,107 +454,17 @@ test_missing_engine_and_missing_defaults_fail_open() {
   done
 }
 
-test_fallback_two_empty_contexts_say_nothing() {
-  e='{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":""}}'
-  fb_merge_run fbe "$e" "$e" || return 1
-  [ ! -s "$tmp/fbe.out" ] || return 1
-  # one empty + one real: only the real one, still one object
-  command -v jq >/dev/null 2>&1 || return 0
-  a='{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"A"}}'
-  fb_merge_run fbe2 "$e" "$a" || return 1
-  [ "$(jq -s length <"$tmp/fbe2.out")" = 1 ] && [ "$(jq -r '.hookSpecificOutput.additionalContext' <"$tmp/fbe2.out")" = A ]
-}
 
-test_fallback_exit1_host_nonblocking_rows() {
-  i=0
-  for body in 'printf out; exit 1' 'exit 1'; do
-    i=$((i + 1))
-    h=$(hook_script "exit1-$i" "$body")
-    printf '@PreToolUse\t%s\nBash\t%s\t%s\n' "$large_timeout" "$large_timeout" "$h" >"$tmp/exit1-row.list"
-    out=$tmp/exit1-row.out
-    err=$tmp/exit1-row.err
-    set +e
-    AH_ENGINE_BIN=/no/such/engine AH_FALLBACK_LIST="$tmp/exit1-row.list" sh "$wrapper" PreToolUse --tool-from-payload <"$payload" >"$out" 2>"$err"
-    rc=$?
-    set -e
-    [ "$rc" -eq 0 ] || return 1
-  done
-}
 
-test_shell_started_126_127_are_host_nonblocking() {
-  missing='command /no/such/command'
-  nonexec=$tmp/not-executable-shell
-  printf '#!/bin/sh\nprintf nope\n' >"$nonexec"
-  chmod 600 "$nonexec"
-  for cmd in "$missing" "\"$nonexec\""; do
-    printf '@PreToolUse\t%s\nBash\t%s\t%s\n' "$large_timeout" "$large_timeout" "$cmd" >"$tmp/shell-126-127.list"
-    out=$tmp/shell-126-127.out
-    err=$tmp/shell-126-127.err
-    set +e
-    AH_ENGINE_BIN=/no/such/engine AH_FALLBACK_LIST="$tmp/shell-126-127.list" sh "$wrapper" PreToolUse --tool-from-payload <"$payload" >"$out" 2>"$err"
-    rc=$?
-    set -e
-    [ "$rc" -eq 0 ] || return 1
-  done
-}
 
-test_exit0_json_block_wins_verbatim() {
-  deny='{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"no"}}'
-  block=$(hook_script jsonblock "printf '%s\\n' '$deny'")
-  sibling=$(hook_script sibling 'printf sibling')
-  printf '@PreToolUse\t%s\nBash\t%s\t%s\nBash\t%s\t%s\n' "$large_timeout" "$large_timeout" "$block" "$large_timeout" "$sibling" >"$tmp/json-block.list"
-  out=$tmp/json-block.out
-  err=$tmp/json-block.err
-  AH_ENGINE_BIN=/no/such/engine AH_FALLBACK_LIST="$tmp/json-block.list" sh "$wrapper" PreToolUse --tool-from-payload <"$payload" >"$out" 2>"$err"
-  [ ! -s "$out" ] && [ ! -s "$err" ]
-}
 
-test_first_json_block_wins_verbatim() {
-  first='{"decision":"block","reason":"first"}'
-  second='{"decision":"block","reason":"second"}'
-  h1=$(hook_script firstjson "printf '%s\\n' '$first'")
-  h2=$(hook_script secondjson "printf '%s\\n' '$second'")
-  printf '@Stop\t%s\n*\t%s\t%s\n*\t%s\t%s\n' "$large_timeout" "$large_timeout" "$h1" "$large_timeout" "$h2" >"$tmp/first-json-block.list"
-  input=$tmp/stop-payload.json
-  printf '{"hook_event_name":"Stop","stop_hook_active":false}' >"$input"
-  out=$tmp/first-json-block.out
-  err=$tmp/first-json-block.err
-  AH_ENGINE_BIN=/no/such/engine AH_FALLBACK_LIST="$tmp/first-json-block.list" sh "$wrapper" Stop <"$input" >"$out" 2>"$err"
-  [ ! -s "$out" ] && [ ! -s "$err" ]
-}
 
-test_fallback_signal_and_incomplete_fail_closed() {
-  sig=$(hook_script sigrow 'kill -9 $$')
-  leak=$(hook_script leakrow 'printf partial; (exec sleep 30) & exit 0')
-  for name in sig leak; do
-    eval "h=\$$name"
-    printf '@PreToolUse\t%s\nBash\t%s\t%s\n' "$large_timeout" "$large_timeout" "$h" >"$tmp/$name-row.list"
-    out=$tmp/$name-row.out
-    err=$tmp/$name-row.err
-    set +e
-    AH_ENGINE_BIN=/no/such/engine AH_FALLBACK_LIST="$tmp/$name-row.list" AH_HOOK_TIMEOUT_S="$short_timeout" sh "$wrapper" PreToolUse --tool-from-payload <"$payload" >"$out" 2>"$err"
-    rc=$?
-    set -e
-    [ "$rc" -eq 0 ] && [ ! -s "$out" ] && [ ! -s "$err" ] || return 1
-  done
-}
 
-test_fallback_timeout_discard_allows_other_hook() {
-  slow=$(hook_script timeoutrow 'exec sleep 60')
-  fast=$(hook_script timeoutrowfast 'printf fast')
-  printf '@PreToolUse\t%s\nBash\t%s\t%s\nBash\t%s\t%s\n' "$short_timeout" "$short_timeout" "$slow" "$large_timeout" "$fast" >"$tmp/timeout-row.list"
-  out=$tmp/timeout-row.out
-  err=$tmp/timeout-row.err
-  AH_ENGINE_BIN=/no/such/engine AH_FALLBACK_LIST="$tmp/timeout-row.list" sh "$wrapper" PreToolUse --tool-from-payload <"$payload" >"$out" 2>"$err"
-  [ ! -s "$out" ] && [ ! -s "$err" ]
-}
 
 test_temp_modes_and_owner() {
   parent=$tmp/private-parent
   mkdir "$parent"
-  h=$(hook_script tempmodes 'mode(){ stat -c "%a" "$1" 2>/dev/null || stat -f "%Lp" "$1"; }; owner(){ stat -c "%u" "$1" 2>/dev/null || stat -f "%u" "$1"; }; root="$TMPDIR/ah-hook-$(id -u)"; set -- "$root"/ah-wrapper-run.*/payload; payload=$1; d=$(dirname "$payload"); [ "$(mode "$root")" = 700 ] && [ "$(mode "$d")" = 700 ] && [ "$(mode "$payload")" = 600 ] && [ "$(owner "$root")" = "$(id -u)" ] && printf ok')
-  printf '@PreToolUse\t%s\nBash\t%s\t%s\n' "$large_timeout" "$large_timeout" "$h" >"$tmp/tempmodes.list"
-  e=$(make_engine tempmodes-engine seventyfive)
+  e=$(engine_script tempmodes 'mode(){ stat -c "%a" "$1" 2>/dev/null || stat -f "%Lp" "$1"; }; owner(){ stat -c "%u" "$1" 2>/dev/null || stat -f "%u" "$1"; }; root="$TMPDIR/ah-hook-$(id -u)"; set -- "$root"/ah-wrapper-run.*/payload; payload=$1; d=$(dirname "$payload"); [ "$(mode "$root")" = 700 ] && [ "$(mode "$d")" = 700 ] && [ "$(mode "$payload")" = 600 ] && [ "$(owner "$root")" = "$(id -u)" ] && printf ok')
   out=$tmp/tempmodes.out
   err=$tmp/tempmodes.err
   TMPDIR="$parent" AH_ENGINE_BIN="$e" AH_FALLBACK_LIST="$tmp/tempmodes.list" sh "$wrapper" PreToolUse --tool-from-payload <"$payload" >"$out" 2>"$err"
@@ -819,19 +591,6 @@ test_env_timeout_validation_guard_blocks() {
   [ "$rc" -eq 2 ] && [ ! -s "$out" ]
 }
 
-test_first_exit_two_wins() {
-  h1=$(hook_script block1 'printf out1; printf first >&2; exit 2')
-  h2=$(hook_script block2 'printf out2; printf second >&2; exit 2')
-  printf '@PreToolUse\t%s\nBash\t%s\t%s\nBash\t%s\t%s\n' "$large_timeout" "$large_timeout" "$h1" "$large_timeout" "$h2" >"$tmp/block.list"
-  e=$(make_engine seventyfive seventyfive)
-  out=$tmp/block.out
-  err=$tmp/block.err
-  set +e
-  AH_ENGINE_BIN="$e" AH_FALLBACK_LIST="$tmp/block.list" sh "$wrapper" PreToolUse --tool-from-payload <"$payload" >"$out" 2>"$err"
-  rc=$?
-  set -e
-  [ "$rc" -eq 2 ] && [ "$(cat "$out")" = out1 ] && grep -q 'first' "$err" && ! grep -q 'second' "$err"
-}
 
 test_stop_active_synthetic_fail_closed_opens() {
   input=$tmp/stop-active.json
@@ -842,22 +601,9 @@ test_stop_active_synthetic_fail_closed_opens() {
   AH_ENGINE_BIN=/no/such/engine AH_FALLBACK_LIST="$tmp/no-list" HOME="$tmp/no-home" PATH="/usr/bin:/bin:/usr/sbin:/sbin" sh "$wrapper" Stop <"$input" >"$out" 2>"$err"
   rc=$?
   set -e
-  [ "$rc" -eq 0 ] && [ ! -s "$out" ] && [ ! -s "$err" ]
+  [ "$rc" -eq 0 ] && [ ! -s "$out" ] && only_notice "$err"
 }
 
-test_stop_active_genuine_exit2_remains_verbatim() {
-  input=$tmp/stop-active-exit2.json
-  printf '{"hook_event_name":"Stop","session_id":"s","stop_hook_active":true}' >"$input"
-  h=$(hook_script stopactiveblock 'printf "{\"decision\":\"block\",\"reason\":\"real\"}\n"; printf real >&2; exit 2')
-  printf '@Stop\t%s\n*\t%s\t%s\n' "$large_timeout" "$large_timeout" "$h" >"$tmp/stop-active-exit2.list"
-  out=$tmp/stop-active-exit2.out
-  err=$tmp/stop-active-exit2.err
-  set +e
-  AH_ENGINE_BIN=/no/such/engine AH_FALLBACK_LIST="$tmp/stop-active-exit2.list" sh "$wrapper" Stop <"$input" >"$out" 2>"$err"
-  rc=$?
-  set -e
-  [ "$rc" -eq 0 ] && [ ! -s "$out" ] && [ ! -s "$err" ]
-}
 
 test_guard_fail_closed_without_engine_or_nodes() {
   out=$tmp/closed.out
@@ -866,7 +612,7 @@ test_guard_fail_closed_without_engine_or_nodes() {
   AH_ENGINE_BIN=/no/such/engine AH_FALLBACK_LIST="$tmp/no-list" sh "$wrapper" PreToolUse --tool-from-payload <"$payload" >"$out" 2>"$err"
   rc=$?
   set -e
-  [ "$rc" -eq 0 ] && [ ! -s "$out" ] && [ ! -s "$err" ]
+  [ "$rc" -eq 0 ] && [ ! -s "$out" ] && only_notice "$err"
 }
 
 test_non_guard_missing_engine_without_nodes_fails_open() {
@@ -876,53 +622,12 @@ test_non_guard_missing_engine_without_nodes_fails_open() {
   AH_ENGINE_BIN=/no/such/engine AH_FALLBACK_LIST="$tmp/no-list" HOME="$tmp/no-home" PATH="/usr/bin:/bin:/usr/sbin:/sbin" sh "$wrapper" PostToolUse --tool-from-payload <"$payload" >"$out" 2>"$err"
   rc=$?
   set -e
-  [ "$rc" -eq 0 ] && [ ! -s "$out" ] && [ ! -s "$err" ]
+  [ "$rc" -eq 0 ] && [ ! -s "$out" ] && only_notice "$err"
 }
 
-test_guard_fail_closed_when_selected_hook_cannot_exec() {
-  printf '@PreToolUse\t%s\nBash\t%s\t/no/such/node "$0"\n' "$large_timeout" "$large_timeout" >"$tmp/noexec-guard.list"
-  out=$tmp/noexec-guard.out
-  err=$tmp/noexec-guard.err
-  set +e
-  AH_ENGINE_BIN=/no/such/engine AH_FALLBACK_LIST="$tmp/noexec-guard.list" HOME="$tmp/no-home" PATH="/usr/bin:/bin:/usr/sbin:/sbin" sh "$wrapper" PreToolUse --tool-from-payload <"$payload" >"$out" 2>"$err"
-  rc=$?
-  set -e
-  [ "$rc" -eq 0 ] && [ ! -s "$out" ] && [ ! -s "$err" ]
-}
 
-test_guard_fail_closed_when_selected_hook_not_executable() {
-  nonexec=$tmp/not-executable-hook
-  printf '#!/bin/sh\nprintf bad\n' >"$nonexec"
-  chmod 600 "$nonexec"
-  printf '@PreToolUse\t%s\nBash\t%s\t%s\n' "$large_timeout" "$large_timeout" "$nonexec" >"$tmp/nonexec-file-guard.list"
-  out=$tmp/nonexec-file-guard.out
-  err=$tmp/nonexec-file-guard.err
-  set +e
-  AH_ENGINE_BIN=/no/such/engine AH_FALLBACK_LIST="$tmp/nonexec-file-guard.list" HOME="$tmp/no-home" PATH="/usr/bin:/bin:/usr/sbin:/sbin" sh "$wrapper" PreToolUse --tool-from-payload <"$payload" >"$out" 2>"$err"
-  rc=$?
-  set -e
-  [ "$rc" -eq 0 ] && [ ! -s "$out" ] && [ ! -s "$err" ]
-}
 
-test_non_guard_selected_hook_cannot_exec_fails_open() {
-  printf '@PostToolUse\t%s\nBash\t%s\t/no/such/node "$0"\n' "$large_timeout" "$large_timeout" >"$tmp/noexec-nonguard.list"
-  out=$tmp/noexec-nonguard.out
-  err=$tmp/noexec-nonguard.err
-  set +e
-  AH_ENGINE_BIN=/no/such/engine AH_FALLBACK_LIST="$tmp/noexec-nonguard.list" HOME="$tmp/no-home" PATH="/usr/bin:/bin:/usr/sbin:/sbin" sh "$wrapper" PostToolUse --tool-from-payload <"$payload" >"$out" 2>"$err"
-  rc=$?
-  set -e
-  [ "$rc" -eq 0 ] && [ ! -s "$out" ] && [ ! -s "$err" ]
-}
 
-test_selected_exec_failure_does_not_override_runnable_hook() {
-  h=$(hook_script runnable 'printf runnable')
-  printf '@PreToolUse\t%s\nBash\t%s\t/no/such/node "$0"\nBash\t%s\t%s\n' "$large_timeout" "$large_timeout" "$large_timeout" "$h" >"$tmp/noexec-runnable.list"
-  out=$tmp/noexec-runnable.out
-  err=$tmp/noexec-runnable.err
-  AH_ENGINE_BIN=/no/such/engine AH_FALLBACK_LIST="$tmp/noexec-runnable.list" HOME="$tmp/no-home" PATH="/usr/bin:/bin:/usr/sbin:/sbin" sh "$wrapper" PreToolUse --tool-from-payload <"$payload" >"$out" 2>"$err"
-  [ ! -s "$out" ] && [ ! -s "$err" ]
-}
 
 test_engine_lookup_prefers_ah_engine_bin() {
   home=$tmp/lookup-home-bin
@@ -973,78 +678,10 @@ test_engine_lookup_uses_path() {
   [ "$(cat "$out")" = path-bin ]
 }
 
-fake_node_bin() {
-  d=$tmp/fakenode-bin
-  mkdir -p "$d"
-  cat >"$d/node" <<'NODE'
-#!/bin/sh
-# Stand-in for node: runs the last argument as a shell script if it exists, else prints node's missing-module error and exits 1.
-for last do :; done
-if [ ! -f "$last" ]; then
-  printf "node:internal/modules/cjs/loader:1228\n  throw err;\nError: Cannot find module '%s'\n  code: 'MODULE_NOT_FOUND'\n" "$last" >&2
-  exit 1
-fi
-exec sh "$last"
-NODE
-  chmod +x "$d/node"
-  printf '%s\n' "$d"
-}
 
-root_case() {
-  # root_case <name> <event> <root-or-UNSET> <tool>; list rows in $tmp/<name>.list; prints rc
-  rcn=$1; ev=$2; root=$3
-  nb=$(fake_node_bin)
-  e=$(make_engine "$rcn" seventyfive)
-  if [ "$root" = UNSET ]; then
-    env -u CLAUDE_PLUGIN_ROOT -u PLUGIN_ROOT AH_ENGINE_BIN="$e" AH_FALLBACK_LIST="$tmp/$rcn.list" PATH="$nb:$PATH" sh "$wrapper" "$ev" --tool-from-payload <"$tmp/bashpush.json" >"$tmp/$rcn.out" 2>"$tmp/$rcn.err"
-  else
-    AH_ENGINE_BIN="$e" AH_FALLBACK_LIST="$tmp/$rcn.list" CLAUDE_PLUGIN_ROOT="$root" PATH="$nb:$PATH" sh "$wrapper" "$ev" --tool-from-payload <"$tmp/bashpush.json" >"$tmp/$rcn.out" 2>"$tmp/$rcn.err"
-  fi
-}
 
-test_fallback_unrunnable_plugin_root_fails_closed() {
-  printf '{"tool_name":"Bash","tool_input":{"command":"git push --force origin main"}}' >"$tmp/bashpush.json"
-  printf '@PreToolUse\t10\nBash\t10\tnode "${CLAUDE_PLUGIN_ROOT}/hooks/git-guard.js"\n@PostToolUse\t10\nBash\t10\tnode "${CLAUDE_PLUGIN_ROOT}/hooks/audit.js"\n' >"$tmp/rootbad.list"
-  sed "s/git-guard.js/no-such-guard.js/" "$tmp/rootbad.list" >"$tmp/rootunset.list"; cp "$tmp/rootbad.list" "$tmp/rootnon.list"
-  set +e
-  root_case rootbad PreToolUse "$tmp/no-such-root"; rc1=$?
-  root_case rootunset PreToolUse UNSET; rc2=$?
-  root_case rootnon PostToolUse "$tmp/no-such-root"; rc3=$?
-  set -e
-  [ "$rc1" -eq 2 ] && [ "$rc2" -eq 2 ] && [ "$rc3" -eq 0 ] && grep -q 'fail closed' "$tmp/rootbad.err" && grep -q "hook script not found" "$tmp/rootunset.err"
-}
 
-test_fallback_missing_module_exit1_fails_closed_own_exit1_does_not() {
-  printf '{"tool_name":"Bash","tool_input":{"command":"x"}}' >"$tmp/bashpush.json"
-  good=$tmp/plugin-root-good
-  mkdir -p "$good/hooks"
-  printf 'echo own-reason >&2; exit 1\n' >"$good/hooks/own.js"
-  printf 'echo blocked-by-guard >&2; exit 2\n' >"$good/hooks/block.js"
-  printf '@PreToolUse\t10\nBash\t10\tnode "${CLAUDE_PLUGIN_ROOT}/hooks/own.js"\n' >"$tmp/rootown.list"
-  printf '@PreToolUse\t10\nBash\t10\tnode "${CLAUDE_PLUGIN_ROOT}/hooks/block.js"\n' >"$tmp/rootblock.list"
-  printf '@PreToolUse\t10\nBash\t10\tnode "${CLAUDE_PLUGIN_ROOT}/hooks/own.js"\nBash\t10\tnode "${CLAUDE_PLUGIN_ROOT}/hooks/gone.js"\n' >"$tmp/rootgone.list"
-  set +e
-  root_case rootown PreToolUse "$good"; rc1=$?
-  root_case rootblock PreToolUse "$good"; rc2=$?
-  root_case rootgone PreToolUse "$good"; rc3=$?
-  set -e
-  [ "$rc1" -eq 0 ] && [ "$rc2" -eq 2 ] && grep -q 'blocked-by-guard' "$tmp/rootblock.err" && [ "$rc3" -eq 2 ]
-}
 
-test_fallback_node_module_not_found_exit1_guard_only() {
-  # script exists (so the target check passes) but node itself reports a missing module and exits 1
-  printf '{"tool_name":"Bash","tool_input":{"command":"x"}}' >"$tmp/bashpush.json"
-  good=$tmp/plugin-root-mnf
-  mkdir -p "$good/hooks"
-  printf 'echo "Error: Cannot find module dep" >&2; echo "  code: '"'"'MODULE_NOT_FOUND'"'"'" >&2; exit 1\n' >"$good/hooks/mnf.js"
-  printf '@PreToolUse\t10\nBash\t10\tnode "${CLAUDE_PLUGIN_ROOT}/hooks/mnf.js"\n@PostToolUse\t10\nBash\t10\tnode "${CLAUDE_PLUGIN_ROOT}/hooks/mnf.js"\n' >"$tmp/rootmnf.list"
-  cp "$tmp/rootmnf.list" "$tmp/rootmnfpost.list"
-  set +e
-  root_case rootmnf PreToolUse "$good"; rc1=$?
-  root_case rootmnfpost PostToolUse "$good"; rc2=$?
-  set -e
-  [ "$rc1" -eq 2 ] && [ "$rc2" -eq 0 ]
-}
 
 test_ah_knobs_ignored_without_wrapper_test() {
   e=$tmp/engine-marker.sh
@@ -1076,14 +713,11 @@ test_temp_base_prefers_home_then_xdg() {
   xdg=$tmp/prefer-xdg
   mkdir -p "$home" "$xdg"
   chmod 700 "$xdg"
-  h=$(hook_script preferhome 'mode(){ stat -c "%a" "$1" 2>/dev/null || stat -f "%Lp" "$1"; }; d="$HOME/.anti-hall/tmp"; set -- "$d"/ah-wrapper-run.*/payload; [ -f "$1" ] && [ "$(mode "$d")" = 700 ] && printf home-ok')
-  printf '@PreToolUse\t%s\nBash\t%s\t%s\n' "$large_timeout" "$large_timeout" "$h" >"$tmp/preferhome.list"
-  e=$(make_engine preferhome-engine seventyfive)
+  e=$(engine_script preferhome 'mode(){ stat -c "%a" "$1" 2>/dev/null || stat -f "%Lp" "$1"; }; d="$HOME/.anti-hall/tmp"; set -- "$d"/ah-wrapper-run.*/payload; [ -f "$1" ] && [ "$(mode "$d")" = 700 ] && printf home-ok')
   HOME="$home" TMPDIR="$tmp/never-used" AH_ENGINE_BIN="$e" AH_FALLBACK_LIST="$tmp/preferhome.list" sh "$wrapper" PreToolUse --tool-from-payload <"$payload" >"$tmp/preferhome.out" 2>"$tmp/preferhome.err" || return 1
   [ "$(cat "$tmp/preferhome.out")" = home-ok ] || return 1
-  h2=$(hook_script preferxdg 'set -- "$XDG_RUNTIME_DIR"/ah-hook-*/ah-wrapper-run.*/payload; [ -f "$1" ] && printf xdg-ok')
-  printf '@PreToolUse\t%s\nBash\t%s\t%s\n' "$large_timeout" "$large_timeout" "$h2" >"$tmp/preferxdg.list"
-  HOME="$home" XDG_RUNTIME_DIR="$xdg" TMPDIR="$tmp/never-used" AH_ENGINE_BIN="$e" AH_FALLBACK_LIST="$tmp/preferxdg.list" sh "$wrapper" PreToolUse --tool-from-payload <"$payload" >"$tmp/preferxdg.out" 2>"$tmp/preferxdg.err" || return 1
+  e2=$(engine_script preferxdg 'set -- "$XDG_RUNTIME_DIR"/ah-hook-*/ah-wrapper-run.*/payload; [ -f "$1" ] && printf xdg-ok')
+  HOME="$home" XDG_RUNTIME_DIR="$xdg" TMPDIR="$tmp/never-used" AH_ENGINE_BIN="$e2" AH_FALLBACK_LIST="$tmp/preferxdg.list" sh "$wrapper" PreToolUse --tool-from-payload <"$payload" >"$tmp/preferxdg.out" 2>"$tmp/preferxdg.err" || return 1
   [ "$(cat "$tmp/preferxdg.out")" = xdg-ok ]
 }
 
@@ -1092,9 +726,7 @@ test_temp_base_prefers_home_then_xdg() {
 test_gnu_stat_flavour_still_makes_private_tmp() {
   shim=$tmp/regr-gnu-bin
   make_gnu_stat_shim "$shim"
-  h=$(hook_script gnuregr 'cat >/dev/null; printf gnu-ok')
-  printf '@PreToolUse\t%s\nBash\t%s\t%s\n' "$large_timeout" "$large_timeout" "$h" >"$tmp/gnuregr.list"
-  e=$(make_engine gnuregr-engine seventyfive)
+  e=$(engine_script gnuregr 'cat >/dev/null; printf gnu-ok')
   PATH=$shim:$PATH AH_ENGINE_BIN="$e" AH_FALLBACK_LIST="$tmp/gnuregr.list" sh "$wrapper" PreToolUse --tool-from-payload <"$payload" >"$tmp/gnuregr.out" 2>"$tmp/gnuregr.err" || return 1
   [ "$(cat "$tmp/gnuregr.out")" = gnu-ok ] && ! grep -q 'cannot create private\|no private temp' "$tmp/gnuregr.err"
 }
@@ -1124,11 +756,10 @@ test_no_temp_anywhere_in_memory_guard_still_blocks() {
   ro=$tmp/ro-base2
   mkdir -p "$ro"
   chmod 500 "$ro"
-  h=$(hook_script memblock 'grep -q Bash && { printf "mem-block\n" >&2; exit 2; }; exit 0')
-  printf '@PreToolUse\t%s\nBash\t%s\t%s\n' "$large_timeout" "$large_timeout" "$h" >"$tmp/memblock.list"
+  e=$(engine_script memblock 'grep -q Bash && { printf "mem-block\n" >&2; exit 2; }; exit 0')
   printf '{"tool_name":"Bash","tool_input":{"command":"x"}}' >"$tmp/memblock.payload"
   set +e
-  PATH=$nb:$PATH TMPDIR="$ro" HOME=/nonexistent AH_ENGINE_BIN=/no/such/engine AH_FALLBACK_LIST="$tmp/memblock.list" sh "$wrapper" PreToolUse --tool-from-payload <"$tmp/memblock.payload" >"$tmp/memblock.out" 2>"$tmp/memblock.err"
+  PATH=$nb:$PATH TMPDIR="$ro" HOME=/nonexistent AH_ENGINE_BIN="$e" AH_FALLBACK_LIST="$tmp/memblock.list" sh "$wrapper" PreToolUse --tool-from-payload <"$tmp/memblock.payload" >"$tmp/memblock.out" 2>"$tmp/memblock.err"
   rc=$?
   set -e
   chmod 700 "$ro"
@@ -1191,7 +822,7 @@ test_hanging_engine_is_cut_at_timeout_not_before() {
     t1=$(now_ms)
     ms=$((t1 - t0))
     # Hung engines now fail open without Node handoff, and still return well before the engine's own 30 s sleep.
-    if [ "$rc" -ne 0 ] || [ "$ms" -gt 8000 ] || [ -s "$tmp/cut.out" ] || [ -s "$tmp/cut.err" ]; then
+    if [ "$rc" -ne 0 ] || [ "$ms" -gt 8000 ] || [ -s "$tmp/cut.out" ] || ! only_notice "$tmp/cut.err"; then
       printf 'hanging engine under %s: rc=%s ms=%s out=%s err=%s\n' "$shname" "$rc" "$ms" "$(cat "$tmp/cut.out")" "$(cat "$tmp/cut.err")" >&2
       return 1
     fi
@@ -1200,14 +831,11 @@ test_hanging_engine_is_cut_at_timeout_not_before() {
 }
 
 test_block_stderr_is_exactly_the_hooks_text_every_shell() {
-  slow=$(hook_script blockslow 'sleep 30')
-  blocker=$(hook_script blocker 'printf "BLOCK-MSG: no\n" >&2; printf "{\"x\":1}"; exit 2')
-  printf '@PreToolUse\t%s\nBash\t1\t%s\nBash\t%s\t%s\n' "$large_timeout" "$slow" "$large_timeout" "$blocker" >"$tmp/blockexact.list"
-  e=$(make_engine blockexact-engine seventyfive)
+  e=$(engine_script blockexact-engine 'cat >/dev/null; printf "BLOCK-MSG: no\n" >&2; printf "{\"x\":1}"; exit 2')
   for shname in sh dash bash; do
     command -v "$shname" >/dev/null 2>&1 || continue
     set +e
-    AH_KILL_GRACE_S=0 AH_ENGINE_BIN="$e" AH_FALLBACK_LIST="$tmp/blockexact.list" "$shname" "$wrapper" PreToolUse --tool-from-payload <"$payload" >"$tmp/blockexact.out" 2>"$tmp/blockexact.err"
+    AH_KILL_GRACE_S=0 AH_ENGINE_BIN="$e" "$shname" "$wrapper" PreToolUse --tool-from-payload <"$payload" >"$tmp/blockexact.out" 2>"$tmp/blockexact.err"
     rc=$?
     set -e
     printf 'BLOCK-MSG: no\n' >"$tmp/blockexact.want"
@@ -1219,21 +847,6 @@ test_block_stderr_is_exactly_the_hooks_text_every_shell() {
   return 0
 }
 
-test_unmatched_tool_runs_nothing_but_unparseable_selects_all() {
-  h=$(hook_script rowbash 'printf bash-row; exit 2')
-  printf '@PreToolUse\t%s\nBash\t%s\t%s\n' "$large_timeout" "$large_timeout" "$h" >"$tmp/unmatched.list"
-  e=$(make_engine unmatched-engine seventyfive)
-  printf '{"tool_name":"Read","tool_input":{}}' >"$tmp/read.json"
-  printf 'not json at all' >"$tmp/garbage.json"
-  printf '{"tool_name":"Bash","tool_input":{}}' >"$tmp/bash.json"
-  set +e
-  AH_ENGINE_BIN="$e" AH_FALLBACK_LIST="$tmp/unmatched.list" sh "$wrapper" PreToolUse --tool-from-payload <"$tmp/read.json" >"$tmp/um1.out" 2>"$tmp/um1.err"; rc1=$?
-  AH_ENGINE_BIN="$e" AH_FALLBACK_LIST="$tmp/unmatched.list" sh "$wrapper" PreToolUse --tool-from-payload <"$tmp/garbage.json" >"$tmp/um2.out" 2>"$tmp/um2.err"; rc2=$?
-  AH_ENGINE_BIN="$e" AH_FALLBACK_LIST="$tmp/unmatched.list" sh "$wrapper" PreToolUse --tool-from-payload <"$tmp/bash.json" >"$tmp/um3.out" 2>"$tmp/um3.err"; rc3=$?
-  set -e
-  # Read: structurally extracted, no row => nothing to run => allow; garbage: ambiguous => all rows run => block; Bash row blocks
-  [ "$rc1" -eq 0 ] && [ ! -s "$tmp/um1.out" ] && [ "$rc2" -eq 2 ] && [ "$rc3" -eq 2 ]
-}
 
 test_killed_wrapper_orphans_are_reaped() {
   # Contract: the wrapper has a ~0.5 s fail-open deadline by default; this test needs the engine to outlive it so the wrapper can be
@@ -1353,49 +966,7 @@ test_temp_removed_on_normal_exit() { run_signal_cleanup_case normal NONE 2; }
 test_temp_removed_on_hup() { run_signal_cleanup_case hup HUP 129; }
 test_temp_removed_on_int() { run_signal_cleanup_case int INT 130; }
 
-test_no_node_hook_events_allow_without_engine() {
-  # D87: the shipped lists give PermissionRequest an event row marked "empty" (a thin trigger and no Node hook): nothing to run and
-  # nothing to guard, so an absent engine allows it. A row that is NOT marked empty and whose hook cannot run still fails closed
-  # (the next test). SubagentStop has one engine-only entry (sibling-sweep, advisory) whose Node command is the no-op `true`, so
-  # with the engine absent that no-op runs and the event allows too. Both hosts' lists.
-  for list in ah-fallback.list ah-fallback.codex.list; do
-    host=claude
-    [ "$list" = ah-fallback.codex.list ] && host=codex
-    grep -q "^@PermissionRequest	[0-9][0-9]*	empty$" "$repo/plugins/anti-hall/hooks/$list" || return 1
-    set +e
-    AH_ENGINE_BIN=/no/such/engine AH_FALLBACK_LIST="$repo/plugins/anti-hall/hooks/$list" sh "$wrapper" PermissionRequest --host "$host" <"$payload" >"$tmp/nohook-PermissionRequest.out" 2>"$tmp/nohook-PermissionRequest.err"
-    rc=$?
-    set -e
-    [ "$rc" -eq 0 ] || return 1
-    grep -q "^@SubagentStop	[0-9][0-9]*$" "$repo/plugins/anti-hall/hooks/$list" || return 1
-    set +e
-    CLAUDE_PLUGIN_ROOT="$repo/plugins/anti-hall" PLUGIN_ROOT="$repo/plugins/anti-hall" AH_ENGINE_BIN=/no/such/engine AH_FALLBACK_LIST="$repo/plugins/anti-hall/hooks/$list" sh "$wrapper" SubagentStop --host "$host" <"$payload" >"$tmp/nohook-SubagentStop.out" 2>"$tmp/nohook-SubagentStop.err"
-    rc=$?
-    set -e
-    [ "$rc" -eq 0 ] || return 1
-  done
-}
 
-test_event_with_node_guards_stays_fail_closed_without_engine() {
-  # Without a usable engine, even damaged or unrunnable Node fallback lists now fail open. Healthy engine and in-process
-  # dispatch coverage lives in the Rust e2e tests; this shell wrapper no longer hands over to Node on engine absence.
-  h=$(hook_script evguard 'exit 0')
-  printf '@PostToolUse\t%s\nBash\t%s\t%s\n' "$large_timeout" "$large_timeout" "$h" >"$tmp/missing-section.list"
-  for ev in PreToolUse Stop; do
-    set +e
-    AH_ENGINE_BIN=/no/such/engine AH_FALLBACK_LIST="$tmp/missing-section.list" sh "$wrapper" "$ev" <"$payload" >"$tmp/ms.out" 2>"$tmp/ms.err"
-    rc=$?
-    set -e
-    [ "$rc" -eq 0 ] && [ ! -s "$tmp/ms.out" ] && [ ! -s "$tmp/ms.err" ] || return 1
-  done
-  printf '@SubagentStop\t%s\n*\t%s\t/no/such/hook-cmd-xyz\n' "$large_timeout" "$large_timeout" >"$tmp/subagent-row.list"
-  set +e
-  AH_ENGINE_BIN=/no/such/engine AH_FALLBACK_LIST="$tmp/subagent-row.list" sh "$wrapper" SubagentStop <"$payload" >"$tmp/sr.out" 2>"$tmp/sr.err"
-  rc=$?
-  set -e
-  [ "$rc" -eq 0 ] && [ ! -s "$tmp/sr.out" ] && [ ! -s "$tmp/sr.err" ] || return 1
-  grep -q '^@Stop' "$repo/plugins/anti-hall/hooks/ah-fallback.list"
-}
 
 check normal_passthrough test_normal_passthrough
 check hooks_own_exit_code_passes_through_after_done_mark test_a_hooks_own_exit_code_passes_through_once_the_engine_marked_the_dispatch_done
@@ -1407,52 +978,26 @@ check signal_fallback test_signal_fallback
 check engine_odd_exits_fallback test_engine_odd_exits_fallback
 check timeout_fallback test_timeout_fallback
 check timeout_kills_engine_process test_timeout_kills_engine_process
-check timeout_kills_fallback_process test_timeout_kills_fallback_process
-check invalid_bytes_reach_fallback test_invalid_bytes_reach_fallback
-check matcher_selection test_matcher_selection
-check tool_name_structural_scanner test_tool_name_structural_scanner
-check tool_name_invalid_selects_all_non_guard test_tool_name_invalid_selects_all_non_guard
-check tool_name_huge_payload_fast test_tool_name_huge_payload_fast
-check fallback_exit_code_matrix_rows test_fallback_exit_code_matrix_rows
-check fallback_merges_json_outputs test_fallback_merges_json_outputs
-check fallback_merges_pretty_printed_json_outputs test_fallback_merges_pretty_printed_json_outputs
 check cold_engine_does_not_hold_host_stderr_open test_cold_engine_does_not_hold_host_stderr_open
 check missing_engine_and_missing_defaults_fail_open test_missing_engine_and_missing_defaults_fail_open
-check fallback_two_empty_contexts_say_nothing test_fallback_two_empty_contexts_say_nothing
-check fallback_exit1_host_nonblocking_rows test_fallback_exit1_host_nonblocking_rows
-check shell_started_126_127_are_host_nonblocking test_shell_started_126_127_are_host_nonblocking
-check exit0_json_block_wins_verbatim test_exit0_json_block_wins_verbatim
-check first_json_block_wins_verbatim test_first_json_block_wins_verbatim
-check fallback_signal_and_incomplete_fail_closed test_fallback_signal_and_incomplete_fail_closed
-check fallback_timeout_discard_allows_other_hook test_fallback_timeout_discard_allows_other_hook
 check temp_modes_and_owner test_temp_modes_and_owner
 check temp_refuses_bad_base_and_symlink_parent test_temp_refuses_bad_base_and_symlink_parent
 check temp_sweep_old_keeps_fresh test_temp_sweep_old_keeps_fresh
 check temp_term_cleanup_kills_child test_temp_term_cleanup_kills_child
 check temp_unusable_guard_blocks test_temp_unusable_guard_blocks
 check env_timeout_validation_guard_blocks test_env_timeout_validation_guard_blocks
-check first_exit_two_wins test_first_exit_two_wins
 check stop_active_synthetic_fail_closed_opens test_stop_active_synthetic_fail_closed_opens
-check stop_active_genuine_exit2_remains_verbatim test_stop_active_genuine_exit2_remains_verbatim
 check guard_fail_closed_without_engine_or_nodes test_guard_fail_closed_without_engine_or_nodes
 check non_guard_missing_engine_without_nodes_fails_open test_non_guard_missing_engine_without_nodes_fails_open
-check guard_fail_closed_when_selected_hook_cannot_exec test_guard_fail_closed_when_selected_hook_cannot_exec
-check guard_fail_closed_when_selected_hook_not_executable test_guard_fail_closed_when_selected_hook_not_executable
-check non_guard_selected_hook_cannot_exec_fails_open test_non_guard_selected_hook_cannot_exec_fails_open
-check selected_exec_failure_does_not_override_runnable_hook test_selected_exec_failure_does_not_override_runnable_hook
 check engine_lookup_prefers_ah_engine_bin test_engine_lookup_prefers_ah_engine_bin
 check engine_lookup_prefers_home_install_over_path test_engine_lookup_prefers_home_install_over_path
 check engine_lookup_uses_path test_engine_lookup_uses_path
-check fallback_unrunnable_plugin_root_fails_closed test_fallback_unrunnable_plugin_root_fails_closed
-check fallback_missing_module_exit1_fails_closed_own_exit1_does_not test_fallback_missing_module_exit1_fails_closed_own_exit1_does_not
-check fallback_node_module_not_found_exit1_guard_only test_fallback_node_module_not_found_exit1_guard_only
 check ah_knobs_ignored_without_wrapper_test test_ah_knobs_ignored_without_wrapper_test
 check ah_knobs_honored_with_wrapper_test test_ah_knobs_honored_with_wrapper_test
 check temp_base_prefers_home_then_xdg test_temp_base_prefers_home_then_xdg
 check healthy_engine_returns_immediately_every_shell test_healthy_engine_returns_immediately_every_shell
 check hanging_engine_is_cut_at_timeout_not_before test_hanging_engine_is_cut_at_timeout_not_before
 check block_stderr_is_exactly_the_hooks_text_every_shell test_block_stderr_is_exactly_the_hooks_text_every_shell
-check unmatched_tool_runs_nothing_but_unparseable_selects_all test_unmatched_tool_runs_nothing_but_unparseable_selects_all
 check killed_wrapper_orphans_are_reaped test_killed_wrapper_orphans_are_reaped
 check sweep_removes_dead_owner_dirs_keeps_live_owner test_sweep_removes_dead_owner_dirs_keeps_live_owner
 check gnu_stat_flavour_still_makes_private_tmp test_gnu_stat_flavour_still_makes_private_tmp
@@ -1461,8 +1006,6 @@ check no_temp_anywhere_in_memory_guard_still_blocks test_no_temp_anywhere_in_mem
 check temp_removed_on_normal_exit test_temp_removed_on_normal_exit
 check temp_removed_on_hup test_temp_removed_on_hup
 check temp_removed_on_int test_temp_removed_on_int
-check no_node_hook_events_allow_without_engine test_no_node_hook_events_allow_without_engine
-check event_with_node_guards_stays_fail_closed_without_engine test_event_with_node_guards_stays_fail_closed_without_engine
 
 # ---- cold start: guard events wait for the daemon (client.cold_guard_wait_ms), everything else stays instant ----
 # cg_setup <wait_ms>: a short state dir (the socket path must stay under the socket limit), a plugin root whose defaults carry
@@ -1707,7 +1250,7 @@ test_timeout_override_needs_the_test_gate() {
 check timeout_override_needs_the_test_gate test_timeout_override_needs_the_test_gate
 
 # Launcher hand-off: with the thin launcher installed under $HOME it is exec'd with the args and the resolved plugin root;
-# --doctor / --fallback-only skip it; a missing or non-executable launcher keeps the old path (fail open, exit 0).
+# --doctor skips it; a missing or non-executable launcher keeps the old path (fail open, exit 0).
 test_launcher_handoff() {
   lh=$tmp/lh-home
   mkdir -p "$lh/.anti-hall/ah-engine/bin"
@@ -1719,13 +1262,8 @@ test_launcher_handoff() {
   set -e
   [ "$rc" -eq 7 ] || return 1
   grep -q '^PreToolUse --host codex --plugin-root .*/\.\.$' "$tmp/lh.args" || return 1
-  # --fallback-only is not handed off (the launcher delegates it back here)
+  # launcher not executable: the wrapper's own path, fail open
   rm -f "$tmp/lh.args"
-  set +e
-  HOME=$lh sh "$wrapper" Stop --fallback-only <"$payload" >/dev/null 2>&1
-  set -e
-  [ ! -f "$tmp/lh.args" ] || return 1
-  # launcher missing or not executable: old path, fail open
   chmod -x "$lh/.anti-hall/ah-engine/bin/ah-hook"
   set +e
   HOME=$lh sh "$wrapper" Stop <"$payload" >/dev/null 2>&1
