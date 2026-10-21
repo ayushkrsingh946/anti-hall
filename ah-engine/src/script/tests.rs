@@ -1686,6 +1686,67 @@ fn an_idle_worker_frees_its_interpreter_and_the_next_call_rebuilds_it() {
     crate::discard::harmless(std::fs::remove_dir_all(&h)); // keep: cleanup
 }
 
+// ---- v0.301 W3b: no hand-backs in the shared libs --------------------------------------------------------------------
+
+/// The scripts hand nothing back to Node: no deferral sentinel or token is left in an executable line of the plugin logic.
+#[test]
+fn no_script_hands_a_case_back_to_node() {
+    let _ = defaults::text("script.ext"); // the root is known once the defaults are loaded
+    let root = defaults::root().expect("plugin root").join("engine/logic");
+    let banned = ["'defer'", "meshDefer", "UNDECIDABLE", "cb.DEFER", "cb.defer(", "gates.run("];
+    let mut stack = vec![root];
+    let mut seen = 0;
+    while let Some(d) = stack.pop() {
+        for e in std::fs::read_dir(&d).expect("logic directory").flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                stack.push(p);
+            } else if p.extension().is_some_and(|x| x == "js") {
+                seen += 1;
+                for (i, line) in std::fs::read_to_string(&p).expect("script").lines().enumerate() {
+                    if line.trim_start().starts_with("//") {
+                        continue;
+                    }
+                    for b in banned {
+                        assert!(!line.contains(b), "{}:{} still hands a case back ({b}): {line}", p.display(), i + 1);
+                    }
+                }
+            }
+        }
+    }
+    assert!(seen > 50, "the scan reached the scripts ({seen})");
+}
+
+/// A DevSwarm child whose message store the host cannot read exactly (a forced backend it does not read) is told its mailbox could
+/// not be counted, instead of being passed in silence; with the store simply absent the same child hears nothing.
+#[test]
+fn a_child_mailbox_the_host_cannot_count_gets_the_drain_nudge_with_an_unknown_count() {
+    let case = |forced: bool| {
+        let mut env = json!({"DEVSWARM_BUILDER_ID": "ws-1", "DEVSWARM_REPO_ID": "r1", "DEVSWARM_SOURCE_BRANCH": "b", "HOME": "{HOME}"});
+        if forced {
+            env[defaults::text("mesh_write.env_store_backend")] = json!("journal");
+        }
+        json!({
+            "env": env, "event": "PostToolUse", "opts": {"plugin_root": "{PLUGIN}"},
+            "files": {
+                ".anti-hall/devswarm/workspaces/ws-1.json": "{\"inboxPath\":\"{HOME}/inbox\",\"worktreePath\":\"{HOME}/wt\"}",
+                "wt/.git/HEAD": "ref: refs/heads/main\n",
+            },
+            "payload": {"hook_event_name": "PostToolUse", "session_id": "s1", "tool_input": {"command": "ls"}, "tool_name": "Bash"},
+        })
+    };
+    let run = |forced: bool| {
+        let l = golden::lay(&case(forced));
+        let got = golden::run_case("devswarm-child-drain", &l, 1).expect("a shipped script");
+        golden::verdict_json(&got, &l)
+    };
+    let unknown = run(true);
+    assert_eq!(unknown["v"], "exact", "{unknown}");
+    let out = unknown["out"].as_str().unwrap_or_default();
+    assert!(out.contains("could not be read here"), "{out}");
+    assert_eq!(run(false)["v"], "allow", "an absent store is a count of zero, not an unknown one");
+}
+
 // ---- v0.301 W3b: the weekly Jev scorecard ----------------------------------------------------------------------------
 
 /// The weekly scorecard is built again: a KEEP verdict whose integration is not on is named, and the week is consumed only once the
@@ -1717,4 +1778,35 @@ fn the_weekly_scorecard_names_an_integration_whose_mode_lags_its_keep_verdict() 
     let off = golden::lay(&case(false));
     assert_eq!(golden::verdict_json(&golden::run_case("jev-weekly-scorecard", &off, 1).expect("a shipped script"), &off)["v"], "allow");
     assert!(!Path::new(&off.home).join(".anti-hall").join(latch).exists(), "a Jev that is off consumes nothing");
+}
+
+/// Script load check (every script a hand-back removal touched): each loads in the interpreter and answers a minimal call on its
+/// own event without a script error (a script error would otherwise pass as a quiet allow).
+#[test]
+fn every_script_without_hand_backs_loads_and_answers_a_minimal_call() {
+    let checks = [
+        ("auto-handover", "UserPromptSubmit"),
+        ("auto-handover-pause-nag", "Stop"),
+        ("limit-conserve-inject", "UserPromptSubmit"),
+        ("devswarm-child-gate", "Stop"),
+        ("devswarm-child-drain", "PostToolUse"),
+        ("devswarm-child-turn", "UserPromptSubmit"),
+        ("devswarm-parent-gate", "Stop"),
+        ("devswarm-parent-inbox", "UserPromptSubmit"),
+        ("devswarm-parent-reply-tracker", "PostToolUse"),
+        ("jev-review-reminder", "SessionStart"),
+        ("jev-weekly-scorecard", "SessionStart"),
+        ("repair-on-reload", "SessionStart"),
+    ];
+    for (check, event) in checks {
+        let case = json!({
+            "env": {"HOME": "{HOME}"}, "event": event, "opts": {"plugin_root": "{PLUGIN}"},
+            "payload": {"hook_event_name": event, "session_id": "s1", "cwd": "{HOME}", "prompt": "hello", "tool_name": "Bash", "tool_input": {"command": "ls"}},
+        });
+        let l = golden::lay(&case);
+        let got = golden::run_case(check, &l, 1).unwrap_or_else(|| panic!("{check}: no shipped script"));
+        assert!(!matches!(got, Some(Verdict::Defer)), "{check}: handed a minimal call back");
+        let errors: Vec<(String, String)> = crate::discard::captured().into_iter().filter(|(code, _)| code == "script_error").collect();
+        assert!(errors.is_empty(), "{check}: script errors {errors:?}");
+    }
 }

@@ -406,6 +406,10 @@ value = "#base.json"
 doc = "The infix of a legacy per-instance cursor file (reader-cursors.js listLegacy)."
 value = "#inst-"
 
+[devswarm_role.pg_ident_unsure_id]
+doc = "The partition id the Primary's Stop gate names when the work tree around its directory could not be resolved exactly (a nested checkout git did not answer for): the gate blocks on an unreadable own mailbox under this id instead of passing."
+value = "primary-unresolved"
+
 [devswarm_role.pg_no_session]
 doc = "The state-file name used when the payload has no session id (stateFileFor)."
 value = "nosession"

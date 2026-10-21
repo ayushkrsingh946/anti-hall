@@ -25,13 +25,7 @@ function pnAdopt(p) {
   return true;
 }
 
-// A case lib/75-ctxbudget.js hands back (cb.defer: a relative cwd, a zone other than UTC, a checkout the resolver cannot classify, a
-// handover or spawn log over the read cap, a line only V8 reads) says nothing this Stop; every write is collected until the end, so nothing is half done.
 function decide(p) {
-  try { return pnDecide(p); } catch (e) { if (e !== cb.DEFER) throw e; ah.unable('auto-handover-pause-nag:ctxbudget_unsure'); return 'allow'; }
-}
-
-function pnDecide(p) {
   if (ah.env.get(ah.cfg('ctxbudget.judge_child_env')) === ah.cfg('ctxbudget.judge_child_on')) return 'allow';
   if (p === null || typeof p !== 'object' || ah.cfg('coordinator_work.agent_markers').some(function (k) { return p[k] !== undefined && p[k] !== null; }) || p.stop_hook_active === true) return 'allow';
   if (!pnAdopt(p)) return 'allow';

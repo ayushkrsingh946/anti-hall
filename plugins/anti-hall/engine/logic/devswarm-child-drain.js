@@ -5,8 +5,8 @@
 // changed or the throttle window passed). The count is the child's own mailbox: the descriptor's durable inbox and, when its worktree
 // names a project with a store, the store rows no inbox line covers, read with this hook's own reader (ah.mesh.countFor). A case it cannot
 // settle exactly is decided natively and counted (native_unable): no usable home or plugin root, a payload that is not an object or a
-// path that is not a string say nothing; a relative path resolves against the stand-in directory; a store the host cannot read exactly
-// means no nudge this turn. Mirrors hooks/devswarm-child-drain.js `main`. This script builds on devswarm-child-gate.js and
+// path that is not a string say nothing; a relative path resolves against the stand-in directory; a project or store the host cannot read exactly
+// gets the nudge with an unknown count. Mirrors hooks/devswarm-child-drain.js `main`. This script builds on devswarm-child-gate.js and
 // devswarm-child-role.js (script.includes). Keys: devswarm_gates.toml (devswarm_gates.*) and devswarm_role.toml (the launchers).
 'use strict';
 
@@ -41,20 +41,22 @@ function cdDecide(p, st) {
   if (typeof inbox !== 'string' || inbox.charAt(0) !== '/') { ah.unable('devswarm-child-drain:inbox_path'); if (typeof inbox !== 'string') return 'allow'; inbox = hookProc.resolve(p, inbox); } // resolved against the stand-in directory
   if (cursor === undefined || cursor === null || cursor === '' || cursor === false || cursor === 0) cursor = null;
   else if (typeof cursor !== 'string' || cursor.charAt(0) !== '/') { ah.unable('devswarm-child-drain:cursor_path'); cursor = typeof cursor === 'string' ? hookProc.resolve(p, cursor) : null; }
-  var key = null;
+  var key = null, keyUnsure = false;
   if (wt) {
     if (typeof wt !== 'string') ah.unable('devswarm-child-drain:worktree_shape');
-    else key = ah.mesh.repoKey(wt);
+    else { var kd = ah.mesh.repoKeyDetail(wt); key = kd.key; keyUnsure = kd.unsure === true; }
   }
   var now = ah.clock.now();
-  var c = ah.mesh.countFor(key, id, inbox, cursor, now);
+  // a project or a store the host cannot read exactly: the count is unknown, and the nudge says so (never a silent pass)
+  var c = keyUnsure ? { state: 'nd', unread: 0, known: false, unsure: true } : ah.mesh.countFor(key, id, inbox, cursor, now);
+  var unknown = c.unsure === true;
   var unread = c.state === 'ok' ? c.unread : (c.known ? c.unread : 0), age = c.state === 'ok' ? c.age : null;
-  if (!(unread > 0)) return 'allow';
-  var w = cdThrottle(st.home, id, unread, now);
+  if (!unknown && !(unread > 0)) return 'allow';
+  var w = cdThrottle(st.home, id, unknown ? ah.cfgNum('devswarm_gates.cd_unknown_count') : unread, now);
   if (w === null) return 'allow';
   ah.commit();
   ah.state.writeAtomic(w.rel, w.body); // best-effort: a failed persist still lets this one nudge through
-  var msg = text.render(ah.cfg('devswarm_gates.cd_message'), { n: String(unread), age: cdAge(age), cli: st.cli, id: id });
+  var msg = text.render(ah.cfg(unknown ? 'devswarm_gates.cd_message_unknown' : 'devswarm_gates.cd_message'), { n: String(unread), age: cdAge(age), cli: st.cli, id: id });
   return { exact: { code: 0, out: JSON.stringify({ hookSpecificOutput: { hookEventName: ah.cfg('devswarm_gates.cd_event'), additionalContext: msg } }) + '\n', err: '' } };
 }
 
@@ -64,6 +66,5 @@ function decide(p, opts) {
   var st = dwLaunchersNative(root, false);
   if (!st) { ah.unable('devswarm-child-drain:no_launchers'); return 'allow'; } // no usable home or plugin root: no launcher can be named
   if (!jx.isObj(p)) { ah.unable('devswarm-child-drain:payload_shape'); return 'allow'; }
-  // a mesh answer the host cannot give exactly (lib/67-mesh.js) means no nudge this turn (an advisory, repeated on the next prompt)
-  try { return cdDecide(p, st); } catch (e) { if (e !== meshDefer) throw e; ah.unable('devswarm-child-drain:mesh_unsure'); return 'allow'; }
+  return cdDecide(p, st);
 }

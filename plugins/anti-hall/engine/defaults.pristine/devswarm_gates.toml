@@ -283,6 +283,14 @@ value = "child-drain"
 doc = "How long an unchanged unread count stays quiet after the drain nudge showed it (THROTTLE_MS); a changed count is shown at once."
 value = 600000
 
+[devswarm_gates.cd_message_unknown]
+doc = "The drain nudge when the child's unread count could not be read (a project or message store the engine cannot read exactly): {cli} (the DevSwarm CLI path), {id} (the workspace id). Shown instead of silence, throttled like the counted nudge."
+value = "⚠️ anti-hall · devswarm-inbox: the unread count of YOUR mailbox could not be read here, so messages addressed to YOU may be waiting. Drain NOW via `node {cli} inbox pull {id} && node {cli} inbox ack {id}` before continuing; a parent ruling may change what you are building."
+
+[devswarm_gates.cd_unknown_count]
+doc = "The count the drain nudge's throttle state records for an unreadable mailbox (below zero, so it never equals a real count and the nudge repeats only after devswarm_gates.cd_throttle_ms)."
+value = -1
+
 [devswarm_gates.cd_unknown_age]
 doc = "The age text of a backlog whose oldest message has no usable time."
 value = "unknown age"

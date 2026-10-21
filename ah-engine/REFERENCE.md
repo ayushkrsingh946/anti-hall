@@ -350,7 +350,7 @@ Rule fields (JSON): `id`, `events`, `tools`, `field`, `pattern` (regex), `check`
 | `gh-rt-advisory` | Advisory (UserPromptSubmit, engine-only): tells a session about GitHub edges in its repo, once each: CI went red or green, the pull request was merged, changes were requested (plugin script gh-rt-advisory.js). |
 | `devswarm-comms-guard` | Blocks SendMessage to a peer session whose cwd is a DevSwarm workspace while DevSwarm is active, and labels other known targets (port of devswarm-comms-guard.js). |
 | `swarm-guard` | Blocks an agent spawn past the spawn-rate cap or under critical memory pressure, and adds the shared-tree advisory to an allowed write-capable spawn that shares a working tree with a running write-capable agent (port of swarm-guard.js and lib/shared-tree-note.js). |
-| `jev-weekly-scorecard` | Stays silent when the weekly Jev scorecard notice cannot be due (Jev off, notice off, child workspace, checked within a week); when the check is due and the Jev decision log holds no rows it stamps the weekly latch itself; otherwise defers to the Node hook, which builds the report (port of jev-weekly-scorecard.js). |
+| `jev-weekly-scorecard` | Stays silent when the weekly Jev scorecard notice cannot be due (Jev off, notice off, child workspace, checked within a week); when it is due it builds the 7-day verdicts (the jev-report scorecard), names the first integration whose mode does not yet match its KEEP or REMOVE verdict and stamps the weekly latch; a week whose scorecard could not be built is not consumed (port of jev-weekly-scorecard.js). |
 | `jev-review-reminder` | SessionStart notices of Jev: the one-time legacy-key notice, the recommend-Jev notice (Jev off) and the review-due line (Jev on), with their state files kept by the engine; answers every case itself (port of hooks/jev-review-reminder.js). |
 | `repair-on-reload` | Stays silent when no repair can start (switch off, subagent turn, skipped, nothing pending at the running version, cooldown); otherwise defers to the Node hook, which takes the lock and starts the detached repair (port of the gates of repair-on-reload.js). |
 | `codex-availability` | SessionStart: probes PATH for a real codex executable, records it, folds a Codex job-log usage-limit error into the quota record and tells the session (port of codex-availability.js). |
@@ -2726,7 +2726,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `ctxbudget.ah_suffix_unknown` | `\n\nEnd your reply to the user with exactly this line, verbatim: 📝 Handover s...` |  |  | The decisive suffix when the handover's freshness is unknown; {path} is the handover path. |
 | `ctxbudget.ah_task_id_keys` | `taskId, id, task_id` |  |  | The input fields a task update names its task by, in order. |
 | `ctxbudget.ah_task_tools` | `TodoWrite, TaskCreate, TaskUpdate` |  |  | The tool names whose calls the open-task scan reads: the list writer, the task creator, the task updater (in that order). |
-| `ctxbudget.ah_unsure_log_kind` | `ctxbudget_unsure` |  |  | Engine log kind of an auto-handover, auto-handover-pause-nag or limit-conserve-inject case the engine cannot reproduce exactly, so the decision defers (logged, before anything is written): relative_home, no_home, test_guard (HOME set but relative or empty, no home at all, or HOME unset with the passwd home being the real one under a spawn_ctx.test_markers variable; HOME unset otherwise adopts the passwd home as os.homedir() does), relative_transcript, relative_cwd (a relative path with no absolute payload cwd: Node resolves it against its own directory), local_date (a request time zone other than UTC), repo_root (a checkout the resolver cannot classify exactly), fresh_line, fresh_timestamp, fresh_path (a transcript line or work timestamp only V8 reads, a relative written path with no cwd), handover_big, spawn_log_big, usage_big, claude_json_big, account_big (a file over script.read_max_bytes), task_line (a task line only V8 parses), resets_object (a reset time that is an object: V8's legacy date parser reads its text), dedupe_unsure (an emit-dedupe transcript timestamp only V8 reads). |
+| `ctxbudget.ah_unsure_log_kind` | `ctxbudget_unsure` |  |  | Engine log kind of an auto-handover, auto-handover-pause-nag or limit-conserve-inject case the engine cannot reproduce exactly, so it is decided on the stated stand-in (logged and counted as native_unable): relative_home, no_home, test_guard (HOME set but relative or empty, no home at all, or HOME unset with the passwd home being the real one under a spawn_ctx.test_markers variable; HOME unset otherwise adopts the passwd home as os.homedir() does), relative_transcript, relative_cwd (a relative path with no absolute payload cwd: Node resolves it against its own directory), local_date (a request time zone other than UTC), repo_root (a checkout the resolver cannot classify exactly), fresh_line, fresh_timestamp, fresh_path (a transcript line or work timestamp only V8 reads, a relative written path with no cwd), handover_big, spawn_log_big, usage_big, claude_json_big, account_big (a file over script.read_max_bytes), task_line (a task line only V8 parses), resets_object (a reset time that is an object: V8's legacy date parser reads its text), dedupe_unsure (an emit-dedupe transcript timestamp only V8 reads). |
 | `ctxbudget.ah_via_pct` | `pct` |  |  | The firedVia word of a percent crossing. |
 | `ctxbudget.ah_via_stop_prefix` | `stop-` |  |  | The prefix the Stop-side fire records in the latch's firedVia. |
 | `ctxbudget.ah_via_tokens` | `tokens` |  |  | The firedVia word of a token-ceiling crossing. |
@@ -3425,12 +3425,18 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 
 | Key | Default | Env override | Unit | What it is |
 |---|---|---|---|---|
-| `jev_weekly.decision_log` | `logs/jev-assist.ndjson` |  |  | The Jev decision log the weekly report reads, relative to the anti-hall directory; its rotated generations are this name plus a dot and a number. |
+| `jev_weekly.guard` | `jev-scorecard` |  |  | The guard name on the weekly scorecard notice. |
 | `jev_weekly.latch_file` | `state/jev-weekly-notice.json` |  |  | The weekly latch, relative to the anti-hall directory: the time of the last check. |
 | `jev_weekly.latch_key` | `lastCheckedTs` |  |  | The key of the weekly latch that holds the time of the last check. |
+| `jev_weekly.mode_off` | `off` |  |  | The Jev mode name of an integration that is off. |
+| `jev_weekly.mode_on` | `on` |  |  | The Jev mode name of an integration that is on. |
+| `jev_weekly.notice_instead` | `run /anti-hall:jev.` |  |  | What the weekly scorecard notice tells the reader to do. |
 | `jev_weekly.notice_setting` | `8 entries` |  |  | The setting jev.weeklyNotice (on by default; a legacy jev.json value is honoured). |
+| `jev_weekly.notice_what` | `{id} is ready to switch {to}.` |  |  | What the weekly scorecard notice says: {id} (the integration), {to} (jev_weekly.to_on or jev_weekly.to_off). |
 | `jev_weekly.period_ms` | `604800000` |  | ms | How often the scorecard check may run. |
 | `jev_weekly.summary` | `Stays silent when the weekly Jev scorecard notice cannot be due (Jev off, not...` |  |  | One-line description of the jev-weekly-scorecard check in the generated reference. |
+| `jev_weekly.to_off` | `OFF` |  |  | The direction word of a REMOVE verdict whose integration is not yet off. |
+| `jev_weekly.to_on` | `ON` |  |  | The direction word of a KEEP verdict whose integration is not yet on. |
 
 ### session_gates.toml / repair_reload
 
@@ -4158,6 +4164,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_role.pg_headline` | `Primary turn held: DevSwarm workspaces or messages need attention first.` |  |  | Headline of the block. |
 | `devswarm_role.pg_hour_per_day` | `24` |  |  | Hours in a day (approxAge). |
 | `devswarm_role.pg_id_key_prefix` | `id:` |  |  | The family key of a row whose worktree resolves to no mesh id (familyKeyOf). |
+| `devswarm_role.pg_ident_unsure_id` | `primary-unresolved` |  |  | The partition id the Primary's Stop gate names when the work tree around its directory could not be resolved exactly (a nested checkout git did not answer for): the gate blocks on an unreadable own mailbox under this id instead of passing. |
 | `devswarm_role.pg_ignore_file` | `ignore.json` |  |  | The nag-ignore list (devswarm-ignore.js), under the DevSwarm directory. |
 | `devswarm_role.pg_inbox_unreadable` | `inbox unreadable` |  |  | Label of an unknown row without members. |
 | `devswarm_role.pg_inspect` | `INSPECT the unread backlog via `devswarm.js inbox peek-primary <id>` (read-on...` |  |  | The inspect hint when a child has unread. |
@@ -4329,10 +4336,12 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_gates.bash_tool` | `Bash` |  |  | The tool name the reply tracker and the drain nudge observe. |
 | `devswarm_gates.cd_event` | `PostToolUse` |  |  | The hook event name the drain nudge answers in. |
 | `devswarm_gates.cd_message` | `⚠️ anti-hall · devswarm-inbox: {n} unread message(s) addressed to YOU (oldest...` |  |  | The drain nudge: {n} (unread count), {age}, {cli} (the DevSwarm CLI path), {id} (the workspace id). |
+| `devswarm_gates.cd_message_unknown` | `⚠️ anti-hall · devswarm-inbox: the unread count of YOUR mailbox could not be ...` |  |  | The drain nudge when the child's unread count could not be read (a project or message store the engine cannot read exactly): {cli} (the DevSwarm CLI path), {id} (the workspace id). Shown instead of silence, throttled like the counted nudge. |
 | `devswarm_gates.cd_minutes_suffix` | `m` |  |  | Suffix of the oldest-message age in whole minutes. |
 | `devswarm_gates.cd_state_dir` | `child-drain` |  |  | Directory of the drain nudge's per-workspace throttle state (last count, last shown time), under the DevSwarm state directory. |
 | `devswarm_gates.cd_throttle_ms` | `600000` |  |  | How long an unchanged unread count stays quiet after the drain nudge showed it (THROTTLE_MS); a changed count is shown at once. |
 | `devswarm_gates.cd_unknown_age` | `unknown age` |  |  | The age text of a backlog whose oldest message has no usable time. |
+| `devswarm_gates.cd_unknown_count` | `-1` |  |  | The count the drain nudge's throttle state records for an unreadable mailbox (below zero, so it never equals a real count and the nudge repeats only after devswarm_gates.cd_throttle_ms). |
 | `devswarm_gates.cg_archived_ask` | `Save a handover (`/anti-hall:handover`) to `{path}` (never a flat file) if yo...` |  |  | The handover request in the archived block ({path} is the canonical handover path). |
 | `devswarm_gates.cg_archived_block` | `Archived: this workspace was archived. {ask}, THEN stop — this workspace is n...` |  |  | The reason an archived workspace's Stop is blocked ({ask} is the handover request, {path} the canonical handover path). |
 | `devswarm_gates.cg_archived_cap` | `1` |  |  | How many times an archived workspace's Stop is blocked (once, then it may stop freely). |
@@ -9632,6 +9641,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `jevrep.thr_windows` | `2 entries` |  |  | The cost windows of the report: label to days. |
 | `jevrep.triage_log` | `logs/jev-triage.ndjson` |  |  | The Jev triage log, relative to the anti-hall home directory. |
 | `jevrep.uncached_reasons` | `unsupported-transport, disabled, no-key` |  |  | The balance results that are local configuration answers and are never cached. |
+| `jevrep.weekly_argv` | `--weekly, --json` |  |  | The arguments the weekly scorecard check hands to the report (the 7-day scorecard as JSON), so a script reads the verdicts without printing a report. |
 | `jevrep.why_script` | `the report rules script could not run` |  |  | The report rules script is off or failed. |
 
 ### operator_cli.toml / opcli

@@ -102,10 +102,6 @@ function lcAdopt(p) {
 }
 
 function decide(p) {
-  try { return lcDecide(p); } catch (e) { if (e !== cb.DEFER) throw e; ah.unable('limit-conserve-inject:ctxbudget_unsure'); return lcEmpty(); }
-}
-
-function lcDecide(p) {
   if (ah.env.get(ah.cfg('ctxbudget.judge_child_env')) === ah.cfg('ctxbudget.judge_child_on')) return 'allow';
   if (!lcAdopt(p)) return lcEmpty();
   var home = ah.home();

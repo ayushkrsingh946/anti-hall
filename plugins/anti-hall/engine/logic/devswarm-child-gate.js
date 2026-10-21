@@ -225,7 +225,7 @@ function cgRepoKey(ctx) {
   var c = ah.repo.context(cgCwd(ctx));
   if (c.unsure) ah.unable('devswarm-child-gate:repo_context');
   ctx.key = null;
-  if (!c.unsure && c.root) { try { ctx.key = ah.mesh.repoKey(c.root); } catch (e) { if (e !== meshDefer) throw e; ah.unable('devswarm-child-gate:repo_key'); } }
+  if (!c.unsure && c.root) ctx.key = ah.mesh.repoKey(c.root); // an unresolvable project has no key: no report is found, so the stop is not excused
   return ctx.key;
 }
 
@@ -254,8 +254,7 @@ function cgDrop(ctx, since, diag) {
   if (!dgSafeId(id)) return null;
   var key = cgRepoKey(ctx);
   if (!key) return null;
-  var nonce = null;
-  try { nonce = ah.mesh.readerNonce(); } catch (e) { if (e !== meshDefer) throw e; ah.unable('devswarm-child-gate:reader_nonce'); }
+  var nonce = ah.mesh.readerNonce(); // null when it cannot be derived: no record authenticates by nonce
   var own = [];
   var desc = cgJson(cgDescPath(ctx, id));
   if (desc && typeof desc === 'object' && desc.sessionId !== null && desc.sessionId !== undefined && String(desc.sessionId) !== '') own.push(String(desc.sessionId));
@@ -321,14 +320,13 @@ function cgDurable(ctx) {
   if (inbox === null) { ctx.durable = none; return none; }
   if (cursor === undefined || cursor === null || cursor === '' || cursor === false || cursor === 0) cursor = null;
   else if (typeof cursor !== 'string' || cursor.charAt(0) !== '/') { ah.unable('devswarm-child-gate:cursor_path'); cursor = typeof cursor === 'string' ? hookProc.resolve(ctx.p, cursor) : null; }
-  var key = null;
+  var key = null, keyUnsure = false;
   if (wt) {
     if (typeof wt !== 'string') ah.unable('devswarm-child-gate:worktree_shape');
-    else { try { key = ah.mesh.repoKey(wt); } catch (e) { if (e !== meshDefer) throw e; ah.unable('devswarm-child-gate:repo_key'); } }
+    else { var kd = ah.mesh.repoKeyDetail(wt); key = kd.key; keyUnsure = kd.unsure === true; }
   }
-  var c;
-  // a store the host cannot read exactly leaves the count unknown (the native probe and the capped 'unknown' block then apply)
-  try { c = ah.mesh.countFor(key, id, inbox, cursor, ctx.now); } catch (e) { if (e !== meshDefer) throw e; ah.unable('devswarm-child-gate:count_unsure'); c = { known: false, unread: 0 }; }
+  // a project or a store the host cannot read exactly leaves the count unknown (the native probe and the capped 'unknown' block then apply)
+  var c = keyUnsure ? { known: false, unread: 0 } : ah.mesh.countFor(key, id, inbox, cursor, ctx.now);
   ctx.durable = { known: !!c.known, count: c.known ? c.unread : 0 };
   return ctx.durable;
 }
@@ -436,8 +434,7 @@ function cgSession(p) {
 // The archived workspace's Stop: one block (its own stop-policy kind and budget) asking for a handover at the canonical path, then free.
 // The flat-handover rewrite hint and the archived-child metrics of the Node hook are not reproduced (the metrics are reporting only).
 function cgArchivedStop(ctx) {
-  var path = null;
-  try { path = cb.expectedHandoverPath({ cwd: ctx.p.cwd, session_id: ctx.sid }); } catch (e) { if (e !== cb.DEFER) throw e; ah.unable('devswarm-child-gate:handover_path'); }
+  var path = cb.expectedHandoverPath({ cwd: ctx.p.cwd, session_id: ctx.sid });
   if (!path) path = ah.cfg('devswarm_gates.cg_archived_path_fallback');
   if (cgConsume(ctx, [ah.cfg('devswarm_gates.cg_kind_archived')], ah.cfgNum('devswarm_gates.cg_archived_cap')).block) {
     var ask = text.render(ah.cfg('devswarm_gates.cg_archived_ask'), { path: path });
@@ -566,8 +563,5 @@ function decide(p, opts, event) {
   var root = jx.isObj(opts) && typeof opts.plugin_root === 'string' ? opts.plugin_root : ah.env.get(ah.cfg('env.plugin_root'));
   var l = dwLaunchersNative(root, true);
   if (l === null) { ah.unable('devswarm-child-gate:no_launchers'); return 'allow'; } // no usable home or plugin root: no launcher can be named
-  var ctx;
-  // a mesh answer the host cannot give exactly (lib/67-mesh.js) ends the gate quietly: nothing planned is written
-  try { ctx = cgGate(p, root, l); } catch (e) { if (e !== meshDefer) throw e; ah.unable('devswarm-child-gate:mesh_unsure'); return 'allow'; }
-  return cgApply(ctx);
+  return cgApply(cgGate(p, root, l));
 }

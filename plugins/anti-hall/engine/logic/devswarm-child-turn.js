@@ -230,10 +230,10 @@ function ctUnsure(why) {
 
 // A setting of the chain; one that needs a plugin root the request lacks counts as unset (the default applies).
 function ctSetting(key, dflt, root) {
-  try { return gates.setting(key, dflt, root); } catch (e) { if (e !== gates.UNDECIDABLE) throw e; ctUnsure('setting'); return dflt; }
+  return gates.setting(key, dflt, root);
 }
 
-function ctDecide(p, opts) {
+function decide(p, opts) {
   if (devswarmGate.silent(true, 'devswarm_prompt.child_setting')) return 'allow';
   return (function () {
     // An active child. Its working directory must be known.
@@ -351,9 +351,4 @@ function ctDecide(p, opts) {
     if (!segments.length) return 'allow';
     return { advisory: text.advisoryJson(ah.cfg('devswarm_prompt.event'), segments.join(ah.cfg('devswarm_prompt.child_block_joiner'))) };
   })();
-}
-
-function decide(p, opts) {
-  // a mesh answer the host cannot give exactly (lib/67-mesh.js) adds nothing this turn (an advisory, repeated on the next prompt)
-  try { return ctDecide(p, opts); } catch (e) { if (e !== meshDefer) throw e; ah.unable('devswarm-child-turn:mesh_unsure'); return 'allow'; }
 }

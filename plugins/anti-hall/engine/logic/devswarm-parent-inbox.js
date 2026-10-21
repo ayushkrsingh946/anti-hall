@@ -1435,6 +1435,5 @@ function piDecide(p, opts) {
 }
 
 function decide(p, opts) {
-  // a mesh answer or setting the host cannot give exactly (lib/67-mesh.js, lib/60-gates.js) adds nothing this turn
-  try { return piDecide(p, opts); } catch (e) { if (e === meshDefer || e === gates.UNDECIDABLE) return piDefer('unsure'); throw e; }
+  return piDecide(p, opts);
 }

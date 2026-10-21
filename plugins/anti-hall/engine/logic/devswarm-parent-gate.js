@@ -59,11 +59,6 @@ function pgPathField(o, k) {
 // A numeric setting of the gate: its value along the settings chain (the shipped default when nothing sets it).
 function pgSetNum(key) { return ah.settings.num(key); }
 
-// A mesh answer the host cannot give exactly (lib/67-mesh.js throws meshDefer) takes `dflt` (counted).
-function pgMesh(site, dflt, fn) {
-  try { return fn(); } catch (e) { if (e !== meshDefer) throw e; ah.unable('devswarm-parent-gate:' + site); return dflt; }
-}
-
 function pgShQuote(s) { return "'" + s.replace(/'/g, "'\\''") + "'"; }
 function pgDq(s) { return '"' + s.replace(/["\\$`]/g, function (c) { return '\\' + c; }) + '"'; }
 
@@ -74,6 +69,8 @@ function pgReadOwn(home, idn, selfKey) {
   // `unread`, `stale`, `source` ('live' | 'cache' | null), `rawZero`, `derive` and `urgency` are the own-reader projection
   var own = { id: null, unknown: false, parsed: false, registryIds: [], pending: [], truncated: null, registryRows: [], archivedKnown: false,
     unread: 0, stale: false, source: null, rawZero: false, derive: false, urgency: null };
+  // a work tree the host could not resolve (counted at mesh:ident) may be a Primary's: it blocks as an unreadable own mailbox, never passes
+  if (idn.unsure === true) { own.id = ah.cfg('devswarm_role.pg_ident_unsure_id'); own.unknown = true; return own; }
   if (idn.top === null) return own;
   var id = idn.own, prefix = ah.cfg('mesh_write.primary_prefix');
   var hash;
@@ -214,7 +211,7 @@ function pgQuestions(home, own, descriptors, selfKey, fx) {
     var meshIds = Object.create(null);
     var resolve = function (wt) {
       if (typeof wt !== 'string') { ah.unable('devswarm-parent-gate:worktree_shape'); return null; }
-      if (!has(meshIds, wt)) { try { meshIds[wt] = ah.mesh.canonicalId(wt); } catch (e) { if (e !== meshDefer) throw e; ah.unable('devswarm-parent-gate:canonical_id'); meshIds[wt] = null; } }
+      if (!has(meshIds, wt)) meshIds[wt] = ah.mesh.canonicalId(wt);
       return meshIds[wt];
     };
     var families = piFamilies(rows, resolve);
@@ -261,7 +258,7 @@ function pgQuestions(home, own, descriptors, selfKey, fx) {
     var wt = piStrField(row.worktreePath), sid = piStrField(row.sessionId);
     var mk = JSON.parse(ahHost.piMarker(from, wt, sid));
     if (mk.unsure) { ah.unable('devswarm-parent-gate:marker_unsure'); mk = { archived: false }; } // an unreadable marker leaves the asker live (the stricter reading)
-    var app = pgMesh('app_archived', { verdict: null, cache: null }, function () { return ah.mesh.appArchived(from, wt === null ? '' : wt, true); });
+    var app = ah.mesh.appArchived(from, wt === null ? '' : wt, true);
     if (app.cache !== null) fx.cacheOwed = true;
     var appArchived = false;
     if (app.verdict !== null) appArchived = app.verdict;
@@ -488,7 +485,7 @@ function pgGate(p, root, l) {
   else { ah.unable('devswarm-parent-gate:session_shape'); sid = String(sidRaw); }
   var cwd = p.cwd;
   if (typeof cwd !== 'string' || cwd === '' || cwd.charAt(0) !== '/') { ah.unable('devswarm-parent-gate:cwd_stand_in'); cwd = hookProc.cwd(p); } // Node falls back to its own working directory: the stand-in
-  var idn = pgMesh('ident', { top: null, own: null, key: null }, function () { return ah.mesh.ident(cwd); }), selfKey = idn.key;
+  var idn = ah.mesh.ident(cwd), selfKey = idn.key;
   var own = pgReadOwn(home, idn, selfKey);
   // the live count is 0 after a positive summary count: Node refreshes the summary from the store (deriveSummary), before any
   // later read of it
@@ -524,7 +521,7 @@ function pgGate(p, root, l) {
   keyMemo[cwd] = selfKey;
   if (derived !== null) readyMemo[selfKey] = pgSummaryWs(derived);
   function keyOf(wt) {
-    if (!Object.prototype.hasOwnProperty.call(keyMemo, wt)) keyMemo[wt] = pgMesh('repo_key', null, function () { return ah.mesh.repoKey(wt); });
+    if (!Object.prototype.hasOwnProperty.call(keyMemo, wt)) keyMemo[wt] = ah.mesh.repoKey(wt);
     return keyMemo[wt];
   }
   descriptors.forEach(function (d) {
@@ -533,7 +530,7 @@ function pgGate(p, root, l) {
     if (isOwn && !(own.parsed && own.rawZero)) return;
     var fresh = selfKey !== null ? keyOf(d.worktree) : null;
     if (selfKey !== null && fresh !== null && selfKey !== fresh) return;
-    var registered = selfKey !== null && fresh === null ? pgMesh('registered_key', null, function () { return ah.mesh.registeredKey(d.raw, d.id); }) : fresh;
+    var registered = selfKey !== null && fresh === null ? ah.mesh.registeredKey(d.raw, d.id) : fresh;
     var foreign = selfKey !== null && fresh === null && registered !== null && registered !== selfKey;
     if (ignore[d.id] === true) return;
     var done = !isOwn && pgArchiveReady(home, d.id, fresh, readyMemo);
@@ -547,7 +544,7 @@ function pgGate(p, root, l) {
       else if (bl.unknown === 'inbox-missing' && pgWorktreeGone(d.worktree, goneMemo)) dead = true;
       else if (bl.unknown === 'inbox-missing' && !foreign) {
         var conclusive = false;
-        if (fresh !== null) { var mc = pgMesh('message_count', { state: 'none' }, function () { return ah.mesh.messageCount(fresh, d.id); }); conclusive = mc.state === 'ok' && mc.count > 0; }
+        if (fresh !== null) { var mc = ah.mesh.messageCount(fresh, d.id); conclusive = mc.state === 'ok' && mc.count > 0; }
         if (!conclusive) { e.unknown = true; e.reason = bl.unknown; e.reasonPath = bl.path; e.reasonErrno = bl.errno; }
       } else { e.unknown = true; e.reason = bl.unknown; e.reasonPath = bl.path; e.reasonErrno = bl.errno; }
     } else {
@@ -563,7 +560,7 @@ function pgGate(p, root, l) {
     }
     var unionKey = fresh !== null ? fresh : (dead ? registered : null);
     if (!e.unknown && unionKey !== null && !foreign) {
-      var u = pgMesh('store_union', { state: 'unsure' }, function () { return ah.mesh.union(unionKey, d.id, d.inbox, d.cursor, isOwn, now); });
+      var u = ah.mesh.union(unionKey, d.id, d.inbox, d.cursor, isOwn, now);
       if (u.state === 'unsure') { e.unknown = true; e.reason = 'store-unreadable'; e.reasonPath = null; e.reasonErrno = null; } // the store cannot be counted: unknown (the stricter reading)
       else if (u.state === 'ok') {
         ownStoreCounted = true;
@@ -592,7 +589,7 @@ function pgGate(p, root, l) {
     }
     // the eligibility projection (row-eligibility.js `of`, liveness on, the cross-invocation app cache on)
     e.archived = pgMarkerArchived(home, d);
-    var app = pgMesh('app_archived', { verdict: null, cache: null }, function () { return ah.mesh.appArchived(d.id, d.worktree, true); });
+    var app = ah.mesh.appArchived(d.id, d.worktree, true);
     if (app.cache !== null) fx.cacheOwed = true;
     if (app.verdict !== null) e.appArchived = app.verdict;
     else {
@@ -602,11 +599,11 @@ function pgGate(p, root, l) {
       e.appArchived = false;
     }
     e.ignored = pgExists(pgDir(home) + '/' + ah.cfg('devswarm_role.pg_dir_archive_ignore') + '/' + d.id + '.json');
-    if (d.session !== '') e.live = pgMesh('session_alive', true, function () { return ah.mesh.sessionAlive(d.session); }); // unknown: taken as alive
+    if (d.session !== '') e.live = ah.mesh.sessionAlive(d.session); // unknown: taken as alive
     if (e.archived || e.appArchived || e.ignored) e.stateSkipped = true; // only a member of the Primary's own family could still need it (checked there)
     else if (d.id !== '' && d.session !== '' && d.worktree !== '') {
       var fresh_ms = pgSetNum('devswarm_role.pg_set_busy_fresh') * pgMin();
-      var b = pgMesh('child_busy', { none: true }, function () { return ah.mesh.childBusy(d.id, d.worktree, d.session, now, fresh_ms); });
+      var b = ah.mesh.childBusy(d.id, d.worktree, d.session, now, fresh_ms);
       if (b.none !== true) {
         e.waiting = b.waiting && e.live;
         e.waitingQ = e.waiting ? b.question : null;
@@ -1075,8 +1072,5 @@ function decide(p, opts, event) {
   if (l === null) { ah.unable('devswarm-parent-gate:no_launchers'); return 'allow'; } // no usable home or plugin root: no launcher can be named
   if (!jx.isObj(p)) { ah.unable('devswarm-parent-gate:payload_shape'); p = {}; }
   if (p[ah.cfg('devswarm_gates.readside_stop_field')] === true) return 'allow';
-  var fx;
-  // a mesh answer the host cannot give exactly (lib/67-mesh.js) ends the gate quietly: nothing planned is written
-  try { fx = pgGate(p, root, l); } catch (e) { if (e !== meshDefer) throw e; ah.unable('devswarm-parent-gate:mesh_unsure'); return 'allow'; }
-  return pgApply(fx);
+  return pgApply(pgGate(p, root, l));
 }

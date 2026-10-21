@@ -108,7 +108,7 @@ function rtDecide(p) {
   var cwd = typeof p.cwd === 'string' ? p.cwd : null;
   if (!cwd) return 'allow';
   if (cwd.charAt(0) !== '/') { ah.unable('devswarm-parent-reply-tracker:relative_cwd'); cwd = hookProc.cwd(p); } // resolved against the stand-in directory
-  var key = ah.mesh.contextKey(cwd);
+  var key = ah.mesh.contextKey(cwd); // a project the host cannot resolve is counted (mesh:context_key) and records nothing: the tracker never prints
   if (!key) return 'allow';
   if (!dgActive() && ah.fs.realpath(home + '/' + ah.cfg('devswarm_role.pg_devswarm_dir') + '/' + ah.cfg('devswarm_role.pg_dir_summaries') + '/' + key + '.json') === null) return 'allow';
   var now = cgFinite(p.timestamp) ? p.timestamp : ah.clock.now();
@@ -143,5 +143,5 @@ function decide(p) {
   if (p.tool_name !== ah.cfg('devswarm_gates.bash_tool')) return 'allow';
   var c = jx.isObj(p.tool_input) ? p.tool_input.command : undefined;
   if (typeof c !== 'string' || !rtLooksLikeSend(c)) return 'allow';
-  try { return rtDecide(p); } catch (e) { if (e !== meshDefer) throw e; ah.unable('devswarm-parent-reply-tracker:mesh_unsure'); return 'allow'; } // the tracker records, it never prints
+  return rtDecide(p);
 }

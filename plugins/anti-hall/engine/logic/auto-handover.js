@@ -1,7 +1,6 @@
 // check = "auto-handover" (UserPromptSubmit). The threshold fire, the soft advisory, the milestone nag, the latch re-arm and the
 // post-handover new-work gate with its backstop. The hooks share one per-session latch (<home>/.anti-hall/auto-handover/<tag>.json);
-// it is read and written in Node's shape. Every write is collected while deciding and done at the end, so a case that cannot be settled
-// writes nothing. The home is Node's os.homedir() (hookProc.adoptHome: HOME unset adopts the passwd home); a relative
+// it is read and written in Node's shape. Every write is collected while deciding and done at the end. The home is Node's os.homedir() (hookProc.adoptHome: HOME unset adopts the passwd home); a relative
 // transcript path is opened from the payload cwd or the stand-in directory. What the engine cannot reproduce exactly adds nothing
 // (counted, native_unable): no home, the real home under a test marker, a relative cwd, a request time zone other than UTC, a checkout
 // the resolver cannot classify. A prompt with text on an armed gate also asks the
@@ -38,12 +37,7 @@ function ahAdopt(p) {
   return true;
 }
 
-// A case lib/75-ctxbudget.js hands back (cb.defer) adds nothing to this prompt and writes nothing (every write is collected until the end).
 function decide(p) {
-  try { return ahDecide(p); } catch (e) { if (e !== cb.DEFER) throw e; ah.unable('auto-handover:ctxbudget_unsure'); return ahEmpty(); }
-}
-
-function ahDecide(p) {
   if (ah.env.get(ah.cfg('ctxbudget.judge_child_env')) === ah.cfg('ctxbudget.judge_child_on')) return 'allow';
   if (!p || typeof p !== 'object' || ah.cfg('coordinator_work.agent_markers').some(function (k) { return p[k] !== undefined && p[k] !== null; })) return ahEmpty();
   if (!ahAdopt(p)) return ahEmpty();

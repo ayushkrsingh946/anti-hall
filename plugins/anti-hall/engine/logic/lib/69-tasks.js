@@ -91,8 +91,7 @@ var tk = {
     if (!o || jx.re('task_guard.coordinator_owner_re', 'i').test(o)) return false;
     var id = o.replace(jx.re('task_guard.workspace_prefix_re', 'i'), '').trim();
     if (!id || !tk.appDbPresent(ah.home())) return false;
-    var verdict = null;
-    try { verdict = ah.mesh.appArchived(id, '', false).verdict; } catch (e) { if (e !== meshDefer) throw e; ah.unable('childattended:verdict_unsure'); }
+    var verdict = ah.mesh.appArchived(id, '', false).verdict; // null (no verdict, or one the host cannot give: counted) goes on to the builders list
     if (verdict === false) return true;
     if (verdict === true) return false;
     var all = tk.appBuilders();
