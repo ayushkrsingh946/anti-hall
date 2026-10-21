@@ -661,12 +661,6 @@ value = "stale"
 
 # ---- the front door and the shadow ---------------------------------------------------------------------------------
 
-[mesh_write.exit_signal_base]
-doc = "A Node child killed by signal N exits as this plus N (the shell convention)."
-value = 128
-min = 0
-max = 255
-
 [mesh_write.msg_unable]
 doc = "stderr line when the engine cannot answer a mesh verb (an unported verb, a case it defers, no plugin context). Nothing was written; the exit code is mesh_write.exit_defer."
 value = "ah-engine mesh: this verb or case is not available natively; nothing was done"
@@ -1932,3 +1926,15 @@ value = 10000
 unit = "ms"
 min = 100
 max = 600000
+
+[mesh_write.shadow_backup_pages]
+doc = "Pages per step of the store snapshot (SQLite online backup); large means one step."
+value = 1000000
+min = 1
+max = 2147483647
+
+[mesh_write.shadow_backup_pause_ms]
+doc = "Pause between snapshot steps, in milliseconds."
+value = 0
+min = 0
+max = 10000

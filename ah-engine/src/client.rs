@@ -1296,7 +1296,7 @@ mod tests {
 
     #[test]
     fn a_panic_fails_open_whatever_the_arguments() {
-        assert_eq!(panic_code(&["--fallback".into(), "/x/hook.js".into()]), 0);
+        assert_eq!(panic_code(&["whatever".into(), "/x/hook.sh".into()]), 0);
         assert_eq!(panic_code(&[]), 0);
     }
 

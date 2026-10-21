@@ -275,10 +275,6 @@ value = "ingest-"
 doc = "The suffix of a JSON file."
 value = ".json"
 
-[devswarm_ingest.ndjson_suffix]
-doc = "The suffix of an NDJSON file."
-value = ".ndjson"
-
 [devswarm_ingest.log_file]
 doc = "The ingest log, relative to the home directory (the file the Node daemon's unit writes its output to); one `[ISO time] line` each."
 value = ".anti-hall/devswarm-ingest.log"

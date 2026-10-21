@@ -62,8 +62,6 @@ script/host_proc.rs | SEEN | pids seen by the call in progress, cleared at the s
 script/host_proc.rs | TERMED | pids terminated by the call in progress, cleared at the start | per-call
 telemetry/emit.rs | BATCH | events of the request in progress, taken at its end | per-request
 telemetry/mod.rs | STAGE | events staged by one request, taken or dropped at its end | per-request
-ops/mod.rs | OUT_CAPTURE | the output of one CLI command being captured, taken by the caller | per-command
-ops/mod.rs | ERR_CAPTURE | the error output of one CLI command being captured | per-command
 
 # ---- captured child output ------------------------------------------------------------------------------------------------
 dispatch/node.rs | Capture.buf | cut at mem.proc_output_max_bytes (mem.proc_output_marker appended) | output of the Node fallback child

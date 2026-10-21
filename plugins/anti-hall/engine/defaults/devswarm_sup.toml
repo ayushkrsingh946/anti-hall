@@ -445,18 +445,6 @@ value = "dssup-notice-drained"
 
 # ---- the worker process ----------------------------------------------------------------------------------------------------
 
-[devswarm_sup.node_bin]
-doc = "The Node executable the `node` duties run through (resolved on PATH). A missing one fails the duty with a recorded error; nothing else is affected."
-value = "node"
-
-[devswarm_sup.detail_chars]
-doc = "Most characters of a duty's output kept in the tick record."
-value = 600
-min = 40
-max = 20000
-
-# ---- verdict mirror of an engine poke / escalate ---------------------------------------------------------------------------
-
 [devswarm_sup.liveness_dir]
 doc = "The liveness verdict files, relative to the DevSwarm state directory (Node: livenessPathFor)."
 value = "liveness"

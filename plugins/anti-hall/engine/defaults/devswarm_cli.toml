@@ -501,12 +501,6 @@ value = " — "
 doc = "The remedy named by a gate refused for a project mismatch."
 value = "run this from within that project's worktree to gate it"
 
-[devswarm_cli.gates_dump_table]
-doc = "The label of the gates table in the witness's comparison record."
-value = "gates"
-
-# ---- logs -----------------------------------------------------------------------------------------------------------------
-
 [devswarm_cli.verb_logs]
 doc = "The verb that reads the shared devswarm JSONL log."
 value = "logs"
@@ -925,12 +919,6 @@ value = "done"
 [devswarm_cli.done_tokens_dir]
 doc = "The directory under the DevSwarm root that keeps each workspace's token usage state."
 value = "token-usage"
-
-[devswarm_cli.message_row_name]
-doc = "What the Node witness reports as different when the message row Node wrote is not the row the engine wrote."
-value = "messages"
-
-# ---- primary (lane l8c) -------------------------------------------------------------------------------------------------
 
 [devswarm_cli.verb_primary]
 doc = "The verb that shows who holds the Primary seat of this worktree (and takes it over)."

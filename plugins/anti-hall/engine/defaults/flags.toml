@@ -65,6 +65,10 @@ value = "--dry-run"
 doc = "The hook event name to dispatch (`hook --event`)."
 value = "--event"
 
+[flag.fallback]
+doc = "The fallback transport of the Jev classifier (`jev-setup enable`). Older versions of `hook` took a Node script here; it is ignored now."
+value = "--fallback"
+
 [flag.fallback-map]
 doc = "File that maps hook entries to their Node fallback commands (`hook --event`)."
 value = "--fallback-map"
