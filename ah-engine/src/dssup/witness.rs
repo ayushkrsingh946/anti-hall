@@ -135,6 +135,15 @@ pub fn finish(job: Job, ctx: &Ctx, runner: &dyn Runner, engine: &Value) -> Value
     };
     rec["ts"] = json!(ctx.now);
     append(ctx, &rec);
+    if rec["match"] == false {
+        super::tick::emit_mistake(
+            ctx.home,
+            &defaults::render("devswarm_sup.act_duty", &[("duty", &job.duty)]),
+            "",
+            defaults::text("devswarm_sup.act_witness_mismatch"),
+            "",
+        );
+    }
     crate::discard::harmless(std::fs::remove_dir_all(&job.scratch)); // keep: this is the engine's own scratch mirror (empty and sparse files it created)
     rec
 }

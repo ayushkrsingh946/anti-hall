@@ -885,6 +885,7 @@ function cmdInboxMessagesInner(id, flags, ctx, opts) {
   let windowUndated = 0;
   let windowSinceWithheld = 0;
   let meshAddedUnreadCount = 0; // count of sibling-partition rows folded into `messages` after dedup (0 unless meshUnionActive)
+  let ownListDropped = 0; // unread rows the own-family filter took out of the list that union.unread did not already leave out of the count
   let meshAddedTotal = 0; // Σ sibling partitions' own full `messageCount` (0 unless meshUnionActive) — undeduped, mirrors how `total` was never cross-source-deduped pre-fix either (only `messages`/`unreadCount` are)
   // Fix Wave 2 F3: this verb (read-primary/peek-primary, the one
   // `hooks/lib/devswarm-wake.js` actually routes the Primary through) never
@@ -1670,6 +1671,17 @@ function cmdInboxMessagesInner(id, flags, ctx, opts) {
         acked = applied.acked;
       }
     }
+    // #181: the unread LIST leaves out the mail the reader's own identity family sent, as the unread COUNT does (history views, which
+    // are not unreadOnly, keep it). The ack targets above were derived from the whole list, so an ack still walks the own rows.
+    if (unreadOnly && Array.isArray(messages) && messages.length) {
+      const family = readerCursors.familyOf(s, id);
+      if (family && family.size) {
+        const isOwn = (m) => !!(m && m.sender != null && family.has(String(m.sender)));
+        // rows of the NDJSON/store union are already out of union.unread; any other row (a sibling partition, the store-only path) is not
+        ownListDropped = messages.filter((m) => isOwn(m) && !(union && (m.origin === 'ndjson' || m.origin === 'store'))).length;
+        messages = messages.filter((m) => !isOwn(m));
+      }
+    }
   } finally { s.close(); }
   // unreadCount (FIX 2): the actual count of unread messages AS OF the cursor
   // read at the top of this call (before any ack this call itself performs) —
@@ -1683,7 +1695,7 @@ function cmdInboxMessagesInner(id, flags, ctx, opts) {
   // whenever meshUnionActive was false (single-row Primary, byte-identical).
   const unreadCount = (union
     ? union.unread
-    : (Number.isFinite(total) && Number.isFinite(cursor) ? Math.max(0, total - cursor) : 0)) + meshAddedUnreadCount;
+    : (Number.isFinite(total) && Number.isFinite(cursor) ? Math.max(0, total - cursor) : 0)) + meshAddedUnreadCount - ownListDropped;
   // total: merged (dedup'd) total across both channels when the union is
   // active — matches `inbox count`'s `total` field, closing the exact
   // field-reported mismatch (457 unread via `count` vs 57 via `peek-primary`)

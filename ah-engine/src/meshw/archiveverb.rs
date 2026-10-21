@@ -358,7 +358,8 @@ fn read_object(p: &std::path::Path) -> R<(Vec<u8>, OVal, (u64, u64))> {
     if !md.is_file() {
         return defer("descriptor-not-file");
     }
-    let bytes = std::fs::read(p).map_err(|_| ident::Defer("descriptor-io".into()))?;
+    // bounded: a file swapped for a FIFO after the check above must not block the verb
+    let bytes = ident::read_bounded(p)?.ok_or_else(|| ident::Defer("descriptor-io".into()))?;
     let v = OVal::parse(&String::from_utf8_lossy(&bytes));
     match v {
         Some(d @ OVal::Obj(_)) => {
@@ -533,4 +534,19 @@ pub fn archive(inv: &Inv, a: &Args) -> R<Answer> {
     }
     lock.release();
     Ok(answer(if partial { 2 } else { 0 }, o.done()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::meshw::ident::fifo_kit::*;
+
+    #[test]
+    fn a_fifo_descriptor_defers_at_once_instead_of_blocking() {
+        let dir = scratch("archive");
+        let f = dir.join("d.json");
+        fifo(&f);
+        assert!(within("read_object", move || read_object(&f).is_err()));
+        crate::discard::harmless(std::fs::remove_dir_all(dir)); // keep: cleanup of a scratch directory
+    }
 }

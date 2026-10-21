@@ -5470,6 +5470,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `mesh_write.field_repo_key` | `repoKey` |  |  | A descriptor's persisted project key. |
 | `mesh_write.field_session_id` | `sessionId` |  |  | A descriptor's session field. |
 | `mesh_write.field_worktree_path` | `worktreePath` |  |  | A descriptor's worktree field. |
+| `mesh_write.fifo_test_bound_ms` | `10000` |  | ms | How long a test waits for a read of a FIFO before it calls the read blocked. |
 | `mesh_write.file_cron_found_mail` | `cron-found-mail.jsonl` |  |  | The cron-found-mail measurement file under the DevSwarm state directory (core.js cronFoundMailPath). |
 | `mesh_write.file_read_max_bytes` | `16777216` |  |  | Largest mesh file a read through a path from a descriptor or a session record may take (a durable inbox, a cursor file, a harness session record). A larger file, and anything that is no regular file (a FIFO, socket or device, whose read could block a worker for good), is not read: the hook's answer goes to Node. |
 | `mesh_write.flag_ack` | `ack` |  |  | roster's consume flag. |
@@ -5618,6 +5619,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `mesh_write.month_names` | `12 items` |  |  | Month abbreviations of that start time, January first (what Date.parse reads). |
 | `mesh_write.ms_per_minute` | `60000` |  |  | Milliseconds in a minute (the unit conversion of that setting). |
 | `mesh_write.msg_committed_failure` | `ah-engine mesh: the write was committed but the engine failed before printing...` |  |  | Stderr line for that case. |
+| `mesh_write.msg_descriptor_read_skipped` | `mesh read skipped: site={site}, reason={reason}, path={path}` |  |  | The log line when a file named by a descriptor (or a receipt) was not read because it is no regular file or is over the read cap. {site} {reason} {path}. |
 | `mesh_write.msg_mesh_read_hint` | `consumed broadcasts stay re-readable without moving any cursor: `mesh history...` |  |  | `hint` of a consuming mesh read. |
 | `mesh_write.msg_no_node_cli` | `ah-engine mesh: cannot find scripts/devswarm.js (no plugin root); run the ver...` |  |  | stderr line when the plugin root (and so Node's CLI) is unknown. |
 | `mesh_write.msg_node_exec_failed` | `ah-engine mesh: could not start node: {err}` |  |  | stderr line when starting Node failed. Placeholder: {err}. |
@@ -5744,6 +5746,10 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `mesh_write.shadow_panic` | `panic` |  |  | Shadow result: the engine path panicked (caught; Node's result was unaffected). |
 | `mesh_write.shadow_skipped` | `skipped` |  |  | Log result of a shadow-mode call for a verb that cannot be replayed on a store copy: Node ran it, the engine only counted it. |
 | `mesh_write.short_nonce_len` | `6` |  |  | Hex characters of the short form of a reader key in the cursor journal (shortInstanceNonce: sha1, first 6). |
+| `mesh_write.site_pull_descriptor` | `pull-descriptor` |  |  | The `site` label of a skipped read of a workspace descriptor by a pull. |
+| `mesh_write.site_pull_inbox` | `pull-inbox` |  |  | The `site` label of a skipped read of a durable inbox that a pull was about to append to. |
+| `mesh_write.site_read_cursor` | `read-cursor` |  |  | The `site` label of a skipped read of a cursor file (the NDJSON read position). |
+| `mesh_write.site_receipt` | `read-receipt` |  |  | The `site` label of a skipped read of a read receipt. |
 | `mesh_write.step_stall_default_min` | `30` |  |  | Minutes of the step stall window when no setting is given (devswarm.stepStallMin). |
 | `mesh_write.step_stall_env` | `ANTIHALL_DEVSWARM_STEP_STALL_MIN` |  |  | The environment variable of the devswarm.stepStallMin setting. |
 | `mesh_write.step_stall_key` | `stepStallMin` |  |  | The settings.json key (in the devswarm section) of the step stall window. |
@@ -7849,6 +7855,11 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 
 | Key | Default | Env override | Unit | What it is |
 |---|---|---|---|---|
+| `devswarm_sup.act_block_outcomes` | `refused` |  |  | The outcome words that count as a refusal (block) in an act telemetry event of the supervisor (a recover request the engine refused). |
+| `devswarm_sup.act_duty` | `duty-{duty}` |  |  | The action word of the act telemetry event of one duty's tick outcome ({duty} = the duty name). |
+| `devswarm_sup.act_recover_reasons` | `7 entries` |  |  | The reason word of the act telemetry event for each way a recover request is refused (caller, id, request, duplicate, descriptor, max, rollback_no_node). |
+| `devswarm_sup.act_skip_outcomes` | `skipped` |  |  | The outcome words that count as a skip (not applicable, nothing done) in an act telemetry event of the supervisor; a word in action_success is an allow, one in act_block_outcomes a block, any other an error. |
+| `devswarm_sup.act_witness_mismatch` | `witness-mismatch` |  |  | The reason word of the mistake telemetry event for a duty whose Node witness disagreed with what the engine did. |
 | `devswarm_sup.action_feature` | `devswarm-supervisor` |  |  | The feature name of the supervisor's action lines. |
 | `devswarm_sup.action_kind` | `action` |  |  | The kind of an action line of the action ledger. |
 | `devswarm_sup.action_log` | `.anti-hall/logs/devswarm-sup-actions.ndjson` |  |  | The action ledger of the supervisor, one JSON line per action it took (kind = action_kind: feature, action, target, inputs, outcome, reason, latency_ms, action_id) and per mistake signal found later (kind = mistake_kind, naming the action_id), relative to the home directory. Each line also goes to telemetry as a `cmd` event (h = the action, e = the outcome), counted in `ah-engine telemetry summary` under detail.cmd. |
@@ -8067,7 +8078,6 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_sup.lv_urgency_fields` | `urgencyMax, broadcastUrgencyMax` |  |  | The summary entry fields holding the highest unread urgency, direct then broadcast (readMeshUrgency). |
 | `devswarm_sup.lv_urgent_tiers` | `high, urgent` |  |  | The urgency words that force a parent notice for a stale workspace at once (Node URGENT_TIERS). |
 | `devswarm_sup.lv_witness_max_ids` | `500` |  |  | Most workspaces one witness comparison covers (the oldest verdicts first); a sweep with more is sampled, never skipped whole. |
-| `devswarm_sup.mistake_command` | `dssup-mistake` |  |  | The telemetry `cmd` h of a mistake signal (e = the action word it is about). An escalation notice is a mistake when the escalated workspace later turns out to have a live session (the `cleared` line of the recovery log). |
 | `devswarm_sup.mistake_kind` | `mistake` |  |  | The kind of a mistake line of the action ledger. |
 | `devswarm_sup.mode` | `engine` |  |  | Who owns the supervisor duties: engine (the default: the engine's scheduler runs them, poke and escalate follow; while a Node supervisor job is still installed and running the engine stands down, so there is never a second actor) \| witness (the Node supervisor job does; the engine runs none of them). Anything else reads as witness, so a typo never starts a second actor. The engine never edits any settings file or any launchd / systemd unit. |
 | `devswarm_sup.mode_words` | `witness, engine` |  |  | The words of devswarm_sup.mode, in the order witness, engine. |
@@ -10874,9 +10884,11 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `jev_slow` | counter | calls |  | Jev calls slower than the SOFT limit (jev.soft_ms); their answers were still used. |
 | `jev_timeouts` | counter | calls |  | Jev calls that ran out of their time budget. |
 | `jev_verdicts` | counter | decisions | id, verdict | What each Jev decision did, by integration and verdict: added or changed (an on-mode outcome moved), would-change (a shadow call that would have moved it), none (Jev agreed with the baseline) or no-answer (it failed or was skipped). |
+| `mesh_descriptor_read_skipped` | counter | reads | site, reason | Reads of a file named by a descriptor that were skipped because it is no regular file (a FIFO, socket or device) or is over the read cap, by site and reason. |
 | `mesh_own_sends_excluded` | counter | counts |  | Counts that left out unread rows the recipient's own identity family sent (an own send is not inbound mail). |
 | `mesh_ref_resolved` | counter | references | outcome | How a workspace reference given to a verb (send --to, archive, nudge, gate, ...) resolved, by outcome: exact, mesh, prefix, ambiguous, none. |
 | `mesh_sender_fallback` | counter | messages | where | Messages whose sender came from a fallback instead of the message's own branch, by where: ingest (a child's queue: the Primary), read (the NDJSON line's own sender, or the Primary for a NULL store row). |
+| `mesh_summary_owner_fallback` | counter | rows |  | Roster/summary rows counted from the shared floor because the workspace's partition has no live reader row (the base is the least-advanced live reader otherwise). |
 | `mesh_watcher_matched_by_checkout` | counter | checks |  | Watcher-live checks answered by another row's lock on the same checkout because the workspace's own id had no live lock. |
 | `rt_edges` | counter | edges |  | Workspace state changes emitted. |
 | `rt_reconcile_repairs` | counter | edges |  | Changes a full reconcile found that the event path had not already applied: the health measure of the realtime event layer (close to 0 is healthy). |

@@ -67,6 +67,23 @@ pub fn read_bounded(path: &Path) -> R<Option<Vec<u8>>> {
     Ok(Some(buf))
 }
 
+/// [`read_bounded`] for a verb that carries on without the file: the bytes, or `None` when the file is absent, unreadable or one a
+/// read must not touch (a FIFO, socket, device or a file over the cap). The last two are counted (`mesh_descriptor_read_skipped`)
+/// and logged with the site and the reason, so a skipped file is seen instead of read as an empty one in silence.
+pub fn read_or_skip(path: &Path, site: &str) -> Option<Vec<u8>> {
+    match read_bounded(path) {
+        Ok(bytes) => bytes,
+        Err(Defer(reason)) => {
+            crate::metrics::bump("mesh_descriptor_read_skipped", &[("site", site), ("reason", reason.as_str())]);
+            crate::debug::violated(
+                "meshw",
+                &defaults::render("mesh_write.msg_descriptor_read_skipped", &[("site", &site), ("reason", &reason), ("path", &path.display())]),
+            );
+            None
+        }
+    }
+}
+
 /// `path.resolve(p)` for an absolute path.
 pub fn resolve_abs(p: &str) -> String {
     let n = posix_normalize(p);
@@ -862,4 +879,52 @@ pub fn reader_nonce_from(home: &Path, start: i64) -> Option<String> {
         pid = *t.as_ref().and_then(|m| m.get(&pid))?;
     }
     None
+}
+
+/// Test helpers for the bounded-read tests: a FIFO in a scratch directory and a run that fails when it blocks.
+#[cfg(test)]
+pub(crate) mod fifo_kit {
+    use std::path::{Path, PathBuf};
+
+    /// Runs `f` on a thread and returns its answer; fails when it takes longer than the bound (a read blocked on a FIFO).
+    pub fn within<T: Send + 'static>(what: &str, f: impl FnOnce() -> T + Send + 'static) -> T {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || crate::discard::harmless(tx.send(f())));
+        let bound = std::time::Duration::from_millis(crate::defaults::num("mesh_write.fifo_test_bound_ms"));
+        rx.recv_timeout(bound).unwrap_or_else(|_| panic!("{what}: still blocked after {bound:?}"))
+    }
+
+    /// A fresh scratch directory.
+    pub fn scratch(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("ah-fifo-{}-{tag}", std::process::id()));
+        crate::discard::harmless(std::fs::remove_dir_all(&dir)); // keep: an absent directory is the goal state
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// `mkfifo(p)`.
+    pub fn fifo(p: &Path) {
+        let c = std::ffi::CString::new(p.to_string_lossy().as_bytes()).unwrap();
+        // SAFETY: `c` is a NUL-terminated path that outlives the call; mkfifo only creates the node.
+        assert_eq!(unsafe { libc::mkfifo(c.as_ptr(), 0o600) }, 0, "mkfifo");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fifo_kit::*;
+    use super::*;
+
+    #[test]
+    fn a_fifo_is_skipped_and_counted_at_once_instead_of_blocking() {
+        let dir = scratch("skip");
+        let f = dir.join("d.json");
+        fifo(&f);
+        let g = f.clone();
+        assert_eq!(within("read_or_skip", move || read_or_skip(&g, "test")), None);
+        std::fs::write(dir.join("ok.json"), b"{}").unwrap();
+        assert_eq!(read_or_skip(&dir.join("ok.json"), "test"), Some(b"{}".to_vec()), "a regular file reads as before");
+        assert_eq!(read_or_skip(&dir.join("none.json"), "test"), None, "an absent file is Node's caught read");
+        crate::discard::harmless(std::fs::remove_dir_all(dir)); // keep: cleanup of a scratch directory
+    }
 }

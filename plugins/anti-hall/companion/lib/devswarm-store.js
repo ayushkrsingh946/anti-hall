@@ -2570,11 +2570,11 @@ function ndjsonHasUnread(d, F, ndFloor) {
 // unionUnreadFor(d, store, F, home) — the summary is the FLOOR view by definition:
 // reader_cursors.countFor with reader null. Returns null when unknown/unavailable
 // (the caller then keeps its store-only count and reports the row unknown).
-function unionUnreadFor(d, store, F, home) {
+function unionUnreadFor(d, store, F, home, liveBase) {
   if (!d) return null;
   let rc;
   try { rc = require('./reader-cursors.js'); } catch (_) { return null; }
-  const u = rc.countFor(store, { reader: null, partition: d.id, inboxPath: d.inboxPath || null, cursorPath: d.cursorPath || null, home, fsi: F, excludeFamily: true });
+  const u = rc.countFor(store, { reader: null, liveBase: liveBase || null, partition: d.id, inboxPath: d.inboxPath || null, cursorPath: d.cursorPath || null, home, fsi: F, excludeFamily: true });
   return u && !u.unknown ? u : null;
 }
 
@@ -2587,6 +2587,14 @@ function unionUnreadFor(d, store, F, home) {
 function floorFor(store, id, home, ns) {
   try { return require('./reader-cursors.js').floorOf(store, id, ns || 'store', { home }); }
   catch (_) { return null; }
+}
+
+// liveBaseFor(store, id) -> { store, nd } | null: the partition's roster read base (reader-cursors.liveBaseOf: the least-advanced LIVE
+// reader per namespace), or null when it has no live reader row (or the table cannot be read) — the caller then counts from the floor.
+function liveBaseFor(store, id) {
+  try {
+    return require('./reader-cursors.js').liveBaseOf(store.readerCursorRows(id));
+  } catch (_) { return null; }
 }
 
 function summaryHashFor(store, o) {
@@ -2705,7 +2713,10 @@ function computeSummary(store, opts) {
     const total = store.messageCount(d.id);
     const floor = floorFor(store, d.id, home);
     const unreadUnknown = floor === null;
-    const cursor = unreadUnknown ? 0 : floor;
+    // #181: the roster counts from the least-advanced LIVE reader of the partition (computed now, never the stored floor a dead reader can
+    // hold back), so no live reader's unread is hidden; a partition with no live reader row falls back to the shared floor
+    const live = unreadUnknown ? null : liveBaseFor(store, d.id);
+    const cursor = unreadUnknown ? 0 : (live && live.store !== null ? live.store : floor);
     // UNREAD UNIFICATION (defect 8f2aec40e2ff, P1). `total - cursor` counts ONLY
     // the store side. The parent Stop gate, liveness.js and the `inbox count`
     // CLI all count the LOSS-FREE UNION (durable-NDJSON unread ∪ store-only
@@ -2737,9 +2748,9 @@ function computeSummary(store, opts) {
     // PERF BOUND (Round 13 item 5): pay for the union ONLY when the NDJSON side
     // actually has unread lines to merge — see ndjsonHasUnread's header for why
     // an empty tail makes the union provably equal to `total - cursor`.
-    if ((d.inboxPath || d.cursorPath) && ndjsonHasUnread(d, F, floorFor(store, d.id, home, 'nd') || 0)) {
+    if ((d.inboxPath || d.cursorPath) && ndjsonHasUnread(d, F, live && live.nd !== null ? live.nd : (floorFor(store, d.id, home, 'nd') || 0))) {
       try {
-        const u = unionUnreadFor(d, store, F, home);
+        const u = unionUnreadFor(d, store, F, home, live);
         if (u && Number.isFinite(u.unread)) {
           unread = Math.max(0, Number.isFinite(u.unreadAll) ? u.unreadAll : u.unread); // `unread` stays inclusive; directUnread leaves own sends out
           if (Number.isFinite(u.ownExcluded)) ownUnreadFromUnion = u.ownExcluded;

@@ -462,6 +462,44 @@ fn cases(fx: &Fx) -> Vec<Case> {
         true,
         vec!["first native", "origin"],
     ));
+    // ---- native: the reader's own sends are not unread (#181): out of the count and out of the list, still walked by the ack ----
+    let own_row = |key: String, hash: &'static str, body: &'static str| {
+        with_launcher(move |h, _| {
+            insert(
+                h,
+                &key,
+                &[R {
+                    ws: "child-1",
+                    ts: 1_790_000_009_000,
+                    hash: Some(hash),
+                    body,
+                    sender: Some("child-1"),
+                    recipient: Some("child-1"),
+                    mtype: Some("direct"),
+                    orig: None,
+                    nonce: None,
+                }],
+            )
+        })
+    };
+    v.push(base(
+        "store-only-own-send-is-not-unread",
+        rp("child-1", &[]),
+        ack(floors("child-1", 0, 0), d_store.clone()),
+        nothing(),
+        own_row(key.clone(), "mesh:0000000000000000000000000000000000000000000000000000000000000a11", "my own note"),
+        true,
+        vec!["\"count\":2", "\"unreadCount\":2", "first task", "!my own note"],
+    ));
+    v.push(base(
+        "union-own-send-is-not-unread",
+        rp("child-1", &[]),
+        ack(floors("child-1", 0, 0), d_inbox.clone()),
+        inbox(format!("{}\n{l1}\n", json!({"sender": "child-1", "_h": "native:own", "message": "my own line", "createdAt": 1_790_000_000_100_i64}))),
+        own_row(key.clone(), "mesh:0000000000000000000000000000000000000000000000000000000000000a11", "my own note"),
+        true,
+        vec!["\"unreadCount\":3", "first native", "first task", "!my own line", "!my own note"],
+    ));
     v.push(base(
         "union-text-format-has-undefined-seq",
         rp("child-1", &["--format", "text"]),
@@ -1066,7 +1104,11 @@ fn read_primary_matches_node_byte_for_byte_and_defers_without_writing() {
         }
         let n = node_verb(&hn, &hn.join("state"), &cwd, &av, now, None, &extra);
         for want in &c.expect {
-            assert!(n.stdout.contains(want), "{}: Node's output lacks {want:?}: {}", c.name, n.stdout);
+            // a leading `!` says the text must NOT be in the output
+            match want.strip_prefix('!') {
+                Some(absent) => assert!(!n.stdout.contains(absent), "{}: Node's output has {absent:?}: {}", c.name, n.stdout),
+                None => assert!(n.stdout.contains(want), "{}: Node's output lacks {want:?}: {}", c.name, n.stdout),
+            }
         }
         let e = engine_verb(&he, &he.join("state"), &cwd, &av, now, None, &extra);
         let log = last_log(&he.join("state"));

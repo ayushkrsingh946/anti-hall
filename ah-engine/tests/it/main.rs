@@ -49,6 +49,7 @@ mod dssup_ingest;
 mod dssup_kill;
 mod dssup_liveness;
 mod dssup_retention;
+mod dssup_telemetry;
 mod durability;
 mod e2e;
 mod engine_update;

@@ -13,6 +13,7 @@
 use crate::checks::guardkit::ojson::OVal;
 use crate::defaults;
 use crate::meshw::common::{self, Obj, n, s, s_or_null};
+use crate::meshw::ident;
 use crate::meshw::idlock::{devswarm_root, is_safe_id};
 use crate::meshw::store::{CursorPut, CursorRow, MeshStore};
 use std::collections::HashMap;
@@ -298,7 +299,7 @@ pub fn primary_cursor_path(home: &Path, id: &str) -> PathBuf {
 
 /// `devswarm-inbox-cursor.js` `readCursor(path)`: a bare integer or `{line: n}`; anything else is 0.
 pub fn read_cursor(p: &Path) -> f64 {
-    let Ok(bytes) = std::fs::read(p) else { return 0.0 };
+    let Some(bytes) = ident::read_or_skip(p, defaults::text("mesh_write.site_read_cursor")) else { return 0.0 };
     let raw = String::from_utf8_lossy(&bytes);
     let raw = raw.trim();
     let c = if !raw.is_empty() && raw.bytes().all(|b| b.is_ascii_digit()) {
@@ -437,4 +438,23 @@ pub fn log_cursor_write(home: &Path, r: &LogRec<'_>) {
         Ok(())
     };
     crate::discard::harmless(write()); // keep: instrumentation never breaks an ack (Node returns false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::meshw::ident::fifo_kit::*;
+
+    #[test]
+    fn a_fifo_cursor_file_reads_as_no_position_at_once_instead_of_blocking() {
+        let dir = scratch("cursor");
+        let f = dir.join("c.json");
+        fifo(&f);
+        let g = f.clone();
+        assert_eq!(within("read_cursor", move || read_cursor(&g)), 0.0);
+        let g = f.clone();
+        assert!(within("ack_to", move || ack_to(&g, 5.0).is_ok()), "the raise replaces the FIFO with the position, as it replaces any file");
+        assert_eq!(read_cursor(&f), 5.0);
+        crate::discard::harmless(std::fs::remove_dir_all(dir)); // keep: cleanup of a scratch directory
+    }
 }

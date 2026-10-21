@@ -259,9 +259,29 @@ value = "devswarm-supervisor"
 doc = "The outcomes that count as success in telemetry; any other counts as an error (a notice that had to be parked, a write that failed)."
 value = ["ok", "ran", "marked", "retired", "pruned"]
 
-[devswarm_sup.mistake_command]
-doc = "The telemetry `cmd` h of a mistake signal (e = the action word it is about). An escalation notice is a mistake when the escalated workspace later turns out to have a live session (the `cleared` line of the recovery log)."
-value = "dssup-mistake"
+[devswarm_sup.act_skip_outcomes]
+doc = "The outcome words that count as a skip (not applicable, nothing done) in an act telemetry event of the supervisor; a word in action_success is an allow, one in act_block_outcomes a block, any other an error."
+value = ["skipped"]
+
+[devswarm_sup.act_block_outcomes]
+doc = "The outcome words that count as a refusal (block) in an act telemetry event of the supervisor (a recover request the engine refused)."
+value = ["refused"]
+
+[devswarm_sup.act_duty]
+doc = "The action word of the act telemetry event of one duty's tick outcome ({duty} = the duty name)."
+value = "duty-{duty}"
+
+[devswarm_sup.act_defer_node_duty]
+doc = "The deferral code of a duty that is Node's own function (no native path yet, e.g. reconcile) when Node cannot start: the duty is skipped and a mistake event carries this code."
+value = "node-duty"
+
+[devswarm_sup.act_witness_mismatch]
+doc = "The reason word of the mistake telemetry event for a duty whose Node witness disagreed with what the engine did."
+value = "witness-mismatch"
+
+[devswarm_sup.act_recover_reasons]
+doc = "The reason word of the act telemetry event for each way a recover request is refused (caller, id, request, duplicate, descriptor, max, rollback_no_node)."
+value = { caller = "caller", id = "bad-id", request = "no-request", duplicate = "duplicate", descriptor = "no-descriptor", max = "max-recoveries", rollback_no_node = "rollback-no-node" }
 
 [devswarm_sup.env_disable]
 doc = "The environment variable that is the hard kill switch of every DevSwarm job (Node: DISABLE_ANTIHALL_DEVSWARM)."

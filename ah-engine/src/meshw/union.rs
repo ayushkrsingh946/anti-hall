@@ -351,6 +351,33 @@ pub fn read_bases(reader: &MeshReader, home: &Path, id: &str, cursor_file: Optio
     Ok((store_base, nd_base))
 }
 
+/// The roster/summary read base of a partition (`liveBaseOf` in reader-cursors.js): per namespace the MINIMUM position over its LIVE
+/// declared reader rows (`live_min`: not `#floor`, not retired), computed at read time. The stored `#floor` is never used: a dead or
+/// stale reader can hold it back (the phantom unread of #181). `None` when the partition has no live reader row in either namespace.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LiveBase {
+    /// The least-advanced live reader's store position, when it has a store row.
+    pub store: Option<f64>,
+    /// The least-advanced live reader's NDJSON position, when it has an NDJSON row.
+    pub nd: Option<f64>,
+}
+
+/// [`LiveBase`] over the raw `reader_cursors` rows of a partition.
+pub fn live_base_of(rows: &[Value]) -> Option<LiveBase> {
+    let floor = defaults::text("mesh_write.floor_reader");
+    let at = |ns: &str| {
+        rows.iter()
+            .filter(|r| r["ns"] == ns && r["reader"].as_str().is_some_and(|x| x != floor))
+            .filter_map(|r| {
+                let (v, line) = (r["value"].as_f64()?, r["retiredLine"].as_f64());
+                (!line.is_some_and(|l| v <= l)).then_some(v)
+            })
+            .reduce(f64::min)
+    };
+    let base = LiveBase { store: at(defaults::text("mesh_write.cursor_ns_store")), nd: at(defaults::text("mesh_write.cursor_ns_nd")) };
+    (base.store.is_some() || base.nd.is_some()).then_some(base)
+}
+
 /// The `sender` an NDJSON line carries (the id `pull` resolved), when it names one.
 pub fn line_sender(line: &str) -> Option<String> {
     match OVal::parse(line)?.get(defaults::text("mesh_write.ndjson_sender_field")) {
@@ -510,7 +537,7 @@ mod tests {
 
     /// A store partition "w" holding one row per sender (`None` = NULL sender) and `#floor` rows at `floor`, plus extra reader rows
     /// `(reader, store position)`. No NDJSON inbox.
-    fn senders_fixture(tag: &str, senders: &[Option<&str>], floor: i64, readers: &[(&str, i64)]) -> (std::path::PathBuf, MeshReader) {
+    fn senders_fixture(tag: &str, senders: &[Option<&str>], floor: i64, readers: &[(&str, i64, i64)]) -> (std::path::PathBuf, MeshReader) {
         let dir = std::env::temp_dir().join(format!("ah-union-for-{}-{tag}", std::process::id()));
         crate::discard::harmless(std::fs::remove_dir_all(&dir)); // keep: cleanup that raced; an absent directory is the goal state
         std::fs::create_dir_all(&dir).unwrap();
@@ -531,8 +558,8 @@ mod tests {
             c.execute("INSERT INTO reader_cursors VALUES ('w', ?1, ?2, ?3, NULL, 0)", params![ns, floor_reader, if ns == ns_store { floor } else { 0 }])
                 .unwrap();
         }
-        for (reader, pos) in readers {
-            c.execute("INSERT INTO reader_cursors VALUES ('w', ?1, ?2, ?3, NULL, 0)", params![ns_store, reader, pos]).unwrap();
+        for (reader, pos, at) in readers {
+            c.execute("INSERT INTO reader_cursors VALUES ('w', ?1, ?2, ?3, NULL, ?4)", params![ns_store, reader, pos, at]).unwrap();
         }
         drop(c);
         (dir, MeshReader::open(&db).unwrap())
@@ -541,7 +568,7 @@ mod tests {
     #[test]
     fn the_unread_the_caller_has_read_is_zero_even_when_a_lagging_reader_holds_the_floor() {
         // #181: 3 messages, `#floor` 1 (reader B lags), reader A read all 3: A's unread is 0, the floor view still says 2
-        let (dir, r) = senders_fixture("lag", &[None, None, None], 1, &[("h:1:1", 3), ("h:2:2", 1)]);
+        let (dir, r) = senders_fixture("lag", &[None, None, None], 1, &[("h:1:1", 3, 10), ("h:2:2", 1, 5)]);
         let home = dir.clone();
         let none = HashSet::new();
         let a = unread_for(&r, &home, "w", None, None, Some("h:1:1"), &none, 1).unwrap();
@@ -558,6 +585,24 @@ mod tests {
         let family: HashSet<String> = ["P", "alias"].iter().map(|s| s.to_string()).collect();
         let u = unread_for(&r, &dir, "w", None, None, None, &family, 1).unwrap();
         assert_eq!((u.unread, u.own_excluded, u.union.unread), (2, 2, 4), "other + NULL count; the union keeps every row");
+        crate::discard::harmless(std::fs::remove_dir_all(dir)); // keep: test cleanup; an absent directory is the goal state
+    }
+
+    #[test]
+    fn the_live_base_is_the_least_advanced_live_reader_and_a_retired_or_floor_row_is_none() {
+        // #181: 3 messages, `#floor` 1, live readers at 3 and 1: the base is 1 (nothing a live reader has not read is hidden)
+        let (dir, r) = senders_fixture("owner", &[None, None, None], 1, &[("h:1:1", 3, 10), ("h:2:2", 1, 5)]);
+        let rows = r.reader_cursors("w").unwrap();
+        assert_eq!(live_base_of(&rows).unwrap().store, Some(1.0));
+        let floor_only: Vec<Value> = rows.iter().filter(|x| x["reader"] == "#floor").cloned().collect();
+        assert_eq!(live_base_of(&floor_only), None, "no reader row: the floor is not a reader");
+        let mut retired = rows.clone();
+        for x in &mut retired {
+            if x["reader"] == "h:2:2" {
+                x["retiredLine"] = serde_json::json!(1);
+            }
+        }
+        assert_eq!(live_base_of(&retired).unwrap().store, Some(3.0), "a retired row is not live");
         crate::discard::harmless(std::fs::remove_dir_all(dir)); // keep: test cleanup; an absent directory is the goal state
     }
 }

@@ -566,6 +566,8 @@ pub fn duty(ctx: &Ctx, runner: &dyn Runner) -> Value {
             let r = node(runner, ctx, d.str_field("snippet"), &[owner], timeout);
             if r.ok {
                 json!({"duty": "retention", "outcome": "ran", "detail": super::tick::parse(&r.stdout), "node": why})
+            } else if r.missing {
+                super::tick::no_node_skip(ctx, "retention", &why)
             } else {
                 json!({"duty": "retention", "outcome": "failed", "error": r.error.clone().unwrap_or_else(|| super::tick::cut(&r.stderr)), "status": r.status, "timedOut": r.timed_out, "node": why})
             }

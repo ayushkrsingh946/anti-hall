@@ -371,6 +371,11 @@ function positions(store, opts) {
     floor[ns] = f ? Math.max(f.value, distinctNdFloor(o.home, partition, cp)) : legacyNdFloor(cp);
   }
   const out = { floor, rows, view: 'floor', store: floor.store, nd: floor.nd };
+  if (o.liveBase) { // the roster's base (liveBaseOf): a position per namespace, the floor where the namespace has no live row
+    if (o.liveBase.store != null) out.store = o.liveBase.store;
+    if (o.liveBase.nd != null) out.nd = o.liveBase.nd;
+    out.view = 'live-min';
+  }
   if (reader) {
     const s = rowOf(rows, 'store', reader);
     const n = rowOf(rows, 'nd', reader);
@@ -435,6 +440,16 @@ function countFor(store, opts) {
     }
   }
   return res;
+}
+
+// liveBaseOf(rows) -> { store, nd } | null. The roster/summary read base of a partition: per namespace the MINIMUM position over its
+// LIVE declared reader rows (liveMinRow: not '#floor', not retired), computed at read time — never the stored '#floor', which a dead
+// or stale reader can hold back (the phantom unread of #181). A namespace with no live row is null (the caller falls back to the floor there); null when the partition has no live
+// reader row at all.
+function liveBaseOf(rows) {
+  const at = (ns) => { const r = liveMinRow(rows || [], ns); return r && Number.isFinite(r.value) ? r.value : null; };
+  const base = { store: at('store'), nd: at('nd') };
+  return base.store === null && base.nd === null ? null : base;
 }
 
 // familyOf(store, partition) -> Set of ids that are the partition's recipient itself or cross-linked to it
@@ -847,7 +862,7 @@ module.exports = {
   FLOOR, NAMESPACES, RETIRE_PIN_AGE_MS, PID_REUSE_MARGIN_MS,
   readerKey, parseReader, provablyEnded, psSnapshot, defaultProcTable,
   legacyStoreFloor, legacyNdFloor, legacyShortFor, liveHarnessReaders, importPlan,
-  positions, baseFor, floorOf, countFor,
+  positions, baseFor, floorOf, countFor, familyOf, liveBaseOf,
   importLegacy, declare, ackFor, raiseAllLossFree, raiseFloorBounded, retireEnded, repairPinnedFloors,
   isRetired, liveMinRow,
 };
