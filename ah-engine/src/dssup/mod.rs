@@ -40,6 +40,7 @@ pub mod liveness;
 pub mod recon;
 pub mod recover;
 pub mod retention;
+pub mod tail;
 pub mod tick;
 pub mod verdict;
 

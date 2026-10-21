@@ -411,7 +411,7 @@ fn apply_side(ctx: &Ctx, runner: &dyn Runner, label: &str, p: side::Planned, ext
 }
 
 /// One line of the central log, written by the engine (not a state change the witness could compare).
-fn log_line(ctx: &Ctx, component: &str, op: &str, level: &str, msg: &str, context: &Value) {
+pub(crate) fn log_line(ctx: &Ctx, component: &str, op: &str, level: &str, msg: &str, context: &Value) {
     let env = Env { home: ctx.home, now: ctx.now, st: ctx.st, log_dir: None };
     let u = Unit {
         label: "log".into(),
