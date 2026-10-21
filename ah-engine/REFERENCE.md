@@ -5399,6 +5399,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `mesh_write.cursor_line_field` | `line` |  |  | Field of a JSON cursor file that holds its position (devswarm-inbox-cursor.js readCursor). |
 | `mesh_write.cursor_log_cap` | `2000` |  |  | Records a cursor-write journal keeps (CURSOR_LOG_CAP); older ones move to the `.1` file. |
 | `mesh_write.cursor_log_old_suffix` | `.1` |  |  | Suffix of the file that receives the records rotated out of a journal. |
+| `mesh_write.cursor_log_older_soft_bytes` | `8388608` |  |  | Soft limit on a cursor journal's older file (`.1`): past it the rotation notes the size (warn and count); nothing is ever deleted or replaced for it. |
 | `mesh_write.cursor_log_unknown_key` | `unknown` |  |  | Journal file name used when the project key is missing or unsafe. |
 | `mesh_write.cursor_max_digits` | `15` |  |  | Longest all-digit NDJSON cursor file the engine reads (parseInt of a longer digit string is only approximated by the specification, so such a file goes to Node). |
 | `mesh_write.cursor_namespaces` | `store, nd` |  |  | The two cursor namespaces of `reader_cursors`, in Node's order (NAMESPACES): the store and the NDJSON inbox. |
@@ -5619,6 +5620,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `mesh_write.month_names` | `12 items` |  |  | Month abbreviations of that start time, January first (what Date.parse reads). |
 | `mesh_write.ms_per_minute` | `60000` |  |  | Milliseconds in a minute (the unit conversion of that setting). |
 | `mesh_write.msg_committed_failure` | `ah-engine mesh: the write was committed but the engine failed before printing...` |  |  | Stderr line for that case. |
+| `mesh_write.msg_cursor_log_older_soft` | `{path}: the older cursor journal is {bytes} bytes, past its soft limit; nothi...` |  |  | The note when a cursor journal's older file passes its soft limit. {path} {bytes}. |
 | `mesh_write.msg_descriptor_read_skipped` | `mesh read skipped: site={site}, reason={reason}, path={path}` |  |  | The log line when a file named by a descriptor (or a receipt) was not read because it is no regular file or is over the read cap. {site} {reason} {path}. |
 | `mesh_write.msg_mesh_read_hint` | `consumed broadcasts stay re-readable without moving any cursor: `mesh history...` |  |  | `hint` of a consuming mesh read. |
 | `mesh_write.msg_no_node_cli` | `ah-engine mesh: cannot find scripts/devswarm.js (no plugin root); run the ver...` |  |  | stderr line when the plugin root (and so Node's CLI) is unknown. |
@@ -9178,6 +9180,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_recon.budget_ms` | `60000` |  | ms | Total wall-clock budget of one project's reconcile; rows not started when it is spent are deferred to the next run through the resume marker. 0 is unlimited. Node: DEFAULT_RECONCILE_BUDGET_MS. |
 | `devswarm_recon.by_engine` | `engine` |  |  | The word an item record carries when the engine did the item itself (witnessed against Node). |
 | `devswarm_recon.by_held` | `held` |  |  | The word an item record carries when the engine did not take the item (held: counted, nothing written, tried again on the next pass). |
+| `devswarm_recon.by_legacy` | `legacy` |  |  | The `by` word of a stage item that is a legacy journal store: the engine does not read it. |
 | `devswarm_recon.cp_help_args` | `workspace, --help` |  |  | The arguments that print the build's workspace commands (the capability probe). |
 | `devswarm_recon.cp_options_word` | `[options]` |  |  | The usage word that stands for the options, not for an argument. |
 | `devswarm_recon.cp_re_arg` | `([<\[])([\w-]+)[>\]]` |  |  | A positional argument in a usage line: `<name>` (required) or `[name]`. |
@@ -9198,7 +9201,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_recon.cp_verb_help_verbs` | `archive, delete` |  |  | The workspace verbs whose own help the probe reads (callers build their arguments from what the binary documents). |
 | `devswarm_recon.cp_version_args` | `--version` |  |  | The arguments that print the hivecontrol build's version (the capability probe). |
 | `devswarm_recon.cursor_log_older_suffix` | `.1` |  |  | The suffix of the file a rotated cursor journal's older records move to. |
-| `devswarm_recon.cursor_log_rotation` | `false` |  |  | Whether the fold may rotate a cursor-write journal that is past `mesh_write.cursor_log_cap` records: the newest records stay and the older ones REPLACE the journal's `.1` file (what the previous generation held is dropped). Off (the default): a fold that would need it waits (counted, nothing written for that group) until you switch it on or trim the journal yourself. |
+| `devswarm_recon.cursor_log_rotation` | `true` |  |  | Whether the fold may rotate a cursor-write journal that is past `mesh_write.cursor_log_cap` records: the newest records stay and the older ones are APPENDED to the end of the journal's `.1` file, which keeps whatever it already held (nothing is lost or replaced). On (the default). Off: a fold that would need it waits (counted, nothing written for that group) until you switch it on or trim the journal yourself. |
 | `devswarm_recon.d_arch` | `fold-archived-rows: retired {retired} registry row(s) of archived workspace(s)` |  |  | Detail of the archived rows stage. Placeholders in braces. |
 | `devswarm_recon.d_arch_budget` | ` (budget hit — {n} pending next run)` |  |  | Detail of the archived rows stage. Placeholders in braces. |
 | `devswarm_recon.d_arch_errors` | ` ({n} error(s), fail-open)` |  |  | Detail of the archived rows stage. Placeholders in braces. |
@@ -9288,6 +9291,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_recon.label_derive` | `derive-summary` |  |  | The label of the closing summary unit of a fold. |
 | `devswarm_recon.label_rows` | `rows` |  |  | The label of the registry-row half in a not-stamped note. |
 | `devswarm_recon.label_twins` | `twin descriptors` |  |  | The label of the twin-descriptor half in a not-stamped note. |
+| `devswarm_recon.legacy_site` | `recon:legacy-store` |  |  | The accounting name under which a legacy journal store skipped by a reconcile pass or a recon stage is counted as disabled. |
 | `devswarm_recon.list_all_args` | `workspace, list, all` |  |  | The hivecontrol arguments of the one workspace listing the name backfill reads (every workspace's current label). |
 | `devswarm_recon.list_timeout_ms` | `5000` |  | ms | How long the name backfill and the active-workspace probe wait for hivecontrol's workspace listing. |
 | `devswarm_recon.log_component_cache` | `devswarm-archived-cache` |  |  | The component of the active-snapshot log lines. |
@@ -9371,6 +9375,8 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_recon.reason_repo_unknown` | `repo-unknown` |  |  | The probe's reason when the repository-unknown streak suppresses it. |
 | `devswarm_recon.reason_shape` | `hivecontrol-shape-unrecognized` |  |  | The probe's reason when the listing is neither a list nor `{children: [...]}`. |
 | `devswarm_recon.reason_source_unreadable` | `source-messages-unreadable` |  |  | Why a store move was not made: the source's messages could not be read completely. |
+| `devswarm_recon.reason_store_backend` | `store-backend` |  |  | The reason code of a store the engine does not read: it is on the legacy journal backend (Node older than 22.5). Such a store is `disabled`, not held: nothing waits for a later try, and the doctor names it. |
+| `devswarm_recon.reason_store_unpinned` | `store-unpinned` |  |  | The reason code of a store with no backend marker (or one naming neither backend): the engine does not open it as it cannot tell which backend it is on. The update's store stages pin a store that holds a database; until then the item is held and tried again. |
 | `devswarm_recon.reason_survivor_gone` | `survivor-gone` |  |  | Why a candidate was not folded: its survivor is not registered in the store. |
 | `devswarm_recon.reason_unattributable` | `unattributable-worktree` |  |  | The reason of an active record dropped because no repository claims its worktree. |
 | `devswarm_recon.reason_unavailable` | `hivecontrol-unavailable` |  |  | The probe's reason when hivecontrol could not be run or exited non-zero. |

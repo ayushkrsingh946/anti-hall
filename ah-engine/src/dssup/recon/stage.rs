@@ -274,6 +274,17 @@ impl Walk<'_> {
         json!({"ok": false, "error": held["held"]})
     }
 
+    /// Whether the reason is a store on the legacy journal backend, which the engine does not read.
+    fn is_legacy(why: &str) -> bool {
+        why == defaults::text("devswarm_recon.reason_store_backend")
+    }
+
+    /// A legacy journal store: counted `disabled` (not held: nothing waits for a later try), and the stage's marker is not kept back by it.
+    fn legacy_item(&self) -> Value {
+        crate::obs::counters::account("stage", defaults::text("devswarm_recon.legacy_site"), crate::obs::counters::Outcome::Disabled, 0, 0);
+        json!({"ok": true, "legacyJournalStore": true})
+    }
+
     /// The engine's result for one item, shaped like Node's; `Err(why)` holds the item.
     fn engine_item(&self, item: &str) -> Result<Value, String> {
         let agreed = |v: &Verdict, deferred: &[(String, String)]| -> Result<(), String> {
@@ -481,6 +492,7 @@ fn walk(w: &Walk, record: Option<(&str, &str, &OVal)>, items: &[String], budget:
         (hooks.at)(&format!("stage:{stage}:{i}:before"));
         let (r, by, why) = match w.engine_item(item) {
             Ok(r) => (r, defaults::text("devswarm_recon.by_engine"), String::new()),
+            Err(why) if Walk::is_legacy(&why) => (w.legacy_item(), defaults::text("devswarm_recon.by_legacy"), why),
             Err(why) => (w.held_item(&why), defaults::text("devswarm_recon.by_held"), why),
         };
         acc.take(stage, item, &r);
@@ -600,6 +612,7 @@ fn half(w: &Walk, label: &str, plan: crate::meshw::ident::R<archive::Plan>, reco
     });
     let (r, by, why) = match engine {
         Ok(r) => (r, defaults::text("devswarm_recon.by_engine"), String::new()),
+        Err(why) if Walk::is_legacy(&why) => (w.legacy_item(), defaults::text("devswarm_recon.by_legacy"), why),
         Err(why) => (w.held_item(&why), defaults::text("devswarm_recon.by_held"), why),
     };
     records.push(json!({"item": label, "by": by, "why": why}));
@@ -707,4 +720,31 @@ fn archived(w: &Walk, budget: f64, up: Option<&UpdateRun>) -> StageOut {
         m.insert(k.into(), v);
     }
     StageOut { result: Value::Object(m), items: records, budget_ms: budget }
+}
+
+#[cfg(test)]
+mod legacy_tests {
+    use super::*;
+
+    #[test]
+    fn dssup_recon_a_legacy_journal_store_is_disabled_not_held() {
+        crate::defaults::init().unwrap();
+        let dir = crate::db::TempDir::new("legacy-store");
+        let home = dir.0.join("home");
+        let store = crate::migrate::readercur::store_dir(&home, "aaaa1111");
+        std::fs::create_dir_all(&store).unwrap();
+        std::fs::write(store.join(defaults::text("mesh.backend_marker")), "journal\n").unwrap();
+        // the registry read of a journal store refuses with the legacy reason ...
+        let why = crate::dssup::recon::view::registry(&home, "aaaa1111").unwrap_err().0;
+        assert!(Walk::is_legacy(&why), "{why}");
+        // ... which a recon stage item counts as disabled and does not hold (the stage's marker is not kept back by it)
+        let st = crate::checks::git::util::Settings { home: home.to_string_lossy().into_owned(), env: std::collections::HashMap::new() };
+        let ctx = Ctx { home: &home, root: &home, st: &st, now: 1_760_000_000_000, engine_pokes: true };
+        let hooks = Hooks::none();
+        let runner = crate::dsact::runner::System::configured();
+        let w = Walk { ctx: &ctx, runner: &runner, hooks: &hooks, stage: "fold-all", deadline_ms: 0 };
+        let r = w.legacy_item();
+        assert_eq!((r["ok"].clone(), r["legacyJournalStore"].clone()), (json!(true), json!(true)));
+        assert!(!Walk::is_legacy("rehome-not-applied"));
+    }
 }

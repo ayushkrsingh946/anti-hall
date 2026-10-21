@@ -2114,3 +2114,12 @@ value = 10000
 unit = "ms"
 min = 100
 max = 600000
+
+[mesh_write.cursor_log_older_soft_bytes]
+doc = "Soft limit on a cursor journal's older file (`.1`): past it the rotation notes the size (warn and count); nothing is ever deleted or replaced for it."
+value = 8388608
+min = 1024
+
+[mesh_write.msg_cursor_log_older_soft]
+doc = "The note when a cursor journal's older file passes its soft limit. {path} {bytes}."
+value = "{path}: the older cursor journal is {bytes} bytes, past its soft limit; nothing is deleted (move it aside by hand when it is no longer needed)"

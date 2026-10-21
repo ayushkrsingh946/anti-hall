@@ -815,6 +815,14 @@ pub fn duty(ctx: &Ctx, runner: &dyn Runner, hooks: &Hooks) -> Value {
                 rec.insert("repoUnknown".into(), or_zero(v.get("repoUnknown")));
                 rec.insert("fold".into(), fold);
             }
+            // a project whose store is on the legacy journal backend: the engine does not read it (the doctor names it); counted
+            // `disabled`, not held, and no failure is raised for it
+            ProjectEnd::Node(why) if why == defaults::text("devswarm_recon.reason_store_backend") => {
+                crate::obs::counters::account("duty", defaults::text("devswarm_recon.legacy_site"), crate::obs::counters::Outcome::Disabled, 0, 0);
+                rec.insert("ok".into(), json!(false));
+                rec.insert("legacy".into(), json!(why));
+                rec.insert("fold".into(), Value::Null);
+            }
             ProjectEnd::Node(why) => {
                 crate::dssup::tick::held("dssup:reconcile:project", &why);
                 let witness = json!({"ts": ctx.now, "job": defaults::text("devswarm_recon.job_project_handback"), "repoKey": p.repo_key, "why": why});

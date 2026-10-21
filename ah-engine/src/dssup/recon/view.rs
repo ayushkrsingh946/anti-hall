@@ -56,16 +56,20 @@ pub fn exists(home: &Path, rel: &str) -> bool {
     home.join(rel).exists()
 }
 
-fn sqlite_marker(home: &Path, hash: &str) -> bool {
-    std::fs::read_to_string(home.join(store_rel(hash)).join(defaults::text("mesh.backend_marker")))
-        .is_ok_and(|m| m.trim().to_ascii_lowercase() == defaults::text("mesh.backend_sqlite"))
+fn marker_of(home: &Path, hash: &str) -> String {
+    std::fs::read_to_string(home.join(store_rel(hash)).join(defaults::text("mesh.backend_marker"))).map(|m| m.trim().to_ascii_lowercase()).unwrap_or_default()
 }
 
 /// Every registry row of a store as stored, ordered by id, or a deferral: not a sqlite store, no database, a registry without
 /// `write_seq`, a column the reader cannot decode.
 pub fn registry(home: &Path, hash: &str) -> R<Vec<RegRow>> {
-    if !sqlite_marker(home, hash) {
-        return defer("store-backend");
+    let marker = marker_of(home, hash);
+    if marker == defaults::text("mesh_write.backend_journal") {
+        // the legacy journal backend (Node older than 22.5): the engine does not read it, and nothing waits for it (see `reason_store_backend`)
+        return defer(defaults::text("devswarm_recon.reason_store_backend"));
+    }
+    if marker != defaults::text("mesh.backend_sqlite") {
+        return defer(defaults::text("devswarm_recon.reason_store_unpinned"));
     }
     let db = store_db(home, hash);
     let reader = crate::mesh::MeshReader::open(&db).map_err(|e| Defer(format!("store-open:{e}")))?;

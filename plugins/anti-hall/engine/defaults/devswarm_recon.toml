@@ -1051,8 +1051,8 @@ doc = "The failure text of a hivecontrol call the capability cache already recor
 value = "capability dormant: {name} — {reason}"
 
 [devswarm_recon.cursor_log_rotation]
-doc = "Whether the fold may rotate a cursor-write journal that is past `mesh_write.cursor_log_cap` records: the newest records stay and the older ones REPLACE the journal's `.1` file (what the previous generation held is dropped). Off (the default): a fold that would need it waits (counted, nothing written for that group) until you switch it on or trim the journal yourself."
-value = false
+doc = "Whether the fold may rotate a cursor-write journal that is past `mesh_write.cursor_log_cap` records: the newest records stay and the older ones are APPENDED to the end of the journal's `.1` file, which keeps whatever it already held (nothing is lost or replaced). On (the default). Off: a fold that would need it waits (counted, nothing written for that group) until you switch it on or trim the journal yourself."
+value = true
 
 [devswarm_recon.cursor_log_older_suffix]
 doc = "The suffix of the file a rotated cursor journal's older records move to."
@@ -1163,3 +1163,19 @@ value = "rehome-not-applied"
 [devswarm_recon.msg_rehome_conflict]
 doc = "The log line when a store move finds the destination already maps the id to another worktree: the source row is kept. {id} is the workspace."
 value = "{id}: the destination already has a conflicting registry row; the source was kept"
+
+[devswarm_recon.reason_store_backend]
+doc = "The reason code of a store the engine does not read: it is on the legacy journal backend (Node older than 22.5). Such a store is `disabled`, not held: nothing waits for a later try, and the doctor names it."
+value = "store-backend"
+
+[devswarm_recon.by_legacy]
+doc = "The `by` word of a stage item that is a legacy journal store: the engine does not read it."
+value = "legacy"
+
+[devswarm_recon.legacy_site]
+doc = "The accounting name under which a legacy journal store skipped by a reconcile pass or a recon stage is counted as disabled."
+value = "recon:legacy-store"
+
+[devswarm_recon.reason_store_unpinned]
+doc = "The reason code of a store with no backend marker (or one naming neither backend): the engine does not open it as it cannot tell which backend it is on. The update's store stages pin a store that holds a database; until then the item is held and tried again."
+value = "store-unpinned"

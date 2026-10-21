@@ -17,7 +17,8 @@
 //!   exists or a reader has drained it; a cross-referenced anchor keeps only the unforgeable half (a heartbeat of its own right now);
 //! * a candidate partition without floor rows whose cursor has to move is imported first (`Op::ImportCursors`, what `raiseAllLossFree` does
 //!   inside its transaction); a session whose working directory git could not classify reads as "keep", as Node's `null` does;
-//! * a cursor journal that would roll over waits unless `devswarm_recon.cursor_log_rotation` is on (rotation replaces the journal's
+//! * a cursor journal that would roll over waits only when `devswarm_recon.cursor_log_rotation` is switched off (the rotation appends the
+//!   older records to the journal's `.1` file and replaces nothing);
 //!   `.1` file); a partition message of a type the engine does not model; a deadline.
 //!
 //! Deferral reasons are the `Defer` texts below; a unit that ends deferred or failed on the real home is reported the same way.
@@ -320,9 +321,9 @@ pub(super) fn plan_group(cx: &Cx, sim: &mut Sim, survivor: &str, cands: &[RegRow
             let journal = crate::meshw::cursors::log_path(cx.home, Some(&key));
             let lines = if moved > 0 { 2 } else { 1 };
             let added = sim.log_added.entry(journal.clone()).or_insert(0);
-            // past the cap the journal rotates (the older records replace its `.1` file): only when the owner switched that on, else the
-            // group waits (nothing is replaced automatically)
-            let rotate = defaults::raw("devswarm_recon.cursor_log_rotation").as_bool().unwrap_or(false);
+            // past the cap the journal rotates (the older records are appended to its `.1` file, loss-free); with the switch off the group
+            // waits instead (nothing is rotated)
+            let rotate = defaults::raw("devswarm_recon.cursor_log_rotation").as_bool().unwrap_or(true);
             if journal_lines(&journal) + *added + lines > log_cap && !rotate {
                 return defer("cursor-log-rotation");
             }

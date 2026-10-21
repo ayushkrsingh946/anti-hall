@@ -269,8 +269,9 @@ fn raise(env: &Env, store: &str, partition: &str, value: i64) -> Result<(), Stri
     Ok(())
 }
 
-/// `logCursorWrite`'s rotation: once the journal holds more than `cap` non-blank records, the newest `cap` stay and the older ones
-/// replace `<path>.1`. The overflow is written first, so a failure in between leaves every record in at least one of the two files.
+/// `logCursorWrite`'s rotation, loss-free: once the journal holds more than `cap` non-blank records, the newest `cap` stay and the
+/// older ones are APPENDED to the journal's older file (`.1`); what that file already holds stays. The overflow is written first, so
+/// a failure in between leaves every record in at least one of the two files (at worst in both: a repeat, never a loss).
 fn rotate_tail(path: &Path, cap: usize) -> Result<(), String> {
     let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
     let lines: Vec<&str> = text.split('\n').filter(|l| !l.trim().is_empty()).collect();
@@ -280,7 +281,7 @@ fn rotate_tail(path: &Path, cap: usize) -> Result<(), String> {
     let (old, keep) = lines.split_at(lines.len() - cap);
     let mut older = path.as_os_str().to_os_string();
     older.push(defaults::text("devswarm_recon.cursor_log_older_suffix"));
-    crate::atomic::write(std::path::PathBuf::from(older), format!("{}\n", old.join("\n"))).map_err(|e| e.to_string())?;
+    crate::meshw::cursors::append_older(&std::path::PathBuf::from(older), &format!("{}\n", old.join("\n"))).map_err(|e| e.to_string())?;
     crate::atomic::write(path, format!("{}\n", keep.join("\n"))).map_err(|e| e.to_string())
 }
 
@@ -423,7 +424,7 @@ mod rotation_tests {
     use super::*;
 
     #[test]
-    fn dssup_recon_cursor_log_rotation_keeps_the_newest_records_and_the_older_move_to_dot_one() {
+    fn dssup_recon_cursor_log_rotation_keeps_the_newest_records_and_appends_the_older_ones_to_dot_one() {
         crate::defaults::init().unwrap();
         let d = crate::db::TempDir::new("cursor-rotation");
         let p = d.0.join(defaults::text("devswarm_recon.file_samples"));
@@ -433,10 +434,14 @@ mod rotation_tests {
         // at or under the cap nothing moves
         rotate_tail(&p, 4).unwrap();
         assert_eq!(std::fs::read_to_string(&older).unwrap(), "{\"n\":0}\n");
-        // over it: the newest two stay, the older two replace `.1`
+        // over it: the newest two stay, the older two go to the END of `.1`; what `.1` held stays (nothing is lost)
         rotate_tail(&p, 2).unwrap();
         assert_eq!(std::fs::read_to_string(&p).unwrap(), "{\"n\":3}\n{\"n\":4}\n");
-        assert_eq!(std::fs::read_to_string(&older).unwrap(), "{\"n\":1}\n{\"n\":2}\n");
+        assert_eq!(std::fs::read_to_string(&older).unwrap(), "{\"n\":0}\n{\"n\":1}\n{\"n\":2}\n");
+        // a second rotation appends again
+        std::fs::write(&p, "{\"n\":3}\n{\"n\":4}\n{\"n\":5}\n").unwrap();
+        rotate_tail(&p, 2).unwrap();
+        assert_eq!(std::fs::read_to_string(&older).unwrap(), "{\"n\":0}\n{\"n\":1}\n{\"n\":2}\n{\"n\":3}\n");
     }
 }
 

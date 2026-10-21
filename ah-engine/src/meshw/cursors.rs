@@ -394,6 +394,35 @@ pub(crate) fn log_path(home: &Path, repo_key: Option<&str>) -> PathBuf {
     devswarm_root(home).join(defaults::text("mesh_write.dir_cursor_log")).join(format!("{key}{}", defaults::text("mesh_write.ndjson_suffix")))
 }
 
+/// Append `text` to a cursor journal's older file (`<journal>.1`), keeping everything it already holds: a rotation moves the records
+/// that no longer fit into the journal to the end of the older file, it never replaces it. A missing final newline is completed
+/// first so the records stay one per line. The older file past `mesh_write.cursor_log_older_soft_bytes` is noted (nothing is ever
+/// deleted for it).
+pub(crate) fn append_older(older: &Path, text: &str) -> std::io::Result<()> {
+    use std::io::{Read, Seek, SeekFrom, Write};
+    if let Some(d) = older.parent() {
+        std::fs::create_dir_all(d)?;
+    }
+    let mut f = std::fs::OpenOptions::new().create(true).read(true).append(true).open(older)?;
+    let len = f.metadata()?.len();
+    let mut out = String::new();
+    if len > 0 {
+        f.seek(SeekFrom::End(-1))?;
+        let mut last = 0u8;
+        f.read_exact(std::slice::from_mut(&mut last))?;
+        if last != b'\n' {
+            out.push('\n');
+        }
+    }
+    out.push_str(text);
+    f.write_all(out.as_bytes())?;
+    let size = len + out.len() as u64;
+    if size > defaults::num("mesh_write.cursor_log_older_soft_bytes") {
+        crate::discard::note("cursor_log_older_soft", &defaults::render("mesh_write.msg_cursor_log_older_soft", &[("path", &older.display()), ("bytes", &size)]));
+    }
+    Ok(())
+}
+
 /// `logCursorWrite(home, rec)`: one JSON line, then tail-preserving rotation at `mesh_write.cursor_log_cap`. Never fails
 /// the ack: a journal that cannot be written is only a missing line.
 pub fn log_cursor_write(home: &Path, r: &LogRec<'_>) {
@@ -432,7 +461,8 @@ pub fn log_cursor_write(home: &Path, r: &LogRec<'_>) {
             let cut = lines.len() - cap;
             let mut old = p.as_os_str().to_os_string();
             old.push(defaults::text("mesh_write.cursor_log_old_suffix"));
-            crate::discard::harmless(std::fs::write(PathBuf::from(old), format!("{}\n", lines[..cut].join("\n")))); // keep: Node's inner try/catch
+            // loss-free: the overflow is appended to the older file first; when that fails the journal keeps every record
+            append_older(&PathBuf::from(old), &format!("{}\n", lines[..cut].join("\n")))?;
             std::fs::write(&p, format!("{}\n", lines[cut..].join("\n")))?;
         }
         Ok(())
@@ -444,6 +474,18 @@ pub fn log_cursor_write(home: &Path, r: &LogRec<'_>) {
 mod tests {
     use super::*;
     use crate::meshw::ident::fifo_kit::*;
+
+    #[test]
+    fn mesh_cursor_log_older_file_is_appended_to_never_replaced() {
+        crate::defaults::init().unwrap();
+        let dir = scratch("older");
+        let older = dir.join("log.ndjson.1");
+        std::fs::write(&older, "{\"n\":0}").unwrap(); // no final newline
+        append_older(&older, "{\"n\":1}\n{\"n\":2}\n").unwrap();
+        append_older(&older, "{\"n\":3}\n").unwrap();
+        assert_eq!(std::fs::read_to_string(&older).unwrap(), "{\"n\":0}\n{\"n\":1}\n{\"n\":2}\n{\"n\":3}\n");
+        crate::discard::harmless(std::fs::remove_dir_all(dir)); // keep: cleanup of a scratch directory
+    }
 
     #[test]
     fn a_fifo_cursor_file_reads_as_no_position_at_once_instead_of_blocking() {
