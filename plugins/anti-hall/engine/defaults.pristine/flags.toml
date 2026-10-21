@@ -65,10 +65,6 @@ value = "--dry-run"
 doc = "The hook event name to dispatch (`hook --event`)."
 value = "--event"
 
-[flag.fallback]
-doc = "Path of the Node hook to run when the engine cannot answer (`hook`), or the fallback transport (`jev-setup`)."
-value = "--fallback"
-
 [flag.fallback-map]
 doc = "File that maps hook entries to their Node fallback commands (`hook --event`)."
 value = "--fallback-map"

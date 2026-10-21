@@ -556,21 +556,6 @@ value = ["code", "desc", "done", "total", "started"]
 doc = "A field name the engine does not merge (JavaScript treats it as the object's prototype); `update` with it is left to the Node script."
 value = "__proto__"
 
-[ops.verb_phase]
-doc = "The shadow name of the phase command."
-value = "phase"
-
-[ops.script_phase]
-doc = "The Node phase script, relative to the plugin root."
-value = "statusline/phase.js"
-
-[ops.shadow_rate_phase]
-doc = "How many runs in a thousand of the phase command are also run by the Node version in the background and compared (0 turns the shadow off). The engine result is always the real one."
-value = 1000
-env = "AH_ENGINE_SHADOW_RATE_PHASE"
-min = 0
-max = 1000
-
 [slcfg.launcher_rel]
 doc = "The launcher an earlier engine installer named in the statusLine command, relative to the directory of the status line dispatcher. Legacy recognition only; no migration writes it."
 value = "../scripts/ah-run.sh"

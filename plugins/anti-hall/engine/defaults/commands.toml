@@ -157,10 +157,6 @@ value = { args = "", read_only = false, status = "implemented" }
 doc = "Take an older anti-hall status line out of the host's settings (L9a, the port of statusline/uninstall-statusline.js): restores the saved original statusLine, else the settings backup, else removes the key; `--project` for ./.claude/settings.local.json, `--purge-base` to also remove the shared base configuration."
 value = { args = "[--user|--project] [--purge-base]", read_only = false, status = "implemented" }
 
-[cmd.shadow-compare]
-doc = "Internal: the detached half of a Node shadow (L9a). Runs the Node version of a sampled operator command on a scratch home and logs a mismatch to telemetry; started by the engine, not by people."
-value = { args = "<scratch dir>", read_only = false, status = "implemented" }
-
 [cmd.schedule]
 doc = "The scheduler (D33): `list` the jobs with their next run and last result, `run <job>` now (waits briefly for the result), or show the run `history` from hot.db; adding and removing jobs from the command line is planned (D33), today they come from schedules.toml and schedules.json."
 value = { args = "<list|run <job>|history> [--job <name>] [--limit <n>]", read_only = false, read_only_args = ["list", "history"], status = "implemented" }

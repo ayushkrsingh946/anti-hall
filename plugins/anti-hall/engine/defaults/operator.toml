@@ -1156,105 +1156,6 @@ value = "\\x1b\\[[0-9;]*[a-zA-Z]"
 doc = "A control character."
 value = "[\\x00-\\x1f\\x7f]"
 
-[ops.verb_statusline]
-doc = "The shadow name of the status line."
-value = "statusline"
-
-[ops.script_statusline]
-doc = "The Node status line dispatcher, relative to the plugin root."
-value = "statusline/statusline.js"
-
-[ops.shadow_rate_statusline]
-doc = "How many runs in a thousand of the statusline command are also run by the Node version in the background and compared (0 turns the shadow off). The engine result is always the real one."
-value = 50
-env = "AH_ENGINE_SHADOW_RATE_STATUSLINE"
-min = 0
-max = 1000
-
-[ops.shadow_dir]
-doc = "The shadow scratch directory, inside the engine state directory."
-value = "shadow"
-
-[ops.shadow_copy]
-doc = "The entries of ~/.anti-hall the Node shadow gets a private copy of (everything it may change); compared after both runs."
-value = ["settings.json", "jev.json", "defects", "update-sweep-state.json", "trusted-command-allow.json", "trusted-edit-allow.json", "phase-state.json"]
-
-[ops.shadow_skip]
-doc = "The entries of ~/.anti-hall the Node shadow never sees."
-value = ["context-pct", "ah-engine", "ah-node-shadow", "shadow"]
-
-[ops.shadow_link_home]
-doc = "The home entries the Node shadow reads through links."
-value = [".claude", ".claude.json"]
-
-[ops.shadow_lock_ext]
-doc = "Lock files are never linked into the shadow home."
-value = ".lock"
-
-[ops.shadow_ignore_ext]
-doc = "File name endings left out of the state comparison."
-value = [".lock", ".tmp"]
-
-[ops.shadow_copy_bytes]
-doc = "Most bytes copied into one shadow home."
-value = 16777216
-
-[ops.shadow_child_env]
-doc = "Set in the shadow child so it never starts a shadow of its own."
-value = "AH_ENGINE_SHADOW_CHILD"
-
-[ops.shadow_dry_env]
-doc = "The dry-run switch every Node script honours."
-value = "ANTIHALL_INGEST_DRY_RUN"
-
-[ops.shadow_command]
-doc = "The internal command that runs one comparison."
-value = "shadow-compare"
-
-[ops.shadow_event]
-doc = "The command name of the telemetry event a comparison leaves."
-value = "shadow"
-
-[ops.shadow_node]
-doc = "The Node program the shadow runs when AH_ENGINE_NODE is not set."
-value = "node"
-
-[ops.shadow_timeout_ms]
-doc = "Longest a Node shadow run may take."
-value = 20000
-
-[ops.shadow_keep]
-doc = "How many mismatching comparisons keep their files for review."
-value = 20
-
-[ops.shadow_home_word]
-doc = "Replaces the real and the scratch home in compared text."
-value = "HOME"
-
-[ops.shadow_job_file]
-doc = "The comparison job file."
-value = "job.json"
-
-[ops.shadow_engine_out]
-doc = "The engine stdout of a sampled run."
-value = "engine.out"
-
-[ops.shadow_engine_err]
-doc = "The engine stderr of a sampled run."
-value = "engine.err"
-
-[ops.shadow_stdin_file]
-doc = "The stdin of a sampled run."
-value = "stdin.bin"
-
-[ops.shadow_report_file]
-doc = "The report left by a mismatching comparison."
-value = "mismatch.txt"
-
-[ops.shadow_masks]
-doc = "Patterns replaced before comparing (`regex => replacement`): clock values and animation frames, and the engine-first status line command (the launcher form) read as the Node installer's own `node \"<dispatcher>\"`."
-value = ["[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z => TS", "corrupt-[0-9]+ => corrupt-N", "[◐◓◑◒] => S", "\\.[0-9]+\\.[0-9a-f]{8}\\.tmp => .tmp", "\"ts\":[0-9]+ => \"ts\":N", "\"started\":[0-9]+ => \"started\":N", "[0-9]+[hms]( |\\x1b|$) => D$1", 'sh \\"[^"]*/ah-run\.sh\\" --stdin statusline -- \\"([^"]*)\\" => node \"$1\"']
-
 [statusline.poll_ms]
 doc = "How often a bounded child is checked, in milliseconds."
 value = 2
@@ -1397,18 +1298,6 @@ value = ".gitmodules"
 [ops.judge_verbs]
 doc = "The verbs of `settings judge`."
 value = ["on", "off", "status"]
-
-[ops.shadow_per]
-doc = "The sampling denominator of the shadow rates."
-value = 1000
-
-[ops.shadow_digest_bytes]
-doc = "Bytes of the content digest in the shadow state comparison."
-value = 8
-
-[ops.shadow_report]
-doc = "The report a mismatching comparison leaves. Placeholders: want, got, e_out, n_out, e_err, n_err, e_state, n_state."
-value = "engine exit {want}, node exit {got}\n--- engine stdout\n{e_out}\n--- node stdout\n{n_out}\n--- engine stderr\n{e_err}\n--- node stderr\n{n_err}\n--- engine state\n{e_state}\n--- node state\n{n_state}\n"
 
 [statusline.tmp_env]
 doc = "The variables that name the temp directory, first match wins."

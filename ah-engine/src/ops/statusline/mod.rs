@@ -101,12 +101,11 @@ static PARTIAL: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 /// `statusline` (the host pipes its session JSON on stdin). The whole run, input wait included, is bounded by
 /// `statusline.total_deadline_ms`: past it the line already rendered is printed and the process ends (a host that stopped waiting
 /// has already dropped the output), and every step's own limit is cut to what is left.
-pub fn run(p: &Parsed) -> i32 {
+pub fn run(_p: &Parsed) -> i32 {
     let started = std::time::Instant::now();
     let total = defaults::millis("statusline.total_deadline_ms");
     util::set_end(Some(started + total));
     let Some(stdin) = read_stdin() else { return 0 };
-    let plan = super::shadow::begin(defaults::text("ops.verb_statusline"), defaults::text("ops.script_statusline"), &p.raw, Some(&stdin));
     let (tx, rx) = std::sync::mpsc::channel();
     let input = stdin.clone();
     std::thread::spawn(move || {
@@ -117,7 +116,7 @@ pub fn run(p: &Parsed) -> i32 {
     match rx.recv_timeout(wait) {
         Ok(()) => {}
         Err(_) => {
-            // cut: the part already rendered is the answer; the Node witness is not compared (it ran to completion)
+            // cut: the part already rendered is the answer
             if let Some(line) = PARTIAL.lock().ok().and_then(|g| g.clone()) {
                 out(&line);
             }
@@ -125,7 +124,6 @@ pub fn run(p: &Parsed) -> i32 {
             return 0;
         }
     }
-    super::shadow::end(plan, 0);
     0
 }
 

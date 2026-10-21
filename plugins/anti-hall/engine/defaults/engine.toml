@@ -38,16 +38,6 @@ value = "AH_ENGINE_RULES"
 doc = "Overrides the version this build reports and compares for handoff (the plugin version in production, arbitrary in tests)."
 value = "AH_ENGINE_VERSION"
 
-[env.fallback]
-doc = "Path of the Node hook the client runs when the engine cannot answer (the `--fallback` argument wins)."
-value = "AH_ENGINE_FALLBACK"
-
-[env.node]
-doc = "The Node binary used to run the fallback hook."
-value = "AH_ENGINE_NODE"
-
-# ---- environment variables read only by the POSIX shell wrappers (documented here so the generated reference lists them) ----
-
 [env.allocator]
 doc = "Selects the daemon's allocator: jemalloc (default) or system. The client sets it from `diagnostics.allocator` on the daemon it spawns, unless it is already set; the daemon reads it before its first allocation."
 value = "AH_ENGINE_ALLOCATOR"

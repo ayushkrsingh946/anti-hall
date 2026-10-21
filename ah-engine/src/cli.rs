@@ -88,7 +88,6 @@ fn handlers() -> &'static [(&'static str, Handler)] {
         ("phase", crate::ops::cmd_phase),
         ("install-statusline", crate::ops::cmd_install_statusline),
         ("uninstall-statusline", crate::ops::cmd_uninstall_statusline),
-        ("shadow-compare", crate::ops::cmd_shadow_compare),
         ("update", crate::operator::update::run),
         ("engine-update", crate::operator::engine_update::run),
         ("install-codex", crate::operator::install_codex::run),
