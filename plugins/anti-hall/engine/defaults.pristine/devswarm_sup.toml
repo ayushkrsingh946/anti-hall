@@ -1822,10 +1822,6 @@ value = "tokens"
 doc = "The supervision log event written when a straying warning is issued."
 value = "warn"
 
-[devswarm_sup.tl_why_log_rotation]
-doc = "Why a supervision event is not written: the log is over its size limit and its rotation with the daily roll-ups has no native port."
-value = "the supervision log is over its size limit; its rotation and daily roll-ups have no native port, so the event is not written"
-
 [devswarm_sup.tl_alert_component]
 doc = "The component of the central-log alert for a straying warning."
 value = "devswarm-supervisor"
@@ -1895,3 +1891,7 @@ doc = "How many hex digits of the SHA-1 of the off-scope file list name an off-s
 value = 10
 min = 4
 max = 40
+
+[devswarm_sup.sl_day_start]
+doc = "The time of day appended to a UTC day (YYYY-MM-DD) to read the day's first instant when a supervision roll-up is written."
+value = "T00:00:00Z"

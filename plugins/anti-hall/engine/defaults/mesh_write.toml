@@ -1332,8 +1332,14 @@ doc = "The supervision event log (one JSON line per plan step event), under the 
 value = "devswarm-supervision.ndjson"
 
 [mesh_write.supervision_max_bytes]
-doc = "Size above which Node rotates the supervision log before appending; the engine defers a plan write while the log is above it (rotation stays Node's)."
+doc = "Size above which the supervision log is rotated before an event is appended (the daily roll-ups are written first). A plan write that cannot rotate it defers while the log is above it."
 value = 1048576
+
+[mesh_write.supervision_rotated_files]
+doc = "How many numbered generations of the supervision log are kept (`.1` to `.N`); the oldest is replaced by a rotation, after its days are rolled up."
+value = 5
+min = 1
+max = 50
 
 [mesh_write.plan_statuses]
 doc = "The step statuses `heartbeat --status` accepts (STEP_STATUSES)."

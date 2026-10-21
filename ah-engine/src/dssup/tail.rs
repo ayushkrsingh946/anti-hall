@@ -15,8 +15,7 @@
 //!   Primary or kills anything. The Jev notes on a warning are put there by the engine's `jev sweep`, not here.
 //!
 //! Everything is fail-open per workspace: an error for one never affects the others. The supervision log (`warn` and `tokens`
-//! events) is appended only while it is under its size limit; its rotation with the daily roll-ups has no native port, so past the
-//! limit the events are held (counted `native_unable` once per pass) and the state files are still written.
+//! events) is rotated natively past its size limit (`super::suplog`: the daily roll-ups first) before an event is appended.
 // Discard triage (E3): every `.ok()` / `harmless` in this file is a deliberate keep, for these reasons:
 // - an unreadable optional state file is the absent one (Node: `try { JSON.parse(...) } catch (_) {}`)
 // - the ask-state and token-usage files are best-effort bookkeeping (Node: "fail-open: dedupe is best-effort")
@@ -486,18 +485,11 @@ fn obj_or_empty(v: Option<&OVal>) -> OVal {
     }
 }
 
-/// The supervision log, appended to while it is under its limit (rotation and the daily roll-ups are not ported): `false` when held.
-fn log_event(ctx: &Ctx, held: &mut bool, typ: &str, fields: Vec<(&str, OVal)>) {
-    let inv = inv_of(ctx, "");
-    if crate::meshw::plan::log_needs_rotation(&inv) {
-        if !*held {
-            *held = true;
-            super::tick::held("dssup:verdicts:supervision_log", defaults::text("devswarm_sup.tl_why_log_rotation"));
-        }
-        return;
-    }
+/// The supervision log, rotated first when it is over its limit, then appended to.
+fn log_event(ctx: &Ctx, typ: &str, fields: Vec<(&str, OVal)>) {
+    super::suplog::rotate_if_needed(ctx.home);
     let f: Vec<(String, OVal)> = fields.into_iter().map(|(k, v)| (k.to_string(), v)).collect();
-    crate::meshw::plan::record(&inv, typ, &f, ctx.now as f64);
+    crate::meshw::plan::record(&inv_of(ctx, ""), typ, &f, ctx.now as f64);
 }
 
 /// One pass's settings and bookkeeping.
@@ -509,7 +501,6 @@ struct Pass<'a> {
     stall_ms: f64,
     burn_warn: f64,
     weight: f64,
-    log_held: bool,
 }
 
 impl Pass<'_> {
@@ -587,7 +578,6 @@ impl Pass<'_> {
             let done = plan["steps"].as_array().map_or(0, |s| s.iter().filter(|x| x.get("status").and_then(Value::as_str) == Some(defaults::text("devswarm_sup.tl_step_done"))).count());
             log_event(
                 ctx,
-                &mut self.log_held,
                 defaults::text("devswarm_sup.tl_ev_tokens"),
                 vec![
                     ("id", OVal::Str(d.id.clone())),
@@ -677,7 +667,6 @@ impl Pass<'_> {
         for (signal, step, repeat) in &issued {
             log_event(
                 ctx,
-                &mut self.log_held,
                 defaults::text("devswarm_sup.tl_ev_warn"),
                 vec![
                     ("id", OVal::Str(d.id.clone())),
@@ -724,7 +713,6 @@ pub fn run(ctx: &Ctx, runner: &dyn Runner, items: &[(Desc, OVal)]) -> Value {
             * defaults::num("devswarm_sup.tl_ms_per_minute") as f64,
         burn_warn: gset::get_number(ctx.st, defaults::raw("devswarm_sup.tl_set_burn_warn")),
         weight: gset::get_number(ctx.st, defaults::raw("devswarm_sup.tl_set_burn_cache_pct")) / 100.0,
-        log_held: false,
     };
     let (mut labels, mut straying) = (Vec::new(), Vec::new());
     for (d, verdict) in items {
@@ -895,8 +883,7 @@ mod tests {
             stall_ms: 30.0 * 60_000.0,
             burn_warn: 2_000_000.0,
             weight: 0.1,
-            log_held: false,
-        };
+            };
         let d = f.desc("w1");
         let (signals, issued) = pass.straying(&d, &verdict("alive", None)).expect("a child with a plan");
         assert_eq!((signals.as_slice(), issued.as_slice()), (&["stall"][..], &["stall"][..]));

@@ -5761,7 +5761,8 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `mesh_write.super_cache_max` | `256` |  |  | Most nested checkouts whose superproject answer is kept at once (expired entries go first, then all). |
 | `mesh_write.super_cache_ttl_ms` | `300000` |  | ms | How long a superproject answer git gave for a nested checkout is reused (identity.js SUPER_CACHE_TTL_MS). |
 | `mesh_write.supervision_log` | `devswarm-supervision.ndjson` |  |  | The supervision event log (one JSON line per plan step event), under the logs directory. |
-| `mesh_write.supervision_max_bytes` | `1048576` |  |  | Size above which Node rotates the supervision log before appending; the engine defers a plan write while the log is above it (rotation stays Node's). |
+| `mesh_write.supervision_max_bytes` | `1048576` |  |  | Size above which the supervision log is rotated before an event is appended (the daily roll-ups are written first). A plan write that cannot rotate it defers while the log is above it. |
+| `mesh_write.supervision_rotated_files` | `5` |  |  | How many numbered generations of the supervision log are kept (`.1` to `.N`); the oldest is replaced by a rotation, after its days are rolled up. |
 | `mesh_write.synthetic_session_prefix` | `unclaimed:` |  |  | The same prefix as the routing code names it (SYNTHETIC_SESSION_PREFIX). |
 | `mesh_write.text_no_messages` | `(no messages)` |  |  | What `inbox read-primary --format text` prints for an empty inbox. |
 | `mesh_write.text_row` | `from: {from}\nseq: {seq}\n{body}\n` |  |  | One message of `inbox read-primary --format text`: `{from}`, `{seq}` and `{body}`. |
@@ -8212,6 +8213,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_sup.set_rt_keep` | `7 entries` |  |  | The newest messages of each partition that are never tombstoned (by age or by size). Node: devswarm.retention.keepPerPartition. |
 | `devswarm_sup.set_rt_max_store_mb` | `7 entries` |  |  | Store size limit in MB: above it the oldest eligible bodies are tombstoned whatever their age; 0 = no limit. Node: devswarm.retention.maxStoreMB. |
 | `devswarm_sup.set_sweep_budget_ms` | `7 entries` |  |  | Time budget for one deferred stage of the sweep tail (one stage per tick). Node: devswarm.supervisorSweepBudgetMs. |
+| `devswarm_sup.sl_day_start` | `T00:00:00Z` |  |  | The time of day appended to a UTC day (YYYY-MM-DD) to read the day's first instant when a supervision roll-up is written. |
 | `devswarm_sup.status_escalated` | `escalated` |  |  | The verdict status after an escalation. |
 | `devswarm_sup.status_nudged` | `nudged` |  |  | The verdict status after a poke. |
 | `devswarm_sup.sweep_tail_mode` | `6 entries` |  |  | Whether the engine decides the sweep tail (archived registry rows, twin descriptors, the deferred post-update stages and the reconcile-family update stages): engine (the default) \| off (those steps are disabled: counted, nothing run). |
@@ -8266,7 +8268,6 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_sup.tl_usage_read_max` | `8388608` |  | bytes | Most bytes of a child's transcript read in one pass (the rest is read on the next). |
 | `devswarm_sup.tl_usage_seen_keep` | `32` |  |  | How many assistant message ids are remembered, so a message written as several transcript entries counts once. |
 | `devswarm_sup.tl_warned_keep` | `100` |  |  | How many warned signal episodes the stray state keeps per plan (the oldest are dropped first). |
-| `devswarm_sup.tl_why_log_rotation` | `the supervision log is over its size limit; its rotation and daily roll-ups h...` |  |  | Why a supervision event is not written: the log is over its size limit and its rotation with the daily roll-ups has no native port. |
 | `devswarm_sup.verdict_fields` | `7 items` |  |  | The fields of a liveness verdict Node's recovery keeps across an update, in its order (PRESERVED_VERDICT_FIELDS); a nudge or an escalation rewrites the file as status + these + the new fields. |
 | `devswarm_sup.verdict_zero_fields` | `recoveries, nudgeAttempts` |  |  | The preserved verdict fields whose value before the first write is 0, not null (Node: recoveries and nudgeAttempts). |
 | `devswarm_sup.witness_dir` | `.anti-hall/witness` |  |  | Where the ingest witness builds its scratch mirrors, relative to the home directory. Each is removed when its comparison is done. |

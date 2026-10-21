@@ -81,11 +81,11 @@ fn rotate_one(path: &Path, threshold: u64) -> Value {
     }
 }
 
-/// The native duty: rotate the supervisor's log and the engine's own tick log. The supervisor's own bounded logs only.
+/// The native duty: rotate the supervisor's log, the engine's own tick log and the supervision event log. The supervisor's own bounded logs only.
 pub fn log_rotate(ctx: &Ctx) -> Value {
     let threshold = setting(ctx.st, "devswarm_sup.set_log_rotate_bytes").as_u64().unwrap_or(u64::MAX);
     let engine = ctx.home.join(defaults::text("devswarm_sup.engine_log"));
-    json!({"supervisor": rotate_one(&node_logs(ctx.home)[0], threshold), "engine": rotate_one(&engine, threshold)})
+    json!({"supervisor": rotate_one(&node_logs(ctx.home)[0], threshold), "engine": rotate_one(&engine, threshold), "supervision": super::suplog::rotate_if_needed(ctx.home)})
 }
 
 fn lock_params() -> nodelock::Params {
