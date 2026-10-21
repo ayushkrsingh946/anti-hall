@@ -12,7 +12,8 @@
 //!   `off-scope` (its commits touch files outside the plan's scope globs, from the read-only `ready-check`). Each signal episode
 //!   warns once, a new episode of the same signal on the same step warns again up to `devswarm.strayWarnMax`; the state is
 //!   `devswarm/stray/<planKey>.json`, which the parent Stop gate reads. Advisory only: nothing messages the child, blocks the
-//!   Primary or kills anything. The Jev notes on a warning are put there by the engine's `jev sweep`, not here.
+//!   Primary or kills anything. The Jev notes on an `off-scope` warning (`devswarmOnBrief`, `devswarmExtraSanctioned`) are
+//!   decided here (`super::jevnotes`); the notes of the other signals are put there by the engine's `jev sweep`.
 //!
 //! Everything is fail-open per workspace: an error for one never affects the others. The supervision log (`warn` and `tokens`
 //! events) is rotated natively past its size limit (`super::suplog`: the daily roll-ups first) before an event is appended.
@@ -51,14 +52,14 @@ fn finite(v: Option<&Value>) -> Option<f64> {
     v.and_then(Value::as_f64).filter(|x| x.is_finite())
 }
 
-fn write_json(path: &Path, v: &OVal) -> bool {
+pub(super) fn write_json(path: &Path, v: &OVal) -> bool {
     if let Some(d) = path.parent() {
         crate::discard::harmless(std::fs::create_dir_all(d)); // keep: the write below reports the failure
     }
     crate::atomic::write(path, v.stringify()).is_ok()
 }
 
-fn read_obj(path: &Path) -> Option<OVal> {
+pub(super) fn read_obj(path: &Path) -> Option<OVal> {
     OVal::parse(&String::from_utf8_lossy(&std::fs::read(path).ok()?)).filter(|v| matches!(v, OVal::Obj(_)))
 }
 
@@ -73,7 +74,7 @@ fn ask_state_path(home: &Path, id: &str) -> PathBuf {
 }
 
 /// `resolveBlockerLabelReaskMs(env)`.
-fn reask_ms(ctx: &Ctx) -> f64 {
+pub(super) fn reask_ms(ctx: &Ctx) -> f64 {
     let sec = gset::get_number(ctx.st, defaults::raw("devswarm_sup.tl_set_reask_sec"));
     (if sec.is_finite() && sec > 0.0 { sec } else { defaults::num("devswarm_sup.tl_reask_default_sec") as f64 }) * defaults::num("devswarm_sup.lv_ms_per_sec") as f64
 }
@@ -211,7 +212,7 @@ fn weigh(u: &serde_json::Map<String, Value>, w: f64) -> f64 {
     n("input_tokens") + n("output_tokens") + n("cache_creation_input_tokens") + w * n("cache_read_input_tokens")
 }
 
-fn transcript_of(home: &Path, wt: &str, session: &str) -> Option<PathBuf> {
+pub(super) fn transcript_of(home: &Path, wt: &str, session: &str) -> Option<PathBuf> {
     if session.is_empty() || !session.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-') || wt.is_empty() {
         return None;
     }
@@ -347,10 +348,12 @@ struct Signal {
     key: String,
     reason: String,
     files: Option<Vec<String>>,
+    /// The Jev recommendations on it (`jevnotes`).
+    jev: Vec<super::jevnotes::Note>,
 }
 
 /// `planLib.currentStep(plan)`: the open step that is being worked on (newest first), else the first open one.
-fn current_step(plan: &Value) -> Option<&Value> {
+pub(super) fn current_step(plan: &Value) -> Option<&Value> {
     let steps = plan.get("steps")?.as_array()?;
     if steps.is_empty() {
         return None;
@@ -433,6 +436,7 @@ fn signals_of(ctx: &Ctx, runner: &dyn Runner, plan: &Value, c: &Child, usage: Op
             key: format!("idle:{ns}:{}", to_js_string(since)),
             reason: format!("{}{}", defaults::text("devswarm_sup.tl_reason_idle"), crate::meshw::plan::dur(now - since)),
             files: None,
+            jev: Vec::new(),
         });
     } else if c.status == alive && now - last_progress >= stall_ms {
         out.push(Signal {
@@ -441,6 +445,7 @@ fn signals_of(ctx: &Ctx, runner: &dyn Runner, plan: &Value, c: &Child, usage: Op
             key: format!("stall:{ns}:{}", to_js_string(last_progress)),
             reason: format!("{}{}", defaults::text("devswarm_sup.tl_reason_stall"), crate::meshw::plan::dur(now - last_progress)),
             files: None,
+            jev: Vec::new(),
         });
     }
     if let Some(u) = usage.filter(|u| !awaiting && burn_warn > 0.0 && u.since_step >= burn_warn) {
@@ -450,6 +455,7 @@ fn signals_of(ctx: &Ctx, runner: &dyn Runner, plan: &Value, c: &Child, usage: Op
             key: format!("burn:{ns}:{}", u.mark_ts.map_or_else(|| "undefined".to_string(), to_js_string)),
             reason: defaults::render("devswarm_sup.tl_reason_burn", &[("used", &fmt_tokens(u.since_step)), ("step", &ns)]),
             files: None,
+            jev: Vec::new(),
         });
     }
     if let Some(mut files) = off_scope_files(ctx, runner, plan, c.wt).filter(|f| !f.is_empty()) {
@@ -463,6 +469,7 @@ fn signals_of(ctx: &Ctx, runner: &dyn Runner, plan: &Value, c: &Child, usage: Op
             key: format!("off-scope:{ns}:{digest}"),
             reason: format!("{}{}{more}", defaults::text("devswarm_sup.tl_reason_off_scope"), files.iter().take(shown).cloned().collect::<Vec<_>>().join(", ")),
             files: Some(files.into_iter().take(defaults::num("devswarm_sup.tl_files_kept") as usize).collect()),
+            jev: Vec::new(),
         });
     }
     out
@@ -486,7 +493,7 @@ fn obj_or_empty(v: Option<&OVal>) -> OVal {
 }
 
 /// The supervision log, rotated first when it is over its limit, then appended to.
-fn log_event(ctx: &Ctx, typ: &str, fields: Vec<(&str, OVal)>) {
+pub(super) fn log_event(ctx: &Ctx, typ: &str, fields: Vec<(&str, OVal)>) {
     super::suplog::rotate_if_needed(ctx.home);
     let f: Vec<(String, OVal)> = fields.into_iter().map(|(k, v)| (k.to_string(), v)).collect();
     crate::meshw::plan::record(&inv_of(ctx, ""), typ, &f, ctx.now as f64);
@@ -501,6 +508,8 @@ struct Pass<'a> {
     stall_ms: f64,
     burn_warn: f64,
     weight: f64,
+    /// The Jev settings of the pass (the modes of the off-scope questions).
+    jev: &'a JevSettings,
 }
 
 impl Pass<'_> {
@@ -589,7 +598,11 @@ impl Pass<'_> {
         }
         let dormant = self.dormant(d, wt, session, last_out);
         let child = Child { wt, status, stale_since, dormant };
-        let signals = signals_of(ctx, self.runner, &plan, &child, usage.as_ref(), self.stall_ms, self.burn_warn);
+        let mut signals = signals_of(ctx, self.runner, &plan, &child, usage.as_ref(), self.stall_ms, self.burn_warn);
+        if let Some(off) = signals.iter_mut().find(|s| s.signal == "off-scope") {
+            let files = off.files.clone().unwrap_or_default();
+            off.jev = super::jevnotes::adjust(ctx, self.runner, self.jev, &super::jevnotes::Off { id: &d.id, key, plan: &plan, wt, session, files: &files, signal_key: &off.key });
+        }
         // the state: what was warned before, bounded, and what is active now
         let prev = read_obj(&stray_path(ctx.home, key));
         let now = ctx.now as f64;
@@ -635,6 +648,9 @@ impl Pass<'_> {
                 }
                 e.push(("at".to_string(), w.get("at").cloned().unwrap_or(OVal::Null)));
                 e.push(("n".to_string(), w.get("n").cloned().unwrap_or(OVal::Null)));
+                if !s.jev.is_empty() {
+                    e.push(("jev".to_string(), OVal::Arr(s.jev.iter().map(super::jevnotes::Note::to_oval).collect())));
+                }
                 active.push(OVal::Obj(e));
             }
         }
@@ -713,6 +729,7 @@ pub fn run(ctx: &Ctx, runner: &dyn Runner, items: &[(Desc, OVal)]) -> Value {
             * defaults::num("devswarm_sup.tl_ms_per_minute") as f64,
         burn_warn: gset::get_number(ctx.st, defaults::raw("devswarm_sup.tl_set_burn_warn")),
         weight: gset::get_number(ctx.st, defaults::raw("devswarm_sup.tl_set_burn_cache_pct")) / 100.0,
+        jev: &lane.settings,
     };
     let (mut labels, mut straying) = (Vec::new(), Vec::new());
     for (d, verdict) in items {
@@ -875,6 +892,7 @@ mod tests {
             &json!({"id": "w1", "created_at": NOW - 3 * 3600 * 1000, "step_ts": NOW - two_hours, "steps": [{"n": 1, "text": "first", "status": "doing", "ts": NOW - two_hours}]}).to_string(),
         );
         let ctx = f.ctx(NOW);
+        let lane = JevLane::load(&ctx);
         let mut pass = Pass {
             ctx: &ctx,
             runner: &Nothing,
@@ -883,7 +901,8 @@ mod tests {
             stall_ms: 30.0 * 60_000.0,
             burn_warn: 2_000_000.0,
             weight: 0.1,
-            };
+            jev: &lane.settings,
+        };
         let d = f.desc("w1");
         let (signals, issued) = pass.straying(&d, &verdict("alive", None)).expect("a child with a plan");
         assert_eq!((signals.as_slice(), issued.as_slice()), (&["stall"][..], &["stall"][..]));

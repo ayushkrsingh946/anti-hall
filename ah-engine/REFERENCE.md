@@ -8023,6 +8023,34 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_sup.hk_status_failed` | `failed` |  |  | The result status of a file or directory the sweep could not handle. |
 | `devswarm_sup.hk_status_fixed` | `fixed` |  |  | The result status of a removed file (doctor-repair's word). |
 | `devswarm_sup.hk_sweeps` | `4 entries, 4 entries` |  |  | The age sweeps of the housekeeping duty, in order: name (the key in the result), dir (under the DevSwarm state directory), suffix (only files ending so are touched) and days (the setting holding the retention window in days). |
+| `devswarm_sup.jv_blocked` | ` (blocked)` |  |  | Appended to the step line when the current step is blocked. |
+| `devswarm_sup.jv_commits_max` | `5` |  |  | How many commit subjects go into the on-brief question. |
+| `devswarm_sup.jv_default_trigger` | `off-scope` |  |  | The trigger key of an off-scope signal that has neither a key nor a step. |
+| `devswarm_sup.jv_ellipsis` | `…` |  |  | The mark that ends a question text cut at its limit. |
+| `devswarm_sup.jv_ev_answer` | `jev` |  |  | The supervision log event written once per cached answer the supervisor first reads. |
+| `devswarm_sup.jv_ev_trigger` | `jev-trigger` |  |  | The supervision log event written once per trigger of a question. |
+| `devswarm_sup.jv_extra` | `9 entries` |  |  | The off-scope question `devswarmExtraSanctioned`: did the user ask for the extra work (as `jv_on_brief`; the state template takes {prompts} and {files}). |
+| `devswarm_sup.jv_files_shown` | `20` |  |  | How many off-scope files go into a question. |
+| `devswarm_sup.jv_git_args` | `-C, {wt}, log, -10, --format=%x01%s, --name-only` |  |  | The arguments that list the subjects of a child's last commits, each followed by its files. {wt} is the worktree; the subject starts after a 0x01 mark. |
+| `devswarm_sup.jv_git_bin` | `git` |  |  | The executable that lists a child's recent commits. |
+| `devswarm_sup.jv_git_mark` | `` |  |  | The mark in the commit listing that starts each commit. |
+| `devswarm_sup.jv_git_timeout_ms` | `3000` |  |  | The longest the commit listing may take. |
+| `devswarm_sup.jv_join_item` | ` \| ` |  |  | The separator of the summaries, commit subjects and user prompts in the question. |
+| `devswarm_sup.jv_join_list` | `, ` |  |  | The separator of the scope globs and the off-scope files in the question. |
+| `devswarm_sup.jv_on_brief` | `9 entries` |  |  | The off-scope question `devswarmOnBrief`: is the work outside the scope off the child's brief. `cap` limits the scrubbed state in characters; `state` is its template ({step} {scope} {summaries} {commits} {files}); `note_true` / `note_false` are the verdicts attached to the warning for each answer; `min_pct` is the floor of the confidence threshold in percent (0 = the configured threshold alone). |
+| `devswarm_sup.jv_outcome_seen` | `seen` |  |  | The trigger outcome: the question's precondition held. |
+| `devswarm_sup.jv_outcome_skipped` | `skipped` |  |  | The trigger outcome: the precondition held but nothing was asked. |
+| `devswarm_sup.jv_prompt_cap` | `400` |  |  | The most characters of one user prompt in the question. |
+| `devswarm_sup.jv_prompt_marker` | `"user"` |  |  | A transcript line is looked at as a prompt only when it holds this text. |
+| `devswarm_sup.jv_prompt_skip_re` | `^<(command\|local-command\|task-notification\|system-reminder)` |  |  | A user message that starts like this (after trimming) is the harness speaking, not a prompt. |
+| `devswarm_sup.jv_prompts_keep` | `3` |  |  | How many of the child's last user prompts go into the question. |
+| `devswarm_sup.jv_prompts_read_max` | `262144` |  |  | How many bytes from the end of the child's transcript are read for the user's prompts. |
+| `devswarm_sup.jv_scope_key` | `scope_globs` |  |  | The plan field that holds the scope globs. |
+| `devswarm_sup.jv_skip_reason` | `mode-off-or-jev-disabled` |  |  | Why nothing was asked: the question's mode is off, or Jev is disabled. |
+| `devswarm_sup.jv_state_dir` | `supervision-jev` |  |  | The directory under the DevSwarm root that keeps, per plan, when each supervision Jev question was last asked and which answer was counted. |
+| `devswarm_sup.jv_step_line` | `latest touched step {n} ({done}/{total} done): {text}{blocked}` |  |  | The current step as the on-brief question shows it. {n} {done} {total} {text} {blocked}. |
+| `devswarm_sup.jv_summaries_key` | `summaries, text` |  |  | The plan field that holds the child's step summaries, and the field of each that holds its text. |
+| `devswarm_sup.jv_trig_keep` | `20` |  |  | How many trigger marks a plan's Jev state keeps per question before the oldest is dropped. |
 | `devswarm_sup.kill_claude_bin` | `claude` |  |  | The Claude Code executable the resume starts. |
 | `devswarm_sup.kill_claude_dir` | `.claude` |  |  | The Claude state directory under the home directory. |
 | `devswarm_sup.kill_claude_dirs` | `~/.local/bin, ~/.claude/local, /opt/homebrew/bin, /usr/local/bin` |  |  | Directories searched for it after PATH (`~/` is the home directory); the daemon's PATH is often minimal. |

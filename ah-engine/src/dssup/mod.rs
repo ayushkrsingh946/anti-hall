@@ -35,6 +35,7 @@ pub mod deferred;
 pub mod gate;
 pub mod housekeep;
 pub mod ingest;
+pub mod jevnotes;
 pub mod kill;
 pub mod liveness;
 pub mod recon;

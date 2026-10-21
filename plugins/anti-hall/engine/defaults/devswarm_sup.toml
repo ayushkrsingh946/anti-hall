@@ -1895,3 +1895,129 @@ max = 40
 [devswarm_sup.sl_day_start]
 doc = "The time of day appended to a UTC day (YYYY-MM-DD) to read the day's first instant when a supervision roll-up is written."
 value = "T00:00:00Z"
+
+[devswarm_sup.jv_state_dir]
+doc = "The directory under the DevSwarm root that keeps, per plan, when each supervision Jev question was last asked and which answer was counted."
+value = "supervision-jev"
+
+[devswarm_sup.jv_on_brief]
+doc = "The off-scope question `devswarmOnBrief`: is the work outside the scope off the child's brief. `cap` limits the scrubbed state in characters; `state` is its template ({step} {scope} {summaries} {commits} {files}); `note_true` / `note_false` are the verdicts attached to the warning for each answer; `min_pct` is the floor of the confidence threshold in percent (0 = the configured threshold alone)."
+value = { id = "devswarmOnBrief", cap = 1500, min_pct = 0, instructions = "A child workspace was given a step plan and a file scope. Is the work described below OFF its brief (not needed for any of its steps)?", when_true = "off the brief", when_false = "on the brief (needed for its steps)", state = "{step}\nscope: {scope}\nrecent summaries: {summaries}\nrecent commits: {commits}\nfiles outside scope: {files}", note_true = "off-brief", note_false = "on-brief" }
+
+[devswarm_sup.jv_extra]
+doc = "The off-scope question `devswarmExtraSanctioned`: did the user ask for the extra work (as `jv_on_brief`; the state template takes {prompts} and {files})."
+value = { id = "devswarmExtraSanctioned", cap = 1000, min_pct = 90, instructions = "A child workspace changed files outside its assigned scope. Given the user prompts it received, is this extra work UNSANCTIONED (the user did not ask for it)?", when_true = "unsanctioned: the user did not ask for it", when_false = "the user asked for this work", state = "user prompts: {prompts}\nfiles outside scope: {files}", note_true = "not requested by the user", note_false = "the user asked for this" }
+
+[devswarm_sup.jv_step_line]
+doc = "The current step as the on-brief question shows it. {n} {done} {total} {text} {blocked}."
+value = "latest touched step {n} ({done}/{total} done): {text}{blocked}"
+
+[devswarm_sup.jv_blocked]
+doc = "Appended to the step line when the current step is blocked."
+value = " (blocked)"
+
+[devswarm_sup.jv_join_list]
+doc = "The separator of the scope globs and the off-scope files in the question."
+value = ", "
+
+[devswarm_sup.jv_join_item]
+doc = "The separator of the summaries, commit subjects and user prompts in the question."
+value = " | "
+
+[devswarm_sup.jv_ellipsis]
+doc = "The mark that ends a question text cut at its limit."
+value = "…"
+
+[devswarm_sup.jv_files_shown]
+doc = "How many off-scope files go into a question."
+value = 20
+min = 1
+max = 1000
+
+[devswarm_sup.jv_summaries_key]
+doc = "The plan field that holds the child's step summaries, and the field of each that holds its text."
+value = ["summaries", "text"]
+
+[devswarm_sup.jv_scope_key]
+doc = "The plan field that holds the scope globs."
+value = "scope_globs"
+
+[devswarm_sup.jv_git_bin]
+doc = "The executable that lists a child's recent commits."
+value = "git"
+
+[devswarm_sup.jv_git_args]
+doc = "The arguments that list the subjects of a child's last commits, each followed by its files. {wt} is the worktree; the subject starts after a 0x01 mark."
+value = ["-C", "{wt}", "log", "-10", "--format=%x01%s", "--name-only"]
+
+[devswarm_sup.jv_git_mark]
+doc = "The mark in the commit listing that starts each commit."
+value = "\u0001"
+
+[devswarm_sup.jv_git_timeout_ms]
+doc = "The longest the commit listing may take."
+value = 3000
+min = 100
+max = 60000
+
+[devswarm_sup.jv_commits_max]
+doc = "How many commit subjects go into the on-brief question."
+value = 5
+min = 1
+max = 50
+
+[devswarm_sup.jv_prompts_read_max]
+doc = "How many bytes from the end of the child's transcript are read for the user's prompts."
+value = 262144
+min = 1024
+max = 16777216
+
+[devswarm_sup.jv_prompts_keep]
+doc = "How many of the child's last user prompts go into the question."
+value = 3
+min = 1
+max = 20
+
+[devswarm_sup.jv_prompt_cap]
+doc = "The most characters of one user prompt in the question."
+value = 400
+min = 10
+max = 5000
+
+[devswarm_sup.jv_prompt_marker]
+doc = "A transcript line is looked at as a prompt only when it holds this text."
+value = "\"user\""
+
+[devswarm_sup.jv_prompt_skip_re]
+doc = "A user message that starts like this (after trimming) is the harness speaking, not a prompt."
+value = "^<(command|local-command|task-notification|system-reminder)"
+
+[devswarm_sup.jv_trig_keep]
+doc = "How many trigger marks a plan's Jev state keeps per question before the oldest is dropped."
+value = 20
+min = 2
+max = 1000
+
+[devswarm_sup.jv_ev_answer]
+doc = "The supervision log event written once per cached answer the supervisor first reads."
+value = "jev"
+
+[devswarm_sup.jv_ev_trigger]
+doc = "The supervision log event written once per trigger of a question."
+value = "jev-trigger"
+
+[devswarm_sup.jv_outcome_seen]
+doc = "The trigger outcome: the question's precondition held."
+value = "seen"
+
+[devswarm_sup.jv_outcome_skipped]
+doc = "The trigger outcome: the precondition held but nothing was asked."
+value = "skipped"
+
+[devswarm_sup.jv_skip_reason]
+doc = "Why nothing was asked: the question's mode is off, or Jev is disabled."
+value = "mode-off-or-jev-disabled"
+
+[devswarm_sup.jv_default_trigger]
+doc = "The trigger key of an off-scope signal that has neither a key nor a step."
+value = "off-scope"
