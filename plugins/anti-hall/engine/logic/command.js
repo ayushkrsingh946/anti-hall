@@ -10,9 +10,10 @@
 // settings questions from the engine's generic primitives (`ah.*`). Every table, pattern, limit and text is in command.toml (and
 // the shared messages); the engine supplies only the file system, the `git` process, the settings chain and the clock.
 //
-// Never weaker than Node: anything that needs what the daemon cannot see (the hook process's own working directory, a settings
-// file only JavaScript can read, a git layout the identity port does not classify) sets `S.unsure`, and the whole verdict defers
-// (the Node hook decides). A script failure (an exception, a stack overflow, the time limit) defers too.
+// Never weaker than Node: what needs what the daemon cannot see (the hook process's own working directory, a settings file only
+// JavaScript can read, a git layout the identity port does not classify) is decided natively and counted (native_unable), towards the
+// stricter verdict where it is evidence for a block. A script failure (an exception, a stack overflow, the time limit) reaches the
+// engine's own failure policy.
 'use strict';
 
 // Regular expressions used inside functions, compiled once (the interpreter compiles a literal each time it is evaluated).
@@ -163,14 +164,14 @@ var S = null;                // the state of the call in progress
 var T = null, TGEN = -1;     // the tables, rebuilt when the defaults generation changes
 var __dirname = '';          // the hooks directory of the plugin (set per call)
 
-// The answer depends on something only the Node hook process can see: remember it (a Node `catch` may swallow the throw) and defer.
-function unsure() {
-  var e = new Error('unsure');
-  if (S) { if (!S.unsure) ah.log('command_unsure', String(e.stack)); S.unsure = true; }
-  e.unsure = true;
-  throw e;
+// A relative path of the hook process resolves against the stand-in for its directory (counted, native_unable).
+function cmdAbs(p) {
+  p = String(p);
+  if (p.charCodeAt(0) === 47) return p;
+  ah.unable('command:relative_path');
+  return ah.path.resolveAbs(hookProc.base() + '/' + p);
 }
-// A stack overflow, memory or time-limit exception must reach the engine (it then defers), never be swallowed by a fail-open catch.
+// A stack overflow, memory or time-limit exception must reach the engine (its policy applies), never be swallowed by a fail-open catch.
 function cmdFatal(e) {
   return !!(e && (e.unsure || e instanceof RangeError || RX0.test(String(e.message || e))));
 }
@@ -190,7 +191,7 @@ var path = (function () {
     resolve: function () {
       var a = [];
       for (var i = 0; i < arguments.length; i++) a.push(String(arguments[i]));
-      if (!a.some(isAbs)) unsure();
+      if (!a.some(isAbs)) { ah.unable('command:path_resolve_cwd'); a.unshift(hookProc.base()); }
       return posix.resolveIn('/', a);
     },
     join: function () { return posix.join.apply(null, Array.prototype.map.call(arguments, String)); },
@@ -202,7 +203,8 @@ var path = (function () {
     normalize: function (p) { return posix.normalize(String(p)); },
     relative: function (a, b) {
       a = String(a); b = String(b);
-      if (!isAbs(a) || !isAbs(b)) unsure();
+      if (!isAbs(a)) { ah.unable('command:path_relative'); a = cmdAbs(a); }
+      if (!isAbs(b)) { ah.unable('command:path_relative'); b = cmdAbs(b); }
       return ah.path.relative(a, b);
     },
   };
@@ -218,8 +220,7 @@ var fs = (function () {
     };
   }
   function lstatSync(p) {
-    p = String(p);
-    if (!path.isAbsolute(p)) unsure();
+    p = cmdAbs(p);
     var l = ah.fs.lstat(p);
     if (l === null) throw cmdErr('ENOENT', 'no such file or directory, lstat ' + p);
     if (l.kind === 'error') throw cmdErr('EIO', 'lstat ' + p + ' ' + l.code);
@@ -246,8 +247,7 @@ var fs = (function () {
     return current === '' ? '/' : current;
   }
   function real(p, native) {
-    p = String(p);
-    if (!path.isAbsolute(p)) unsure();
+    p = cmdAbs(p);
     if (!native) return jsRealpath(p);
     var r = ah.fs.realpathEx(p);
     if (r.error) throw cmdErr(r.error === 'NotFound' ? 'ENOENT' : 'EIO', 'realpath ' + p);
@@ -265,8 +265,7 @@ var fs = (function () {
     lstatSync: lstatSync, realpathSync: realpathSync, statSync: statSync,
     existsSync: function (p) { try { real(p, true); return true; } catch (e) { if (e && e.unsure) throw e; return false; } },
     readFileSync: function (p) {
-      p = String(p);
-      if (!path.isAbsolute(p)) unsure();
+      p = cmdAbs(p);
       var t = ah.fs.readText(p);
       if (t === null) throw cmdErr('ENOENT', 'no such file or directory, open ' + p);
       return t;
@@ -286,14 +285,14 @@ var os = {
   homedir: function () {
     var h = ah.env.get(ah.cfg('env.home'));
     if (h === null || h === '') h = ah.env.get(ah.cfg('env.home_alt'));
-    if (h === null || h === '') unsure();
+    if (h === null || h === '') { ah.unable('command:os_homedir'); h = ah.env.passwdHome() || ''; }
     return h;
   },
   userInfo: function () { return { homedir: ah.env.passwdHome() || '' }; },
 };
 
 var process = {
-  cwd: function () { unsure(); },
+  cwd: function () { ah.unable('command:process_cwd'); return hookProc.base(); },
   platform: 'linux',
   getuid: function () { return ah.uid(); },
   pid: 0,
@@ -305,7 +304,7 @@ function ahUndef(v) { return v === null ? undefined : v; }
 function gitSpawn(args, opts) {
   var cwdArg = opts && opts.cwd ? String(opts.cwd) : null;
   if (args[0] === '-C') { cwdArg = args[1]; args = args.slice(2); }
-  if (cwdArg !== null && !path.isAbsolute(cwdArg)) unsure();
+  if (cwdArg !== null && !path.isAbsolute(cwdArg)) cwdArg = cmdAbs(cwdArg);
   var env = opts && opts.env && opts.env.GIT_OPTIONAL_LOCKS !== undefined ? { GIT_OPTIONAL_LOCKS: opts.env.GIT_OPTIONAL_LOCKS } : undefined;
   var r = ah.exec('git', args, { cwd: cwdArg === null ? undefined : cwdArg, env: env, timeoutMs: (opts && opts.timeout) || ah.cfgNum('command.git_timeout_ms') });
   if (r === null) return { status: null, stdout: '', stderr: '', error: new Error('spawn git') };
@@ -439,18 +438,18 @@ var settings = {
   },
   getRaw: function (section, key) {
     var k = T.settings[section + '.' + key];
-    if (k === undefined) unsure();
+    if (k === undefined) { ah.unable('command:settings_key'); return undefined; }
     var entry = ah.cfg(k);
     // a free-text setting has no type: its value is a string (the entry's default when unset)
     if (entry.type === undefined && typeof entry.default === 'string') return ah.settings.str(k);
     var r = ah.settings.get(k, undefined, S.pluginRoot);
-    if (r.status === 'undecidable') unsure();
+    if (r.status === 'undecidable') { ah.unable('command:setting_undecidable'); return undefined; } // the setting's default applies
     return r.status === 'value' ? r.value : undefined;
   },
   enabled: function (section, key) {
     return cmdMemo('enabled:' + section + '.' + key, function () {
       var k = T.settings[section + '.' + key];
-      if (k === undefined) unsure();
+      if (k === undefined) { ah.unable('command:settings_key'); return true; } // an unknown switch counts as on (the stricter side)
       return ah.settings.bool(k);
     });
   },
@@ -488,6 +487,56 @@ LIB['./lib/devswarm-detect.js'] = { isDevswarmActive: function () { return cmdMe
 LIB['./lib/devswarm-role.js'] = {
   isChildWorkspace: function () { var v = ah.env.get(ah.cfg('command.child_env')); return v !== null && v.trim() !== ''; },
 };
+
+// hooks/lib/devswarm-role.js isChildWorker: a DevSwarm child workspace corroborated on disk (a registered descriptor, or a working
+// directory below DevSwarm's worktree root) on a live DevSwarm install. False on any doubt (a Primary), as in Node; a descriptor the
+// file system refuses to show counts as corroborated, as in Node.
+function cmdChildWorker(cwd) {
+  if (!LIB['./lib/devswarm-detect.js'].isDevswarmActive()) return false;
+  if (!LIB['./lib/devswarm-role.js'].isChildWorkspace()) return false;
+  var h = os.homedir();
+  var id = ah.env.get(ah.cfg('edit_guard.builder_id_env'));
+  if (typeof id === 'string' && id.trim() !== '' && id.indexOf('..') < 0 && new RegExp(ah.cfg('edit_guard.builder_id_pattern')).test(id)) {
+    var parts = ah.cfg('edit_guard.descriptor_dir').concat([id + ah.cfg('edit_guard.descriptor_ext')]);
+    var desc = parts.reduce(function (acc, part) { return path.join(acc, part); }, h);
+    try {
+      if (fs.statSync(desc).isFile()) return true;
+    } catch (e) {
+      if (e && e.code === 'EACCES') return true;
+      if (!e || e.code !== 'ENOENT') ah.unable('command:child_descriptor_stat');
+    }
+  }
+  var c = cwd ? String(cwd) : process.cwd();
+  var isDir = false;
+  try { isDir = fs.statSync(c).isDirectory(); } catch (e) {
+    if (!e || e.code !== 'ENOENT') ah.unable('command:child_cwd_stat');
+    isDir = false;
+  }
+  if (!isDir) return false;
+  var rootRaw = ah.cfg('edit_guard.repos_dir').reduce(function (acc, part) { return path.join(acc, part); }, h);
+  var rootReal, cwdReal;
+  try { rootReal = fs.realpathSync(rootRaw); } catch (e) { rootReal = path.resolve(rootRaw); }
+  try { cwdReal = fs.realpathSync(c); } catch (e) { cwdReal = path.resolve(c); }
+  return (cwdReal + '/').indexOf(rootReal + '/') === 0;
+}
+
+// {head, rest} of a command over the parse cap (hooks/lib/shell-writes.js bigCommandParts): its leading heredoc header, or its first
+// shell_writes.head_len characters cut at a line end, and the text after the heredoc when it is short and no cd precedes it.
+function cmdBigParts(command) {
+  var headLen = ah.cfgNum('shell_writes.head_len'), bigLen = ah.cfgNum('shell_writes.big_len');
+  var nl = command.indexOf('\n');
+  var first = nl === -1 ? command : command.slice(0, nl);
+  var m = nl !== -1 && first.length <= headLen ? /<<-?[ \t]*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\1/.exec(first) : null;
+  var cut = command.lastIndexOf('\n', headLen);
+  var prefix = { head: command.slice(0, cut > 0 ? cut : headLen), rest: '' };
+  if (!m) return prefix;
+  var delim = m[2];
+  var end = command.indexOf('\n' + delim + '\n', nl);
+  var bodyEnd = end !== -1 ? end : (command.endsWith('\n' + delim) ? command.length - delim.length - 1 : -1);
+  if (bodyEnd === -1) return prefix;
+  var rest = end !== -1 ? command.slice(end + delim.length + 2) : '';
+  return { head: first + '\n\n' + delim, rest: rest.trim() && rest.length <= bigLen && !/\bcd\b|\bpushd\b/.test(first) ? rest : '' };
+}
 
 // hooks/lib/scratchpad.js
 LIB['./lib/scratchpad.js'] = (function () {
@@ -549,10 +598,9 @@ LIB['./lib/scratchpad.js'] = (function () {
 // companion/lib/identity.js (`resolveContext` from the engine's identity port, and `rawGitInfo`)
 LIB['../companion/lib/identity.js'] = (function () {
   function resolveContext(cwd, opts) {
-    var d = cwd == null || cwd === '' ? process.cwd() : String(cwd);
-    if (!path.isAbsolute(d)) unsure();
+    var d = cwd == null || cwd === '' ? process.cwd() : cmdAbs(cwd);
     var c = ah.repo.context(d, !!(opts && opts.missingPath === 'ancestor'));
-    if (c.unsure) unsure();
+    if (c.unsure) { ah.unable('command:repo_context'); return { toplevel: null, worktreeRoot: null }; } // a checkout the host cannot classify
     return { toplevel: c.toplevel, worktreeRoot: c.root };
   }
   function gitdirOf(F, Tt) {
@@ -607,9 +655,8 @@ LIB['./lib/jev-assist.js'] = { scrubSecrets: function (t) { return ah.scrub(t); 
 LIB['./lib/skip-cmd.js'] = {
   skipCommand: function (key) {
     // the plugin's own devswarm CLI, quoted; the plugin root must be known to name it
-    if (!S.pluginRoot) unsure();
-    var real = ah.fs.realpath(S.pluginRoot);
-    if (real === null) unsure();
+    var real = S.pluginRoot ? ah.fs.realpath(S.pluginRoot) : null;
+    if (real === null) { ah.unable('command:skip_cmd_root'); real = S.pluginRoot || ''; } // the CLI is named from the plugin root as given
     var cli = path.join(real, ah.cfg('command.devswarm_cli_rel'));
     return text.render(ah.cfg('command.msg_edit_skip_cmd').replace('edit-guard', key), { cli: "'" + cli.replace(/'/g, "'\\''") + "'" });
   },
@@ -634,7 +681,7 @@ function noWorkspaceRepo(cwd) {
     for (var k = 0; k < files.length; k++) {
       var f = path.join(dir, files[k]), txt = ah.fs.readText(f);
       if (txt === null) continue;
-      if (txt.indexOf('�') >= 0) unsure(); // not valid UTF-8: Node decodes differently
+      if (txt.indexOf('�') >= 0) ah.unable('command:tier_doc_utf8'); // not valid UTF-8: decoded as the host does
       if (re.test(txt)) return true;
     }
     if (root && dir === root) break;
@@ -670,7 +717,7 @@ LIB['./lib/devswarm-inbox-paths.js'] = {
     if (seg === ah.cfg('command.devswarm_inbox_dir')) return 'deny-inbox';
     if (seg === ah.cfg('command.devswarm_store_dir')) {
       var rest = rel.slice(seg.length + 1);
-      if (ah.cfg('command.store_deny_patterns').some(function (p) { return new RegExp(p).test(rest); })) unsure();
+      if (ah.cfg('command.store_deny_patterns').some(function (p) { return new RegExp(p).test(rest); })) { ah.unable('command:store_file_denied'); return 'deny-inbox'; } // the installed store module is present: denied
     }
     return 'allow';
   },
@@ -744,7 +791,7 @@ LIB['./lib/command-allow.js'] = (function () {
     if (!fst.isFile()) return { state: 'unreadable' };
     var hash = ah.fs.sha256File(cfgPath), txt = ah.fs.readText(cfgPath);
     if (hash === null || txt === null) return { state: 'unreadable' };
-    if (txt.indexOf('�') >= 0) unsure(); // not valid UTF-8: Node decodes differently
+    if (txt.indexOf('�') >= 0) ah.unable('command:cfg_utf8'); // not valid UTF-8: decoded as the host does
     var parsed;
     try { parsed = JSON.parse(txt); } catch (e) { return { state: 'invalid-json' }; }
     var patterns = parsed && Array.isArray(parsed[spec.listKey]) ? parsed[spec.listKey] : [];
@@ -754,7 +801,7 @@ LIB['./lib/command-allow.js'] = (function () {
     try {
       var t = ah.fs.readText(path.join(home, KINDS(kind).trustFile));
       if (t === null) return {};
-      if (t.indexOf('�') >= 0) unsure();
+      if (t.indexOf('�') >= 0) ah.unable('command:trust_utf8');
       var obj = JSON.parse(t);
       return obj && typeof obj === 'object' && !Array.isArray(obj) ? obj : {};
     } catch (e) { if (cmdFatal(e)) throw e; return {}; }
@@ -971,7 +1018,7 @@ LIB['./edit-guard.js'] = (function () {
       if (segs.some(function (seg) { return deny.indexOf(seg) >= 0; })) return false;
       if (segs[segs.length - 1] === ah.cfg('command.eg_hooks_file')) return false;
       var sh = spawn.stateHome();
-      if (sh.unknown) unsure();
+      if (sh.unknown) { ah.unable('command:eg_no_home'); return false; } // no home: fail closed, as for a guarded home
       if (sh.guarded) return false; // resolveHome throws under a test run on the real home: fail closed
       var home = sh.ok;
       var claudeHome = realpathOrSelf(path.join(home, ah.cfg('command.eg_claude_dir')));
@@ -1565,7 +1612,6 @@ function detectProtectedFileRead(command, home, cwd, depth) {
 // the append-only inbox). NEVER echoes the path (injection hygiene).
 function buildRawFileReadReason(kind) {
   // a raw store file needs the store module's presence check, which the engine does not make (classifyDevswarmPath defers it)
-  if (kind !== 'deny-inbox') unsure();
   return bm().blockMessage({
     guard: ah.cfg('command.msg_rawread_inbox_guard'),
     what: ah.cfg('command.msg_rawread_inbox_what'),
@@ -2423,6 +2469,22 @@ function isFlaggedInterpreterScript(segment) {
     if (ext.test(tokens[i])) return true;
   }
   return false;
+}
+
+// hooks/command-guard.js isChildGitSyncChain: every segment is a `git ...` (or a leading `cd`) and the only heavy ones are push/pull/fetch.
+function isChildGitSyncChain(command) {
+  if (typeof command !== 'string' || !command.trim()) return false;
+  const segs = splitSegments(command).map((x) => x.trim()).filter(Boolean);
+  if (!segs.length) return false;
+  let sawSync = false;
+  for (const seg of segs) {
+    const verb = effectiveVerb(seg);
+    if (verb === 'cd') continue;
+    if (verb !== 'git') return false;
+    if (isGitPushSegment(seg) || isGitPullFetchSegment(seg)) { sawSync = true; continue; }
+    if (isHeavySegment(seg, command)) return false;
+  }
+  return sawSync;
 }
 
 function isHeavySegment(segment, command) {
@@ -3792,7 +3854,7 @@ function isGoogleApisHttpsUrl(raw) {
   if (!RX96.test(rawHost)) return false;
   // `new URL(raw)` is not available here: an IDNA label is validated by the URL parser in ways this check does not reproduce, and
   // a port that is not empty digits up to the maximum makes the parser throw
-  if (rawHost.split('.').some((l) => l.length >= 4 && l.slice(0, 4).toLowerCase() === 'xn--')) unsure();
+  if (rawHost.split('.').some((l) => l.length >= 4 && l.slice(0, 4).toLowerCase() === 'xn--')) { ah.unable('command:idna_host'); return false; } // an IDNA label is not provably a Google API host: refused
   const afterHost = raw.slice('https://'.length + rawHost.length);
   if (afterHost.charAt(0) === ':') {
     const pm = RX97.exec(afterHost);
@@ -4773,7 +4835,7 @@ var io = {
   homeOf: function () {
     var h = ah.env.get(ah.cfg('env.home'));
     if (h === null || h === '') h = ah.env.get(ah.cfg('env.home_alt'));
-    if (h === null || h === '') unsure();
+    if (h === null || h === '') { ah.unable('command:home_of'); h = ah.env.passwdHome() || ''; }
     return h;
   },
 };
@@ -4789,7 +4851,7 @@ function antiHallCliMatch(segment) {
 function launcherRegexes(cmd) {
   if (cmd.toLowerCase().indexOf(ah.cfg('command.launcher_marker')) < 0) return [];
   var homes = [], sh = spawn.stateHome();
-  if (sh.unknown) unsure();
+  if (sh.unknown) ah.unable('command:launcher_no_home');
   if (sh.ok) homes.push(sh.ok);
   var pw = ah.env.passwdHome();
   if (pw && homes.indexOf(pw) < 0) homes.push(pw);
@@ -4813,7 +4875,7 @@ function mainFlow(payload) {
   const command = (payload && payload.tool_input && payload.tool_input.command) || '';
   // a command over the classify cap is judged in parts by the Node hook (a head/tail scan the engine does not reproduce): defer it
   // before any parsing (the edit prefilter is false for it, so a gate behind that prefilter never fired)
-  if (command.length > T.maxLen) unsure();
+  // a command over the classify cap is judged in parts (the edit gate below scans its head and tail); the heavy-command gates skip it, as in Node
   const bm = LIB['./lib/block-message.js'];
   let hit;
   hit = guarded(() => {
@@ -4868,14 +4930,16 @@ function mainFlow(payload) {
   if (S.off) return 'allow';
   if (!coordinator.isCoordinator(payload)) return 'allow';
   hit = guarded(() => {
-    if (cmdMayWrite(command, 0)
+    if ((command.length > T.maxLen || cmdMayWrite(command, 0))
       && settingsGet('guards', 'bashEditParity') !== false
       && settings.enabled('safety', 'editGuard')
       && !isSkipped(ah.cfg('command.edit_guard_name'))
       && !matchedProjectCommandAllowPattern(command, (payload && payload.cwd) || '')) {
-      if (classifyBashWork(command, payload, { editOnly: true }).editBlocks.length) {
-        // a DevSwarm child workspace is a worker (hooks/lib/devswarm-role.js isChildWorker, which reads the disk): Node decides
-        if (LIB['./lib/devswarm-role.js'].isChildWorkspace()) unsure();
+      var scans = [command];
+      if (command.length > T.maxLen) { var bp = cmdBigParts(command); scans = bp.rest ? [bp.head, bp.rest] : [bp.head]; }
+      if (scans.some(function (c) { return classifyBashWork(c, payload, { editOnly: true }).editBlocks.length; })) {
+        // a DevSwarm child workspace is a worker on its own branch (hooks/lib/devswarm-role.js isChildWorker): its edits are its job
+        if (cmdChildWorker((payload && payload.cwd) || '')) return undefined;
         return blockExact(LIB['./edit-guard.js'].delegationReason('Bash (sed -i/perl -i/tee/cp/mv/redirect/inline-code write)', payload.cwd, payload));
       }
     }
@@ -4908,8 +4972,8 @@ function mainFlow(payload) {
   if (guarded(() => settingsGet('guards', 'allowBackgroundScratchScripts') !== false && isBackgroundScratchScript(command, payload))) return 'allow';
   if (guarded(() => settingsGet('guards', 'allowGcloudReads') !== false && isAllowedGcloudReadCommand(command))) return 'allow';
 
-  // a DevSwarm child workspace commits and pushes its own branch inline (hooks/command-guard.js isChildGitSyncChain): Node decides
-  if (LIB['./lib/devswarm-role.js'].isChildWorkspace()) unsure();
+  // a DevSwarm child worker commits and pushes its own branch inline (hooks/command-guard.js isChildGitSyncChain)
+  if (guarded(() => cmdChildWorker((payload && payload.cwd) || '') && isChildGitSyncChain(command))) return 'allow';
   const cls = classifyHeavy(command);
   const remote = !!cls && cls.kind === 'remote';
   const detail = remote ? '' : cls
@@ -4962,6 +5026,6 @@ function decide(p, opts, event) {
   if (!ti || typeof ti !== 'object' || typeof ti.command !== 'string') return null;
   cmdBegin(opts);
   let v;
-  try { v = mainFlow(p); } catch (e) { if (!cmdFatal(e)) throw e; S.unsure = true; v = null; }
-  return cmdEnd() || v === null ? 'defer' : v;
+  try { v = mainFlow(p); } finally { cmdEnd(); } // a fatal exception (stack, memory, time) reaches the engine's own failure policy
+  return v === null || v === undefined ? 'allow' : v;
 }

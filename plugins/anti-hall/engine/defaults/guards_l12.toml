@@ -156,3 +156,37 @@ value = "spawn_agent$"
 [orch_on_spawn.default_event]
 doc = "The event name echoed when the payload names none."
 value = "PreToolUse"
+
+[orch_on_spawn.tail_windows]
+doc = "The transcript windows, in bytes, the delivered-copy scan reads in turn (a short tail first, then once wider)."
+value = [262144, 4194304]
+unit = "bytes"
+
+[orch_on_spawn.line_max]
+doc = "Longest transcript line, in bytes, the first-timestamp scan keeps."
+value = 1048576
+unit = "bytes"
+
+[orch_on_spawn.claude_entry_type]
+doc = "The transcript entry type that holds a Claude hook attachment."
+value = "attachment"
+
+[orch_on_spawn.claude_attachment_type]
+doc = "The attachment type that is a delivered hook context."
+value = "hook_additional_context"
+
+[orch_on_spawn.codex_entry_type]
+doc = "The rollout entry type that holds a Codex message."
+value = "response_item"
+
+[orch_on_spawn.codex_payload_type]
+doc = "The rollout payload type of a message."
+value = "message"
+
+[orch_on_spawn.codex_role]
+doc = "The rollout role of a delivered hook context."
+value = "developer"
+
+[edit_guard.nudge_note]
+doc = "The once-per-session note to a DevSwarm Primary that keeps editing inline while actionable tasks are pending and no workspace is live."
+value = "💡 anti-hall · devswarm-primary: you have made several direct file edits while actionable tasks are pending and no child workspace is live. Workspace-scale work (a feature/fix/deploy: multi-step, own branch, own review) belongs in a child workspace: `node scripts/devswarm.js spawn <branch> -p \"<brief>\"`. Keep inline edits to small, scoped changes."
