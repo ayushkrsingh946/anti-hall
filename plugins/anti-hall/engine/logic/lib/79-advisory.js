@@ -35,8 +35,9 @@ var adv = {
   },
   // The decision for one candidate, with nothing written: `content` null is a fixed text, a string is a state table.
   // {emit, why, overSoft, st, e, hash}
-  decide: function (kind, session, content) {
-    var st = adv.load(session), e = adv.entry(st, kind), hash = content === null ? '' : ah.sha1(content).slice(0, ah.cfgNum('advisory.hash_len'));
+  // `shared` (optional): a state from `adv.load`, so several kinds decided together write one consistent file.
+  decide: function (kind, session, content, shared) {
+    var st = shared || adv.load(session), e = adv.entry(st, kind), hash = content === null ? '' : ah.sha1(content).slice(0, ah.cfgNum('advisory.hash_len'));
     var out = { emit: true, why: '', overSoft: false, st: st, e: e, hash: hash, kind: kind, session: session };
     if (e.n >= adv.by('advisory.cap_hard_by_kind', kind, 'advisory.cap_hard_default')) { out.emit = false; out.why = 'cap'; return out; }
     if (content !== null) {
