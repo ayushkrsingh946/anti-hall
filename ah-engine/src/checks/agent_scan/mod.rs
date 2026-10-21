@@ -135,6 +135,9 @@ pub struct Scan {
     pub launched: OMap<Rec>,
     /// Ids with terminal evidence that stands.
     pub terminal: HashSet<String>,
+    /// Agent ids of teammates a `TaskStop` ended, which names the teammate (`task_id` is the name, not the agent id) and was issued
+    /// after its latest spawn. A stop that failed because the task no longer exists counts: the teammate is gone either way.
+    pub stopped_agents: HashSet<String>,
     /// Teammates sent a message they have not reported on.
     pub pending: Vec<(String, Pending)>,
 }
@@ -616,6 +619,8 @@ struct Walk {
     tool_uses: HashMap<String, ToolUse>,
     stops: Vec<Stop>,
     errored: HashSet<String>,
+    /// Tool-use ids whose result says the task does not exist (already ended).
+    gone: HashSet<String>,
     answered: HashSet<String>,
     team_events: OMap<Vec<TeamEv>>,
     team_info: OMap<TeamInfo>,
@@ -642,6 +647,7 @@ impl Walk {
             tool_uses: HashMap::new(),
             stops: Vec::new(),
             errored: HashSet::new(),
+            gone: HashSet::new(),
             answered: HashSet::new(),
             team_events: OMap::default(),
             team_info: OMap::default(),
@@ -895,6 +901,12 @@ impl Walk {
             }
             let mut texts = Vec::new();
             extract_texts(block_content, &mut texts);
+            if is_tool_result
+                && let Some(id) = tuid
+                && texts.iter().any(|t| t.to_lowercase().contains(defaults::text("agent_scan.stop_gone_text")))
+            {
+                self.gone.insert(id.to_string());
+            }
             for text in texts {
                 if is_tool_result
                     && has_launch
@@ -1433,6 +1445,20 @@ fn finish(mut w: Walk, path: &str, opts: &Opts) -> Res<Scan> {
         }
     }
 
+    // A stop names a teammate by its name: the agent id of that spawn ended too (only a stop after the latest spawn counts).
+    let mut stopped_agents: HashSet<String> = HashSet::new();
+    for s in &stops {
+        let Some(tuid) = s.tool_use_id.as_ref() else { continue };
+        if (w.errored.contains(tuid) && !w.gone.contains(tuid)) || !(w.answered.contains(tuid)) {
+            continue;
+        }
+        let Some(info) = w.team_info.get(&s.id).filter(|i| !i.agent_id.is_empty()) else { continue };
+        let spawned_at = w.team_events.get(&s.id).and_then(|evs| evs.iter().filter(|e| e.kind == "spawn").map(|e| e.seq).max());
+        if spawned_at.is_some_and(|sp| s.seq > sp) {
+            stopped_agents.insert(info.agent_id.clone());
+        }
+    }
+
     // SAFETY NET: a later answer to a TaskOutput/SendMessage call that quotes a launched agent's id.
     let launched_ids: Vec<String> = w.launched.keys().cloned().collect();
     for id in &launched_ids {
@@ -1604,7 +1630,7 @@ fn finish(mut w: Walk, path: &str, opts: &Opts) -> Res<Scan> {
         );
         w.terminal.remove(&name);
     }
-    Ok(Scan { launched: w.launched, terminal: w.terminal, pending })
+    Ok(Scan { launched: w.launched, terminal: w.terminal, stopped_agents, pending })
 }
 
 /// What `agentCountProof` returns: the running agents (`None`: the count cannot be trusted), the ids the scanned window shows

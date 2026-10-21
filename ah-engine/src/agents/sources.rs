@@ -257,7 +257,7 @@ fn stopped_subagents(env: &Env, st: &mut State) {
         let parent = format!("{}{}", session_dir.to_string_lossy(), pth("transcript_ext"));
         let set = ended
             .entry(parent.clone())
-            .or_insert_with(|| crate::checks::agent_scan::scan_transcript(&parent, tail, &opts).ok().flatten().map(|s| s.terminal).unwrap_or_default());
+            .or_insert_with(|| crate::checks::agent_scan::scan_transcript(&parent, tail, &opts).ok().flatten().map(|s| s.terminal.into_iter().chain(s.stopped_agents).collect()).unwrap_or_default());
         if set.contains(&id)
             && let Some(a) = st.agents.get_mut(&id)
         {

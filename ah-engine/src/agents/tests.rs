@@ -342,6 +342,48 @@ fn a_subagent_stopped_with_task_stop_is_done_not_hung() {
     assert!(hung.iter().all(|r| !r["text"].as_str().unwrap().contains("abc")), "no hung reminder about the stopped agent: {hung:?}");
 }
 
+/// A teammate is stopped by NAME (`TaskStop {"task_id":"W3"}`); the tool answers with another task id, or "No task found" when it was
+/// already gone. The tracked subagent is the transcript `agent-<agent_id>`: both stops must end it; a stop issued before a respawn
+/// of the same name must not end the new agent.
+#[test]
+fn a_teammate_stopped_by_name_is_done_not_hung() {
+    let h = home("stopname");
+    let n = now0();
+    let spawn = |ts: u64, tuid: &str, name: &str, aid: &str| {
+        json!({"type": "user", "timestamp": iso(ts), "toolUseResult": {"status": "teammate_spawned", "name": name, "agent_id": aid},
+               "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": tuid, "content": "Spawned successfully."}]}})
+        .to_string()
+    };
+    write(
+        &sess(&h, "parent"),
+        &[
+            prompt(n - 80 * MIN, "/w"),
+            tool(n - 70 * MIN, "p0", 5, "toolu_a1", "Agent", json!({"name": "W3"})),
+            spawn(n - 70 * MIN + 1000, "toolu_a1", "W3", "aw3-1111"),
+            tool(n - 69 * MIN, "p1", 5, "toolu_a2", "Agent", json!({"name": "live31"})),
+            spawn(n - 69 * MIN + 1000, "toolu_a2", "live31", "alive31-2222"),
+            tool(n - 68 * MIN, "p2", 5, "toolu_a3", "Agent", json!({"name": "W4"})),
+            spawn(n - 68 * MIN + 1000, "toolu_a3", "W4", "aw4-3333"),
+            tool(n - 30 * MIN, "p3", 5, "toolu_s1", "TaskStop", json!({"task_id": "W3"})),
+            result(n - 30 * MIN + 1000, "toolu_s1", "{\"message\":\"Successfully stopped task: t9xu321q2 (x)\",\"task_id\":\"t9xu321q2\"}", false),
+            tool(n - 29 * MIN, "p4", 5, "toolu_s2", "TaskStop", json!({"task_id": "live31"})),
+            result(n - 29 * MIN + 1000, "toolu_s2", "<tool_use_error>No task found with ID: live31</tool_use_error>", true),
+        ],
+    );
+    let dir = h.join(".claude/projects/p/parent/subagents");
+    for id in ["aw3-1111", "alive31-2222", "aw4-3333"] {
+        write(
+            &dir.join(format!("agent-{id}.jsonl")),
+            &[prompt(n - 70 * MIN, "/w"), asst(n - 65 * MIN, "s1", 5, 5, json!([{"type": "text", "text": "x"}]), None)],
+        );
+    }
+    let mut st = State::default();
+    ticks(&h, &mut st, &[n, n + MIN, n + 2 * MIN]);
+    assert_eq!(signals::state_of(agent(&st, "aw3-1111")), "done", "stopped by name, answered with another task id");
+    assert_eq!(signals::state_of(agent(&st, "alive31-2222")), "done", "stopped by name, task already gone");
+    assert_eq!(signals::state_of(agent(&st, "aw4-3333")), "running", "never stopped");
+}
+
 // ---- wake paths ---------------------------------------------------------------------------------------------
 
 fn parent_with_bg(h: &Path, n: u64, arm: Option<Value>) {
