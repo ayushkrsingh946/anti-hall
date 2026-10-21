@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 /// The wrapper's note when it ran the Node fallback instead of the engine's answer (ah-hook.sh `fallback_note`).
-const FALLBACK_NOTE: &str = "anti-hall: engine fallback for ";
+const FALLBACK_NOTE: &str = "anti-hall: the engine did not answer this ";
 /// The wrapper's note when it failed closed (ah-hook.sh `fail_closed`).
 const FAIL_CLOSED_NOTE: &str = "anti-hall: fail closed for ";
 
@@ -180,20 +180,23 @@ fn drive(host: &str) {
         .into_iter()
         .map(|(surface, id, mut row)| {
             let node: Vec<String> = w.hits_of(&id).iter().map(|h| w.script_key(&h.argv)).collect();
-            if !fallback_cases.contains(&id) {
-                for k in &node {
-                    note(&mut seen, &surface, k, &id);
-                }
+            for k in &node {
+                note(&mut seen, &surface, k, &id);
             }
             row["node"] = serde_json::json!(node);
             row
         })
         .collect();
     let daemon: Vec<String> = w.hits_of(harness::DAEMON_TAG).iter().map(|h| w.script_key(&h.argv)).collect();
+    // every recorded launch list is empty: no case and no daemon start launched Node
+    problems.extend(rows.iter().filter(|r| r["node"].as_array().is_some_and(|a| !a.is_empty())).map(|r| format!("case `{}` launched Node: {}", r["case"], r["node"])));
+    if !daemon.is_empty() {
+        problems.push(format!("the daemon launched Node: {daemon:?}"));
+    }
     let max_fallback = usize::try_from(cfg_int(&w.cfg, "hooks", "max_fallback_cases")).unwrap();
     if fallback_cases.len() > max_fallback {
         problems.push(format!(
-            "{} case(s) ran the wrapper's Node fallback (limit {max_fallback}, harness.toml hooks.max_fallback_cases): the engine did not answer {fallback_cases:?}; rerun on a quieter machine",
+            "{} case(s) were passed through because the engine did not answer (limit {max_fallback}, harness.toml hooks.max_fallback_cases): {fallback_cases:?}; rerun on a quieter machine",
             fallback_cases.len()
         ));
     }
