@@ -264,9 +264,9 @@ value = "held: the journal fold removes raw files and is owner-gated (devswarm_s
 doc = "Why the archive-cap eviction is held: removing archived bodies needs devswarm_sup.rt_cap_alone, which is off."
 value = "held: the archive-cap eviction removes archived bodies and is owner-gated (devswarm_sup.rt_cap_alone is off)"
 
-[devswarm_sup.msg_recover_off]
-doc = "Printed when the on-demand recovery is refused because it is switched off (devswarm_sup.duties_off names recover). There is no Node rollback of the kill."
-value = "recover is switched off (devswarm_sup.duties_off names recover); there is no Node rollback of the kill"
+[devswarm_sup.msg_recover_native_refused]
+doc = "Printed when a recovery request passed every check and is refused all the same: the engine never kills or resumes a session (owner decision F)."
+value = "recover is refused: the engine does not kill or resume a session, and there is no rollback of a kill; use the on-demand Node recovery (devswarm-recover) for a confirmed wedge"
 
 # ---- the native result log ----------------------------------------------------------------------------------------------------
 # The non-acting Node witness is gone; the native results of the duties that act on user data are logged to witness_file instead.
@@ -308,8 +308,8 @@ doc = "The action word of the act telemetry event of one duty's tick outcome ({d
 value = "duty-{duty}"
 
 [devswarm_sup.act_recover_reasons]
-doc = "The reason word of the act telemetry event for each way a recover request is refused (caller, id, request, duplicate, descriptor, max, switched_off)."
-value = { caller = "caller", id = "bad-id", request = "no-request", duplicate = "duplicate", descriptor = "no-descriptor", max = "max-recoveries", switched_off = "switched-off" }
+doc = "The reason word of the act telemetry event for each way a recover request is refused (caller, id, request, duplicate, descriptor, max, switched_off, native_refused)."
+value = { caller = "caller", id = "bad-id", request = "no-request", duplicate = "duplicate", descriptor = "no-descriptor", max = "max-recoveries", switched_off = "switched-off", native_refused = "native-refused" }
 
 [devswarm_sup.env_disable]
 doc = "The environment variable that is the hard kill switch of every DevSwarm job (Node: DISABLE_ANTIHALL_DEVSWARM)."
@@ -629,13 +629,6 @@ value = ["-p", "--resume", "{uuid}", "--dangerously-skip-permissions"]
 [devswarm_sup.kill_resume_log_prefix]
 doc = "The start of the temporary file the resumed session's first output goes to."
 value = "antihall-resume-"
-
-[devswarm_sup.kill_readiness_ms]
-doc = "How long a fresh resume is watched for an immediate failure. Never a kill deadline."
-value = 4000
-min = 500
-max = 60000
-unit = "ms"
 
 [devswarm_sup.kill_poll_ms]
 doc = "How often the readiness watch checks whether the resumed session has exited."

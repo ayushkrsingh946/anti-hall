@@ -1,12 +1,11 @@
-//! `ah-engine devswarm recover --id <ws> --request <id>`: the on-demand kill-and-resume of ONE workspace's session. It is never
-//! scheduled and never started by a sweep (`devswarm_act.automatic_kinds` and `devswarm_sup.duties` do not list it).
-//!
-//! The engine decides whether it may start and refuses before anything is touched: a caller that is not the owner's own session
-//! (the role matrix, then the automated-caller rule), an id that is not a plain workspace id, a request id that already ran, a
-//! descriptor without a worktree and a session, a workspace already recovered `maxRecoveries` times. What then runs is the
-//! engine's own [`super::kill`]: it resolves the process (exactly one match or it abstains), confirms its identity and working
-//! directory right before SIGTERM and again before SIGKILL, and resumes the session headless. There is no Node rollback of the kill
-//! (owner decision F): `devswarm_sup.duties_off` naming `recover` switches the recovery off, and a request is then `refused`.
+//! `ah-engine devswarm recover --id <ws> --request <id>`: the on-demand kill-and-resume of ONE workspace's session is REFUSED by the
+//! engine (owner decision F: there is no Node rollback of a kill, so the engine never kills or resumes a session). A request is still
+//! checked first, so the refusal names the real problem when there is one: a caller that is not the owner's own session (the role
+//! matrix, then the automated-caller rule), an id that is not a plain workspace id, a request id that already ran, a descriptor
+//! without a worktree and a session, a workspace already recovered `maxRecoveries` times. Every request that passes those checks gets
+//! the explicit `native_refused` outcome, before any ledger line is written and before any process is looked at. The kill-and-resume is
+//! the on-demand Node recovery (`companion/devswarm-recover.js`). It is never scheduled and never started by a sweep
+//! (`devswarm_act.automatic_kinds` and `devswarm_sup.duties` do not list it).
 // Discard triage (E3): every `.ok()` / `unwrap_or_default()` in this module is a deliberate keep, for these reasons:
 // - an unreadable descriptor or verdict is an absent one: the first is a refusal, the second counts as no recoveries
 use super::setting;
@@ -47,9 +46,9 @@ pub struct Place<'a> {
 }
 
 /// Run the recovery request. Returns the report and the exit code (0 when the run was handled, whatever the outcome Node reports).
-pub fn run(at: &Place, st: &Settings, runner: &dyn Runner, id: &str, request: &str, now: i64) -> (Value, i32) {
+pub fn run(at: &Place, st: &Settings, _runner: &dyn Runner, id: &str, request: &str, _now: i64) -> (Value, i32) {
     let t0 = std::time::Instant::now();
-    let (report, code) = match decide(at, st, runner, id, request, now) {
+    let (report, code) = match decide(at, st, id, request) {
         Ok(done) => done,
         Err(r) => {
             let reason = defaults::raw("devswarm_sup.act_recover_reasons").str_field(r.code);
@@ -65,7 +64,7 @@ pub fn run(at: &Place, st: &Settings, runner: &dyn Runner, id: &str, request: &s
     (report, code)
 }
 
-fn decide(at: &Place, st: &Settings, runner: &dyn Runner, id: &str, request: &str, now: i64) -> Result<(Value, i32), Refusal> {
+fn decide(at: &Place, st: &Settings, id: &str, request: &str) -> Result<(Value, i32), Refusal> {
     let Place { home, state_dir, .. } = *at;
     let caller = st.env.get(defaults::text("devswarm_act.caller_env")).cloned().unwrap_or_default();
     if !caller.is_empty() && caller != defaults::text("devswarm_act.interactive_caller") {
@@ -97,24 +96,8 @@ fn decide(at: &Place, st: &Settings, runner: &dyn Runner, id: &str, request: &st
     if done >= max {
         return Err(refuse("max", defaults::render("devswarm_sup.msg_recover_max", &[("id", &id), ("n", &done), ("max", &max)])));
     }
-    // `devswarm_sup.duties_off` naming `recover` switches the on-demand recovery off: it is refused before anything is recorded or
-    // touched (owner decision F: there is no Node rollback of the kill, and the engine's kill does not run while the switch is off)
-    if defaults::list("devswarm_sup.duties_off").contains(&defaults::text("devswarm_sup.recover_duty")) {
-        return Err(refuse("switched_off", defaults::text("devswarm_sup.msg_recover_off").into()));
-    }
-    // the request is recorded BEFORE the run: a run that dies half way is never repeated by the same request
-    crate::dsact::exec::append_line(&ledger(state_dir), &json!({"ts": now, "request": request, "id": id}));
-    let desc = desc.unwrap_or(Value::Null);
-    let wt = desc.get(keys.str_field("worktree")).and_then(Value::as_str).unwrap_or_default();
-    let session = desc.get(keys.str_field("session")).and_then(Value::as_str).unwrap_or_default();
-    let sys = super::kill::Real {
-        runner,
-        claude: super::kill::find_claude(st.env.get(defaults::text("devswarm_ingest.env_path")).map(String::as_str), home),
-        readiness_ms: defaults::num("devswarm_sup.kill_readiness_ms"),
-    };
-    let target = super::kill::find_target(&sys, home, wt, session, true);
-    let grace = setting(st, "devswarm_sup.set_grace_sec").as_u64().unwrap_or_default().max(1) * 1000; // keep: the shipped default always resolves
-    let job = super::kill::Job { home, id, descriptor: &desc, now, max_recoveries: max, grace_ms: grace, allow_interactive: true };
-    let result = super::kill::recover(&sys, &job, &target);
-    Ok((json!({"outcome": "handled", "id": id, "request": request, "target": target.to_json(wt), "result": result}), 0))
+    // Owner decision F: the engine never kills or resumes a session, and there is no rollback of a kill. The request is refused here,
+    // before the ledger or any process is touched, whatever `devswarm_sup.duties_off` says (an opt-out list is no authorisation for a
+    // native kill). The kill-and-resume stays the on-demand Node recovery (`companion/devswarm-recover.js`).
+    Err(refuse("native_refused", defaults::text("devswarm_sup.msg_recover_native_refused").into()))
 }

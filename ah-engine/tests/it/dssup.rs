@@ -609,38 +609,38 @@ fn recover_refuses_before_it_touches_anything() {
     put(&dev(&f).join("liveness/ws-1.json"), &json!({"status": "stale", "recoveries": 3}));
     assert!(why(&do_recover(&f, &st, &rec, "ws-1", "r1")).contains("limit 3"));
     put(&f.home.join(".anti-hall/settings.json"), &json!({"devswarm": {"maxRecoveries": 5}}));
-    let (r, _) = do_recover(&f, &st, &rec, "ws-1", "r1");
-    assert_eq!(r["outcome"], "handled", "with a limit of 5 and 3 done it may run: {r}");
-    assert_eq!(r["result"]["action"], "abstain", "the stub process table has no such session: nothing is signalled");
-    assert!(!f.state.join("none").exists());
-    // none of the refusals started anything or wrote the ledger (only the last, allowed, request did)
-    let ledger = std::fs::read_to_string(f.state.join("rt-recover.ndjson")).unwrap();
-    assert_eq!(ledger.lines().count(), 1);
+    // #233: every request that passed those checks is still refused: the engine never kills or resumes a session (owner decision F);
+    // nothing is signalled, nothing is recorded, and the refusal is the explicit outcome
+    let (r, code) = do_recover(&f, &st, &rec, "ws-1", "r1");
+    assert_eq!((r["outcome"].as_str(), code), (Some("refused"), 64), "{r}");
+    assert!(why(&(r, code)).contains("no rollback of a kill"));
+    assert_eq!(rec.n(), 0, "the runner was never asked for the process table");
+    assert!(!f.state.join("rt-recover.ndjson").exists(), "a refusal writes no request ledger");
 }
 
 #[test]
-fn a_recover_request_runs_once() {
+fn a_recover_request_is_refused_every_time_and_nothing_is_recorded() {
     let f = fx("rec-once", true);
     let st = settings(&f, &[]);
     let rec = Rec::default();
-    let (r, code) = do_recover(&f, &st, &rec, "ws-1", "req-1");
-    assert_eq!((r["outcome"].as_str(), code), (Some("handled"), 0), "{r}");
-    let (again, code) = do_recover(&f, &st, &rec, "ws-1", "req-1");
-    assert_eq!((again["outcome"].as_str(), code), (Some("refused"), 64), "the same request never runs twice");
+    for _ in 0..2 {
+        let (r, code) = do_recover(&f, &st, &rec, "ws-1", "req-1");
+        assert_eq!((r["outcome"].as_str(), code), (Some("refused"), 64), "{r}");
+    }
+    assert!(!f.state.join("rt-recover.ndjson").exists());
 }
 
 #[test]
-fn recover_against_real_node_abstains_on_a_session_that_is_not_running() {
+fn recover_never_signals_a_process_even_with_a_matching_session() {
     if !have_node() {
         return;
     }
     let f = fx("rec-real", true);
     let st = settings(&f, &[]);
     let (r, code) = do_recover(&f, &st, &System::configured(), "ws-1", "real-1");
-    assert_eq!(code, 0, "{r}");
-    assert_eq!(r["outcome"], "handled");
-    assert_eq!(r["result"]["action"], "abstain", "no process matches the session: nothing is killed: {r}");
-    assert_eq!(r["result"]["reason"], "no-candidate");
+    assert_eq!(code, 64, "{r}");
+    assert_eq!(r["outcome"], "refused");
+    assert!(r.get("result").is_none(), "no kill was attempted: {r}");
 }
 
 #[test]

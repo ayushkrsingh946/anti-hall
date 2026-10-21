@@ -7811,7 +7811,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_wire.msg_separator` | `; ` |  |  | Between two changes in an advisory. |
 | `devswarm_wire.msg_unknown_verb` | `unknown devswarm verb {verb}` |  |  | Printed for an unknown verb. {verb}. |
 | `devswarm_wire.nudge_state_file` | `rt-nudges.json` |  |  | The engine's own record of pokes made (attempts, last time, escalated), under the engine state directory. |
-| `devswarm_wire.owner_verbs` | `13 items` |  |  | The `ah-engine devswarm <verb>` verbs and what each does: status, line, advisory, supervisor, ingest and ledger (the action audit: per-feature counts, success rate, refusals by reason, mistake rate, in-doubt keys, witness agreement) read the state; archive, plan-prune, prune and recover (kill and resume one session; Node's recovery code does the kill after the engine's refusals) act at the owner's request; wake-watch runs the idle-wake Monitor until the session ends. `create` answers deferred (the Node verb keeps it, because the engine cannot reproduce its source-freshness check yet); `merge` is a devswarm.js verb (compat_verbs) and runs the hivecontrol merge itself. |
+| `devswarm_wire.owner_verbs` | `13 items` |  |  | The `ah-engine devswarm <verb>` verbs and what each does: status, line, advisory, supervisor, ingest and ledger (the action audit: per-feature counts, success rate, refusals by reason, mistake rate, in-doubt keys, witness agreement) read the state; archive, plan-prune and prune act at the owner's request; recover is always refused (the engine never kills or resumes a session: the on-demand kill is Node's recovery code); wake-watch runs the idle-wake Monitor until the session ends. `create` answers deferred (the Node verb keeps it, because the engine cannot reproduce its source-freshness check yet); `merge` is a devswarm.js verb (compat_verbs) and runs the hivecontrol merge itself. |
 | `devswarm_wire.periodic_full_sweep_ms` | `300000` |  | ms | The longest the periodic reconcile goes without a full action sweep (every workspace's git facts, the mistake scan, the nag pass). In between it sweeps in full only when the reconcile saw a change in the DevSwarm state; edges are acted on through the event path either way. |
 | `devswarm_wire.plan_flag` | `--plan` |  |  | The flag of prune that names the plan. |
 | `devswarm_wire.probe_cause_default` | `none` |  |  | The cause label of a probe read made outside any reconcile (work counter `probe_reads.<site>.<cause>`). |
@@ -7859,7 +7859,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 |---|---|---|---|---|
 | `devswarm_sup.act_block_outcomes` | `refused` |  |  | The outcome words that count as a refusal (block) in an act telemetry event of the supervisor (a recover request the engine refused). |
 | `devswarm_sup.act_duty` | `duty-{duty}` |  |  | The action word of the act telemetry event of one duty's tick outcome ({duty} = the duty name). |
-| `devswarm_sup.act_recover_reasons` | `7 entries` |  |  | The reason word of the act telemetry event for each way a recover request is refused (caller, id, request, duplicate, descriptor, max, switched_off). |
+| `devswarm_sup.act_recover_reasons` | `8 entries` |  |  | The reason word of the act telemetry event for each way a recover request is refused (caller, id, request, duplicate, descriptor, max, switched_off, native_refused). |
 | `devswarm_sup.act_skip_outcomes` | `skipped` |  |  | The outcome words that count as a skip (not applicable, nothing done) in an act telemetry event of the supervisor; a word in action_success is an allow, one in act_block_outcomes a block, any other an error. |
 | `devswarm_sup.action_feature` | `devswarm-supervisor` |  |  | The feature name of the supervisor's action lines. |
 | `devswarm_sup.action_kind` | `action` |  |  | The kind of an action line of the action ledger. |
@@ -8078,7 +8078,6 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_sup.kill_ps_bin` | `ps` |  |  | The process-table executable. |
 | `devswarm_sup.kill_ps_cap_bytes` | `33554432` |  |  | Most bytes of the process table read; a longer one is treated as unreadable (the gate abstains). |
 | `devswarm_sup.kill_ps_line_re` | `^\s*(\d+)\s+(\d+)\s+(.*)$` |  |  | Captures pid, parent pid and command from a line of the process table. |
-| `devswarm_sup.kill_readiness_ms` | `4000` |  | ms | How long a fresh resume is watched for an immediate failure. Never a kill deadline. |
 | `devswarm_sup.kill_resume_args` | `-p, --resume, {uuid}, --dangerously-skip-permissions` |  |  | The arguments of the resume; {uuid} is the session. |
 | `devswarm_sup.kill_resume_guardrail` | `You were interrupted mid-task and resumed. Before re-running ANY command with...` |  |  | Prepended to every resume prompt: the interrupted session must check with a read-only command whether a side-effecting step already completed before it repeats it. |
 | `devswarm_sup.kill_resume_log_prefix` | `antihall-resume-` |  |  | The start of the temporary file the resumed session's first output goes to. |
@@ -8140,7 +8139,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_sup.msg_recover_duplicate` | `recover request {request} already ran; use a new request id for a new recovery` |  |  | Printed for a request id that already ran. {request}. |
 | `devswarm_sup.msg_recover_id` | `recover needs --id <workspace> (a plain workspace id)` |  |  | Printed when the workspace id is missing or not a safe name. |
 | `devswarm_sup.msg_recover_max` | `workspace {id} was already recovered {n} time(s) (limit {max}); needs a manua...` |  |  | Printed when the workspace was already recovered the most times allowed. {id} {n} {max}. |
-| `devswarm_sup.msg_recover_off` | `recover is switched off (devswarm_sup.duties_off names recover); there is no ...` |  |  | Printed when the on-demand recovery is refused because it is switched off (devswarm_sup.duties_off names recover). There is no Node rollback of the kill. |
+| `devswarm_sup.msg_recover_native_refused` | `recover is refused: the engine does not kill or resume a session, and there i...` |  |  | Printed when a recovery request passed every check and is refused all the same: the engine never kills or resumes a session (owner decision F). |
 | `devswarm_sup.msg_recover_request` | `recover needs --request <id> (the same request is never run twice)` |  |  | Printed when the request id is missing. |
 | `devswarm_sup.msg_witness` | `devswarm_sup.mode is off: the supervisor duties are switched off (counted as ...` |  |  | The tick's answer while the mode is off (the diagnostic switch). |
 | `devswarm_sup.node_log` | `.anti-hall/devswarm-supervisor.log` |  |  | The Node supervisor's log, relative to the home directory (the launchd / systemd / cron job writes its sweep line there). |

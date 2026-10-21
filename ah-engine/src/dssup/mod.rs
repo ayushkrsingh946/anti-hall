@@ -12,8 +12,8 @@
 //! * Every duty is native ([`tick`]): the engine owns schedule, gate, lock and record and writes the files Node wrote, byte for
 //!   byte. A step it cannot decide is `held` ([`tick::held`]: counted `native_unable`, nothing written, tried again); no Node is
 //!   launched and no Node witness is asked. [`verdict`] mirrors an engine poke / escalation into the liveness verdict and recovery
-//!   log in Node's exact shape. [`recover`] is the on-demand kill-and-resume, gated and executed by the engine (`refused` while
-//!   switched off; there is no Node rollback of the kill).
+//!   log in Node's exact shape. [`recover`] is the on-demand kill-and-resume, which the engine always `refused`: it never kills or
+//!   resumes a session (owner decision F; there is no rollback of a kill).
 //! * Reusable by the CLI verbs (each is a plain function over a home directory, no scheduler needed): the liveness model
 //!   ([`liveness`]), the app database snapshot and its queries ([`appsync::snap::read`], `workspace_for`, `focused`,
 //!   `brief_status`, [`appsync::snap::finish_signal`], [`appsync::snap::transcript_cwd_matches`]), the archived-marker planner
