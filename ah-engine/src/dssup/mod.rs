@@ -35,11 +35,14 @@ pub mod deferred;
 pub mod gate;
 pub mod housekeep;
 pub mod ingest;
+pub mod jevnotes;
 pub mod kill;
 pub mod liveness;
 pub mod recon;
 pub mod recover;
 pub mod retention;
+pub mod suplog;
+pub mod tail;
 pub mod tick;
 pub mod verdict;
 

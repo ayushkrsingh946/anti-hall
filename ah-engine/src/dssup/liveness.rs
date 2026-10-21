@@ -5,16 +5,13 @@
 //! `cleared` line of the recovery log when a sticky `escalated` workspace turns out to have a live session, and whether a
 //! parked escalation notice needs delivering.
 //!
-//! What stays Node's, per workspace, because it either writes through machinery the engine does not reproduce or cannot be
-//! proven identical:
-//! * a verdict that is `stale` (suppressors, poke or escalate, the forced parent notice for an urgent mesh unread): the engine
-//!   never produces a `stale` verdict, so it can never nominate a workspace for a poke Node would not; Node recomputes it;
-//! * a workspace Jev has a pending blocker or question for, or one with a step plan (straying signals, the Jev label);
-//! * anything the engine defers on (a store it will not read exactly like Node, a descriptor field of an unexpected type,
-//!   a partition whose `reader_cursors` floor rows are missing).
+//! The per-workspace tail ([`super::tail`]): the Jev blocker label and the straying signals of a workspace Jev holds a pending
+//! blocker or question for, or that has a step plan. A workspace the engine cannot compute (a store it will not read exactly like
+//! Node, a descriptor field of an unexpected type, a partition whose `reader_cursors` floor rows are missing) is held, counted and
+//! named in the record: its previous verdict stays and the next tick tries again.
 //!
-//! Those are handed to Node's own `sweepOnce` restricted to them, with the engine's verdict supplied for the first group so
-//! Node does not compute or write it twice.
+//! The engine never produces a `stale` verdict for a workspace nobody pokes: with both poke executors set to `node` the stale
+//! workspaces are only named in the record (`standDown`).
 // Discard triage (E3): every `.ok()` / `unwrap_or_default()` in this module is a deliberate keep, for these reasons:
 // - an unreadable or unparsable optional file is the absent one (Node's `try { JSON.parse(...) } catch (_) {}`)
 // - a verdict that cannot be written is lost, never the sweep (Node: the caller fails open per workspace)
@@ -146,6 +143,20 @@ pub(crate) fn transcript_mtime(home: &Path, wt: &str, session: &str) -> R<Option
     }
     let dir = home.join(defaults::text("mesh_write.claude_dir")).join(defaults::text("devswarm_sup.lv_projects_dir")).join(encode_worktree(wt));
     Ok(std::fs::metadata(dir.join(format!("{session}{}", defaults::text("devswarm_sup.lv_transcript_ext")))).ok().map(|m| mtime_ms(&m)))
+}
+
+/// The path of a session's transcript (`projectDirFor(wt)/<session>.jsonl`); `None` for a session name that could leave the directory.
+pub(crate) fn transcript_path(home: &Path, wt: &str, session: &str) -> Option<PathBuf> {
+    if session.is_empty() || session.contains('/') || session.contains('\\') || session.contains("..") {
+        return None;
+    }
+    let dir = home.join(defaults::text("mesh_write.claude_dir")).join(defaults::text("devswarm_sup.lv_projects_dir")).join(encode_worktree(wt));
+    Some(dir.join(format!("{session}{}", defaults::text("devswarm_sup.lv_transcript_ext"))))
+}
+
+/// `isSafeId(key)` for a plan key.
+pub(crate) fn safe_key(key: &str) -> bool {
+    is_safe_id(key)
 }
 
 /// `descriptorRegistrationTs(id)`: the modification time of `workspaces/<id>.json`.
@@ -556,6 +567,8 @@ pub struct Outcome {
     pub full: Vec<(String, String)>,
     /// A parked escalation notice needs delivering.
     pub drain: bool,
+    /// Each native workspace the tail has work for: its descriptor and the verdict computed for it.
+    pub tail_work: Vec<(Desc, OVal)>,
     /// The verdicts the engine wrote (id, bytes), for the witness.
     pub written: Vec<(String, String)>,
     /// The previous verdict text of each native workspace (what Node's own compute would have read), for the witness.
@@ -602,6 +615,7 @@ pub fn sweep(inv: &Inv, t: Thresholds, runner: &dyn Runner, dry: bool) -> Outcom
                 }
                 if needs_tail(inv, &d.id) {
                     out.tail.push(d.id.clone());
+                    out.tail_work.push((d.clone(), c.verdict.clone()));
                 }
                 out.native.push(d.id);
             }
@@ -734,21 +748,18 @@ pub fn duty(ctx: &Ctx, runner: &dyn Runner) -> Value {
     let dry = super::setting(ctx.st, "devswarm_sup.set_dry_run_verdicts").as_bool().unwrap_or(false);
     let t = Thresholds::read(ctx);
     let inv = inv_of(ctx);
-    let mut out = sweep(&inv, t, runner, dry);
-    // Who acts on a stale workspace: with the engine owning poke and escalate, the engine also sends the forced parent notice;
-    // otherwise Node's own sweep pokes it, so the stale workspace goes to Node's tail as before.
+    let out = sweep(&inv, t, runner, dry);
+    // Who acts on a stale workspace: with the engine owning poke and escalate, the engine also sends the forced parent notice. When
+    // the owner set both executors to `node` (the engine stands down) nobody here acts on it: the record names those workspaces.
     let mut forced: Vec<(String, String)> = Vec::new();
+    let mut stood_down: Vec<String> = Vec::new();
     if !dry && !out.stale.is_empty() {
         if ctx.engine_pokes {
             let grace =
                 super::setting(ctx.st, "devswarm_sup.set_post_spawn_grace_sec").as_f64().unwrap_or(0.0) * defaults::num("devswarm_sup.lv_ms_per_sec") as f64;
             forced = forced_notices(&inv, &out.stale, grace);
         } else {
-            for (id, _) in &out.stale {
-                if !out.tail.contains(id) {
-                    out.tail.push(id.clone());
-                }
-            }
+            stood_down = out.stale.iter().map(|(id, _)| id.clone()).collect();
         }
     }
     // parked notices are retried on every sweep, whatever any workspace's verdict
@@ -763,12 +774,15 @@ pub fn duty(ctx: &Ctx, runner: &dyn Runner) -> Value {
         "drain": out.drain,
         "dryRun": dry,
     });
-    // the per-workspace tail work (Jev blocker label, straying signals, a stale workspace nobody else pokes) and the workspaces the
-    // engine defers on have no native port: they are held, counted per kind, and named in the record; the verdicts, the forced notices
-    // and the parked notices above are done
-    if !dry && !out.tail.is_empty() {
-        detail["tailHeld"] = json!({"count": out.tail.len(), "held": super::tick::held("dssup:verdicts:tail", defaults::text("devswarm_sup.lv_why_tail"))["held"]});
+    // the per-workspace tail: the Jev blocker label and the straying signals of the workspaces that have either
+    if !dry && !out.tail_work.is_empty() {
+        detail["tailWork"] = super::tail::run(ctx, runner, &out.tail_work);
     }
+    if !stood_down.is_empty() {
+        detail["standDown"] = json!(stood_down);
+    }
+    // the workspaces the engine defers on (a store it will not read exactly like Node, a descriptor field of an unexpected type) are
+    // held, counted, and named in the record
     if !dry && !out.full.is_empty() {
         detail["fullHeld"] = json!({"count": out.full.len(), "held": super::tick::held("dssup:verdicts:full", defaults::text("devswarm_sup.lv_why_full"))["held"]});
     }

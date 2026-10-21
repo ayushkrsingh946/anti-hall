@@ -337,6 +337,10 @@ fn cwd_in_partition(cx: &mut Cx, cwd: Option<&str>, ids: &HashSet<String>) -> Op
     }
     match ident::resolve_context(cwd, false) {
         Ok(c) => Some(c.worktree_root.is_some_and(|r| ids.contains(&ident::mesh_id_for_real_path(&r)))),
+        // a resolution git could not answer (a failed or timed-out superproject query) is Node's `c.uncertain`: `null`, which every
+        // caller reads as "keep / include", never as a confident "no". Any other reason (a relative path Node would resolve against
+        // its own working directory) is not reproducible: Node's.
+        Err(d) if d.0 == "git-superproject" => None,
         Err(_) => {
             cx.deferred = true;
             None
@@ -450,6 +454,26 @@ fn apply_import(tx: &CursorTx<'_>, partition: &str, rows: &[CursorRow], plan: &P
         }
     }
     Ok(wrote)
+}
+
+/// What the rows of a partition would be once `applyImport` has run, without writing anything: the missing floor rows and every
+/// planned reader row. `cx.deferred` is set when the plan met a case only Node decides.
+pub(crate) fn simulate_import(cx: &mut Cx, h: &Handle, partition: &str, rows: &[CursorRow]) -> Vec<CursorRow> {
+    let plan = import_plan(cx, h, partition, None);
+    let mut out = rows.to_vec();
+    for ns in namespaces() {
+        if row_of(rows, ns, floor_name()).is_some() {
+            continue;
+        }
+        out.push(CursorRow { ns: ns.into(), reader: floor_name().into(), value: plan.floors.at(ns) as i64, retired_line: None, updated_at: cx.now });
+        for (reader, rns, value) in &plan.readers {
+            if *rns != ns || row_of(rows, ns, reader).is_some() {
+                continue;
+            }
+            out.push(CursorRow { ns: ns.into(), reader: reader.clone(), value: *value as i64, retired_line: None, updated_at: cx.now });
+        }
+    }
+    out
 }
 
 /// `dualWrite`: the legacy projection after a commit, best effort and upward only.

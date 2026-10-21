@@ -242,9 +242,9 @@ fn duty_settings(c: &Corpus) -> ah_engine::checks::git::util::Settings {
     ah_engine::checks::git::util::Settings { home: c.home.to_string_lossy().into_owned(), env }
 }
 
-/// The whole duty: native verdicts, Node's own sweep for the rest, and the non-acting Node witness over the verdicts it wrote.
+/// The whole duty: native verdicts, the native tail (blocker label, straying signals) for the workspaces that have either, and no Node.
 #[test]
-fn the_duty_runs_native_with_nodes_tail_and_a_matching_witness() {
+fn the_duty_runs_native_with_its_own_tail() {
     if !have_node_sqlite() {
         return;
     }
@@ -257,9 +257,10 @@ fn the_duty_runs_native_with_nodes_tail_and_a_matching_witness() {
     assert_eq!(rec["outcome"], "ran", "{rec}");
     let detail = &rec["detail"];
     assert!(detail["native"].as_u64().unwrap() > 20, "{rec}");
-    assert!(detail["node"].is_object() && detail["node"].get("error").is_none(), "Node's tail sweep must run: {rec}");
+    assert!(detail.get("node").is_none(), "no Node runs: {rec}");
+    assert!(detail["tail"].as_array().is_none_or(|t| t.is_empty()) || detail["tailWork"]["workspaces"].as_u64().is_some_and(|n| n > 0), "the tail is done natively: {rec}");
     assert!(detail["stale"].as_u64().unwrap() > 0, "{rec}");
-    // the engine wrote every stale verdict itself; Node's sweep (restricted to the Jev / step-plan tail) left them as written
+    // the engine wrote every stale verdict itself
     let after = tree(&ds(&c).join("liveness"), &[]);
     let kinds = c.manifest["kinds"].as_array().unwrap();
     let mut stale = 0;
@@ -287,11 +288,6 @@ fn the_duty_runs_native_with_nodes_tail_and_a_matching_witness() {
         }
     }
     assert!(stale > 0, "the corpus must hold a stale workspace");
-    // the witness ran Node's own computation over the engine's verdicts and found them identical
-    let w = std::fs::read_to_string(c.home.join(".anti-hall/logs/devswarm-sup-witness.ndjson")).unwrap_or_default();
-    let line: Value = serde_json::from_str(w.lines().last().expect("a witness line")).unwrap();
-    assert_eq!(line["duty"], "verdicts", "{line}");
-    assert_eq!(line["match"], true, "witness mismatch: {line}");
 }
 
 // ---- no Node on the machine ------------------------------------------------------------------------------------------------
@@ -308,8 +304,8 @@ impl ah_engine::dsact::runner::Runner for NoNode {
     }
 }
 
-/// Without any Node the verdicts duty still decides and writes every verdict it can read like Node (stale ones included), the
-/// tail work it cannot do is reported as skipped (not failed), and the witness records that Node could not run.
+/// Without any Node the verdicts duty still decides and writes every verdict it can read like Node (stale ones included) and does
+/// the tail work itself.
 #[test]
 fn without_node_the_verdicts_duty_runs_and_writes_stale_verdicts_itself() {
     if !have_node_sqlite() {
@@ -324,17 +320,11 @@ fn without_node_the_verdicts_duty_runs_and_writes_stale_verdicts_itself() {
     let detail = &rec["detail"];
     assert!(detail["native"].as_u64().unwrap() > 20, "{rec}");
     assert!(detail["stale"].as_u64().unwrap() > 0, "the corpus must hold a stale workspace: {rec}");
-    if detail["tail"].as_array().is_some_and(|t| !t.is_empty()) || detail["full"].as_array().is_some_and(|f| !f.is_empty()) {
-        assert!(detail["node"]["skipped"].is_string(), "the tail is skipped, not failed: {rec}");
-        assert!(detail["node"].get("error").is_none(), "{rec}");
-    }
+    assert!(detail.get("node").is_none(), "no Node runs: {rec}");
     let live = ds(&c).join("liveness");
     let stale_files =
         std::fs::read_dir(&live).unwrap().flatten().filter(|e| status_of(&std::fs::read_to_string(e.path()).unwrap_or_default()) == "stale").count();
     assert!(stale_files > 0, "the engine wrote the stale verdicts");
-    let w = std::fs::read_to_string(c.home.join(".anti-hall/logs/devswarm-sup-witness.ndjson")).unwrap_or_default();
-    let line: Value = serde_json::from_str(w.lines().last().expect("a witness line")).unwrap();
-    assert_eq!(line["match"], Value::Null, "Node could not run: {line}");
 }
 
 // ---- the escalation notice against Node's notifyParentEscalation / drainEscalationIntents ---------------------------------

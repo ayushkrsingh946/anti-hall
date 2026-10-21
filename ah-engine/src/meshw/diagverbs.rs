@@ -22,7 +22,6 @@ use crate::meshw::ident::{self, R, Row, defer};
 use crate::meshw::idlock::devswarm_root;
 use crate::meshw::rosterrows::Verdicts;
 use crate::meshw::send::{Answer, Effect};
-use crate::meshw::store::MeshStore;
 use std::collections::HashSet;
 
 fn text(k: &str) -> &'static str {
@@ -81,13 +80,13 @@ fn session_authored_heartbeat(inv: &Inv, id: &str) -> bool {
 }
 
 /// `pickFreshestLive(candidates, { storeHandle, home, isLive })`.
-fn pick_freshest<'a>(inv: &Inv, st: &MeshStore, cands: &'a [Row], live: &dyn Fn(&Row) -> R<bool>) -> R<Option<&'a Row>> {
+pub(crate) fn pick_freshest<'a>(inv: &Inv, rd: &crate::mesh::MeshReader, cands: &'a [Row], live: &dyn Fn(&Row) -> R<bool>) -> R<Option<&'a Row>> {
     let group: HashSet<&str> = cands.iter().map(|d| d.id.as_str()).collect();
     // cursorEvidence(store, id): (has a cursor row, cursor value, unread by the count)
     let evidence = |id: &str| -> (bool, f64, Option<bool>) {
-        let value = st.reader().cursor(id).map_or(-1.0, |v| v as f64);
-        let exists = st.reader().has_cursor_row(id).unwrap_or(false);
-        let unread = st.reader().message_count(id).ok().map(|t| t as f64 > if value > 0.0 { value } else { 0.0 });
+        let value = rd.cursor(id).map_or(-1.0, |v| v as f64);
+        let exists = rd.has_cursor_row(id).unwrap_or(false);
+        let unread = rd.message_count(id).ok().map(|t| t as f64 > if value > 0.0 { value } else { 0.0 });
         (exists, value, unread)
     };
     let mut any_drain = false;
@@ -118,7 +117,7 @@ fn pick_freshest<'a>(inv: &Inv, st: &MeshStore, cands: &'a [Row], live: &dyn Fn(
         }
         let credit = session_authored_heartbeat(inv, &d.id);
         let updated = d.updated_at.filter(|u| u.is_finite()).unwrap_or(-1.0);
-        let tie = st.reader().cursor(&d.id).map_or(-1.0, |v| v as f64);
+        let tie = rd.cursor(&d.id).map_or(-1.0, |v| v as f64);
         let score = [f64::from(u8::from(!alias)), f64::from(u8::from(b_ok)), f64::from(u8::from(credit)), updated, tie];
         match &best {
             None => best = Some((d, score)),
@@ -248,7 +247,7 @@ fn diagnose_store(inv: &Inv, repo_key: &str) -> R<Diagnosis> {
         let target = match cands.len() {
             0 => None,
             1 => Some(&cands[0]),
-            _ => pick_freshest(inv, &st, &cands, &strict)?,
+            _ => pick_freshest(inv, st.reader(), &cands, &strict)?,
         };
         let (mut live_split, mut dead_split, mut mixed_split) = (false, false, false);
         let mut kind = OVal::Null;

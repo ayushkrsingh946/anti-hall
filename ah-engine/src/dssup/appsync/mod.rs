@@ -8,8 +8,9 @@
 //! The bar for what touches user state:
 //! * a marker is written only from the engine's own plan ([`plan::plan_marks`]: never a delete, never an overwrite), each write
 //!   recorded in the action ledger; the names cache and `app-state.json` only ever hold derived data;
-//! * retiring a marker (a restored descriptor, a revived registry row, hard links) is the one step whose store and identity logic is
-//!   not ported: it is `held` (counted as `native_unable`, nothing written; the marker stays and the plan names it as pending);
+//! * retiring a marker restores the descriptor and revives the registry row through the recon planner's own restore, and only then
+//!   moves the marker to `archived-retired/` with a `retired` record (never a delete); a marker that cannot be restored stays and
+//!   is named as pending;
 //! * anything the engine cannot read exactly like JavaScript holds the whole sync before the first write, and every step is
 //!   idempotent, so the next tick repeats nothing.
 pub mod plan;
@@ -151,15 +152,47 @@ pub fn pass_with(ctx: &Ctx, _runner: &dyn Runner, o: Opts) -> Result<Pass, Defer
     let pending = (planned.len() as u64).saturating_sub(if dry { 0 } else { marked });
     let archived_summary =
         obj(vec![("marked", n(marked as f64)), ("pending", n(pending as f64)), ("deletedInApp", n(deleted as f64)), ("errors", n(errors as f64))]);
-    // 2. the stale markers the app shows open: restoring the descriptor and moving the marker is the one step with no native port, so
-    // it is held (counted once per sweep that has any), the markers stay where they are and are named as pending
+    // 2. the stale markers the app shows open: each is restored (descriptor, registry row) and only then moved to archived-retired/
+    // (never deleted); one that cannot be restored stays where it is and is named as pending
     let retire = plan::plan_retire(ctx.home, &snap, ctx.now)?;
-    let (retired, r_errors) = (0u64, 0u64);
-    let r_pending = retire.ids.len() as u64;
+    let (mut retired, mut r_errors, mut r_gone) = (0u64, 0u64, 0u64);
     if !retire.ids.is_empty() && !dry {
-        let held = super::tick::held("dssup:app_sync:retire", defaults::text("devswarm_sup.as_why_retire"));
-        log_native(ctx, &json!({"ts": ctx.now, "duty": "app_sync-retire", "native": true, "ids": retire.ids.len(), "held": held["held"]}));
+        if o.strict {
+            crate::meshw::mark_committed();
+        }
+        log_native(ctx, &json!({"ts": ctx.now, "duty": "app_sync-retire", "native": true, "ids": retire.ids.len()}));
+        for id in &retire.ids {
+            let t0 = std::time::Instant::now();
+            let (outcome, reason) = match plan::retire_marker(ctx, id, id) {
+                plan::Retired::Done => {
+                    retired += 1;
+                    (defaults::text("devswarm_sup.as_action_retired"), String::new())
+                }
+                plan::Retired::Gone => {
+                    r_gone += 1;
+                    continue;
+                }
+                plan::Retired::Left(why) => (defaults::text("devswarm_sup.as_action_left"), why),
+                plan::Retired::Failed(why) => {
+                    r_errors += 1;
+                    (defaults::text("devswarm_sup.as_action_failed"), why)
+                }
+            };
+            super::tick::record_action(
+                ctx.home,
+                &super::tick::Action {
+                    action: defaults::text("devswarm_sup.as_action_retire"),
+                    target: id,
+                    inputs: json!({}),
+                    outcome,
+                    reason: &reason,
+                    latency_ms: t0.elapsed().as_millis() as u64,
+                    now: ctx.now,
+                },
+            );
+        }
     }
+    let r_pending = (retire.ids.len() as u64).saturating_sub(if dry { 0 } else { retired + r_gone });
     let retired_summary = obj(vec![("retired", n(retired as f64)), ("pending", n(r_pending as f64)), ("errors", n(r_errors as f64))]);
     let retired_out = retired_summary.clone();
     // 3. what is on disk now

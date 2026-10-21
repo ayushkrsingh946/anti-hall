@@ -20,6 +20,7 @@ pub mod cursorhyg;
 pub mod poststages;
 pub mod promote;
 pub mod readercur;
+pub mod splitmerge;
 pub mod settings;
 pub mod state;
 pub mod sweeps;

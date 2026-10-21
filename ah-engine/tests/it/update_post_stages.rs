@@ -320,7 +320,7 @@ fn seed_not_split(home: &Path) {
 /// A store whose sqlite side and `journal/*.ndjson` side both hold data: the split the merge repairs (Node's to do).
 fn seed_split(home: &Path) {
     seed_not_split(home);
-    put(home, &format!(".anti-hall/devswarm/store/{STORE}/journal/w1.ndjson"), "{\"workspaceId\":\"w1\",\"ts\":1,\"hash\":\"zz\",\"body\":\"only in the journal\"}\n");
+    put(home, &format!(".anti-hall/devswarm/store/{STORE}/journal/messages.ndjson"), "{\"workspaceId\":\"w1\",\"ts\":1,\"hash\":\"zz\",\"body\":\"only in the journal\"}\n");
 }
 
 static CHILD: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
@@ -713,20 +713,23 @@ fn split_merge_pins_a_store_without_a_marker_even_in_a_preview_like_node() {
 
 // ---- fallback, the switch, nothing deleted -------------------------------------------------------------------------------------
 
-/// A journal store is not one the engine opens: the stage hands the whole run to Node (here a shim that fails, so the answer is the
-/// engine's own "could not run" answer and the shim saw exactly the fallback function).
+/// A journal store is the legacy backend of Node older than 22.5, which the engine does not read: a stage with nothing else to walk is
+/// `disabled` (named, counted, nothing waiting for a later try), no Node runs, and the store is left byte for byte.
 #[test]
-fn a_journal_store_is_left_to_the_node_function() {
+fn a_journal_store_is_legacy_and_its_stage_is_disabled() {
     let o = Opt { ds: true, no_upstream_move: true, live: true, no_node: true, stage_only: Some("reader-floor-repair"), ..Opt::default() };
     let w = world(&o);
     seed_floors(&w.home);
     fs::write(ds(&w.home).join("store").join(STORE).join("BACKEND"), "journal\n").unwrap();
+    let before = picture(&w, Value::Null, None);
     let ans = engine_answer(&w, &o, "readerFloorRepair");
     assert_eq!(ans["attempted"], json!(false), "{ans}");
-    assert!(ans["detail"].as_str().unwrap().starts_with("reader-floor-repair: held"), "{ans}");
+    assert_eq!(ans["disabled"], json!(true), "{ans}");
+    assert!(ans["detail"].as_str().unwrap().contains("legacy journal backend"), "{ans}");
+    assert!(ans.get("held").is_none(), "{ans}");
     let calls = stage_node_calls(&w);
     assert!(calls.is_empty(), "the engine started Node: {calls:?}");
-    assert_eq!(ans["held"], json!(true), "{ans}");
+    assert_eq!(before["stores"], picture(&w, Value::Null, None)["stores"]);
     let db = fs::read(ds(&w.home).join("store").join(STORE).join("devswarm.db")).unwrap();
     assert!(!db.is_empty());
 }
@@ -862,21 +865,27 @@ fn hygiene_removes_and_rewrites_nothing() {
     }
 }
 
-/// A split store is Node's to merge (the engine does not read the journal backend): the engine leaves every byte of it alone and the
-/// stage's Node function answers.
+/// A split store (a sqlite side and a journal side): the engine folds the journal side into sqlite, never writes to or deletes the
+/// journal side, leaves a marker, and a second run merges nothing.
 #[test]
-fn a_split_store_is_left_to_the_node_function_untouched() {
+fn a_split_store_is_merged_into_sqlite_and_both_sides_stay() {
     let o = Opt { ds: true, no_upstream_move: true, live: true, no_node: true, stage_only: Some("merge-split-backend-stores"), ..Opt::default() };
     let w = world(&o);
     seed_split(&w.home);
-    let before = picture(&w, Value::Null, None);
+    let journal = ds(&w.home).join("store").join(STORE).join("journal").join("messages.ndjson");
+    let before = fs::read(&journal).unwrap();
     let ans = engine_answer(&w, &o, "mergeSplitBackendStores");
-    assert_eq!(ans["attempted"], json!(false), "{ans}");
-    let calls = stage_node_calls(&w);
+    assert_eq!(ans["attempted"], json!(true), "{ans}");
+    assert_eq!((ans["splitStores"].clone(), ans["messagesMerged"].clone(), ans["errors"].clone()), (json!(1), json!(1), json!(0)), "{ans}");
+    assert!(calls_none(&w));
+    assert_eq!(fs::read(&journal).unwrap(), before, "the journal side was written");
+    assert!(ds(&w.home).join("store").join(STORE).join("MERGE-STATE.json").is_file());
+}
+
+fn calls_none(w: &World) -> bool {
+    let calls = stage_node_calls(w);
     assert!(calls.is_empty(), "the engine started Node: {calls:?}");
-    assert_eq!(ans["held"], json!(true), "{ans}");
-    let after = picture(&w, Value::Null, None);
-    assert_eq!(before, after, "the engine changed a split store it handed to Node");
+    true
 }
 
 /// Aliasing a child's label, forwarding its unread mail and retiring the phantom row are Node's: the engine sees there is work, writes

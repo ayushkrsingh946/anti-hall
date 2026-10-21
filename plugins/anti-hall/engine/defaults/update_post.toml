@@ -411,3 +411,27 @@ value = "reconcile handed to Node: {why}"
 [update_post.recon_note_fold]
 doc = "The event-log note when the fold port hands the project to Node. Placeholders: verdict, deferred."
 value = "fold handed to Node: {verdict} {deferred}"
+
+[update_post.journal_messages]
+doc = "The journal backend's message file inside a store's journal directory."
+value = "messages.ndjson"
+
+[update_post.journal_registry]
+doc = "The journal backend's registry file (an append-only list of upsert and remove operations)."
+value = "registry.ndjson"
+
+[update_post.journal_cursors]
+doc = "The journal backend's cursor file (read only to list the partitions a store names)."
+value = "cursors.ndjson"
+
+[update_post.journal_gates]
+doc = "The journal backend's gate file (read only to list the partitions a store names)."
+value = "gates.ndjson"
+
+[update_post.merge_marker]
+doc = "The no-delete completion marker the split-store merge leaves in the store directory (what it merged, when)."
+value = "MERGE-STATE.json"
+
+[update_post.legacy_json]
+doc = "The answer of a store stage when every DevSwarm store is on the legacy journal backend (Node older than 22.5), which the engine does not read: the stage is disabled. {name} is the stage."
+value = '{"attempted":false,"disabled":true,"detail":"{name} skipped: every DevSwarm store is on the legacy journal backend, which the engine does not read (see the doctor)"}'

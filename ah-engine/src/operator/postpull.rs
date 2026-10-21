@@ -157,6 +157,14 @@ impl Run<'_> {
         fill(parse_json(text("update_post.disabled_json")), &[("name", name)])
     }
 
+    /// A store stage whose every store is on the legacy journal backend (Node older than 22.5): the engine does not read those stores,
+    /// so there is nothing for it to do. Accounted `disabled` (not held: nothing is waiting for a later try), answered with
+    /// `update_post.legacy_json`; the doctor names the stores.
+    fn legacy_stage(&self, name: &str) -> J {
+        self.outcome.set(Some(crate::obs::counters::Outcome::Disabled));
+        fill(parse_json(text("update_post.legacy_json")), &[("name", name)])
+    }
+
     /// The migration context of the engine's own ports: this home, this process's environment and working directory, the new
     /// version (else the plugin tree's own, as `migrations.js` falls back to it) and the plugin tree.
     fn migrate_ctx(&self) -> migrate::Ctx {
@@ -352,6 +360,9 @@ impl Run<'_> {
         let t = migrate::poststages::run(&ctx, which, dry);
         Self::log_notes(&ctx);
         let t = t?;
+        if t.all_legacy {
+            return Some(self.legacy_stage(row.str_field("name")));
+        }
         let errors = t.n.get("errors").copied().unwrap_or(0.0);
         let latest = self.latest.filter(|v| !v.is_empty());
         if let Some(key) = row.get("state").map(|f| f.strings()).unwrap_or_default().first()
