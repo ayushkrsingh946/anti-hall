@@ -132,6 +132,7 @@ function psAdopt(p) {
   var why = hookProc.adoptHome();
   if (why === null) return true;
   ah.unable('precompact-snapshot:' + why);
+  ah.log(ah.cfg('codex_handover.precompact_unsure_log_kind'), why);
   if (why !== 'relative_home') return false;
   var h = hookProc.home(p);
   if (h === null) return false;

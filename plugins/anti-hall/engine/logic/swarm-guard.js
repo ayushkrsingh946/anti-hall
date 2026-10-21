@@ -181,7 +181,7 @@ function decide(p) {
   var raw = null, size = ah.fs.size(logPath);
   if (size !== null && size > ah.cfgNum('script.read_max_bytes')) {
     ah.unable('swarm-guard:log_big'); // the window is at the end of the log: read its tail, without the partly cut first line
-    raw = ah.fs.readTail(logPath, ah.cfgNum('script.read_max_bytes'));
+    raw = ah.fs.readEnd(logPath, ah.cfgNum('script.read_max_bytes'));
     if (raw !== null) raw = raw.slice(raw.indexOf('\n') + 1);
   } else if (size !== null) raw = ah.fs.readText(logPath, size + 1);
   if (raw !== null) {

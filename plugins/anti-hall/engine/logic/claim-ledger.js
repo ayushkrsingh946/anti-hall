@@ -81,6 +81,7 @@ function clAdopt(p) {
   var why = hookProc.adoptHome();
   if (why === null) return true;
   ah.unable('claim-ledger:' + why);
+  ah.log(ah.cfg('claim_ledger.unsure_log_kind'), why);
   if (why !== 'relative_home') return false;
   var h = hookProc.home(p);
   if (h === null) return false;

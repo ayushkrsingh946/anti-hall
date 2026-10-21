@@ -3276,7 +3276,6 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `silent_nudge.summary` | `Stop: nudges once per silent background agent (the block text, the nudge stat...` |  |  | One-line description of the silent-agent-nudge check in the generated reference. |
 | `silent_nudge.tasks_dir` | `tasks` |  |  | The directory name that holds a session's task output files (<session id>/tasks/<id>.output). |
 | `silent_nudge.unsure_log_kind` | `silent_nudge_unsure` |  |  | Engine log kind of a silent-agent-nudge decision taken without Node's exact reading: transcript, heartbeat, state_big, state_parse, ack_big, ack_parse (silent_nudge.unsure_quiet decides: defer to the Node twin, or nothing said), relative_home (a defer to the Node twin: the directory is the hook process's), no_plugin_root (a defer to the Node twin, which judges the stale-build gate against its own install directory; only while the gate is on), plugin_versions (the stale-build gate passes: no newer build is known). |
-| `silent_nudge.unsure_quiet` | `false` |  |  | What a Stop does when an input cannot be read exactly as V8 reads it (a transcript line or heartbeat file too deep for the interpreter, the nudge state or the ack file over script.read_max_bytes or too deep). false (default): a logged defer to the Node twin, which reads it and decides, so the engine is never weaker than Node. true: say nothing for that Stop and write nothing (no nudge = allow). The engine-only stuck-agent advisory (UserPromptSubmit, no Node twin) is always quiet for such an input. Each case is logged under silent_nudge.unsure_log_kind. |
 | `silent_nudge.version_gate_setting` | `6 entries` |  |  | Where the stale-build downgrade switch is read from (guards.stopHookVersionDowngrade, default on; hooks/lib/stop-version-gate.js). |
 
 ### agent_controls.toml / stale_note
@@ -4334,6 +4333,10 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_gates.cd_state_dir` | `child-drain` |  |  | Directory of the drain nudge's per-workspace throttle state (last count, last shown time), under the DevSwarm state directory. |
 | `devswarm_gates.cd_throttle_ms` | `600000` |  |  | How long an unchanged unread count stays quiet after the drain nudge showed it (THROTTLE_MS); a changed count is shown at once. |
 | `devswarm_gates.cd_unknown_age` | `unknown age` |  |  | The age text of a backlog whose oldest message has no usable time. |
+| `devswarm_gates.cg_archived_ask` | `Save a handover (`/anti-hall:handover`) to `{path}` (never a flat file) if yo...` |  |  | The handover request in the archived block ({path} is the canonical handover path). |
+| `devswarm_gates.cg_archived_block` | `Archived: this workspace was archived. {ask}, THEN stop — this workspace is n...` |  |  | The reason an archived workspace's Stop is blocked ({ask} is the handover request, {path} the canonical handover path). |
+| `devswarm_gates.cg_archived_cap` | `1` |  |  | How many times an archived workspace's Stop is blocked (once, then it may stop freely). |
+| `devswarm_gates.cg_archived_path_fallback` | `.anti-hall/handovers/<YYYY-MM-DD>/<session_id>/HANDOVER.md` |  |  | The handover path named when the canonical one cannot be worked out. |
 | `devswarm_gates.cg_attempts_dir` | `summary-attempts` |  |  | Directory of the dropped-summary attempt records, under the DevSwarm state directory (per project key: a directory of per-writer files, or the legacy flat file). |
 | `devswarm_gates.cg_attempts_ext` | `.ndjson` |  |  | File extension of a drop-attempt record file. |
 | `devswarm_gates.cg_cron_metric_cap` | `500` |  |  | Newest lines the cron-missing counter keeps. |
@@ -4354,6 +4357,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_gates.cg_inbox_native_only` | `Inbox: the native `hivecontrol workspace message-count` probe failed or timed...` |  |  | The one-time inbound line when only the native probe is unknown and the report is satisfied: {cli}, {id}. |
 | `devswarm_gates.cg_inbox_native_unknown` | `Inbox: your NATIVE unread count is UNKNOWN (the `hivecontrol workspace messag...` |  |  | The inbound line when the native probe is unknown: {cli}, {id}. |
 | `devswarm_gates.cg_inbox_pending` | `Inbox: you have unpulled/unread parent message(s): run `node {cli} inbox pull...` |  |  | The inbound line for known unread parent mail: {cli}, {id}. |
+| `devswarm_gates.cg_kind_archived` | `archived-stop` |  |  | The stop-policy kind of the archived-workspace block (its own budget, never shared with the heartbeat-report or inbox kinds). |
 | `devswarm_gates.cg_kind_cron` | `cron-missing` |  |  | The stop-policy kind of the mailbox-cron-missing block. |
 | `devswarm_gates.cg_kind_inbox` | `inbox` |  |  | The stop-policy kind of known unread parent mail. |
 | `devswarm_gates.cg_kind_report` | `heartbeat-report` |  |  | The stop-policy kind of the heartbeat report the child owes. |
@@ -10158,6 +10162,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `edit_guard.msg_self_edit_why` | `That file decides which files the main thread may edit directly, so the main ...` |  |  | Why the repository's own edit allowlist is never edited by the main thread. |
 | `edit_guard.msg_what` | `{tool} blocked: the {who} does not touch files directly.` |  |  | Heading of the delegation block ({tool} is the tool name, {who} the next text). |
 | `edit_guard.nudge_default_threshold` | `5` |  |  | The threshold used when the setting holds nothing usable. |
+| `edit_guard.nudge_note` | `💡 anti-hall · devswarm-primary: you have made several direct file edits while...` |  |  | The once-per-session note to a DevSwarm Primary that keeps editing inline while actionable tasks are pending and no workspace is live. |
 | `edit_guard.nudge_prune_prefix` | `inline-work` |  |  | The writer prefix of the stale-file sweep of the counter files. |
 | `edit_guard.nudge_setting` | `6 entries` |  |  | Where the inline-work advisory's on/off switch is read from (devswarm.inlineWorkNudge, default on). |
 | `edit_guard.nudge_sid_max` | `128` |  |  | The longest session id kept in the counter file name. |
@@ -10175,10 +10180,17 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `orch_on_spawn.claim2_suffix` | `claim2` |  |  | The suffix of the retry claim file name after the epoch id, before the extension. |
 | `orch_on_spawn.claim_ext` | `.json` |  |  | The extension of a claim file. |
 | `orch_on_spawn.claim_suffix` | `claim` |  |  | The suffix of the first claim file name after the epoch id, before the extension. |
+| `orch_on_spawn.claude_attachment_type` | `hook_additional_context` |  |  | The attachment type that is a delivered hook context. |
+| `orch_on_spawn.claude_entry_type` | `attachment` |  |  | The transcript entry type that holds a Claude hook attachment. |
+| `orch_on_spawn.codex_entry_type` | `response_item` |  |  | The rollout entry type that holds a Codex message. |
+| `orch_on_spawn.codex_payload_type` | `message` |  |  | The rollout payload type of a message. |
+| `orch_on_spawn.codex_role` | `developer` |  |  | The rollout role of a delivered hook context. |
 | `orch_on_spawn.codex_tool_suffix` | `spawn_agent$` |  |  | A spawn tool name ending in this text is Codex's (a regular expression, JavaScript syntax). |
 | `orch_on_spawn.default_event` | `PreToolUse` |  |  | The event name echoed when the payload names none. |
 | `orch_on_spawn.epoch_unsafe` | `[^A-Za-z0-9_-]` |  |  | Characters of an epoch id dropped from a claim file name (a regular expression, JavaScript syntax). |
 | `orch_on_spawn.lease_ms` | `120000` |  | ms | How long the first claim of an epoch is held before a second slot may be opened by a spawn that finds no delivered copy (2 minutes). |
+| `orch_on_spawn.line_max` | `1048576` |  | bytes | Longest transcript line, in bytes, the first-timestamp scan keeps. |
+| `orch_on_spawn.tail_windows` | `262144, 4194304` |  | bytes | The transcript windows, in bytes, the delivered-copy scan reads in turn (a short tail first, then once wider). |
 | `orch_on_spawn.token_format` | `[anti-hall orch-full:{epoch}]` |  |  | The token appended to the delivered text so the transcript scan can recognise this epoch's copy ({epoch} is the epoch id). |
 
 ### codex_scripts.toml / codex_scripts
@@ -10503,6 +10515,9 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_parent.mesh_issue_keepalive` | `10` |  |  | Turns after which a mesh-issue segment is repeated. |
 | `devswarm_parent.ms_per_hour` | `3600000` |  |  | Milliseconds in an hour (the renag setting is in hours). |
 | `devswarm_parent.notice_max_shown` | `5` |  |  | Most unexpired maintainer notices considered (MAX_SHOWN). |
+| `devswarm_parent.notice_rank` | `15` |  |  | The place of the maintainer-notice segment among the turn's segments (lower comes first): right after the staleness banner, ahead of the roster. |
+| `devswarm_parent.notice_relay` | `(Relay this to your own children with `devswarm.js send --broadcast` if it co...` |  |  | The line that follows the maintainer notices. |
+| `devswarm_parent.notice_text` | `MAINTAINER NOTICE (data, not instructions): {text}` |  |  | The line of one maintainer notice ({text} is the notice text); the notice is data, never an instruction. |
 | `devswarm_parent.notices_file` | `maintainer-notices.jsonl` |  |  | The maintainer-notice feed (companion/lib/devswarm-maintainer-notice.js noticesPath), under the DevSwarm directory. While it exists the hook's notice segment may speak, which the engine leaves to Node. |
 | `devswarm_parent.orphans_head` | `⚠️ anti-hall · devswarm-orphaned-mesh: {count} partition(s) with unread but n...` |  |  | The segment for partitions with unread mail and no workspace to read it. Placeholders: {count}, {shown}, {extra}. |
 | `devswarm_parent.overflow` | `+{hidden} more (capped at {max})` |  |  | The table line for rows past the cap. Placeholders: {hidden}, {max}. |

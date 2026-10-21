@@ -20,11 +20,6 @@ reason = "a slow git check-ignore (past session.gitignore_probe_ms) on a loaded 
 optional = true
 [[node]]
 surface = "hook/claude/SessionStart"
-script = "hooks/devswarm-child-role.js"
-lane = "L14b"
-reason = "the engine runs the Node twin of the child-role SessionStart check"
-[[node]]
-surface = "hook/claude/SessionStart"
 script = "hooks/verify-first-orch.js"
 lane = "L14b"
 reason = "the DevSwarm-active verify-first-orch path defers to the Node hook"

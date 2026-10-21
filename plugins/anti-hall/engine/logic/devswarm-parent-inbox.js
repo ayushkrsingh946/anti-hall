@@ -621,6 +621,7 @@ function piArchiveCooldown(home, id, now) {
 
 // `autoArchiveOwnsRow(home, id, now)`: the supervisor's last sweep owns the row. A record that could say yes needs the capability check, which is not made here: the row is not taken as owned (counted).
 function piAutoArchiveOwns(home, id, now) {
+  if (ah.settings.str('devswarm_parent.set_auto_archive') === 'off') return false; // the supervisor does not archive on its own
   var st = piJson(piDevswarmDir(home) + '/' + ah.cfg('devswarm_parent.file_auto_archive'));
   if (!st || !Array.isArray(st.owned) || !(now - Number(st.at) < ah.cfgNum('devswarm_parent.auto_archive_window_ms'))) return false;
   if (st.owned.indexOf(String(id)) < 0) return false;
