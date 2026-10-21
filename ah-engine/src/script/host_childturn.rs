@@ -53,12 +53,8 @@ pub(super) fn reset_call() {
     PLANNED.with(|p| p.borrow_mut().clear());
 }
 
-fn unsure() -> String {
-    json!({"unsure": true}).to_string()
-}
-
 fn answer(r: R<Value>) -> String {
-    r.map_or_else(|_| unsure(), |v| v.to_string())
+    r.map_or_else(|d| json!({"unsure": true, "why": d.0}).to_string(), |v| v.to_string())
 }
 
 fn inv_of(st: &Settings, cwd: &str) -> Inv {

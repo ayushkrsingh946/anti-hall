@@ -47,6 +47,7 @@ pub mod idlock;
 pub mod inbox;
 pub mod lifeverbs;
 pub mod mboxtool;
+pub mod orphan;
 pub mod plan;
 pub mod planverbs;
 pub mod pull;
