@@ -325,8 +325,13 @@ function cgDurable(ctx) {
     if (typeof wt !== 'string') ah.unable('devswarm-child-gate:worktree_shape');
     else { var kd = ah.mesh.repoKeyDetail(wt); key = kd.key; keyUnsure = kd.unsure === true; }
   }
-  // a project or a store the host cannot read exactly leaves the count unknown (the native probe and the capped 'unknown' block then apply)
-  var c = keyUnsure ? { known: false, unread: 0 } : ah.mesh.countFor(key, id, inbox, cursor, ctx.now);
+  // a project or a store the host cannot read exactly is an UNKNOWN count (Node's readDurableUnread `unknown: true`): never "0 unread",
+  // so the satisfaction paths refuse to clear on it and the inbox-unknown block budget applies
+  var c = keyUnsure ? { known: false, unread: 0, unsure: true } : ah.mesh.countFor(key, id, inbox, cursor, ctx.now);
+  if (c.unknown === true || c.unsure === true) {
+    ctx.durable = { known: false, count: 0, unknown: true, reason: typeof c.reason === 'string' && c.reason !== '' ? c.reason : ah.cfg('devswarm_gates.cg_unknown_reason_default') };
+    return ctx.durable;
+  }
   ctx.durable = { known: !!c.known, count: c.known ? c.unread : 0 };
   return ctx.durable;
 }
@@ -515,13 +520,14 @@ function cgGate(p, root, l) {
   }
 
   var pending = cgHasUnread(ctx);
+  var durableUnknown = cgDurable(ctx).unknown === true;
   var tickFresh = cgTickFresh(ctx);
   var heartbeatSatisfied = !!(reported || tickFresh);
   var outboundSatisfied = !!(reported || drop || tickFresh);
-  var nativeOnlyUnknown = outboundSatisfied && pending === 'unknown';
+  var nativeOnlyUnknown = outboundSatisfied && pending === 'unknown' && !durableUnknown;
   var kinds = (nativeOnlyUnknown || heartbeatSatisfied) ? [] : [ah.cfg('devswarm_gates.cg_kind_report')];
   if (pending === true) kinds.push(ah.cfg('devswarm_gates.cg_kind_inbox'));
-  else if (pending === 'unknown') kinds.push(ah.cfg('devswarm_gates.cg_kind_unknown'));
+  else if (durableUnknown || pending === 'unknown') kinds.push(ah.cfg('devswarm_gates.cg_kind_unknown'));
   if (kinds.length === 0) {
     cgClear(ctx, [ah.cfg('devswarm_gates.cg_kind_report'), ah.cfg('devswarm_gates.cg_kind_inbox'), ah.cfg('devswarm_gates.cg_kind_unknown')]);
     cgWriteState(ctx, state);
@@ -539,6 +545,7 @@ function cgGate(p, root, l) {
 
   var cli = l.cli, rid = cgResolvedId(), args = { cli: cli, id: rid };
   var prefix = pending === true ? text.render(ah.cfg('devswarm_gates.cg_inbox_pending'), args)
+    : durableUnknown ? text.render(ah.cfg('devswarm_gates.cg_inbox_durable_unknown'), { cli: cli, id: rid, reason: cgDurable(ctx).reason })
     : pending === 'unknown' ? text.render(ah.cfg(nativeOnlyUnknown ? 'devswarm_gates.cg_inbox_native_only' : 'devswarm_gates.cg_inbox_native_unknown'), args)
     : '';
   var wakeLine = cgWakeLine(l);

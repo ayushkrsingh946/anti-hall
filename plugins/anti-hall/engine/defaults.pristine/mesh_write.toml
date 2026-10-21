@@ -1953,3 +1953,11 @@ min = 1024
 [mesh_write.msg_cursor_log_older_soft]
 doc = "The note when a cursor journal's older file passes its soft limit. {path} {bytes}."
 value = "{path}: the older cursor journal is {bytes} bytes, past its soft limit; nothing is deleted (move it aside by hand when it is no longer needed)"
+
+[mesh_write.unread_reason_cursors]
+doc = "The reason a child's unread count is UNKNOWN when its store's reader cursors cannot be read (reader-cursors.js unknownResult)."
+value = "reader-cursors-unreadable"
+
+[mesh_write.unread_reason_union]
+doc = "The reason a child's unread count is UNKNOWN when the union of inbox lines and store rows cannot be computed (reader-cursors.js unknownResult)."
+value = "union-threw"

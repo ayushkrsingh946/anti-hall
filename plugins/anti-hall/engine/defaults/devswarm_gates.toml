@@ -267,6 +267,14 @@ value = "Inbox: the native `hivecontrol workspace message-count` probe failed or
 doc = "The inbound line when the native probe is unknown: {cli}, {id}."
 value = "Inbox: your NATIVE unread count is UNKNOWN (the `hivecontrol workspace message-count` probe failed or timed out), so this gate cannot prove your native queue is empty. Run `node {cli} inbox pull {id}` and handle any mail BEFORE you stop. "
 
+[devswarm_gates.cg_inbox_durable_unknown]
+doc = "The inbound line when the child's own durable unread count is unknown (its store could not be read): {cli}, {id}, {reason}."
+value = "Inbox: your unread count is UNKNOWN ({reason}): the store could not be read, so this gate cannot prove your inbox is empty. Run `node {cli} inbox count {id}` and read any mail BEFORE you stop. "
+
+[devswarm_gates.cg_unknown_reason_default]
+doc = "The reason named in that line when the host cannot say why the store could not be read."
+value = "store-read-error"
+
 [devswarm_gates.cg_err_mismatch]
 doc = "The once-per-session stderr notice of an own-id drop-attempt record that authenticates against neither the nonce nor the session: {sid}, {row}, {own} (JSON texts)."
 value = "⚠️ anti-hall · devswarm-child-gate: an attempt record for this workspace's own id exists for session {sid} but authenticated against NEITHER this process's nonce nor its session (row nonce prefix {row} vs own nonce prefix {own}) — treated as unauthenticated; this Stop re-blocks as if no attempt was made.\n"

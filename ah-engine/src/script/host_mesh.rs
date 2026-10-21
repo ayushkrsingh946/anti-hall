@@ -13,7 +13,7 @@
 //! | `meshUnion(key, id, inbox, cursor, own, now)` | `{state: "none"}` or `{state: "ok", storeOnly: [row], age}`: the store rows no inbox line covers and the age in ms of the oldest unread row |
 //! | `meshOwnReader(key, id, inbox, cursor, count, now)` | `{reader: false}`, `{reader: true, state: "none"}` or `{reader: true, state: "ok", own, unread?, total?}`: this hook's own reader row on a partition and, with `count`, its unread count and the partition's message count |
 //! | `meshReaderNonce()` | `{nonce}`: the reader nonce of the hook that sent the request (`deriveReaderNonce`), `null` for a headless caller |
-//! | `meshCountFor(key, id, inbox, cursor, now)` | `{state: "nd", unread, known}` (no key or no store: the inbox and its cursor alone) or `{state: "ok", unread, known, age}`: a child's own unread mail counted with its own reader (`countFor`) |
+//! | `meshCountFor(key, id, inbox, cursor, now)` | `{state: "nd", unread, known}` (no key or no store: the inbox and its cursor alone) or `{state: "ok", unread, known, age}`: a child's own unread mail counted with its own reader (`countFor`); a store that exists but cannot be read is `{state: "nd", unread: 0, known: false, unknown: true, reason}` |
 //! | `meshContextKey(cwd)` | `{key}`: the project key of the checkout around `cwd` (`resolveContext(cwd, {missingPath: 'ancestor'}).repoKey`), `null` when none |
 //! | `meshAppArchived(id, worktree, cache)` | `{verdict: true \| false \| null, cache: n \| null}`: the app database's archive verdict; `cache` names a cache write owed |
 //! | `meshPerformCache()` | perform every cache write the call's lookups owe |
@@ -160,8 +160,13 @@ fn count_for(st: &Settings, key: Option<&str>, id: &str, inbox: Option<&str>, cu
         _ => None,
     };
     let known = lines.is_some() && position.is_some();
+    // a store that exists but cannot be read is an UNKNOWN count, never "0 unread": Node's `countFor` answers `{unknown: true, reason}`
+    let unknown = |reason_key: &str| Ok(json!({"state": "nd", "unread": 0, "known": false, "unknown": true, "reason": defaults::text(reason_key)}));
     let store = match key {
-        Some(k) => open_store(st, k)?,
+        Some(k) => match open_store(st, k) {
+            Ok(s) => s,
+            Err(No) => return unknown("mesh_write.unread_reason_cursors"),
+        },
         None => None,
     };
     let Some(store) = store else {
@@ -170,8 +175,10 @@ fn count_for(st: &Settings, key: Option<&str>, id: &str, inbox: Option<&str>, cu
         return Ok(json!({"state": "nd", "unread": if known { u.unread } else { 0 }, "known": known}));
     };
     let reader = own_reader(st)?;
-    let (sb, nb) = floor_positions(&store, &st.home, id, cursor, reader.as_deref())?;
-    let u = union_unread(&UnionIn { inbox, cursor_file: cursor, id, store: Some(&store), store_base: sb, nd_base: nb, now: now as i64 }).map_err(|_| No)?;
+    let Ok((sb, nb)) = floor_positions(&store, &st.home, id, cursor, reader.as_deref()) else { return unknown("mesh_write.unread_reason_cursors") };
+    let Ok(u) = union_unread(&UnionIn { inbox, cursor_file: cursor, id, store: Some(&store), store_base: sb, nd_base: nb, now: now as i64 }) else {
+        return unknown("mesh_write.unread_reason_union");
+    };
     Ok(json!({"state": "ok", "unread": u.unread, "known": known, "age": u.oldest_unread_age_ms.filter(|a| a.is_finite())}))
 }
 

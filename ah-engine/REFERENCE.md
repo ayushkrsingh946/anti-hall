@@ -4372,6 +4372,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_gates.cg_heartbeat_drop` | `Heartbeat: {drop}, THEN stop.` |  |  | The outbound line after a dropped report: {drop}. |
 | `devswarm_gates.cg_heartbeats_dir` | `heartbeats` |  |  | Directory of the workspace heartbeat files, under the DevSwarm state directory (the session-age proxy of the cron check). |
 | `devswarm_gates.cg_hook` | `child-gate` |  |  | The hook name of the child Stop gate in the shared stop-policy budgets (`<session>\|<hook>\|<kind>`, hooks/lib/stop-policy.js). |
+| `devswarm_gates.cg_inbox_durable_unknown` | `Inbox: your unread count is UNKNOWN ({reason}): the store could not be read, ...` |  |  | The inbound line when the child's own durable unread count is unknown (its store could not be read): {cli}, {id}, {reason}. |
 | `devswarm_gates.cg_inbox_native_only` | `Inbox: the native `hivecontrol workspace message-count` probe failed or timed...` |  |  | The one-time inbound line when only the native probe is unknown and the report is satisfied: {cli}, {id}. |
 | `devswarm_gates.cg_inbox_native_unknown` | `Inbox: your NATIVE unread count is UNKNOWN (the `hivecontrol workspace messag...` |  |  | The inbound line when the native probe is unknown: {cli}, {id}. |
 | `devswarm_gates.cg_inbox_pending` | `Inbox: you have unpulled/unread parent message(s): run `node {cli} inbox pull...` |  |  | The inbound line for known unread parent mail: {cli}, {id}. |
@@ -4394,6 +4395,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_gates.cg_state_dir` | `child-gate` |  |  | Directory of the child gate's own per-session state files (block and check times, the one-shot notice flags), under the DevSwarm state directory. |
 | `devswarm_gates.cg_strict_setting` | `5 entries` |  |  | The setting devswarm.childGateStrict (on by default): when the durable inbox shows nothing, the gate also asks the native queue (`hivecontrol workspace message-count`). The engine answers only while it is unset. |
 | `devswarm_gates.cg_tick_fresh_ms` | `120000` |  |  | How recent a zero-unread `inbox tick` marker must be to count as liveness proof for this Stop (TICK_MARKER_FRESH_MS). |
+| `devswarm_gates.cg_unknown_reason_default` | `store-read-error` |  |  | The reason named in that line when the host cannot say why the store could not be read. |
 | `devswarm_gates.cg_unknown_session` | `unknown` |  |  | The session key of a Stop payload with neither a session id nor a transcript path. |
 | `devswarm_gates.cg_wake_tick` | ``node "$CLI" inbox tick {id} --child --quiet`` |  |  | The tick command of the child's mailbox-wake re-verify line: {id}. |
 | `devswarm_gates.cg_why` | `Your parent orchestrator relies on your heartbeat and a drained inbox.` |  |  | Why line of the child gate block. |
@@ -5851,6 +5853,8 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `mesh_write.tmp_suffix` | `.tmp` |  |  | Suffix of a staged file before its rename. |
 | `mesh_write.truncated_body_hint` | `if this JSON looks shorter than `totalBodyBytes`/per-row `bodyLength` implies...` |  |  | The `truncatedBodyHint` of a read-primary result; `{id}` is the workspace id. |
 | `mesh_write.unclaimed_prefix` | `unclaimed:` |  |  | Prefix of a session id that no real session claimed yet (the seat ignores it). |
+| `mesh_write.unread_reason_cursors` | `reader-cursors-unreadable` |  |  | The reason a child's unread count is UNKNOWN when its store's reader cursors cannot be read (reader-cursors.js unknownResult). |
+| `mesh_write.unread_reason_union` | `union-threw` |  |  | The reason a child's unread count is UNKNOWN when the union of inbox lines and store rows cannot be computed (reader-cursors.js unknownResult). |
 | `mesh_write.urgency_default` | `normal` |  |  | send's urgency when none is given. |
 | `mesh_write.urgency_rank` | `low, normal, high, urgent` |  |  | Urgency words from lowest to highest (devswarm-store.js URGENCY_RANK); any other word is ignored. |
 | `mesh_write.value_required_flags` | `message, message-file` |  |  | Flags that always take the next word as their value (Node's VALUE_REQUIRED_FLAGS). |

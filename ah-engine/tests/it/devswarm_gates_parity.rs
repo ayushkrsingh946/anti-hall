@@ -1528,6 +1528,7 @@ const CX_INBOX2: &str = "{\"m\":1}\n{\"m\":2}\n";
 const CX_TICK: &str = ".anti-hall/devswarm/wake-tick/b-1.json";
 const CX_ATTEMPT: &str = ".anti-hall/devswarm/summary-attempts/{key}/b-1.ndjson";
 const CX_POLICY: &str = ".anti-hall/devswarm/stop-policy/s1.json";
+const CX_STORE_DB: &str = ".anti-hall/devswarm/store/{key}/devswarm.db";
 const CX_DESC: &str = ".anti-hall/devswarm/workspaces/b-1.json";
 
 fn cg_cases() -> Vec<Cx> {
@@ -1546,6 +1547,10 @@ fn cg_cases() -> Vec<Cx> {
         cg("store-unread-blocks", &[A]).store(0, 2).expect("unpulled/unread parent message(s)"),
         cg("store-and-inbox-unread-blocks", &[A]).store(2, 2).expect("unpulled/unread parent message(s)"),
         cg("store-empty-asks-heartbeat", &[A]).store(0, 0).expect("Heartbeat: before you stop"),
+        // #226: a durable store the host cannot read is an UNKNOWN unread count (Node blocks with the reason), never "0 unread"
+        cg("store-unreadable-is-unknown", &[A, A, A, A]).store(0, 2).seed(CX_STORE_DB, "this is not a database").expect("unread count is UNKNOWN"),
+        cg("store-unreadable-reported-still-blocks", &[A]).store(0, 2).seed(CX_STORE_DB, "this is not a database").seed(CX_SUMMARY, CX_REPORTED).expect("unread count is UNKNOWN"),
+        cg("store-unreadable-fresh-tick-still-blocks", &[A]).store(0, 2).seed(CX_STORE_DB, "this is not a database").seed(CX_TICK, r#"{"ts":{now},"unreadTotal":0,"known":true}"#).expect("unread count is UNKNOWN"),
         cg("reported-allows-then-next-turn-blocks", &[A, A]).seed(CX_SUMMARY, CX_REPORTED).expect("!decision"),
         cg("reported-with-unread-asks-inbox-only", &[A]).seed(CX_SUMMARY, CX_REPORTED).seed("in.ndjson", CX_INBOX2).expect("!Heartbeat: before"),
         cg("report-by-another-workspace-does-not-count", &[A]).seed(CX_SUMMARY, r#"{"recent":[{"from":"b-2","ts":{now}}]}"#).expect("Heartbeat: before"),
