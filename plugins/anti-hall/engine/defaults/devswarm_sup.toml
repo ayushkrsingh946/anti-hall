@@ -263,10 +263,6 @@ value = "recover is switched off (devswarm_sup.duties_off names recover); there 
 # ---- the native result log ----------------------------------------------------------------------------------------------------
 # The non-acting Node witness is gone; the native results of the duties that act on user data are logged to witness_file instead.
 
-[devswarm_sup.witness_dir]
-doc = "Where the ingest witness builds its scratch mirrors, relative to the home directory. Each is removed when its comparison is done."
-value = ".anti-hall/witness"
-
 [devswarm_sup.witness_file]
 doc = "The log of the native duties' results (retention plans and holds, app-sync marks), one JSON line each (`native`: true), relative to the home directory."
 value = ".anti-hall/logs/devswarm-sup-witness.ndjson"
@@ -452,10 +448,6 @@ value = "dssup-notice-drained"
 [devswarm_sup.node_bin]
 doc = "The Node executable the `node` duties run through (resolved on PATH). A missing one fails the duty with a recorded error; nothing else is affected."
 value = "node"
-
-[devswarm_sup.node_args]
-doc = "The arguments before the duty's snippet (the snippet, the plugin root, the home directory and the poke owner follow)."
-value = ["-e"]
 
 [devswarm_sup.detail_chars]
 doc = "Most characters of a duty's output kept in the tick record."
