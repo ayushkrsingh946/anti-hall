@@ -273,12 +273,11 @@ fn id_of(inp: &Value) -> R<Option<String>> {
 
 fn classify(line: &str) -> R<Line> {
     let mut r = Line::default();
-    let entry: Value = match serde_json::from_str(line) {
-        Ok(v) => v,
-        Err(_) => {
-            // Same rule as the window parser: a line JavaScript might still parse is not ours to skip.
-            return if super::parse::maybe_valid_for_js(line) { Err(Unsure) } else { Ok(r) };
-        }
+    let entry: Value = match super::parse::parse_line(line) {
+        super::parse::Line::Parsed(v) => v,
+        // Same rule as the window parser: a line JavaScript parses is read, one it cannot be read is not ours to skip.
+        super::parse::Line::Unsure => return Err(Unsure),
+        super::parse::Line::Skip => return Ok(r),
     };
     if entry.is_null() || get(&entry, "isSidechain") == Some(&Value::Bool(true)) {
         return Ok(r);

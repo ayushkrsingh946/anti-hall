@@ -104,10 +104,11 @@ fn the_session_key_and_hash_follow_node() {
     assert_eq!(sha1_hex(b"/x/y.jsonl"), "95af2b5c45318efd81ab1ea4c5d50b6fd1d9d641");
 }
 
-/// Review 3 P2: a transcript line serde rejects that `JSON.parse` reads (a 309+ digit integer is Infinity, 1e400, a lone surrogate
-/// escape, nesting past 128) is not a skippable bad line: Node counts it, so the reconstruction must say "unsure" (defer).
+/// A transcript line serde rejects that `JSON.parse` reads (a 309+ digit integer is Infinity, 1e400, a lone surrogate escape, nesting
+/// past 128) is not a skippable bad line and no longer a hand-back to Node (there is none): Node counts it, so the reconstruction
+/// reads it too (#237) and the task it carries is kept, never turned into "no tasks".
 #[test]
-fn a_line_only_javascript_can_parse_is_unsure_not_skipped() {
+fn a_line_only_javascript_can_parse_is_read_not_skipped() {
     let base = json!({"type": "assistant", "message": {"id": "m", "content": [{"type": "tool_use", "id": "t1", "name": "TaskCreate", "input": {"subject": "a", "x": 1}}]}}).to_string();
     let deep = format!("{}{}", "[".repeat(150), "]".repeat(150));
     for (name, repl) in [
@@ -120,9 +121,17 @@ fn a_line_only_javascript_can_parse_is_unsure_not_skipped() {
         let line = base.replace("\"x\":1", &format!("\"x\":{repl}"));
         assert!(serde_json::from_str::<Value>(&line).is_err(), "{name}: the fixture must be one serde rejects");
         assert!(super::parse::maybe_valid_for_js(&line), "{name}");
-        assert!(reconstruct(&[line.as_str()], Variant::Guard).is_err(), "{name}: guard variant");
-        assert!(reconstruct(&[line.as_str()], Variant::State).is_err(), "{name}: state variant");
+        for variant in [Variant::Guard, Variant::State] {
+            let facts = reconstruct(&[line.as_str()], variant).unwrap_or_else(|_| panic!("{name}: {variant:?} left unsure"));
+            assert_eq!(facts.tasks.len(), 1, "{name}: {variant:?} lost the task the line creates");
+        }
     }
+    // an unrelated line with a lone surrogate beside a task that stays open
+    let other = "{\"type\":\"assistant\",\"message\":{\"id\":\"o\",\"content\":[{\"type\":\"text\",\"text\":\"cut \\ud83d here\"}]}}";
+    assert!(serde_json::from_str::<Value>(other).is_err());
+    let plain = base.replace("\"x\":1", "\"x\":2");
+    let facts = reconstruct(&[plain.as_str(), other], Variant::Guard).unwrap_or_else(|_| panic!("unrelated line left unsure"));
+    assert_eq!(facts.tasks.len(), 1);
     // a line both parsers reject is skipped
     assert!(!super::parse::maybe_valid_for_js("{\"x\": 1,"));
     assert!(reconstruct(&["{\"x\": 1,"], Variant::Guard).is_ok());

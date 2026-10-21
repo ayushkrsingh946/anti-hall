@@ -61,6 +61,26 @@ pub fn maybe_valid_for_js(line: &str) -> bool {
     crate::checks::guardkit::jsdiff::js_reads_differently_str(line)
 }
 
+/// One transcript line as the scans read it: parsed (as `JSON.parse` would, see [`jsdiff::parse_as_js`](crate::checks::guardkit::jsdiff::parse_as_js)),
+/// skipped (invalid for JavaScript too, as the Node code skips it), or not understood (JavaScript reads it and the engine cannot).
+pub enum Line {
+    /// The line, parsed.
+    Parsed(Value),
+    /// Invalid for JavaScript too: skipped.
+    Skip,
+    /// JavaScript reads it, the engine cannot.
+    Unsure,
+}
+
+/// See [`Line`].
+pub fn parse_line(t: &str) -> Line {
+    match crate::checks::guardkit::jsdiff::parse_as_js(t) {
+        Some(v) => Line::Parsed(v),
+        None if maybe_valid_for_js(t) => Line::Unsure,
+        None => Line::Skip,
+    }
+}
+
 /// The tool uses inside an entry (`collectToolUses`): the node itself when it is a tool use with a name, then everything
 /// under `content`, `message`, `messages`, `tool_uses` and `parts`.
 pub fn collect_tool_uses<'a>(node: &'a Value, out: &mut Vec<&'a Value>) {
@@ -173,10 +193,10 @@ pub fn reconstruct(lines: &[&str], variant: Variant) -> R<Facts> {
         if variant == Variant::State && !t.contains("Task") && !t.contains("TodoWrite") {
             continue;
         }
-        let entry: Value = match serde_json::from_str(t) {
-            Ok(v) => v,
-            Err(_) if maybe_valid_for_js(t) => return Err(Unsure),
-            Err(_) => continue,
+        let entry: Value = match parse_line(t) {
+            Line::Parsed(v) => v,
+            Line::Unsure => return Err(Unsure),
+            Line::Skip => continue,
         };
         // `entry.type` on a JSON `null` throws in JavaScript.
         if entry.is_null() {

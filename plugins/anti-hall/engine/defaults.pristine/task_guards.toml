@@ -152,6 +152,12 @@ value = "the DEFAULT when unsure: a lookup, a bug fix, a UI text or copy change,
 
 # ---- task fact model (checks::taskstate: lib/task-state.js, task-guard.js parseTasksFromFile, lib/task-subject-backfill.js) ----
 
+[taskstate.js_parse_max_depth]
+doc = "The deepest bracket nesting of a transcript line the engine reads the way JSON.parse does when serde_json's 128-level limit rejects it (JavaScript's own stack ends far past it). A deeper line cannot be read and leaves the scan unsure."
+value = 2000
+min = 128
+max = 100000
+
 [taskstate.tail_bytes]
 doc = "How much of the end of a transcript the task reconstruction reads (the Node `MAX_TAIL_BYTES`, 1.5 MiB)."
 value = 1572864

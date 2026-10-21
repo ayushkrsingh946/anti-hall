@@ -4,7 +4,7 @@
 //! number, a TodoWrite replaces the list), so it has its own pass. The work counting of the same hook pass is a rule and lives in
 //! the plugin's script, not here.
 use super::backfill::backfill;
-use super::parse::{Facts, collect_tool_uses, is_not_found, maybe_valid_for_js};
+use super::parse::{Facts, Line, collect_tool_uses, is_not_found, parse_line};
 use super::tail::{lines_of, read_tail};
 use super::{Task, TaskMap, Unknown, norm_priority, number_of_digits, priority_field, truthy_status};
 use crate::checks::guardkit::jsre;
@@ -74,10 +74,10 @@ pub(crate) fn judge_wide_line(buf: &[u8], names: &[&str], finders: &[memchr::mem
     if t.is_empty() {
         return None;
     }
-    let entry = match serde_json::from_str::<Value>(t) {
-        Ok(e) => e,
-        Err(_) if maybe_valid_for_js(t) => return Some(Decisive::Unsure),
-        Err(_) => return None,
+    let entry = match parse_line(t) {
+        Line::Parsed(e) => e,
+        Line::Unsure => return Some(Decisive::Unsure),
+        Line::Skip => return None,
     };
     let mut uses = Vec::new();
     collect_tool_uses(&entry, &mut uses);
@@ -176,10 +176,10 @@ fn scan_lines(lines: &[&str], truncated: bool, path: &str, window: u64, wide: u6
         if t.is_empty() {
             continue;
         }
-        let entry: Value = match serde_json::from_str(t) {
-            Ok(v) => v,
-            Err(_) if maybe_valid_for_js(t) => return Err(Unsure),
-            Err(_) => continue,
+        let entry: Value = match parse_line(t) {
+            Line::Parsed(v) => v,
+            Line::Unsure => return Err(Unsure),
+            Line::Skip => continue,
         };
         if entry.is_null() {
             return Ok(None);

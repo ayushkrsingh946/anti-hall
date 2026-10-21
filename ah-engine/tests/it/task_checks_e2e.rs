@@ -191,6 +191,21 @@ fn task_guard_answers_a_stop_with_nothing_open_and_blocks_one_with_an_open_task(
     }
 }
 
+/// #237: a transcript line `JSON.parse` reads and serde does not (here an escaped lone surrogate in an unrelated assistant text) must
+/// not turn the open tasks of the transcript into "no tasks": Node still blocks the Stop.
+#[test]
+fn a_line_only_javascript_can_parse_does_not_hide_an_open_task_from_the_stop_guard() {
+    let w = World::new("task-guard-js-line");
+    std::fs::create_dir_all(w.path("home/.anti-hall")).unwrap();
+    let odd = "{\"type\":\"assistant\",\"message\":{\"id\":\"o\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"cut \\ud83d here\"}]}}\n";
+    assert!(serde_json::from_str::<serde_json::Value>(odd).is_err(), "the fixture must be a line serde rejects");
+    std::fs::write(w.path("t.jsonl"), format!("{}{odd}", task_lines("pending"))).unwrap();
+    let payload = serde_json::json!({"hook_event_name": "Stop", "session_id": "s1", "cwd": w.path("proj"), "transcript_path": w.path("t.jsonl")}).to_string();
+    let (code, out) = stop_run(&w, "task-guard", &payload);
+    assert_eq!(code, 0);
+    assert!(out.contains("\"decision\":\"block\""), "the open task still blocks: {out}");
+}
+
 /// stdout is nothing or one JSON object: the host reads anything else as plain text (a block next to a note is lost) and the
 /// dispatcher cannot merge plain text with another Stop hook's JSON (`dispatch_conflict`).
 fn assert_stdout_is_json_or_empty(out: &str, what: &str) {

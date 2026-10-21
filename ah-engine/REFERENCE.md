@@ -3975,6 +3975,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `taskstate.backfill_prefix_scan_bytes` | `8388608` |  |  | How far past the window start the backfill looks for the end of the line that straddles it. |
 | `taskstate.done_statuses` | `completed, done, cancelled, canceled` |  |  | Statuses (lowercase) that count as completed for the completed-task advisory. |
 | `taskstate.id_keys` | `taskId, id, task_id` |  |  | The input fields a task tool call may name its task id in, in order: the harness's `taskId`, then `id`, then `task_id`. |
+| `taskstate.js_parse_max_depth` | `2000` |  |  | The deepest bracket nesting of a transcript line the engine reads the way JSON.parse does when serde_json's 128-level limit rejects it (JavaScript's own stack ends far past it). A deeper line cannot be read and leaves the scan unsure. |
 | `taskstate.open_statuses` | `pending, in_progress, in-progress` |  |  | Statuses (lowercase) that make a task open. |
 | `taskstate.prune_stamp_prefix` | `.prune-stamp-` |  |  | Prefix of the stamp file that throttles one prefix's sweep. |
 | `taskstate.prune_throttle_hours` | `6` |  |  | The sweep of one file prefix runs at most once per this many hours. |
