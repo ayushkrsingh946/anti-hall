@@ -236,7 +236,7 @@ value = { pr = ["merge", "close", "edit", "create", "review"], issue = ["create"
 
 [command.gh_oneliner_subcommands]
 doc = "gh group and subcommand pairs that are light when the whole command is one short plain line (command-guard.js GH_ONELINER_SUBCOMMANDS): they print a line or two and flood nothing, so a subagent for them is noise."
-value = { pr = ["merge", "close", "edit", "review", "comment", "ready", "reopen"], issue = ["close", "edit", "comment", "reopen", "create"], secret = ["set"], label = ["create", "edit"] }
+value = { pr = ["merge", "close", "edit", "review", "comment", "ready", "reopen"], issue = ["close", "edit", "comment", "reopen"], secret = ["set"], label = ["create", "edit"] }
 
 [command.scratch_clone_sync_subs]
 doc = "git subcommands that are light in the main thread when run in a git checkout outside the session's own tree (git -C <abs|~ dir> or one leading cd <abs|~ dir>), chained with && or ; only to light segments and at most one final | tail/head -N, on one plain line (command-guard.js isAllowedScratchCloneSync, SCRATCH_CLONE_SYNC_SUBS). A sync prints a few lines; the output-flood rule is for unbounded runners and builds. Empty turns the exemption off."

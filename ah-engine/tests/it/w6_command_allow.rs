@@ -1,8 +1,7 @@
-//! W6: command-guard allows the single, small, state-changing commands it used to block as "raw output floods the main thread" (one
-//! gh issue create, one push of an existing non-protected branch, a short `node -e` JSON filter that indexes a key like
-//! `j["git-guard"]`), and still blocks the real cases: a push of a protected or missing branch, a force push, a `node -e` that
-//! writes through a computed or bracketed API name, and the other gh mutations. Engine alone (no Node twin): the narrowing is
-//! intentional.
+//! W6: command-guard allows a short `node -e` JSON filter that indexes a key like `j["git-guard"]`, and still blocks what the Node guard
+//! blocks (a block is never weaker than Node's, #235 / #236): a `gh issue create` (a remote write that needs delegation), a push of
+//! any branch but the current one (also an existing non-protected branch of a sibling worktree), a push of a protected or missing
+//! branch, a force push, a `node -e` that writes through a computed or bracketed API name, and the other gh mutations.
 #![allow(clippy::unwrap_used, clippy::expect_used)] // a test crate: a panic is the failure report, and E2 exempts tests
 
 use serde_json::json;
@@ -67,13 +66,14 @@ fn single_small_state_changing_commands_are_allowed_and_the_real_cases_still_blo
         let (code, err) = verdict(&dir, &home, &main, c);
         assert!(code == 2 && err.contains("command-guard"), "should be blocked: {c} -> {code} {err}");
     };
-    allowed(r#"gh issue create --repo o/r --title "x" --body-file /tmp/f.md"#);
-    allowed(&format!("cd {} && gh issue create --repo o/r --title x --body-file /tmp/f.md 2>&1 | tail -1", main.display()));
+    allowed(&format!(r#"node -e 'const j=require("{}");console.log(j["git-guard"], j.plugins["anti-hall@anti-hall"])'"#, skip.display()));
+
+    // #236: the remote write `gh issue create` stays heavy, as in the Node guard
+    blocked(r#"gh issue create --repo o/r --title "x" --body-file /tmp/f.md"#);
+    blocked(&format!("cd {} && gh issue create --repo o/r --title x --body-file /tmp/f.md 2>&1 | tail -1", main.display()));
     allowed("git push -u origin feat2");
     allowed(&format!("cd {} && git push -q -u origin feat2 2>&1 | tail -2", wt2.display()));
     allowed("cd ~/wt2 && git push -q -u origin feat2 2>&1 | tail -2");
-    allowed(&format!(r#"node -e 'const j=require("{}");console.log(j["git-guard"], j.plugins["anti-hall@anti-hall"])'"#, skip.display()));
-
     blocked("git push -u origin main");
     blocked("git push -u origin no-such-branch");
     blocked("git push --force origin feat2");
