@@ -761,18 +761,21 @@ pub struct Busy {
     pub waiting: bool,
     /// The preview of the unresolved question (only meaningful with `waiting`).
     pub question: Option<String>,
+    /// The transcript was read (it exists and holds entries): "not busy" is then a fact, not just the unknown cases.
+    pub seen: bool,
 }
 
 /// `childBusyState(desc, home, { now, freshMs })` from `realActivity` on: the transcript `file` at `now`, fresh within `fresh_ms`.
 pub fn busy_state(file: &Path, now: f64, fresh_ms: f64) -> R<Busy> {
-    let none = Busy { busy: false, waiting: false, question: None };
+    let none = Busy { busy: false, waiting: false, question: None, seen: false };
     let Some(sc) = scan(file)? else { return Ok(none) };
+    let none = Busy { seen: true, ..none };
     let open = open_tool(&sc.w)?;
     let fresh = is_fresh(now, sc.mtime, fresh_ms);
     if let Some(o) = &open
         && (defaults::list("devswarm_cli.rr_tr_wait_tools").contains(&o.tool.as_str()) || !fresh)
     {
-        return Ok(Busy { busy: false, waiting: true, question: o.question.clone() });
+        return Ok(Busy { busy: false, waiting: true, question: o.question.clone(), seen: true });
     }
     if !fresh {
         return Ok(none);
@@ -781,7 +784,7 @@ pub fn busy_state(file: &Path, now: f64, fresh_ms: f64) -> R<Busy> {
     // is mailbox-class
     let Some(t) = &sc.w.cur else { return Ok(none) };
     let ping = if t.prompted { t.wake && all_mailbox(t)? } else { !t.tools.is_empty() && all_mailbox(t)? };
-    Ok(Busy { busy: !ping, waiting: false, question: None })
+    Ok(Busy { busy: !ping, waiting: false, question: None, seen: true })
 }
 
 fn all_mailbox(t: &Turn) -> R<bool> {

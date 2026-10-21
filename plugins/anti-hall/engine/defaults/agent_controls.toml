@@ -40,6 +40,10 @@ unit = "ms"
 doc = "Largest integer JavaScript prints exactly (2^53 - 1); a tool input holding a number outside it is judged by the Node hook, whose number text differs."
 value = 9007199254740991
 
+[agent_scan.stop_gone_text]
+doc = "Lower-case text a TaskStop error carries when the task no longer exists: the agent is already gone, so the stop still ended it."
+value = "no task found"
+
 [agent_scan.launch_text]
 doc = "Text a launch tool_result begins with."
 value = "Async agent launched successfully"

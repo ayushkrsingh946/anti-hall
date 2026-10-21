@@ -114,3 +114,5 @@ mod update_parity;
 mod update_post_recon;
 mod update_post_stages;
 mod wake_watch_parity;
+mod w6_command_allow;
+mod w6_task_tracker;

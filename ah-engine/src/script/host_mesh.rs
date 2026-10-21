@@ -311,7 +311,7 @@ fn child_busy(st: &Settings, id: &str, worktree: &str, session: &str, now: f64, 
         Err(_) => return Err(No),
     };
     let b = crate::meshw::rostertail::busy_state(&file, now, fresh).map_err(|_| No)?;
-    Ok(json!({"busy": b.busy, "waiting": b.waiting, "question": b.question}))
+    Ok(json!({"busy": b.busy, "waiting": b.waiting, "question": b.question, "seen": b.seen}))
 }
 
 /// Whether the setting described by `entry` has a value anywhere Node looks: its environment variable, the settings file and its

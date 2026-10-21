@@ -969,6 +969,8 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `command.git_global_flag_opts` | `8 items` |  |  | git global options without a value, skipped to find the subcommand (command-guard.js GIT_GLOBAL_FLAG_OPTS). |
 | `command.git_global_value_opts` | `8 items` |  |  | git global options that take a value (command-guard.js GIT_GLOBAL_VALUE_OPTS). |
 | `command.git_heavy_subs` | `push, pull, clone` |  |  | git subcommands that are always heavy (command-guard.js isHeavyGitSegment). |
+| `command.git_local_branch_argv` | `rev-parse, --verify, --quiet` |  |  | The git arguments (before the ref) that succeed only when a local branch exists (plain-push carve-out for another branch of the repository). |
+| `command.git_local_branch_prefix` | `refs/heads/` |  |  | What a branch name is prefixed with to name its ref for the existence check. |
 | `command.git_status_timeout_ms` | `2000` |  | ms | How long the `git status` question about a script file may take (command-guard.js gitCleanTracked: 2000 ms). |
 | `command.git_tag_value_flags` | `10 items` |  |  | git tag options that take a value (command-guard.js GIT_TAG_VALUE_FLAGS). |
 | `command.git_timeout_ms` | `5000` |  | ms | How long a git question of the plain-push carve-out may take (command-guard.js: 5000 ms). |
@@ -1051,11 +1053,13 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `command.nice_value_flags` | `-n, --adjustment` |  |  | nice options that take a value (command-guard.js effectiveVerb). |
 | `command.node_eval_deny` | `8 items` |  |  | Patterns that make a `node -e` payload unsafe (command-guard.js NODE_EVAL_UNSAFE_RE, NODE_EVAL_BRACKET_ACCESS_RE and the inline denials of isSafeNodeEvalPayload). |
 | `command.node_eval_flags` | `-e, --eval` |  |  | node options whose next word is inline code (command-guard.js isSafeNodeEval). |
+| `command.node_eval_safe_bracket` | `\[\s*(['"])[^'"\\\]]*[^A-Za-z0-9_$'"\\\]][^'"\\\]]*\1\s*\]` |  |  | A bracket access with one plain quoted key that holds a character no JavaScript method name has (a dash, an at sign, a dot, a slash): data access, removed from a `node -e` payload before the deny patterns run (JavaScript regex, global). |
 | `command.node_fs_method_call` | `(?:\brequire\(\s*['"]fs['"]\s*\)\|\bfs)\s*\.\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*\(` |  |  | An fs API call in a `node -e` payload; group 1 is the method (command-guard.js NODE_FS_METHOD_CALL_RE). |
 | `command.node_fs_read_allowlist` | `readFileSync, readdirSync, statSync, existsSync, lstatSync` |  |  | fs methods a safe `node -e` payload may call (command-guard.js NODE_FS_READ_ALLOWLIST). |
 | `command.node_script_ext` | `(?i)\.(?:js\|mjs\|cjs)$` |  |  | Script file extensions of node for the flagged-interpreter test (command-guard.js isFlaggedInterpreterScript). |
 | `command.pattern_first_verbs` | `grep, sed, awk` |  |  | Verbs whose first operand is a pattern, blanked before the heavy patterns run (command-guard.js PATTERN_FIRST_VERBS). |
 | `command.pipeline_ends` | `end, ;, &&, \\|\\|, \n` |  |  | The delimiters that end a pipeline in the bounded verification scan (command-guard.js PIPELINE_ENDS). |
+| `command.plain_push_protected_refs` | `main, master` |  |  | Branch names a plain push never carves out when they are not the current branch (the plain push of the current branch is unchanged). |
 | `command.plain_read_git_kinds` | `log, status, show, revparse` |  |  | classifyPlainGitChainSegment kinds that count as one read-only unit of a chain whose other units are whole read-only forms (command-guard.js isPlainReadGitSegment). |
 | `command.plugin_manifest_rel` | `.claude-plugin/plugin.json` |  |  | The plugin manifest, relative to a plugin root. |
 | `command.plugin_name` | `anti-hall` |  |  | The name anti-hall's manifest carries. |
@@ -2579,6 +2583,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `idle_sweep.re_queued_message` | `^Message queued for delivery to\s` |  |  | A queued-delivery result's message (JavaScript regex). |
 | `idle_sweep.re_resume_message` | `^Resuming\s+agent\s+([0-9a-fA-F]{6,40})` |  |  | A resume result's message (JavaScript regex, ignore case). |
 | `idle_sweep.re_status` | `<status>([^<]*)</status>` |  |  | The status inside one notification block (JavaScript regex). |
+| `idle_sweep.re_stop_gone` | `no (such )?task found` |  |  | A TaskStop result that says the task no longer exists. The agent is gone, so the errored stop still ended it (JavaScript regex, case-insensitive). |
 | `idle_sweep.re_system_reminder_notice` | `<system-reminder>\s*<task-notification>` |  |  | A notification block directly inside a system-reminder block (JavaScript regex). |
 | `idle_sweep.re_task_id` | `<task-id>([^<]*)</task-id>` |  |  | The task id inside one notification block (JavaScript regex). |
 | `idle_sweep.re_terminal_status` | `^(completed\|failed\|stopped\|killed\|cancelled\|canceled)$` |  |  | Notification and attachment statuses that mean an agent ended (JavaScript regex, ignore case). |
@@ -2589,6 +2594,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `idle_sweep.send_tools` | `SendMessage` |  |  | The tools whose results can be a message sent to a teammate. |
 | `idle_sweep.skip_name` | `idle-agent-sweep` |  |  | The name that ~/.anti-hall/skip.json uses to skip this hook. |
 | `idle_sweep.spawned_status` | `teammate_spawned` |  |  | The `toolUseResult.status` of a named teammate's spawn. |
+| `idle_sweep.stale_minutes` | `1440` |  |  | A finished agent idle longer than this many minutes is stale (long gone), not idle: it is dropped from the idle-agents advisory. |
 | `idle_sweep.summary` | `UserPromptSubmit: lists agents that finished but were never stopped or closed...` |  |  | One-line description of the idle-agent-sweep check in the generated reference. |
 | `idle_sweep.sw_enabled` | `4 entries` |  |  | Where the on/off switch is read from (guards.idleAgentSweep, default on). |
 | `idle_sweep.task_stop_marks` | `"name":"TaskStop", "name": "TaskStop"` |  |  | How a TaskStop call appears in a transcript line. |
@@ -3152,6 +3158,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `agent_scan.send_tools` | `SendMessage` |  |  | Tools whose tool_result can be a message sent to a teammate's inbox. |
 | `agent_scan.sidechain_key` | `isSidechain` |  |  | The one key of the list above that only counts when it is true. |
 | `agent_scan.sidechain_prefix` | `agent-a` |  |  | Prefix of a subagent transcript's file name. |
+| `agent_scan.stop_gone_text` | `no task found` |  |  | Lower-case text a TaskStop error carries when the task no longer exists: the agent is already gone, so the stop still ended it. |
 | `agent_scan.stop_tool` | `TaskStop` |  |  | Name of the tool that stops an agent. |
 | `agent_scan.subagents_dir` | `subagents` |  |  | Directory, beside a transcript's own name, that holds the transcripts of its subagents. |
 | `agent_scan.tail_bytes` | `1572864` |  | bytes | Bytes read from the end of a transcript by the default scan (MAX_TAIL_BYTES of hooks/lib/transcript-tail.js). |
@@ -4231,6 +4238,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_role.pg_waiting_q` | ` — "{q}"` |  |  | The question phrase of that line: {q}. |
 | `devswarm_role.pg_wake_line` | ` MAILBOX WAKE CHECK (CLI={cli}): CronList must show `{cron}` running {tick}{w...` |  |  | The mailbox-wake re-verify line (devswarm-wake.js wakeReassert): {cli}, {cron}, {tick}, {watch}, {id}. |
 | `devswarm_role.pg_wake_tick` | ``node "$CLI" inbox tick {id} --quiet`` |  |  | The tick command of the wake re-verify line: {id}. |
+| `devswarm_role.pg_wake_total_prefix` | `wake-total-` |  |  | Filename prefix of the per-session count of mailbox-wake blocks. No clean pass clears it, so a flapping condition cannot re-arm the block. |
 | `devswarm_role.pg_wake_watch` | `; WATCH={watcher}, `Monitor` on `node "$WATCH"` armed (never two)` |  |  | The watcher part of the wake re-verify line: {watcher} (double-quoted). |
 | `devswarm_role.pg_why` | `Unanswered questions or unread mail would be dropped if this turn ended now.` |  |  | Why line of the block. |
 | `devswarm_role.pg_you` | ` (you)` |  |  | Marks the Primary's own row. |
@@ -6305,6 +6313,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `task_tracker.full_level` | `full` |  |  | The protocol level at which the directive keeps the non-blocking clause (any other level drops it). |
 | `task_tracker.future_tolerance_ms` | `300000` |  | ms | How far ahead of now a stored timestamp may be (clock skew) before it counts as corrupt and the window is treated as expired. |
 | `task_tracker.growth_bytes` | `245760` |  | bytes | How much the transcript may grow after a full directive before the next prompt injects it again (about 60 thousand tokens, where adherence to an instruction starts to decay). |
+| `task_tracker.growth_min_gap_ms` | `1800000` |  | ms | The least time since the last full directive before transcript growth alone injects it again. In a session whose transcript grows by the growth threshold every turn, growth alone re-sent the whole directive on every prompt; the window (window_ms) still re-sends it on expiry. |
 | `task_tracker.guard_name` | `task-tracker` |  |  | The guard name in the message header and in the skip file. |
 | `task_tracker.in_progress_re` | `in[-_]?progress` |  |  | JavaScript regex source (case-insensitive) of a status that means in progress. |
 | `task_tracker.instead_head` | `give each task a priority (metadata.priority: P0/P1/P2) and keep the list sor...` |  |  | The start of the full directive's 'Do instead' line. |
@@ -10388,6 +10397,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_parent.q_of_these_one` | `1 of these is an unanswered QUESTION` |  |  | Question clause: one of the unread messages is a question. |
 | `devswarm_parent.q_remain_many` | `{n} unanswered QUESTIONS remain (not necessarily among the unread above)` |  |  | Question clause: several questions remain beyond the unread messages. Placeholder: {n}. |
 | `devswarm_parent.q_remain_one` | `1 unanswered QUESTION remains (not necessarily among the unread above)` |  |  | Question clause: one question remains beyond the unread messages. |
+| `devswarm_parent.re_table_activity_label` | `^(\\|(?:[^\|\\]\|\\.)*\\|\s*)(?:active\|idle \(alive\)\|idle\|dormant)(\s*\\|)` |  |  | A table row's status cell when it only reflects recent activity (active, idle, idle (alive), dormant): capture 1 is the row up to the cell, capture 2 the cell's closing bar. The hash treats these as one label, so an activity flap alone does not re-send the table (JavaScript regex). |
 | `devswarm_parent.registry_scopes` | `user, project` |  |  | The scopes of a registry entry in the order the version lookup prefers them. |
 | `devswarm_parent.relative_none` | `—` |  |  | What a relative age shows when the time is unknown. |
 | `devswarm_parent.reply_state_suffix` | `-replies.json` |  |  | The file name suffix of a project's reply record. |
@@ -10410,6 +10420,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_parent.stale_build_message` | `stale anti-hall {version}: run /reload-plugins (restart only if it persists) ...` |  |  | The text for a child that runs an older anti-hall build than the machine's newest. Placeholders: {version}, {cmd}. |
 | `devswarm_parent.stale_registry_head` | `⚠️ anti-hall · devswarm-stale-workspaces: {count} workspace(s) whose worktree...` |  |  | The segment for registry rows whose worktree is gone but that still hold unread. Placeholders: {count}, {shown}, {extra}. |
 | `devswarm_parent.stuck_statuses` | `stale, nudged, escalated` |  |  | Supervisor verdicts that mean a child is wedged (STUCK_STATUSES). |
+| `devswarm_parent.table_activity_token` | `live` |  |  | What the activity-only status labels are replaced with before the table is hashed. |
 | `devswarm_parent.table_head` | `💡 anti-hall · devswarm-workspaces: (re-sent on change, else every 10 turns):\...` |  |  | The head of the live workspace table: the title line and the column header. |
 | `devswarm_parent.table_row` | `\| {workspace} \| {label} \| {finish} \| {unread} \| {last} \|` |  |  | One table row. Placeholders: {workspace}, {label}, {finish}, {unread}, {last}. |
 | `devswarm_parent.title_instruction` | `When mentioning a workspace to the human, use its TITLE from the table above ...` |  |  | The reminder that follows a newly sent table: name a workspace by its title. |

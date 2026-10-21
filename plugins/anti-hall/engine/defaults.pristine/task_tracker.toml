@@ -100,6 +100,12 @@ doc = "How much the transcript may grow after a full directive before the next p
 value = 245760
 unit = "bytes"
 
+[task_tracker.growth_min_gap_ms]
+doc = "The least time since the last full directive before transcript growth alone injects it again. In a session whose transcript grows by the growth threshold every turn, growth alone re-sent the whole directive on every prompt; the window (window_ms) still re-sends it on expiry."
+value = 1800000
+unit = "ms"
+min = 0
+
 [task_tracker.future_tolerance_ms]
 doc = "How far ahead of now a stored timestamp may be (clock skew) before it counts as corrupt and the window is treated as expired."
 value = 300000

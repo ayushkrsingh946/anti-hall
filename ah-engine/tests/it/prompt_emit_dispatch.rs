@@ -247,4 +247,9 @@ fn idle_agent_sweep_through_the_dispatcher_reads_the_request_environment() {
     // the same prompt again is the same block, still undelivered: both are suppressed
     let (_, again, _) = e.run(&args, true, &p, &extra);
     assert_eq!(ctx(&again), "", "the dedupe state of the first call must hold");
+    // two days on, the same agent is stale (long gone), not idle: it drops out of the advisory
+    let later = (t0 + 2 * 86_400_000).to_string();
+    let extra = [("ANTIHALL_TEST_ISOLATION", "1"), ("ANTIHALL_TEST_NOW_MS", later.as_str())];
+    let (_, stale, _) = e.run(&args, true, &ups("is-stale", "go on", Some(&transcript)), &extra);
+    assert!(!ctx(&stale).contains("finished agent"), "a stale agent must not be listed: {stale}");
 }

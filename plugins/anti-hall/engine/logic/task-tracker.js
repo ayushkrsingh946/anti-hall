@@ -49,7 +49,9 @@ function ttPick(home, rel, tp, now) {
     }
   }
   var fresh = now - lastFull < ttN('window_ms');
-  var grew = size >= 0 && lastSize >= 0 && size - lastSize >= ttN('growth_bytes');
+  // a transcript that grows by the threshold on every turn would re-send the full directive each turn: growth re-sends it only once the
+  // minimum gap since the last full directive has passed (the window still re-sends it on expiry)
+  var grew = size >= 0 && lastSize >= 0 && size - lastSize >= ttN('growth_bytes') && now - lastFull >= ttN('growth_min_gap_ms');
   return { full: !(fresh && !grew), size: size };
 }
 
