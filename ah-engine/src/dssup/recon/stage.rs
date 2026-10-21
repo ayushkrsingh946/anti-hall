@@ -623,7 +623,7 @@ fn archived(w: &Walk, budget: f64, up: Option<&UpdateRun>) -> StageOut {
     let mut records = Vec::new();
     let deadline = Some(w.deadline_ms);
     (w.hooks.at)(&format!("stage:{stage}:rows:before"));
-    let r = if rows_done { json!({}) } else { half(w, "rows", archive::fold_archived_rows(ctx.home, ctx.now, deadline), &mut records) };
+    let r = if rows_done { json!({}) } else { half(w, "rows", archive::fold_archived_rows(ctx, deadline), &mut records) };
     (w.hooks.at)(&format!("stage:{stage}:rows:after"));
     if r.get("threw") == Some(&Value::Bool(true)) {
         let d = defaults::render("devswarm_recon.d_raised", &[("stage", &stage), ("error", &js_text(&r["error"]))]);

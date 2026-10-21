@@ -1128,7 +1128,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 
 | Key | Default | Env override | Unit | What it is |
 |---|---|---|---|---|
-| `docs.external_flags` | `16 items` |  |  | Flags that appear as string literals in the engine's source but belong to other programs it runs (git, gh, cargo, node, claude) or to its shell wrappers, so the flag drift test does not ask for a `[flag.*]` entry. |
+| `docs.external_flags` | `18 items` |  |  | Flags that appear as string literals in the engine's source but belong to other programs it runs (git, gh, cargo, node, claude, hivecontrol) or to its shell wrappers, so the flag drift test does not ask for a `[flag.*]` entry. |
 
 ### telemetry.toml / telemetry
 
@@ -9172,6 +9172,25 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_recon.budget_ms` | `60000` |  | ms | Total wall-clock budget of one project's reconcile; rows not started when it is spent are deferred to the next run through the resume marker. 0 is unlimited. Node: DEFAULT_RECONCILE_BUDGET_MS. |
 | `devswarm_recon.by_engine` | `engine` |  |  | The word an item record carries when the engine did the item itself (witnessed against Node). |
 | `devswarm_recon.by_held` | `held` |  |  | The word an item record carries when the engine did not take the item (held: counted, nothing written, tried again on the next pass). |
+| `devswarm_recon.cp_help_args` | `workspace, --help` |  |  | The arguments that print the build's workspace commands (the capability probe). |
+| `devswarm_recon.cp_options_word` | `[options]` |  |  | The usage word that stands for the options, not for an argument. |
+| `devswarm_recon.cp_re_arg` | `([<\[])([\w-]+)[>\]]` |  |  | A positional argument in a usage line: `<name>` (required) or `[name]`. |
+| `devswarm_recon.cp_re_cmd_row` | `^ {2}([a-z][\w-]*)((?: \S+)*?)(?: {2,}(.*))?$` |  |  | One command row of the `Commands:` block: the name, its argument words and its description. |
+| `devswarm_recon.cp_re_cmds_header` | `^Commands:\s*$` |  |  | The line that starts the `Commands:` block of a help page. |
+| `devswarm_recon.cp_re_columns` | ` {2,}` |  |  | The gap between the columns of an options row. |
+| `devswarm_recon.cp_re_flag` | `(?:^\|[\s,])(--?[A-Za-z][\w-]*)` |  |  | A flag in the first column of an options row. |
+| `devswarm_recon.cp_re_options_header` | `^Options:\s*$` |  |  | The line that starts the `Options:` block of a verb's help page. |
+| `devswarm_recon.cp_re_section` | `^\S` |  |  | A line that starts a new section of a help page (it is not indented). |
+| `devswarm_recon.cp_re_usage` | `^Usage:\s*(.*)$` |  |  | The `Usage:` line of a verb's help page (matched line by line). |
+| `devswarm_recon.cp_required_open` | `<` |  |  | The bracket that opens a required argument in a usage line. |
+| `devswarm_recon.cp_sentry_field` | `release` |  |  | The field of the app's session record that holds its release (`DevSwarm@2.5.2`). |
+| `devswarm_recon.cp_sentry_rel` | `Library, Application Support, DevSwarm, sentry, session.json` |  |  | Where the DevSwarm app records its release, below the home (the version when the binary does not print one). |
+| `devswarm_recon.cp_src_app` | `sentry` |  |  | The probe's `versionSource` when the version came from the app's session record. |
+| `devswarm_recon.cp_src_binary` | `hivecontrol` |  |  | The probe's `versionSource` when the binary printed the version. |
+| `devswarm_recon.cp_timeout_ms` | `8000` |  |  | The longest one probe command (--version, --help) may take. |
+| `devswarm_recon.cp_verb_help_args` | `workspace, {verb}, --help` |  |  | The arguments that print one workspace verb's usage and options. {verb} is the verb. |
+| `devswarm_recon.cp_verb_help_verbs` | `archive, delete` |  |  | The workspace verbs whose own help the probe reads (callers build their arguments from what the binary documents). |
+| `devswarm_recon.cp_version_args` | `--version` |  |  | The arguments that print the hivecontrol build's version (the capability probe). |
 | `devswarm_recon.cursor_log_older_suffix` | `.1` |  |  | The suffix of the file a rotated cursor journal's older records move to. |
 | `devswarm_recon.cursor_log_rotation` | `false` |  |  | Whether the fold may rotate a cursor-write journal that is past `mesh_write.cursor_log_cap` records: the newest records stay and the older ones REPLACE the journal's `.1` file (what the previous generation held is dropped). Off (the default): a fold that would need it waits (counted, nothing written for that group) until you switch it on or trim the journal yourself. |
 | `devswarm_recon.d_arch` | `fold-archived-rows: retired {retired} registry row(s) of archived workspace(s)` |  |  | Detail of the archived rows stage. Placeholders in braces. |
@@ -9393,7 +9412,6 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_recon.why_state_held` | `the sweep cool-down state could not be written; the sweep is held` |  |  | Why the reconcile duty holds its tick: the cool-down state could not be persisted first. |
 | `devswarm_recon.why_summary_orphan` | `summary-orphan` |  |  | Why a fold was handed back: after it the closing summary would meet an unregistered partition with unread mail, which only Node's projection classifies. |
 | `devswarm_recon.why_surrogate` | `surrogate-cut` |  |  | Why a decision was handed back: cutting the text at Node's length would split a surrogate pair. |
-| `devswarm_recon.why_survivor_pick` | `survivor-pick` |  |  | Why a decision was handed back: two or more drainable siblings need the cursor and heartbeat ranking of pickSurvivor. |
 | `devswarm_recon.why_units_handed_back` | `units-handed-back` |  |  | Why an item went to Node: part of its plan was handed back at apply time. |
 | `devswarm_recon.why_unreadable` | `descriptor-unreadable` |  |  | Why a decision was handed back: a descriptor or archived path could not be read as Node reads it. |
 | `devswarm_recon.why_wal_blocked` | `wal-blocked` |  |  | Why a drain was handed back: the delivery log cannot be appended and fsynced right now. |

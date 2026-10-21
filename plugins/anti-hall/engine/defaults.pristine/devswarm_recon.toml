@@ -411,10 +411,6 @@ value = "live-or-unprovable-worktree"
 doc = "Why a twin descriptor stayed active: archived/ already holds a different file under its name."
 value = "archived-tombstone-differs"
 
-[devswarm_recon.why_survivor_pick]
-doc = "Why a decision was handed back: two or more drainable siblings need the cursor and heartbeat ranking of pickSurvivor."
-value = "survivor-pick"
-
 [devswarm_recon.why_group_fold]
 doc = "Why the archived rows pass was handed back: a sibling row would be folded into a survivor (foldGroupIntoSurvivor)."
 value = "fold-group-into-survivor"
@@ -1069,3 +1065,81 @@ value = false
 [devswarm_recon.cursor_log_older_suffix]
 doc = "The suffix of the file a rotated cursor journal's older records move to."
 value = ".1"
+
+[devswarm_recon.cp_version_args]
+doc = "The arguments that print the hivecontrol build's version (the capability probe)."
+value = ["--version"]
+
+[devswarm_recon.cp_help_args]
+doc = "The arguments that print the build's workspace commands (the capability probe)."
+value = ["workspace", "--help"]
+
+[devswarm_recon.cp_verb_help_args]
+doc = "The arguments that print one workspace verb's usage and options. {verb} is the verb."
+value = ["workspace", "{verb}", "--help"]
+
+[devswarm_recon.cp_verb_help_verbs]
+doc = "The workspace verbs whose own help the probe reads (callers build their arguments from what the binary documents)."
+value = ["archive", "delete"]
+
+[devswarm_recon.cp_timeout_ms]
+doc = "The longest one probe command (--version, --help) may take."
+value = 8000
+min = 100
+max = 120000
+
+[devswarm_recon.cp_sentry_rel]
+doc = "Where the DevSwarm app records its release, below the home (the version when the binary does not print one)."
+value = ["Library", "Application Support", "DevSwarm", "sentry", "session.json"]
+
+[devswarm_recon.cp_sentry_field]
+doc = "The field of the app's session record that holds its release (`DevSwarm@2.5.2`)."
+value = "release"
+
+[devswarm_recon.cp_src_binary]
+doc = "The probe's `versionSource` when the binary printed the version."
+value = "hivecontrol"
+
+[devswarm_recon.cp_src_app]
+doc = "The probe's `versionSource` when the version came from the app's session record."
+value = "sentry"
+
+[devswarm_recon.cp_re_cmds_header]
+doc = "The line that starts the `Commands:` block of a help page."
+value = "^Commands:\\s*$"
+
+[devswarm_recon.cp_re_section]
+doc = "A line that starts a new section of a help page (it is not indented)."
+value = "^\\S"
+
+[devswarm_recon.cp_re_cmd_row]
+doc = "One command row of the `Commands:` block: the name, its argument words and its description."
+value = "^ {2}([a-z][\\w-]*)((?: \\S+)*?)(?: {2,}(.*))?$"
+
+[devswarm_recon.cp_re_usage]
+doc = "The `Usage:` line of a verb's help page (matched line by line)."
+value = "^Usage:\\s*(.*)$"
+
+[devswarm_recon.cp_re_options_header]
+doc = "The line that starts the `Options:` block of a verb's help page."
+value = "^Options:\\s*$"
+
+[devswarm_recon.cp_re_arg]
+doc = "A positional argument in a usage line: `<name>` (required) or `[name]`."
+value = "([<\\[])([\\w-]+)[>\\]]"
+
+[devswarm_recon.cp_re_flag]
+doc = "A flag in the first column of an options row."
+value = "(?:^|[\\s,])(--?[A-Za-z][\\w-]*)"
+
+[devswarm_recon.cp_re_columns]
+doc = "The gap between the columns of an options row."
+value = " {2,}"
+
+[devswarm_recon.cp_options_word]
+doc = "The usage word that stands for the options, not for an argument."
+value = "[options]"
+
+[devswarm_recon.cp_required_open]
+doc = "The bracket that opens a required argument in a usage line."
+value = "<"

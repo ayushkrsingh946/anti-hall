@@ -230,7 +230,7 @@ fn pick_archive_forward_survivor_matches_node_and_defers_a_tie() {
     f.live("live2", &p, "sess-2");
     f.live("dead", &p, "unclaimed:dead");
     let one = |rows: Vec<RegRow>, want: &str| {
-        let got = archive::pick_archive_forward_survivor(&f.home, "arch", &rows).unwrap();
+        let got = archive::pick_archive_forward_survivor(&f.ctx(), "store", "arch", &rows).unwrap();
         assert_eq!(got, want);
         let out = gate::run(&f.ctx(), &System::configured(), &archive::survivor_job(&f.home, "arch", &rows, &got), &Hooks::none());
         assert_eq!(out.verdict, Verdict::Agreed, "{rows:?}: {:?}", out.verdict);
@@ -243,9 +243,9 @@ fn pick_archive_forward_survivor_matches_node_and_defers_a_tie() {
     one(vec![reg_row("arch", &p, Some("s"))], "arch"); // the archived id itself is never a destination
     one(vec![reg_row("live1", &p, Some("sess-1"))], "live1");
     one(vec![reg_row("live1", &p, Some("sess-1")), reg_row("dead", &p, Some("unclaimed:dead")), reg_row("phantom", &p, Some("s"))], "live1");
-    // two drainable siblings need pickSurvivor's evidence ranking: handed to Node
+    // two drainable siblings are ranked by pickSurvivor's evidence from the store; this fixture has none to read, so the pick is handed back
     let two = vec![reg_row("live1", &p, Some("sess-1")), reg_row("live2", &p, Some("sess-2"))];
-    assert!(archive::pick_archive_forward_survivor(&f.home, "arch", &two).is_err());
+    assert!(archive::pick_archive_forward_survivor(&f.ctx(), "store", "arch", &two).is_err());
     t.case(true);
     t.print();
 }
@@ -498,11 +498,11 @@ fn fold_archived_rows_matches_node_for_every_shape_and_defers_a_group_fold() {
     f.tomb("a1", &p, "s1");
     f.row(&k, "a1", &p, "s1");
     f.row(&k, "other", "/elsewhere", "s9");
-    let plan = archive::fold_archived_rows(&f.home, NOW, None).unwrap();
+    let plan = archive::fold_archived_rows(&f.ctx(), None).unwrap();
     assert_eq!(plan.result["retired"], serde_json::json!([format!("a1@{k}")]));
     agreed(&f, &plan);
     assert_eq!(f.registry(&k).iter().map(|r| r.row.id.clone()).collect::<Vec<_>>(), vec!["other"]);
-    settles(&f, || archive::fold_archived_rows(&f.home, NOW, None).unwrap());
+    settles(&f, || archive::fold_archived_rows(&f.ctx(), None).unwrap());
     t.case(false);
     // a live drainable sibling on the worktree is the survivor: reported, kept; nothing to fold into it
     let f = fix("rows-live");
@@ -512,7 +512,7 @@ fn fold_archived_rows_matches_node_for_every_shape_and_defers_a_group_fold() {
     f.row(&k, "a1", &p, "s1");
     f.row(&k, "sib", &p, "sess-sib");
     f.live("sib", &p, "sess-sib");
-    let plan = archive::fold_archived_rows(&f.home, NOW, None).unwrap();
+    let plan = archive::fold_archived_rows(&f.ctx(), None).unwrap();
     assert_eq!(plan.result["left"], serde_json::json!([{"id": "sib", "bucket": k, "reason": "live-descriptor"}]));
     agreed(&f, &plan);
     assert_eq!(f.registry(&k).len(), 1);
@@ -525,7 +525,7 @@ fn fold_archived_rows_matches_node_for_every_shape_and_defers_a_group_fold() {
     f.row(&k, "a1", &p, "s1");
     f.row(&k, "phantom", &p, "s2");
     let before = f.snapshot();
-    assert!(archive::fold_archived_rows(&f.home, NOW, None).is_err());
+    assert!(archive::fold_archived_rows(&f.ctx(), None).is_err());
     assert_eq!(f.snapshot(), before);
     t.case(true);
     // an empty session is a NULL guard that the stored empty text never satisfies: raced-re-register, nothing deleted
@@ -534,7 +534,7 @@ fn fold_archived_rows_matches_node_for_every_shape_and_defers_a_group_fold() {
     let k = f.key_of(&p);
     f.tomb("a1", &p, "s1");
     f.row(&k, "a1", &p, "");
-    let plan = archive::fold_archived_rows(&f.home, NOW, None).unwrap();
+    let plan = archive::fold_archived_rows(&f.ctx(), None).unwrap();
     assert_eq!(plan.result["left"], serde_json::json!([{"id": "a1", "bucket": k, "reason": "raced-re-register"}]));
     agreed(&f, &plan);
     assert_eq!(f.registry(&k).len(), 1);
@@ -548,13 +548,13 @@ fn fold_archived_rows_matches_node_for_every_shape_and_defers_a_group_fold() {
         f.tomb(id, wt, "s");
         f.row(key, id, wt, "s");
     }
-    let plan = archive::fold_archived_rows(&f.home, NOW, Some(NOW - 1)).unwrap();
+    let plan = archive::fold_archived_rows(&f.ctx(), Some(NOW - 1)).unwrap();
     assert_eq!(plan.result["budgetExhausted"], serde_json::json!(true));
     agreed(&f, &plan);
     let marker = f.read(&f.ds("fold-archived-resume.json")).unwrap();
     assert!(marker.contains("\"buckets\""), "{marker}");
     t.case(false);
-    agreed(&f, &archive::fold_archived_rows(&f.home, NOW, None).unwrap());
+    agreed(&f, &archive::fold_archived_rows(&f.ctx(), None).unwrap());
     assert!(!f.exists(&f.ds("fold-archived-resume.json")));
     assert!(f.registry(&kp).is_empty() && f.registry(&kq).is_empty());
     t.case(false);
@@ -566,7 +566,7 @@ fn fold_archived_rows_matches_node_for_every_shape_and_defers_a_group_fold() {
     f.row(&k, "a1", &p, "s1");
     f.put(&f.ds("fold-archived-resume.json"), "{\"buckets\":{\"abc\":[\"a1\"");
     assert!(archive::read_rows_resume(&f.home).is_empty());
-    agreed(&f, &archive::fold_archived_rows(&f.home, NOW, None).unwrap());
+    agreed(&f, &archive::fold_archived_rows(&f.ctx(), None).unwrap());
     t.case(false);
     // a store that is not SQLite is Node's
     let f = fix("rows-journal");
@@ -574,7 +574,7 @@ fn fold_archived_rows_matches_node_for_every_shape_and_defers_a_group_fold() {
     let k = f.key_of(&p);
     f.tomb("a1", &p, "s1");
     f.put(&f.ds(&format!("store/{k}/BACKEND")), "journal\n");
-    assert!(archive::fold_archived_rows(&f.home, NOW, None).is_err());
+    assert!(archive::fold_archived_rows(&f.ctx(), None).is_err());
     t.case(true);
     // a tombstone with a live descriptor of the same id is a mid-archive state: not this pass's
     let f = fix("rows-midarchive");
@@ -583,7 +583,7 @@ fn fold_archived_rows_matches_node_for_every_shape_and_defers_a_group_fold() {
     f.tomb("a1", &p, "s1");
     f.live("a1", &p, "s1");
     f.row(&k, "a1", &p, "s1");
-    let plan = archive::fold_archived_rows(&f.home, NOW, None).unwrap();
+    let plan = archive::fold_archived_rows(&f.ctx(), None).unwrap();
     assert_eq!(plan.result["scanned"], serde_json::json!(0));
     agreed(&f, &plan);
     assert_eq!(f.registry(&k).len(), 1);
@@ -751,7 +751,7 @@ fn crash_child() {
             archive::retire_identity_family(&home, "A", &desc, false).unwrap()
         }
         "restore" => archive::restore_archived_descriptor(&home, "W", &archive::RestoreOpts::default()).unwrap(),
-        _ => archive::fold_archived_rows(&home, NOW, None).unwrap(),
+        _ => archive::fold_archived_rows(&ctx, None).unwrap(),
     };
     let _ = archive::run_plan(&ctx, &System::configured(), &plan, &Hooks { at: &hook });
 }
@@ -862,7 +862,7 @@ fn a_sigkill_inside_the_rows_fold_leaves_the_row_whole_and_the_rerun_converges()
             let rows = f.registry(&k);
             assert!(rows.len() <= 1 && rows.iter().all(|r| r.row.id == "a1" && r.row.session_id.as_deref() == Some("s1")), "{point}: the row is whole or gone");
             assert!(f.exists(&f.ds("archived/a1.json")), "{point}: the tombstone is never touched");
-            let r = archive::run_plan(&f.ctx(), &System::configured(), &archive::fold_archived_rows(&f.home, NOW, None).unwrap(), &Hooks::none());
+            let r = archive::run_plan(&f.ctx(), &System::configured(), &archive::fold_archived_rows(&f.ctx(), None).unwrap(), &Hooks::none());
             assert_eq!(r.verdict, Verdict::Agreed, "{point}: {:?}", r.verdict);
             assert!(f.registry(&k).is_empty(), "{point}: converged");
         }

@@ -32,8 +32,13 @@ fn row_of(r: &RegRow) -> Row {
 /// `pickSurvivor(s, { rows }, home)`: the id of the surviving row; `None` for no rows. A liveness reader that cannot answer reads
 /// the row as not live (an undetermined row never wins a selection), as `isRoutingLiveRowStrict` does.
 pub(super) fn pick(cx: &Cx, rows: &[RegRow]) -> R<Option<String>> {
+    pick_in(cx.inv, cx.store, cx.rd, rows)
+}
+
+/// [`pick`] for a caller that has no fold context: the invocation, the store the rows belong to, and its reader.
+pub(super) fn pick_in(inv: &Inv, store: &str, rd: &crate::mesh::MeshReader, rows: &[RegRow]) -> R<Option<String>> {
     let cands: Vec<Row> = rows.iter().map(row_of).collect();
-    let verdicts = Verdicts::new(cx.inv, cx.store);
+    let verdicts = Verdicts::new(inv, store);
     let strict = |d: &Row| -> R<bool> {
         let wt = d.worktree_path.as_deref().filter(|x| !x.is_empty());
         if verdicts.archived(&d.id, wt).unwrap_or(false) {
@@ -41,5 +46,5 @@ pub(super) fn pick(cx: &Cx, rows: &[RegRow]) -> R<Option<String>> {
         }
         Ok(verdicts.live(&d.id, wt, d.session_id.as_deref().filter(|x| !x.is_empty())).unwrap_or(false))
     };
-    Ok(crate::meshw::diagverbs::pick_freshest(cx.inv, cx.rd, &cands, &strict)?.map(|r| r.id.clone()))
+    Ok(crate::meshw::diagverbs::pick_freshest(inv, rd, &cands, &strict)?.map(|r| r.id.clone()))
 }

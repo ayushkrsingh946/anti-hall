@@ -26,6 +26,7 @@
 pub mod apply;
 pub mod archive;
 pub mod archived;
+pub mod capprobe;
 pub mod dup;
 pub mod fold;
 pub mod gate;

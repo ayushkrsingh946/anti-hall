@@ -74,12 +74,17 @@ pub(super) enum Listing {
 }
 
 /// The one bounded, read-only listing every part of the sweep shares, behind the capability gate (`hcRun`): a build the cache records
-/// as lacking `workspace list` is not asked. A missing or stale cache, or no binary, goes through to the call, which then fails
-/// like any other (the probe that fills the cache is not run here).
+/// as lacking `workspace list` is not asked. A missing or stale cache is filled first by the capability probe; no binary goes through to
+/// the call, which then fails like any other.
 pub(super) fn list_all(ctx: &Ctx, runner: &dyn Runner, cwd: &str) -> Listing {
     let env = pull::sweep_env(&ctx.st.env, ctx.home);
     let verb = defaults::text("mesh_write.hivecontrol_list_verb");
-    if let crate::meshw::hivecontrol::Cap::Dormant(reason) = crate::meshw::hivecontrol::cap_verb(&env, ctx.home, verb, None, None) {
+    let mut cap = crate::meshw::hivecontrol::cap_verb(&env, ctx.home, verb, None, None);
+    // no current entry for this build: probe it (read-only --version / --help) and write the cache, as Node's `probe` does
+    if cap == crate::meshw::hivecontrol::Cap::Probe && crate::dssup::recon::capprobe::fill(ctx, &env, runner) {
+        cap = crate::meshw::hivecontrol::cap_verb(&env, ctx.home, verb, None, None);
+    }
+    if let crate::meshw::hivecontrol::Cap::Dormant(reason) = cap {
         return Listing::Refused(defaults::render("devswarm_recon.msg_capability_dormant", &[("name", &format!("{}{verb}", defaults::text("devswarm_cli.hc_cap_prefix"))), ("reason", &reason)]));
     }
     let spec = RunSpec {
@@ -354,15 +359,18 @@ mod tests {
     use crate::dsact::runner::RunResult;
     use std::cell::RefCell;
 
-    /// A runner that answers every call with `answer` and counts them.
+    /// A runner that answers every call with `answer` and counts the listings (the capability probe's `--version` / `--help` calls
+    /// are answered too, but not counted).
     struct Listing {
         answer: RunResult,
         calls: RefCell<usize>,
     }
 
     impl Runner for Listing {
-        fn run(&self, _spec: &RunSpec) -> RunResult {
-            *self.calls.borrow_mut() += 1;
+        fn run(&self, spec: &RunSpec) -> RunResult {
+            if spec.args.iter().map(String::as_str).eq(defaults::list("devswarm_recon.list_all_args")) {
+                *self.calls.borrow_mut() += 1;
+            }
             self.answer.clone()
         }
     }

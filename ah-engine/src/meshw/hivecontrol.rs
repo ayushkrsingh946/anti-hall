@@ -38,7 +38,7 @@ fn is_file(p: &Path) -> bool {
 }
 
 /// `resolveBin({ env, home })`; `Err(())` when a `PATH` entry joins to a spelling `path.join` would normalise.
-fn resolve_bin(env: &Env, home: &Path) -> Result<Option<PathBuf>, ()> {
+pub(crate) fn resolve_bin(env: &Env, home: &Path) -> Result<Option<PathBuf>, ()> {
     let name = defaults::text("mesh_write.hivecontrol_bin");
     if let Some(explicit) = env.get(defaults::text("mesh_write.env_hivecontrol")) {
         let t = js_trim(explicit);
@@ -81,7 +81,7 @@ fn resolve_bin(env: &Env, home: &Path) -> Result<Option<PathBuf>, ()> {
 
 /// The key `probe` caches under: `bin|mtimeMs|size`, spelled both ways Node's `mtimeMs` has been computed; a cache that
 /// matches neither is not trusted.
-fn cache_keys(bin: &Path) -> Vec<String> {
+pub(crate) fn cache_keys(bin: &Path) -> Vec<String> {
     use std::os::unix::fs::MetadataExt;
     let Ok(m) = std::fs::metadata(bin) else { return Vec::new() };
     let (sec, nsec) = (m.mtime() as f64, m.mtime_nsec() as f64);
