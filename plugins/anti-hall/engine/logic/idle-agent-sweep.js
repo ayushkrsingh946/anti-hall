@@ -56,6 +56,9 @@ function idAdvisory(p, now) {
     if (found.unsure) { ah.unable('idle-agent-sweep:teammates_scan_unsure'); return ''; }
     agents = found.teammates.map(function (f) { return { id: f.name, label: f.name, idleSinceMs: f.idleSinceMs }; });
   }
+  // An agent idle past the stale bound is long gone (its stop may have failed as "No task found"), not idle: it drops out.
+  var staleMs = ah.cfgNum('idle_sweep.stale_minutes') * ah.cfgNum('idle_sweep.ms_per_minute');
+  agents = agents.filter(function (a) { return now - a.idleSinceMs < staleMs; });
   agents.sort(function (a, b) { return a.idleSinceMs - b.idleSinceMs; });
   var count = ah.settings.num('idle_sweep.num_count'), minutes = ah.settings.num('idle_sweep.num_minutes');
   var fire = agents.length > 0 && (agents.length >= count || agents.some(function (a) { return now - a.idleSinceMs >= minutes * ah.cfgNum('idle_sweep.ms_per_minute'); }));
