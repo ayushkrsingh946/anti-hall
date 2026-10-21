@@ -905,10 +905,6 @@ value = "the engine's staged pull did not answer this workspace"
 doc = "Why the reconcile duty holds its tick: the cool-down state could not be persisted first."
 value = "the sweep cool-down state could not be written; the sweep is held"
 
-[devswarm_recon.why_rest_held]
-doc = "Why the rest of Node's reconcile sweep is held: the active-workspace probe and the start-up sampling have no native port."
-value = "the active-workspace probe and start-up sampling have no native port"
-
 [devswarm_recon.list_all_args]
 doc = "The hivecontrol arguments of the one workspace listing the name backfill reads (every workspace's current label)."
 value = ["workspace", "list", "all"]
@@ -919,3 +915,91 @@ value = 5000
 min = 500
 max = 120000
 unit = "ms"
+
+[devswarm_recon.scope_list]
+doc = "The scope key of the workspace listing in the repository-unknown marker (the pull's scope is `pull:<id>`)."
+value = "list"
+
+[devswarm_recon.log_component_supervisor]
+doc = "The component of the supervisor sweep's central-log lines."
+value = "devswarm-supervisor"
+
+[devswarm_recon.log_op_active_probe]
+doc = "The operation of the log line for an active-workspace probe that returned no usable records."
+value = "active-probe"
+
+[devswarm_recon.log_op_active_drop]
+doc = "The operation of the log line for an active record no repository claims."
+value = "active-scope-drop"
+
+[devswarm_recon.log_op_reconcile_sweep]
+doc = "The operation of the log line that summarizes one reconcile sweep."
+value = "reconcile-sweep"
+
+[devswarm_recon.log_level_warn_word]
+doc = "The level of the reconcile-sweep log line when some project reported a real loss."
+value = "warn"
+
+[devswarm_recon.msg_active_probe]
+doc = "The log line for a probe that returned no usable records."
+value = "hivecontrol workspace list returned no usable records — app-side archive detection is OFF this cycle (nothing written, nothing suppressed)"
+
+[devswarm_recon.msg_active_drop]
+doc = "The log line for an active record that no repository claims and no same-repository sibling rule applied to."
+value = "an active hivecontrol record could not be attributed to any repoKey (and no same-repositoryId sibling fallback applied) — dropped from this sweep"
+
+[devswarm_recon.msg_repo_unknown_list]
+doc = "The log line when suppression of a project's active-workspace probe begins. Placeholder: {n}."
+value = "hivecontrol does not know this project's repository ({n} sweeps in a row, no live row) — the active-workspace probe is suppressed until a periodic recheck"
+
+[devswarm_recon.reason_unavailable]
+doc = "The probe's reason when hivecontrol could not be run or exited non-zero."
+value = "hivecontrol-unavailable"
+
+[devswarm_recon.reason_shape]
+doc = "The probe's reason when the listing is neither a list nor `{children: [...]}`."
+value = "hivecontrol-shape-unrecognized"
+
+[devswarm_recon.reason_empty]
+doc = "The probe's reason when the listing holds no record (never cached: it would read as nothing being live)."
+value = "hivecontrol-empty-list"
+
+[devswarm_recon.reason_repo_unknown]
+doc = "The probe's reason when the repository-unknown streak suppresses it."
+value = "repo-unknown"
+
+[devswarm_recon.reason_unattributable]
+doc = "The reason of an active record dropped because no repository claims its worktree."
+value = "unattributable-worktree"
+
+[devswarm_recon.word_no_output]
+doc = "The probe's error text when hivecontrol failed without saying why."
+value = "no output"
+
+[devswarm_recon.probe_stderr_max]
+doc = "Most characters of a failed probe's stderr kept in its diagnostics."
+value = 200
+min = 0
+max = 100000
+
+[devswarm_recon.drop_log_max]
+doc = "Most distinct unattributable active records logged per sweep (the count itself is never capped)."
+value = 20
+min = 0
+max = 10000
+
+[devswarm_recon.job_active_cache]
+doc = "The accounting name of the active-workspace snapshot write."
+value = "active-cache"
+
+[devswarm_recon.job_sampling]
+doc = "The accounting name of the start-up sampling write."
+value = "sampling"
+
+[devswarm_recon.set_startup_sampling]
+doc = "Whether the reconcile sweep probes `workspace info` of stale or not-draining workspaces and logs a non-null start-up field or a terminal id change (data capture only). Node: devswarm.startupSampling."
+value = { type = "bool", section = "devswarm", key = "startupSampling", env = "ANTIHALL_DEVSWARM_STARTUP_SAMPLING", default = true }
+
+[devswarm_recon.set_paused_probe_max]
+doc = "Most `workspace info` probes of the start-up sampling per sweep. Node: devswarm.pausedProbeMax."
+value = { type = "number", section = "devswarm", key = "pausedProbeMax", env = "ANTIHALL_DEVSWARM_PAUSED_PROBE_MAX", min = 1, max = 20, default = 8 }

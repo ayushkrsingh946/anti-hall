@@ -37,6 +37,8 @@ use regex::RegexBuilder;
 use serde_json::{Map, Value, json};
 use std::path::Path;
 
+mod probe;
+
 /// The clock and the limits of one reconcile (Node's `ctx.reconcileNow`, `ctx.reconcileBudgetMs`, the retry backoff), injectable so
 /// a test can make a budget exact.
 pub struct Opts<'a> {
@@ -679,7 +681,7 @@ fn reconcile(ctx: &Ctx, runner: &dyn Runner, cwd: &str, o: &Opts, hooks: &Hooks)
     };
     // a name still missing after the app's titles comes from ONE `hivecontrol workspace list all` call (best-effort: no binary, a
     // failed or unparseable answer backfills nothing and never fails the sweep)
-    let backfilled = backfill_names(ctx, cwd, &targets);
+    let backfilled = backfill_names(ctx, runner, cwd, &targets);
     // the resume marker: what is still deferred goes first next time, and a drained sweep leaves no marker
     let marker = view::exists(home, &side::resume_rel());
     if !deferred_ids.is_empty() || marker {
@@ -719,18 +721,24 @@ fn reconcile(ctx: &Ctx, runner: &dyn Runner, cwd: &str, o: &Opts, hooks: &Hooks)
 }
 
 /// The task-6 name backfill of `cmdReconcile`: the labels hivecontrol lists for the targets that have no cached name.
-fn backfill_names(ctx: &Ctx, cwd: &str, targets: &[Target]) -> u64 {
+fn backfill_names(ctx: &Ctx, runner: &dyn Runner, cwd: &str, targets: &[Target]) -> u64 {
     let missing: Vec<&Target> = targets.iter().filter(|t| state::read_name(ctx.home, &t.id).is_none()).collect();
     if missing.is_empty() {
         return 0;
     }
-    let env = pull::sweep_env(&ctx.st.env, ctx.home);
-    let args = defaults::list("devswarm_recon.list_all_args");
-    let call = crate::meshw::hivecontrol::call_in(&args, &env, Some(cwd), defaults::millis("devswarm_recon.list_timeout_ms"));
-    if !call.ok {
+    let spec = crate::dsact::runner::RunSpec {
+        bin: None,
+        args: defaults::list("devswarm_recon.list_all_args").iter().map(|a| (*a).to_string()).collect(),
+        cwd: Some(cwd.to_string()),
+        timeout_ms: defaults::num("devswarm_recon.list_timeout_ms"),
+        scrub_env: defaults::list("devswarm_recon.env_strip").iter().map(|a| (*a).to_string()).collect(),
+        ..Default::default()
+    };
+    let res = runner.run(&spec);
+    if !(res.ok && res.status == Some(0)) {
         return 0;
     }
-    let labels = state::parse_labels(&call.raw);
+    let labels = state::parse_labels(&res.stdout);
     missing
         .iter()
         .filter(|t| labels.iter().find(|(id, _)| *id == t.id).and_then(|(_, l)| l.as_deref()).is_some_and(|l| state::write_name(ctx.home, &t.id, l, ctx.now)))
@@ -759,6 +767,8 @@ pub fn duty(ctx: &Ctx, runner: &dyn Runner, hooks: &Hooks) -> Value {
     let cap = defaults::num("devswarm_recon.max_projects_per_tick") as usize;
     let mut pre = Map::new();
     let mut folds = Map::new();
+    let mut actives = Map::new();
+    let mut acc = probe::Acc::default();
     if !descs.is_empty() && !projects.is_empty() {
         // persisted BEFORE the work, so a slow or crashed sweep still honours the cool-down
         if apply_side(ctx, runner, defaults::text("devswarm_recon.job_sweep_state"), side::plan_sweep_state(ctx.home, ctx.now), &[]).is_none() {
@@ -781,15 +791,18 @@ pub fn duty(ctx: &Ctx, runner: &dyn Runner, hooks: &Hooks) -> Value {
                     crate::dsact::exec::append_line(&ctx.home.join(defaults::text("devswarm_recon.witness_file")), &rec);
                 }
             }
+            // the active-workspace probe runs for every project, whatever became of its reconcile
+            actives.insert(p.worktree.clone(), probe::probe_project(ctx, runner, &descs, p, &mut acc));
         }
     }
+    // the active-workspace probe (per project) and the start-up sampling (all descriptors)
+    let sampled = probe::sampling(ctx, runner, &descs);
+    let (active_probe, active_scope) = probe::finish(ctx, runner, acc);
     let results: Vec<Value> = pre
         .iter()
         .map(|(wt, r)| {
-            json!({"worktree": wt, "ok": r.get("ok"), "count": r.get("count"), "imported": r.get("imported"), "lost": r.get("lost"), "fold": folds.get(wt)})
+            json!({"worktree": wt, "ok": r.get("ok"), "count": r.get("count"), "imported": r.get("imported"), "lost": r.get("lost"), "fold": folds.get(wt), "active": actives.get(wt)})
         })
         .collect();
-    // the active-workspace probe and the start-up sampling of Node's sweep have no native port: held, counted once per sweep
-    let rest = crate::dssup::tick::held("dssup:reconcile:rest", defaults::text("devswarm_recon.why_rest_held"));
-    json!({"duty": "reconcile", "outcome": "ran", "detail": {"projects": pre.len(), "results": results, "rest": rest}, "engineProjects": pre.len()})
+    json!({"duty": "reconcile", "outcome": "ran", "detail": {"projects": pre.len(), "results": results, "activeProbe": active_probe, "activeScope": active_scope, "sampling": sampled}, "engineProjects": pre.len()})
 }
