@@ -1298,6 +1298,8 @@ Files:
 | `messages.toml` | every message the engine produces (failure hints, advisories, replies, errors, command-line text) |
 | `git.toml` | every table, limit, setting name and block message of the git check |
 | `task_guards.toml` | switches, limits, file layout and messages of the task checks and their shared helpers |
+| `advisory.toml` | the advisory layer (GitHub #225): fixed text once per session, state tables once per content change, per-session soft and hard caps per advisory kind, the rule-fallback rate limit and the metric names counted under `advisory` in `status --json` |
+| `inference.toml` | the unsupported-inference scan of the speculation guard (`guards.inferenceCheck`): the causal connectives, the word lists, the identifier and stem rules and the block text |
 | `roles.toml` | the role matrix (which role may run which engine verb), role detection names, the engine skill areas and their size budgets, and the role note texts; the `anti-hall:engine` skills are generated from it and the registry (`ah-engine/scripts/gen-engine-skills.sh`) |
 | `broad_kill.toml` | the broad-kill guard: blocked commands, the scoped `pkill -P` form, lookup patterns, wrappers and shells it looks through, and the block texts |
 | `devswarm_parent.toml` | the DevSwarm Primary prompt hook (`devswarm-parent-inbox`, for a Primary inside a git checkout): the event-log kind of a deferral to the Node hook, the maintainer-notice feed name and the hook's texts |

@@ -251,6 +251,13 @@ pub fn handback(kind: Handback, site: &str) {
     note(kind.name(), site, "", Val { n: 1, ..Val::default() });
 }
 
+/// Count one advisory event (`flagged`, `asked`, `confirmed`, `injected`, `suppressed`, `jev_error`) of advisory `kind`; the report
+/// keeps them under `advisory`, per kind.
+pub fn advisory(kind: &str, metric: &str) {
+    trace::push("advisory", &format!("{kind}.{metric}"), "", 0);
+    note(defaults::text("diagnostics.advisory_counter_kind"), kind, metric, Val { n: 1, ..Val::default() });
+}
+
 /// Count one run of the duty or stage `name` of `kind` (`duty` or `stage`) with its outcome, CPU and wall time.
 pub fn account(kind: &'static str, name: &str, outcome: Outcome, cpu_us: u64, wall_us: u64) {
     trace::push(kind, name, outcome.name(), wall_us);
@@ -279,7 +286,14 @@ pub fn report(f: &Folded) -> Value {
     let mut totals: BTreeMap<&str, u64> = BTreeMap::new();
     let mut sites: BTreeMap<&str, Map<String, Value>> = BTreeMap::new();
     let mut acct: BTreeMap<&str, BTreeMap<&str, Map<String, Value>>> = BTreeMap::new();
+    let mut adv: BTreeMap<&str, Map<String, Value>> = BTreeMap::new();
     for ((kind, name, outcome), v) in &f.rows {
+        if kind == defaults::text("diagnostics.advisory_counter_kind") {
+            let e = adv.entry(name).or_default();
+            let cur = e.get(outcome.as_str()).and_then(Value::as_u64).unwrap_or(0);
+            e.insert(outcome.clone(), json!(cur + v.n));
+            continue;
+        }
         if let Some(h) = Handback::parse(kind) {
             *totals.entry(h.name()).or_default() += v.n;
             sites.entry(name).or_default().insert(h.name().to_string(), json!(v.n));
@@ -304,6 +318,7 @@ pub fn report(f: &Folded) -> Value {
     json!({
         "node_handback": hb,
         "accounting": acct,
+        "advisory": adv,
         "counters": {"dropped": f.dropped, "soft_hits": f.soft_hits, "malformed": f.malformed},
     })
 }

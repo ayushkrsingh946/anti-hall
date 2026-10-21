@@ -3751,6 +3751,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `task_guard.cap_reserve` | `2` |  |  | CPUs kept free when the parallel cap is derived from the CPU count. |
 | `task_guard.codex_patch_tool` | `apply_patch` |  |  | The Codex tool name that marks a Codex payload on its own. |
 | `task_guard.coordinator_owner_re` | `^(main\|orchestrator\|coordinator)$` |  |  | JavaScript regex source (case-insensitive) of an owner that is the orchestrator itself; such a task still counts as unowned. |
+| `task_guard.devswarm_hint` | ` Delegated to a DevSwarm workspace: set the task owner ({upd} owner) to the w...` |  |  | The DevSwarm sentence added to the idle-neglect block's do-instead line while the app database shows a live workspace; `{upd}` is the task update tool. |
 | `task_guard.dispatch_demand_setting` | `5 entries` |  |  | Whether running agents are counted per task from this session's transcript (guards.dispatchDemand, default on); off restores the legacy rule (any fresh agent heartbeat silences the idle-neglect block). |
 | `task_guard.dispatch_list_max` | `12` |  |  | Most tasks the idle-neglect block names. |
 | `task_guard.generic_allowed` | `a genuinely blocked task: mark it via {upd} with blockedBy:[<open task id>] o...` |  |  | The allowed-here line of the generic block; `{upd}` is the task update tool. |
@@ -4011,6 +4012,68 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `workdetect.scratchpad_path` | `\/scratchpad\/` |  |  | Regex source of a path inside the session scratchpad (a segment literally named scratchpad); writes there are message passing, not project work. |
 | `workdetect.state_dir` | `(?:^\|[\s/])\.anti-hall\/(?:progress\|history\|handovers)\/` |  |  | Regex source of a path inside anti-hall's own progress, history or handover directories; writing the bookkeeping the guard asks for is not work. |
 | `workdetect.tmp_housekeeping_target` | `\/scratchpad\/\|(?:^\|\/)tmp\/` |  |  | Regex source (case-insensitive) of the redirect targets a housekeeping crontab install may write to: the scratchpad or a tmp directory. |
+
+### advisory.toml / advisory
+
+| Key | Default | Env override | Unit | What it is |
+|---|---|---|---|---|
+| `advisory.cap_hard_by_kind` | `2 entries` |  |  | Per-kind override of advisory.cap_hard_default. |
+| `advisory.cap_hard_default` | `30` |  |  | The per-session hard cap of an advisory kind: past it the advisory is suppressed (counted as suppressed). |
+| `advisory.cap_soft_by_kind` | `2 entries` |  |  | Per-kind override of advisory.cap_soft_default. |
+| `advisory.cap_soft_default` | `8` |  |  | The per-session soft cap of an advisory kind: past it the advisory still fires and the kind is counted as over its soft cap. |
+| `advisory.fallback_per_session` | `1` |  |  | How many times per session the rule-only fallback of a judgment advisory may fire when Jev cannot confirm it (error, no key, too slow). |
+| `advisory.hash_len` | `16` |  |  | How many hex characters of a state table's content hash are kept in the advisory state. |
+| `advisory.kind_dispatch_tier` | `dispatch_tier` |  |  | The advisory kind name of the dispatch-tier hook's Jev question. |
+| `advisory.kind_task_demand_line` | `task_demand_line` |  |  | The advisory kind name of the per-turn DISPATCH NOW line of the task tracker. |
+| `advisory.kind_task_guard_agents` | `task_guard_agents` |  |  | The advisory kind name of the task guard's step-aside note while agents run. |
+| `advisory.kind_task_guard_omc` | `task_guard_omc` |  |  | The advisory kind name of the task guard's step-aside note while an OMC loop runs. |
+| `advisory.kind_task_guard_prune` | `task_guard_prune` |  |  | The advisory kind name of the task guard's prune-the-task-list note. |
+| `advisory.kind_task_open_line` | `task_open_line` |  |  | The advisory kind name of the per-prompt open-tasks line of the task tracker. |
+| `advisory.kind_task_tier_note` | `task_tier_note` |  |  | The advisory kind name of the Jev dispatch-tier annotation on the DISPATCH NOW line. |
+| `advisory.kind_tasklist_omc` | `tasklist_omc` |  |  | The advisory kind name of the task-list guard's step-aside note while an OMC loop runs. |
+| `advisory.kind_tasklist_plan_mode` | `tasklist_plan_mode` |  |  | The advisory kind name of the task-list guard's plan-mode note. |
+| `advisory.max_kinds` | `32` |  |  | The most advisory kinds one session's state file keeps (the least recently used go first). |
+| `advisory.metric_names` | `7 entries` |  |  | The metric names the scripts count per advisory kind, by role: a rule flagged a candidate, a question was put to Jev, Jev confirmed, the advisory reached the model, it was held back (unchanged table, repeat, cap, Jev declined, rate-limited fallback), a Jev question failed, an advisory fired past its soft cap. |
+| `advisory.repeat_turns_by_kind` | `5 entries` |  |  | Per-kind override of advisory.repeat_turns_default. |
+| `advisory.repeat_turns_default` | `12` |  |  | How many further calls a fixed-text advisory is held back after it fired, unless its kind has its own entry in advisory.repeat_turns_by_kind. |
+| `advisory.session_safe_max` | `80` |  |  | The longest sanitised session id used in the advisory state file name. |
+| `advisory.state_ext` | `.json` |  |  | The extension of the per-session advisory state file. |
+| `advisory.state_prefix` | `advisory-state` |  |  | The prefix of the per-session advisory state file under the base directory (`<prefix>-<session>.json`). |
+
+### inference.toml / inference
+
+| Key | Default | Env override | Unit | What it is |
+|---|---|---|---|---|
+| `inference.cause_clause_split_re` | `[,:;—]` |  |  | Where the cause clause of a sentence ends for the modal test (the first comma, colon, semicolon or dash). |
+| `inference.connectives_after` | `14 items` |  |  | Regular expressions (JavaScript syntax, case-insensitive) of causal connectives whose cause follows them. |
+| `inference.connectives_before` | `\b(?:is\\|was)\s+the\s+(?:culprit\\|root\s+cause\\|cause)\b, \b(?:is\\|was)\s+(?:...` |  |  | Regular expressions (JavaScript syntax, case-insensitive) of causal connectives whose cause comes before them. |
+| `inference.ellipsis` | `…` |  |  | Appended to a quoted sentence that was cut. |
+| `inference.fence_re` | `(```\|~~~)[^\n]*\n([\s\S]*?)\1` |  |  | A fenced block pasted by the user (evidence). |
+| `inference.first_person_re` | `(?:^\|[^\w'])(?:I\|we\|We\|I'(?:ll\|d\|ve\|m))(?=[\s,])` |  |  | First-person wording (case-sensitive) that marks design rationale or a plan, not a claim about the project's state. |
+| `inference.hypothetical_re` | `\b(?:if\|whether\|suppose\|supposing\|assuming\|unless\|would\|could\|might\|may\|can)\...` |  |  | A modal, conditional or hypothetical word (case-insensitive): a sentence with one in its head or its cause clause is a possibility, not a claim. |
+| `inference.ident_min_len_letters` | `3` |  |  | The shortest identifier containing a letter that counts as distinctive evidence. |
+| `inference.ident_min_len_other` | `4` |  |  | The shortest identifier with no letter (a number) that counts as distinctive evidence. |
+| `inference.ident_re` | `^(?:[\w-]+\.[\w.-]+\|[a-z0-9]+_[\w]+\|[a-z]+[A-Z]\w*\|[A-Z]{2,}\w*\|\/[\w./-]+\|--...` |  |  | A code-like identifier token (dotted, snake_case, camelCase, a path, a flag, a number with units). |
+| `inference.max_chunk` | `20000` |  |  | The most characters of one evidence chunk that are searched. |
+| `inference.msg_what` | `your reply states a cause as fact ('{sentence}') but no tool output in this s...` |  |  | Block headline of an unsupported inference; {sentence} is the reply's own sentence. |
+| `inference.observe_tools_re` | `^(?:bash\|read\|grep\|glob\|ls\|notebookread\|webfetch\|websearch\|exec_command\|shell...` |  |  | Names (case-insensitive) of the tools whose input counts as observation evidence. |
+| `inference.oneline_bidi_re` | `[‪-‮⁦-⁩]` |  |  | Bidirectional control characters removed when a sentence is quoted back. |
+| `inference.oneline_control_re` | `[\x00-\x1F\x7F-\x9F]` |  |  | Control characters replaced by a space when a sentence is quoted back. |
+| `inference.oneline_max` | `120` |  |  | The longest quoted sentence in the block reason, in characters. |
+| `inference.plan_prefix_re` | `^\s*(?:[-*+•]\s+\|\d+[.)]\s+)?(?:(?:the\s+)?plan\|next(?:\s+step)?\|todo\|proposa...` |  |  | A plan, next-step or option label at the start of a sentence (case-insensitive): not a claim. |
+| `inference.question_re` | `\?\s*$` |  |  | A sentence ending in a question mark is not a claim. |
+| `inference.sentence_sep_re` | `(?<=[.!?])\s+(?=[A-Z0-9"'(`*])` |  |  | Where a line splits into sentences: sentence punctuation followed by white space and a capital, digit, quote or bracket. |
+| `inference.source` | `inference` |  |  | The source recorded in the pending outcome of a block this scan made. |
+| `inference.stem_len` | `7` |  |  | How many characters of a word are kept as its stem. |
+| `inference.stem_re` | `(?:ing\|ed\|es\|s)$` |  |  | The suffix stripped from a content word before it is stemmed. |
+| `inference.stop_words` | `a an the and or but nor so yet for of to in on at by with from into onto over...` |  |  | Space-separated function words and words too generic to identify a cause. |
+| `inference.task_notification_re` | `<task-notification>` |  |  | Text that marks a task notification (always evidence). |
+| `inference.token_re` | `[\w./:'-]+` |  |  | The pattern that splits a cause clause into candidate tokens. |
+| `inference.token_trim_re` | `^['.:-]+\|['.:-]+$` |  |  | Leading and trailing punctuation trimmed from a token. |
+| `inference.unverified_re` | `\b(?:unverified\|not\s+(?:yet\s+)?(?:verified\|confirmed\|checked)\|ha(?:ve\|s)n'?...` |  |  | Wording (case-insensitive) by which the reply says its claim is unverified; a reply holding it is never flagged. |
+| `inference.window_bytes` | `1048576` |  | bytes | How much of the end of the transcript is read as evidence. |
+| `inference.word_min_len` | `4` |  |  | The shortest plain word that counts as a content word. |
+| `inference.words_needed` | `2` |  |  | How many content-word stems of the cause must co-occur in one evidence chunk when it has no distinctive identifier. |
 
 ### devswarm_role.toml / devswarm_role
 
@@ -5363,6 +5426,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `mesh_write.app_col_builder_type` | `builderType` |  |  | The `builders` type column. |
 | `mesh_write.app_col_hidden` | `isHidden` |  |  | The `builders` hidden flag column (archived = hidden and not active). |
 | `mesh_write.app_col_id` | `id` |  |  | The `builders` id column. |
+| `mesh_write.app_col_label` | `label` |  |  | The `builders` title column (the workspace title a Primary sees; the script that matches a task owner against a live workspace reads it). |
 | `mesh_write.app_col_worktree` | `worktreePath` |  |  | The `builders` worktree column. |
 | `mesh_write.app_cols_builder_terminals` | `13 items` |  |  | Every `builder_terminals` column the snapshot reads (SCHEMA.builder_terminals). |
 | `mesh_write.app_cols_builders` | `16 items` |  |  | Every `builders` column the snapshot reads (SCHEMA.builders). |
@@ -6054,6 +6118,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `script.time_hard_factor` | `10` |  |  | The HARD CPU limit of a script call as a multiple of its SOFT limit (script.time_limit_ms, or the per-check entry of script.time_limit_by_check). Past the soft limit a call is only logged and counted; the interpreter is interrupted at the hard one. |
 | `script.time_limit_by_check` | `25 entries` |  |  | Per-check limit of one script call (ms; the interpreter thread's CPU time, and the wall-clock backstop is script.wall_limit_factor times it), replacing script.time_limit_ms. A key is the check name, or `<check>:<event>` for one event, which wins. handover-hygiene reads and writes a whole directory tree, so its command-line and scheduled-job runs (event Cli) get seconds; `command` (command-guard) resolves repositories and runs `git` for its edit parity and carve-outs (a child process wait is credited back, but a loaded machine stretches the interpreter's own time as well); `git` (git-guard) tokenizes the whole command and its heredoc bodies (the frozen replay of 2026-10-09 interrupted it at 50 ms on 3 long heredoc commands, each answered the same with the time); api-guard and ship-it-guard parse Bash writes with command-guard's parsers (script.includes) and compact-declaration-guard parses the current turn of a 1.5 MB transcript tail, so they get command-guard's order of time and more; the DevSwarm child Stop gate and drain nudge (devswarm-child-gate, devswarm-child-drain) open the project's mesh store and read the child's inbox, as devswarm-child-turn and devswarm-parent-inbox do; `precompact-snapshot` reads the transcript tail of a PreCompact (a real 1.5 MB tail takes about 190 ms in the interpreter, so 50 ms would defer it to Node every time); `claim-ledger` walks up to 2 MB of transcript evidence; the Stop-time and prompt-time checks that scan the transcript tail or state (tasklist-guard, task-guard, silent-agent-nudge, stale-agent-stop-note, auto-handover, auto-handover-pause-nag, compact-advice-guard, limit-conserve-inject, idle-agent-sweep) get 500 ms because, measured 2026-10-09 on the frozen replay (2113 calls), the 50 ms default interrupted tasklist-guard on 2 and silent-agent-nudge on 6 of 61 Stop calls (and stale-agent-stop-note on a 156 MB transcript), each deferring a decision the script makes identically when given the time; its SessionStart advisory only lists and stats files. |
 | `script.time_limit_ms` | `50` | `AH_ENGINE_SCRIPT_TIME_MS` | ms | SOFT CPU-time limit of one script call (the interpreter thread's own CPU time): a call that used more is logged (script_soft) and counted, and keeps running. The HARD limit that interrupts it is this value times script.time_hard_factor (the call then defers to Node, never a silent allow); script.wall_limit_factor sets the wall-clock backstop from the hard limit. |
+| `script.unable_prefix` | `script:` |  |  | The prefix of the site name under which a script counts a case it could not model exactly and decided natively (native_unable), followed by the check and the site. |
 | `script.unload_batch` | `4` |  |  | Checks unloaded per collection while an interpreter is above mem.quickjs.soft_bytes. |
 | `script.wall_limit_factor` | `4` |  |  | The wall-clock backstop of a script call, as a multiple of its HARD CPU limit (script.time_limit_ms times script.time_hard_factor). The limit itself counts the interpreter thread's CPU time, so a thread kept waiting for a core by a loaded machine is not interrupted; the backstop ends a script that waits without using CPU. Time a host function spends blocked (a child process, a lock) is credited back to the backstop. |
 | `script.write_max_bytes` | `1048576` |  | bytes | Largest text one `ah.state.writeAtomic` call may write; a larger text is refused. |
@@ -10131,6 +10196,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 
 | Key | Default | Env override | Unit | What it is |
 |---|---|---|---|---|
+| `diagnostics.advisory_counter_kind` | `advisory` |  |  | The journal kind under which the advisory counters (flagged, asked, confirmed, injected, suppressed, jev_error per advisory kind) are kept in the shared counter journal. |
 | `diagnostics.allocator` | `jemalloc` |  |  | Allocator for the daemon the client spawns: jemalloc (default) or system. The client passes it on as AH_ENGINE_ALLOCATOR unless that is already set. Changing it requires a daemon restart. |
 | `diagnostics.allocator_choices` | `jemalloc, system` |  |  | Allocator names the client accepts from diagnostics.allocator; any other value is logged and the daemon starts with jemalloc. |
 | `diagnostics.allocator_env` | `AH_ENGINE_ALLOCATOR` |  |  | Environment variable the client sets on the daemon it spawns to select the allocator (the daemon reads it before its first allocation). An existing value in the client's own environment wins. |

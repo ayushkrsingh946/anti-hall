@@ -6,6 +6,8 @@ function ahNull(v) { return v === undefined ? null : v; }
 // Node turns a lone surrogate into U+FFFD when it encodes a string to UTF-8 (a hash, a file write); the host cannot take one.
 var ahWfRe = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g;
 function ahWf(t) { return typeof t === 'string' ? t.replace(ahWfRe, '\ufffd') : t; }
+// Count a case this script could not model exactly and then decided natively (native_unable at `site`, a short stable name such as `task-tracker.state_unsure`). The caller applies the native decision.
+function ahUnableCount(site) { try { ahHost.unable(site); } catch (e) { /* a lost count never changes a decision */ } }
 var ahCfgMemo = { gen: -1, map: new Map() };
 var ah = {
   // Defaults entries, memoized until the engine loads a new defaults snapshot (a file edit or a plugin update).
@@ -17,6 +19,7 @@ var ah = {
     return v;
   },
   cfgNum: function (key) { return ahHost.cfgNum(key); },
+  unable: function (site) { ahUnableCount(site); },
   // The hook's own environment (the request's, never the daemon's); null when a variable is unset.
   env: {
     get: function (name) { return ahNull(ahHost.env(name)); },

@@ -201,6 +201,10 @@ value = "anti-hall {check}: BLOCKED. Its check script failed ({why}) and this gu
 doc = "Reason logged (then the failure policy applies) when a check whose logic is a script has no script file."
 value = "no script file"
 
+[script.unable_prefix]
+doc = "The prefix of the site name under which a script counts a case it could not model exactly and decided natively (native_unable), followed by the check and the site."
+value = "script:"
+
 [script.write_root]
 doc = "The one directory under the home directory that a script may write to through `ah.state.writeAtomic` (a path must start with it; nothing outside it, no link below it)."
 value = ".anti-hall"
