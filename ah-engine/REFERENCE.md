@@ -9322,6 +9322,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_recon.msg_failures_unchanged` | `{n} unchanged failures (same as last run)` |  |  | The note that replaces a failure list identical to the last pass's. Placeholder: {n}. |
 | `devswarm_recon.msg_not_linked` | `{rel} is not another name of {other}` |  |  | An unlink was refused because the two names are not one file. Placeholders: {rel}, {other}. |
 | `devswarm_recon.msg_partial_list` | `hivecontrol workspace list returned {new} record(s) for {key}, below the {pct...` |  |  | The partial-list guard's log line. Placeholders: {new}, {key}, {pct}, {prev}. |
+| `devswarm_recon.msg_rehome_conflict` | `{id}: the destination already has a conflicting registry row; the source was ...` |  |  | The log line when a store move finds the destination already maps the id to another worktree: the source row is kept. {id} is the workspace. |
 | `devswarm_recon.msg_repo_unknown_list` | `hivecontrol does not know this project's repository ({n} sweeps in a row, no ...` |  |  | The log line when suppression of a project's active-workspace probe begins. Placeholder: {n}. |
 | `devswarm_recon.msg_repo_unknown_log` | `hivecontrol does not know this archived/held row's repository ({n} sweeps in ...` |  |  | The log line when suppression of an archived or held row's pull begins. Placeholder: {n}. |
 | `devswarm_recon.msg_skip_archived` | `archived workspace (DevSwarm app or local marker)` |  |  | Why a row was skipped: it is archived (DevSwarm app or local marker). |
@@ -9351,9 +9352,12 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_recon.re_repo_key` | `^[a-z0-9-]{1,40}-[0-9a-f]{6}$` |  |  | The shape of a repository-keyed store directory name. |
 | `devswarm_recon.re_repo_unknown_line` | `^(?:hivecontrol\b[^:]*\bexited \d+:\s*)?(?:Error:\s*)?Repository not found\.?...` |  |  | A line of hivecontrol's repository-not-known error (ignoring case; the colour codes are stripped first). |
 | `devswarm_recon.reason_anchor` | `mesh-anchor-attended` |  |  | The reason an attended mesh-anchor row was left (archiveLeftReason). |
+| `devswarm_recon.reason_cursors_unreadable` | `reader-cursors-unreadable` |  |  | Why a store move was not made: the source's reader-cursor table could not be read, so the copy base is unknown (nothing moved, the source stays authoritative). |
+| `devswarm_recon.reason_dest_gone` | `destination-gone` |  |  | Why a store move was not made: the destination partition is no longer registered. |
 | `devswarm_recon.reason_differs` | `archived-tombstone-differs` |  |  | Why a twin descriptor stayed active: archived/ already holds a different file under its name. |
 | `devswarm_recon.reason_empty` | `hivecontrol-empty-list` |  |  | The probe's reason when the listing holds no record (never cached: it would read as nothing being live). |
 | `devswarm_recon.reason_forward_failed` | `forward-failed` |  |  | The reason a row whose forward failed is reported as left. |
+| `devswarm_recon.reason_legacy_store` | `legacy-journal-store` |  |  | Why a store move was not made: one of the stores is on the legacy journal backend (Node older than 22.5), which the engine does not read. |
 | `devswarm_recon.reason_live` | `live-descriptor` |  |  | Why a row survived: it has a descriptor and a live session. |
 | `devswarm_recon.reason_live_descriptor` | `live-descriptor` |  |  | The reason a left row with a descriptor and a live session is given (archiveLeftReason). |
 | `devswarm_recon.reason_max` | `300` |  |  | Most characters (UTF-16 units) of an error text kept in the repository-not-known marker. |
@@ -9363,8 +9367,10 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_recon.reason_no_project` | `no-project` |  |  | The reason `reconcile` gives (and logs) for a working directory that is not inside a project. |
 | `devswarm_recon.reason_no_projects` | `no-resolvable-projects` |  |  | The reconcile duty's reason when no descriptor resolves to a project. |
 | `devswarm_recon.reason_raced` | `raced-re-register` |  |  | The reason a left row is given when it has no descriptor (archiveLeftReason). |
+| `devswarm_recon.reason_rehome_not_applied` | `rehome-not-applied` |  |  | The reason of a heal row whose move was neither done nor refused by the destination's id-collision guard. |
 | `devswarm_recon.reason_repo_unknown` | `repo-unknown` |  |  | The probe's reason when the repository-unknown streak suppresses it. |
 | `devswarm_recon.reason_shape` | `hivecontrol-shape-unrecognized` |  |  | The probe's reason when the listing is neither a list nor `{children: [...]}`. |
+| `devswarm_recon.reason_source_unreadable` | `source-messages-unreadable` |  |  | Why a store move was not made: the source's messages could not be read completely. |
 | `devswarm_recon.reason_survivor_gone` | `survivor-gone` |  |  | Why a candidate was not folded: its survivor is not registered in the store. |
 | `devswarm_recon.reason_unattributable` | `unattributable-worktree` |  |  | The reason of an active record dropped because no repository claims its worktree. |
 | `devswarm_recon.reason_unavailable` | `hivecontrol-unavailable` |  |  | The probe's reason when hivecontrol could not be run or exited non-zero. |
@@ -9412,10 +9418,8 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_recon.why_orphan_archived` | `orphan-archived` |  |  | Why a store was handed back: an orphan is archived (forward or drained, which are Node's) or the archive gate needs the liveness proof. |
 | `devswarm_recon.why_orphan_family` | `orphan-family` |  |  | Why a store was handed back: an orphan's worktree already has registry rows, so adopting it forwards its unread into the survivor (the fold, which is Node's). |
 | `devswarm_recon.why_pull_held` | `the engine's staged pull did not answer this workspace` |  |  | Why a workspace's pull is held (event count `native_unable` at dssup:recon:pull). |
-| `devswarm_recon.why_rehome_across` | `rehome-across-stores` |  |  | Why a row was handed back: it is mis-keyed and moving it between stores (rehomeAcrossStores) is still Node's. |
 | `devswarm_recon.why_replay_failed` | `replay-failed` |  |  | Why a drain was handed back: a batch of the delivery log could not be ingested or closed (it stays pending for Node's replay). |
 | `devswarm_recon.why_resume_duplicates` | `resume-duplicates` |  |  | Why a pass was handed back: its resume marker names an id twice. |
-| `devswarm_recon.why_root_mapped` | `root-mapped-repair` |  |  | Why a store's rows were handed back whole: a row's id is a non-primary builder in the app database with a different worktree path, so Node's healRegistry may first repair it (repairRootMappedChildRows), which is still Node's. |
 | `devswarm_recon.why_state_held` | `the sweep cool-down state could not be written; the sweep is held` |  |  | Why the reconcile duty holds its tick: the cool-down state could not be persisted first. |
 | `devswarm_recon.why_summary_orphan` | `summary-orphan` |  |  | Why a fold was handed back: after it the closing summary would meet an unregistered partition with unread mail, which only Node's projection classifies. |
 | `devswarm_recon.why_surrogate` | `surrogate-cut` |  |  | Why a decision was handed back: cutting the text at Node's length would split a surrogate pair. |

@@ -21,7 +21,7 @@ use ah_engine::checks::git::util::Settings;
 use ah_engine::checks::guardkit::ojson::OVal;
 use ah_engine::dsact::runner::System;
 use ah_engine::dssup::recon::gate::{self, Job, Verdict};
-use ah_engine::dssup::recon::{Hooks, Op, UnitEnd, apply, archived, dup, fold, heal, norm, orphans, side};
+use ah_engine::dssup::recon::{Hooks, Op, UnitEnd, apply, archived, dup, fold, heal, norm, orphans, rehome, side};
 use ah_engine::dssup::tick::Ctx;
 use ah_engine::meshw::store::{CursorPut, MeshRow, MeshStore, RegistryRow};
 use serde_json::Value;
@@ -633,13 +633,13 @@ fn heal_cases() -> Vec<HealCase> {
             deferred: &[],
         },
         HealCase {
-            name: "mis-keyed row goes to Node",
+            name: "mis-keyed row is moved",
             build: |f| {
                 let (_, k, q) = base(f);
                 f.row(&k, "w1", &q, "s1");
                 f.descriptor("w1", &desc_json("w1", &q, "s1", None, None));
             },
-            deferred: &["w1"],
+            deferred: &[],
         },
         HealCase {
             name: "worktree gone with an archived counterpart",
@@ -691,7 +691,7 @@ fn heal_cases() -> Vec<HealCase> {
                 f.descriptor("c3", &desc_json("c3", &q, "sc", None, None));
                 f.row(&k, "d4", &p, "sd");
             },
-            deferred: &["c3"],
+            deferred: &[],
         },
     ]
 }
@@ -721,10 +721,11 @@ fn s2_heal_registry_matches_node_for_every_row_shape() {
 }
 
 #[test]
-fn s2_rehome_core_answers_the_trivial_cases_and_defers_moves() {
-    assert_eq!(heal::rehome_core("w1", ""), heal::Core::Nothing);
-    assert_eq!(heal::rehome_core("w1", &ah_engine::meshw::send::hash_from_workspace_id("w1")), heal::Core::Nothing);
-    assert!(matches!(heal::rehome_core("w1", "repo-abc123"), heal::Core::Node(_)));
+fn s2_rehome_core_answers_the_trivial_cases_and_moves_nothing_for_them() {
+    let f = fix("s2core");
+    let ctx = f.ctx();
+    assert_eq!(rehome::core(&ctx, "w1", ""), rehome::Moved::default());
+    assert_eq!(rehome::core(&ctx, "w1", &ah_engine::meshw::send::hash_from_workspace_id("w1")), rehome::Moved::default());
 }
 
 #[test]

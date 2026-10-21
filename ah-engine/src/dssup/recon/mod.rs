@@ -35,6 +35,7 @@ pub mod mirror;
 pub mod norm;
 pub mod orphans;
 pub mod pull;
+pub mod rehome;
 pub mod side;
 pub mod stage;
 pub mod survivor;

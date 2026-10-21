@@ -295,11 +295,12 @@ fn git_root(path: &str) -> Option<String> {
     (status.success() && !t.is_empty()).then(|| t.to_string())
 }
 
-/// `rehomeStrandedProjectDescriptors` would move something: a descriptor stranded in the legacy hash bucket whose own worktree
-/// belongs to this project. Detection only.
-fn stranded_exists(home: &Path, repo_key: &str) -> R<bool> {
+/// The ids `rehomeStrandedProjectDescriptors` moves: descriptors stranded in the legacy hash bucket whose own worktree belongs to
+/// this project. Detection only.
+fn stranded_ids(home: &Path, repo_key: &str) -> R<Vec<String>> {
+    let mut found = Vec::new();
     let dir = devswarm_root(home).join(defaults::text("mesh_write.dir_workspaces"));
-    let Some(names) = crate::checks::jsport::fsx::read_dir_names(&dir.to_string_lossy()) else { return Ok(false) };
+    let Some(names) = crate::checks::jsport::fsx::read_dir_names(&dir.to_string_lossy()) else { return Ok(found) };
     let suffix = defaults::text("mesh_write.json_suffix");
     for (name, _) in names {
         let Some(id) = name.strip_suffix(suffix) else { continue };
@@ -331,10 +332,10 @@ fn stranded_exists(home: &Path, repo_key: &str) -> R<bool> {
             continue;
         }
         if ident::repo_key_for_worktree(&wt)?.as_deref() == Some(repo_key) {
-            return Ok(true);
+            found.push(id.to_string());
         }
     }
-    Ok(false)
+    Ok(found)
 }
 
 // ---- a workspace the engine does not answer is held ------------------------------------------------------------------------------
@@ -449,9 +450,9 @@ fn reconcile(ctx: &Ctx, runner: &dyn Runner, cwd: &str, o: &Opts, hooks: &Hooks)
         crate::meshw::clog::refusal(&inv, defaults::text("devswarm_recon.action_reconcile"), None, None, why, Some(why));
         return Ok(ProjectEnd::Result(json!({"ok": false, "reason": why})));
     };
-    // GH1: a stranded child of this project is Node's to re-home before the listing
-    if stranded_exists(home, &repo_key)? {
-        return defer("rehome-stranded");
+    // GH1: a child of this project stranded in the legacy hash bucket is re-homed before the listing (fail-open per id)
+    for id in stranded_ids(home, &repo_key)? {
+        super::rehome::core(ctx, &id, &repo_key);
     }
     // Claim 3 self-heal pre-pass
     let healed = heal::run(ctx, runner, &repo_key, hooks)?;

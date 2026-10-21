@@ -538,5 +538,7 @@ pub const RECON_MESSAGES_OF: &str = "SELECT id, ts, hash, body, sender, recipien
 pub const RECON_HASH_PRESENT: &str = "SELECT 1 FROM messages WHERE hash = ? LIMIT 1;";
 /// The reconcile port: the number of message rows in a partition.
 pub const RECON_MESSAGE_COUNT: &str = "SELECT COUNT(*) FROM messages WHERE workspace_id = ?;";
+/// The unguarded removal of one registry row (the re-home's tombstone of its source row, after the copy was verified).
+pub const RECON_REGISTRY_DELETE: &str = "DELETE FROM registry WHERE id = ?;";
 /// The reconcile port: `removeRegistryIf` (the guard compares session, `updated_at` and `write_seq`, NULL-safe).
 pub const RECON_REGISTRY_DELETE_IF: &str = "DELETE FROM registry WHERE id = ? AND session_id IS ? AND updated_at IS ? AND write_seq IS ?;";
