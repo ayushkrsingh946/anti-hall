@@ -349,7 +349,8 @@ fn cases() -> Vec<Case> {
     v.push(case("stamp-negative-size", vec![step(p("s1"))]).file(".anti-hall/task-tracker-s1.json", &stamp(now - 1000.0, -5)));
     let mut grew = step(p("s1"));
     grew.transcript = Some(vec!["x".repeat(300_000)]);
-    v.push(case("growth-triggers-full", vec![grew.clone()]).file(".anti-hall/task-tracker-s1.json", &stamp(now - 1000.0, 10)));
+    // the full directive is re-sent on growth only once the minimum gap (growth_min_gap_ms, 30 min) since the last one has passed
+    v.push(case("growth-triggers-full", vec![grew.clone()]).file(".anti-hall/task-tracker-s1.json", &stamp(now - 7_200_000.0, 10)));
     v.push(case("growth-below-threshold", vec![grew.clone()]).file(".anti-hall/task-tracker-s1.json", &stamp(now - 1000.0, 200_000)));
     v.push(case(
         "no-transcript-path",
