@@ -4611,7 +4611,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `doctor.kind_unknown` | `unknown` |  |  | The kind of a unit whose name is in no known shape (it is never touched). |
 | `doctor.launchd_dir` | `Library, LaunchAgents` |  |  | The user LaunchAgents directory, as path segments under the home directory. |
 | `doctor.leaks_examples` | `5` |  |  | How many leaked stores the report names. |
-| `doctor.legacy_stores_report` | `1` |  |  | 1 (the default): the doctor warns about DevSwarm stores on the journal backend or split between a journal and SQLite, which the engine does not support (the Node tooling serves them). 0: no such warning. |
+| `doctor.legacy_stores_report` | `1` |  |  | 1 (the default): the doctor warns about DevSwarm stores on the legacy journal backend (not read by the engine) or split between a journal and SQLite (merged by the update). 0: no such warning. |
 | `doctor.linux_name` | `linux` |  |  | The OS name the engine and the release assets use for Linux. |
 | `doctor.lock_dir` | `locks` |  |  | The directory of the ingest daemons' lock files under the DevSwarm directory. |
 | `doctor.lock_file` | `ah-engine.lock` |  |  | The plugin's pin of the engine release, relative to the plugin root. |
@@ -4891,7 +4891,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `doctor_msg.leak_example` | `{hash} -> {worktree}` |  |  | One leaked store. Placeholders: {hash}, {worktree}. |
 | `doctor_msg.leak_more` | `, +{n} more` |  |  | How many more leaked stores are not listed. Placeholder: {n}. |
 | `doctor_msg.leak_summary` | `(warn) leaked test-fixture stores: {count} (run doctor --repair-test-stores t...` |  |  | The leaked stores. Placeholders: {count}, {shown}, {more}. |
-| `doctor_msg.legacy_journal` | `(warn) {count} DevSwarm store(s) use the legacy journal backend, which the en...` |  |  | Stores on the journal backend. Placeholders: {count}, {shown}. |
+| `doctor_msg.legacy_journal` | `(warn) {count} DevSwarm store(s) use the legacy journal backend (Node older t...` |  |  | Stores on the journal backend. Placeholders: {count}, {shown}. |
 | `doctor_msg.legacy_split` | `(warn) {count} DevSwarm store(s) are split between the legacy journal and SQL...` |  |  | Stores split between a journal and SQLite. Placeholders: {count}, {shown}. |
 | `doctor_msg.lock_no_asset` | `the plugin's ah-engine.lock has no build for {triple}; the Node hooks stay in...` |  |  | BIN-10. Placeholder: {triple}. |
 | `doctor_msg.lock_no_version` | `the lock has no version` |  |  | The lock has no version. |
@@ -7214,7 +7214,11 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `update_post.ingest_native` | `1` |  |  | 1 (the default): while the engine owns the DevSwarm ingest daemons (devswarm_ingest.mode = engine) the ingest heal step answers by itself and never runs Node or re-installs a Node unit (units heal retires those). 0: always ask the Node functions. |
 | `update_post.ingest_off_json` | `{"attempted":false,"healed":false,"disabled":true,"detail":"ingest heal disab...` |  |  | The ingest heal answer while the engine does not own the ingest daemons (update_post.ingest_native is 0, or the Node daemons drain): nothing is healed or re-installed. Counted `disabled`. |
 | `update_post.ingest_stage_name` | `ingest heal` |  |  | The accounting name of the ingest heal step. |
+| `update_post.journal_cursors` | `cursors.ndjson` |  |  | The journal backend's cursor file (read only to list the partitions a store names). |
 | `update_post.journal_dir` | `journal` |  |  | The directory (inside a store directory) that holds the journal backend's `.ndjson` segments; a store with a segment there AND a sqlite database is split (devswarm-store.js hasBackendData). |
+| `update_post.journal_gates` | `gates.ndjson` |  |  | The journal backend's gate file (read only to list the partitions a store names). |
+| `update_post.journal_messages` | `messages.ndjson` |  |  | The journal backend's message file inside a store's journal directory. |
+| `update_post.journal_registry` | `registry.ndjson` |  |  | The journal backend's registry file (an append-only list of upsert and remove operations). |
 | `update_post.key_opt_in_applied` | `already applied (marker)` |  |  | The legacy key opt-in already stamped. |
 | `update_post.key_opt_in_enabled_key` | `enabled` |  |  | The setting that says Jev is on (section jev). |
 | `update_post.key_opt_in_file_key` | `keyFile` |  |  | The setting naming the Jev key file (section jev); empty means the vendor's default file. |
@@ -7234,9 +7238,11 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `update_post.key_opt_in_write_failed` | `could not write jev.allowLegacyKeyRead: unknown` |  |  | The setting could not be written (settings lock busy or a write error); nothing stamped, retried next update. |
 | `update_post.legacy_base_suffix` | `#base.json` |  |  | Suffix of a partition's legacy baseline cursor file (`<id>#base.json`). |
 | `update_post.legacy_inst_sep` | `#inst-` |  |  | Separator of a legacy per-instance store cursor file (`<id>#inst-<short6>.json`). |
+| `update_post.legacy_json` | `{"attempted":false,"disabled":true,"detail":"{name} skipped: every DevSwarm s...` |  |  | The answer of a store stage when every DevSwarm store is on the legacy journal backend (Node older than 22.5), which the engine does not read: the stage is disabled. {name} is the stage. |
 | `update_post.legacy_nd_sep` | `#nd-` |  |  | Separator of a legacy per-instance NDJSON cursor file (`<id>#nd-<short6>.json`). |
 | `update_post.lib_errors` | ` ({n} error(s), fail-open)` |  |  | The detail suffix when the library counted errors. Placeholder: n. |
 | `update_post.marker_file` | `.anti-hall/update-sweep-state.json` |  |  | The one-time stage markers, relative to the home directory. |
+| `update_post.merge_marker` | `MERGE-STATE.json` |  |  | The no-delete completion marker the split-store merge leaves in the store directory (what it merged, when). |
 | `update_post.note_store` | `{stage}: {what}: {error}` |  |  | What a store stage swallowed (fail-open) and kept in the event log. Placeholders: stage, what, error. |
 | `update_post.promote_event_msg` | `workspace {id} promoted from {marker} to a real session id` |  |  | The `msg` of that log line. Placeholders: id, marker. |
 | `update_post.promote_event_op` | `unclaimed-session-promoted` |  |  | The `op` of the central log line written for a promoted session (identity.js promoteUnclaimedSession). |

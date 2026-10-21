@@ -1694,7 +1694,7 @@ fn sto_01_journal_and_split_stores_are_reported_as_unsupported_legacy() {
     }
     let r = sc.doctor(&[]);
     r.has("warn", &["2 DevSwarm store(s) use the legacy journal backend", "aaaa1111, bbbb2222", "No anti-hall command converts a journal store to SQLite"]);
-    r.has("warn", &["1 DevSwarm store(s) are split", "cccc3333", "merge-split-backend-stores", "hooks/doctor.js --repair"]);
+    r.has("warn", &["1 DevSwarm store(s) are split", "cccc3333", "merge-split-backend-stores", "folds the journal side into SQLite"]);
     r.lacks("dddd4444");
     r.lacks("eeee5555");
     // read-only: nothing moved or written

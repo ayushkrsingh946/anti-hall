@@ -2209,7 +2209,7 @@ value = "the engine failed open {n} times in the last {window}s (most often {top
 # ---- legacy (journal / split) DevSwarm stores ---------------------------------------------------------------------------------------
 
 [doctor.legacy_stores_report]
-doc = "1 (the default): the doctor warns about DevSwarm stores on the journal backend or split between a journal and SQLite, which the engine does not support (the Node tooling serves them). 0: no such warning."
+doc = "1 (the default): the doctor warns about DevSwarm stores on the legacy journal backend (not read by the engine) or split between a journal and SQLite (merged by the update). 0: no such warning."
 value = 1
 min = 0
 max = 1
@@ -2224,8 +2224,8 @@ value = "legacy DevSwarm stores (journal backend)"
 
 [doctor_msg.legacy_journal]
 doc = "Stores on the journal backend. Placeholders: {count}, {shown}."
-value = "(warn) {count} DevSwarm store(s) use the legacy journal backend, which the engine does not support: {shown}. The engine cannot read them; the Node tooling and the update's Node fallback keep serving them. No anti-hall command converts a journal store to SQLite (there is no devswarm verb or doctor repair for it). If its message history is not needed, the owner can move that store directory aside by hand (~/.anti-hall/devswarm/store/<name>); anti-hall never deletes it."
+value = "(warn) {count} DevSwarm store(s) use the legacy journal backend (Node older than 22.5), which the engine does not read: {shown}. The update's store stages skip them and report `disabled` for them; nothing waits on them. No anti-hall command converts a journal store to SQLite (there is no devswarm verb or doctor repair for it). If its message history is not needed, the owner can move that store directory aside by hand (~/.anti-hall/devswarm/store/<name>); anti-hall never deletes it."
 
 [doctor_msg.legacy_split]
 doc = "Stores split between a journal and SQLite. Placeholders: {count}, {shown}."
-value = "(warn) {count} DevSwarm store(s) are split between the legacy journal and SQLite, which the engine does not support: {shown}. Merge the journal side into SQLite (neither side is deleted) with the update's merge-split-backend-stores stage (run the anti-hall update) or node hooks/doctor.js --repair; both need Node with node:sqlite (22.5 or newer)."
+value = "(warn) {count} DevSwarm store(s) are split between the legacy journal and SQLite: {shown}. The update's merge-split-backend-stores stage folds the journal side into SQLite (neither side is deleted); run the anti-hall update."
