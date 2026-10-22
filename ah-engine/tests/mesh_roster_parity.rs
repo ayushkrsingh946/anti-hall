@@ -480,10 +480,10 @@ fn roster_matches_node_for_a_project_with_no_rows_and_defers_every_other() {
                 assert!(!stub.as_ref().unwrap().join("hivecontrol.ran").exists(), "{}: a refused call must not start the binary", c.name);
             }
             let verify = verify_line(&he.join("state"));
-            assert_eq!(verify["result"], "match", "{}: the background Node shadow disagrees: {verify}", c.name);
+            assert_eq!(verify["result"], "none", "{}: a Node shadow record exists, but no shadow runs any more: {verify}", c.name);
         } else {
             deferred += 1;
-            assert_eq!(e.code, n.code, "{}: exit code of the fallback", c.name);
+            assert_eq!(e.code, 75, "{}: no Node to hand the verb to, the engine is unable (75)", c.name);
             let pre_tree = home_files(&hd);
             let pre_db = store_dump(&hd, &empty_key);
             let ran = stub.as_ref().map(|s| s.join("hivecontrol.ran"));
@@ -502,13 +502,12 @@ fn roster_matches_node_for_a_project_with_no_rows_and_defers_every_other() {
 }
 
 fn verify_line(state: &Path) -> Value {
-    for _ in 0..300 {
+    {
         if let Ok(t) = fs::read_to_string(state.join("mesh-verify.jsonl"))
             && let Some(l) = t.lines().last()
         {
             return serde_json::from_str(l).unwrap();
         }
-        std::thread::sleep(std::time::Duration::from_millis(100));
     }
     json!({"result": "none"})
 }

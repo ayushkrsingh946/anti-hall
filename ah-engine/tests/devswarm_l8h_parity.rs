@@ -227,7 +227,7 @@ fn check_from(
             pending.push((c.name.clone(), homes[1].join("state")));
         } else {
             deferred += 1;
-            assert_eq!(e.code, n.code, "{}: exit code of the fallback", c.name);
+            assert_eq!(e.code, 75, "{}: no Node to hand the verb to, the engine is unable (75)", c.name);
             let pre = (tree(&homes[2]), key_db(&homes[2]).is_file().then(|| raw_dump(&key_db(&homes[2]))));
             let d = engine_cli(&homes[2], &cwd, &c.argv, now, &to_ref(&ed));
             assert_eq!(d.code, 75, "{}: a deferral the engine cannot hand to Node exits 75, got {} / {}", c.name, d.code, d.stdout);
@@ -237,16 +237,9 @@ fn check_from(
             assert!(pre == post, "{}: a deferral wrote", c.name);
         }
     }
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    // the background Node witness was removed with the Node fallbacks: an answered call leaves no witness record
     for (name, state) in &pending {
-        let line = loop {
-            if let Some(l) = verify_lines(state).into_iter().last() {
-                break l;
-            }
-            assert!(std::time::Instant::now() < deadline, "{name}: the Node witness never logged");
-            std::thread::sleep(std::time::Duration::from_millis(100));
-        };
-        assert_eq!(line["result"], "match", "{name}: the background Node witness disagrees: {line}");
+        assert!(verify_lines(state).is_empty(), "{name}: a Node witness record exists, but no witness runs any more");
     }
     eprintln!("l8h cli parity: {} cases, {native} answered by the engine and identical to Node, {deferred} deferred with nothing written", cases.len());
     if std::env::var("AH_L8H_FILTER").is_err() {
@@ -695,8 +688,8 @@ fn reap_orphans_matches_node() {
     let orphan2 = orphan.clone();
     let orphan3 = orphan.clone();
     let cases = vec![
-        r("reap-dry-run-with-an-orphan-is-node", &["reap-orphans"], "main", false).setup(orphan),
-        r("reap-apply-with-an-orphan-is-node", &["reap-orphans", "--apply", "--max", "1", "--i-am-a-human"], "main", false).setup(orphan2),
+        r("reap-dry-run-with-an-orphan", &["reap-orphans"], "main", true).setup(orphan),
+        r("reap-apply-with-an-orphan", &["reap-orphans", "--apply", "--max", "1", "--i-am-a-human"], "main", true).setup(orphan2),
         r("reap-refusal-does-not-need-the-orphans", &["reap-orphans", "--apply"], "main", true).setup(orphan3),
         r("reap-dry-run", &["reap-orphans"], "main", true),
         r("reap-apply-as-a-human", &["reap-orphans", "--apply", "--max", "3", "--i-am-a-human"], "main", true),
@@ -712,5 +705,5 @@ fn reap_orphans_matches_node() {
         r("reap-apply-outside-a-project", &["reap-orphans", "--apply", "--max", "3"], "nongit", true),
         r("reap-from-a-child", &["reap-orphans", "--apply"], "child", true),
     ];
-    check(&fx, &cases, &[], 11, 2);
+    check(&fx, &cases, &[], 13, 0);
 }

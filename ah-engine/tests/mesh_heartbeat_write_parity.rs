@@ -148,13 +148,12 @@ fn assert_same_home(name: &str, a: &Path, b: &Path, key: &str, what: &str) {
 
 /// The detached verifier's newest record, waited for up to 40 s.
 fn verify_line(state: &Path) -> Value {
-    for _ in 0..400 {
+    {
         if let Ok(t) = fs::read_to_string(state.join("mesh-verify.jsonl"))
             && let Some(l) = t.lines().last()
         {
             return serde_json::from_str(l).unwrap();
         }
-        std::thread::sleep(std::time::Duration::from_millis(100));
     }
     json!({"result": "none"})
 }
@@ -955,10 +954,10 @@ fn run_cases(tag: &str, list: Vec<Case>, min_native: usize, min_deferred: usize)
             assert_eq!((e.code, &e.stdout), (n.code, &n.stdout), "{}: stdout/exit differ", c.name);
             assert_same_home(c.name, &hn, &he, &fx.repo_key, "node vs engine");
             let v = verify_line(&he.join("state"));
-            assert_eq!(v["result"], "match", "{}: the background Node shadow disagrees: {v}", c.name);
+            assert_eq!(v["result"], "none", "{}: a Node shadow record exists, but no shadow runs any more: {v}", c.name);
         } else {
             deferred += 1;
-            assert_eq!(e.code, n.code, "{}: exit code of the fallback", c.name);
+            assert_eq!(e.code, 75, "{}: no Node to hand the verb to, the engine is unable (75)", c.name);
             let before = fx.root.join(format!("{}-before", c.name));
             prepare(&before, &fx, c);
             let d = engine_verb(&hd, &hd.join("state"), &cwd, &av, now, None, &[extra.clone(), vec![("PATH", nonode.as_str())]].concat());
@@ -1167,7 +1166,7 @@ fn same_or_deferred(name: &str, fx: &Fx, prep: &dyn Fn(&Path), undo: &dyn Fn(&Pa
     if native {
         assert_eq!((e.code, &e.stdout), (n.code, &n.stdout), "{name}: stdout/exit differ");
     } else {
-        assert_eq!(e.code, n.code, "{name}: exit code of the fallback");
+        assert_eq!(e.code, 75, "{name}: no Node to hand the verb to, the engine is unable (75)");
         let d = engine_verb(&hd, &hd.join("state"), &fx.child, &av, now, None, &[("PATH", nonode.as_str())]);
         assert_eq!((d.code, d.stdout.is_empty()), (75, true), "{name}: deferral contract: {} / {}", d.code, d.stdout);
     }

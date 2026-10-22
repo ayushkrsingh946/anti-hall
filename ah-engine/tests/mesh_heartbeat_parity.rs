@@ -148,13 +148,12 @@ fn line(h_field: Option<&str>, created: i64, msg: &str) -> String {
 
 /// The detached verifier's record (`mesh-verify.jsonl`), waited for up to 30 s.
 fn verify_line(state: &Path) -> Value {
-    for _ in 0..300 {
+    {
         if let Ok(t) = fs::read_to_string(state.join("mesh-verify.jsonl"))
             && let Some(l) = t.lines().last()
         {
             return serde_json::from_str(l).unwrap();
         }
-        std::thread::sleep(std::time::Duration::from_millis(100));
     }
     json!({"result": "none"})
 }
@@ -766,10 +765,10 @@ fn heartbeat_matches_node_byte_for_byte_and_defers_without_writing() {
             assert_same_home(c.name, &hn, &he, &fx.repo_key, "node vs engine");
             // the background Node check on a scratch copy reaches the same verdict (it runs detached: wait for its line)
             let v = verify_line(&he.join("state"));
-            assert_eq!(v["result"], "match", "{}: the background Node shadow disagrees: {v}", c.name);
+            assert_eq!(v["result"], "none", "{}: a Node shadow record exists, but no shadow runs any more: {v}", c.name);
         } else {
             deferred += 1;
-            assert_eq!(e.code, n.code, "{}: exit code of the fallback", c.name);
+            assert_eq!(e.code, 75, "{}: no Node to hand the verb to, the engine is unable (75)", c.name);
             // the contract: deferred means NOTHING written, and exit 75 when the engine cannot run Node
             let before = fx.root.join(format!("{}-before", c.name));
             copy_tree(&fx.seed_home, &before);
@@ -941,7 +940,7 @@ fn faulty_inputs_are_reproduced_or_deferred_without_a_write() {
             assert_same_home(f.name, &hn, &he, &fx.repo_key, "node vs engine");
         } else {
             deferred += 1;
-            assert_eq!(e.code, n.code, "{}: exit code of the fallback", f.name);
+            assert_eq!(e.code, 75, "{}: no Node to hand the verb to, the engine is unable (75)", f.name);
             let before = fx.root.join(format!("{}-before", f.name));
             seed_one(&before);
             let d = engine_verb(&hd, &hd.join("state"), &fx.child, &av, now, None, &[("PATH", nonode.as_str())]);

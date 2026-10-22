@@ -66,13 +66,12 @@ fn assert_same_home(name: &str, a: &Path, b: &Path, what: &str) {
 }
 
 fn verify_line(state: &Path) -> Value {
-    for _ in 0..300 {
+    {
         if let Ok(t) = fs::read_to_string(state.join("mesh-verify.jsonl"))
             && let Some(l) = t.lines().last()
         {
             return serde_json::from_str(l).unwrap();
         }
-        std::thread::sleep(std::time::Duration::from_millis(100));
     }
     json!({"result": "none"})
 }
@@ -441,11 +440,11 @@ fn app_database_heartbeats_match_node_byte_for_byte_and_defer_without_writing() 
             assert_eq!((e.code, &e.stdout), (n.code, &n.stdout), "{}: stdout/exit differ", case.name);
             assert_same_home(case.name, &hn, &he, "node vs engine");
             let v = verify_line(&he.join("state"));
-            assert_eq!(v["result"], "match", "{}: the background Node shadow disagrees: {v}", case.name);
+            assert_eq!(v["result"], "none", "{}: a Node shadow record exists, but no shadow runs any more: {v}", case.name);
             verified += 1;
         } else {
             deferred += 1;
-            assert_eq!(e.code, n.code, "{}: exit code of the fallback", case.name);
+            assert_eq!(e.code, 75, "{}: no Node to hand the verb to, the engine is unable (75)", case.name);
             // the contract: deferred means NOTHING written, and exit 75 when the engine cannot run Node
             let before = fx.root.join(format!("{}-before", case.name));
             copy_tree(&fx.seed_home, &before);

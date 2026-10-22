@@ -326,7 +326,7 @@ fn run_cases(fx: &Fx, w: &W, cases: &[Lc], min_native: usize, min_deferred: usiz
             }
         } else {
             deferred += 1;
-            assert_eq!(e.code, n.code, "{}: exit code of the fallback", c.name);
+            assert_eq!(e.code, 75, "{}: no Node to hand the verb to, the engine is unable (75)", c.name);
             let snap = |h: &Path| {
                 let mut t = tree(h);
                 t.retain(|k, _| !k.starts_with("hc/calls.log"));

@@ -192,13 +192,12 @@ fn store_dump(home: &Path, key: &str) -> String {
 }
 
 fn verify_line(state: &Path) -> Value {
-    for _ in 0..300 {
+    {
         if let Ok(t) = fs::read_to_string(state.join("mesh-verify.jsonl"))
             && let Some(l) = t.lines().last()
         {
             return serde_json::from_str(l).unwrap();
         }
-        std::thread::sleep(std::time::Duration::from_millis(100));
     }
     json!({"result": "none"})
 }
@@ -923,10 +922,10 @@ fn tick_matches_node_byte_for_byte_and_defers_without_writing() {
             assert_eq!((e.code, &se), (n.code, &sn), "{}: stdout/exit differ", c.name);
             assert_same_home(c.name, &hn, &he, &fx.repo_key, "node vs engine");
             let v = verify_line(&he.join("state"));
-            assert_eq!(v["result"], "match", "{}: the background Node shadow disagrees: {v}", c.name);
+            assert_eq!(v["result"], "none", "{}: a Node shadow record exists, but no shadow runs any more: {v}", c.name);
         } else {
             deferred += 1;
-            assert_eq!(e.code, n.code, "{}: exit code of the fallback", c.name);
+            assert_eq!(e.code, 75, "{}: no Node to hand the verb to, the engine is unable (75)", c.name);
             // the seeded home itself, before the engine runs (seeding twice stamps different wall-clock times into the registry)
             let (pre_tree, pre_db) = (tree(&hd), store_dump(&hd, &fx.repo_key));
             let d = engine_verb(&hd, &hd.join("state"), &cwd, &av, now, None, &[extra.clone(), vec![("PATH", nonode.as_str())]].concat());

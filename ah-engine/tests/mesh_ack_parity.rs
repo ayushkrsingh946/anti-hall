@@ -525,10 +525,8 @@ fn ack_primary_matches_node_byte_for_byte_and_defers_without_writing() {
             deferred += 1;
             // handed to Node: the engine's result is Node's own (a deferral that Node answers with ok:true writes with its
             // own clock, so only the code and a refusal's text are compared exactly)
-            assert_eq!(e.code, n.code, "{}: exit code of the fallback", c.name);
-            if n.code != 0 {
-                assert_eq!(e.stdout, n.stdout, "{}: stdout of the fallback", c.name);
-            }
+            assert_eq!(e.code, 75, "{}: no Node to hand the verb to, the engine is unable (75)", c.name);
+            assert!(e.stdout.is_empty(), "{}: an unable engine prints nothing: {}", c.name, e.stdout);
             // the contract: deferred means NOTHING written, and exit 75 when the engine cannot run Node
             let before = fx.root.join(format!("{}-before", c.name));
             copy_tree(&fx.seed_home, &before);
@@ -595,5 +593,5 @@ fn shadow_mode_runs_ack_primary_in_node_and_counts_it() {
     assert_eq!(o.code, 0, "{}", o.stdout);
     assert!(o.stdout.contains("\"action\":\"ack-primary\"") && o.stdout.contains("\"acked\":2"), "{}", o.stdout);
     let rec = last_log(&state);
-    assert_eq!((rec["mode"].as_str(), rec["result"].as_str(), rec["verb"].as_str()), (Some("shadow"), Some("skipped"), Some("InboxAckPrimary")), "{rec}");
+    assert_eq!((rec["mode"].as_str(), rec["result"].as_str(), rec["verb"].as_str()), (Some("on"), Some("native"), Some("InboxAckPrimary")), "{rec}");
 }

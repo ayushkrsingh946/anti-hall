@@ -308,7 +308,7 @@ fn check_from(
             }
         } else {
             deferred += 1;
-            assert_eq!(e.code, n.code, "{}: exit code of the fallback", c.name);
+            assert_eq!(e.code, 75, "{}: no Node to hand the verb to, the engine is unable (75)", c.name);
             // reconcile-registry reads `workspace list all` before it can know it must defer: the stub's own log of that read is not a write
             let strip = |mut t: BTreeMap<String, String>| {
                 if c.argv[0] == "reconcile-registry" {
@@ -325,16 +325,9 @@ fn check_from(
             assert!(pre == post, "{}: a deferral wrote", c.name);
         }
     }
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    // the background Node witness was removed with the Node fallbacks: an answered call leaves no witness record
     for (name, state) in &pending {
-        let line = loop {
-            if let Some(l) = verify_lines(state).into_iter().last() {
-                break l;
-            }
-            assert!(std::time::Instant::now() < deadline, "{name}: the Node witness never logged");
-            std::thread::sleep(std::time::Duration::from_millis(100));
-        };
-        assert_eq!(line["result"], "match", "{name}: the background Node witness disagrees: {line}");
+        assert!(verify_lines(state).is_empty(), "{name}: a Node witness record exists, but no witness runs any more");
     }
     eprintln!("dsB parity: {} cases, {native} answered by the engine and identical to Node, {deferred} deferred with nothing written", cases.len());
     if std::env::var("AH_DSB_FILTER").is_err() {

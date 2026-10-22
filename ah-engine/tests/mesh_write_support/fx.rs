@@ -257,6 +257,16 @@ pub fn home_files(home: &Path) -> BTreeMap<String, Vec<u8>> {
     }
     let mut out = BTreeMap::new();
     walk(home, home, &mut out);
+    // the engine's own logs (`devswarm_sup.witness_file`: the native duties' results, `devswarm_sup.action_log`: the supervisor's action
+    // ledger) exist only in the engine: they are not part of what a verb leaves behind that Node leaves too, and a logs directory holding
+    // nothing else goes with them
+    let mut gone = false;
+    for own in [".anti-hall/logs/devswarm-sup-witness.ndjson", ".anti-hall/logs/devswarm-sup-actions.ndjson"] {
+        gone |= out.remove(own).is_some();
+    }
+    if gone && !out.keys().any(|k| k.starts_with(".anti-hall/logs/") && k != ".anti-hall/logs/") {
+        out.remove(".anti-hall/logs/");
+    }
     out
 }
 
