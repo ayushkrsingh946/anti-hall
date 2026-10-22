@@ -300,6 +300,33 @@ fn stopped_subagents(env: &Env, st: &mut State) {
     }
 }
 
+/// A teammate the host's team roster (`agent_tracker.roster`) no longer lists - or lists as joined after this agent started, so the name
+/// belongs to a newer spawn - was stopped or finished. The host writes nothing into such a teammate's own transcript, and the scan of
+/// the launching session's transcript only sees a stop still inside its window, so the roster is the one record that stays true. A
+/// roster that is missing or unreadable decides nothing. Runs over every tracked teammate, not only the ones read this tick: an agent
+/// the tick's cap left out would otherwise keep its last "running" for as long as it is tracked.
+fn off_roster(env: &Env, st: &mut State) {
+    let r = defaults::raw("agent_tracker.roster");
+    let num = |k: &str| r.get(k).and_then(V::as_integer).unwrap_or(0).max(0) as u64;
+    let mut rosters: std::collections::HashMap<String, Option<std::collections::BTreeMap<String, u64>>> = std::collections::HashMap::new();
+    for a in st.agents.values_mut().filter(|a| a.kind == kind_name("teammate") && !a.team.is_empty() && !a.name.is_empty()) {
+        // a tick may read the roster between the host's two writes at spawn: an agent just followed decides nothing
+        if env.now_ms.saturating_sub(a.first_seen) < num("grace_ms") {
+            continue;
+        }
+        let roster = rosters.entry(a.team.clone()).or_insert_with(|| {
+            let v = json_of(&env.home.join(r.str_field("dir")).join(&a.team).join(r.str_field("file")))?;
+            let members = v.get(r.str_field("members"))?.as_array()?;
+            Some(members.iter().filter_map(|m| Some((m.get(r.str_field("name"))?.as_str()?.to_string(), m.get(r.str_field("joined")).and_then(Value::as_u64).unwrap_or(0)))).collect())
+        });
+        let Some(roster) = roster else { continue };
+        let started = mtime_ms(Path::new(&facts::meta_path(&a.path))).map_or(0, |m| m as u64);
+        if roster.get(&a.name).is_none_or(|joined| *joined > started.saturating_add(num("rejoin_slack_ms"))) {
+            a.finished = true;
+        }
+    }
+}
+
 /// Discover and ingest every source; drop agents that disappeared.
 pub(crate) fn refresh(env: &Env, st: &mut State) -> Listing {
     let now = env.now_ms;
@@ -343,6 +370,7 @@ pub(crate) fn refresh(env: &Env, st: &mut State) -> Listing {
         }
     }
     stopped_subagents(env, st);
+    off_roster(env, st);
     heartbeats(env, st);
     devswarm(env, st);
     let again = relist(env, st, due);
