@@ -35,10 +35,11 @@ const path = require('node:path');
 const cp = require('node:child_process');
 
 const PLUGIN = path.join(__dirname, '../../plugins/anti-hall');
-const cli = require(path.join(PLUGIN, 'scripts/devswarm.js'));
-const storeLib = require(path.join(PLUGIN, 'companion/lib/devswarm-store.js'));
-const repokey = require(path.join(PLUGIN, 'companion/lib/devswarm-repokey.js'));
-const recovery = require(path.join(PLUGIN, 'companion/lib/recovery.js'));
+const NODE_PLUGIN = path.join(__dirname, '../../plugins/anti-hall-node');
+const cli = require(path.join(NODE_PLUGIN, 'scripts/devswarm.js'));
+const storeLib = require(path.join(NODE_PLUGIN, 'companion/lib/devswarm-store.js'));
+const repokey = require(path.join(NODE_PLUGIN, 'companion/lib/devswarm-repokey.js'));
+const recovery = require(path.join(NODE_PLUGIN, 'companion/lib/recovery.js'));
 const HOLD_LOCK_HELPER = path.join(__dirname, '../helpers/fixcli-0102-hold-lock.js');
 
 function tmpHome() {
@@ -90,7 +91,7 @@ test('D5: a lockBusy first attempt retries and succeeds once the holder releases
     // then releases — the SECOND attempt must then succeed.
     const readyFile = path.join(home, 'lock-ready.txt');
     const holdMs = 2300;
-    const holder = cp.spawn(process.execPath, [HOLD_LOCK_HELPER, PLUGIN, home, id, String(holdMs), readyFile], { stdio: 'ignore' });
+    const holder = cp.spawn(process.execPath, [HOLD_LOCK_HELPER, NODE_PLUGIN, home, id, String(holdMs), readyFile], { stdio: 'ignore' });
     try {
       waitForFile(readyFile, 5000);
 

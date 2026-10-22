@@ -9,7 +9,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-const PLUGIN = path.resolve(__dirname, '..', '..', 'plugins', 'anti-hall');
+const PLUGIN = path.resolve(__dirname, '..', '..', 'plugins', 'anti-hall-node'); // the Node backup tree holds the hooks under test
 
 const CASES = [
   ['hooks/model-routing-guard.js', 'DEPLOY_STRONG_RE',

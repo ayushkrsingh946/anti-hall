@@ -28,11 +28,12 @@ const path = require('node:path');
 const cp = require('node:child_process');
 
 const ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const cli = require(path.join(ROOT, 'scripts', 'devswarm.js'));
-const storeLib = require(path.join(ROOT, 'companion', 'lib', 'devswarm-store.js'));
-const repoKeyLib = require(path.join(ROOT, 'companion', 'lib', 'devswarm-repokey.js'));
-const updateMod = require(path.join(ROOT, 'skills', 'update', 'scripts', 'update.js'));
-const { DEFAULT_ROSTER_IDLE_MS } = require(path.join(ROOT, 'companion', 'lib', 'liveness.js'));
+const NODE_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const cli = require(path.join(NODE_ROOT, 'scripts', 'devswarm.js'));
+const storeLib = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-store.js'));
+const repoKeyLib = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-repokey.js'));
+const updateMod = require(path.join(NODE_ROOT, 'skills', 'update', 'scripts', 'update.js'));
+const { DEFAULT_ROSTER_IDLE_MS } = require(path.join(NODE_ROOT, 'companion', 'lib', 'liveness.js'));
 
 const STALE_MS = DEFAULT_ROSTER_IDLE_MS + 60 * 60 * 1000;
 
@@ -108,7 +109,7 @@ test('re-retire: DemoApp shape — archived A + resurrected legacy-slug twin T (
       assert.equal(s.messageCount('A') >= 2, true, 'A must have received the forwarded mail');
     } finally { s.close(); }
 
-    const { isArchivedWorkspace } = require(path.join(ROOT, 'companion', 'lib', 'devswarm-archived.js'));
+    const { isArchivedWorkspace } = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-archived.js'));
     assert.equal(isArchivedWorkspace(home, 'A', repo), true, 'A must still read as archived');
   } finally { rm(home); rm(repo); }
 });
@@ -176,7 +177,7 @@ test('R2: a row whose own marker is the ONLY marker at its worktree ("no forward
 test('R2 P1: a candidate whose lock is held by a concurrent operation is skipped (lock-busy), never raced', () => {
   const home = tmpHome();
   const repo = makeGitRepo('main');
-  const recovery = require(path.join(ROOT, 'companion', 'lib', 'recovery.js'));
+  const recovery = require(path.join(NODE_ROOT, 'companion', 'lib', 'recovery.js'));
   try {
     const ctx = { home, env: {}, cwd: repo, now: Date.now(), backend: backend() };
     let r = cli.run(['register', 'A7', '--worktree', repo, '--session', 'sess-A7'], ctx);
@@ -314,7 +315,7 @@ function registryHasId(home, repo, id) {
 test('doctor repair: a bare (default) runRepairs pass leaves a resurrected row untouched', () => {
   const { home, repo, tid } = setupDoctorFixture('B5');
   try {
-    const doctorRepair = require(path.join(ROOT, 'hooks', 'lib', 'doctor-repair.js'));
+    const doctorRepair = require(path.join(NODE_ROOT, 'hooks', 'lib', 'doctor-repair.js'));
     const results = doctorRepair.runRepairs({ home, cwd: repo, env: {}, dryRun: false });
     assert.equal(results.find((x) => x.id === 're-retire-resurrected'), undefined,
       're-retire-resurrected must not appear in the default AUTO-SAFE repair pass at all');
@@ -325,7 +326,7 @@ test('doctor repair: a bare (default) runRepairs pass leaves a resurrected row u
 test('doctor repair: checkResurrectedRows (unconditional DETECT, doctor --check included) reports the candidate + the exact command', () => {
   const { home, repo, tid } = setupDoctorFixture('C5');
   try {
-    const doctorRepair = require(path.join(ROOT, 'hooks', 'lib', 'doctor-repair.js'));
+    const doctorRepair = require(path.join(NODE_ROOT, 'hooks', 'lib', 'doctor-repair.js'));
     const result = doctorRepair.checkResurrectedRows({ home, cwd: repo, env: {} });
     assert.ok(result, 'must report when a candidate exists');
     assert.equal(result.candidates, 1);
@@ -337,7 +338,7 @@ test('doctor repair: checkResurrectedRows (unconditional DETECT, doctor --check 
 test('doctor repair: --repair-resurrected (no --apply) leaves the row and prints the plan', () => {
   const { home, repo, tid } = setupDoctorFixture('D5');
   try {
-    const doctorRepair = require(path.join(ROOT, 'hooks', 'lib', 'doctor-repair.js'));
+    const doctorRepair = require(path.join(NODE_ROOT, 'hooks', 'lib', 'doctor-repair.js'));
     const results = doctorRepair.runResurrectedRepair({ home, cwd: repo, env: {}, dryRun: true });
     const row = results.find((x) => x.id === 'repair-resurrected');
     assert.ok(row);
@@ -350,7 +351,7 @@ test('doctor repair: --repair-resurrected (no --apply) leaves the row and prints
 test('doctor repair: --repair-resurrected --apply removes the row; a second apply is a no-op', () => {
   const { home, repo, tid } = setupDoctorFixture('E5');
   try {
-    const doctorRepair = require(path.join(ROOT, 'hooks', 'lib', 'doctor-repair.js'));
+    const doctorRepair = require(path.join(NODE_ROOT, 'hooks', 'lib', 'doctor-repair.js'));
     const applied = doctorRepair.runResurrectedRepair({ home, cwd: repo, env: {}, dryRun: false });
     const appliedRow = applied.find((x) => x.id === 'repair-resurrected');
     assert.ok(appliedRow);

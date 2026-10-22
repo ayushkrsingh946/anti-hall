@@ -1487,9 +1487,10 @@ test('install-divergence: a REAL marketplace clone with divergent watcher conten
     const PLUGIN_ROOT = path.join(REPO_ROOT, 'plugins', 'anti-hall');
     const realVersion = JSON.parse(fs.readFileSync(path.join(PLUGIN_ROOT, '.claude-plugin', 'plugin.json'), 'utf8')).version;
     const mpPluginDir = path.join(mpBase, 'plugins', 'anti-hall');
+    const NODE_mpPluginDir = path.join(mpBase, 'plugins', 'anti-hall-node');
     fs.cpSync(PLUGIN_ROOT, mpPluginDir, { recursive: true });
-    fs.mkdirSync(path.join(mpPluginDir, 'companion', 'lib'), { recursive: true });
-    fs.writeFileSync(path.join(mpPluginDir, 'companion', 'lib', 'devswarm-wake-watch.js'), '// FINAL post-fix watcher, different from installed\n');
+    fs.mkdirSync(path.join(NODE_mpPluginDir, 'companion', 'lib'), { recursive: true });
+    fs.writeFileSync(path.join(NODE_mpPluginDir, 'companion', 'lib', 'devswarm-wake-watch.js'), '// FINAL post-fix watcher, different from installed\n');
 
     const results = repair.runRepairs({ cwd: repo, env: { ANTIHALL_MARKETPLACE_DIR: mpBase }, home, dryRun: true, platform: 'win32' });
     const divergence = results.find((x) => x.id === 'install-divergence');

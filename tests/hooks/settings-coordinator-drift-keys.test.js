@@ -11,8 +11,9 @@ const os = require('node:os');
 const path = require('node:path');
 
 const PLUGIN = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const schema = require(path.join(PLUGIN, 'hooks', 'lib', 'settings-schema.js'));
-const settings = require(path.join(PLUGIN, 'hooks', 'lib', 'settings.js'));
+const NODE_PLUGIN = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const schema = require(path.join(NODE_PLUGIN, 'hooks', 'lib', 'settings-schema.js'));
+const settings = require(path.join(NODE_PLUGIN, 'hooks', 'lib', 'settings.js'));
 
 const NUM = [
   ['coordinatorWorkWindowMinutes', 0, 10, 'ANTIHALL_COORDINATOR_WORK_WINDOW_MINUTES'],
@@ -101,7 +102,7 @@ test('a negative env value for the 4 numeric keys falls back to the default, not
   for (const [key, , dflt, env] of NUM) {
     assert.strictEqual(settings.get('guards', key, undefined, { home, env: { [env]: '-3' } }), dflt, key);
   }
-  const L = require(path.join(PLUGIN, 'hooks', 'lib', 'coordinator-work.js'));
+  const L = require(path.join(NODE_PLUGIN, 'hooks', 'lib', 'coordinator-work.js'));
   const saved = {};
   for (const [, , , env] of NUM) { saved[env] = process.env[env]; process.env[env] = '-1'; }
   try {

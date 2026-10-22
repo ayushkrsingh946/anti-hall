@@ -8,10 +8,11 @@ const os = require('node:os');
 const path = require('node:path');
 
 const PLUGIN = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const ei = require(path.join(PLUGIN, 'hooks', 'lib', 'enabled-install.js'));
-const cachePrune = require(path.join(PLUGIN, 'hooks', 'lib', 'cache-prune.js'));
-const update = require(path.join(PLUGIN, 'skills', 'update', 'scripts', 'update.js'));
-const doctorDevswarm = require(path.join(PLUGIN, 'companion', 'lib', 'doctor-devswarm.js'));
+const NODE_PLUGIN = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const ei = require(path.join(NODE_PLUGIN, 'hooks', 'lib', 'enabled-install.js'));
+const cachePrune = require(path.join(NODE_PLUGIN, 'hooks', 'lib', 'cache-prune.js'));
+const update = require(path.join(NODE_PLUGIN, 'skills', 'update', 'scripts', 'update.js'));
+const doctorDevswarm = require(path.join(NODE_PLUGIN, 'companion', 'lib', 'doctor-devswarm.js'));
 
 const LIVE = 'anti-hall@anti-hall-engine-live';
 

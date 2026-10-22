@@ -23,8 +23,10 @@ const { spawn } = require('node:child_process');
 
 const ROOT = process.env.ANTIHALL_TEST_PLUGIN_ROOT
   || path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const wakeWatchPath = path.join(ROOT, 'companion', 'lib', 'devswarm-wake-watch.js');
-const stableLauncherPath = path.join(ROOT, 'hooks', 'lib', 'stable-launcher.js');
+const NODE_ROOT = process.env.ANTIHALL_TEST_PLUGIN_ROOT
+  || path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const wakeWatchPath = path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-wake-watch.js');
+const stableLauncherPath = path.join(NODE_ROOT, 'hooks', 'lib', 'stable-launcher.js');
 if (!fs.existsSync(wakeWatchPath) || !fs.existsSync(stableLauncherPath)) {
   throw new Error('ANTIHALL_TEST_PLUGIN_ROOT=' + JSON.stringify(ROOT) + ' is not a plugins/anti-hall-shaped tree');
 }

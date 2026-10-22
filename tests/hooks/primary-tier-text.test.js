@@ -61,7 +61,8 @@ for (const { hook, marker, payload } of HOOKS) {
 
 test('schema / manifest parity for devswarm.dispatchTierText', () => {
   const plugin = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-  const e = require(path.join(plugin, 'hooks', 'lib', 'settings-schema.js')).findSetting('devswarm', 'dispatchTierText');
+  const NODE_plugin = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+  const e = require(path.join(NODE_plugin, 'hooks', 'lib', 'settings-schema.js')).findSetting('devswarm', 'dispatchTierText');
   assert.ok(e);
   assert.strictEqual(e.default, true);
   assert.strictEqual(e.env, 'ANTIHALL_DEVSWARM_DISPATCH_TIER_TEXT');

@@ -25,9 +25,11 @@ const cp = require('node:child_process');
 
 const ROOT = process.env.ANTIHALL_TEST_PLUGIN_ROOT
   || path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const cli = require(path.join(ROOT, 'scripts', 'devswarm.js'));
-const storeLib = require(path.join(ROOT, 'companion', 'lib', 'devswarm-store.js'));
-const inboxCursor = require(path.join(ROOT, 'companion', 'lib', 'devswarm-inbox-cursor.js'));
+const NODE_ROOT = process.env.ANTIHALL_TEST_PLUGIN_ROOT
+  || path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const cli = require(path.join(NODE_ROOT, 'scripts', 'devswarm.js'));
+const storeLib = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-store.js'));
+const inboxCursor = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-inbox-cursor.js'));
 
 function tmpHome() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ah-8b21-'));
@@ -47,7 +49,7 @@ function makeGitRepo(tag) {
 }
 function backend() { return (storeLib.sqliteAvailable && storeLib.sqliteAvailable()) ? 'sqlite' : 'journal'; }
 function repoKeyOf(repo) {
-  const rk = require(path.join(ROOT, 'companion', 'lib', 'devswarm-repokey.js'));
+  const rk = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-repokey.js'));
   return rk.repoKeyForWorktree(repo);
 }
 // Seed `n` direct messages addressed to `id` into that repo's store partition.

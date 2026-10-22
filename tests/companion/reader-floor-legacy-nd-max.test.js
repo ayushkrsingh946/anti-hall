@@ -22,11 +22,12 @@ const os = require('node:os');
 const path = require('node:path');
 
 const ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const storeLib = require(path.join(ROOT, 'companion', 'lib', 'devswarm-store.js'));
-const rc = require(path.join(ROOT, 'companion', 'lib', 'reader-cursors.js'));
-const liveness = require(path.join(ROOT, 'companion', 'lib', 'liveness.js'));
-const dwReal = require(path.join(ROOT, 'scripts', 'devswarm.js'));
-const updateJs = require(path.join(ROOT, 'skills', 'update', 'scripts', 'update.js'));
+const NODE_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const storeLib = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-store.js'));
+const rc = require(path.join(NODE_ROOT, 'companion', 'lib', 'reader-cursors.js'));
+const liveness = require(path.join(NODE_ROOT, 'companion', 'lib', 'liveness.js'));
+const dwReal = require(path.join(NODE_ROOT, 'scripts', 'devswarm.js'));
+const updateJs = require(path.join(NODE_ROOT, 'skills', 'update', 'scripts', 'update.js'));
 
 const HASH = 'fixture-repo-abc124';
 const BACKENDS = storeLib.sqliteAvailable && storeLib.sqliteAvailable() ? ['sqlite', 'journal'] : ['journal'];

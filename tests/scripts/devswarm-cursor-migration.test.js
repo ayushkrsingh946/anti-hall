@@ -16,12 +16,14 @@ const cp = require('node:child_process');
 
 const ROOT = process.env.ANTIHALL_TEST_PLUGIN_ROOT
   || path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const cli = require(path.join(ROOT, 'scripts', 'devswarm.js'));
-const storeLib = require(path.join(ROOT, 'companion', 'lib', 'devswarm-store.js'));
-const inboxCursor = require(path.join(ROOT, 'companion', 'lib', 'devswarm-inbox-cursor.js'));
-const doctorDevswarm = require(path.join(ROOT, 'companion', 'lib', 'doctor-devswarm.js'));
-const updateMod = require(path.join(ROOT, 'skills', 'update', 'scripts', 'update.js'));
-const readerCursors = require(path.join(ROOT, 'companion', 'lib', 'reader-cursors.js'));
+const NODE_ROOT = process.env.ANTIHALL_TEST_PLUGIN_ROOT
+  || path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const cli = require(path.join(NODE_ROOT, 'scripts', 'devswarm.js'));
+const storeLib = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-store.js'));
+const inboxCursor = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-inbox-cursor.js'));
+const doctorDevswarm = require(path.join(NODE_ROOT, 'companion', 'lib', 'doctor-devswarm.js'));
+const updateMod = require(path.join(NODE_ROOT, 'skills', 'update', 'scripts', 'update.js'));
+const readerCursors = require(path.join(NODE_ROOT, 'companion', 'lib', 'reader-cursors.js'));
 function floorRow(home, repo, id, ns) {
   const s = storeLib.openStore({ home, hash: repoKeyOf(repo), backend: backend() });
   try { return s.readerCursorRows(id).find((r) => r.ns === (ns || 'store') && r.reader === '#floor') || null; }
@@ -46,7 +48,7 @@ function makeGitRepo(tag) {
 }
 function backend() { return (storeLib.sqliteAvailable && storeLib.sqliteAvailable()) ? 'sqlite' : 'journal'; }
 function repoKeyOf(repo) {
-  return require(path.join(ROOT, 'companion', 'lib', 'devswarm-repokey.js')).repoKeyForWorktree(repo);
+  return require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-repokey.js')).repoKeyForWorktree(repo);
 }
 function cursorsDir(home) { return path.join(home, '.anti-hall', 'devswarm', 'cursors'); }
 function seed(home, repo, id, n) {
@@ -269,7 +271,8 @@ function tryGitTag() {
   const ex = cp.spawnSync('tar', ['-x', '-f', tarFile, '-C', dest], { timeout: 20000 });
   if (ex.status !== 0) { rm(dest); return null; }
   const root = path.join(dest, 'plugins', 'anti-hall');
-  if (!fs.existsSync(path.join(root, 'scripts', 'devswarm.js'))) { rm(dest); return null; }
+  const NODE_root = path.join(dest, 'plugins', 'anti-hall-node');
+  if (!fs.existsSync(path.join(NODE_root, 'scripts', 'devswarm.js'))) { rm(dest); return null; }
   oldBuildTemp = dest;
   return { root, source: 'git commit ' + tag + ' (v' + OLD_VERSION + ')' };
 }
@@ -567,8 +570,8 @@ test('Phase 3 import: the all-stores driver is fail-open per partition and dry-r
     assert.strictEqual(dry.dryRun, true);
     assert.ok(dry.wouldImport >= 1);
     assert.strictEqual(floorRow(home, repo, id), null, 'dry run wrote no reader_cursors row');
-    const origImport = require(path.join(ROOT, 'companion', 'lib', 'reader-cursors.js')).importLegacy;
-    const rcMod = require(path.join(ROOT, 'companion', 'lib', 'reader-cursors.js'));
+    const origImport = require(path.join(NODE_ROOT, 'companion', 'lib', 'reader-cursors.js')).importLegacy;
+    const rcMod = require(path.join(NODE_ROOT, 'companion', 'lib', 'reader-cursors.js'));
     let calls = 0;
     rcMod.importLegacy = (s, o) => { calls += 1; if (calls === 1) throw new Error('one bad partition'); return origImport(s, o); };
     let r;

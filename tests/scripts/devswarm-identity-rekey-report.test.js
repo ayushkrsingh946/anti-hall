@@ -17,9 +17,10 @@ const { buildIdentityFixtures } = require('../helpers/git-fixtures.js');
 const legacyRepokey = require('../helpers/legacy-repokey-0.103.0.js');
 
 const PLUGIN = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const devswarm = require(path.join(PLUGIN, 'scripts', 'devswarm.js'));
-const store = require(path.join(PLUGIN, 'companion', 'lib', 'devswarm-store.js'));
-const identity = require(path.join(PLUGIN, 'companion', 'lib', 'identity.js'));
+const NODE_PLUGIN = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const devswarm = require(path.join(NODE_PLUGIN, 'scripts', 'devswarm.js'));
+const store = require(path.join(NODE_PLUGIN, 'companion', 'lib', 'devswarm-store.js'));
+const identity = require(path.join(NODE_PLUGIN, 'companion', 'lib', 'identity.js'));
 
 const ENV = { ANTIHALL_INGEST_DRY_RUN: '1' };
 const BACKENDS = ['journal'].concat(store.sqliteAvailable() ? ['sqlite'] : []);
@@ -56,7 +57,7 @@ function send(s, fields) {
   return store.appendMeshMessage(s, Object.assign({}, f, { hash: store.meshMessageHash(f) }));
 }
 
-const doctorRepair = require(path.join(PLUGIN, 'hooks', 'lib', 'doctor-repair.js'));
+const doctorRepair = require(path.join(NODE_PLUGIN, 'hooks', 'lib', 'doctor-repair.js'));
 const KINDS = ['wt/libs/sub', 'wt/libs/sub/inner', 'main/vend/raw', 'main/emb', 'subwt'];
 
 for (const backend of BACKENDS) {

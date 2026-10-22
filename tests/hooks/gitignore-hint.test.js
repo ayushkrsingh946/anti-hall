@@ -21,8 +21,9 @@ process.env.GIT_CONFIG_NOSYSTEM = '1';
 
 const REPO_ROOT = path.join(__dirname, '..', '..');
 const PLUGIN = path.join(REPO_ROOT, 'plugins', 'anti-hall');
-const hint = require(path.join(PLUGIN, 'hooks', 'lib', 'gitignore-hint.js'));
-const { runRepairs } = require(path.join(PLUGIN, 'hooks', 'lib', 'doctor-repair.js'));
+const NODE_PLUGIN = path.join(REPO_ROOT, 'plugins', 'anti-hall-node');
+const hint = require(path.join(NODE_PLUGIN, 'hooks', 'lib', 'gitignore-hint.js'));
+const { runRepairs } = require(path.join(NODE_PLUGIN, 'hooks', 'lib', 'doctor-repair.js'));
 const GIT_ENV = { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' };
 
 function tmp(tag) { return fs.mkdtempSync(path.join(os.tmpdir(), 'antihall-gih-' + tag + '-')); }
@@ -143,7 +144,7 @@ test('runRepairs: migrationsOnly (automatic pass) never touches info/exclude', (
 test('doctor --check: WARNs with the remedy when not ignored; silent when ignored', () => {
   const d = repo();
   const home = makeHome().home || fs.mkdtempSync(path.join(os.tmpdir(), 'antihall-doctor-default-home-'));
-  const run = () => cp.spawnSync(process.execPath, [path.join(PLUGIN, 'hooks', 'doctor.js'), '--check'], {
+  const run = () => cp.spawnSync(process.execPath, [path.join(NODE_PLUGIN, 'hooks', 'doctor.js'), '--check'], {
     cwd: d, encoding: 'utf8', timeout: 120000,
     env: Object.assign({}, process.env, GIT_ENV, { HOME: home, USERPROFILE: home, ANTIHALL_INGEST_DRY_RUN: '1' }),
   });

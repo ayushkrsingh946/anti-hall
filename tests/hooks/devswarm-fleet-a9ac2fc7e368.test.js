@@ -30,10 +30,12 @@ const { spawnSync } = require('node:child_process');
 
 const ROOT = process.env.ANTIHALL_TEST_PLUGIN_ROOT
   || path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
+const NODE_ROOT = process.env.ANTIHALL_TEST_PLUGIN_ROOT
+  || path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
 
-const hookPath = path.join(ROOT, 'hooks', 'devswarm-parent-inbox.js');
-const archivedCachePath = path.join(ROOT, 'companion', 'lib', 'devswarm-archived-cache.js');
-const repokeyPath = path.join(ROOT, 'companion', 'lib', 'devswarm-repokey.js');
+const hookPath = path.join(NODE_ROOT, 'hooks', 'devswarm-parent-inbox.js');
+const archivedCachePath = path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-archived-cache.js');
+const repokeyPath = path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-repokey.js');
 if (!fs.existsSync(hookPath) || !fs.existsSync(archivedCachePath) || !fs.existsSync(repokeyPath)) {
   throw new Error(
     'ANTIHALL_TEST_PLUGIN_ROOT=' + JSON.stringify(ROOT) + ' is not a plugins/anti-hall-shaped '

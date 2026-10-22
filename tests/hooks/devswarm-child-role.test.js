@@ -231,8 +231,9 @@ test('WAKE: Claude Primary -> CronCreate directive using the read-primary drain 
   const cp = require('node:child_process');
   const os = require('node:os');
   const ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-  const cli = require(path.join(ROOT, 'scripts', 'devswarm.js'));
-  const inst = require(path.join(ROOT, 'companion', 'install-devswarm-ingest.js'));
+  const NODE_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+  const cli = require(path.join(NODE_ROOT, 'scripts', 'devswarm.js'));
+  const inst = require(path.join(NODE_ROOT, 'companion', 'install-devswarm-ingest.js'));
 
   function rm(p) { try { fs.rmSync(p, { recursive: true, force: true }); } catch (_) {} }
   function repoFixture() {

@@ -13,7 +13,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const DEFAULT_PLUGIN_ROOT = path.join(__dirname, '..', '..', '..', 'plugins', 'anti-hall');
+const DEFAULT_PLUGIN_ROOT = path.join(__dirname, '..', '..', '..', 'plugins', 'anti-hall-node');
 
 // sourceFiles(pluginRoot?): absolute paths — scripts/devswarm.js first, then
 // every *.js directly under scripts/devswarm-lib/ (if it exists), sorted.
@@ -42,7 +42,7 @@ function readAll(pluginRoot) {
 // onto the dispatcher's key ('scripts/devswarm.js') so file-keyed allowlists
 // treat devswarm.js + devswarm-lib/* as one unit; any other path is unchanged.
 function logicalUnit(rel) {
-  return /^(?:plugins\/anti-hall\/)?scripts\/devswarm-lib\/[^/]+\.js$/.test(rel)
+  return /^(?:plugins\/anti-hall-node\/)?scripts\/devswarm-lib\/[^/]+\.js$/.test(rel)
     ? rel.replace(/scripts\/devswarm-lib\/[^/]+\.js$/, 'scripts/devswarm.js')
     : rel;
 }

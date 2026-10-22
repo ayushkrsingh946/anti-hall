@@ -39,8 +39,10 @@ function layoutMarketplace(home) {
   return dir;
 }
 
+// The real scripts live in the Node backup tree, a sibling of the plugin root (nodeback.node_dir = ../anti-hall-node).
 function writeRealTarget(root, segments, contents) {
-  const target = path.join(root, ...segments);
+  const nodeRoot = path.basename(root) === 'anti-hall' ? path.join(path.dirname(root), 'anti-hall-node') : root;
+  const target = path.join(nodeRoot, ...segments);
   fs.mkdirSync(path.dirname(target), { recursive: true });
   fs.writeFileSync(target, contents);
   return target;
@@ -211,6 +213,7 @@ test('launcher picks the ENABLED anti-hall@* install, not the anti-hall@anti-hal
   const home = tmpHome();
   try {
     const oldRoot = path.join(home, 'old-install', 'plugins', 'anti-hall');
+    const NODE_oldRoot = path.join(home, 'old-install', 'plugins', 'anti-hall-node');
     const newRoot = path.join(home, 'new-install', 'plugins', 'anti-hall');
     for (const kind of [['scripts', 'devswarm.js'], ['companion', 'lib', 'devswarm-wake-watch.js']]) {
       writeRealTarget(oldRoot, kind, 'console.log("OLD");\n');
@@ -230,8 +233,8 @@ test('launcher picks the ENABLED anti-hall@* install, not the anti-hall@anti-hal
     }));
     const env = Object.assign({}, process.env, { HOME: home, USERPROFILE: home });
     const { cli, watcher } = stableLauncher.installLaunchers({
-      cliFallback: path.join(oldRoot, 'scripts', 'devswarm.js'),
-      watcherFallback: path.join(oldRoot, 'companion', 'lib', 'devswarm-wake-watch.js'),
+      cliFallback: path.join(NODE_oldRoot, 'scripts', 'devswarm.js'),
+      watcherFallback: path.join(NODE_oldRoot, 'companion', 'lib', 'devswarm-wake-watch.js'),
       home,
     });
     for (const l of [cli, watcher]) {
@@ -253,6 +256,7 @@ test('launcher-choice.log gets one line per CHANGE of choice, not one per run (#
   const home = tmpHome();
   try {
     const root = path.join(home, 'only-install', 'plugins', 'anti-hall');
+    const NODE_root = path.join(home, 'only-install', 'plugins', 'anti-hall-node');
     const kind = ['scripts', 'devswarm.js'];
     writeRealTarget(root, kind, 'console.log("ONLY");\n');
     writeRealTarget(root, ['companion', 'lib', 'devswarm-wake-watch.js'], 'console.log("ONLY");\n');
@@ -265,8 +269,8 @@ test('launcher-choice.log gets one line per CHANGE of choice, not one per run (#
     fs.writeFileSync(path.join(home, '.claude', 'settings.json'), JSON.stringify({ enabledPlugins: {} }));
     const env = Object.assign({}, process.env, { HOME: home, USERPROFILE: home });
     const { cli } = stableLauncher.installLaunchers({
-      cliFallback: path.join(root, 'scripts', 'devswarm.js'),
-      watcherFallback: path.join(root, 'companion', 'lib', 'devswarm-wake-watch.js'),
+      cliFallback: path.join(NODE_root, 'scripts', 'devswarm.js'),
+      watcherFallback: path.join(NODE_root, 'companion', 'lib', 'devswarm-wake-watch.js'),
       home,
     });
     for (let i = 0; i < 3; i++) execFileSync(process.execPath, [cli], { env });

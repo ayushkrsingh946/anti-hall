@@ -21,11 +21,12 @@ const os = require('node:os');
 const path = require('node:path');
 
 const ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const appDb = require(path.join(ROOT, 'companion', 'lib', 'devswarm-app-db.js'));
-const { rowState } = require(path.join(ROOT, 'companion', 'lib', 'row-state.js'));
-const dw = require(path.join(ROOT, 'scripts', 'devswarm.js'));
-const M = require(path.join(ROOT, 'companion', 'lib', 'migrations.js'));
-const repokey = require(path.join(ROOT, 'companion', 'lib', 'devswarm-repokey.js'));
+const NODE_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const appDb = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-app-db.js'));
+const { rowState } = require(path.join(NODE_ROOT, 'companion', 'lib', 'row-state.js'));
+const dw = require(path.join(NODE_ROOT, 'scripts', 'devswarm.js'));
+const M = require(path.join(NODE_ROOT, 'companion', 'lib', 'migrations.js'));
+const repokey = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-repokey.js'));
 const { testHook } = require('../helpers/spawn-hook.js');
 
 let sqlite = null;

@@ -15,9 +15,10 @@ const { testHook } = require('../helpers/spawn-hook.js');
 const { switchOff } = require('../helpers/settings-switch.js');
 
 const ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const installIngest = require(path.join(ROOT, 'companion', 'install-devswarm-ingest.js'));
-const { resolveContext } = require(path.join(ROOT, 'companion', 'lib', 'identity.js'));
-const { lockPathFor } = require(path.join(ROOT, 'companion', 'lib', 'devswarm-wake-watch.js'));
+const NODE_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const installIngest = require(path.join(NODE_ROOT, 'companion', 'install-devswarm-ingest.js'));
+const { resolveContext } = require(path.join(NODE_ROOT, 'companion', 'lib', 'identity.js'));
+const { lockPathFor } = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-wake-watch.js'));
 
 const HOOK = 'devswarm-parent-gate.js';
 const CLAUDE_ENV = { DEVSWARM_REPO_ID: 'repo-1', DEVSWARM_AI_AGENT: 'claude' };

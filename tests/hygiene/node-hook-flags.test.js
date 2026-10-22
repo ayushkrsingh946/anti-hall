@@ -17,8 +17,9 @@ const { spawnSync } = require('node:child_process');
 
 const REPO = path.resolve(__dirname, '..', '..');
 const PLUGIN = path.join(REPO, 'plugins', 'anti-hall');
+const NODE_PLUGIN = path.join(REPO, 'plugins', 'anti-hall-node');
 const HOOKS = path.join(PLUGIN, 'hooks');
-const { NODE_HOOK_FLAGS, EXPOSED_HOOKS } = require(path.join(HOOKS, 'lib', 'node-hook-flags.js'));
+const { NODE_HOOK_FLAGS, EXPOSED_HOOKS } = require(path.join(NODE_PLUGIN, 'hooks', 'lib', 'node-hook-flags.js'));
 const PREFIX = 'node ' + NODE_HOOK_FLAGS.join(' ') + ' ';
 
 function commands(file) {
@@ -31,7 +32,7 @@ function commands(file) {
 function tmpHome() { return fs.mkdtempSync(path.join(os.tmpdir(), 'antihall-node-flags-')); }
 
 function run(flags, hook, payload, home, extraEnv, timeout) {
-  return spawnSync(process.execPath, [...flags, path.join(HOOKS, hook)], {
+  return spawnSync(process.execPath, [...flags, path.join(NODE_PLUGIN, 'hooks', hook)], {
     input: JSON.stringify(payload),
     env: Object.assign({ PATH: process.env.PATH, HOME: home, ANTIHALL_TEST_ISOLATION: '1' }, extraEnv || {}),
     encoding: 'utf8',
@@ -54,7 +55,7 @@ const ARG_ALLOWLIST = {
 // only, the same form with the flags inserted after `node`. Trailing args must be
 // allowlisted for that exact script; `claudeOnly` args are a failure on Codex (isCodex).
 function check(cmds, root, isCodex) {
-  const plain = new RegExp('^node "\\$\\{' + root + '\\}/hooks/([\\w-]+\\.js)"((?: \\S+)*)$');
+  const plain = new RegExp('^node "\\$\\{' + root + '\\}/(?:\\.\\./anti-hall-node/)?hooks/([\\w-]+\\.js)"((?: \\S+)*)$');
   const bad = [];
   const flagged = new Set();
   for (const c of cmds) {
@@ -85,14 +86,14 @@ test('exactly the EXPOSED_HOOKS entries carry the flags; every other command kee
   // every exposed script is registered for Claude and flagged there
   assert.deepStrictEqual([...claude.flagged].sort(), Object.keys(EXPOSED_HOOKS).sort());
   assert.ok(claude.flagged.has('silent-agent-nudge.js') && codex.flagged.has('silent-agent-nudge.js'));
-  for (const f of Object.keys(EXPOSED_HOOKS)) assert.ok(fs.existsSync(path.join(HOOKS, f)), f);
+  for (const f of Object.keys(EXPOSED_HOOKS)) assert.ok(fs.existsSync(path.join(NODE_PLUGIN, 'hooks', f)), f);
 });
 
 // Since the engine, install-codex registers thin triggers (`ah-hook.sh <Event> --host codex`), not direct node
 // commands. Node is now launched only by the wrapper fallback (ah-fallback*.list / .map.json) and the engine
 // dispatcher (engine/defaults/dispatch.toml), both generated from the registry. The flags must be present there.
 test('install-codex registers only thin ah-hook.sh triggers (no direct node command)', () => {
-  const { ANTI_HALL_HOOKS } = require(path.join(PLUGIN, 'codex', 'install-codex.js'));
+  const { ANTI_HALL_HOOKS } = require(path.join(NODE_PLUGIN, 'codex', 'install-codex.js'));
   const cmds = [];
   for (const groups of Object.values(ANTI_HALL_HOOKS)) for (const g of groups) for (const h of g.hooks) cmds.push(h.command);
   assert.ok(cmds.length >= 5);

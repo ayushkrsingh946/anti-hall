@@ -23,6 +23,7 @@ const path = require('node:path');
 const devswarmSource = require('../scripts/lib/devswarm-source.js');
 
 const PLUGIN_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
+const NODE_PLUGIN_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
 const EXEMPT = new Set(['companion/lib/lock.js']);
 
 const LOCKISH = /lock/i;
@@ -89,8 +90,8 @@ function scanSource(src) {
 
 function scan() {
   const found = {};
-  for (const abs of walk(PLUGIN_ROOT, [])) {
-    const rel = path.relative(PLUGIN_ROOT, abs).split(path.sep).join('/');
+  for (const [abs, base] of [PLUGIN_ROOT, NODE_PLUGIN_ROOT].flatMap((r) => walk(r, []).map((a) => [a, r]))) {
+    const rel = path.relative(base, abs).split(path.sep).join('/');
     if (EXEMPT.has(rel)) continue;
     // scripts/devswarm-lib/* is one logical unit with scripts/devswarm.js.
     const key = devswarmSource.logicalUnit(rel);
@@ -144,7 +145,7 @@ if (require.main === module && process.argv.includes('--print')) {
     ].join('\n');
     assert.deepStrictEqual(scanSource(planted), { 'excl-create': 3, link: 2, 'unlink-lock': 1 });
     // lock.js itself is the one place these belong.
-    const own = scanSource(fs.readFileSync(path.join(PLUGIN_ROOT, 'companion', 'lib', 'lock.js'), 'utf8'));
+    const own = scanSource(fs.readFileSync(path.join(NODE_PLUGIN_ROOT, 'companion', 'lib', 'lock.js'), 'utf8'));
     assert.ok((own.link || 0) > 0 && (own['excl-create'] || 0) > 0, 'lock.js is exempt, not invisible to the scanner');
   });
 }

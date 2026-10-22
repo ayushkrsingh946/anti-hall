@@ -13,10 +13,11 @@ const path = require('node:path');
 const cp = require('node:child_process');
 
 const ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const L = require(path.join(ROOT, 'companion', 'lib', 'lock.js'));
-const wakeWatchPath = path.join(ROOT, 'companion', 'lib', 'devswarm-wake-watch.js');
+const NODE_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const L = require(path.join(NODE_ROOT, 'companion', 'lib', 'lock.js'));
+const wakeWatchPath = path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-wake-watch.js');
 const wakeWatch = require(wakeWatchPath);
-const pull = require(path.join(ROOT, 'companion', 'lib', 'devswarm-pull.js'));
+const pull = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-pull.js'));
 
 function tmp() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ah-lockrel-'));
