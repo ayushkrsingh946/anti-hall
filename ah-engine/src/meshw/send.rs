@@ -914,7 +914,7 @@ fn do_append(c: &AppendCtx<'_>) -> R<Obj> {
 }
 
 #[cfg(test)]
-mod descriptor_prefix_tests {
+mod tests {
     use super::*;
 
     /// #203: a live descriptor id by prefix is found (the engine then hands the send to Node's alias step); other prefixes are not.
