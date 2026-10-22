@@ -193,6 +193,13 @@ pub const STRS: &[(&str, &str)] = &[
         "msg.engine_unreachable_notice",
         "anti-hall: the engine did not answer this {event} call ({why}); it went through unchecked. Run `ah-engine doctor` if it keeps happening.",
     ),
+    ("msg.launcher_unreachable_why_missing", "the engine is not installed"),
+    ("msg.launcher_unreachable_why_down", "the engine is marked down"),
+    ("msg.launcher_unreachable_why_handed_back", "the engine handed the call back"),
+    ("msg.launcher_unreachable_why_silent", "the engine exited without an answer"),
+    ("msg.launcher_unreachable_why_timed_out", "the engine did not answer in time"),
+    ("msg.launcher_unreachable_why_unfinished", "the engine did not finish"),
+    ("msg.launcher_unreachable_why_not_started", "the engine could not be started"),
 ];
 
 /// Per-field number tables (`{ default = .., <Event> = .. }`).

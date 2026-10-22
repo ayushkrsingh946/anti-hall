@@ -321,6 +321,38 @@ value = "anti-hall: the engine is not installed or not runnable, so `{what}` did
 doc = "Printed once per session on stderr by the hook wrapper when the engine is unreachable (not installed, crashed, did not answer in time, marked down): the call passes through unchecked because no fallback hooks exist. Placeholders: {event}, {why}."
 value = "anti-hall: the engine did not answer this {event} call ({why}); it went through unchecked. Run `ah-engine doctor` if it keeps happening."
 
+[msg.launcher_unreachable_why_missing]
+doc = "The {why} of the engine-unreachable notice when no engine is installed."
+value = "the engine is not installed"
+
+[msg.launcher_unreachable_why_down]
+doc = "The {why} of the engine-unreachable notice when the daemon-down marker is fresh."
+value = "the engine is marked down"
+
+[msg.launcher_unreachable_why_handed_back]
+doc = "The {why} of the engine-unreachable notice when the engine handed the call back."
+value = "the engine handed the call back"
+
+[msg.launcher_unreachable_why_silent]
+doc = "The {why} of the engine-unreachable notice when the engine exited without an answer."
+value = "the engine exited without an answer"
+
+[msg.launcher_unreachable_why_timed_out]
+doc = "The {why} of the engine-unreachable notice when the engine did not answer in time."
+value = "the engine did not answer in time"
+
+[msg.launcher_unreachable_why_unfinished]
+doc = "The {why} of the engine-unreachable notice when the engine did not finish."
+value = "the engine did not finish"
+
+[msg.launcher_unreachable_why_not_started]
+doc = "The {why} of the engine-unreachable notice when the engine could not be started."
+value = "the engine could not be started"
+
+[msg.engine_unreachable_why_daemon]
+doc = "The {why} of the engine-unreachable notice when the client could not reach the engine's daemon (down, breaker open, crash-loop stop)."
+value = "the engine daemon could not be reached"
+
 [msg.cold_guard_notice]
 doc = "Printed once per session on stderr when a guard event gave up waiting for a cold-starting daemon and was let through unchecked; {event} is the event name."
 value = "anti-hall: the engine was still starting, so this {event} was not checked; the guards apply again once it is up"

@@ -358,6 +358,20 @@ fn exchange_for(sock: &Path, payload: &[u8], deadline: Duration, window: Duratio
     rx.recv_timeout(window + defaults::millis("client.deadline_slack_ms")).unwrap_or_else(|_| Exch::Slow(defaults::text("msg.client_timeout").into()))
 }
 
+/// The once-per-session notice for a call the engine could not take because its daemon is unreachable (C9): the same text and state
+/// file as the launcher's, so a call that went through both is told once. The call itself passes through. Empty when this session
+/// already heard it, or when the notice cannot be written (never a second notice for a failed write).
+pub(crate) fn unreachable_notice(raw: &str, event: Option<&str>) -> String {
+    let sid = serde_json::from_str::<serde_json::Value>(raw).ok().and_then(|p| p.get("session_id").and_then(|v| v.as_str().map(str::to_owned))).unwrap_or_else(|| "none".into());
+    let file = state_file("unreachable_notice");
+    if std::fs::read_to_string(&file).is_ok_and(|t| t.trim_end() == sid) {
+        return String::new();
+    }
+    crate::discard::harmless(crate::limits::ensure_private_dir(&paths::dir())); // keep: the notice is still shown when the marker cannot be written
+    crate::discard::logged("unreachable_notice_write", crate::atomic::write(&file, format!("{sid}\n")));
+    defaults::render("msg.engine_unreachable_notice", &[("event", &event.unwrap_or_default()), ("why", &defaults::text("msg.engine_unreachable_why_daemon"))])
+}
+
 fn state_file(key: &str) -> PathBuf {
     paths::dir().join(defaults::text(&format!("files.{key}")))
 }
@@ -979,7 +993,7 @@ fn run_bytes(raw: Vec<u8>, unaskable: bool, fail_closed_unavailable: bool) -> Ou
         let non_ok_reply = take_non_ok_reply();
         let unavailable = take_unavailable() || fail_open_unavailable();
         if !non_ok_reply && unavailable && raw.len() as u64 <= defaults::num("daemon.max_request") {
-            return Outcome { out: env_advisory_output(raw, "").unwrap_or_default(), code: 0, err: String::new() };
+            return Outcome { out: env_advisory_output(raw, "").unwrap_or_default(), code: 0, err: unreachable_notice(raw, event_name.as_deref()) };
         }
     }
     let advisory_raw = if unaskable { None } else { text.map(str::to_owned) };

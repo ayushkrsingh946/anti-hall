@@ -10669,6 +10669,7 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `msg.docs_intro` | Opening paragraph of the generated reference. |
 | `msg.docs_rule_fields` | Paragraph listing the fields of a rule in the generated reference. |
 | `msg.engine_unreachable_notice` | Printed once per session on stderr by the hook wrapper when the engine is unreachable (not installed, crashed, did not answer in time, marked down): the call passes through unchecked because no fallback hooks exist. Placeholders: {event}, {why}. |
+| `msg.engine_unreachable_why_daemon` | The {why} of the engine-unreachable notice when the client could not reach the engine's daemon (down, breaker open, crash-loop stop). |
 | `msg.err_db_busy` | The storage writer queue is full. |
 | `msg.err_db_journal` | The journal mode could not be set. Placeholder: {mode}. |
 | `msg.err_db_schema` | A database was written by a newer build of the engine. Placeholders: {db}, {found}, {known}. |
@@ -10739,6 +10740,13 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `msg.launcher_st_ver_empty` | Selftest reason: the engine's version check printed nothing. |
 | `msg.launcher_st_ver_exit` | Selftest reason: the engine's version check failed with exit code {code}. |
 | `msg.launcher_st_ver_timeout` | Selftest reason: the engine's version check did not finish in {ms} ms. |
+| `msg.launcher_unreachable_why_down` | The {why} of the engine-unreachable notice when the daemon-down marker is fresh. |
+| `msg.launcher_unreachable_why_handed_back` | The {why} of the engine-unreachable notice when the engine handed the call back. |
+| `msg.launcher_unreachable_why_missing` | The {why} of the engine-unreachable notice when no engine is installed. |
+| `msg.launcher_unreachable_why_not_started` | The {why} of the engine-unreachable notice when the engine could not be started. |
+| `msg.launcher_unreachable_why_silent` | The {why} of the engine-unreachable notice when the engine exited without an answer. |
+| `msg.launcher_unreachable_why_timed_out` | The {why} of the engine-unreachable notice when the engine did not answer in time. |
+| `msg.launcher_unreachable_why_unfinished` | The {why} of the engine-unreachable notice when the engine did not finish. |
 | `msg.launcher_wall_hard` | Printed when the launcher passed its wall-clock backstop and let the hook through. |
 | `msg.launcher_why_timeout_ms` | Reason: the milliseconds budget knob is not a positive integer. |
 | `msg.launcher_why_timeout_s` | Reason: the seconds budget knob is not a positive integer. |

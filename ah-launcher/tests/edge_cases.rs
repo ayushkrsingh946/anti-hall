@@ -42,12 +42,30 @@ fn quick_cold(env: &Env) {
 // ---- the engine binary ----------------------------------------------------------------------------------------------------
 
 #[test]
-fn engine_missing_fails_open_silently_and_logs() {
+fn engine_missing_passes_through_logs_and_tells_the_session_once() {
     let env = Env::new("e-missing");
     let o = env.run("PreToolUse", PAYLOAD, None, &[]);
     assert_eq!((o.code, o.out.len()), (0, 0), "{}", o.err);
-    assert!(o.err.is_empty(), "silent: {}", o.err);
     assert!(env.log().contains("engine_missing"), "{}", env.log());
+    // #229: an unreachable engine is never silent: the session hears it once (the C9 notice), the call still passes through
+    assert!(o.err.contains("did not answer this PreToolUse call") && o.err.contains("went through unchecked"), "{}", o.err);
+    let again = env.run("PreToolUse", PAYLOAD, None, &[]);
+    assert_eq!(again.code, 0);
+    assert!(again.err.is_empty(), "the same session is told once: {}", again.err);
+}
+
+#[test]
+fn a_fresh_daemon_down_marker_passes_through_and_tells_the_session_once() {
+    let env = Env::new("e-down-marker");
+    let p = engine(&env, "echo should-not-run");
+    let until = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() + 60_000;
+    std::fs::create_dir_all(&env.state).unwrap();
+    std::fs::write(env.state.join("daemon.down.until"), until.to_string()).unwrap();
+    let o = env.run("PreToolUse", PAYLOAD, Some(&p), &[]);
+    assert_eq!((o.code, o.out.len()), (0, 0), "{}", o.err);
+    assert!(o.err.contains("did not answer this PreToolUse call") && o.err.contains("went through unchecked"), "{}", o.err);
+    let again = env.run("PreToolUse", PAYLOAD, Some(&p), &[]);
+    assert!(again.err.is_empty(), "the same session is told once: {}", again.err);
 }
 
 #[test]

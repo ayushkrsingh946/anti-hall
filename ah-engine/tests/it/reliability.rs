@@ -535,6 +535,22 @@ fn engine_down_fails_open_quickly_with_or_without_fallback() {
     assert!(o.stdout.is_empty() && o.status.success());
 }
 
+/// #229: an engine the client cannot reach passes the call through AND tells the session once (the C9 notice, same state file and text
+/// as the launcher's), never a silent pass.
+#[test]
+fn engine_down_passes_through_and_tells_the_session_once() {
+    let e = Env::new("down-notice", &[("AH_ENGINE_NOSPAWN", "1")]);
+    let (out, err, code, _) = e.hook(DENY_IN, false);
+    assert_eq!((out.as_str(), code), ("", 0));
+    assert!(err.contains("did not answer this PreToolUse call") && err.contains("went through unchecked"), "the session hears it: {err:?}");
+    let (_, again, code, _) = e.hook(DENY_IN, false);
+    assert_eq!(code, 0);
+    assert!(again.is_empty(), "the same session is told once: {again:?}");
+    let other = DENY_IN.replace("\"s1\"", "\"s2\"");
+    let (_, other_err, _, _) = e.hook(&other, false);
+    assert!(other_err.contains("went through unchecked"), "a new session hears it again: {other_err:?}");
+}
+
 #[cfg(target_os = "macos")] // RLIMIT_NPROC counts processes only here (Linux counts threads too, which the client needs)
 #[test]
 fn a_daemon_that_cannot_be_forked_is_logged_with_its_errno() {

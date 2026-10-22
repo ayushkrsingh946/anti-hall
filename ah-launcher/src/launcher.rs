@@ -225,6 +225,11 @@ impl L {
 
     /// The engine is unreachable (not installed, crashed, timed out, marked down, handed the call back): the call passes
     /// through unchecked and the session hears it once (msg.engine_unreachable_notice).
+    fn unreachable_notice_for(&self, why_key: &str) {
+        let why = self.key(why_key);
+        self.unreachable_notice(&why);
+    }
+
     fn unreachable_notice(&self, why: &str) {
         self.session_notice("msg.engine_unreachable_notice", "files.unreachable_notice", &[("event", self.event.as_str()), ("why", why)]);
     }
@@ -423,7 +428,7 @@ impl L {
     fn handed_back(&self) -> i32 {
         self.log_line(&format!("engine_handed_back event={}", self.event));
         self.integrity("fail");
-        self.unreachable_notice("the engine handed the call back");
+        self.unreachable_notice_for("msg.launcher_unreachable_why_handed_back");
         0
     }
 
@@ -566,7 +571,7 @@ impl L {
                     self.event
                 ));
                 self.integrity("fail");
-                self.unreachable_notice("the engine exited without an answer");
+                self.unreachable_notice_for("msg.launcher_unreachable_why_silent");
                 0
             }
             Run::TimedOut => {
@@ -582,7 +587,7 @@ impl L {
                     u8::from(done_marked)
                 ));
                 self.integrity("fail");
-                self.unreachable_notice("the engine did not answer in time");
+                self.unreachable_notice_for("msg.launcher_unreachable_why_timed_out");
                 0
             }
             Run::GroupAlive => {
@@ -592,7 +597,7 @@ impl L {
                 ));
                 self.log_line(&format!("engine_group_alive event={}", self.event));
                 self.integrity("fail");
-                self.unreachable_notice("the engine did not finish");
+                self.unreachable_notice_for("msg.launcher_unreachable_why_unfinished");
                 0
             }
             Run::SpawnFailed { errno } => {
@@ -604,7 +609,7 @@ impl L {
                 if errno != Some(libc::ENOENT) {
                     self.integrity("fail"); // present but cannot start (corrupt, wrong format): the rollback counts it
                 }
-                self.unreachable_notice("the engine could not be started");
+                self.unreachable_notice_for("msg.launcher_unreachable_why_not_started");
                 0
             }
         }
@@ -977,11 +982,13 @@ pub fn run() -> i32 {
     let Some(engine) = find_engine(l.home.as_ref(), &l.s, l.knob("launcher.knob_engine_bin"))
     else {
         l.log_line(&format!("engine_missing event={}", l.event));
+        l.unreachable_notice_for("msg.launcher_unreachable_why_missing");
         return 0;
     };
     if env_nonempty(&l.key("launcher.in_process_env")).is_none_or(|v| v != "1")
         && l.fresh_marker("daemon_down_marker")
     {
+        l.unreachable_notice_for("msg.launcher_unreachable_why_down");
         return 0;
     }
     let eng_ms = match l.event_timeout_s() {
