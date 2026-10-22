@@ -23,6 +23,11 @@ use std::process::Command;
 /// The DevSwarm app's own CLI is never called by these scenarios (a path that is not there).
 const NO_HC: &[(&str, &str)] = &[("ANTIHALL_DEVSWARM_HIVECONTROL", "/nonexistent/hivecontrol")];
 
+/// A project whose archived row has a worktree makes the engine probe the DevSwarm CLI's capabilities (read-only help calls). A path that
+/// is not there falls through to the app's own install location on a Mac that has DevSwarm, which would run the real app's CLI:
+/// an executable that is there and prints nothing keeps the scenario away from it.
+const STUB_HC: &[(&str, &str)] = &[("ANTIHALL_DEVSWARM_HIVECONTROL", "/usr/bin/false")];
+
 const WITNESS: &str = ".anti-hall/logs/devswarm-recon-witness.ndjson";
 
 fn real_key() -> String {
@@ -50,7 +55,15 @@ fn seed_fold(home: &Path) {
         }
         // the partition was imported by the earlier build: it holds the floor of each namespace
         for ns in ["store", "nd"] {
-            st.reader_cursor_txn(&[CursorPut { partition: "w-ph".into(), ns: ns.into(), reader: "#floor".into(), value: 0, retired_line: None, updated_at: 1000 }]).unwrap();
+            st.reader_cursor_txn(&[CursorPut {
+                partition: "w-ph".into(),
+                ns: ns.into(),
+                reader: "#floor".into(),
+                value: 0,
+                retired_line: None,
+                updated_at: 1000,
+            }])
+            .unwrap();
         }
     }
 }
@@ -223,7 +236,11 @@ fn prepare(c: &Case, shim: Shim) -> (World, Opt, Value) {
         fs::create_dir_all(p.parent().unwrap()).unwrap();
         fs::write(p, format!("{}\n", serde_json::to_string_pretty(&pic).unwrap())).unwrap();
     }
-    let want: Value = serde_json::from_str(&fs::read_to_string(fixture_path(c.stage, c.name)).unwrap_or_else(|e| panic!("{}/{}: no fixture ({e}); record with AH_RECORD_UPDATE_FIXTURES=1", c.stage, c.name))).unwrap();
+    let want: Value = serde_json::from_str(
+        &fs::read_to_string(fixture_path(c.stage, c.name))
+            .unwrap_or_else(|e| panic!("{}/{}: no fixture ({e}); record with AH_RECORD_UPDATE_FIXTURES=1", c.stage, c.name)),
+    )
+    .unwrap();
     let eo = Opt { stage_only: Some(row_of(c)), ..o };
     let w = world(&eo);
     install_shim(&w, shim);
@@ -276,7 +293,11 @@ fn run_case(c: &Case) {
     if c.name == "budget" {
         // the first run stopped at the budget and left the rest; the next run resumes that list, drains it and stamps the version
         assert_eq!((got["answer"]["budgetExhausted"].clone(), got["answer"]["pending"].clone()), (json!(true), json!(1)), "{got}");
-        assert_eq!((again["budgetExhausted"].clone(), again["pending"].clone(), again["stores"].clone()), (json!(false), json!(0), json!(1)), "the resume: {again}");
+        assert_eq!(
+            (again["budgetExhausted"].clone(), again["pending"].clone(), again["stores"].clone()),
+            (json!(false), json!(0), json!(1)),
+            "the resume: {again}"
+        );
         let third = engine_answer(&w, &o, c, "engine");
         assert_eq!(third["skippedAlreadyDone"], json!(true), "{third}");
         return;
@@ -325,14 +346,23 @@ case!(archived_rows_already_done_is_skipped, "fold-archived-rows", "already_done
 case!(fold_folds_the_project_of_the_working_directory, "fold", "bad_state", "fold", "foldMeshPostUpdate", seed_fold, repo: true, env: &[], marked: false);
 case!(reconcile_of_a_directory_that_is_no_project_reports_it, "reconcile", "no_project", "reconcile", "reconcilePostUpdate", seed_nothing, repo: false, env: &[], marked: false);
 case!(reconcile_of_a_project_with_nothing_to_drain, "reconcile", "empty_project", "reconcile", "reconcilePostUpdate", seed_empty_project, repo: true, env: NO_HC, marked: false);
-case!(reconcile_skips_an_archived_workspace_whose_worktree_is_gone, "reconcile", "gone_archived", "reconcile", "reconcilePostUpdate", seed_gone_archived, repo: true, env: NO_HC, marked: false);
+case!(reconcile_skips_an_archived_workspace_whose_worktree_is_gone, "reconcile", "gone_archived", "reconcile", "reconcilePostUpdate", seed_gone_archived, repo: true, env: STUB_HC, marked: false);
 
 // ---- the switch ----------------------------------------------------------------------------------------------------------
 
 /// A stage whose switch says anything but `engine` is disabled: nothing runs, no Node is started, and the answer says so.
 #[test]
 fn a_switched_off_stage_is_disabled_and_starts_no_node() {
-    let c = Case { stage: "fold-all-stores", name: "bad_state", key: "foldAllStores", func: "foldAllStoresPostUpdate", seed: seed_fold, in_repo: false, env: &[], marked: false };
+    let c = Case {
+        stage: "fold-all-stores",
+        name: "bad_state",
+        key: "foldAllStores",
+        func: "foldAllStoresPostUpdate",
+        seed: seed_fold,
+        in_repo: false,
+        env: &[],
+        marked: false,
+    };
     let (w, o, _) = prepare(&c, Shim::Spy);
     let ans = engine_answer(&w, &o, &c, "off");
     assert_eq!(ans["disabled"], json!(true), "{ans}");
@@ -343,11 +373,19 @@ fn a_switched_off_stage_is_disabled_and_starts_no_node() {
 /// The reconcile stage follows `devswarm_sup.reconcile_mode`, the others `devswarm_sup.sweep_tail_mode`.
 #[test]
 fn each_stage_follows_its_own_switch() {
-    let c = Case { stage: "reconcile", name: "empty_project", key: "reconcile", func: "reconcilePostUpdate", seed: seed_empty_project, in_repo: true, env: &[], marked: false };
+    let c = Case {
+        stage: "reconcile",
+        name: "empty_project",
+        key: "reconcile",
+        func: "reconcilePostUpdate",
+        seed: seed_empty_project,
+        in_repo: true,
+        env: &[],
+        marked: false,
+    };
     let (w, o, _) = prepare(&c, Shim::Spy);
     // every switch (sweep tail and reconcile) is forced to `off` by the harness: the reconcile stage is disabled
     let ans = engine_answer(&w, &o, &c, "off");
     assert_eq!(ans["disabled"], json!(true), "{ans}");
     assert!(spy_log(&w).is_empty(), "{:?}", spy_log(&w));
 }
-

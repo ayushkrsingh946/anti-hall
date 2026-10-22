@@ -874,12 +874,15 @@ fn a_sigkill_inside_the_rows_fold_leaves_the_row_whole_and_the_rerun_converges()
 
 #[test]
 fn the_sweep_tail_is_node_s_unless_the_setting_says_engine() {
+    // the engine decides the sweep tail by default; `off` disables it (counted, nothing run); an unknown word reads as the default
     let mut f = fix("mode");
-    assert!(!archive::engine_mode(&f.st), "the default leaves the sweep tail to Node");
+    assert!(archive::engine_mode(&f.st), "the default is the engine");
+    f.st.env.insert("ANTIHALL_DEVSWARM_SWEEP_TAIL_MODE".into(), "off".into());
+    assert!(!archive::engine_mode(&f.st), "off disables the sweep tail");
     f.st.env.insert("ANTIHALL_DEVSWARM_SWEEP_TAIL_MODE".into(), "engine".into());
     assert!(archive::engine_mode(&f.st));
     f.st.env.insert("ANTIHALL_DEVSWARM_SWEEP_TAIL_MODE".into(), "bogus".into());
-    assert!(!archive::engine_mode(&f.st), "an unknown value is not engine");
+    assert!(archive::engine_mode(&f.st), "an unknown value reads as the default, which is the engine");
 }
 
 #[test]
@@ -887,9 +890,11 @@ fn the_archive_module_cannot_address_a_message_row() {
     let re = regex::Regex::new(r"(?i)(delete\s+from\s+messages|update\s+messages|insert\s+into\s+messages)").unwrap();
     let text = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/dssup/recon/archive.rs")).unwrap();
     assert!(!re.is_match(&text));
-    // the only SQL step that removes anything is the conditional registry delete
+    // the only SQL steps that remove anything are registry deletes: the conditional one (the fold) and the re-home's removal of the
+    // SOURCE store's registry row, made after the copy was verified (Node's `removeRegistry`); never a message row
     let sql = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/sql.rs")).unwrap();
     let removers: Vec<&str> = sql.lines().filter(|l| l.contains("pub const RECON_") && l.to_ascii_uppercase().contains("DELETE")).collect();
-    assert_eq!(removers.len(), 1);
-    assert!(removers[0].contains("FROM registry WHERE id = ? AND session_id IS ? AND updated_at IS ? AND write_seq IS ?"));
+    assert_eq!(removers.len(), 2, "{removers:?}");
+    assert!(removers.iter().all(|l| l.contains("FROM registry WHERE id = ?")), "{removers:?}");
+    assert!(removers.iter().any(|l| l.contains("FROM registry WHERE id = ? AND session_id IS ? AND updated_at IS ? AND write_seq IS ?")));
 }

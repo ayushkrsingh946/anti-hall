@@ -192,6 +192,15 @@ fn refs(v: &[(String, String)]) -> Vec<(&str, &str)> {
     v.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect()
 }
 
+/// Node's `deferredSweepIfDue` on `home` (the reference the native stage is compared with).
+fn node_deferred_tick(home: &Path) -> serde_json::Value {
+    let root = ah_engine::defaults::root().unwrap();
+    let code = "process.env.HOME=process.argv[2];process.env.ANTIHALL_CALLER=\"supervisor\";const S=require(process.argv[1]+\"/companion/devswarm-supervisor.js\");console.log(JSON.stringify(S.deferredSweepIfDue({home:process.argv[2]})))";
+    let o = Command::new("node").args(["-e", code, root.to_str().unwrap(), home.to_str().unwrap()]).output().unwrap();
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    serde_json::from_str(String::from_utf8_lossy(&o.stdout).lines().last().unwrap()).unwrap()
+}
+
 #[test]
 fn every_stage_ends_in_the_same_state_in_engine_mode_as_in_node_mode() {
     if !node_ready() {
@@ -207,9 +216,9 @@ fn every_stage_ends_in_the_same_state_in_engine_mode_as_in_node_mode() {
         seed(&node_home, stage, &refs(&a));
         seed(&eng_home, stage, &refs(&b));
         let runner = System::configured();
-        let nrec = ah_engine::dssup::deferred::duty(&node_home.ctx(), &runner);
+        // the reference is Node's own `deferredSweepIfDue` on the other home; the engine's duty is native
+        let nrec = serde_json::json!({"detail": node_deferred_tick(&node_home.home)});
         let erec = ah_engine::dssup::deferred::duty(&eng_home.ctx(), &runner);
-        assert!(nrec.get("engine").is_none(), "node mode: {nrec}");
         let items = erec["engine"]["items"].as_array().unwrap_or_else(|| panic!("engine mode ran no item: {erec}"));
         assert!(!items.is_empty(), "{erec}");
         engine_items += items.iter().filter(|i| i["by"] == "engine").count();
@@ -305,9 +314,11 @@ fn a_stage_without_a_usable_resume_list_is_nodes_whole() {
     let before = f.read(".anti-hall/update-sweep-state.json");
     assert!(ah_engine::dssup::recon::stage::run(&f.ctx(), &System::configured(), STAGES[3], &Hooks::none()).is_none());
     assert_eq!(f.read(".anti-hall/update-sweep-state.json"), before, "nothing written");
-    let g = fix("nomode");
+    // the switch off: the engine takes no stage (counted, nothing run)
+    let mut g = fix("nomode");
+    g.st.env.insert("ANTIHALL_DEVSWARM_SWEEP_TAIL_MODE".into(), "off".into());
     seed(&g, 3, &refs(&two_repos(&g, 1)));
-    assert!(ah_engine::dssup::recon::stage::run(&g.ctx(), &System::configured(), STAGES[3], &Hooks::none()).is_none(), "node mode: the engine takes no stage");
+    assert!(ah_engine::dssup::recon::stage::run(&g.ctx(), &System::configured(), STAGES[3], &Hooks::none()).is_none(), "off: the engine takes no stage");
 }
 
 #[test]
@@ -428,19 +439,20 @@ fn no_reconcile_module_can_delete_or_rewrite_a_message_row() {
         }
     }
     assert!(n >= 12, "all the reconcile modules were read ({n})");
-    // the SQL the port owns: the only statement that removes a row is the guarded registry delete
+    // the SQL the port owns: the only statements that remove a row are registry deletes: the guarded one (the fold) and the re-home's
+    // removal of the source store's registry row after the copy was verified (Node's `removeRegistry`)
     let sql = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/sql.rs")).unwrap();
     let removers: Vec<&str> = sql.lines().filter(|l| l.contains("pub const RECON_") && l.to_ascii_uppercase().contains("DELETE")).collect();
-    assert_eq!(removers.len(), 1, "{removers:?}");
-    assert!(removers[0].contains("FROM registry WHERE id = ? AND session_id IS ? AND updated_at IS ? AND write_seq IS ?"));
+    assert_eq!(removers.len(), 2, "{removers:?}");
+    assert!(removers.iter().all(|l| l.contains("FROM registry WHERE id = ?")), "{removers:?}");
+    assert!(removers.iter().any(|l| l.contains("FROM registry WHERE id = ? AND session_id IS ? AND updated_at IS ? AND write_seq IS ?")));
     let writers: Vec<&str> = sql.lines().filter(|l| l.contains("pub const RECON_") && l.to_ascii_uppercase().contains("INTO MESSAGES")).collect();
     assert!(writers.is_empty(), "{writers:?}");
-    // no std::fs removal of a directory tree anywhere but the gate's own scratch mirrors
+    // no std::fs removal of a directory tree anywhere (the gate's scratch mirrors for Node's witness are gone with the witness)
     let mut trees = Vec::new();
     for e in std::fs::read_dir(&dir).unwrap().flatten() {
         let text = std::fs::read_to_string(e.path()).unwrap_or_default();
         trees.extend(text.lines().filter(|l| l.contains("remove_dir_all")).map(|l| format!("{}: {}", e.file_name().to_string_lossy(), l.trim())));
     }
-    assert_eq!(trees.len(), 1, "{trees:?}");
-    assert!(trees[0].starts_with("gate.rs:") && trees[0].contains("scratch"), "{trees:?}");
+    assert!(trees.is_empty(), "{trees:?}");
 }

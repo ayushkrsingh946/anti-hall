@@ -1001,7 +1001,7 @@ fn s5_a_busy_lock_hands_the_adoption_back_untouched() {
     assert!(ah_engine::dssup::recon::view::registry(&f.home, &k).unwrap().is_empty(), "nothing was adopted");
 }
 
-/// `sweep_tail_mode`: default `node` leaves the stage to Node alone; `engine` runs the witnessed orphan heal first and records it.
+/// `sweep_tail_mode`: the default (`engine`) runs the orphan heal natively and records it; `off` runs no engine part (counted, nothing run).
 #[test]
 fn s5_the_sweep_tail_mode_selects_the_engine_part_of_the_deferred_stage() {
     if !have("node") || !have("git") {
@@ -1020,11 +1020,11 @@ fn s5_the_sweep_tail_mode_selects_the_engine_part_of_the_deferred_stage() {
         }
         (f, k)
     };
-    let (node_home, k) = build("s5mode-node", None);
-    let rec = ah_engine::dssup::deferred::duty(&node_home.ctx(), &System::configured());
+    let (off_home, k) = build("s5mode-off", Some("off"));
+    let rec = ah_engine::dssup::deferred::duty(&off_home.ctx(), &System::configured());
     assert!(rec.get("engine").is_none(), "{rec}");
     let _ = k;
-    let (eng_home, k) = build("s5mode-engine", Some("engine"));
+    let (eng_home, k) = build("s5mode-engine", None);
     let rec = ah_engine::dssup::deferred::duty(&eng_home.ctx(), &System::configured());
     let items = rec["engine"]["items"].as_array().unwrap_or_else(|| panic!("no engine part: {rec}"));
     assert_eq!(items.len(), 1, "{rec}");
@@ -1623,7 +1623,7 @@ fn s6_cases() -> Vec<FoldCase> {
             whole: true,
         },
         FoldCase {
-            name: "unread mail without floor rows needs the legacy cursor import, Node's",
+            name: "unread mail without floor rows is decided by the engine, like Node",
             build: |f| {
                 let (wt, k) = s6_base(f);
                 f.row_s(&k, "w-live", &wt, Some("s1"));
@@ -1631,10 +1631,10 @@ fn s6_cases() -> Vec<FoldCase> {
                 f.msg_at(&k, "w-ph", 10, "one", "snd");
                 (k.clone(), pair(&k, &wt))
             },
-            retired: &[],
-            forwarded: 0,
-            deferred: 1,
-            whole: false,
+            retired: &["w-ph"],
+            forwarded: 1,
+            deferred: 0,
+            whole: true,
         },
     ]
 }
@@ -1752,12 +1752,15 @@ fn dssup_recon_s6_a_fresh_heartbeat_protects_a_cross_referenced_anchor_and_its_a
 
 #[test]
 fn s6_the_engine_switch_is_off_by_default_and_a_deferred_store_writes_nothing() {
-    let f = fix("s6-off");
+    // the switch (`devswarm_sup.sweep_tail_mode`) defaults to the engine; `off` hands the store to nobody: the pass is refused before
+    // anything is read, nothing is written (counted as disabled)
+    let mut f = fix("s6-off");
     let (wt, k) = s6_base(&f);
     f.row_s(&k, "w-live", &wt, Some("s1"));
     f.row_s(&k, "w-ph", &wt, None);
+    f.st.env.insert("ANTIHALL_DEVSWARM_SWEEP_TAIL_MODE".into(), "off".into());
     let before = f.snapshot();
-    assert!(fold::run(&f.ctx(), &System::configured(), &k, &Hooks::none()).is_err(), "mode node hands the store to Node");
+    assert!(fold::run(&f.ctx(), &System::configured(), &k, &Hooks::none()).is_err(), "off: the engine takes no store");
     assert_eq!(f.snapshot(), before);
     // a missing store: nothing to fold, and nothing is created
     let g = fix6("s6-none");
