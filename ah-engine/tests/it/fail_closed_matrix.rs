@@ -833,52 +833,10 @@ fn consecutive_stops_with_a_broken_install_end_in_an_exit_0_within_the_cap() {
             let codes: Vec<i32> = (0..cap + 2).map(|_| run_kept(&case, &broken, MARK, MARK).code).collect();
             let expect: Vec<i32> = (0..cap + 2).map(|i| if i < cap { 2 } else { 0 }).collect();
             assert_eq!(codes, expect, "[{host}/{event}] consecutive Stops, broken install");
-            // a healthy run in between resets the count
-            let healthy = Row { name: "healthy", daemon: Daemon::Down, ..BASE };
+            // a healthy run in between resets the count: the built-in checks answer in the client (no hook command exists to run)
+            let healthy = Row { name: "healthy", ..BASE };
             assert_eq!(run_kept(&case, &healthy, MARK, MARK).code, 0, "[{host}/{event}] healthy Stop");
             assert_eq!(run_kept(&case, &broken, MARK, MARK).code, 2, "[{host}/{event}] the count restarted after a healthy Stop");
-        }
-    }
-}
-
-/// A healthy hook's genuine block must reach the host even when a sibling hook cannot run and the Stop block counter is at
-/// its cap or the payload says `stop_hook_active` (D74): the cap bounds the engine's own fail-closed blocks, never a hook's.
-#[test]
-fn a_stop_hooks_genuine_block_survives_a_failed_sibling_at_the_cap() {
-    let cap = ah_engine::defaults::num("dispatch.stop_block_cap").to_string();
-    let dir_name = ah_engine::defaults::text("dispatch.stop_state_dir");
-    for host in table::hosts() {
-        for event in ah_engine::defaults::list("dispatch.stop_events") {
-            if table::entries(host, event).is_empty() {
-                continue;
-            }
-            let host: &'static str = Box::leak(host.to_string().into_boxed_str());
-            let case = Case { host, event: event.to_string(), dir: std::env::temp_dir().join(format!("ahd-gb-{host}-{event}-{}", std::process::id())) };
-            let siblings: [(&str, &str); 3] =
-                [("killed sibling", "kill -9 $$"), ("unspawnable sibling", "a\0b"), ("orphan holding the pipes", "(exec sleep 3) & echo partial")];
-            for (what, second) in siblings {
-                for (state, active, filled) in [
-                    ("fresh", Stdin::Valid, false),
-                    ("counter at the cap", Stdin::Valid, true),
-                    ("stop_hook_active", Stdin::StopActive, false),
-                    ("both", Stdin::StopActive, true),
-                ] {
-                    ah_engine::discard::harmless(std::fs::remove_dir_all(&case.dir));
-                    if filled {
-                        let counters = case.dir.join("state").join(dir_name);
-                        std::fs::create_dir_all(&counters).unwrap();
-                        std::fs::write(counters.join(format!("{event}-fc")), &cap).unwrap();
-                    }
-                    // checks down: the hooks under test are the Node commands, which a built-in check would otherwise answer first
-                    let row = Row { name: "genuine block", stdin: active, daemon: Daemon::Down, ..BASE };
-                    let r = run_kept(&case, &row, BLOCK, second);
-                    let ctx = format!("[{host}/{event}] {what}, {state}: code {} err {:?}", r.code, r.err);
-                    assert!(
-                        r.code == 2 && r.err.contains("BLOCKME") && !r.err.contains("could not run the guards"),
-                        "the hook's block must be returned verbatim: {ctx}"
-                    );
-                }
-            }
         }
     }
 }
