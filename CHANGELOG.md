@@ -8,7 +8,14 @@ the update.
 
 ## Unreleased
 
+### Added
+
+- **An idle coordinating session is woken when an agent it launched goes idle with open work, loops, burns tokens or a watched process ends (#256).** New route target `wake` (config rows in `agent_tracker.targets`), the Monitor `ah-engine agents wake-watch --auto` armed at SessionStart (off switch `agents.wakeWatch`), and the config-defined signals `idle_open_task` and `watched_exit`. `monitor_unarmed` now sees a live wake-watch and is one short line.
+
 ### Fixed
+
+- **A DevSwarm workspace Primary was never told of its own signals (e.g. `monitor_unarmed`).** The reminders went only to the mesh outbox, which nothing reads; they now also reach the workspace's session queue.
+- **`gh issue create|comment --body-file` and `cargo clean` are no longer blocked in the main thread** (rows of `command.light_exceptions`).
 
 - **Spawned-process CPU: the scheduled `gh_poll` and `agent_tick` jobs stop paying for work that cannot change.** The scheduler now skips `gh_poll` (no re-exec of the engine, no state parse, no `git` or `gh` child) unless a directory is unresolved, a push or checkout shows in the git files (stat only), a repo's poll time has come or a merge follow-up is due; a root git cannot read (a repository with no commit) was looked at again at every tick and is now retried on the done cadence. The agent tracker asks the host for its session listing (`claude agents --json`, one heavy process) at most every `agent_tracker.limits.cli_list_ttl_ms` (300 s), earlier when a main or workspace session the last listing did not cover appears; between listings each agent keeps the host state and gone flag of the last one, and a failed listing is not retried at every tick. New state fields default, so an older state file loads unchanged.
 - **First guard call after a daemon start no longer probes the interpreters cold.** The daemon warms its probe cache (the version probes of `python3` and `python`) on a background thread once its socket is listening (`host_spawn.prewarm`, `host_spawn.prewarm_programs`, `host_spawn.prewarm_timeout_ms`), so api-guard's first call finds them kept instead of skipping verification inside the 300 ms deadline.

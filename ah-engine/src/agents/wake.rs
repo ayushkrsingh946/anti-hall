@@ -19,8 +19,8 @@ fn setting_num(key: &str) -> u64 {
 }
 
 /// The session this watcher belongs to: the first of the configured variables that is set.
-fn session() -> Option<String> {
-    defaults::list("agent_tracker.wake_session_env").into_iter().filter_map(|v| std::env::var(v).ok()).find(|s| !s.trim().is_empty())
+fn session(env: &Env) -> Option<String> {
+    defaults::list("agent_tracker.wake_session_env").into_iter().filter_map(|v| env.settings.env.get(v).cloned()).find(|s| !s.trim().is_empty())
 }
 
 fn parent_gone(start: i32) -> bool {
@@ -83,7 +83,7 @@ pub(crate) fn run(p: &Parsed) -> i32 {
     if !env.switch("agent_tracker.setting") || !env.switch("agent_tracker.wake_setting") {
         return refuse(defaults::text("msg.agent_wake_reason_off"));
     }
-    let Some(sid) = session() else { return refuse(defaults::text("msg.agent_wake_reason_no_session")) };
+    let Some(sid) = session(&env) else { return refuse(defaults::text("msg.agent_wake_reason_no_session")) };
     let armed = WakeFeed::stamp(&env, &sid);
     if held_elsewhere(&env, &armed) {
         return refuse(defaults::text("msg.agent_wake_reason_held"));

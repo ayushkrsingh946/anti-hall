@@ -1383,6 +1383,7 @@ Generated from `hooks/lib/settings-schema.js` (a hygiene test keeps this table a
 | `maintenance.sessionEndReaper` | `true` | `ANTIHALL_SESSION_END_REAPER` (deprecated alias `ANTI_HALL_SESSION_END_REAPER`; canonical wins) | session-end-mcp-reaper (SessionEnd): kill orphaned MCP-server processes this session left behind. |
 | `agents.tracker` | `true` | `ANTIHALL_AGENT_TRACKER` | agent tracker (engine job `agent_tick`): follow every agent, raise hung / looping / token-waste / drift / stale-heartbeat / no-wake-path signals; off, a tick does nothing. |
 | `agents.reminders` | `true` | `ANTIHALL_AGENT_REMINDERS` | agent-reminders (UserPromptSubmit, PostToolUse): deliver the tracker's queued reminders to the agent that owns them; off, signals are recorded but nothing is queued. |
+| `agents.wakeWatch` | `true` | `ANTIHALL_AGENT_WAKE_WATCH` | session wake-watch (Monitor armed at SessionStart): wakes an idle session when an agent it launched goes idle with open work, loops, burns tokens or a watched process ends; off, nothing is armed. |
 | `agents.ownerNotify` | `false` | `ANTIHALL_AGENT_OWNER_NOTIFY` | agent tracker owner notices: also append hung / looping / token-waste advisories to the owner notices file. |
 | `versionAlerts.antiHall` | `true` | `ANTIHALL_VERSION_ALERT` | Alert when a newer anti-hall version is available. |
 | `versionAlerts.claudeCli` | `true` | `ANTIHALL_CLAUDE_CLI_VERSION_ALERT` | Alert when a newer Claude CLI version is available. |
