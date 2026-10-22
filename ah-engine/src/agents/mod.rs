@@ -17,6 +17,7 @@
 // A failure that must be seen goes through `crate::discard` instead.
 
 mod facts;
+mod live;
 mod signals;
 mod sinks;
 mod sources;
@@ -62,6 +63,10 @@ pub(crate) fn state_name(k: &str) -> &'static str {
 }
 pub(crate) fn chan(k: &str) -> &'static str {
     defaults::raw("agent_tracker.channels").str_field(k)
+}
+/// A subagent or an in-process teammate: an agent a session launched, which finishes ("done") rather than waits.
+pub(crate) fn is_child(a: &Agent) -> bool {
+    a.kind == kind_name("subagent") || a.kind == kind_name("teammate")
 }
 /// `Math.min`-style cap of a text to `n` characters.
 pub(crate) fn cap(s: &str, n: u64) -> String {
@@ -194,7 +199,7 @@ pub struct Ws {
 pub struct Agent {
     /// The agent id (a session id, a subagent id, a heartbeat id).
     pub id: String,
-    /// `main`, `subagent`, `workspace` or `heartbeat`.
+    /// `main`, `subagent`, `teammate`, `codex`, `workspace` or `heartbeat`.
     pub kind: String,
     /// The session that launched it (a subagent), or its own session id.
     pub parent: String,
@@ -244,6 +249,15 @@ pub struct Agent {
     pub host: String,
     /// The host reports it exited.
     pub gone: bool,
+    /// The team a teammate belongs to (its meta file).
+    #[serde(default)]
+    pub team: String,
+    /// The host's meta file records the agent as finished.
+    #[serde(default)]
+    pub finished: bool,
+    /// The pid of the live process the session registry joined to this agent (0 = none).
+    #[serde(default)]
+    pub pid: u32,
     /// Unanswered tool calls by id.
     pub pending: BTreeMap<String, Pending>,
     /// Message ids already counted (the transcript repeats a message's usage on every line).

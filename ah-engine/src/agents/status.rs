@@ -6,7 +6,23 @@ use crate::cli::Parsed;
 use crate::defaults;
 use serde_json::{Value, json};
 
-fn row(a: &super::Agent, now: u64) -> Value {
+/// The agents each session launched, by the session's id.
+fn children(agents: &[&super::Agent]) -> std::collections::BTreeMap<String, Vec<String>> {
+    let mut out: std::collections::BTreeMap<String, Vec<String>> = std::collections::BTreeMap::new();
+    for a in agents.iter().filter(|a| super::is_child(a)) {
+        out.entry(a.parent.clone()).or_default().push(a.id.clone());
+    }
+    out
+}
+
+/// One agent's row. `all` is every tracked agent, for the links of the tree: its parent, its children, the project it works in.
+fn row(a: &super::Agent, now: u64, all: &std::collections::BTreeMap<&str, &super::Agent>, kids: &std::collections::BTreeMap<String, Vec<String>>) -> Value {
+    let roles = defaults::raw("agent_tracker.roles");
+    let mine = kids.get(&a.id).cloned().unwrap_or_default();
+    let session = a.kind == super::kind_name("main") || a.kind == super::kind_name("workspace");
+    let parent = (a.parent != a.id && !a.parent.is_empty()).then(|| a.parent.clone());
+    // a launched agent works in its launcher's project when its own transcript named none
+    let project = if a.cwd.is_empty() { parent.as_deref().and_then(|p| all.get(p)).map(|p| p.cwd.clone()).unwrap_or_default() } else { a.cwd.clone() };
     let last = if a.last_output_ms == 0 { Value::Null } else { json!(now.saturating_sub(a.last_output_ms) / fmtn("ms_per_s")) };
     json!({
         "agent": a.id, "name": a.name, "kind": a.kind, "state": state_of(a), "source": a.source, "host_state": a.host,
@@ -15,6 +31,8 @@ fn row(a: &super::Agent, now: u64) -> Value {
         "errors": a.errors, "step": a.step, "last_output_s": last, "partial": a.partial,
         "flags": a.flags.iter().map(|(k, f)| json!({"signal": k, "since": f.since, "evidence": f.evidence, "text": f.text, "reminded_at": f.reminded_at, "delivered_at": f.delivered_at})).collect::<Vec<_>>(),
         "workspace": a.ws.as_ref().map(|w| json!({"id": w.id, "watcher_armed": w.armed, "step": w.step})),
+        "parent": parent, "children": mine, "project": project, "transcript": a.path, "team": a.team, "pid": (a.pid != 0).then_some(a.pid),
+        "role": session.then(|| if mine.is_empty() { roles.str_field("solo") } else { roles.str_field("primary") }),
     })
 }
 
@@ -27,10 +45,12 @@ pub(crate) fn document(env: &Env, st: &State, l: &super::sources::Listing) -> Va
     let mut agents: Vec<&super::Agent> = st.agents.values().collect();
     agents.sort_by(|a, b| b.flags.len().cmp(&a.flags.len()).then(b.last_output_ms.cmp(&a.last_output_ms)));
     let cli = defaults::raw("agent_tracker.claude_cli");
+    let by_id: std::collections::BTreeMap<&str, &super::Agent> = st.agents.values().map(|a| (a.id.as_str(), a)).collect();
+    let kids = children(&agents);
     json!({
         "generated_ms": env.now_ms,
         "claude": {"version": l.cli_version, "agents_json": st.cli_ok, "used": l.cli_used, "verified_on": cli.get("verified").map(|v| v.to_json())},
-        "agents": agents.iter().map(|a| row(a, env.now_ms)).collect::<Vec<_>>(),
+        "agents": agents.iter().map(|a| row(a, env.now_ms, &by_id, &kids)).collect::<Vec<_>>(),
         "today": totals_json(&st.today(env)),
     })
 }

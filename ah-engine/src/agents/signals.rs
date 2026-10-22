@@ -19,11 +19,13 @@ pub(crate) type Raised = (u64, String);
 
 /// The state of an agent as the tracker reads it.
 pub(crate) fn state_of(a: &Agent) -> &'static str {
-    let host = |k: &str| defaults::raw("agent_tracker.claude_cli").get(k).map(V::strings).unwrap_or_default().contains(&a.host.as_str());
+    let host = |k: &str| {
+        ["agent_tracker.claude_cli", "agent_tracker.registry"].iter().any(|t| defaults::raw(t).get(k).map(V::strings).unwrap_or_default().contains(&a.host.as_str()))
+    };
     if a.kind == kind_name("heartbeat") {
         return if a.flags.contains_key("heartbeat_stale") { state_name("stale") } else { state_name("running") };
     }
-    if a.gone {
+    if a.gone || a.finished {
         return state_name("done");
     }
     if !a.host.is_empty() {
@@ -34,7 +36,7 @@ pub(crate) fn state_of(a: &Agent) -> &'static str {
             return state_name("running");
         }
     }
-    match (a.running, a.kind == kind_name("subagent")) {
+    match (a.running, super::is_child(a)) {
         (true, _) => state_name("running"),
         (false, true) => state_name("done"),
         (false, false) => state_name("waiting"),
@@ -146,7 +148,7 @@ fn heartbeat_stale(a: &Agent, now: u64) -> Option<Raised> {
 /// A subagent or workspace that finished its turn with a task still open and has said nothing for `idle_open_ms`: nobody is told, so it
 /// sits. Raised once per idle spell; it clears the moment the agent works again.
 fn idle_open_task(a: &Agent, now: u64) -> Option<Raised> {
-    if (a.kind != kind_name("subagent") && a.kind != kind_name("workspace")) || a.gone || !a.open || a.running || a.last_output_ms == 0 {
+    if (!super::is_child(a) && a.kind != kind_name("workspace")) || a.gone || !a.open || a.running || a.last_output_ms == 0 {
         return None;
     }
     let idle = now.saturating_sub(a.last_output_ms);
@@ -170,7 +172,7 @@ fn monitor_unarmed(env: &Env, a: &Agent, st: &State, now: u64) -> Option<Raised>
     if a.kind == kind_name("main") && sinks::wake_armed(env, &a.id) {
         return None;
     }
-    let subs = st.agents.values().filter(|s| s.kind == kind_name("subagent") && s.parent == a.id && running(s)).count() as u64;
+    let subs = st.agents.values().filter(|s| super::is_child(s) && s.parent == a.id && running(s)).count() as u64;
     let shells = a.bg_bash.iter().filter(|t| now.saturating_sub(**t) <= lim("bg_bash_ms")).count() as u64;
     let bg = subs + shells;
     (bg >= lim("monitor_min_bg") && now > a.armed_until).then(|| {
@@ -320,7 +322,7 @@ fn targets(env: &Env, st: &State, a: &Agent, sig: &str) -> Vec<Target> {
         } else if to == chan("coordinator") {
             let session = match (&a.ws, a.kind.as_str()) {
                 (Some(_), _) => None,
-                (None, k) if k == kind_name("subagent") => Some(a.parent.clone()),
+                (None, _) if super::is_child(a) => Some(a.parent.clone()),
                 (None, k) if k == kind_name("heartbeat") => {
                     st.agents.values().filter(|m| m.kind == kind_name("main")).max_by_key(|m| m.last_output_ms).map(|m| m.id.clone())
                 }
