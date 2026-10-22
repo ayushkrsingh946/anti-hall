@@ -34,14 +34,6 @@ value = "CLAUDE_PLUGIN_OPTION_JEV_TYPESAFE_API_KEY"
 doc = "The legacy vendor-less key option, used only for the vendor it is bound to (Node: CLAUDE_PLUGIN_OPTION_JEV_API_KEY)."
 value = "CLAUDE_PLUGIN_OPTION_JEV_API_KEY"
 
-[env.jev_legacy_key_vercel]
-doc = "Legacy Vercel key variable, read only when the jev.allowLegacyKeyRead setting is on (Node: AI_GATEWAY_API_KEY)."
-value = "AI_GATEWAY_API_KEY"
-
-[env.jev_legacy_key_typesafe]
-doc = "Legacy TypeSafe key variable, read only when the jev.allowLegacyKeyRead setting is on (Node: TYPESAFE_API_KEY)."
-value = "TYPESAFE_API_KEY"
-
 [env.jev_integration_prefix]
 doc = "Prefix of the per-integration kill switch: the integration id in upper snake case is appended and a value of 0 forces that one integration off (Node: ANTIHALL_JEV_<ID>)."
 value = "ANTIHALL_JEV_"

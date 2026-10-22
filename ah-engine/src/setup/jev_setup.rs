@@ -306,7 +306,7 @@ fn lookup_with_notes(s: &JevSettings, vendor: Vendor) -> (bool, Option<String>, 
         }
     }
     let mut rejected = None;
-    if s.allow_legacy_key_read && s.env().get(legacy_var(vendor)).is_none_or(|v| js_trim(v).is_empty()) {
+    if s.allow_legacy_key_read {
         let file = key_file_path(s, vendor);
         if let Err(why) = read_key_file(&file, s.home()) {
             rejected = Some(node_reason(&why));
@@ -319,13 +319,6 @@ fn own_var(v: Vendor) -> &'static str {
     match v {
         Vendor::Vercel => defaults::text("env.jev_key_vercel"),
         Vendor::Typesafe => defaults::text("env.jev_key_typesafe"),
-    }
-}
-
-fn legacy_var(v: Vendor) -> &'static str {
-    match v {
-        Vendor::Vercel => defaults::text("env.jev_legacy_key_vercel"),
-        Vendor::Typesafe => defaults::text("env.jev_legacy_key_typesafe"),
     }
 }
 
@@ -718,9 +711,8 @@ fn cmd_status(cx: &mut Ctx) -> Result<(), SetupError> {
     }
     // a legacy key that exists but is not read
     if !s.allow_legacy_key_read {
-        let env_present = cx.env.get(legacy_var(transport)).is_some_and(|v| !v.is_empty());
         let file_present = std::fs::metadata(key_file_path(&s, transport)).is_ok_and(|m| m.is_file() && m.len() > 0);
-        if env_present || file_present {
+        if file_present {
             out(&defaults::render("setup.fmt_status_notice", &[("text", &defaults::text("setup.msg_migration_notice"))]))?;
         }
     }
