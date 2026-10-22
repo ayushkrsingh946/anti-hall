@@ -199,9 +199,16 @@ pub fn apply_pull(env: &Env, id: &str, cwd: &str, at: &dyn Fn(&str)) -> Result<(
     Ok(())
 }
 
+/// Whether the reason a workspace was not drained names a pull with nothing to read by construction (`devswarm_recon.pull_skip_reasons`):
+/// a skip, not a held decision.
+pub fn skipped_by_construction(why: &str) -> bool {
+    defaults::list("devswarm_recon.pull_skip_reasons").contains(&why)
+}
+
 /// One line in the witness log for a workspace the engine did not drain itself, so the proof window can see how often and why.
 pub fn note_handback(ctx: &Ctx, id: &str, why: &str) {
-    let rec = json!({"ts": ctx.now, "job": defaults::text("devswarm_recon.job_handback"), "id": id, "why": why});
+    let job = if skipped_by_construction(why) { "devswarm_recon.job_pull_skip" } else { "devswarm_recon.job_handback" };
+    let rec = json!({"ts": ctx.now, "job": defaults::text(job), "id": id, "why": why});
     crate::dsact::exec::append_line(&ctx.home.join(defaults::text("devswarm_recon.witness_file")), &rec);
 }
 
@@ -258,6 +265,16 @@ mod tests {
 
     /// hivecontrol refuses a drain of workspace X run with another workspace's AI pane ("Current AI pane ... was not found in this
     /// Workspace"), so a sweep drain carries neither the builder id nor the pane id of the session that started it.
+    /// A Primary checkout's label has no hivecontrol workspace (`workspace message-count` answers "Workspace not found"), so its pull is a
+    /// skip; every reason that is a real engine gap stays a held decision.
+    #[test]
+    fn only_a_workspace_with_no_native_queue_is_skipped_rather_than_held() {
+        assert!(skipped_by_construction("primary-label"));
+        for held in ["path-outside-state-dir", "duplicate-registry-rows", "shortfall", "count-failed", ""] {
+            assert!(!skipped_by_construction(held), "{held} is a held decision");
+        }
+    }
+
     #[test]
     fn a_sweep_drain_carries_no_session_or_pane_identity() {
         let mut base = ident::Env::new();
