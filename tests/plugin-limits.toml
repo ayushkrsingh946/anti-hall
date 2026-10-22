@@ -1,0 +1,6 @@
+# Claude plugin directory limits for plugins/anti-hall (claude.com/docs/plugins/pre-submission-checklist).
+# Beyond them the listing is held for human review. Values carry headroom below the directory's own caps
+# (512 files; 256 KiB per non-image, non-font file).
+max_files = 470
+max_file_kib = 200
+# Files exempt from the per-file size cap by repo-relative path (images and fonts are exempt by extension).
