@@ -318,7 +318,7 @@ doc = "The `ah-engine devswarm <verb>` verbs and what each does: status, line, a
 value = ["status", "line", "advisory", "supervisor", "ingest", "ledger", "archive", "plan-prune", "prune", "recover", "create", "merge", "wake-watch"]
 
 [devswarm_wire.compat_verbs]
-doc = "The `ah-engine devswarm <verb> <args>` verbs that take exactly the arguments of `node scripts/devswarm.js <verb>` and print its output (lane l8; ported in `src/meshw/simple.rs`). They run under the role matrix like the owner verbs, then through the same front as `ah-engine mesh <devswarm.js argv>`: `mesh.engine_writes` off sends them to Node, on makes the engine answer and Node the cases it defers (exit 75 only when Node cannot run either)."
+doc = "The `ah-engine devswarm <verb> <args>` verbs that take exactly the arguments of `~/.anti-hall/bin/devswarm.js <verb>` and print its output (lane l8; ported in `src/meshw/simple.rs`). They run under the role matrix like the owner verbs, then through the same front as `ah-engine mesh <devswarm.js argv>`: `mesh.engine_writes` off sends them to Node, on makes the engine answer and Node the cases it defers (exit 75 only when Node cannot run either)."
 value = ["create", "help", "skip", "archive-ignore", "archive-unignore", "gate-intent", "notice", "plan", "scope", "gate", "workspaces", "logs", "wake-directive", "ready-check", "app-state", "app-sync", "done", "primary", "relay", "archive-request", "nudge", "supervision-report", "sync-ui", "retention", "unarchive", "migrate-owner-keys", "ensure", "register", "correct", "reap-orphans", "register-primary", "diagnose", "healthcheck", "merge", "spawn", "respawn", "reconcile-registry", "reap-stale", "reconcile-active", "auto-archive"]
 
 [devswarm_wire.command_word]

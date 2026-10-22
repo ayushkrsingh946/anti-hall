@@ -154,10 +154,12 @@ pub fn can_handoff(own: &str, newest: &str, stamp: Option<&str>) -> bool {
 }
 
 /// `formatStaleVersionLine`
-pub fn stale_line(role: &str, id: &str, own: Option<&str>, newest: &str, script: &str) -> String {
+pub fn stale_line(role: &str, id: &str, own: Option<&str>, newest: &str, _script: &str) -> String {
+    // the re-arm command is the version-independent watcher shim, not the running build's script
+    let script = crate::checks::devswarm_role::text::engine_watcher(&std::env::var(defaults::text("env.home")).unwrap_or_default());
     defaults::render(
         "wake_watch.line_stale",
-        &[("role", &word(role)), ("id", &word(id)), ("own", &own.map_or_else(|| word(""), str::to_string)), ("newest", &newest), ("script", &script)],
+        &[("role", &word(role)), ("id", &word(id)), ("own", &own.map_or_else(|| word(""), str::to_string)), ("newest", &newest), ("script", &script.as_str())],
     )
 }
 

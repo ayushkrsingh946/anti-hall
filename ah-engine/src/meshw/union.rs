@@ -264,15 +264,23 @@ pub fn merged_total(i: &UnionIn<'_>) -> R<usize> {
     Ok(all.len() + uncovered.len() - by_body.len())
 }
 
-/// The floor view of `positions(store, { reader: null, partition, cursorPath })`: `(store base, nd base)`. A partition
-/// without both floor rows would be imported from the legacy cursor files by Node first: that defers.
+/// The floor view of `positions(store, { reader: null, partition, cursorPath })`: `(store base, nd base)`. A namespace without its floor
+/// row reads its legacy floor instead, as Node's `positions()` does (`legacyStoreFloor`, `legacyNdFloor` of the caller's cursor path or
+/// the descriptor's); nothing is written.
 pub fn floor_bases(reader: &MeshReader, home: &Path, partition: &str, cursor_path: Option<&str>) -> R<(f64, f64)> {
     let rows = reader.reader_cursors(partition).map_err(|e| Defer(format!("cursor-rows:{e}")))?;
     let floor_of = |ns: &str| -> Option<f64> {
         rows.iter().find(|r| r["ns"] == ns && r["reader"] == defaults::text("mesh_write.floor_reader")).and_then(|r| r["value"].as_f64())
     };
-    let (Some(store), Some(nd)) = (floor_of(defaults::text("mesh_write.cursor_ns_store")), floor_of(defaults::text("mesh_write.cursor_ns_nd"))) else {
-        return defer("cursor-import");
+    let (store_row, nd_row) = (floor_of(defaults::text("mesh_write.cursor_ns_store")), floor_of(defaults::text("mesh_write.cursor_ns_nd")));
+    let store = match store_row {
+        Some(v) => v,
+        None => crate::migrate::readercur::legacy_store_floor(reader, home, partition),
+    };
+    let Some(nd) = nd_row else {
+        let desc_cp = crate::migrate::readercur::desc_cursor_path(crate::migrate::readercur::descriptor_of(home, partition).as_ref());
+        let cp = cursor_path.filter(|c| !c.is_empty()).map(str::to_string).or(desc_cp);
+        return Ok((store, crate::migrate::readercur::legacy_nd_floor(cp.as_deref())));
     };
     // distinctNdFloor: the legacy nd cursor, except when the file is the partition's shared store cursor
     let distinct = match cursor_path {

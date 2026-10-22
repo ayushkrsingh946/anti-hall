@@ -91,7 +91,7 @@ function cgWakeLine(l) {
 // `frame({ guard, headline, why, override, body })` of hooks/lib/block-message.js with the gate's own texts and skip command.
 function cgFrame(body, ctx) {
   var clean = text.clean, guard = ah.cfg('devswarm_gates.child_gate_guard_name');
-  var cli = posix.normalize(ctx.nodeRoot + '/' + ah.cfg('devswarm_role.launcher_cli').target);
+  var cli = dwEngineCmd('devswarm_role.engine_cli', ah.env.get(ah.cfg('env.home')) || '');
   var skip = text.render(ah.cfg('devswarm_role.pg_skip_cmd'), { cli: cgShQuote(cli), guard: guard });
   var lines = [text.render(ah.cfg('devswarm_role.pg_frame_head'), { guard: clean(guard), headline: clean(ah.cfg('devswarm_gates.cg_headline')) })];
   lines.push(ah.cfg('devswarm_role.pg_frame_why') + clean(ah.cfg('devswarm_gates.cg_why')));

@@ -1732,12 +1732,12 @@ value = '''
 [devswarm_prompt.child_reminder]
 doc = "The child's per-turn report reminder (hooks/devswarm-child-turn.js REMINDER); {cli} is the DevSwarm CLI path and the id token is replaced by the builder id when that is a safe id."
 value = '''
-💡 anti-hall · devswarm-child-workspace: (per turn) keep the parent orchestrator updated — run `node {cli} heartbeat <DEVSWARM_BUILDER_ID> --summary "<status>"` to report progress/blockers as you make them — this is what satisfies your Stop-gate report (`send --to-primary --message-file <path>` is a SEPARATE direct message, not a substitute) — and check for + act on any parent messages before continuing, so you stay visible on the parent's task list instead of drifting off it.'''
+💡 anti-hall · devswarm-child-workspace: (per turn) keep the parent orchestrator updated — run `{cli} heartbeat <DEVSWARM_BUILDER_ID> --summary "<status>"` to report progress/blockers as you make them — this is what satisfies your Stop-gate report (`send --to-primary --message-file <path>` is a SEPARATE direct message, not a substitute) — and check for + act on any parent messages before continuing, so you stay visible on the parent's task list instead of drifting off it.'''
 
 [devswarm_prompt.child_receive]
 doc = "The child's reception reminder (hooks/devswarm-child-turn.js RECEIVE_NUDGE); {cli} is the DevSwarm CLI path and the id token is replaced by the builder id when that is a safe id."
 value = '''
-💡 anti-hall · devswarm-child-reception: to RECEIVE parent messages, run `node {cli} inbox pull <DEVSWARM_BUILDER_ID>` (anti-hall devswarm CLI) — a SAFE, bounded drain that folds the native parent->child queue into your durable inbox (non-destructive count gate, one bounded read, never `monitor`). Then read them via `node {cli} inbox read-primary <DEVSWARM_BUILDER_ID>` (read-only; after handling, run the `ackCommand` it returns). Substitute your own DEVSWARM_BUILDER_ID for <...>.'''
+💡 anti-hall · devswarm-child-reception: to RECEIVE parent messages, run `{cli} inbox pull <DEVSWARM_BUILDER_ID>` (anti-hall devswarm CLI) — a SAFE, bounded drain that folds the native parent->child queue into your durable inbox (non-destructive count gate, one bounded read, never `monitor`). Then read them via `{cli} inbox read-primary <DEVSWARM_BUILDER_ID>` (read-only; after handling, run the `ackCommand` it returns). Substitute your own DEVSWARM_BUILDER_ID for <...>.'''
 
 [devswarm_prompt.id_token]
 doc = "The placeholder of the builder id in the child's reminders."
@@ -1816,7 +1816,7 @@ value = { section = "devswarm", key = "planRequired", type = "boolean", env = "A
 [devswarm_prompt.plan_none]
 doc = "The plan segment of a child with no step plan when one is required (hooks/devswarm-child-turn.js buildPlanSegment). Placeholders: {cli}, {id}."
 value = '''
-💡 anti-hall · devswarm-plan: you have no step plan yet. Write your brief as numbered steps once: `node {cli} plan set {id} --steps "1. …\n2. …"` — then report each step with `heartbeat {id} --step N --status doing|done|blocked`.'''
+💡 anti-hall · devswarm-plan: you have no step plan yet. Write your brief as numbered steps once: `{cli} plan set {id} --steps "1. …\n2. …"` — then report each step with `heartbeat {id} --step N --status doing|done|blocked`.'''
 
 [devswarm_prompt.plan_head]
 doc = "The first sentence of the plan segment. Placeholders: {done}, {total}, {n}, {blocked}, {text}."
@@ -1830,12 +1830,12 @@ value = " (blocked)"
 [devswarm_prompt.plan_all_done]
 doc = "The first sentence of the plan segment when every step is done. Placeholders: {total}, {cli}."
 value = '''
-💡 anti-hall · devswarm-plan: all {total} steps are done — report it with `node {cli} done`.'''
+💡 anti-hall · devswarm-plan: all {total} steps are done — report it with `{cli} done`.'''
 
 [devswarm_prompt.plan_tail]
 doc = "The rest of the plan segment. Placeholders: {cli}, {id}."
 value = '''
- Report step progress as it happens: `node {cli} heartbeat {id} --step N --status doing|done|blocked` (it is what the Primary's roster shows). If a user prompt asks you for work outside this plan, record it first: `node {cli} scope add {id} --glob '<paths>' --note '<what the user asked>'` — the Primary sees the note and may challenge it.'''
+ Report step progress as it happens: `{cli} heartbeat {id} --step N --status doing|done|blocked` (it is what the Primary's roster shows). If a user prompt asks you for work outside this plan, record it first: `{cli} scope add {id} --glob '<paths>' --note '<what the user asked>'` — the Primary sees the note and may challenge it.'''
 
 [devswarm_prompt.builder_env]
 doc = "Environment variable that holds a child workspace's builder id."
@@ -1890,12 +1890,12 @@ value = "[[ANTIHALL_ARCHIVE_REQUEST]]"
 [devswarm_prompt.unread_segment]
 doc = "The child's unread-parent-mail segment (hooks/devswarm-child-turn.js buildUnreadSegment). Placeholders: {count}, {cli}, {id}."
 value = '''
-⚠️ anti-hall · devswarm-child-inbox: priority — you have {count} unread parent message(s). STOP and address these parent message(s) FIRST before continuing. Read them the SAFE way via the durable inbox cursor — `node {cli} inbox read-primary {id}` (anti-hall devswarm CLI) (read-only; after handling, run the `ackCommand` it returns). Do NOT run `hivecontrol workspace read-messages` or `monitor` — those DESTRUCTIVELY drain the native queue.'''
+⚠️ anti-hall · devswarm-child-inbox: priority — you have {count} unread parent message(s). STOP and address these parent message(s) FIRST before continuing. Read them the SAFE way via the durable inbox cursor — `{cli} inbox read-primary {id}` (anti-hall devswarm CLI) (read-only; after handling, run the `ackCommand` it returns). Do NOT run `hivecontrol workspace read-messages` or `monitor` — those DESTRUCTIVELY drain the native queue.'''
 
 [devswarm_prompt.archive_request]
 doc = "The segment that relays a parent's request to archive the workspace (hooks/devswarm-child-turn.js buildArchiveRequestSegment). Placeholders: {cli}, {id}."
 value = '''
-💡 anti-hall · devswarm-archive-request: your parent asks you to archive this workspace. Confirm with YOUR user, then run `node {cli} archive {id}`. NEVER auto-archive.'''
+💡 anti-hall · devswarm-archive-request: your parent asks you to archive this workspace. Confirm with YOUR user, then run `{cli} archive {id}`. NEVER auto-archive.'''
 
 [devswarm_prompt.proto_key]
 doc = "A descriptor key the engine does not merge (JavaScript would set the prototype); a descriptor that holds it is left to the Node hook."
@@ -1916,12 +1916,12 @@ value = "child-turn-defer"
 [devswarm_prompt.mesh_direct]
 doc = "The child's nudge for mesh mail addressed to it (hooks/devswarm-child-turn.js buildMeshDirectSegment). Placeholders: {count}, {age}, {cli}, {id}."
 value = '''
-⚠️ anti-hall · devswarm-mesh-direct: you have {count} unread mesh direct message(s){age} addressed to you. Read them via `node {cli} inbox read-primary {id}` (read-only; after handling, run the `ackCommand` it returns).'''
+⚠️ anti-hall · devswarm-mesh-direct: you have {count} unread mesh direct message(s){age} addressed to you. Read them via `{cli} inbox read-primary {id}` (read-only; after handling, run the `ackCommand` it returns).'''
 
 [devswarm_prompt.mesh_direct_urgent]
 doc = "The loudest form of the mesh-direct nudge, for urgent or high-urgency mail. Placeholders: {count}, {age}, {cli}, {id}."
 value = '''
-⚠️ anti-hall · devswarm-mesh-direct: urgent — you have {count} unread mesh direct message(s){age} addressed to you. STOP and read them FIRST via `node {cli} inbox read-primary {id}` (read-only; after handling, run the `ackCommand` it returns), before continuing.'''
+⚠️ anti-hall · devswarm-mesh-direct: urgent — you have {count} unread mesh direct message(s){age} addressed to you. STOP and read them FIRST via `{cli} inbox read-primary {id}` (read-only; after handling, run the `ackCommand` it returns), before continuing.'''
 
 [devswarm_prompt.mesh_direct_age]
 doc = "The age of the oldest unread mesh mail, appended to the nudge. Placeholder: {minutes}."
