@@ -42,12 +42,13 @@ pub struct Armed {
 }
 
 /// `watcherLiveForWorkspace(home, id, now)`: the workspace's own lock, else the live lock of any other registered row whose
-/// checkout is the same directory (compared by resolved and real path, as `realFormsOf` does).
+/// checkout is the same directory (compared by resolved and real path, as `realFormsOf` does). A row with no session id counts
+/// on both sides: it is the app's own row for the checkout.
 pub fn live_for_workspace(home: &Path, id: &str, now: i64) -> R<Armed> {
     if lock_live(home, id, now)? {
         return Ok(Armed { armed: true, by_checkout: false });
     }
-    let rows = crate::wakew::who::read_descriptors(home);
+    let rows = crate::wakew::who::read_checkout_rows(home); // rows without a session too: the app's own row covers the Primary's checkout
     let text = |d: &crate::checks::jsport::json::J, k: &str| crate::wakew::who::str_member(d, k);
     let Some(own) = rows.iter().find(|d| text(d, "id").as_deref() == Some(id)) else { return Ok(Armed { armed: false, by_checkout: false }) };
     let Some(own_wt) = text(own, "worktreePath") else { return Ok(Armed { armed: false, by_checkout: false }) };
@@ -101,6 +102,26 @@ mod tests {
         assert_eq!(live_for_workspace(&home, "C", 1_000_500).unwrap(), Armed { armed: false, by_checkout: false }, "another checkout is not covered");
         let stale = live_for_workspace(&home, "A", 1_000_000 + defaults::num("mesh_write.wake_lock_stale_ms") as i64 + 1).unwrap();
         assert!(!stale.armed, "a stale lock covers nobody");
+        crate::discard::harmless(std::fs::remove_dir_all(home)); // keep: test cleanup; an absent directory is the goal state
+    }
+
+    #[test]
+    fn the_app_row_without_a_session_is_covered_by_the_primarys_lock_on_its_checkout() {
+        // SkyCrew 2026-10-22: the DevSwarm app's own row for a Primary's checkout has `sessionId: null`; the Primary's row (with the
+        // session) holds the live lock. The tracker asks about the app row and said "no Monitor wake-watch covers this workspace".
+        let home = scratch("sessionless");
+        let wt = home.join("wt").to_string_lossy().into_owned();
+        std::fs::create_dir_all(&wt).unwrap();
+        descriptor(&home, "primary-x", &wt);
+        let f = devswarm_root(&home).join(defaults::text("mesh_write.dir_workspaces")).join("app-row.json");
+        std::fs::write(f, format!(r#"{{"id":"app-row","worktreePath":"{wt}","sessionId":null}}"#)).unwrap();
+        lock(&home, "primary-x", 1_000_000);
+        let a = live_for_workspace(&home, "app-row", 1_000_500).unwrap();
+        assert_eq!(a, Armed { armed: true, by_checkout: true }, "the app row is covered by the Primary's lock");
+        // a sessionless row holding the live lock covers the Primary's row the same way
+        lock(&home, "app-row", 1_000_000);
+        crate::discard::harmless(std::fs::remove_file(lock_file(&home, "primary-x"))); // keep: the lock may already be gone
+        assert!(live_for_workspace(&home, "primary-x", 1_000_500).unwrap().armed, "a live lock under the app row covers the Primary");
         crate::discard::harmless(std::fs::remove_dir_all(home)); // keep: test cleanup; an absent directory is the goal state
     }
 }
