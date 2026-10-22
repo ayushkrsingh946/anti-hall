@@ -280,7 +280,7 @@ printf '[a.renamed]\nvalue = 2\n' >"$W/new/defaults/a.toml"
 mk_engine "$W/new/ah-engine" "a.renamed wire.ack"
 run --check "$W/new/ah-engine" "$W/new/defaults" --allow-drop >"$W/check.out" 2>&1; rc=$?
 ok "window: a renamed key is reported, not failed (informational)" test $rc -eq 0
-ok "window: names the old binary's missed key" has "defaults/a.toml \[a.old\]""$W/check.out"
+ok "window: names the old binary's missed key" has "defaults/a.toml \[a.old\]" "$W/check.out"
 ok "window: says it WILL log defaults_fallback" has "WINDOW: the old (live) binary" "$W/check.out"
 ok "window: the old binary's own refusal is quoted" has "refuses: ah-engine: defaults unavailable: missing_key" "$W/check.out"
 ok "window: summary line counts the keys per root" has "WINDOW SUMMARY: 4 key(s)" "$W/check.out"
