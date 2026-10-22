@@ -188,11 +188,13 @@ fn exact_stdin_cap_is_asked_of_the_engine_and_one_more_byte_is_not() {
     assert_eq!(exact.len(), max);
 
     let e = Env::new("exact-cap", RAN);
-    // With no daemon, an exact-cap payload is a normal unaskable-engine call (the client lets it through), while one more byte
-    // is undecodable by the cap and a guard event blocks.
-    let (_, err, code) = e.call_bytes_with(&exact, None, None);
-    assert!(!err.contains("hook input unavailable"), "the engine was asked: {err:?}");
-    assert_ne!(code, 2, "an unreachable engine is a pass-through, not a block");
+    // The stdin cap (8 MiB) and the daemon request cap (1 MiB) differ on purpose: an exact-cap guard payload is still read whole
+    // and is not "unavailable input", but it is too large to send to the daemon, so the guard event follows its configured
+    // infra failure mode (closed: exit 2, stricter than the Node wrapper, which let such a call through).
+    let (out, err, code) = e.call_bytes_with(&exact, None, None);
+    assert!(!err.contains("hook input unavailable"), "the payload was read whole: {err:?}");
+    assert_eq!((out.as_str(), code), ("", 2), "an unsendable guard request fails closed: {err:?}");
+    assert!(err.contains("could not run the guards"), "{err:?}");
 
     let mut over = exact;
     over.push(b'\n');
