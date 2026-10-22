@@ -42,7 +42,8 @@ const mutantKit = require('./lib/devswarm-mutant-kit.js');
 const { testHook } = require('../helpers/spawn-hook.js');
 
 const PLUGIN_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const CHILD_TURN_HOOK_PATH = path.join(PLUGIN_ROOT, 'hooks', 'devswarm-child-turn.js');
+const NODE_PLUGIN_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const CHILD_TURN_HOOK_PATH = path.join(NODE_PLUGIN_ROOT, 'hooks', 'devswarm-child-turn.js');
 
 function tmpHome() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'anti-hall-fixwave5-'));
@@ -200,8 +201,8 @@ function scratchHookCopy(prefix) {
   fs.mkdirSync(hooksDir);
   const hookPath = path.join(hooksDir, 'devswarm-child-turn.js');
   fs.copyFileSync(CHILD_TURN_HOOK_PATH, hookPath);
-  fs.symlinkSync(path.join(PLUGIN_ROOT, 'hooks', 'lib'), path.join(hooksDir, 'lib'), 'dir');
-  fs.symlinkSync(path.join(PLUGIN_ROOT, 'companion'), path.join(dir, 'companion'), 'dir');
+  fs.symlinkSync(path.join(NODE_PLUGIN_ROOT, 'hooks', 'lib'), path.join(hooksDir, 'lib'), 'dir');
+  fs.symlinkSync(path.join(NODE_PLUGIN_ROOT, 'companion'), path.join(dir, 'companion'), 'dir');
   return { dir, hookPath };
 }
 function discardHookCopy(copy) {

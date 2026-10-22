@@ -14,8 +14,9 @@ const os = require('node:os');
 const path = require('node:path');
 
 const ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const doc = require(path.join(ROOT, 'companion', 'lib', 'doctor-devswarm.js'));
-const liveness = require(path.join(ROOT, 'companion', 'lib', 'liveness.js'));
+const NODE_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const doc = require(path.join(NODE_ROOT, 'companion', 'lib', 'doctor-devswarm.js'));
+const liveness = require(path.join(NODE_ROOT, 'companion', 'lib', 'liveness.js'));
 
 let sqlite = null;
 try { sqlite = require('node:sqlite'); } catch (_) { sqlite = null; }

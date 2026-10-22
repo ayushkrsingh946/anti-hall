@@ -20,12 +20,13 @@ const path = require('node:path');
 const cp = require('node:child_process');
 
 const ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const cli = require(path.join(ROOT, 'scripts', 'devswarm.js'));
-const storeLib = require(path.join(ROOT, 'companion', 'lib', 'devswarm-store.js'));
-const recovery = require(path.join(ROOT, 'companion', 'lib', 'recovery.js'));
-const liveness = require(path.join(ROOT, 'companion', 'lib', 'liveness.js'));
-const inst = require(path.join(ROOT, 'companion', 'install-devswarm-ingest.js'));
-const repokey = require(path.join(ROOT, 'companion', 'lib', 'devswarm-repokey.js'));
+const NODE_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const cli = require(path.join(NODE_ROOT, 'scripts', 'devswarm.js'));
+const storeLib = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-store.js'));
+const recovery = require(path.join(NODE_ROOT, 'companion', 'lib', 'recovery.js'));
+const liveness = require(path.join(NODE_ROOT, 'companion', 'lib', 'liveness.js'));
+const inst = require(path.join(NODE_ROOT, 'companion', 'install-devswarm-ingest.js'));
+const repokey = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-repokey.js'));
 const probeLib = require('../helpers/partition-lock-probe.js');
 const { testHook } = require('../helpers/spawn-hook.js');
 

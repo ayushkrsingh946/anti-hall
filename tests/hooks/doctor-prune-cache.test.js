@@ -350,7 +350,7 @@ test('doctor --prune-cache prints the cron/Monitor versioned-path warning in BOT
 });
 
 test('nothing but doctor --prune-cache reaches the prune code', () => {
-  const pluginDir = path.join(REPO_ROOT, 'plugins', 'anti-hall');
+  const pluginDir = path.join(REPO_ROOT, 'plugins', 'anti-hall-node'); // cache-prune and doctor live in the Node backup tree
   const hits = [];
   const walk = (d) => {
     for (const e of fs.readdirSync(d, { withFileTypes: true })) {

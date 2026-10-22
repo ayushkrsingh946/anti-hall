@@ -26,7 +26,9 @@ test('every Node site that runs git status/diff under a timeout uses the shared 
     'hooks/command-guard.js', 'engine/logic/command.js',
   ];
   for (const rel of sites) {
-    const src = fs.readFileSync(path.join(ROOT, rel), 'utf8');
+    const NODE_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+    const base = fs.existsSync(path.join(NODE_ROOT, rel)) ? NODE_ROOT : ROOT; // Node files moved out of the published plugin
+    const src = fs.readFileSync(path.join(base, rel), 'utf8');
     assert.ok(/readOnlyGitEnv|GIT_OPTIONAL_LOCKS/.test(src), rel + ' runs read-only git without GIT_OPTIONAL_LOCKS=0');
   }
 });

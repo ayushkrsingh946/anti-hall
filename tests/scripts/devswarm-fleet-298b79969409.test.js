@@ -31,9 +31,11 @@ const cp = require('node:child_process');
 
 const ROOT = process.env.ANTIHALL_TEST_PLUGIN_ROOT
   || path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
+const NODE_ROOT = process.env.ANTIHALL_TEST_PLUGIN_ROOT
+  || path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
 
-const cliPath = path.join(ROOT, 'scripts', 'devswarm.js');
-const storePath = path.join(ROOT, 'companion', 'lib', 'devswarm-store.js');
+const cliPath = path.join(NODE_ROOT, 'scripts', 'devswarm.js');
+const storePath = path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-store.js');
 if (!fs.existsSync(cliPath) || !fs.existsSync(storePath)) {
   throw new Error(
     'ANTIHALL_TEST_PLUGIN_ROOT=' + JSON.stringify(ROOT) + ' is not a plugins/anti-hall-shaped '
@@ -42,9 +44,9 @@ if (!fs.existsSync(cliPath) || !fs.existsSync(storePath)) {
 }
 const cli = require(cliPath);
 const storeLib = require(storePath);
-const inst = require(path.join(ROOT, 'companion', 'install-devswarm-ingest.js'));
-const repokey = require(path.join(ROOT, 'companion', 'lib', 'devswarm-repokey.js'));
-const liveness = require(path.join(ROOT, 'companion', 'lib', 'liveness.js'));
+const inst = require(path.join(NODE_ROOT, 'companion', 'install-devswarm-ingest.js'));
+const repokey = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-repokey.js'));
+const liveness = require(path.join(NODE_ROOT, 'companion', 'lib', 'liveness.js'));
 
 function tmpHome() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'anti-hall-298b79969409-'));

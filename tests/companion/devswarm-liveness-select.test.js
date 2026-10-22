@@ -15,7 +15,8 @@ const os = require('node:os');
 const path = require('node:path');
 
 const ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const livenessSelect = require(path.join(ROOT, 'companion', 'lib', 'devswarm-liveness-select.js'));
+const NODE_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const livenessSelect = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-liveness-select.js'));
 const { pickFreshestLive, isLiveSessionId, sessionAuthoredHeartbeat, cursorEvidence, heartbeatPath, hasLiveCandidate } = livenessSelect;
 
 function tmpHome(prefix) {

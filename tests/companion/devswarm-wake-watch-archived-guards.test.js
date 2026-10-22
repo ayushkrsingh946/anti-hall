@@ -16,10 +16,11 @@ const path = require('node:path');
 const { spawnSync, spawn } = require('node:child_process');
 
 const ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const MODULE_PATH = path.join(ROOT, 'companion', 'lib', 'devswarm-wake-watch.js');
+const NODE_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const MODULE_PATH = path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-wake-watch.js');
 const { isOwnChildArchived, saveSeenState, ARCHIVED_RECHECK_MS } = require(MODULE_PATH);
-const pull = require(path.join(ROOT, 'companion', 'lib', 'devswarm-pull.js'));
-const appDb = require(path.join(ROOT, 'companion', 'lib', 'devswarm-app-db.js'));
+const pull = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-pull.js'));
+const appDb = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-app-db.js'));
 
 let sqlite = null;
 try { sqlite = require('node:sqlite'); } catch (_) { sqlite = null; }

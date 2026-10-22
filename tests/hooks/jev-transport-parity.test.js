@@ -16,8 +16,9 @@ const { execFileSync } = require('node:child_process');
 const { makeHome } = require('../helpers/fixtures.js');
 
 const PLUGIN = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const HOOKS = path.join(PLUGIN, 'hooks', 'lib');
-const REPORT = path.join(PLUGIN, 'scripts', 'jev-report.js');
+const NODE_PLUGIN = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const HOOKS = path.join(NODE_PLUGIN, 'hooks', 'lib');
+const REPORT = path.join(NODE_PLUGIN, 'scripts', 'jev-report.js');
 const LIBS = ['jev-client.js', 'jev-assist.js'].map((f) => require.resolve(path.join(HOOKS, f)));
 const fresh = (n) => { for (const l of LIBS) delete require.cache[l]; return require(path.join(HOOKS, n)); };
 
@@ -104,7 +105,7 @@ for (const transport of ['vercel', 'typesafe']) {
 }
 
 test('report: rows without a transport land in "unrecorded (assumed vercel)", never merged into vercel', () => {
-  const { buildTransportBreakdown } = require(path.join(PLUGIN, 'scripts', 'jev-report.js'));
+  const { buildTransportBreakdown } = require(path.join(NODE_PLUGIN, 'scripts', 'jev-report.js'));
   const base = { ts: new Date().toISOString(), id: 'speculation', backend: 'jev', ms: 100, mode: 'on' };
   const rows = [
     Object.assign({}, base),
@@ -125,7 +126,7 @@ test('report: rows without a transport land in "unrecorded (assumed vercel)", ne
 });
 
 test('triage rows carry the serving transport into the breakdown', () => {
-  const { buildTransportBreakdown } = require(path.join(PLUGIN, 'scripts', 'jev-report.js'));
+  const { buildTransportBreakdown } = require(path.join(NODE_PLUGIN, 'scripts', 'jev-report.js'));
   const t = buildTransportBreakdown([], [
     { ts: new Date().toISOString(), hash: 'a', backend: 'jev', ms: 120, transport: 'typesafe' },
     { ts: new Date().toISOString(), hash: 'b', backend: 'haiku', ms: 900 },
@@ -158,7 +159,7 @@ test('no error path returns or logs a response body (typesafe 422 echoes the sub
 });
 
 test('weekly scorecard carries the per-transport breakdown', () => {
-  const { buildWeeklyScorecard } = require(path.join(PLUGIN, 'scripts', 'jev-report.js'));
+  const { buildWeeklyScorecard } = require(path.join(NODE_PLUGIN, 'scripts', 'jev-report.js'));
   const row = { ts: new Date().toISOString(), id: 'speculation', hash: 'h', backend: 'jev', ms: 80, mode: 'on', transport: 'typesafe' };
   const sc = buildWeeklyScorecard([row], {});
   assert.deepStrictEqual(sc.transports.map((t) => [t.transport, t.calls]), [['typesafe', 1]]);

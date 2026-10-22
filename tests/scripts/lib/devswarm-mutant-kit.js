@@ -59,8 +59,9 @@ const path = require('node:path');
 const devswarmSource = require('./devswarm-source.js');
 
 const PLUGIN_ROOT = path.join(__dirname, '..', '..', '..', 'plugins', 'anti-hall');
-const LIVE_DEVSWARM_PATH = path.join(PLUGIN_ROOT, 'scripts', 'devswarm.js');
-const LIVE_DEVSWARM_LIB = path.join(PLUGIN_ROOT, 'scripts', 'devswarm-lib');
+const NODE_PLUGIN_ROOT = path.join(__dirname, '..', '..', '..', 'plugins', 'anti-hall-node');
+const LIVE_DEVSWARM_PATH = path.join(NODE_PLUGIN_ROOT, 'scripts', 'devswarm.js');
+const LIVE_DEVSWARM_LIB = path.join(NODE_PLUGIN_ROOT, 'scripts', 'devswarm-lib');
 
 // copyDirFiles: copy every regular file of `src` into `dest` (recursive,
 // preserving the relative layout). devswarm-lib/ holds plain .js modules.
@@ -97,8 +98,8 @@ function createCopy(prefix) {
   const devswarmPath = path.join(scriptsDir, 'devswarm.js');
   fs.copyFileSync(LIVE_DEVSWARM_PATH, devswarmPath);
   if (fs.existsSync(LIVE_DEVSWARM_LIB)) copyDirFiles(LIVE_DEVSWARM_LIB, path.join(scriptsDir, 'devswarm-lib'));
-  fs.symlinkSync(path.join(PLUGIN_ROOT, 'companion'), path.join(dir, 'companion'), 'dir');
-  fs.symlinkSync(path.join(PLUGIN_ROOT, 'hooks'), path.join(dir, 'hooks'), 'dir');
+  fs.symlinkSync(path.join(NODE_PLUGIN_ROOT, 'companion'), path.join(dir, 'companion'), 'dir');
+  fs.symlinkSync(path.join(NODE_PLUGIN_ROOT, 'hooks'), path.join(dir, 'hooks'), 'dir');
   return { dir, devswarmPath };
 }
 

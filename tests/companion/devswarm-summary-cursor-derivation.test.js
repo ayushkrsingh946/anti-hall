@@ -33,10 +33,12 @@ const cp = require('node:child_process');
 
 const ROOT = process.env.ANTIHALL_TEST_PLUGIN_ROOT
   || path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const cli = require(path.join(ROOT, 'scripts', 'devswarm.js'));
-const storeLib = require(path.join(ROOT, 'companion', 'lib', 'devswarm-store.js'));
-const inboxCursor = require(path.join(ROOT, 'companion', 'lib', 'devswarm-inbox-cursor.js'));
-const ownReader = require(path.join(ROOT, 'companion', 'lib', 'devswarm-own-reader.js'));
+const NODE_ROOT = process.env.ANTIHALL_TEST_PLUGIN_ROOT
+  || path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const cli = require(path.join(NODE_ROOT, 'scripts', 'devswarm.js'));
+const storeLib = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-store.js'));
+const inboxCursor = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-inbox-cursor.js'));
+const ownReader = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-own-reader.js'));
 
 function tmpHome() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ah-summary-deriv-'));
@@ -56,7 +58,7 @@ function makeGitRepo(tag) {
 }
 function backend() { return (storeLib.sqliteAvailable && storeLib.sqliteAvailable()) ? 'sqlite' : 'journal'; }
 function repoKeyOf(repo) {
-  const rk = require(path.join(ROOT, 'companion', 'lib', 'devswarm-repokey.js'));
+  const rk = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-repokey.js'));
   return rk.repoKeyForWorktree(repo);
 }
 function seed(home, repo, id, n, tagBase, startTs) {
@@ -335,7 +337,7 @@ test('AMBIGUOUS-BRANCH LIVE RESOLUTION: live read cannot run (repo/store gone) -
 // (3) a legitimately higher union DOES win.
 // ---------------------------------------------------------------------------
 
-const unreadLib = require(path.join(ROOT, 'companion', 'lib', 'devswarm-unread.js'));
+const unreadLib = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-unread.js'));
 
 function withNdjsonInbox(home, tag) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ah-ndjson-' + tag + '-'));

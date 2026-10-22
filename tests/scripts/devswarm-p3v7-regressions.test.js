@@ -20,14 +20,15 @@ const path = require('node:path');
 const cp = require('node:child_process');
 
 const ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const cli = require(path.join(ROOT, 'scripts', 'devswarm.js'));
-const storeLib = require(path.join(ROOT, 'companion', 'lib', 'devswarm-store.js'));
-const recovery = require(path.join(ROOT, 'companion', 'lib', 'recovery.js'));
-const supervisor = require(path.join(ROOT, 'companion', 'devswarm-supervisor.js'));
-const doctorDevswarm = require(path.join(ROOT, 'companion', 'lib', 'doctor-devswarm.js'));
-const migrate = require(path.join(ROOT, 'companion', 'devswarm-migrate.js'));
-const inst = require(path.join(ROOT, 'companion', 'install-devswarm-ingest.js'));
-const repokey = require(path.join(ROOT, 'companion', 'lib', 'devswarm-repokey.js'));
+const NODE_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const cli = require(path.join(NODE_ROOT, 'scripts', 'devswarm.js'));
+const storeLib = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-store.js'));
+const recovery = require(path.join(NODE_ROOT, 'companion', 'lib', 'recovery.js'));
+const supervisor = require(path.join(NODE_ROOT, 'companion', 'devswarm-supervisor.js'));
+const doctorDevswarm = require(path.join(NODE_ROOT, 'companion', 'lib', 'doctor-devswarm.js'));
+const migrate = require(path.join(NODE_ROOT, 'companion', 'devswarm-migrate.js'));
+const inst = require(path.join(NODE_ROOT, 'companion', 'install-devswarm-ingest.js'));
+const repokey = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-repokey.js'));
 const { testHook } = require('../helpers/spawn-hook.js');
 
 function tmpHome() {

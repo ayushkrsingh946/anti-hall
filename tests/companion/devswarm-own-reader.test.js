@@ -23,10 +23,12 @@ const path = require('node:path');
 
 const ROOT = process.env.ANTIHALL_TEST_PLUGIN_ROOT
   || path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const cli = require(path.join(ROOT, 'scripts', 'devswarm.js'));
-const unread = require(path.join(ROOT, 'companion', 'lib', 'devswarm-unread.js'));
-const storeLib = require(path.join(ROOT, 'companion', 'lib', 'devswarm-store.js'));
-const ownReader = require(path.join(ROOT, 'companion', 'lib', 'devswarm-own-reader.js'));
+const NODE_ROOT = process.env.ANTIHALL_TEST_PLUGIN_ROOT
+  || path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const cli = require(path.join(NODE_ROOT, 'scripts', 'devswarm.js'));
+const unread = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-unread.js'));
+const storeLib = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-store.js'));
+const ownReader = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-own-reader.js'));
 
 const HASH = 'ownreader-abcdef';
 const ME = 'h:4242:1700000000000';

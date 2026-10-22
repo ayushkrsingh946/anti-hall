@@ -20,6 +20,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const PLUGIN_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
+const NODE_PLUGIN_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
 const MONITORS_JSON = path.join(PLUGIN_ROOT, 'monitors', 'monitors.json');
 
 const RAW = fs.readFileSync(MONITORS_JSON, 'utf8');
@@ -83,7 +84,7 @@ test('the devswarm-wake-watch command tries the engine first and falls back to t
 });
 
 test('the watcher script the entry points at is require()-loadable and side-effect-free on require (main() guarded)', () => {
-  const watcherPath = path.join(PLUGIN_ROOT, 'companion', 'lib', 'devswarm-wake-watch.js');
+  const watcherPath = path.join(NODE_PLUGIN_ROOT, 'companion', 'lib', 'devswarm-wake-watch.js');
   let mod;
   assert.doesNotThrow(() => { mod = require(watcherPath); });
   assert.strictEqual(typeof mod.tick, 'function');

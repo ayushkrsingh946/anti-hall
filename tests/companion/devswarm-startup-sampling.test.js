@@ -10,8 +10,9 @@ const os = require('node:os');
 const path = require('node:path');
 
 const ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const sampling = require(path.join(ROOT, 'companion', 'lib', 'devswarm-startup-sampling.js'));
-const { livenessPathFor, devswarmRoot } = require(path.join(ROOT, 'companion', 'lib', 'liveness.js'));
+const NODE_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const sampling = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-startup-sampling.js'));
+const { livenessPathFor, devswarmRoot } = require(path.join(NODE_ROOT, 'companion', 'lib', 'liveness.js'));
 
 function tmpHome() { return fs.mkdtempSync(path.join(os.tmpdir(), 'ah-startupsamp-')); }
 function rm(p) { try { fs.rmSync(p, { recursive: true, force: true }); } catch (_) {} }

@@ -22,12 +22,13 @@ const path = require('node:path');
 const cp = require('node:child_process');
 
 const ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const dw = require(path.join(ROOT, 'scripts', 'devswarm.js'));
-const sup = require(path.join(ROOT, 'companion', 'devswarm-supervisor.js'));
-const names = require(path.join(ROOT, 'companion', 'lib', 'devswarm-names.js'));
-const storeLib = require(path.join(ROOT, 'companion', 'lib', 'devswarm-store.js'));
-const repokey = require(path.join(ROOT, 'companion', 'lib', 'devswarm-repokey.js'));
-const { projectDirFor } = require(path.join(ROOT, 'companion', 'lib', 'target-session.js'));
+const NODE_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const dw = require(path.join(NODE_ROOT, 'scripts', 'devswarm.js'));
+const sup = require(path.join(NODE_ROOT, 'companion', 'devswarm-supervisor.js'));
+const names = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-names.js'));
+const storeLib = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-store.js'));
+const repokey = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-repokey.js'));
+const { projectDirFor } = require(path.join(NODE_ROOT, 'companion', 'lib', 'target-session.js'));
 const { buildAppDb, rmFixture } = require('../helpers/app-db-fixture.js');
 
 let sqlite = null;

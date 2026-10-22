@@ -28,12 +28,14 @@ const cp = require('node:child_process');
 // swapped in. Defaults to the real repo's plugins/anti-hall for a bare run.
 const antiHallDir = process.env.DEVSWARM_ANTIHALL_DIR
   || path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const devswarmModulePath = path.join(antiHallDir, 'scripts', 'devswarm.js');
+const NODE_antiHallDir = process.env.DEVSWARM_ANTIHALL_DIR
+  || path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const devswarmModulePath = path.join(NODE_antiHallDir, 'scripts', 'devswarm.js');
 
 const cli = require(devswarmModulePath);
-const storeLib = require(path.join(antiHallDir, 'companion', 'lib', 'devswarm-store.js'));
-const inst = require(path.join(antiHallDir, 'companion', 'install-devswarm-ingest.js'));
-const repokey = require(path.join(antiHallDir, 'companion', 'lib', 'devswarm-repokey.js'));
+const storeLib = require(path.join(NODE_antiHallDir, 'companion', 'lib', 'devswarm-store.js'));
+const inst = require(path.join(NODE_antiHallDir, 'companion', 'install-devswarm-ingest.js'));
+const repokey = require(path.join(NODE_antiHallDir, 'companion', 'lib', 'devswarm-repokey.js'));
 
 function tmpHome() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'anti-hall-fold-redirect-'));

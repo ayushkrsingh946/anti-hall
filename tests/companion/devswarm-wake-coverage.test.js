@@ -13,9 +13,10 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
 const ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const { wakeCoverage } = require(path.join(ROOT, 'companion', 'lib', 'devswarm-wake-coverage.js'));
-const { lockPathFor } = require(path.join(ROOT, 'companion', 'lib', 'devswarm-wake-watch.js'));
-const { noWakePathLine } = require(path.join(ROOT, 'hooks', 'lib', 'devswarm-wake.js'));
+const NODE_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const { wakeCoverage } = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-wake-coverage.js'));
+const { lockPathFor } = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-wake-watch.js'));
+const { noWakePathLine } = require(path.join(NODE_ROOT, 'hooks', 'lib', 'devswarm-wake.js'));
 
 const PRIMARY_ID = 'primary-abc123';
 const NOW = 1_800_000_000_000;

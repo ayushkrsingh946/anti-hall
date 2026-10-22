@@ -14,7 +14,8 @@ const path = require('node:path');
 const fs = require('node:fs');
 
 const ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const guard = require(path.join(ROOT, 'companion', 'lib', 'test-home-guard.js'));
+const NODE_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const guard = require(path.join(NODE_ROOT, 'companion', 'lib', 'test-home-guard.js'));
 const REAL = os.userInfo().homedir;
 
 test('the guard recognises the real home under node --test, and never outside it', () => {
@@ -31,7 +32,7 @@ test('a spawned hook child (ANTIHALL_TEST_ISOLATION, no NODE_TEST_CONTEXT) with 
   // the passwd home. The canonical resolver (used by jev-assist's log/cache paths)
   // must throw, not resolve it.
   const { spawnSync } = require('node:child_process');
-  const script = "const g=require(" + JSON.stringify(path.join(ROOT, 'companion', 'lib', 'test-home-guard.js')) + ");"
+  const script = "const g=require(" + JSON.stringify(path.join(NODE_ROOT, 'companion', 'lib', 'test-home-guard.js')) + ");"
     + "let r='resolved';try{g.resolveHome(null);}catch(e){r='threw:'+e.message}"
     + "process.stdout.write(r)";
   const r = spawnSync(process.execPath, ['-e', script], {
@@ -42,8 +43,8 @@ test('a spawned hook child (ANTIHALL_TEST_ISOLATION, no NODE_TEST_CONTEXT) with 
 });
 
 test('runRepairs / runMigrations refuse the real home before doing anything', () => {
-  const repair = require(path.join(ROOT, 'hooks', 'lib', 'doctor-repair.js'));
-  const migrations = require(path.join(ROOT, 'companion', 'lib', 'migrations.js'));
+  const repair = require(path.join(NODE_ROOT, 'hooks', 'lib', 'doctor-repair.js'));
+  const migrations = require(path.join(NODE_ROOT, 'companion', 'lib', 'migrations.js'));
   assert.throws(() => repair.runRepairs({ home: REAL, cwd: os.tmpdir(), env: { HOME: REAL }, dryRun: true }), /REAL user home/);
   assert.throws(() => migrations.runMigrations({ home: REAL, dryRun: true }), /REAL user home/);
 });
@@ -52,7 +53,7 @@ test('runUpdate refuses when os.homedir() is the real home', () => {
   const saved = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
   process.env.HOME = REAL; process.env.USERPROFILE = REAL;
   try {
-    const U = require(path.join(ROOT, 'skills', 'update', 'scripts', 'update.js'));
+    const U = require(path.join(NODE_ROOT, 'skills', 'update', 'scripts', 'update.js'));
     assert.throws(() => U.runUpdate({ paths: {} }), /REAL user home/);
   } finally {
     if (saved.HOME === undefined) delete process.env.HOME; else process.env.HOME = saved.HOME;
@@ -62,6 +63,6 @@ test('runUpdate refuses when os.homedir() is the real home', () => {
 
 test('every entry point carries the guard (a new one must add it)', () => {
   for (const f of ['hooks/lib/doctor-repair.js', 'companion/lib/migrations.js', 'skills/update/scripts/update.js']) {
-    assert.match(fs.readFileSync(path.join(ROOT, f), 'utf8'), /realHomeUnderTest\(/, f);
+    assert.match(fs.readFileSync(path.join(NODE_ROOT, f), 'utf8'), /realHomeUnderTest\(/, f);
   }
 });

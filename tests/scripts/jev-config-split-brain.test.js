@@ -14,9 +14,10 @@ const { execFileSync, spawnSync } = require('node:child_process');
 const { makeHome } = require('../helpers/fixtures.js');
 
 const PLUGIN = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const SETUP = path.join(PLUGIN, 'scripts', 'jev-setup.js');
-const DOCTOR = path.join(PLUGIN, 'hooks', 'doctor.js');
-const CLIENT = path.join(PLUGIN, 'hooks', 'lib', 'jev-client.js');
+const NODE_PLUGIN = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const SETUP = path.join(NODE_PLUGIN, 'scripts', 'jev-setup.js');
+const DOCTOR = path.join(NODE_PLUGIN, 'hooks', 'doctor.js');
+const CLIENT = path.join(NODE_PLUGIN, 'hooks', 'lib', 'jev-client.js');
 
 function envFor(home, extra) {
   const env = Object.assign({}, process.env, { HOME: home, USERPROFILE: home, ANTIHALL_INGEST_DRY_RUN: '1' }, extra);
@@ -63,7 +64,7 @@ test('settings.json says enabled:false; `enable` turns the hooks on; `disable` t
 test('enabled only in settings.json is honoured by the integration-mode gate (jev-assist getMode)', () => {
   const { home } = makeHome();
   seed(home, 'settings.json', { jev: { enabled: true } });
-  const out = execFileSync(process.execPath, ['-e', `const a=require(${JSON.stringify(path.join(PLUGIN, 'hooks', 'lib', 'jev-assist.js'))});process.stdout.write(a.getMode('speculation', a.readJevJson(${JSON.stringify(home)}), ${JSON.stringify(home)}))`], { env: envFor(home), encoding: 'utf8' });
+  const out = execFileSync(process.execPath, ['-e', `const a=require(${JSON.stringify(path.join(NODE_PLUGIN, 'hooks', 'lib', 'jev-assist.js'))});process.stdout.write(a.getMode('speculation', a.readJevJson(${JSON.stringify(home)}), ${JSON.stringify(home)}))`], { env: envFor(home), encoding: 'utf8' });
   assert.strictEqual(out, 'on');
 });
 

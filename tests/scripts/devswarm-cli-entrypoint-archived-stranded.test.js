@@ -36,10 +36,12 @@ const cp = require('node:child_process');
 
 const ROOT = process.env.ANTIHALL_TEST_PLUGIN_ROOT
   || path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
+const NODE_ROOT = process.env.ANTIHALL_TEST_PLUGIN_ROOT
+  || path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
 
-const cliPath = path.join(ROOT, 'scripts', 'devswarm.js');
-const storePath = path.join(ROOT, 'companion', 'lib', 'devswarm-store.js');
-const repokeyPath = path.join(ROOT, 'companion', 'lib', 'devswarm-repokey.js');
+const cliPath = path.join(NODE_ROOT, 'scripts', 'devswarm.js');
+const storePath = path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-store.js');
+const repokeyPath = path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-repokey.js');
 if (!fs.existsSync(cliPath) || !fs.existsSync(storePath)) {
   throw new Error(
     'ANTIHALL_TEST_PLUGIN_ROOT=' + JSON.stringify(ROOT) + ' is not a plugins/anti-hall-shaped '

@@ -24,10 +24,11 @@ process.on('exit', () => { try { fs.rmSync(LOG_DIR, { recursive: true, force: tr
 
 const REPO = path.join(__dirname, '..', '..');
 const ROOT = path.join(REPO, 'plugins', 'anti-hall');
-const cli = require(path.join(ROOT, 'scripts', 'devswarm.js'));
-const planLib = require(path.join(ROOT, 'companion', 'lib', 'devswarm-plan.js'));
-const storeLib = require(path.join(ROOT, 'companion', 'lib', 'devswarm-store.js'));
-const repokey = require(path.join(ROOT, 'companion', 'lib', 'devswarm-repokey.js'));
+const NODE_ROOT = path.join(REPO, 'plugins', 'anti-hall-node');
+const cli = require(path.join(NODE_ROOT, 'scripts', 'devswarm.js'));
+const planLib = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-plan.js'));
+const storeLib = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-store.js'));
+const repokey = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-repokey.js'));
 
 function tmpHome() {
   const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ah-plock-home-')));
@@ -71,7 +72,7 @@ test('race: a second process writing the plan inside a heartbeat --step read-mod
     fs.renameSync = function patched(src, dst) {
       if (!fired && dst === target) {
         fired = true;
-        child = cp.spawn(process.execPath, [script, ROOT, home, key, mark], {
+        child = cp.spawn(process.execPath, [script, NODE_ROOT, home, key, mark], {
           env: Object.assign({}, process.env, { HOME: home, USERPROFILE: home }), stdio: 'ignore',
         });
         assert.ok(waitFor(mark + '.start', 30000), 'writer B started');
@@ -130,7 +131,7 @@ test('roster fixture: plan.tokens and plan.straying appear once the supervisor h
     assert.ok(row0 && row0.plan, 'row carries the P1 plan field');
     assert.ok(!('tokens' in row0.plan) && !('straying' in row0.plan), 'no supervisor state -> P1 shape only');
 
-    const tokFile = require(path.join(ROOT, 'companion', 'lib', 'devswarm-token-usage.js')).statePath(home, key);
+    const tokFile = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-token-usage.js')).statePath(home, key);
     fs.mkdirSync(path.dirname(tokFile), { recursive: true });
     fs.writeFileSync(tokFile, JSON.stringify({ total: 1834567.4, sinceStep: 420000.6 }));
     planLib.saveStray(home, key, { active: [{ signal: 'stall', step: 1, reason: 'no step progress for 45m',

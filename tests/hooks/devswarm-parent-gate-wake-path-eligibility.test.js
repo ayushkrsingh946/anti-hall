@@ -16,10 +16,11 @@ const { testHook } = require('../helpers/spawn-hook.js');
 const { writeSettings } = require('../helpers/settings-switch.js');
 
 const ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const installIngest = require(path.join(ROOT, 'companion', 'install-devswarm-ingest.js'));
-const { resolveContext } = require(path.join(ROOT, 'companion', 'lib', 'identity.js'));
-const { wakeCoverage } = require(path.join(ROOT, 'companion', 'lib', 'devswarm-wake-coverage.js'));
-const { stateFileFor } = require(path.join(ROOT, 'companion', 'lib', 'devswarm-gate-state.js'));
+const NODE_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const installIngest = require(path.join(NODE_ROOT, 'companion', 'install-devswarm-ingest.js'));
+const { resolveContext } = require(path.join(NODE_ROOT, 'companion', 'lib', 'identity.js'));
+const { wakeCoverage } = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-wake-coverage.js'));
+const { stateFileFor } = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-gate-state.js'));
 
 const HOOK = 'devswarm-parent-gate.js';
 const CLAUDE_ENV = { DEVSWARM_REPO_ID: 'repo-1', DEVSWARM_AI_AGENT: 'claude' };
@@ -94,7 +95,7 @@ test('(c) repo key unresolvable / predicate throws -> unknown, silent, no block'
     assert.strictEqual(thrown.unknown, true);
     assert.strictEqual(thrown.liveChildren, false);
     // Every caller (prompt line, spawn warning, Stop gate) goes through noWakePathLine.
-    const { noWakePathLine } = require(path.join(ROOT, 'hooks', 'lib', 'devswarm-wake.js'));
+    const { noWakePathLine } = require(path.join(NODE_ROOT, 'hooks', 'lib', 'devswarm-wake.js'));
     assert.strictEqual(noWakePathLine(nullKey, CLAUDE_ENV, 'cli', 'watcher', s.id), '');
     assert.strictEqual(noWakePathLine(thrown, CLAUDE_ENV, 'cli', 'watcher', s.id), '');
   } finally { s.cleanup(); }

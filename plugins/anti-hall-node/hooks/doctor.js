@@ -1175,7 +1175,7 @@ function devswarmHookSelfTests() {
       }
       // Defensive fallback only (install-codex.js failed to require) — never
       // crash the scan; falls back to the old coarse substring test.
-      return JSON.stringify(cfg).replace(/\\\\/g, '/').includes('/plugins/anti-hall/hooks/');
+      return /\/plugins\/anti-hall(?:-node)?\/hooks\//.test(JSON.stringify(cfg).replace(/\\\\/g, '/'));
     } catch (_) { return false;
     }
   }
@@ -1201,8 +1201,8 @@ function devswarmHookSelfTests() {
     if (s.hooksEnabled) ok(`Codex config.toml (${s.label}) has the hooks feature enabled`);
     else warnl(`Codex config.toml (${s.label}) found but [features] hooks is not enabled`);
     if (s.wired === true) ok(`Codex hooks.json (${s.label}) has anti-hall hooks registered`);
-    else if (s.wired === false) warnl(`Codex hooks.json (${s.label}) present but no anti-hall hooks found — run plugins/anti-hall/codex/install-codex.js`);
-    else warnl(`Codex hooks.json (${s.label}) missing — run plugins/anti-hall/codex/install-codex.js`);
+    else if (s.wired === false) warnl(`Codex hooks.json (${s.label}) present but no anti-hall hooks found — run plugins/anti-hall-node/codex/install-codex.js`);
+    else warnl(`Codex hooks.json (${s.label}) missing — run plugins/anti-hall-node/codex/install-codex.js`);
   }
 })();
 

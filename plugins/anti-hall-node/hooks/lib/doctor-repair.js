@@ -668,10 +668,10 @@ function runIngestOrphanRepair(opts) {
 
 // Friendly (plugin-relative) command strings for the manual-command hints in
 // GATED reports — humans copy these, so keep them repo-relative not absolute.
-const CMD_INGEST     = 'node plugins/anti-hall/companion/install-devswarm-ingest.js';
-const CMD_SUPERVISOR = 'node plugins/anti-hall/companion/install-devswarm-supervisor.js';
-const CMD_REAPER     = 'node plugins/anti-hall/companion/install-reaper.js';
-const CMD_RECONCILE  = 'node plugins/anti-hall/scripts/devswarm.js reconcile';
+const CMD_INGEST     = 'node plugins/anti-hall-node/companion/install-devswarm-ingest.js';
+const CMD_SUPERVISOR = 'node plugins/anti-hall-node/companion/install-devswarm-supervisor.js';
+const CMD_REAPER     = 'node plugins/anti-hall-node/companion/install-reaper.js';
+const CMD_RECONCILE  = 'node plugins/anti-hall-node/scripts/devswarm.js reconcile';
 
 // LABEL/UNIT/marker come from the installers themselves — NEVER re-derived here, so
 // this can't drift from what install actually writes (same discipline as doctor.js).
@@ -1079,7 +1079,7 @@ function scanCodex(cwd, home) {
         // Defensive fallback only (install-codex.js failed to require, or
         // exports missing) — never crash the scan; falls back to the old
         // coarse substring test rather than reporting a hard failure.
-        wired = JSON.stringify(cfg).replace(/\\\\/g, '/').includes('/plugins/anti-hall/hooks/');
+        wired = /\/plugins\/anti-hall(?:-node)?\/hooks\//.test(JSON.stringify(cfg).replace(/\\\\/g, '/'));
       }
     } catch (_) { wired = null; }
     out.push({ label, dir, flags, wired });
