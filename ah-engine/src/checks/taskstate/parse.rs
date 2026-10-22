@@ -265,8 +265,9 @@ pub fn reconstruct(lines: &[&str], variant: Variant) -> R<Facts> {
                 Some(v) if truthy(v) && v.is_object() => v,
                 _ => &empty,
             };
-            if let Some(id_v) = get(tu, "id").filter(|v| truthy(v)) {
-                let Value::String(tid) = id_v else { return Err(Unsure) };
+            // A tool-use id that is not a string (a number or a boolean) is a Map key no tool_result can match: it is recorded for no
+            // call (the lookup is by the result's string id) and a TaskCreate under it lives under `String(id)`.
+            if let Some(Value::String(tid)) = get(tu, "id").filter(|v| truthy(v)) {
                 let task_id = match defaults::list("taskstate.id_keys").iter().find_map(|k| get(inp0, k).filter(|v| !v.is_null())) {
                     Some(v) => Some(scalar_string(v)?),
                     None => None,
@@ -317,11 +318,17 @@ pub fn reconstruct(lines: &[&str], variant: Variant) -> R<Facts> {
                 }
                 "TaskCreate" => {
                     let inp = inp0;
-                    let Some(Value::String(tid)) = get(tu, "id").filter(|v| truthy(v)) else {
+                    let Some(id_v) = get(tu, "id").filter(|v| truthy(v)) else {
                         // `if (tid)`: a create without an id is never recorded.
                         continue;
                     };
-                    let tid_v = Value::String(tid.clone());
+                    let (tid, tid_v) = match id_v {
+                        Value::String(s) => (s.clone(), id_v.clone()),
+                        // a number or boolean id: its own Map key (distinct from the same text as a string), the task key `String(id)`
+                        Value::Number(_) | Value::Bool(_) => (format!("{NON_STRING_ID}{}", scalar_string(id_v)?), id_v.clone()),
+                        _ => return Err(Unsure),
+                    };
+                    let tid = &tid;
                     let content_v =
                         first_truthy(&[get(inp, "subject"), get(inp, "title"), get(inp, "content"), get(inp, "description"), Some(&tid_v)]).unwrap_or(&tid_v);
                     let rec = Prov {
@@ -396,10 +403,14 @@ fn todo_blocked_on(todo: &Value) -> Option<Value> {
     create_blocked_on(todo)
 }
 
+/// Marks a provisional key that came from a tool-use id that was not a string, so it never equals a string id of the same text (they are
+/// two Map keys in the Node code); the task key is the text after it.
+pub(super) const NON_STRING_ID: char = '\u{1}';
+
 /// The end-of-scan step: every TaskCreate gets the number its result named (or stays under its tool-use id).
 fn resolve_provisional(tasks: &mut TaskMap, prov: &[(String, Prov)], result_ids: &[(String, String)], variant: Variant) {
     for (tid, rec) in prov {
-        let numeric = result_ids.iter().find(|(k, _)| k == tid).map(|(_, n)| n.clone()).filter(|n| !n.is_empty()).unwrap_or_else(|| tid.clone());
+        let numeric = result_ids.iter().find(|(k, _)| k == tid).map(|(_, n)| n.clone()).filter(|n| !n.is_empty()).unwrap_or_else(|| tid.strip_prefix(NON_STRING_ID).unwrap_or(tid).to_string());
         let key = numeric;
         let mut ex = tasks.get(&key).cloned();
         if let Some(e) = &ex

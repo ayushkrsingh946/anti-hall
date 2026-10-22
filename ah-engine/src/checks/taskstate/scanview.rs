@@ -4,7 +4,7 @@
 //! number, a TodoWrite replaces the list), so it has its own pass. The work counting of the same hook pass is a rule and lives in
 //! the plugin's script, not here.
 use super::backfill::backfill;
-use super::parse::{Facts, Line, collect_tool_uses, is_not_found, parse_line};
+use super::parse::{Facts, Line, NON_STRING_ID, collect_tool_uses, is_not_found, parse_line};
 use super::tail::{lines_of, read_tail};
 use super::{Task, TaskMap, Unknown, norm_priority, number_of_digits, priority_field, truthy_status};
 use crate::checks::guardkit::jsre;
@@ -241,13 +241,14 @@ fn scan_lines(lines: &[&str], truncated: bool, path: &str, window: u64, wide: u6
                 }
                 "TaskCreate" => {
                     s.saw_task_activity = true;
-                    let Some(Value::String(tid)) = get(tu, "id").filter(|v| truthy(v)) else {
-                        if get(tu, "id").is_some_and(truthy) {
-                            return Err(Unsure);
-                        }
-                        continue;
+                    let Some(id_v) = get(tu, "id").filter(|v| truthy(v)) else { continue };
+                    let (tid, tid_v) = match id_v {
+                        Value::String(s) => (s.clone(), id_v.clone()),
+                        // a number or boolean id is its own Map key, never equal to a string id: the task lives under `String(id)`
+                        Value::Number(_) | Value::Bool(_) => (format!("{NON_STRING_ID}{}", scalar_string(id_v)?), id_v.clone()),
+                        _ => return Err(Unsure),
                     };
-                    let tid_v = Value::String(tid.clone());
+                    let tid = &tid;
                     let content = scalar_string(
                         first_truthy(&[get(inp, "subject"), get(inp, "title"), get(inp, "content"), get(inp, "description"), Some(&tid_v)]).unwrap_or(&tid_v),
                     )?;
@@ -294,7 +295,7 @@ fn scan_lines(lines: &[&str], truncated: bool, path: &str, window: u64, wide: u6
     }
     // end of scan: every TaskCreate gets the number its result named
     for (tid, (content, status, priority)) in &prov {
-        let key = result_ids.iter().find(|(k, _)| k == tid).map(|(_, n)| n.clone()).unwrap_or_else(|| tid.clone());
+        let key = result_ids.iter().find(|(k, _)| k == tid).map(|(_, n)| n.clone()).unwrap_or_else(|| tid.strip_prefix(NON_STRING_ID).unwrap_or(tid).to_string());
         let mut ex = tasks.get(&key).cloned();
         if let Some(e) = &ex
             && e.unknown.is_some()

@@ -137,6 +137,36 @@ fn a_line_only_javascript_can_parse_is_read_not_skipped() {
     assert!(reconstruct(&["{\"x\": 1,"], Variant::Guard).is_ok());
 }
 
+/// #244: a TaskCreate Node still counts although its shape is off: a numeric tool_use id (the Map key is the number, so no tool_result
+/// ever matches it and the task lives under `String(5)`) and a non-string subject (rendered with `String()`). The reconstruction must
+/// keep both, never answer "unsure" (which the Stop guards read as no task) or drop them.
+#[test]
+fn a_task_create_with_a_numeric_id_or_an_object_subject_is_still_a_task() {
+    let create = |id: Value, subject: Value| json!({"type": "assistant", "message": {"id": "m", "content": [{"type": "tool_use", "id": id, "name": "TaskCreate", "input": {"subject": subject}}]}}).to_string();
+    for (name, id, subject, want_id, want_content) in [
+        ("numeric id", json!(5), json!("x"), "5", "x"),
+        ("fractional id", json!(1.5), json!("x"), "1.5", "x"),
+        ("true id", json!(true), json!("x"), "true", "x"),
+        ("object subject", json!("tu_1"), json!({"a": 1}), "tu_1", "[object Object]"),
+        ("array subject", json!("tu_2"), json!(["a", ["b", 2], null]), "tu_2", "a,b,2,"),
+    ] {
+        let line = create(id, subject);
+        for variant in [Variant::Guard, Variant::State] {
+            let facts = reconstruct(&[line.as_str()], variant).unwrap_or_else(|_| panic!("{name}: {variant:?} left unsure"));
+            let t = facts.tasks.get(want_id).unwrap_or_else(|| panic!("{name}: {variant:?} has no task {want_id}: {:?}", facts.tasks.values().collect::<Vec<_>>()));
+            assert_eq!((t.content.as_str(), t.status.as_deref()), (want_content, Some("pending")), "{name}: {variant:?}");
+        }
+    }
+    // a numeric id and a string id of the same digits are two creates that land on one task
+    let both = [create(json!(7), json!("first")), create(json!("7"), json!("second"))];
+    let refs: Vec<&str> = both.iter().map(String::as_str).collect();
+    let facts = reconstruct(&refs, Variant::Guard).unwrap();
+    assert_eq!(facts.tasks.len(), 1);
+    // an object subject that carries its own toString has no String(): Node throws there, so this stays unsure
+    let weird = create(json!("tu_3"), json!({"toString": "x"}));
+    assert!(reconstruct(&[weird.as_str()], Variant::Guard).is_err());
+}
+
 /// The tasklist-guard pass (`scanview`) applies a rename the way the reconstruction does (#177 follow-up): a subject an update set
 /// is kept when the create's result is folded in, and the status and priority the pass counts are unchanged by it. The pass reports
 /// ids and counts only, so the rename itself is not visible in its answer; this holds the counts.
