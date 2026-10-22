@@ -264,7 +264,9 @@ fn drive(name: &str, cases: Vec<Case>) -> (usize, usize, usize) {
         let node = run_side(false, &hn, case);
         let eng = run_side(true, &he, case);
         settle(&hn, &he);
-        let (an, ae) = (snapshot(&hn, now), snapshot(&he, now));
+        let (an, mut ae) = (snapshot(&hn, now), snapshot(&he, now));
+        // the engine's advisory layer keeps its own per-session table state (W2: a fixed reminder fires once per change); Node has none
+        ae.retain(|k, _| !(k.starts_with(".anti-hall/advisory-state-") || k == ".anti-hall/.prune-stamp-advisory-state.json"));
         let ctx = |what: &str| {
             format!(
                 "{name}/{}: {what}\n node: {:?}\n  eng: {:?}\n node home: {an:?}\n  eng home: {ae:?}",
@@ -653,6 +655,13 @@ fn cases() -> Vec<Case> {
 fn the_tracker_says_and_writes_exactly_what_node_does() {
     let cs = cases();
     assert!(cs.len() >= 60, "the corpus must stay broad: {}", cs.len());
+    // `AH_PARITY_ONLY=<substring>` runs the matching cases only (a focused check; the full corpus is the gate)
+    if let Ok(only) = std::env::var("AH_PARITY_ONLY") {
+        let picked: Vec<Case> = cs.into_iter().filter(|c| c.name.contains(only.as_str())).collect();
+        assert!(!picked.is_empty(), "no case matches AH_PARITY_ONLY={only}");
+        drive("tracker", picked);
+        return;
+    }
     let (same, deferred, emitted) = drive("tracker", cs);
     assert!(same >= 50 && deferred >= 4, "answered {same} deferred {deferred}");
     assert!(emitted >= 40, "the corpus must exercise the emitted texts: {emitted}");

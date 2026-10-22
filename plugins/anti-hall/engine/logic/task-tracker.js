@@ -478,11 +478,17 @@ function decide(p) {
   if (gDemand !== null && gDemand.emit) lineParts.push(fresh.demand);
   if (gOpen !== null && gOpen.emit) lineParts.push(fresh.openLine);
   var freshLine = lineParts.join(ttT('freshness_joiner'));
+  // `freshLineAll`: the tables as Node writes them, whether or not the advisory layer holds one back; the dedupe store hashes this text
+  // (Node's), so a turn that changed nothing is suppressed whole, as in Node, instead of re-showing the short reminder.
+  var freshLineAll = fresh === null ? '' : [fresh.demand, fresh.openLine].filter(function (x) { return x !== ''; }).join(ttT('freshness_joiner'));
   function compose(unknownNote) {
-    var open = '';
-    if (fresh !== null) open = freshLine === '' ? unknownNote : (unknownNote === '' ? freshLine : freshLine + ' ' + unknownNote);
+    var open = '', openAll = '';
+    if (fresh !== null) {
+      open = freshLine === '' ? unknownNote : (unknownNote === '' ? freshLine : freshLine + ' ' + unknownNote);
+      openAll = freshLineAll === '' ? unknownNote : (unknownNote === '' ? freshLineAll : freshLineAll + ' ' + unknownNote);
+    }
     var lead = chosen.full ? full : short;
-    return { text: open === '' ? lead : lead + ttT('note_joiner') + open, open: open };
+    return { text: open === '' ? lead : lead + ttT('note_joiner') + open, textAll: openAll === '' ? lead : lead + ttT('note_joiner') + openAll, open: open };
   }
   var every = ah.settings.num('verify_first.num_repeat_every');
   var keepalive = isFinite(every) && every > 0 ? every : 0;
@@ -516,7 +522,7 @@ function decide(p) {
   if (primaryOn) primaryBlock = (dsid === null || should(primaryOpts())) ? primaryText : '';
   var t = c.text, out = t, emit = true;
   if (dsid !== null) {
-    var o = { sessionId: dsid, key: ttT('dedupe_key'), content: t, transcriptPath: tp, normalize: normalize };
+    var o = { sessionId: dsid, key: ttT('dedupe_key'), content: c.textAll, transcriptPath: tp, normalize: normalize };
     if (t.indexOf(full) === 0) dedupe.record(o);
     else emit = should(o);
   }
