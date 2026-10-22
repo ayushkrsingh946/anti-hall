@@ -23,7 +23,8 @@ const os = require('node:os');
 const path = require('node:path');
 
 const ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const appDb = require(path.join(ROOT, 'companion', 'lib', 'devswarm-app-db.js'));
+const NODE_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const appDb = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-app-db.js'));
 
 let sqlite = null;
 try { sqlite = require('node:sqlite'); } catch (_) { sqlite = null; }

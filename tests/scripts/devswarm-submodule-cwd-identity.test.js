@@ -14,8 +14,9 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
 const PLUGIN = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const CLI = path.join(PLUGIN, 'scripts', 'devswarm.js');
-const identity = require(path.join(PLUGIN, 'companion', 'lib', 'identity.js'));
+const NODE_PLUGIN = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const CLI = path.join(NODE_PLUGIN, 'scripts', 'devswarm.js');
+const identity = require(path.join(NODE_PLUGIN, 'companion', 'lib', 'identity.js'));
 
 let tmp, home, proj, sub;
 const GIT = ['-c', 'protocol.file.allow=always', '-c', 'user.name=t', '-c', 'user.email=t@t'];
@@ -78,7 +79,7 @@ test('inbox read-primary from the submodule cwd equals the one from the root', (
 });
 
 test('installer resolveWorktree from the submodule cwd is the superproject root (daemon workdir)', () => {
-  const inst = require(path.join(PLUGIN, 'companion', 'install-devswarm-ingest.js'));
+  const inst = require(path.join(NODE_PLUGIN, 'companion', 'install-devswarm-ingest.js'));
   assert.strictEqual(inst.resolveWorktree(sub), proj);
   assert.strictEqual(inst.resolveWorktree(proj), proj);
   assert.strictEqual(inst.resolveWorktree(tmp), null);
@@ -86,10 +87,10 @@ test('installer resolveWorktree from the submodule cwd is the superproject root 
 
 test('phantom Primary rows: detect (read-only) -> repair archives (no delete) -> idempotent', () => {
   process.env.ANTIHALL_INGEST_DRY_RUN = '1';
-  const dw = require(path.join(PLUGIN, 'scripts', 'devswarm.js'));
-  const dr = require(path.join(PLUGIN, 'hooks', 'lib', 'doctor-repair.js'));
+  const dw = require(path.join(NODE_PLUGIN, 'scripts', 'devswarm.js'));
+  const dr = require(path.join(NODE_PLUGIN, 'hooks', 'lib', 'doctor-repair.js'));
   const rootId = identity.resolveContext(proj).meshId;
-  const phantomId = identity.resolveContext(sub).toplevel && require(path.join(PLUGIN, 'companion', 'install-devswarm-ingest.js')).primaryWorkspaceId(identity.resolveContext(sub).toplevel);
+  const phantomId = identity.resolveContext(sub).toplevel && require(path.join(NODE_PLUGIN, 'companion', 'install-devswarm-ingest.js')).primaryWorkspaceId(identity.resolveContext(sub).toplevel);
   assert.notStrictEqual(phantomId, rootId);
   // Seed the OLD-version bad state: an explicit --worktree <submodule> mints the phantom row.
   cli(proj, ['register-primary', '--session', 's1']);

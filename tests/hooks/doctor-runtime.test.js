@@ -14,10 +14,11 @@ const os = require('node:os');
 const path = require('node:path');
 
 const ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const D = require(path.join(ROOT, 'companion', 'lib', 'doctor-runtime.js'));
-const store = require(path.join(ROOT, 'companion', 'lib', 'devswarm-store.js'));
-const installIngest = require(path.join(ROOT, 'companion', 'install-devswarm-ingest.js'));
-const installSupervisor = require(path.join(ROOT, 'companion', 'install-devswarm-supervisor.js'));
+const NODE_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const D = require(path.join(NODE_ROOT, 'companion', 'lib', 'doctor-runtime.js'));
+const store = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-store.js'));
+const installIngest = require(path.join(NODE_ROOT, 'companion', 'install-devswarm-ingest.js'));
+const installSupervisor = require(path.join(NODE_ROOT, 'companion', 'install-devswarm-supervisor.js'));
 
 function tmpHome(prefix) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), prefix || 'dr-test-'));
@@ -414,7 +415,7 @@ test('checkDaemonsRunning: no ANTIHALL_MARKETPLACE_DIR / no marketplace clone on
 
 test('checkDaemonsRunning: resolveStableScript raises -> fail-open, no drift WARN, RUNNING probe still reported, never throws', { skip: process.platform === 'win32' }, () => {
   const { home, cleanup } = tmpHome();
-  const INGEST_JS_PATH = path.join(ROOT, 'companion', 'install-devswarm-ingest.js');
+  const INGEST_JS_PATH = path.join(NODE_ROOT, 'companion', 'install-devswarm-ingest.js');
   const cacheKey = require.resolve(INGEST_JS_PATH);
   const original = require.cache[cacheKey].exports.resolveStableScript;
   require.cache[cacheKey].exports.resolveStableScript = () => { throw new Error('simulated resolveStableScript failure'); };
@@ -526,7 +527,7 @@ test('checkDaemonsRunning: installed supervisor + injected "loaded/active" probe
 test('probeCronRunning: prefers a FRESH ingest heartbeat over ps', () => {
   const { home, cleanup } = tmpHome();
   try {
-    const ingestMod = require(path.join(ROOT, 'companion', 'devswarm-ingest.js'));
+    const ingestMod = require(path.join(NODE_ROOT, 'companion', 'devswarm-ingest.js'));
     const hash = 'deadbeef';
     const hbPath = ingestMod.ingestHeartbeatPath(home, hash);
     fs.mkdirSync(path.dirname(hbPath), { recursive: true });
@@ -541,7 +542,7 @@ test('probeCronRunning: prefers a FRESH ingest heartbeat over ps', () => {
 test('probeCronRunning: stale heartbeat -> running:false via heartbeat', () => {
   const { home, cleanup } = tmpHome();
   try {
-    const ingestMod = require(path.join(ROOT, 'companion', 'devswarm-ingest.js'));
+    const ingestMod = require(path.join(NODE_ROOT, 'companion', 'devswarm-ingest.js'));
     const hash = 'deadbeef';
     const hbPath = ingestMod.ingestHeartbeatPath(home, hash);
     fs.mkdirSync(path.dirname(hbPath), { recursive: true });
@@ -676,7 +677,7 @@ test('checkDataStaleness: daemon running + unread>0 + FRESH matching heartbeat -
     const hash = 'cafe1234';
     const id = 'primary-' + hash;
     store.writeSummaryAtomic(home, undefined, { generatedAt: Date.now() - 60 * 60 * 1000, workspaces: { [id]: { total: 5, cursor: 2, unread: 3 } } });
-    const ingestMod = require(path.join(ROOT, 'companion', 'devswarm-ingest.js'));
+    const ingestMod = require(path.join(NODE_ROOT, 'companion', 'devswarm-ingest.js'));
     const hbPath = ingestMod.ingestHeartbeatPath(home, hash);
     fs.mkdirSync(path.dirname(hbPath), { recursive: true });
     fs.writeFileSync(hbPath, JSON.stringify({ ts: Date.now(), pid: 1 }));

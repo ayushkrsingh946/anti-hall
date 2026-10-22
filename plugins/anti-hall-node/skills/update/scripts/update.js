@@ -91,7 +91,18 @@ function resolvePaths(env, homedir) {
     pluginJson: path.join(marketplaceDir, 'plugins', 'anti-hall', '.claude-plugin', 'plugin.json'),
     changelog: path.join(marketplaceDir, 'CHANGELOG.md'),
     pluginSrcDir: path.join(marketplaceDir, 'plugins', 'anti-hall'),
+    nodeSrcDir: path.join(marketplaceDir, 'plugins', 'anti-hall-node'),
   };
+}
+
+/**
+ * nodeSrcDir(paths) → the Node backup tree of the marketplace clone (plugins/anti-hall-node, a sibling of plugins/anti-hall).
+ * companion/, hooks/, scripts/, codex/ and this script live there, not in the published plugin. A hand-built `paths` without
+ * nodeSrcDir (tests, fixtures) derives it from pluginSrcDir.
+ */
+function nodeSrcDir(paths) {
+  if (paths && paths.nodeSrcDir) return paths.nodeSrcDir;
+  return paths && paths.pluginSrcDir ? path.join(path.dirname(paths.pluginSrcDir), 'anti-hall-node') : '';
 }
 
 // ---------------------------------------------------------------------------
@@ -889,7 +900,7 @@ function recordSweepResult(home, state, key, version, sweep, opts) {
  * module's already-tested readInstalledIngestWorkingDir/classifyIngestUnit
  * (read-only) instead of re-deriving the classification logic here, and only
  * spawns the (freshly-pulled) installer when the classification is NOT already
- * 'ok'. Requires from paths.pluginSrcDir (the just-pulled marketplace clone),
+ * 'ok'. Requires from nodeSrcDir(paths) (the just-pulled marketplace clone),
  * not this update.js's own possibly-stale __dirname, so the installer that
  * actually runs is the one carrying the stable-path fix.
  *
@@ -934,13 +945,13 @@ function inspectInstalledIngest(opts) {
   const paths = o.paths;
   const gate = (detail) => ({ gated: true, detail, cls: null });
   try {
-    if (!paths || !paths.pluginSrcDir) return gate('ingest heal skipped: no plugin source dir resolved');
-    const installerPath = path.join(paths.pluginSrcDir, 'companion', 'install-devswarm-ingest.js');
-    const repairPath = path.join(paths.pluginSrcDir, 'hooks', 'lib', 'doctor-repair.js');
-    const detectPath = path.join(paths.pluginSrcDir, 'hooks', 'lib', 'devswarm-detect.js');
-    const repokeyPath = path.join(paths.pluginSrcDir, 'companion', 'lib', 'devswarm-repokey.js');
+    if (!paths || !nodeSrcDir(paths)) return gate('ingest heal skipped: no plugin source dir resolved');
+    const installerPath = path.join(nodeSrcDir(paths), 'companion', 'install-devswarm-ingest.js');
+    const repairPath = path.join(nodeSrcDir(paths), 'hooks', 'lib', 'doctor-repair.js');
+    const detectPath = path.join(nodeSrcDir(paths), 'hooks', 'lib', 'devswarm-detect.js');
+    const repokeyPath = path.join(nodeSrcDir(paths), 'companion', 'lib', 'devswarm-repokey.js');
     if (!fs.existsSync(installerPath) || !fs.existsSync(repairPath) || !fs.existsSync(detectPath)) {
-      return gate('ingest heal skipped: expected plugin files not found under ' + paths.pluginSrcDir);
+      return gate('ingest heal skipped: expected plugin files not found under ' + nodeSrcDir(paths));
     }
     const installIngest = require(installerPath);
     const { isDevswarmActive } = require(detectPath);
@@ -952,7 +963,7 @@ function inspectInstalledIngest(opts) {
     // ENGINE OWNS INGEST (live 2026-10-16): no Node ingest unit is healed or
     // re-baked while ah-engine's ownership marker says engine.
     try {
-      const h = require(path.join(paths.pluginSrcDir, 'companion', 'lib', 'ingest-health.js'));
+      const h = require(path.join(nodeSrcDir(paths), 'companion', 'lib', 'ingest-health.js'));
       if (typeof h.engineOwnsIngest === 'function' && h.engineOwnsIngest(home)) {
         return gate('the anti-hall engine owns the ingest drain — Node ingest heal skipped (gate closed)');
       }
@@ -1057,7 +1068,7 @@ function healIngestDaemon(opts) {
     // Merged env with test markers carried (see doctor-repair spawnInstaller):
     // a partial caller env must never strip NODE_TEST_CONTEXT/PATH.
     const childEnv = (() => {
-      try { return require(path.join(paths.pluginSrcDir, 'companion', 'lib', 'test-home-guard.js')).installerChildEnv(env, { HOME: home, USERPROFILE: home }); }
+      try { return require(path.join(nodeSrcDir(paths), 'companion', 'lib', 'test-home-guard.js')).installerChildEnv(env, { HOME: home, USERPROFILE: home }); }
       catch (_) { return Object.assign({}, process.env, env, { HOME: home, USERPROFILE: home }); }
     })();
     const spawn = o.spawnFn || ((script) => spawnSync(process.execPath, [script], {
@@ -1138,10 +1149,10 @@ function reconcilePostUpdate(opts) {
   const home = o.home || os.homedir();
   const paths = o.paths;
   try {
-    const detectPath = path.join(paths.pluginSrcDir, 'hooks', 'lib', 'devswarm-detect.js');
-    const devswarmPath = path.join(paths.pluginSrcDir, 'scripts', 'devswarm.js');
+    const detectPath = path.join(nodeSrcDir(paths), 'hooks', 'lib', 'devswarm-detect.js');
+    const devswarmPath = path.join(nodeSrcDir(paths), 'scripts', 'devswarm.js');
     if (!fs.existsSync(detectPath) || !fs.existsSync(devswarmPath)) {
-      return { attempted: false, detail: 'reconcile skipped: expected plugin files not found under ' + paths.pluginSrcDir };
+      return { attempted: false, detail: 'reconcile skipped: expected plugin files not found under ' + nodeSrcDir(paths) };
     }
     const { isDevswarmActive } = require(detectPath);
     if (typeof isDevswarmActive !== 'function' || !isDevswarmActive(env)) {
@@ -1245,10 +1256,10 @@ function foldMeshPostUpdate(opts) {
   const home = o.home || os.homedir();
   const paths = o.paths;
   try {
-    const detectPath = path.join(paths.pluginSrcDir, 'hooks', 'lib', 'devswarm-detect.js');
-    const devswarmPath = path.join(paths.pluginSrcDir, 'scripts', 'devswarm.js');
+    const detectPath = path.join(nodeSrcDir(paths), 'hooks', 'lib', 'devswarm-detect.js');
+    const devswarmPath = path.join(nodeSrcDir(paths), 'scripts', 'devswarm.js');
     if (!fs.existsSync(detectPath) || !fs.existsSync(devswarmPath)) {
-      return { attempted: false, detail: 'fold skipped: expected plugin files not found under ' + paths.pluginSrcDir };
+      return { attempted: false, detail: 'fold skipped: expected plugin files not found under ' + nodeSrcDir(paths) };
     }
     const { isDevswarmActive } = require(detectPath);
     if (typeof isDevswarmActive !== 'function' || !isDevswarmActive(env)) {
@@ -1329,10 +1340,10 @@ function promoteUnclaimedPostUpdate(opts) {
   const home = o.home || os.homedir();
   const paths = o.paths;
   try {
-    const detectPath = path.join(paths.pluginSrcDir, 'hooks', 'lib', 'devswarm-detect.js');
-    const devswarmPath = path.join(paths.pluginSrcDir, 'scripts', 'devswarm.js');
+    const detectPath = path.join(nodeSrcDir(paths), 'hooks', 'lib', 'devswarm-detect.js');
+    const devswarmPath = path.join(nodeSrcDir(paths), 'scripts', 'devswarm.js');
     if (!fs.existsSync(detectPath) || !fs.existsSync(devswarmPath)) {
-      return { attempted: false, detail: 'promote-unclaimed skipped: expected plugin files not found under ' + paths.pluginSrcDir };
+      return { attempted: false, detail: 'promote-unclaimed skipped: expected plugin files not found under ' + nodeSrcDir(paths) };
     }
     const { isDevswarmActive } = require(detectPath);
     if (typeof isDevswarmActive !== 'function' || !isDevswarmActive(env)) {
@@ -1366,10 +1377,10 @@ function foldArchivedRowsPostUpdate(opts) {
   const home = o.home || os.homedir();
   const paths = o.paths;
   try {
-    const detectPath = path.join(paths.pluginSrcDir, 'hooks', 'lib', 'devswarm-detect.js');
-    const devswarmPath = path.join(paths.pluginSrcDir, 'scripts', 'devswarm.js');
+    const detectPath = path.join(nodeSrcDir(paths), 'hooks', 'lib', 'devswarm-detect.js');
+    const devswarmPath = path.join(nodeSrcDir(paths), 'scripts', 'devswarm.js');
     if (!fs.existsSync(detectPath) || !fs.existsSync(devswarmPath)) {
-      return { attempted: false, detail: 'fold-archived-rows skipped: expected plugin files not found under ' + paths.pluginSrcDir };
+      return { attempted: false, detail: 'fold-archived-rows skipped: expected plugin files not found under ' + nodeSrcDir(paths) };
     }
     const { isDevswarmActive } = require(detectPath);
     if (typeof isDevswarmActive !== 'function' || !isDevswarmActive(env)) {
@@ -1531,10 +1542,10 @@ function reRetireResurrectedPostUpdate(opts) {
   const home = o.home || os.homedir();
   const paths = o.paths;
   try {
-    const detectPath = path.join(paths.pluginSrcDir, 'hooks', 'lib', 'devswarm-detect.js');
-    const devswarmPath = path.join(paths.pluginSrcDir, 'scripts', 'devswarm.js');
+    const detectPath = path.join(nodeSrcDir(paths), 'hooks', 'lib', 'devswarm-detect.js');
+    const devswarmPath = path.join(nodeSrcDir(paths), 'scripts', 'devswarm.js');
     if (!fs.existsSync(detectPath) || !fs.existsSync(devswarmPath)) {
-      return { attempted: false, detail: 're-retire-resurrected skipped: expected plugin files not found under ' + paths.pluginSrcDir };
+      return { attempted: false, detail: 're-retire-resurrected skipped: expected plugin files not found under ' + nodeSrcDir(paths) };
     }
     const { isDevswarmActive } = require(detectPath);
     if (typeof isDevswarmActive !== 'function' || !isDevswarmActive(env)) {
@@ -1598,10 +1609,10 @@ function ownerKeyMigratePostUpdate(opts) {
   const home = o.home || os.homedir();
   const paths = o.paths;
   try {
-    const detectPath = path.join(paths.pluginSrcDir, 'hooks', 'lib', 'devswarm-detect.js');
-    const devswarmPath = path.join(paths.pluginSrcDir, 'scripts', 'devswarm.js');
+    const detectPath = path.join(nodeSrcDir(paths), 'hooks', 'lib', 'devswarm-detect.js');
+    const devswarmPath = path.join(nodeSrcDir(paths), 'scripts', 'devswarm.js');
     if (!fs.existsSync(detectPath) || !fs.existsSync(devswarmPath)) {
-      return { attempted: false, detail: 'ownerKey migrate skipped: expected plugin files not found under ' + paths.pluginSrcDir };
+      return { attempted: false, detail: 'ownerKey migrate skipped: expected plugin files not found under ' + nodeSrcDir(paths) };
     }
     const { isDevswarmActive } = require(detectPath);
     if (typeof isDevswarmActive !== 'function' || !isDevswarmActive(env)) {
@@ -1678,10 +1689,10 @@ function cursorHygienePostUpdate(opts) {
   const home = o.home || os.homedir();
   const paths = o.paths;
   try {
-    const detectPath = path.join(paths.pluginSrcDir, 'hooks', 'lib', 'devswarm-detect.js');
-    const devswarmPath = path.join(paths.pluginSrcDir, 'scripts', 'devswarm.js');
+    const detectPath = path.join(nodeSrcDir(paths), 'hooks', 'lib', 'devswarm-detect.js');
+    const devswarmPath = path.join(nodeSrcDir(paths), 'scripts', 'devswarm.js');
     if (!fs.existsSync(detectPath) || !fs.existsSync(devswarmPath)) {
-      return { attempted: false, detail: 'cursor hygiene skipped: expected plugin files not found under ' + paths.pluginSrcDir };
+      return { attempted: false, detail: 'cursor hygiene skipped: expected plugin files not found under ' + nodeSrcDir(paths) };
     }
     const { isDevswarmActive } = require(detectPath);
     if (typeof isDevswarmActive !== 'function' || !isDevswarmActive(env)) {
@@ -1737,10 +1748,10 @@ function readerCursorsImportPostUpdate(opts) {
   const home = o.home || os.homedir();
   const paths = o.paths;
   try {
-    const detectPath = path.join(paths.pluginSrcDir, 'hooks', 'lib', 'devswarm-detect.js');
-    const devswarmPath = path.join(paths.pluginSrcDir, 'scripts', 'devswarm.js');
+    const detectPath = path.join(nodeSrcDir(paths), 'hooks', 'lib', 'devswarm-detect.js');
+    const devswarmPath = path.join(nodeSrcDir(paths), 'scripts', 'devswarm.js');
     if (!fs.existsSync(detectPath) || !fs.existsSync(devswarmPath)) {
-      return { attempted: false, detail: 'reader-cursors import skipped: expected plugin files not found under ' + paths.pluginSrcDir };
+      return { attempted: false, detail: 'reader-cursors import skipped: expected plugin files not found under ' + nodeSrcDir(paths) };
     }
     const { isDevswarmActive } = require(detectPath);
     if (typeof isDevswarmActive !== 'function' || !isDevswarmActive(env)) {
@@ -1796,9 +1807,9 @@ function readerFloorRepairPostUpdate(opts) {
     // walks ~/.anti-hall stores that exist on disk), not a session action — an
     // update run from a plain terminal must still repair a machine's stores. A
     // machine with no stores walks nothing (listStoreHashes -> []).
-    const devswarmPath = path.join(paths.pluginSrcDir, 'scripts', 'devswarm.js');
+    const devswarmPath = path.join(nodeSrcDir(paths), 'scripts', 'devswarm.js');
     if (!fs.existsSync(devswarmPath)) {
-      return { attempted: false, detail: 'reader-floor repair skipped: expected plugin files not found under ' + paths.pluginSrcDir };
+      return { attempted: false, detail: 'reader-floor repair skipped: expected plugin files not found under ' + nodeSrcDir(paths) };
     }
     const devswarm = o.devswarm || require(devswarmPath);
     if (typeof devswarm.repairReaderFloorsAllStores !== 'function') {
@@ -1845,9 +1856,9 @@ function markAppArchivedPostUpdate(opts) {
   const home = o.home || os.homedir();
   const paths = o.paths;
   try {
-    const devswarmPath = path.join(paths.pluginSrcDir, 'scripts', 'devswarm.js');
+    const devswarmPath = path.join(nodeSrcDir(paths), 'scripts', 'devswarm.js');
     if (!fs.existsSync(devswarmPath)) {
-      return { attempted: false, detail: 'app-archived markers skipped: expected plugin files not found under ' + paths.pluginSrcDir };
+      return { attempted: false, detail: 'app-archived markers skipped: expected plugin files not found under ' + nodeSrcDir(paths) };
     }
     const devswarm = o.devswarm || require(devswarmPath);
     if (typeof devswarm.markAppArchivedDescriptors !== 'function') {
@@ -1894,9 +1905,9 @@ function childSenderLabelsPostUpdate(opts) {
   const home = o.home || os.homedir();
   const paths = o.paths;
   try {
-    const devswarmPath = path.join(paths.pluginSrcDir, 'scripts', 'devswarm.js');
+    const devswarmPath = path.join(nodeSrcDir(paths), 'scripts', 'devswarm.js');
     if (!fs.existsSync(devswarmPath)) {
-      return { attempted: false, detail: 'child-sender-labels skipped: expected plugin files not found under ' + paths.pluginSrcDir };
+      return { attempted: false, detail: 'child-sender-labels skipped: expected plugin files not found under ' + nodeSrcDir(paths) };
     }
     const devswarm = o.devswarm || require(devswarmPath);
     if (typeof devswarm.repairChildSenderLabelsAllStores !== 'function') {
@@ -1940,10 +1951,10 @@ function dualPartitionAcksPostUpdate(opts) {
   const home = o.home || os.homedir();
   const paths = o.paths;
   try {
-    const detectPath = path.join(paths.pluginSrcDir, 'hooks', 'lib', 'devswarm-detect.js');
-    const devswarmPath = path.join(paths.pluginSrcDir, 'scripts', 'devswarm.js');
+    const detectPath = path.join(nodeSrcDir(paths), 'hooks', 'lib', 'devswarm-detect.js');
+    const devswarmPath = path.join(nodeSrcDir(paths), 'scripts', 'devswarm.js');
     if (!fs.existsSync(detectPath) || !fs.existsSync(devswarmPath)) {
-      return { attempted: false, detail: 'dual-partition-acks skipped: expected plugin files not found under ' + paths.pluginSrcDir };
+      return { attempted: false, detail: 'dual-partition-acks skipped: expected plugin files not found under ' + nodeSrcDir(paths) };
     }
     const { isDevswarmActive } = require(detectPath);
     if (typeof isDevswarmActive !== 'function' || !isDevswarmActive(env)) {
@@ -1995,10 +2006,10 @@ function mergeSplitBackendStoresPostUpdate(opts) {
   const home = o.home || os.homedir();
   const paths = o.paths;
   try {
-    const detectPath = path.join(paths.pluginSrcDir, 'hooks', 'lib', 'devswarm-detect.js');
-    const devswarmPath = path.join(paths.pluginSrcDir, 'scripts', 'devswarm.js');
+    const detectPath = path.join(nodeSrcDir(paths), 'hooks', 'lib', 'devswarm-detect.js');
+    const devswarmPath = path.join(nodeSrcDir(paths), 'scripts', 'devswarm.js');
     if (!fs.existsSync(detectPath) || !fs.existsSync(devswarmPath)) {
-      return { attempted: false, detail: 'split-store merge skipped: expected plugin files not found under ' + paths.pluginSrcDir };
+      return { attempted: false, detail: 'split-store merge skipped: expected plugin files not found under ' + nodeSrcDir(paths) };
     }
     const { isDevswarmActive } = require(detectPath);
     if (typeof isDevswarmActive !== 'function' || !isDevswarmActive(env)) {
@@ -2087,9 +2098,9 @@ function codexGraphifyHooksMigratePostUpdate(opts) {
   ];
   let installMod;
   try {
-    const installPath = path.join(paths.pluginSrcDir, 'codex', 'install-codex.js');
+    const installPath = path.join(nodeSrcDir(paths), 'codex', 'install-codex.js');
     if (!fs.existsSync(installPath)) {
-      return { attempted: false, detail: 'codex graphify-hooks migrate skipped: install-codex.js not found under ' + paths.pluginSrcDir };
+      return { attempted: false, detail: 'codex graphify-hooks migrate skipped: install-codex.js not found under ' + nodeSrcDir(paths) };
     }
     installMod = o.installCodex || require(installPath);
     if (typeof installMod.removeGraphifyGroups !== 'function') {
@@ -2163,10 +2174,10 @@ function replyStateMigratePostUpdate(opts) {
   const home = o.home || os.homedir();
   const paths = o.paths;
   try {
-    const detectPath = path.join(paths.pluginSrcDir, 'hooks', 'lib', 'devswarm-detect.js');
-    const migratePath = path.join(paths.pluginSrcDir, 'scripts', 'migrate-state.js');
+    const detectPath = path.join(nodeSrcDir(paths), 'hooks', 'lib', 'devswarm-detect.js');
+    const migratePath = path.join(nodeSrcDir(paths), 'scripts', 'migrate-state.js');
     if (!fs.existsSync(detectPath) || !fs.existsSync(migratePath)) {
-      return { attempted: false, detail: 'reply-state migrate skipped: expected plugin files not found under ' + paths.pluginSrcDir };
+      return { attempted: false, detail: 'reply-state migrate skipped: expected plugin files not found under ' + nodeSrcDir(paths) };
     }
     const { isDevswarmActive } = require(detectPath);
     if (typeof isDevswarmActive !== 'function' || !isDevswarmActive(env)) {
@@ -2215,10 +2226,10 @@ function gateIntentsMigratePostUpdate(opts) {
   const home = o.home || os.homedir();
   const paths = o.paths;
   try {
-    const detectPath = path.join(paths.pluginSrcDir, 'hooks', 'lib', 'devswarm-detect.js');
-    const migratePath = path.join(paths.pluginSrcDir, 'scripts', 'migrate-state.js');
+    const detectPath = path.join(nodeSrcDir(paths), 'hooks', 'lib', 'devswarm-detect.js');
+    const migratePath = path.join(nodeSrcDir(paths), 'scripts', 'migrate-state.js');
     if (!fs.existsSync(detectPath) || !fs.existsSync(migratePath)) {
-      return { attempted: false, detail: 'gate-intents migrate skipped: expected plugin files not found under ' + paths.pluginSrcDir };
+      return { attempted: false, detail: 'gate-intents migrate skipped: expected plugin files not found under ' + nodeSrcDir(paths) };
     }
     const { isDevswarmActive } = require(detectPath);
     if (typeof isDevswarmActive !== 'function' || !isDevswarmActive(env)) {
@@ -2266,10 +2277,10 @@ function autoArchivedStateMigratePostUpdate(opts) {
   const home = o.home || os.homedir();
   const paths = o.paths;
   try {
-    const detectPath = path.join(paths.pluginSrcDir, 'hooks', 'lib', 'devswarm-detect.js');
-    const migratePath = path.join(paths.pluginSrcDir, 'scripts', 'migrate-state.js');
+    const detectPath = path.join(nodeSrcDir(paths), 'hooks', 'lib', 'devswarm-detect.js');
+    const migratePath = path.join(nodeSrcDir(paths), 'scripts', 'migrate-state.js');
     if (!fs.existsSync(detectPath) || !fs.existsSync(migratePath)) {
-      return { attempted: false, detail: 'auto-archived-state migrate skipped: expected plugin files not found under ' + paths.pluginSrcDir };
+      return { attempted: false, detail: 'auto-archived-state migrate skipped: expected plugin files not found under ' + nodeSrcDir(paths) };
     }
     const { isDevswarmActive } = require(detectPath);
     if (typeof isDevswarmActive !== 'function' || !isDevswarmActive(env)) {
@@ -2358,11 +2369,11 @@ function healRegistryPostUpdate(opts) {
   const home = o.home || os.homedir();
   const paths = o.paths;
   try {
-    const detectPath = path.join(paths.pluginSrcDir, 'hooks', 'lib', 'devswarm-detect.js');
-    const devswarmPath = path.join(paths.pluginSrcDir, 'scripts', 'devswarm.js');
-    const storePath = path.join(paths.pluginSrcDir, 'companion', 'lib', 'devswarm-store.js');
+    const detectPath = path.join(nodeSrcDir(paths), 'hooks', 'lib', 'devswarm-detect.js');
+    const devswarmPath = path.join(nodeSrcDir(paths), 'scripts', 'devswarm.js');
+    const storePath = path.join(nodeSrcDir(paths), 'companion', 'lib', 'devswarm-store.js');
     if (!fs.existsSync(detectPath) || !fs.existsSync(devswarmPath) || !fs.existsSync(storePath)) {
-      return { attempted: false, detail: 'heal-registry-rows skipped: expected plugin files not found under ' + paths.pluginSrcDir };
+      return { attempted: false, detail: 'heal-registry-rows skipped: expected plugin files not found under ' + nodeSrcDir(paths) };
     }
     const { isDevswarmActive } = require(detectPath);
     if (typeof isDevswarmActive !== 'function' || !isDevswarmActive(env)) {
@@ -2467,11 +2478,11 @@ function foldAllStoresPostUpdate(opts) {
   const home = o.home || os.homedir();
   const paths = o.paths;
   try {
-    const detectPath = path.join(paths.pluginSrcDir, 'hooks', 'lib', 'devswarm-detect.js');
-    const devswarmPath = path.join(paths.pluginSrcDir, 'scripts', 'devswarm.js');
-    const storePath = path.join(paths.pluginSrcDir, 'companion', 'lib', 'devswarm-store.js');
+    const detectPath = path.join(nodeSrcDir(paths), 'hooks', 'lib', 'devswarm-detect.js');
+    const devswarmPath = path.join(nodeSrcDir(paths), 'scripts', 'devswarm.js');
+    const storePath = path.join(nodeSrcDir(paths), 'companion', 'lib', 'devswarm-store.js');
     if (!fs.existsSync(detectPath) || !fs.existsSync(devswarmPath) || !fs.existsSync(storePath)) {
-      return { attempted: false, detail: 'fold-all-stores skipped: expected plugin files not found under ' + paths.pluginSrcDir };
+      return { attempted: false, detail: 'fold-all-stores skipped: expected plugin files not found under ' + nodeSrcDir(paths) };
     }
     const { isDevswarmActive } = require(detectPath);
     if (typeof isDevswarmActive !== 'function' || !isDevswarmActive(env)) {
@@ -2586,11 +2597,11 @@ function healOrphanPartitionsPostUpdate(opts) {
   const home = o.home || os.homedir();
   const paths = o.paths;
   try {
-    const detectPath = path.join(paths.pluginSrcDir, 'hooks', 'lib', 'devswarm-detect.js');
-    const devswarmPath = path.join(paths.pluginSrcDir, 'scripts', 'devswarm.js');
-    const storePath = path.join(paths.pluginSrcDir, 'companion', 'lib', 'devswarm-store.js');
+    const detectPath = path.join(nodeSrcDir(paths), 'hooks', 'lib', 'devswarm-detect.js');
+    const devswarmPath = path.join(nodeSrcDir(paths), 'scripts', 'devswarm.js');
+    const storePath = path.join(nodeSrcDir(paths), 'companion', 'lib', 'devswarm-store.js');
     if (!fs.existsSync(detectPath) || !fs.existsSync(devswarmPath) || !fs.existsSync(storePath)) {
-      return { attempted: false, detail: 'heal-orphan-partitions skipped: expected plugin files not found under ' + paths.pluginSrcDir };
+      return { attempted: false, detail: 'heal-orphan-partitions skipped: expected plugin files not found under ' + nodeSrcDir(paths) };
     }
     const { isDevswarmActive } = require(detectPath);
     if (typeof isDevswarmActive !== 'function' || !isDevswarmActive(env)) {
@@ -2745,10 +2756,10 @@ function wakeMonitorPostUpdate(opts) {
   const home = o.home || os.homedir();
   const paths = o.paths;
   try {
-    const detectPath = path.join(paths.pluginSrcDir, 'hooks', 'lib', 'devswarm-detect.js');
-    const watcherPath = path.join(paths.pluginSrcDir, 'companion', 'lib', 'devswarm-wake-watch.js');
+    const detectPath = path.join(nodeSrcDir(paths), 'hooks', 'lib', 'devswarm-detect.js');
+    const watcherPath = path.join(nodeSrcDir(paths), 'companion', 'lib', 'devswarm-wake-watch.js');
     if (!fs.existsSync(detectPath)) {
-      return { attempted: false, shipped: false, live: false, detail: 'wake-monitor skipped: expected plugin file not found under ' + paths.pluginSrcDir };
+      return { attempted: false, shipped: false, live: false, detail: 'wake-monitor skipped: expected plugin file not found under ' + nodeSrcDir(paths) };
     }
     const { isDevswarmActive } = require(detectPath);
     if (typeof isDevswarmActive !== 'function' || !isDevswarmActive(env)) {
@@ -2774,7 +2785,7 @@ function wakeMonitorPostUpdate(opts) {
     // 2. ensure the watcher's state dir exists — CREATE ONLY, never delete.
     let stateDirEnsured = false;
     try {
-      const livenessPath = path.join(paths.pluginSrcDir, 'companion', 'lib', 'liveness.js');
+      const livenessPath = path.join(nodeSrcDir(paths), 'companion', 'lib', 'liveness.js');
       const { devswarmRoot } = require(livenessPath);
       fs.mkdirSync(path.join(devswarmRoot(home), 'wake'), { recursive: true });
       stateDirEnsured = true;
@@ -2809,7 +2820,7 @@ function wakeMonitorPostUpdate(opts) {
     if (identity.role === 'primary') {
       let idleSkip = false;
       try {
-        idleSkip = require(path.join(paths.pluginSrcDir, 'companion', 'lib', 'devswarm-live-children.js'))
+        idleSkip = require(path.join(nodeSrcDir(paths), 'companion', 'lib', 'devswarm-live-children.js'))
           .idleSkipApplies(home, identity.cwd || cwd, { env, ...(o.liveChildOpts || {}) });
       } catch (_) { idleSkip = false; }
       if (idleSkip) {
@@ -2913,12 +2924,12 @@ function rollbackToLegacyUnits(opts) {
         detail: 'rollback is a documented no-op on win32 (ingest daemon/scheduler unsupported there — D28)',
       });
     }
-    const installerPath = path.join(paths.pluginSrcDir, 'companion', 'install-devswarm-ingest.js');
-    const repokeyPath = path.join(paths.pluginSrcDir, 'companion', 'lib', 'devswarm-repokey.js');
-    const livenessPath = path.join(paths.pluginSrcDir, 'companion', 'lib', 'liveness.js');
+    const installerPath = path.join(nodeSrcDir(paths), 'companion', 'install-devswarm-ingest.js');
+    const repokeyPath = path.join(nodeSrcDir(paths), 'companion', 'lib', 'devswarm-repokey.js');
+    const livenessPath = path.join(nodeSrcDir(paths), 'companion', 'lib', 'liveness.js');
     if (!fs.existsSync(installerPath) || !fs.existsSync(repokeyPath) || !fs.existsSync(livenessPath)) {
       return Object.assign({}, NOOP, {
-        detail: 'rollback skipped: expected plugin files not found under ' + paths.pluginSrcDir,
+        detail: 'rollback skipped: expected plugin files not found under ' + nodeSrcDir(paths),
       });
     }
     const installIngest = o.installIngest || require(installerPath);
@@ -3192,8 +3203,8 @@ function runUpdate(opts) {
   // if it ends up needing to" — never forces a stale/empty list on them.
   let sharedStoreHashes = null;
   try {
-    const detectPath = path.join(paths.pluginSrcDir, 'hooks', 'lib', 'devswarm-detect.js');
-    const storeLibPath = path.join(paths.pluginSrcDir, 'companion', 'lib', 'devswarm-store.js');
+    const detectPath = path.join(nodeSrcDir(paths), 'hooks', 'lib', 'devswarm-detect.js');
+    const storeLibPath = path.join(nodeSrcDir(paths), 'companion', 'lib', 'devswarm-store.js');
     if (fs.existsSync(detectPath) && fs.existsSync(storeLibPath)) {
       const { isDevswarmActive } = require(detectPath);
       if (typeof isDevswarmActive === 'function' && isDevswarmActive(opts.env)) {
@@ -3477,7 +3488,7 @@ function runUpdate(opts) {
 // second update/doctor.
 //
 // Fix: whenever `status.installed` (pre-pull) !== `status.latest` (post-
-// pull) — i.e. an update actually happened — re-exec paths.pluginSrcDir's
+// pull) — i.e. an update actually happened — re-exec nodeSrcDir(paths)'s
 // update.js (the marketplace clone, always the newest copy right after a
 // pull) with --post-pull-only (stages only, no pull — see runUpdate's
 // skipPull branch), and merge ITS JSON status over ours so it — not this
@@ -3520,7 +3531,7 @@ function runPostPullReexec(opts) {
   }
   if (env.ANTIHALL_UPDATE_REEXEC === '1') return { status, note: null };
   try {
-    const newUpdateJs = path.join(paths.pluginSrcDir, 'skills', 'update', 'scripts', 'update.js');
+    const newUpdateJs = path.join(nodeSrcDir(paths), 'skills', 'update', 'scripts', 'update.js');
     if (!fs.existsSync(newUpdateJs)) return { status, note: null }; // nothing to re-exec into
     const spawnReexec = o.spawnReexec || spawnSync;
     const res = spawnReexec(process.execPath, [newUpdateJs, '--post-pull-only'], {

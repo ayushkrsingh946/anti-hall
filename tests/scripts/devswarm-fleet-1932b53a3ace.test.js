@@ -33,14 +33,16 @@ const cp = require('node:child_process');
 
 const ROOT = process.env.ANTIHALL_TEST_PLUGIN_ROOT
   || path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
+const NODE_ROOT = process.env.ANTIHALL_TEST_PLUGIN_ROOT
+  || path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
 
-const cliPath = path.join(ROOT, 'scripts', 'devswarm.js');
+const cliPath = path.join(NODE_ROOT, 'scripts', 'devswarm.js');
 if (!fs.existsSync(cliPath)) {
   throw new Error('ANTIHALL_TEST_PLUGIN_ROOT=' + JSON.stringify(ROOT) + ' is not a plugins/anti-hall-shaped tree — expected to find ' + cliPath);
 }
 const cli = require(cliPath);
-const storeLib = require(path.join(ROOT, 'companion', 'lib', 'devswarm-store.js'));
-const repokey = require(path.join(ROOT, 'companion', 'lib', 'devswarm-repokey.js'));
+const storeLib = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-store.js'));
+const repokey = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-repokey.js'));
 
 function tmpHome() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'anti-hall-1932b53a3ace-'));

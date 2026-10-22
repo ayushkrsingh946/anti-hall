@@ -314,18 +314,6 @@ pub fn blocked_by_after_update(existing: &[String], inp: &Value) -> R<Vec<String
     Ok(out)
 }
 
-/// A status field read with `||`: `None` when falsy, the string when truthy; a truthy non-string is [`Unsure`] (the Node
-/// code would call `.toLowerCase()` on it and throw).
-pub fn truthy_status(v: Option<&Value>) -> R<Option<String>> {
-    match v {
-        Some(x) if truthy(x) => match x {
-            Value::String(s) => Ok(Some(s.clone())),
-            _ => Err(Unsure),
-        },
-        _ => Ok(None),
-    }
-}
-
 /// Marks a status the reconstruction holds as JavaScript holds it, a truthy value that is not a string (`inp.status || ...` keeps a
 /// number, boolean, object or array as it is). Node only throws on it where it lowercases the status of a task still in the final
 /// map, so it is carried through the scan (a later create, update or list reset can replace it) and only a task that keeps it to

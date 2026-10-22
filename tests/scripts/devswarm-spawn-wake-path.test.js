@@ -17,10 +17,11 @@ process.env.ANTI_HALL_LOG_DIR = LOG_DIR;
 process.on('exit', () => { try { fs.rmSync(LOG_DIR, { recursive: true, force: true }); } catch (_) {} });
 
 const ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const cli = require(path.join(ROOT, 'scripts', 'devswarm.js'));
-const installIngest = require(path.join(ROOT, 'companion', 'install-devswarm-ingest.js'));
-const { resolveContext } = require(path.join(ROOT, 'companion', 'lib', 'identity.js'));
-const { lockPathFor } = require(path.join(ROOT, 'companion', 'lib', 'devswarm-wake-watch.js'));
+const NODE_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const cli = require(path.join(NODE_ROOT, 'scripts', 'devswarm.js'));
+const installIngest = require(path.join(NODE_ROOT, 'companion', 'install-devswarm-ingest.js'));
+const { resolveContext } = require(path.join(NODE_ROOT, 'companion', 'lib', 'identity.js'));
+const { lockPathFor } = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-wake-watch.js'));
 
 const GIT_ENV = Object.assign({}, process.env, {
   HOME: LOG_DIR, USERPROFILE: LOG_DIR, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1',

@@ -13,7 +13,8 @@ const assert = require('node:assert');
 const path = require('node:path');
 
 const ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const appDb = require(path.join(ROOT, 'companion', 'lib', 'devswarm-app-db.js'));
+const NODE_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const appDb = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-app-db.js'));
 const { buildAppDb, rmFixture, COLS } = require('../helpers/app-db-fixture.js');
 
 let sqlite = null;
@@ -134,7 +135,7 @@ test('(e) messageTimestamps: window-bounded, no bodies', { skip }, () => {
 });
 
 test('(f) capability gate: a gated column/table sleeps (null + listed), a gated core column -> null', { skip }, () => {
-  const caps = require(path.join(ROOT, 'companion', 'lib', 'devswarm-capabilities.js'));
+  const caps = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-capabilities.js'));
   const realCan = caps.can;
   const f = buildAppDb();
   const gateOff = (off) => { caps.can = (name) => (off.includes(name) ? { ok: false, reason: 'test-gated' } : { ok: true, reason: null }); };
@@ -155,20 +156,20 @@ test('(f) capability gate: a gated column/table sleeps (null + listed), a gated 
 });
 
 test('(g) every app-DB column/table and app file this module reads is in the capability registry', () => {
-  const caps = require(path.join(ROOT, 'companion', 'lib', 'devswarm-capabilities.js'));
+  const caps = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-capabilities.js'));
   const names = new Set(caps.CAPABILITIES.map((c) => c.name));
   for (const [table, cols] of Object.entries(appDb.SCHEMA)) {
     assert.ok(names.has('appdb.' + table), 'appdb.' + table);
     for (const c of cols) assert.ok(names.has('appdb.' + table + '.' + c), 'appdb.' + table + '.' + c);
   }
-  const src = require('fs').readFileSync(path.join(ROOT, 'companion', 'lib', 'devswarm-app-db.js'), 'utf8');
+  const src = require('fs').readFileSync(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-app-db.js'), 'utf8');
   const used = new Set([...src.matchAll(/capOk\('((?:appdb|appfs)\.[\w.-]*\w)',/g)].map((m) => m[1]));
   assert.ok(used.size >= 5);
   for (const n of used) assert.ok(names.has(n), n + ' used but not registered');
 });
 
 test('(h) real gate end-to-end: fixture DB reads fully ungated (no unknown names)', { skip }, () => {
-  const caps = require(path.join(ROOT, 'companion', 'lib', 'devswarm-capabilities.js'));
+  const caps = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-capabilities.js'));
   caps.resetCache();
   const f = buildAppDb();
   try {

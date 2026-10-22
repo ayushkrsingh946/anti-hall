@@ -12,6 +12,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
+const NODE_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
 
 function walk(dir, out) {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -29,7 +30,7 @@ function walk(dir, out) {
 function callSiteIds() {
   const ids = new Set();
   for (const d of ['hooks', 'scripts', 'companion']) {
-    for (const f of walk(path.join(ROOT, d), [])) {
+    for (const f of walk(path.join(NODE_ROOT, d), [])) {
       const s = fs.readFileSync(f, 'utf8');
       if (!/jev-assist/.test(s)) continue;
       for (const m of s.matchAll(/\bid:\s*'([A-Za-z]+)'/g)) {
@@ -50,8 +51,8 @@ test('call-site discovery is non-vacuous (finds the known framed + routing ids)'
 });
 
 test('every Jev call-site id is in KNOWN_INTEGRATIONS and the settings schema', () => {
-  const { KNOWN_INTEGRATIONS } = require(path.join(ROOT, 'scripts', 'jev-setup.js'));
-  const { SECTIONS } = require(path.join(ROOT, 'hooks', 'lib', 'settings-schema.js'));
+  const { KNOWN_INTEGRATIONS } = require(path.join(NODE_ROOT, 'scripts', 'jev-setup.js'));
+  const { SECTIONS } = require(path.join(NODE_ROOT, 'hooks', 'lib', 'settings-schema.js'));
   const schemaKeys = new Set(SECTIONS.find((s) => s.key === 'jevIntegrations').settings.map((s) => s.key));
   const known = new Set(KNOWN_INTEGRATIONS);
   for (const id of callSiteIds()) {

@@ -35,8 +35,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const PLUGIN_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
+const NODE_PLUGIN_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
 const EXCLUDED_FILES = new Set([
-  path.join(PLUGIN_ROOT, 'companion', 'lib', 'test-home-guard.js'),
+  path.join(NODE_PLUGIN_ROOT, 'companion', 'lib', 'test-home-guard.js'),
 ]);
 
 // Baseline recorded 2026-09-26 (v0.110 lane #3, "tests never touch the real

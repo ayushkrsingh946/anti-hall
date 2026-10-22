@@ -14,8 +14,9 @@ const path = require('node:path');
 const cp = require('node:child_process');
 
 const ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const doc = require(path.join(ROOT, 'companion', 'lib', 'doctor-devswarm.js'));
-const dw = require(path.join(ROOT, 'scripts', 'devswarm.js'));
+const NODE_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const doc = require(path.join(NODE_ROOT, 'companion', 'lib', 'doctor-devswarm.js'));
+const dw = require(path.join(NODE_ROOT, 'scripts', 'devswarm.js'));
 const { buildAppDb, rmFixture } = require('../helpers/app-db-fixture.js');
 
 let sqlite = null;

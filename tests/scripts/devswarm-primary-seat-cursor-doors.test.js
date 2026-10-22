@@ -19,10 +19,11 @@ const cp = require('node:child_process');
 
 process.env.ANTI_HALL_LOG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'ah-seatdoor-log-'));
 const ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const cli = require(path.join(ROOT, 'scripts', 'devswarm.js'));
-const storeLib = require(path.join(ROOT, 'companion', 'lib', 'devswarm-store.js'));
-const repokey = require(path.join(ROOT, 'companion', 'lib', 'devswarm-repokey.js'));
-const inst = require(path.join(ROOT, 'companion', 'install-devswarm-ingest.js'));
+const NODE_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const cli = require(path.join(NODE_ROOT, 'scripts', 'devswarm.js'));
+const storeLib = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-store.js'));
+const repokey = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-repokey.js'));
+const inst = require(path.join(NODE_ROOT, 'companion', 'install-devswarm-ingest.js'));
 
 const CHILD = 'c0ffee00-1111-4222-8333-444455556666';
 function rm(p) { try { fs.rmSync(p, { recursive: true, force: true }); } catch (_) {} }

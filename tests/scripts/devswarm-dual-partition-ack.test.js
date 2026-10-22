@@ -24,13 +24,14 @@ const path = require('node:path');
 const cp = require('node:child_process');
 
 const ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const cli = require(path.join(ROOT, 'scripts', 'devswarm.js'));
-const storeLib = require(path.join(ROOT, 'companion', 'lib', 'devswarm-store.js'));
-const repokey = require(path.join(ROOT, 'companion', 'lib', 'devswarm-repokey.js'));
-const liveness = require(path.join(ROOT, 'companion', 'lib', 'liveness.js'));
-const readerCursors = require(path.join(ROOT, 'companion', 'lib', 'reader-cursors.js'));
-const migrations = require(path.join(ROOT, 'companion', 'lib', 'migrations.js'));
-const wakeWatch = require(path.join(ROOT, 'companion', 'lib', 'devswarm-wake-watch.js'));
+const NODE_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const cli = require(path.join(NODE_ROOT, 'scripts', 'devswarm.js'));
+const storeLib = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-store.js'));
+const repokey = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-repokey.js'));
+const liveness = require(path.join(NODE_ROOT, 'companion', 'lib', 'liveness.js'));
+const readerCursors = require(path.join(NODE_ROOT, 'companion', 'lib', 'reader-cursors.js'));
+const migrations = require(path.join(NODE_ROOT, 'companion', 'lib', 'migrations.js'));
+const wakeWatch = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-wake-watch.js'));
 
 const UUID = '76cf862f-4dbd-4a14-904b-b84c8e255743';
 

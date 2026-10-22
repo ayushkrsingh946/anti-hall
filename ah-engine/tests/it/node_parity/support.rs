@@ -49,8 +49,16 @@ pub fn hooks_dir() -> Option<PathBuf> {
     hooks_dir_with("node", std::env::var("CI").is_ok_and(|v| v == "true"))
 }
 
+/// The plugin root the engine reads its defaults from: the plugin the engine ships in, not the Node reference's root.
+pub fn engine_plugin_root(hooks: &Path) -> PathBuf {
+    let shipped = repo_root().join("plugins/anti-hall");
+    if shipped.join("engine/defaults/index.toml").exists() { shipped } else { hooks.parent().expect("hooks directory has a parent").to_path_buf() }
+}
+
 fn hooks_dir_with(node: &str, ci: bool) -> Option<PathBuf> {
-    let hooks = repo_root().join("plugins/anti-hall/hooks");
+    // the Node reference moved to plugins/anti-hall-node; an older layout kept it beside the engine's plugin
+    let moved = repo_root().join("plugins/anti-hall-node/hooks");
+    let hooks = if moved.join("auto-handover.js").exists() { moved } else { repo_root().join("plugins/anti-hall/hooks") };
     if !hooks.join("auto-handover.js").exists() || Command::new(node).arg("--version").output().is_err() {
         assert!(!ci, "CI=true but no Node ({node}) or no plugin hooks next to the engine: the Node parity lanes cannot be skipped in CI");
         eprintln!("skipped: no Node or no plugin hooks next to the engine");

@@ -18,10 +18,11 @@ process.env.ANTI_HALL_LOG_DIR = LOG_DIR;
 process.on('exit', () => { try { fs.rmSync(LOG_DIR, { recursive: true, force: true }); } catch (_) {} });
 
 const ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const cli = require(path.join(ROOT, 'scripts', 'devswarm.js'));
-const planLib = require(path.join(ROOT, 'companion', 'lib', 'devswarm-plan.js'));
-const inbox = require(path.join(ROOT, 'hooks', 'devswarm-parent-inbox.js'));
-const inst = require(path.join(ROOT, 'companion', 'install-devswarm-ingest.js'));
+const NODE_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const cli = require(path.join(NODE_ROOT, 'scripts', 'devswarm.js'));
+const planLib = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-plan.js'));
+const inbox = require(path.join(NODE_ROOT, 'hooks', 'devswarm-parent-inbox.js'));
+const inst = require(path.join(NODE_ROOT, 'companion', 'install-devswarm-ingest.js'));
 
 const GIT_ENV = Object.assign({}, process.env, {
   HOME: LOG_DIR, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1',

@@ -16,8 +16,9 @@ const cp = require('node:child_process');
 
 const REPO_ROOT = path.join(__dirname, '..', '..');
 const PLUGIN = path.join(REPO_ROOT, 'plugins', 'anti-hall');
-const DOCTOR_JS = path.join(PLUGIN, 'hooks', 'doctor.js');
-const MIGRATE_JS = path.join(PLUGIN, 'scripts', 'migrate-state.js');
+const NODE_PLUGIN = path.join(REPO_ROOT, 'plugins', 'anti-hall-node');
+const DOCTOR_JS = path.join(NODE_PLUGIN, 'hooks', 'doctor.js');
+const MIGRATE_JS = path.join(NODE_PLUGIN, 'scripts', 'migrate-state.js');
 const { migrateGsdPlanning } = require(MIGRATE_JS);
 
 function mkTmp(tag) { return fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'antihall-planning-' + tag + '-'))); }

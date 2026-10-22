@@ -16,10 +16,11 @@ const cp = require('node:child_process');
 
 process.env.ANTI_HALL_LOG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'ah-seat-log-'));
 const ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const cli = require(path.join(ROOT, 'scripts', 'devswarm.js'));
-const inst = require(path.join(ROOT, 'companion', 'install-devswarm-ingest.js'));
-const drift = require(path.join(ROOT, 'companion', 'lib', 'primary-session-drift.js'));
-const seat = require(path.join(ROOT, 'companion', 'lib', 'primary-seat.js'));
+const NODE_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const cli = require(path.join(NODE_ROOT, 'scripts', 'devswarm.js'));
+const inst = require(path.join(NODE_ROOT, 'companion', 'install-devswarm-ingest.js'));
+const drift = require(path.join(NODE_ROOT, 'companion', 'lib', 'primary-session-drift.js'));
+const seat = require(path.join(NODE_ROOT, 'companion', 'lib', 'primary-seat.js'));
 const { testHook } = require('../helpers/spawn-hook.js');
 
 const HOOK_ENV = { DEVSWARM_REPO_ID: 'repo-1', ANTIHALL_DEVSWARM_APP_DB: 'off' };
@@ -192,7 +193,7 @@ test('concurrent adoption: two live sessions race for a closed seat -> exactly o
     endSession(f, 'sess-A');
     sessionFile(f, 'sess-B');
     sessionFile(f, 'sess-D');
-    const hook = path.join(ROOT, 'hooks', 'devswarm-child-role.js');
+    const hook = path.join(NODE_ROOT, 'hooks', 'devswarm-child-role.js');
     const SETTLED_RE = /adopted Primary |Another live Primary session/;
 
     function spawnSessionStart(sid) {

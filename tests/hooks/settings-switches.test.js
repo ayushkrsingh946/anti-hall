@@ -29,9 +29,10 @@ const { writeSettings, switchOff } = require('../helpers/settings-switch.js');
 
 const REPO = path.join(__dirname, '..', '..');
 const PLUGIN = path.join(REPO, 'plugins', 'anti-hall');
-const schema = require(path.join(PLUGIN, 'hooks', 'lib', 'settings-schema.js'));
-const settings = require(path.join(PLUGIN, 'hooks', 'lib', 'settings.js'));
-const CLI = path.join(PLUGIN, 'scripts', 'settings.js');
+const NODE_PLUGIN = path.join(REPO, 'plugins', 'anti-hall-node');
+const schema = require(path.join(NODE_PLUGIN, 'hooks', 'lib', 'settings-schema.js'));
+const settings = require(path.join(NODE_PLUGIN, 'hooks', 'lib', 'settings.js'));
+const CLI = path.join(NODE_PLUGIN, 'scripts', 'settings.js');
 
 // hook file -> the setting that switches it off. Hooks whose switch predates
 // 0.108.4 are included so the drift check covers every registered hook.
@@ -188,15 +189,15 @@ test('DRIFT: each mapped switch exists in the schema and each 0.108.4 hook sourc
     const [sec, key] = split(k);
     assert.ok(schema.findSetting(sec, key), k + ' (for ' + file + ') missing from the schema');
     if (!NEW_KEYS.includes(k) && k !== 'guards.modelRouting') continue;
-    const src = fs.readFileSync(path.join(PLUGIN, 'hooks', file), 'utf8');
+    const src = fs.readFileSync(path.join(NODE_PLUGIN, 'hooks', file), 'utf8');
     assert.ok(src.includes("'" + sec + "', '" + key + "'"), file + ' never reads its switch ' + k);
   }
   for (const [file, k] of Object.entries(COMPANION_SWITCHES)) {
     const [sec, key] = split(k);
     // scripts/devswarm.js + scripts/devswarm-lib/* are one logical source unit.
     const src = file === 'scripts/devswarm.js'
-      ? require('../scripts/lib/devswarm-source.js').readAll(PLUGIN)
-      : fs.readFileSync(path.join(PLUGIN, file), 'utf8');
+      ? require('../scripts/lib/devswarm-source.js').readAll(NODE_PLUGIN)
+      : fs.readFileSync(path.join(NODE_PLUGIN, file), 'utf8');
     assert.ok(src.includes("'" + sec + "', '" + key + "'"), file + ' never reads its switch ' + k);
   }
 });
@@ -307,7 +308,7 @@ const CASES = [
     payload: (s) => ({ hook_event_name: 'SessionStart', session_id: 't', cwd: s.cwd, source: 'startup' }),
     // It prints only when there is something to report, but it always arms
     // its once-a-day stamp when it runs — that stamp is the proof it ran.
-    fired: (r, s, h) => fs.existsSync(require(path.join(PLUGIN, 'hooks', 'lib', 'defect-store.js')).nudgeStampFile(h.home)),
+    fired: (r, s, h) => fs.existsSync(require(path.join(NODE_PLUGIN, 'hooks', 'lib', 'defect-store.js')).nudgeStampFile(h.home)),
   },
   {
     hook: 'claim-ledger.js', key: 'guards.claimLedger',
@@ -374,9 +375,9 @@ const CASES = [
       tool_response: { content: 'Error: out of quota until 2026-09-27T00:00:00Z. Try again later.' },
       session_id: 't',
     }),
-    fired: (r, s, h) => fs.existsSync(require(path.join(PLUGIN, 'hooks', 'lib', 'codex-quota.js')).statePath(h.home)) &&
-      JSON.parse(fs.readFileSync(require(path.join(PLUGIN, 'hooks', 'lib', 'codex-quota.js')).statePath(h.home), 'utf8')).quota &&
-      JSON.parse(fs.readFileSync(require(path.join(PLUGIN, 'hooks', 'lib', 'codex-quota.js')).statePath(h.home), 'utf8')).quota.available === false,
+    fired: (r, s, h) => fs.existsSync(require(path.join(NODE_PLUGIN, 'hooks', 'lib', 'codex-quota.js')).statePath(h.home)) &&
+      JSON.parse(fs.readFileSync(require(path.join(NODE_PLUGIN, 'hooks', 'lib', 'codex-quota.js')).statePath(h.home), 'utf8')).quota &&
+      JSON.parse(fs.readFileSync(require(path.join(NODE_PLUGIN, 'hooks', 'lib', 'codex-quota.js')).statePath(h.home), 'utf8')).quota.available === false,
   },
 ];
 
@@ -419,7 +420,7 @@ test('SWITCH guards.modelRouting=advisory (settings.json) downgrades the block t
 test('SWITCH maintenance.sessionEndReaper: off returns before reading the SessionEnd payload', () => {
   const h = makeHome();
   try {
-    const mod = path.join(PLUGIN, 'hooks', 'session-end-mcp-reaper.js');
+    const mod = path.join(NODE_PLUGIN, 'hooks', 'session-end-mcp-reaper.js');
     const code = 'let read=false; const o={ logDir: process.argv[2], get stdinRaw(){ read=true; return "not json"; } };'
       + ' require(' + JSON.stringify(mod) + ').main(o); process.stdout.write(String(read));';
     const env = { PATH: process.env.PATH, HOME: h.home, ANTIHALL_TEST_ISOLATION: '1' };

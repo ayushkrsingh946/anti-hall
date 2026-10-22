@@ -20,13 +20,15 @@ const cp = require('node:child_process');
 
 const REPO = path.join(__dirname, '..', '..');
 const PLUGIN = 'plugins/anti-hall/';
-const LIFECYCLE = PLUGIN + 'companion/lib/devswarm-lifecycle.js';
-const CLI = PLUGIN + 'scripts/devswarm.js';
+const NODE = 'plugins/anti-hall-node/'; // the Node backup tree: the lifecycle lib, the CLI and the hooks live here
+const TREES = [PLUGIN, NODE];
+const LIFECYCLE = NODE + 'companion/lib/devswarm-lifecycle.js';
+const CLI = NODE + 'scripts/devswarm.js';
 // devswarm.js + scripts/devswarm-lib/* are one logical unit.
-const isCli = (x) => x.startsWith(CLI + ':') || x.startsWith(PLUGIN + 'scripts/devswarm-lib/');
+const isCli = (x) => x.startsWith(CLI + ':') || x.startsWith(NODE + 'scripts/devswarm-lib/');
 
 function productionFiles() {
-  const r = cp.spawnSync('git', ['ls-files', '-co', '--exclude-standard', PLUGIN], { cwd: REPO, encoding: 'utf8' });
+  const r = cp.spawnSync('git', ['ls-files', '-co', '--exclude-standard', ...TREES], { cwd: REPO, encoding: 'utf8' });
   assert.strictEqual(r.status, 0, 'git ls-files failed: ' + r.stderr);
   return r.stdout.split('\n').filter((f) => /\.(js|cjs|mjs|json|sh)$/.test(f) && fs.existsSync(path.join(REPO, f)));
 }
@@ -58,8 +60,8 @@ test('executePrune: defined in the lifecycle lib, called ONLY by the prune-archi
 });
 
 test('no automation path references deletion (hooks, supervisor, schedulers, monitors, codex hooks)', () => {
-  const auto = (f) => f.startsWith(PLUGIN + 'hooks/') || f.startsWith(PLUGIN + 'codex/hooks/')
-    || f.startsWith(PLUGIN + 'monitors') || f.startsWith(PLUGIN + 'statusline/')
+  const auto = (f) => TREES.some((t) => f.startsWith(t + 'hooks/') || f.startsWith(t + 'codex/hooks/')
+    || f.startsWith(t + 'monitors') || f.startsWith(t + 'statusline/'))
     || /companion\/(devswarm-supervisor|devswarm-ingest|install-[\w-]+|mcp-reaper)\.js$/.test(f)
     || /monitors\.json$/.test(f) || /hooks\.json$/.test(f);
   assert.deepStrictEqual(hits(/executePrune|confirm-ids|prune-archived|verbArgv\(\s*'delete'/, auto), []);
@@ -75,6 +77,6 @@ test('nobody calls the DevSwarm app local HTTP API', () => {
 });
 
 test('auto-archive never calls the side-effecting check-merge', () => {
-  const f = (x) => x === LIFECYCLE || x === PLUGIN + 'companion/devswarm-supervisor.js';
+  const f = (x) => x === LIFECYCLE || x === NODE + 'companion/devswarm-supervisor.js';
   assert.deepStrictEqual(hits(/check-merge/, f), []);
 });

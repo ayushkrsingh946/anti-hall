@@ -29,7 +29,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 
 const REPO = path.join(__dirname, '..', '..');
-const P = (...parts) => path.join(REPO, 'plugins', 'anti-hall', ...parts);
+const P = (...parts) => path.join(REPO, 'plugins', 'anti-hall-node', ...parts);
 
 function withPoisonedHomedir(fn) {
   const real = os.homedir;

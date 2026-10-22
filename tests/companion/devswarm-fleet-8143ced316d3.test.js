@@ -28,9 +28,11 @@ const { spawnSync } = require('node:child_process');
 
 const ROOT = process.env.ANTIHALL_TEST_PLUGIN_ROOT
   || path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
+const NODE_ROOT = process.env.ANTIHALL_TEST_PLUGIN_ROOT
+  || path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
 
-const pullPath = path.join(ROOT, 'companion', 'lib', 'devswarm-pull.js');
-const wakeWatchPath = path.join(ROOT, 'companion', 'lib', 'devswarm-wake-watch.js');
+const pullPath = path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-pull.js');
+const wakeWatchPath = path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-wake-watch.js');
 if (!fs.existsSync(pullPath) || !fs.existsSync(wakeWatchPath)) {
   throw new Error(
     'ANTIHALL_TEST_PLUGIN_ROOT=' + JSON.stringify(ROOT) + ' is not a plugins/anti-hall-shaped '

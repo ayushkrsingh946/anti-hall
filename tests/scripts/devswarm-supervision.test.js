@@ -28,13 +28,14 @@ process.env.ANTI_HALL_LOG_DIR = LOG_DIR;
 process.on('exit', () => { try { fs.rmSync(LOG_DIR, { recursive: true, force: true }); } catch (_) {} });
 
 const ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const cli = require(path.join(ROOT, 'scripts', 'devswarm.js'));
-const planLib = require(path.join(ROOT, 'companion', 'lib', 'devswarm-plan.js'));
-const sup = require(path.join(ROOT, 'companion', 'lib', 'devswarm-supervision.js'));
-const supJev = require(path.join(ROOT, 'companion', 'lib', 'devswarm-supervision-jev.js'));
-const metrics = require(path.join(ROOT, 'companion', 'lib', 'devswarm-supervision-metrics.js'));
-const supervisor = require(path.join(ROOT, 'companion', 'devswarm-supervisor.js'));
-const jevAssist = require(path.join(ROOT, 'hooks', 'lib', 'jev-assist.js'));
+const NODE_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const cli = require(path.join(NODE_ROOT, 'scripts', 'devswarm.js'));
+const planLib = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-plan.js'));
+const sup = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-supervision.js'));
+const supJev = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-supervision-jev.js'));
+const metrics = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-supervision-metrics.js'));
+const supervisor = require(path.join(NODE_ROOT, 'companion', 'devswarm-supervisor.js'));
+const jevAssist = require(path.join(NODE_ROOT, 'hooks', 'lib', 'jev-assist.js'));
 
 const GIT_ENV = Object.assign({}, process.env, {
   HOME: LOG_DIR, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1',
@@ -348,8 +349,8 @@ test('jev trigger counter: an off-scope signal records "seen" once per episode, 
 
 // ---- token burn ---------------------------------------------------------
 
-const tokenUsage = require(path.join(ROOT, 'companion', 'lib', 'devswarm-token-usage.js'));
-const { projectDirFor } = require(path.join(ROOT, 'companion', 'lib', 'target-session.js'));
+const tokenUsage = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-token-usage.js'));
+const { projectDirFor } = require(path.join(NODE_ROOT, 'companion', 'lib', 'target-session.js'));
 function assistant(id, ts, usage) {
   return JSON.stringify({ type: 'assistant', timestamp: new Date(ts).toISOString(), message: { id, role: 'assistant', usage } }) + '\n';
 }
@@ -537,7 +538,7 @@ test('activity: a broadcast send from a child with a plan counts as progress', (
   try {
     cp.spawnSync('git', ['init', '-q', repo], { env: GIT_ENV });
     git(repo, ['commit', '-q', '--allow-empty', '-m', 'init']);
-    const inst = require(path.join(ROOT, 'companion', 'install-devswarm-ingest.js'));
+    const inst = require(path.join(NODE_ROOT, 'companion', 'install-devswarm-ingest.js'));
     const id = inst.primaryWorkspaceId(inst.resolveWorktree(repo));
     const t0 = Date.now() - 200 * MIN;
     cli.run(['plan', 'set', id, '--steps', '1. a\n2. b'], { home, env: ENV, cwd: repo, now: t0 });
