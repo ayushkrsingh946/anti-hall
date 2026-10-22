@@ -310,7 +310,10 @@ function installLauncher(kind, fallbackAbsPath, home) {
   try {
     const dest = launcherPath(kind, home);
     const source = buildLauncherSource(t.segments, fallbackAbsPath);
-    writeIfDifferent(dest, source);
+    // an engine-written POSIX-sh shim (no Node) owns the file: never turn it back into a Node launcher
+    let engineShim = false;
+    try { engineShim = fs.readFileSync(dest, 'utf8').startsWith('#!/bin/sh\n'); } catch (_) { /* absent: write */ }
+    if (!engineShim) writeIfDifferent(dest, source);
     // Verify the file actually exists & is readable post-write before
     // handing it back — never claim success on an unverified write.
     fs.accessSync(dest, fs.constants.R_OK);

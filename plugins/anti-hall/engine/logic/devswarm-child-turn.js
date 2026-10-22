@@ -26,16 +26,7 @@ function ctHeartbeatKey(builderId, branch) {
 // The CLI path the reminders name: the stable launcher when that is switched on and installed, else the plugin's own script (`preferStableLauncher`).
 // null when the plugin root cannot be resolved the way Node's `__dirname` would be.
 function ctCli(opts, home) {
-  var root = jx.isObj(opts) && typeof opts.plugin_root === 'string' ? opts.plugin_root : ah.env.get(ah.cfg('env.plugin_root'));
-  if (root === null || root === undefined || root === '') return null;
-  var nr = dwNodeRoot(root);
-  if (nr === null) return null;
-  var l = ah.cfg('devswarm_role.launcher_cli');
-  if (ah.settings.bool('devswarm_role.sw_stable_launcher')) {
-    var stable = posix.normalize(home + '/' + ah.cfg('devswarm_role.bin_dir') + '/' + l.name);
-    if (ah.fs.isFile(stable)) return stable;
-  }
-  return posix.normalize(nr + '/' + l.target);
+  return dwEngineCmd('devswarm_role.engine_cli', home);
 }
 
 // Text of a small state file, or null when absent; undefined when it is too large to read whole (Node reads all of it).

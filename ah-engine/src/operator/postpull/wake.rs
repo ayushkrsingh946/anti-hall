@@ -68,7 +68,10 @@ impl Run<'_> {
         let home = Path::new(self.home);
         let root = devswarm_root(home);
         let ensured = std::fs::create_dir_all(root.join(text("update_post.wake_state_dir"))).is_ok();
-        let arm = defaults::fill(text("update_post.wake_arm_cmd"), &[("watcher", &shown)]);
+        let engine_watcher = crate::checks::devswarm_role::text::engine_watcher(self.home);
+        // the engine owns the stable shims: write them where absent or different (the same files the DevSwarm hooks name)
+        crate::discard::harmless(crate::checks::devswarm_role::text::install_shims(home)); // keep: a failed write leaves the shim as it was; hooks retry
+        let arm = defaults::fill(text("update_post.wake_arm_cmd"), &[("watcher", &engine_watcher)]);
         let cwd = std::env::current_dir().ok()?.to_string_lossy().into_owned();
         let st = crate::checks::git::util::Settings { home: self.home.to_string(), env: self.env.to_map() };
         let p = Proc { home: home.to_path_buf(), cwd: cwd.clone(), env: self.env.to_map().into_iter().collect(), st, root: self.paths.plugin_src.clone() };
