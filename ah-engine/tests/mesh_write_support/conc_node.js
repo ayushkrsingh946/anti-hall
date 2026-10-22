@@ -6,7 +6,7 @@
 // usage: node conc_node.js <tag> <n>     (HOME is the scratch home; cwd the repo)
 const path = require('path');
 const os = require('os');
-const plugin = path.join(__dirname, '..', '..', '..', 'plugins', 'anti-hall');
+const plugin = path.join(__dirname, '..', '..', '..', 'plugins', 'anti-hall-node');
 const cli = require(path.join(plugin, 'scripts', 'devswarm.js'));
 const store = require(path.join(plugin, 'companion', 'lib', 'devswarm-store.js'));
 const repokey = require(path.join(plugin, 'companion', 'lib', 'devswarm-repokey.js'));
