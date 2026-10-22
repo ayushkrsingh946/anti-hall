@@ -73,16 +73,7 @@ pub(super) struct Paths {
 }
 
 fn resolve_paths(env: &Env, home: &str) -> Paths {
-    let mut marketplace = join(home, t("update.marketplace_rel"));
-    let mut override_ignored = String::new();
-    let name = defaults::text("env.update_marketplace_dir");
-    if let Some(o) = env.get(name).filter(|o| !o.is_empty()) {
-        if is_absolute(o) && std::fs::metadata(o).is_ok_and(|m| m.is_dir()) {
-            marketplace = o.to_string();
-        } else {
-            override_ignored = defaults::render("update_msg.override_ignored", &[("path", &o)]);
-        }
-    }
+    let (marketplace, override_ignored) = marketplace_dir(env.get(defaults::text("env.update_marketplace_dir")).filter(|o| !o.is_empty()), home);
     let plugins_root = resolve_abs(&format!("{marketplace}/../.."));
     let plugin_src = join(&marketplace, t("update.plugin_src_rel"));
     Paths {
@@ -95,6 +86,21 @@ fn resolve_paths(env: &Env, home: &str) -> Paths {
         plugin_src,
         marketplace,
     }
+}
+
+/// The marketplace clone `update` pulls from and installs out of (the one source an "update available" notice may compare with),
+/// and the note for an override that was ignored. `over` is the value of the override variable.
+pub(crate) fn marketplace_dir(over: Option<&str>, home: &str) -> (String, String) {
+    let mut marketplace = join(home, t("update.marketplace_rel"));
+    let mut override_ignored = String::new();
+    if let Some(o) = over {
+        if is_absolute(o) && std::fs::metadata(o).is_ok_and(|m| m.is_dir()) {
+            marketplace = o.to_string();
+        } else {
+            override_ignored = defaults::render("update_msg.override_ignored", &[("path", &o)]);
+        }
+    }
+    (marketplace, override_ignored)
 }
 
 // ---- reading ----------------------------------------------------------------------------------------------------------------
