@@ -172,25 +172,26 @@ fn list_legacy(home: &Path, id: &str, sep: &str) -> Vec<(String, f64)> {
     out
 }
 
-fn legacy_shared_cursor(h: &Handle, home: &Path, id: &str) -> f64 {
+fn legacy_shared_cursor(rd: &MeshReader, home: &Path, id: &str) -> f64 {
     let json = cursors::read_cursor(&cursors::primary_cursor_path(home, id));
-    let row = h.rd().cursor(id).unwrap_or(0) as f64;
+    let row = rd.cursor(id).unwrap_or(0) as f64;
     json.max(row)
 }
 
-fn legacy_baseline(h: &Handle, home: &Path, id: &str) -> f64 {
+fn legacy_baseline(rd: &MeshReader, home: &Path, id: &str) -> f64 {
     if cursors::legacy_safe(id) {
         let bp = cursors_dir(home).join(format!("{id}{}", defaults::text("update_post.legacy_base_suffix")));
         if bp.exists() {
             return cursors::read_cursor(&bp);
         }
     }
-    legacy_shared_cursor(h, home, id)
+    legacy_shared_cursor(rd, home, id)
 }
 
-/// `legacyStoreFloor`: HEAD's `instanceFloor`, dry: `max(#base | shared pair, MIN over the #inst files)`.
-fn legacy_store_floor(h: &Handle, home: &Path, id: &str) -> f64 {
-    let baseline = legacy_baseline(h, home, id);
+/// `legacyStoreFloor`: HEAD's `instanceFloor`, dry: `max(#base | shared pair, MIN over the #inst files)`. Read only: `positions()` takes
+/// it as the store floor of a partition that has no floor row yet.
+pub(crate) fn legacy_store_floor(rd: &MeshReader, home: &Path, id: &str) -> f64 {
+    let baseline = legacy_baseline(rd, home, id);
     let files = list_legacy(home, id, defaults::text("update_post.legacy_inst_sep"));
     match files.iter().map(|f| f.1).reduce(f64::min) {
         None => baseline,
@@ -198,7 +199,8 @@ fn legacy_store_floor(h: &Handle, home: &Path, id: &str) -> f64 {
     }
 }
 
-fn legacy_nd_floor(cursor_path: Option<&str>) -> f64 {
+/// `legacyNdFloor(cursorPath)`: the legacy NDJSON cursor, 0 without one.
+pub(crate) fn legacy_nd_floor(cursor_path: Option<&str>) -> f64 {
     cursor_path.filter(|p| !p.is_empty()).map_or(0.0, |p| cursors::read_cursor(Path::new(p)))
 }
 
@@ -214,7 +216,7 @@ pub(crate) fn descriptor_of(home: &Path, partition: &str) -> Option<OVal> {
     }
 }
 
-fn desc_cursor_path(desc: Option<&OVal>) -> Option<String> {
+pub(crate) fn desc_cursor_path(desc: Option<&OVal>) -> Option<String> {
     match desc.and_then(|d| d.get("cursorPath")) {
         Some(OVal::Str(s)) if !s.is_empty() => Some(s.clone()),
         _ => None,
@@ -411,7 +413,7 @@ fn import_plan(cx: &mut Cx, h: &Handle, partition: &str, cursor_path: Option<&st
     let home = cx.home.clone();
     let desc = descriptor_of(&home, partition);
     let cursor_path = cursor_path.filter(|p| !p.is_empty()).map(str::to_string).or_else(|| desc_cursor_path(desc.as_ref()));
-    let floors = Two { store: legacy_store_floor(h, &home, partition), nd: legacy_nd_floor(cursor_path.as_deref()) };
+    let floors = Two { store: legacy_store_floor(h.rd(), &home, partition), nd: legacy_nd_floor(cursor_path.as_deref()) };
     let mesh_ids = partition_mesh_ids(cx, partition, desc.as_ref());
     let mapped = mapped_shorts(&home, partition);
     let mut harnesses = Vec::new();
@@ -423,7 +425,7 @@ fn import_plan(cx: &mut Cx, h: &Handle, partition: &str, cursor_path: Option<&st
     }
     let mut readers = Vec::new();
     if !harnesses.is_empty() {
-        let baseline = legacy_baseline(h, &home, partition);
+        let baseline = legacy_baseline(h.rd(), &home, partition);
         let inst: HashMap<String, f64> = list_legacy(&home, partition, defaults::text("update_post.legacy_inst_sep")).into_iter().collect();
         let nd: HashMap<String, f64> = list_legacy(&home, partition, defaults::text("update_post.legacy_nd_sep")).into_iter().collect();
         let (store_ns, nd_ns) = ns_pair();
@@ -582,7 +584,7 @@ pub(crate) fn floor_store(cx: &Cx, h: &Handle, partition: &str) -> i64 {
         Err(_) => 0,
         Ok(rows) => match row_of(&rows, defaults::text("mesh_write.ns_store"), floor_name()) {
             Some(f) => f.value,
-            None => legacy_store_floor(h, &cx.home, partition) as i64,
+            None => legacy_store_floor(h.rd(), &cx.home, partition) as i64,
         },
     }
 }

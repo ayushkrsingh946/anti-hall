@@ -698,7 +698,7 @@ fn cases(fx: &Fx) -> Vec<Case> {
             extra: vec![],
             ack: ack(vec![], d_plain.clone(), vec![]),
             union: none(),
-            native: false,
+            native: true,
             expect: vec!["\"ok\":true"],
         },
         Case {
@@ -791,7 +791,7 @@ fn heartbeat_matches_node_byte_for_byte_and_defers_without_writing() {
         }
     }
     eprintln!("heartbeat parity: {} cases, {native} answered by the engine and identical to Node, {deferred} deferred with nothing written", list.len());
-    assert!(native >= 36 && deferred >= 7, "{native} native, {deferred} deferred");
+    assert!(native >= 37 && deferred >= 6, "{native} native, {deferred} deferred");
 }
 
 /// Input faults: whatever the engine cannot read exactly like Node, it must leave untouched for Node.
