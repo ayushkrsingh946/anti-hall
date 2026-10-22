@@ -139,6 +139,18 @@ value = "⚠️ anti-hall · jev-setup: could not save the review state: {error}
 doc = "The Jev decision-log scan stopped at its memory hard limit (mem.jev_review_scan_hard_bytes); the review state counts as unusable. Placeholders: {file}, {limit}."
 value = "review state: the Jev decision log {file} holds a line longer than the scan's {limit}-byte limit (mem.jev_review_scan_hard_bytes); the review was skipped"
 
+[opcli.review_stats_fingerprint_bytes]
+doc = "Bytes at each end of the kept part of a Jev decision-log file that are compared with the file before its kept totals are used again; a file that differs there was rewritten and is read from its start."
+value = 4096
+min = 1
+unit = "bytes"
+
+[opcli.review_stats_max_files]
+doc = "How many decision-log files the review scan keeps totals for (the log and its numbered generations); the least recently used are dropped first and read again from their start."
+value = 64
+min = 0
+unit = "count"
+
 [opcli.review_state_bad]
 doc = "The review state holds an entry that is not an object, which the verb cannot update (nothing is written). Placeholder: {id}."
 value = "review state: the entry of {id} is not an object; fix or remove ~/.anti-hall/jev-review-state.json"
