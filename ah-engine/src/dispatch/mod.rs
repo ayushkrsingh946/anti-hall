@@ -411,7 +411,7 @@ pub fn defer(event: &str, why: &str) -> Outcome {
 /// ([`closed`], bounded on Stop), `open` lets the call through with a loud stderr line. Every answer is logged and counted
 /// in telemetry as the `dispatcher-<path>` hook. Always `Some` (the launcher client still calls it as an `Option`).
 pub fn no_node_answer(event: &str, payload: Option<&Value>, path: &str, why: &str) -> Option<Outcome> {
-    crate::obs::counters::handback(crate::obs::counters::Handback::Abandoned, &format!("dispatch:{path}"));
+    crate::obs::counters::handback_why(crate::obs::counters::Handback::Abandoned, &format!("dispatch:{path}"), &format!("{event}: {why}"));
     use crate::telemetry::event::Outcome as T;
     let guard = guarded(event);
     let closed_mode = guard && defaults::raw("dispatch.failure_mode").get(path).and_then(|v| v.as_str()).unwrap_or("closed") != "open";
@@ -503,7 +503,7 @@ fn start_node(e: &table::Entry, _raw: &[u8], _payload: Option<&File>) -> node::R
 /// ([`crate::script::unanswered`]): `open` allows (counted `abandoned` and told to the user once per session), `closed` blocks on a
 /// guard event. Never a hook that "could not run", which on a guard event would fail the whole event closed.
 fn resolve_unanswered(e: &table::Entry, event: &str) -> combine::HookResult {
-    crate::obs::counters::handback(crate::obs::counters::Handback::Abandoned, &format!("dispatch:hook:{}", e.id));
+    crate::obs::counters::handback_why(crate::obs::counters::Handback::Abandoned, &format!("dispatch:hook:{}", e.id), event);
     let check = e.check.as_deref().unwrap_or(&e.id);
     match native::answer_of(&e.id, Some(crate::script::unanswered(check, event))) {
         native::Answer::Decided(r, _) => r,
