@@ -1430,6 +1430,14 @@ value = "ah-engine-integrity.sh"
 doc = "Bootstrap script in the plugin's hooks directory (installs the engine binary)."
 value = "ah-engine-bootstrap.sh"
 
+[files.fallback_switch]
+doc = "Marker file (state directory) of the Node fallback switch (the Node backup, stage 2): present = the launcher runs the original Node hooks directly instead of the engine. Written and removed by `ah-engine fallback node|off`; read by hooks/ah-hook.sh and the thin launcher."
+value = "fallback.node"
+
+[launcher.script_hook]
+doc = "The shell wrapper in the plugin's hooks directory; the launcher hands the call to it while the Node fallback switch is on (files.fallback_switch)."
+value = "ah-hook.sh"
+
 [launcher.script_doctor]
 doc = "Doctor script in the plugin's hooks directory (the --doctor mode runs it)."
 value = "ah-doctor.sh"

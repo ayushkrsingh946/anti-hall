@@ -35,6 +35,10 @@ value = { kind = "engine", action = "spool_drain", every_key = "spool.drain_ms",
 doc = "Roll complete days of telemetry counters up into archive.db and apply the telemetry retention (D78); idempotent, so a repeat or a catch-up changes nothing."
 value = { kind = "engine", action = "telemetry_rollup", every_key = "schedule.telemetry_rollup_ms", jitter_ms = 600000, timeout_ms = 300000, retries = 2, backoff_ms = 60000, backoff_max_ms = 600000, cooldown_ms = 3600000, catch_up = "once", persist = true }
 
+[job.shadow_report]
+doc = "Pair the engine rows and the Node rows of the shadow ledger and write the agreement report (shadow-compare, nodeback.report_file); cheap and idempotent."
+value = { kind = "engine", action = "shadow_report", every_key = "schedule.shadow_report_ms", jitter_ms = 600000, timeout_ms = 60000, retries = 1, backoff_ms = 60000, backoff_max_ms = 600000, cooldown_ms = 3600000, catch_up = "once", persist = false }
+
 [job.handovers]
 doc = "Keep the handover brief trees (BRIEF.md and BRIEF.json per day, plus the root brief) of every registered project current: rebuilds only the days whose handover files changed, writes only files whose bytes change, never edits a handover and never deletes. Runs `ah-engine handovers index --registered` as a subprocess; off when schedule.handovers_ms is 0."
 value = { kind = "engine", action = "handovers", every_key = "schedule.handovers_ms", jitter_ms = 60000, timeout_ms = 120000, retries = 1, backoff_ms = 30000, backoff_max_ms = 300000, cooldown_ms = 900000, catch_up = "skip", persist = false }
@@ -93,6 +97,12 @@ unit = "ms"
 doc = "Interval of the telemetry rollup job (D78); 0 turns it off."
 value = 86400000
 env = "AH_ENGINE_TELEMETRY_ROLLUP_MS"
+unit = "ms"
+
+[schedule.shadow_report_ms]
+doc = "Interval of the daily Node-shadow agreement report job; 0 turns it off."
+value = 86400000
+env = "AH_ENGINE_SHADOW_REPORT_MS"
 unit = "ms"
 
 [schedule.procwatch_ms]

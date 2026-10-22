@@ -212,6 +212,11 @@ const ALLOW: &[(&str, &str, &str)] = &[
         "a thread-local buffer that starts empty and holds the current call's events until they are written: state, not a tunable",
     ),
     (
+        "src/nodeback/shadow.rs",
+        "static CAPTURE",
+        "a thread-local buffer that starts empty and holds the current call's engine verdicts until the shadow job is written: state, not a tunable",
+    ),
+    (
         "src/telemetry/emit.rs",
         "static ITEMS",
         "a thread-local counter initialised to zero: the items the running command reports as changed: state, not a tunable",
