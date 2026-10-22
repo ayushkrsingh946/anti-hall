@@ -272,6 +272,29 @@ ok "tree: --scope defaults is honoured" has "scope: defaults" "$W/check.out"
 run --check "$W/new/ah-engine" "$W/new/defaults" --scope tree >"$W/check.out" 2>&1; rc=$?
 ok "tree: --scope tree on a bare defaults dir refuses" test $rc -ne 0
 
+# --- 8. Node backup tree (sibling of each root, at nodeback.node_dir) ------------------------------------------------------
+setup node
+NR=$W/newroot/plugins/anti-hall; NN=$W/newroot/plugins/anti-hall-node
+mk_root "$NR"; mk_new_defaults "$NR/engine/defaults" 1; mk_new_defaults "$NR/engine/defaults.pristine" 1
+printf '[nodeback.node_dir]\nvalue = "../anti-hall-node"\n' | tee "$NR/engine/defaults/nodeback.toml" >"$NR/engine/defaults.pristine/nodeback.toml"
+mkdir -p "$NN/hooks"; echo 'node hook v2' >"$NN/hooks/g.js"
+mkdir -p "$MKT/../anti-hall-node/hooks"; echo 'node hook v1' >"$MKT/../anti-hall-node/hooks/g.js"
+run --check "$W/new/ah-engine" "$NR" >"$W/check.out" 2>&1
+ok "node: --check reports the node backup tree" has "node backup tree" "$W/check.out"
+before=$(tree_sum)
+run --deploy "$W/new/ah-engine" "$NR" >"$W/dry.out" 2>&1
+ok "node: dry run changes nothing" test "$before" = "$(tree_sum)"
+ok "node: the plan names the node tree" has "Node backup tree" "$W/dry.out"
+run --deploy "$W/new/ah-engine" "$NR" --yes >"$W/deploy.out" 2>&1; rc=$?
+BK=$E/deploys/$(cat "$E/deploys/latest")
+ok "node: deploy OK" test $rc -eq 0
+ok "node: marketplace sibling updated" has "node hook v2" "$MKT/../anti-hall-node/hooks/g.js"
+ok "node: cache-root sibling created" has "node hook v2" "$CACHE/../anti-hall-node/hooks/g.js"
+ok "node: the replaced node file is in the backup" has "node hook v1" "$BK/root1/node/hooks/g.js"
+run --rollback --yes >"$W/rb.out" 2>&1
+ok "node: rollback restores the replaced node file" has "node hook v1" "$MKT/../anti-hall-node/hooks/g.js"
+ok "node: rollback moves the added node file aside" test ! -e "$CACHE/../anti-hall-node/hooks/g.js"
+
 for f in $(find "$T" -name daemon.run 2>/dev/null); do kill "$(cat "$f")" 2>/dev/null; done
 printf '\n%s passed, %s failed (scratch: %s)\n' "$PASS" "$FAIL" "$T"
 [ "$FAIL" -eq 0 ]

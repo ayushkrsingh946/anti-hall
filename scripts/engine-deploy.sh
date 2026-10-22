@@ -33,6 +33,8 @@
 # --scope tree      (default when <new-defaults> is a plugin root) sync the WHOLE plugin tree (hooks, engine/logic, skills, monitors,
 #                   scripts, ...) so a train deploy has hooks and logic in step with the binary; engine/defaults go first.
 # --scope defaults  (the default when <new-defaults> is only a defaults dir) sync engine/defaults + engine/defaults.pristine only.
+#                   Also syncs the Node backup tree (plugins/anti-hall-node) to the sibling path nodeback.node_dir resolves to from each
+#                   root, with the same backup/manifest/verify rules, so the Node shadow and fallback switch are not no-ops.
 # Nothing is ever removed with rm: replaced files are kept in the backup directory; the sync only adds and replaces. POSIX sh, no Node.
 #
 # Environment (all optional; defaults are $HOME-relative):
@@ -116,7 +118,7 @@ resolve_roots() {
 }
 
 # --- new defaults -----------------------------------------------------------------------------------------------------
-SRC_DEF=; SRC_PRI=; SRC_TREE=
+SRC_DEF=; SRC_PRI=; SRC_TREE=; SRC_NODE=; NODE_REL=
 resolve_src() {
   d=$1
   [ -d "$d" ] || die "new defaults not found: $d"
@@ -136,6 +138,12 @@ resolve_src() {
     defaults) ;;
     *) die "--scope takes tree or defaults" ;;
   esac
+  # the Node backup tree: a sibling of the plugin root, at nodeback.node_dir (read from the NEW defaults, nothing hardcoded)
+  SRC_NODE=; NODE_REL=
+  if [ "$SCOPE" = tree ]; then
+    NODE_REL=$(def_value "$SRC_DEF/nodeback.toml" nodeback.node_dir)
+    if [ -n "$NODE_REL" ] && [ -d "$SRC_TREE/$NODE_REL" ]; then SRC_NODE=$SRC_TREE/$NODE_REL; fi
+  fi
 }
 
 # tree_files SRC: the plugin-tree files the sync handles, relative paths, one per line. engine/defaults* are synced by their own
@@ -278,6 +286,10 @@ do_check() {
     if [ "$SCOPE" = tree ]; then
       apply_tree "$SRC_TREE" "$sim" "$SCRATCH/simbk$i/t" "" || { problem "cannot apply the new plugin tree to the scratch copy of $r"; continue; }
       note "  plugin tree: $(cat "$SCRATCH/tree.n") file(s) change (hooks, logic, skills, monitors, scripts ...)"
+      if [ -n "$SRC_NODE" ]; then
+        nm=$(tree_mismatch "$SRC_NODE" "$r/$NODE_REL")
+        note "  node backup tree ($r/$NODE_REL): $nm file(s) change"
+      else note "  node backup tree: none in the new source (shadow and fallback stay no-ops)"; fi
     fi
     out=$(eng_scratch "$NEW" "$sim" config validate "$SCRATCH/empty.toml"); rc=$?
     if [ $rc -eq 0 ]; then
@@ -404,6 +416,7 @@ tree_mismatch_scope() { # ROOT: files of the new source (per scope) missing or d
     done
   done
   if [ "$SCOPE" = tree ]; then a=$((a + $(tree_mismatch "$SRC_TREE" "$1"))); fi
+  if [ -n "$SRC_NODE" ]; then a=$((a + $(tree_mismatch "$SRC_NODE" "$1/$NODE_REL"))); fi
   echo "$a"
 }
 
@@ -474,7 +487,7 @@ do_deploy() {
   note "== plan"
   note "0 maintenance hold: hooks start no engine for up to ${HOLD_TTL}s (refreshed each step, released at the end; 0 = off)"
   note "1 stop the engine ($BIN stop)"
-  i=0; for r in $ROOTS; do i=$((i + 1)); note "2.$i sync engine/defaults + engine/defaults.pristine$([ "$SCOPE" = tree ] && echo " + the whole plugin tree") of $r (replaced files copied to the backup first, nothing deleted)"; done
+  i=0; for r in $ROOTS; do i=$((i + 1)); note "2.$i sync engine/defaults + engine/defaults.pristine$([ "$SCOPE" = tree ] && echo " + the whole plugin tree$([ -n "$SRC_NODE" ] && echo " + the Node backup tree at $r/$NODE_REL")") of $r (replaced files copied to the backup first, nothing deleted)"; done
   note "3 binary: $BIN -> keep as $BIN.prev; install $NEW"
   note "4 integrity record (accept) with the first root's hooks/ah-engine-integrity.sh"
   note "5 stop AGAIN, re-sync every root, release the hold, start the new binary"
@@ -510,6 +523,10 @@ do_deploy() {
       if [ "$SCOPE" = tree ]; then
         apply_tree "$SRC_TREE" "$r" "$BK/$2root$i/tree" "$3" || fail_deploy "could not sync the plugin tree into $r"
         step "  plugin tree: $(cat "$SCRATCH/tree.n") file(s) changed in root $i"
+        if [ -n "$SRC_NODE" ]; then
+          apply_tree "$SRC_NODE" "$r/$NODE_REL" "$BK/$2root$i/node" "$3" || fail_deploy "could not sync the Node backup tree into $r/$NODE_REL"
+          step "  node backup tree: $(cat "$SCRATCH/tree.n") file(s) changed at $r/$NODE_REL"
+        fi
       fi
     done
   }
