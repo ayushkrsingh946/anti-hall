@@ -314,8 +314,8 @@ doc = "Exchange failure when the socket path is not a socket owned by this user.
 value = "socket is not a socket owned by this user"
 
 [msg.run_engine_missing]
-doc = "Printed on stderr by the plugin's launcher script (scripts/ah-run.sh) when no engine can run the command, which exits 127: nothing else runs in its place. Placeholder: {what} (the verb or command words)."
-value = "anti-hall: the engine is not installed or not runnable, so `{what}` did not run. Start a new session to reinstall it, or run `ah-hook.sh --doctor`."
+doc = "Printed on stderr by the thin client (`ah-hook <verb>`, reached through hooks/ah-hook.sh) when no engine can run the command, which exits launcher.cli_no_engine_exit: nothing else runs in its place. Placeholder: {what} (the verb)."
+value = "anti-hall: the engine is not installed or not runnable, so `{what}` did not run. Start a new session to reinstall it, or run `ah-hook doctor`."
 
 [msg.engine_unreachable_notice]
 doc = "Printed once per session on stderr by the hook wrapper when the engine is unreachable (not installed, crashed, did not answer in time, marked down): the call passes through unchecked because no fallback hooks exist. Placeholders: {event}, {why}."

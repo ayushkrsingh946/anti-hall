@@ -620,6 +620,8 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 
 | Key | Default | Env override | Unit | What it is |
 |---|---|---|---|---|
+| `launcher.cli_lowercase_verbs` | `1` |  |  | 1: a first argument that starts with a lowercase letter is an engine command (`ah-hook <verb> [args...]` runs `ah-engine <verb> [args...]` by exec); hook event names are PascalCase, so they never match. 0: every first argument is a hook event. |
+| `launcher.cli_no_engine_exit` | `127` |  |  | Exit code of `ah-hook <verb>` when no engine can run the command (msg.run_engine_missing goes to stderr; nothing else runs). |
 | `launcher.connect_timeout_ms` | `50` |  | ms | Bound on the launcher's probe connection to the daemon socket (it only tells a live daemon from a stale socket file). |
 | `launcher.cpu_hard_s` | `5` |  | s | Hard limit on the launcher's own CPU time (RLIMIT_CPU, whole seconds): past it the launcher stops the engine and lets the hook through. The engine does not inherit it. |
 | `launcher.cpu_soft_ms` | `500` |  | ms | Soft limit on the launcher's own CPU time: past it the launcher warns and counts it (at exit). |
@@ -10944,7 +10946,7 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `msg.restore_daemon_busy` | A restore could not stop the daemon or take its lock in time. |
 | `msg.restore_damaged` | A snapshot database failed its integrity check. Placeholders: {path}, {check}. |
 | `msg.restore_no_hot` | A snapshot directory has no hot.db. Placeholder: {path}. |
-| `msg.run_engine_missing` | Printed on stderr by the plugin's launcher script (scripts/ah-run.sh) when no engine can run the command, which exits 127: nothing else runs in its place. Placeholder: {what} (the verb or command words). |
+| `msg.run_engine_missing` | Printed on stderr by the thin client (`ah-hook <verb>`, reached through hooks/ah-hook.sh) when no engine can run the command, which exits launcher.cli_no_engine_exit: nothing else runs in its place. Placeholder: {what} (the verb). |
 | `msg.schedule_agent_planned` | Result of an agent-targeted job until mailbox delivery exists (D45). |
 | `msg.schedule_daemon_gone` | An in-process job found the daemon gone (it was exiting). |
 | `msg.schedule_exit_code` | How a subprocess job's exit is named in its failure detail. Placeholder: {code}. |

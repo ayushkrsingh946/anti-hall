@@ -1492,6 +1492,18 @@ value = "bin/ah-engine"
 doc = "Name of the engine binary looked up on PATH when none is installed."
 value = "ah-engine"
 
+[launcher.cli_lowercase_verbs]
+doc = "1: a first argument that starts with a lowercase letter is an engine command (`ah-hook <verb> [args...]` runs `ah-engine <verb> [args...]` by exec); hook event names are PascalCase, so they never match. 0: every first argument is a hook event."
+value = 1
+min = 0
+max = 1
+
+[launcher.cli_no_engine_exit]
+doc = "Exit code of `ah-hook <verb>` when no engine can run the command (msg.run_engine_missing goes to stderr; nothing else runs)."
+value = 127
+min = 1
+max = 255
+
 [launcher.run_base_dir]
 doc = "Directory, below the anti-hall base directory, for the launcher's private per-call run directories."
 value = "tmp"

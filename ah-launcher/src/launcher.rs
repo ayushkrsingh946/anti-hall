@@ -13,7 +13,7 @@ use crate::proc::{self, Feed, Opts, Retry, Run};
 use crate::util::{
     env_nonempty, fill, is_exec, json_str_field, json_true_field, now_ms, positive, say, uid,
 };
-use crate::{builtin, selftest};
+use crate::{builtin, cli, selftest};
 use std::ffi::CString;
 use std::io::Write;
 use std::os::unix::ffi::OsStrExt;
@@ -27,7 +27,7 @@ use std::time::{Duration, Instant};
 
 pub static RUN_DIR: Mutex<Option<PathBuf>> = Mutex::new(None);
 static INTERNAL_TEXT: OnceLock<String> = OnceLock::new();
-static LOG: OnceLock<Log> = OnceLock::new();
+pub static LOG: OnceLock<Log> = OnceLock::new();
 
 /// One stderr line and a log line for a failure of the launcher itself (a panic, a limit): the hook is let through.
 pub fn internal(what: &str) {
@@ -693,7 +693,7 @@ impl L {
     }
 }
 
-fn find_engine(home: Option<&PathBuf>, s: &Settings, knob_bin: Option<String>) -> Option<String> {
+pub fn find_engine(home: Option<&PathBuf>, s: &Settings, knob_bin: Option<String>) -> Option<String> {
     if let Some(b) = knob_bin {
         return is_exec(Path::new(&b)).then_some(b);
     }
@@ -751,10 +751,14 @@ fn arg_after(args: &[String], flag: &str) -> Option<String> {
 
 pub fn run() -> i32 {
     let t0 = Instant::now();
-    let args: Vec<String> = std::env::args_os()
+    let mut args: Vec<String> = std::env::args_os()
         .skip(1)
         .map(|a| a.to_string_lossy().into_owned())
         .collect();
+    // a shim may name the plugin root first (`ah-hook --plugin-root <dir> <event|verb> ...`): the same as naming it last
+    if args.first().is_some_and(|a| a == "--plugin-root") && args.len() >= 2 {
+        args.rotate_left(2);
+    }
     // before any settings: the host's plugin-root variable names come from the built-in copy
     let root_envs: Vec<String> = builtin::list("launcher.plugin_root_envs")
         .map(|l| l.iter().map(|s| s.to_string()).collect())
@@ -845,6 +849,9 @@ pub fn run() -> i32 {
                 say(&s.text("msg.launcher_no_doctor"));
             }
             return 1;
+        }
+        Some(first) if cli::is_verb(&s, first) => {
+            return cli::exec_engine(&s, &args, home.as_ref(), cfg_root.as_deref().or(root.as_deref()));
         }
         _ => {}
     }
@@ -1057,17 +1064,34 @@ pub fn run() -> i32 {
     code
 }
 
-/// HUP/INT/TERM to the launcher (the host gave up on the hook): take the child's whole group down, remove the run dir, and
-/// exit 128+signal as the shell wrapper's traps do. The signals are blocked in every thread and taken by one `sigwait` thread;
-/// std's spawn resets the mask in the child, so the engine still gets them.
-pub fn install_signal_thread() {
-    // SAFETY: sigset manipulation on a local set; pthread_sigmask on the calling (main) thread before the thread below exists.
+fn hook_signals() -> libc::sigset_t {
+    // SAFETY: sigset manipulation on a local set.
     unsafe {
         let mut set: libc::sigset_t = std::mem::zeroed();
         libc::sigemptyset(&mut set);
         for sig in [libc::SIGHUP, libc::SIGINT, libc::SIGTERM] {
             libc::sigaddset(&mut set, sig);
         }
+        set
+    }
+}
+
+/// Before an exec: the new program gets HUP/INT/TERM delivered again (a blocked mask survives exec).
+pub fn unblock_signals() {
+    let set = hook_signals();
+    // SAFETY: pthread_sigmask on the calling thread with a valid set.
+    unsafe {
+        libc::pthread_sigmask(libc::SIG_UNBLOCK, &set, std::ptr::null_mut());
+    }
+}
+
+/// HUP/INT/TERM to the launcher (the host gave up on the hook): take the child's whole group down, remove the run dir, and
+/// exit 128+signal as the shell wrapper's traps do. The signals are blocked in every thread and taken by one `sigwait` thread;
+/// std's spawn resets the mask in the child, so the engine still gets them.
+pub fn install_signal_thread() {
+    let set = hook_signals();
+    // SAFETY: pthread_sigmask on the calling (main) thread before the thread below exists.
+    unsafe {
         if libc::pthread_sigmask(libc::SIG_BLOCK, &set, std::ptr::null_mut()) != 0 {
             return;
         }

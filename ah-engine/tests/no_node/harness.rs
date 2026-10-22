@@ -113,7 +113,7 @@ impl World {
         let st = Command::new("cp").arg("-R").arg(plugin_src()).arg(&plugin).status().unwrap();
         assert!(st.success(), "copying the plugin failed");
 
-        // the engine, installed where ah-hook.sh and ah-run.sh look first
+        // the engine, installed where ah-hook.sh and the thin client look first
         let engine_dir = home.join(".anti-hall").join("ah-engine").join("bin");
         fs::create_dir_all(&engine_dir).unwrap();
         let engine = engine_dir.join("ah-engine");
