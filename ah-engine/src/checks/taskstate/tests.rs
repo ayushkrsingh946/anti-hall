@@ -299,4 +299,35 @@ mod non_string_status_in_the_scan {
         lines.extend([filler, bare]);
         assert_eq!(scan("bf-update-needed", &lines, bare_len + 10), None);
     }
+
+    /// Prevention sweep: every transcript-status read site (TodoWrite, TaskCreate, TaskUpdate) with every bad shape. A truthy
+    /// non-string status a later update replaces is read; one a task keeps is unsure (never a silent allow); a falsy one is `pending`.
+    #[test]
+    fn every_status_read_site_decides_every_bad_shape_like_node() {
+        let truthy_shapes = [json!(7), json!(true), json!({"a": 1}), json!(["completed"]), json!(-1.5)];
+        let falsy_shapes = [json!(null), json!(0), json!(false)];
+        let replace = call("r", "TaskUpdate", json!({"taskId": "1", "status": "in_progress"}));
+        for (n, shape) in truthy_shapes.iter().chain(falsy_shapes.iter()).enumerate() {
+            let is_truthy = n < truthy_shapes.len();
+            let sites: [(&str, Vec<Value>); 3] = [
+                ("todo", vec![call("t", "TodoWrite", json!({"todos": [{"id": "1", "content": "x", "status": shape}]}))]),
+                ("create", vec![call("t", "TaskCreate", json!({"subject": "x", "status": shape})), result("t", "Task #1 created successfully: x")]),
+                ("update", vec![call("t", "TaskUpdate", json!({"taskId": "1", "status": shape}))]),
+            ];
+            for (site, lines) in sites {
+                let tag = format!("sweep-{site}-{n}");
+                let kept = scan(&tag, &lines, 1 << 20);
+                let mut replaced = lines.clone();
+                replaced.push(replace.clone());
+                let after = scan(&format!("{tag}-r"), &replaced, 1 << 20);
+                assert_eq!(after, Some((vec!["1".to_string()], 1)), "{site} {shape}: a later update replaces it");
+                if is_truthy {
+                    assert_eq!(kept, None, "{site} {shape}: a kept non-string status is unsure");
+                } else if site != "update" {
+                    // a TaskUpdate of an unseen task with no status makes no pending task (Node: no record to lowercase)
+                    assert_eq!(kept, Some((vec!["1".to_string()], 0)), "{site} {shape}: a falsy status is pending");
+                }
+            }
+        }
+    }
 }
