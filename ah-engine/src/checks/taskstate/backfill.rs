@@ -106,8 +106,8 @@ fn rec_update(rec: &mut Rec, inp: &Value) -> R<()> {
         && let Some(s) = get(inp, "status").filter(|v| truthy(v))
     {
         rec.f.status = true;
-        let Value::String(text) = s else { return Err(Unsure) };
-        let text = text.clone();
+        // a non-string status is kept as JavaScript keeps it: Node only throws where the task that takes it is lowercased
+        let text = super::kept_status(Some(s))?.unwrap_or_default();
         if rec.need_status && terminal(&text) {
             rec.done = true;
         }
@@ -155,7 +155,7 @@ fn rec_update(rec: &mut Rec, inp: &Value) -> R<()> {
 fn rec_create(rec: &mut Rec, inp: &Value) -> R<()> {
     if !rec.f.status {
         rec.f.status = true;
-        rec.st = Some(super::truthy_status(get(inp, "status"))?.unwrap_or_else(|| "pending".to_string()));
+        rec.st = Some(super::kept_status(get(inp, "status"))?.unwrap_or_else(|| "pending".to_string()));
     }
     if !rec.f.owner {
         rec.f.owner = true;
