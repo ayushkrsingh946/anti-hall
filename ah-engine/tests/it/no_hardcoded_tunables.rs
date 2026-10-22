@@ -34,6 +34,11 @@ use std::path::{Path, PathBuf};
 const ALLOW: &[(&str, &str, &str)] = &[
     // ---- wire and host protocols: part of the interface, versioned with it, not tunables --------------------
     (
+        "src/checks/taskstate/mod.rs",
+        "NON_STRING_STATUS: char",
+        "the in-band mark of the task reconstruction for a status that is not a string (an internal sentinel character of the scan, never shown, never configured, and a string status that starts with it is treated as unsure)",
+    ),
+    (
         "src/diag.rs",
         "",
         "the `diag heap` developer report (`--features diag`, absent from every release build): its table layout and usage text are the tool's own output format, not engine messages or tunables",

@@ -405,7 +405,7 @@ pub(crate) fn run_fx(o: &Opts, hooks: &Path, scenarios: &[Scenario]) -> Report {
                 if tn.keys().any(|k| !k.starts_with("home")) {
                     st.effects += 1;
                 }
-            } else if o.may_defer.as_ref().is_some_and(|f| f(sc, step)) {
+            } else if !o.mutate && o.may_defer.as_ref().is_some_and(|f| f(sc, step)) {
                 // A case the old engine could hand back to Node (a window it cannot read exactly, a path only the hook process can resolve)
                 // is now answered natively: advisory text and side files may differ, but where Node blocks the engine must block.
                 match crate::common::not_weaker_than_node((n1.code.parse().unwrap_or(-1), &n1.out), (e1.code.parse().unwrap_or(-1), &e1.out)) {
