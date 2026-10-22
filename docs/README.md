@@ -32,7 +32,7 @@ reference and the changelog pages are generated at build time by `tools/site_gen
 | Doc | What it covers |
 |---|---|
 | [`GUIDE.md` install](./GUIDE.md#install-verify-and-uninstall) | Install for Claude Code and Codex, the `.anti-hall/` git-ignore line, how to check it worked, and uninstall (including companions). |
-| [`GUIDE.md` requirements](./GUIDE.md#requirements) | Node 22+ on `PATH`, and what `/config` needs. |
+| [`GUIDE.md` requirements](./GUIDE.md#requirements) | The supported systems, and what `/config` needs. |
 | [`GUIDE.md` capabilities](./GUIDE.md#capabilities-at-a-glance) | What each area of the plugin does, in one table. |
 | [Skills](#skills) | Every `/anti-hall:<name>` skill, one line each. |
 | [`GUIDE.md` troubleshooting](./GUIDE.md#troubleshooting--faq) | Hooks not firing, a guard blocking something legitimate, statusline, updates. |
@@ -70,6 +70,7 @@ reference and the changelog pages are generated at build time by `tools/site_gen
 | [`../SUPPORT.md`](../SUPPORT.md) | Where to ask a question, report a bug or get help. |
 | [`../RELEASING.md`](../RELEASING.md) | The release checklist and the `dev` → `main` branch flow. |
 | [`REPO-PIPELINES.md`](./REPO-PIPELINES.md) | Every GitHub workflow, its trigger and whether it gates, plus the repository's policy files and security settings. |
+| [`specs/2026-08-02-devswarm-parent-decide-gate.md`](./specs/2026-08-02-devswarm-parent-decide-gate.md) | Design spec of the DevSwarm parent decide-and-reply gate (kept outside the plugin folder). |
 | [`CONTRACT-1.0.md`](./CONTRACT-1.0.md) | What semver freezes at 1.0: settings keys, CLI verbs, hooks, state paths, Codex parity. |
 | [`../AGENTS.md`](../AGENTS.md) | The protocol for Codex and cross-tool agents. |
 | [`../plugins/anti-hall/README.md`](../plugins/anti-hall/README.md) | The plugin directory page (ships inside the plugin). |

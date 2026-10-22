@@ -37,10 +37,9 @@ owner-approved prune and message retention. Per-component detail is in the
 ## What it is, and why it exists
 
 anti-hall is a Claude Code **marketplace + plugin**, plus a separate Codex-native port,
-that keeps coding assistants from acting before they verify. It ships always-on Node
-hooks (mechanical guards no prompt can talk around), a set of evidence-driven workflow
-skills, with legacy statusline cleanup retained for older installs. A small Rust engine answers the hooks with Node.js 22+ as the fallback, no npm dependencies, **macOS · Linux**
-(Node ≥ 22 on `PATH` is the only prerequisite; Windows is not supported).
+that keeps coding assistants from acting before they verify. It ships always-on hooks, decided by the Rust engine (mechanical guards no prompt can talk around), a set of evidence-driven workflow
+skills, with legacy statusline cleanup retained for older installs. A small Rust engine (`ah-engine`) decides every hook; no Node.js and no npm dependencies, **macOS · Linux**
+(Windows is not supported).
 
 It targets four predictable failure modes: **eagerness** (acting before investigating),
 **hallucination** (stating unverified facts as truth), **fix-before-diagnosis** (patching

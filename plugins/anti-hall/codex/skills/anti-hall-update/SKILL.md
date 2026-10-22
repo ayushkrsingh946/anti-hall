@@ -29,7 +29,7 @@ ANTI_HALL_ROOT="$(cd "$(dirname "$SKILL_FILE")/../../.." && pwd)"
 test -d "$ANTI_HALL_ROOT/.codex-plugin" || { echo "anti-hall plugin root not found relative to $SKILL_FILE — aborting" >&2; exit 1; }
 ```
 
-Use the existing pure-Node update helper:
+Use the engine's update helper:
 
 ```bash
 sh "$ANTI_HALL_ROOT/scripts/ah-run.sh" update --check

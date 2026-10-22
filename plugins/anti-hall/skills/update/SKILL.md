@@ -37,9 +37,9 @@ takes effect in-session — this skill does not over-promise.
   without crash-looping; see step 5's ingest-daemon heal below for the one-time repair of
   a daemon installed before this fix shipped.
 
-## What the helper does (`skills/update/scripts/update.js`)
+## What the helper does (`ah-engine update`)
 
-Pure Node ≥ 22 built-ins, macOS + Linux (Windows is not supported), fail-open
+macOS + Linux (Windows is not supported), fail-open
 (report-don't-break). It makes **no writes outside the marketplace clone and stdout** —
 the only filesystem mutation is copying the clone's `plugins/anti-hall/` into a **new**
 `cache/.../<newver>/` dir (it never deletes or overwrites another version dir).

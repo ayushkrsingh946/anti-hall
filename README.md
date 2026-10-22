@@ -6,7 +6,7 @@
 
 ### Make Claude Code and Codex *verify before they claim* — with platform-native guardrails and workflow skills.
 
-[![tests](https://github.com/talas9/anti-hall/actions/workflows/test.yml/badge.svg)](https://github.com/talas9/anti-hall/actions/workflows/test.yml) [![version](https://img.shields.io/github/v/tag/talas9/anti-hall?label=version)](https://github.com/talas9/anti-hall/releases) [![license](https://img.shields.io/github/license/talas9/anti-hall)](LICENSE) ![node](https://img.shields.io/badge/node-%E2%89%A522-brightgreen) ![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-8A2BE2) ![Codex port](https://img.shields.io/badge/Codex-port-111827) [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/15357/badge)](https://www.bestpractices.dev/projects/15357)
+[![tests](https://github.com/talas9/anti-hall/actions/workflows/test.yml/badge.svg)](https://github.com/talas9/anti-hall/actions/workflows/test.yml) [![version](https://img.shields.io/github/v/tag/talas9/anti-hall?label=version)](https://github.com/talas9/anti-hall/releases) [![license](https://img.shields.io/github/license/talas9/anti-hall)](LICENSE) ![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-8A2BE2) ![Codex port](https://img.shields.io/badge/Codex-port-111827) [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/15357/badge)](https://www.bestpractices.dev/projects/15357)
 
 </div>
 
@@ -20,11 +20,9 @@
 - Blocks risky git actions outright: force-pushes, and AI credit lines in commit messages and GitHub PR/issue/release text.
 - Keeps the main conversation responsive by pushing heavy commands and file edits to helper agents, and caps runaway agent spawning.
 - Adds skills you can call by name for debugging to a proven root cause, reviewing risky changes, and writing a session handover.
-- Works with Claude Code (plugin) and Codex (separate port). The core is a small Rust engine (`ah-engine`), downloaded once and checked against a pinned sha256; it answers hook calls without starting Node. The Node hooks are a temporary compatibility fallback during the migration and are removed in v0.301, when the engine becomes the only runtime.
+- Works with Claude Code (plugin) and Codex (separate port). The core is a small Rust engine (`ah-engine`), downloaded once and checked against a pinned sha256; it decides every hook call. As of v0.301 the engine is the only runtime: the plugin ships no Node code and needs no Node.js.
 
 ## Install
-
-Needs **Node.js 22+** on your `PATH` (`node --version`).
 
 **Supported systems:** macOS and Linux, including WSL on Windows (it runs the Linux build). Native Windows is not supported yet.
 
@@ -80,7 +78,7 @@ These are the notable things it runs and writes outside the project. Hook state 
 | | What happens |
 |---|---|
 | **Runs** | Hooks run on Claude Code tool events (one thin trigger per event, `hooks/ah-hook.sh`). They read the event, decide, and print a verdict or a note. No hook sends project content anywhere. |
-| **Fetches** | The `ah-engine` binary is downloaded once at install, only from this repository's GitHub releases. Its SHA-256 is pinned in `ah-engine.lock` and verified before the binary runs; a mismatch means it is not used and the Node fallback runs instead. The only other request is the optional update check (a GitHub tag-list request, no project data). |
+| **Fetches** | The `ah-engine` binary is downloaded once at install, only from this repository's GitHub releases. Its SHA-256 is pinned in `ah-engine.lock` and verified before the binary runs; a mismatch means it is not used (hook calls then pass through with a one-line notice). The only other request is the optional update check (a GitHub tag-list request, no project data). |
 | **Sends** | Only if you turn on Jev (opt-in, off by default): review questions go to the one vendor whose API key you entered in the plugin options, and to no other. Nothing else is sent. No analytics, no telemetry upload; usage counters stay on your machine. |
 
 Details and every setting: [PRIVACY.md](PRIVACY.md).

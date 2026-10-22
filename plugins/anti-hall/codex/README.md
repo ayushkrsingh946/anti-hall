@@ -37,15 +37,14 @@ anti-hall writes per-project session notes under `.anti-hall/`. Add `.anti-hall/
 
 ## How the hooks run (the engine)
 
-Same as on Claude Code: `codex/hooks/hooks.json` (and what `install-codex.js` writes) holds one thin trigger per Codex event,
+Same as on Claude Code: `codex/hooks/hooks.json` (and what `ah-run.sh install-codex` writes) holds one thin trigger per Codex event,
 `sh ".../hooks/ah-hook.sh" <Event> --host codex`, for all ten events. The core is the `ah-engine` binary
 (`~/.anti-hall/ah-engine/bin/ah-engine`, downloaded once by the shared bootstrap and checked against the sha256 pinned in
-`ah-engine.lock`), the trigger asks it: the engine answers natively what it can prove identical to the Node hook and hands
-every other case, during the migration, to that temporary Node compatibility hook (removed in v0.301, when the engine is the only runtime). With no binary, or when the engine cannot answer, those Node
-hooks run. The Codex hook table, its rules, settings and texts are the plugin's `engine/` files (shared with
+`ah-engine.lock`), the trigger asks it: the engine decides every case (v0.301 and later: it is the only runtime, the port needs no Node.js). With no binary,
+hook calls pass through with a one-line notice. The Codex hook table, its rules, settings and texts are the plugin's `engine/` files (shared with
 Claude, hot-reloaded, with last-known-good and pristine copies). `PermissionRequest`, `PostCompact` and `SubagentStart` have a
 thin trigger but no hook entries yet, so they answer with the neutral no-op. Opt out of the download with
-the setting `engine.bootstrap` = false or `AH_ENGINE_BOOTSTRAP=0`. Full description, rollback and the list of what still runs on Node:
+the setting `engine.bootstrap` = false or `AH_ENGINE_BOOTSTRAP=0`. Full description and rollback:
 [AH-ENGINE.md](https://github.com/talas9/anti-hall/blob/main/docs/AH-ENGINE.md). Telemetry is local only and read with
 `ah-engine telemetry summary`.
 
