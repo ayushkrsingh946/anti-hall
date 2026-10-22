@@ -957,11 +957,11 @@ fn run_cases(tag: &str, list: Vec<Case>, min_native: usize, min_deferred: usize)
             assert_eq!(v["result"], "none", "{}: a Node shadow record exists, but no shadow runs any more: {v}", c.name);
         } else {
             deferred += 1;
-            assert_eq!(e.code, 75, "{}: no Node to hand the verb to, the engine is unable (75)", c.name);
+            assert_eq!(e.code, 69, "{}: no Node to hand the verb to, the engine is unable (69, a visible error)", c.name);
             let before = fx.root.join(format!("{}-before", c.name));
             prepare(&before, &fx, c);
             let d = engine_verb(&hd, &hd.join("state"), &cwd, &av, now, None, &[extra.clone(), vec![("PATH", nonode.as_str())]].concat());
-            assert_eq!(d.code, 75, "{}: a deferral the engine cannot hand to Node exits 75, got {} / {}", c.name, d.code, d.stdout);
+            assert_eq!(d.code, 69, "{}: a deferral the engine cannot hand to Node exits 69 (exit_unable), got {} / {}", c.name, d.code, d.stdout);
             assert!(d.stdout.is_empty(), "{}: nothing is printed on a deferral: {}", c.name, d.stdout);
             assert_eq!(last_log(&hd.join("state"))["result"], "defer", "{}: logged as a deferral", c.name);
             assert_same_home(c.name, &before, &hd, &fx.repo_key, "deferral wrote");
@@ -1166,9 +1166,9 @@ fn same_or_deferred(name: &str, fx: &Fx, prep: &dyn Fn(&Path), undo: &dyn Fn(&Pa
     if native {
         assert_eq!((e.code, &e.stdout), (n.code, &n.stdout), "{name}: stdout/exit differ");
     } else {
-        assert_eq!(e.code, 75, "{name}: no Node to hand the verb to, the engine is unable (75)");
+        assert_eq!(e.code, 69, "{name}: no Node to hand the verb to, the engine is unable (69, a visible error)");
         let d = engine_verb(&hd, &hd.join("state"), &fx.child, &av, now, None, &[("PATH", nonode.as_str())]);
-        assert_eq!((d.code, d.stdout.is_empty()), (75, true), "{name}: deferral contract: {} / {}", d.code, d.stdout);
+        assert_eq!((d.code, d.stdout.is_empty()), (69, true), "{name}: deferral contract: {} / {}", d.code, d.stdout);
     }
     for h in [&hn, &he, &hd] {
         undo(h);

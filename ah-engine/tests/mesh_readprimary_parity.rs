@@ -1095,7 +1095,7 @@ fn read_primary_matches_node_byte_for_byte_and_defers_without_writing() {
             deferred += 1;
             let (pre_tree, pre_db) = (tree(&hd), store_dump(&hd, &fx.repo_key));
             let d = engine_verb(&hd, &hd.join("state"), &cwd, &av, now, None, &[extra.clone(), vec![("PATH", nonode.as_str())]].concat());
-            assert_eq!(d.code, 75, "{}: a deferral the engine cannot hand to Node exits 75, got {} / {}", c.name, d.code, d.stdout);
+            assert_eq!(d.code, 69, "{}: a deferral the engine cannot hand to Node exits 69 (exit_unable), got {} / {}", c.name, d.code, d.stdout);
             assert!(d.stdout.is_empty(), "{}: nothing is printed on a deferral: {}", c.name, d.stdout);
             assert_eq!(last_log(&hd.join("state"))["result"], "defer", "{}: logged as a deferral", c.name);
             assert!(pre_tree == tree(&hd) && pre_db == store_dump(&hd, &fx.repo_key), "{}: deferral wrote", c.name);
@@ -1138,10 +1138,10 @@ fn read_primary_matches_node_byte_for_byte_and_defers_without_writing() {
             assert_eq!(v["result"], "none", "{}: a Node shadow record exists, but no shadow runs any more: {v}", c.name);
         } else {
             deferred += 1;
-            assert_eq!(e.code, 75, "{}: no Node to hand the verb to, the engine is unable (75)", c.name);
+            assert_eq!(e.code, 69, "{}: no Node to hand the verb to, the engine is unable (69, a visible error)", c.name);
             let (pre_tree, pre_db) = (tree(&hd), store_dump(&hd, &fx.repo_key));
             let d = engine_verb(&hd, &hd.join("state"), &cwd, &av, now, None, &[extra.clone(), vec![("PATH", nonode.as_str())]].concat());
-            assert_eq!(d.code, 75, "{}: a deferral the engine cannot hand to Node exits 75, got {} / {}", c.name, d.code, d.stdout);
+            assert_eq!(d.code, 69, "{}: a deferral the engine cannot hand to Node exits 69 (exit_unable), got {} / {}", c.name, d.code, d.stdout);
             assert!(d.stdout.is_empty(), "{}: nothing is printed on a deferral: {}", c.name, d.stdout);
             let reason = last_log(&hd.join("state"));
             assert_eq!(reason["result"], "defer", "{}: logged as a deferral: {reason}", c.name);

@@ -403,7 +403,7 @@ fn engine_verbs_match_node_byte_for_byte() {
         }
         if !c.native {
             // Node ran it for the engine; the timestamp of a Node run is its own clock, so only refusals are compared exactly
-            assert_eq!(e.code, 75, "{}: no Node to hand the verb to, the engine is unable (75)", c.name);
+            assert_eq!(e.code, 69, "{}: no Node to hand the verb to, the engine is unable (69, a visible error)", c.name);
             assert!(e.stdout.is_empty(), "{}: an unable engine prints nothing: {}", c.name, e.stdout);
             continue;
         }
@@ -486,13 +486,13 @@ fn off_mode_hands_every_call_to_node_and_shadow_logs_a_match() {
     assert_eq!(count(), before + 1);
     let rec = last_log(&state);
     assert_eq!((rec["mode"].as_str(), rec["result"].as_str()), (Some("on"), Some("native")), "{rec}");
-    // off: nothing is done and nothing is logged, and the refusal is said (exit 75), never a silent success
+    // off: nothing is done and nothing is logged, and the refusal is said (exit 69), never a silent success
     fs::write(home.join(".anti-hall").join("settings.json"), "{\"mesh\":{\"engine_writes\":\"off\"}}\n").unwrap();
     let lines_before = fs::read_to_string(state.join("mesh-shadow.jsonl")).unwrap_or_default().lines().count();
     let mut c = Command::new(BIN);
     c.args(["mesh", "send", "--to", "child-1", "--message", "off mode"]).current_dir(&fx.main).env_clear().envs(base_env(&home, &state, &[]));
     let o = run(&mut c, None);
-    assert_eq!(o.status.code(), Some(75), "{}", String::from_utf8_lossy(&o.stderr));
+    assert_eq!(o.status.code(), Some(69), "{}", String::from_utf8_lossy(&o.stderr));
     assert!(o.stdout.is_empty(), "off mode prints nothing: {}", String::from_utf8_lossy(&o.stdout));
     assert!(!String::from_utf8_lossy(&o.stderr).is_empty(), "off mode says it is off");
     assert_eq!(count(), before + 1, "off mode wrote nothing");

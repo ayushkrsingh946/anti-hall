@@ -157,7 +157,7 @@ impl Run<'_> {
     /// A stage the native path cannot decide this time: counted `native_unable` at `postpull:<name>`, accounted `held`, answered with
     /// `update_post.held_json`. Nothing is run or written for it; the next update or doctor pass tries it again.
     fn held_stage(&self, name: &str, why: &str) -> J {
-        crate::obs::counters::handback(crate::obs::counters::Handback::NativeUnable, &format!("postpull:{name}"));
+        crate::obs::counters::handback(crate::obs::counters::Handback::Abandoned, &format!("postpull:{name}"));
         self.outcome.set(Some(crate::obs::counters::Outcome::Held));
         fill(parse_json(text("update_post.held_json")), &[("name", name), ("why", why)])
     }

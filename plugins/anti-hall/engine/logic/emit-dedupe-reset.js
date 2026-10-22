@@ -8,7 +8,7 @@ function decide(p) {
   if (ah.env.get(ah.cfg('prompt_emit.judge_child_env')) === '1') return 'allow';
   var sid = p && p.session_id !== undefined && p.session_id !== null ? String(p.session_id) : '';
   if (dedupe.disabled() || !sid) return 'allow';
-  if (spawn.osHome() === null) { ah.unable('emit-dedupe-reset:no_home'); return 'allow'; } // no absolute HOME: no marker can be kept
+  if (spawn.osHome() === null) { ah.unable('emit-dedupe-reset:no_home', 'abandoned'); return 'allow'; } // no absolute HOME: no marker can be kept
   dedupe.reset(sid);
   return 'allow';
 }

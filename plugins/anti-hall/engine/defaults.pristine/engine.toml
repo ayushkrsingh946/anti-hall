@@ -299,13 +299,13 @@ min = 0
 unit = "us"
 
 [daemon.request_hard_ms]
-doc = "HARD deadline of a request, measured from its arrival (less daemon.reply_slack_ms): the point where a scripted check still running is cut and a check not yet started is deferred to its Node hook. The SOFT deadline is client.deadline_ms (past it the request is logged as deadline_soft and counted, nothing is cut). A client whose daemon is alive waits for a late reply up to client.slow_fallback_max_ms less client.slow_wait_margin_ms and uses it, so this must stay below that window."
+doc = "HARD deadline of a request, measured from its arrival (less daemon.reply_slack_ms): the point where a scripted check still running is cut and a check not yet started gets no answer: both take the check's failure policy (script.failure_mode_by_check). The SOFT deadline is client.deadline_ms (past it the request is logged as deadline_soft and counted, nothing is cut). A client whose daemon is alive waits for a late reply up to client.slow_fallback_max_ms less client.slow_wait_margin_ms and uses it, so this must stay below that window."
 value = 2000
 min = 1
 unit = "ms"
 
 [daemon.eval_budget_us]
-doc = "HARD per-request thread CPU budget for rule evaluation: past it every remaining check defers to its Node hook. The SOFT budget (a warning only) is daemon.eval_soft_us. 0 turns the hard budget off."
+doc = "HARD per-request thread CPU budget for rule evaluation: past it every remaining check gets no answer and takes its failure policy. The SOFT budget (a warning only) is daemon.eval_soft_us. 0 turns the hard budget off."
 value = 1000000
 env = "AH_ENGINE_EVAL_BUDGET_US"
 unit = "us"
@@ -770,6 +770,34 @@ value = ["crashloop", "crashloop_reset", "reset"]
 [health.crashy_kinds]
 doc = "Event kinds that count toward the crash-loop threshold."
 value = ["crash", "panic", "start_fail", "watchdog", "rss"]
+
+[health.start_kind]
+doc = "The event-log kind the daemon writes when it starts. A defaults fallback logged before the latest one is answered by that start (the daemon reloads every defaults file then), so it no longer marks the engine degraded."
+value = "start"
+
+[health.resolved_by_start_kinds]
+doc = "Event kinds from `health.degraded_kinds` that a daemon start resolves: one logged before the latest `health.start_kind` event does not count toward degraded."
+value = ["defaults_fallback", "defaults_heal_skipped"]
+
+[health.group_restart]
+doc = "Group name of a self-restart in a degraded reason."
+value = "restart"
+
+[health.group_defaults]
+doc = "Group name of a defaults fallback in a degraded reason."
+value = "defaults"
+
+[health.group_crashloop]
+doc = "Group name of the crash-loop breaker in a degraded reason."
+value = "crashloop"
+
+[health.group_breaker]
+doc = "Group name of the client breaker in a degraded reason."
+value = "breaker"
+
+[health.group_fail_open]
+doc = "Group name of an unhealthy fail-open window in a degraded reason."
+value = "fail_open"
 
 [health.system_restart_slack_ms]
 doc = "How much later than a dead daemon's last sign of life (its newest breadcrumb, or its start) the operating system must have booted for the unclean stop to be reported as a `system_restart` (the machine stopped under it) instead of a `crash`. A margin against clock steps."

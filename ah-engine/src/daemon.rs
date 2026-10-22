@@ -471,7 +471,10 @@ impl Shared {
         let gs = crate::gate::global().stats();
         // one flag for `degraded` and `health.degraded`: the health summary's own reasons or an unhealthy fail-open window
         let mut health_summary = health::summary();
-        let degraded = health::overall_degraded(&health_summary, crate::failopen::state(crate::failopen::window().0) != defaults::text("fail_open.state_ok"));
+        let (fo_n, fo_top) = crate::failopen::window();
+        let fo_unhealthy = crate::failopen::state(fo_n) != defaults::text("fail_open.state_ok");
+        health::add_fail_open_reason(&mut health_summary, fo_unhealthy.then(|| (fo_n, fo_top)));
+        let degraded = health::overall_degraded(&health_summary, fo_unhealthy);
         health_summary["degraded"] = serde_json::Value::Bool(degraded);
         let mut v = serde_json::json!({
             "running": true,
@@ -763,7 +766,7 @@ impl crate::hookio::Observer for DaemonObserver<'_> {
         observe_check_cost_in(self.t, self.event, check, micros);
         crate::obs::trace::push("check", check, telemetry::decision_name(verdict), micros);
         if matches!(verdict, crate::checks::Verdict::Defer) {
-            crate::obs::counters::handback(crate::obs::counters::Handback::NativeUnable, &format!("check:{check}"));
+            crate::obs::counters::handback(crate::obs::counters::Handback::Abandoned, &format!("check:{check}"));
         }
         self.t.observe_check_in(self.event, check, rule_id, verdict, micros, self.project);
     }

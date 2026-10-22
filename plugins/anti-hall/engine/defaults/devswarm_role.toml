@@ -44,7 +44,7 @@ doc = "The agent name that has the idle-wake cron and monitor tools."
 value = "claude"
 
 [devswarm_role.test_markers]
-doc = "Environment variables that mark a test run; with one of them set and the home equal to the real home the Node settings reader refuses, so the check defers rather than guess what Node does."
+doc = "Environment variables that mark a test run; with one of them set and the home equal to the real home the Node settings reader refuses, so the script counts the case as abandoned and allows rather than guess what Node does."
 value = ["ANTIHALL_TEST", "ANTIHALL_TEST_ISOLATION"]
 
 [devswarm_role.real_home_escape]

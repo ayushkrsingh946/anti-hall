@@ -76,7 +76,7 @@ function decide(p) {
   var cwd = hookProc.cwd(p); // the payload's cwd, else the stand-in for the hook process's directory
   if (!(p && typeof p.cwd === 'string' && p.cwd !== '' && ah.path.isAbsolute(p.cwd))) ah.unable('defect-nudge:cwd_stand_in');
   var home = spawn.osHome();
-  if (home === null) { ah.unable('defect-nudge:no_home'); return 'allow'; } // no absolute HOME: no stamp or defect store
+  if (home === null) { ah.unable('defect-nudge:no_home', 'abandoned'); return 'allow'; } // no absolute HOME: no stamp or defect store
   var stamp = ah.cfg('session.state_dir') + '/' + ah.cfg('session.defect_stamp'), now = ah.clock.now();
   var raw = ah.state.readText(stamp);
   if (raw !== null && raw.trim() !== '') {

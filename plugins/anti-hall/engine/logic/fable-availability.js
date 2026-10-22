@@ -36,7 +36,7 @@ function decide() {
   if (ah.env.get(judge.name) === judge.on) return 'allow';
   var home = ah.env.get(ah.cfg('env.home'));
   if (home === null) home = ah.env.get(ah.cfg('env.home_alt'));
-  if (home === null || home === '') { ah.unable('fable-availability:no_home'); return 'allow'; } // no home: no config to read, no state to keep
+  if (home === null || home === '') { ah.unable('fable-availability:no_home', 'abandoned'); return 'allow'; } // no home: no config to read, no state to keep
   var file = home + '/' + ah.cfg('fable_availability.config_file'), found;
   var size = ah.fs.size(file);
   var tooBig = size !== null && size > ah.cfgNum('script.read_max_bytes');

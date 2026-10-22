@@ -1149,7 +1149,7 @@ function decide(p, opts, event) {
   }
   var root = jx.isObj(opts) && typeof opts.plugin_root === 'string' ? opts.plugin_root : ah.env.get(ah.cfg('env.plugin_root'));
   var l = dwLaunchersNative(root, true);
-  if (l === null) { ah.unable('devswarm-parent-gate:no_launchers'); return 'allow'; } // no usable home or plugin root: no launcher can be named
+  if (l === null) { ah.unable('devswarm-parent-gate:no_launchers', 'abandoned'); return 'allow'; } // no usable home or plugin root: no launcher can be named
   if (!jx.isObj(p)) { ah.unable('devswarm-parent-gate:payload_shape'); p = {}; }
   if (p[ah.cfg('devswarm_gates.readside_stop_field')] === true) return 'allow';
   return pgApply(pgGate(p, root, l));

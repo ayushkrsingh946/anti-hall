@@ -117,6 +117,10 @@ value = { pid = "pid", session = "sessionId", cwd = "cwd", started = "startedAt"
 doc = "Field names of a subagent's meta file (the host's format). task_kind and teammate: a subagent whose task_kind field equals teammate is an in-process teammate of an agent team; name: its team name for it; team: the team; finished: true once the host recorded the agent as finished."
 value = { task_kind = "taskKind", teammate = "in_process_teammate", name = "name", team = "teamName", finished = "finished" }
 
+[agent_tracker.roster]
+doc = "The host's team roster as a liveness source for teammates: <dir>/<team>/<file> lists the members of an agent team (field `members`, each with a `name`); the host removes a teammate when it is stopped or finishes, but writes nothing into the teammate's own transcript, which reads running for as long as it is tracked. A teammate whose meta file names a team and whose name is missing from that team's readable roster, or is listed with a `joined` time later than the agent's start plus rejoin_slack_ms (the name belongs to a newer spawn), is finished. grace_ms: how long a teammate must have been followed before its absence counts (the roster is written at spawn, but a tick may read it between the two writes). A roster that is missing or unreadable decides nothing."
+value = { dir = ".claude/teams", file = "config.json", members = "members", name = "name", joined = "joinedAt", grace_ms = 120000, rejoin_slack_ms = 120000 }
+
 [agent_tracker.codex]
 doc = "Field names of a Codex rollout file (Codex's format): its first line is a session_meta record whose payload carries the session id and the working directory."
 value = { type_key = "type", meta_type = "session_meta", payload = "payload", id = "id", cwd = "cwd" }

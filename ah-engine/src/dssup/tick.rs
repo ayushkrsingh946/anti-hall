@@ -39,7 +39,7 @@ fn duty(name: &str) -> &'static V {
 /// A step the native path cannot decide this time. The hand-back to Node is gone: the step is counted at `site` as `native_unable`,
 /// nothing is written or launched, and the record says `held` with the reason; the next tick or pass tries it again.
 pub fn held(site: &str, why: &str) -> Value {
-    crate::obs::counters::handback(crate::obs::counters::Handback::NativeUnable, site);
+    crate::obs::counters::handback(crate::obs::counters::Handback::Abandoned, site);
     json!({"held": why})
 }
 
