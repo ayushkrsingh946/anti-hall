@@ -44,6 +44,7 @@ d="$HOME/hc"
 echo "$*" >> "$d/calls.log" 2>/dev/null
 case "$2" in
 message-count)
+  if [ -f "$d/count.needcwd" ] && [ "$(pwd -P)" != "$(cat "$d/count.needcwd")" ]; then echo "Error: Not in a git repository" >&2; exit 1; fi
   rc=0; [ -f "$d/count.rc" ] && rc=$(cat "$d/count.rc")
   [ -f "$d/count.err" ] && cat "$d/count.err" >&2
   [ -f "$d/count" ] && cat "$d/count"
@@ -627,6 +628,36 @@ fn an_inbox_inside_the_workspaces_own_worktree_is_drained() {
     hc(&he2, "count", "1");
     hc(&he2, "read", &msgs(&[("only", "2026-10-09T10:00:00.000Z")]));
     assert_eq!(engine_drain(&he2, &fx, &Hooks::none()), Err("path-outside-allowed-dirs".to_string()));
+}
+
+/// hivecontrol names the workspace by the directory it runs in; the engine daemon's own directory is no git repository, so the sweep's
+/// count and read must run in the workspace's checkout. Live RC4: "Not in a git repository" on three workspaces.
+#[test]
+fn the_count_and_the_read_run_in_the_workspaces_own_checkout() {
+    let Some((fx, w)) = world("s3cwd") else { return };
+    let he = fx.root.join("cwd-engine");
+    copy_tree(&fx.seed_home, &he);
+    seed_home(&he);
+    base(&w, &he, &[], &[]);
+    hc(&he, "count.needcwd", &fs::canonicalize(&fx.child).unwrap().to_string_lossy());
+    hc(&he, "count", "1");
+    hc(&he, "read", &msgs(&[("only", "2026-10-09T10:00:00.000Z")]));
+    let done = engine_drain(&he, &fx, &Hooks::none()).expect("the count ran in the workspace's checkout");
+    assert_eq!(done["imported"].as_i64(), Some(1), "{done}");
+}
+
+/// A failed count says why in the reason it is handed back with: the exit code and the first line the call printed.
+#[test]
+fn a_failed_count_names_its_exit_code_and_first_stderr_line() {
+    let Some((fx, w)) = world("s3cwhy") else { return };
+    let he = fx.root.join("cwhy-engine");
+    copy_tree(&fx.seed_home, &he);
+    seed_home(&he);
+    base(&w, &he, &[], &[]);
+    hc(&he, "count.rc", "3");
+    hc(&he, "count.err", "Error: Not in a git repository\nsecond line\n");
+    let why = engine_drain(&he, &fx, &Hooks::none()).expect_err("a failed count is handed back");
+    assert_eq!(why, "count-failed (exit 3: Error: Not in a git repository)");
 }
 
 /// SkyCrew's Primary checkout has two registry rows on one worktree (its `primary-<hash>` label and the workspace's own id). The sweep's

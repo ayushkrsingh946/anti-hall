@@ -317,6 +317,20 @@ pub fn call_full(args: &[&str], env: &Env, cwd: Option<&str>, timeout: std::time
     Full { call: Call { ok: false, raw, timed_out: false, error }, stderr, code, signal, spawn_failed: None, overflow: false }
 }
 
+/// Why a failed call failed, in a line: the exit code (or signal, or spawn error) and the first line it printed, stderr before stdout,
+/// cut to `devswarm_recon.failure_detail_max_chars` (`devswarm_recon.failure_detail`).
+pub fn failure_detail(f: &Full) -> String {
+    let first = |t: &str| t.lines().map(js_trim).find(|l| !l.is_empty()).unwrap_or_default().to_string();
+    let said = Some(first(&f.stderr)).filter(|l| !l.is_empty()).unwrap_or_else(|| first(&f.call.raw));
+    let how = match (f.code, f.signal) {
+        (Some(c), _) => defaults::render("devswarm_recon.failure_how_exit", &[("code", &c)]),
+        (None, Some(s)) => defaults::render("devswarm_recon.failure_how_signal", &[("signal", &signal_name(s))]),
+        _ => f.call.error.clone(),
+    };
+    let max = defaults::num("devswarm_recon.failure_detail_max_chars") as usize;
+    defaults::render("devswarm_recon.failure_detail", &[("how", &how), ("said", &said.chars().take(max).collect::<String>())])
+}
+
 /// What the capability gate says about one workspace verb, from the cache alone.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Cap {
