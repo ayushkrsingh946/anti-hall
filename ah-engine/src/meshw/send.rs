@@ -66,6 +66,15 @@ pub fn resolve_mesh_target(rows: &[Row], mesh_id: Option<&str>) -> R<Option<Row>
     }
 }
 
+/// A worktree label row nobody reads: a `primary-<hash>` id with no session (or a synthetic one) and no reader of its partition. A
+/// spawn pre-registers the child's worktree under such a label and the child later registers under its own id; a message sent to the
+/// label in between waits in a partition no session reads until reconcile folds the label into the child (SkyCrew 2026-10-22: four
+/// minutes of silence behind "verified").
+fn label_without_reader(row: &Row, readers: usize) -> bool {
+    let session = row.session_id.as_deref().unwrap_or("");
+    row.id.starts_with(defaults::text("mesh_write.primary_prefix")) && readers == 0 && (session.is_empty() || session.starts_with(defaults::text("mesh_write.synthetic_session_prefix")))
+}
+
 /// What `--to` named.
 enum Resolved {
     /// The recipient's registry row.
@@ -556,14 +565,8 @@ pub(crate) fn cmd_send_mode(inv: &Inv, a: &Args, plan: bool) -> R<Obj> {
     let st = common::open_store(inv, &repo_key)?;
     let rows = ident::rows_of(&st.reader().roster().map_err(|e| Defer(format!("registry:{e}")))?);
     let from_d = ident::sender_identity_detailed(&inv.env, &cwd, &rows, home)?;
-    if from_d.kind == defaults::text("mesh_write.kind_child") {
-        // writeAlias(home, meshId, child, worktree): a no-op only when the alias already says so
-        let label = from_d.mesh_id.clone().unwrap_or_default();
-        let have = common::read_aliases(home).into_iter().any(|(k, v)| k == label && v == from_d.identity);
-        if !have {
-            return defer("sender-alias");
-        }
-    }
+    // writeAlias(home, meshId, child, worktree): a no-op when the alias already says so
+    common::ensure_alias(inv, &from_d, &cwd);
     let from = from_d.identity.clone();
     if let Some(ff) = a.one(defaults::text("mesh_write.flag_from"))
         && ff != from
@@ -693,6 +696,8 @@ pub(crate) fn cmd_send_mode(inv: &Inv, a: &Args, plan: bool) -> R<Obj> {
         return defer("plan-activity");
     }
     let partition = target.as_ref().map(|t| t.id.clone());
+    let no_reader = !broadcast
+        && target.as_ref().is_some_and(|t| label_without_reader(t, st.reader().reader_cursors(&t.id).map_or(1, |r| r.len())));
     // the summary refresh after the write must be one the engine can do (else Node runs the whole verb)
     crate::meshw::summary::check(&st, inv, partition.as_deref())?;
     if plan {
@@ -722,6 +727,7 @@ pub(crate) fn cmd_send_mode(inv: &Inv, a: &Args, plan: bool) -> R<Obj> {
         question,
         answers,
         candidates,
+        no_reader,
         repo_key: &repo_key,
         cwd: &cwd,
     };
@@ -804,6 +810,8 @@ struct AppendCtx<'a> {
     question: bool,
     answers: bool,
     candidates: Option<usize>,
+    /// The recipient is a label row no session reads yet (see [`label_without_reader`]).
+    no_reader: bool,
     repo_key: &'a str,
     cwd: &'a str,
 }
@@ -866,6 +874,10 @@ fn do_append(c: &AppendCtx<'_>) -> R<Obj> {
         out.put("candidates", n(k as f64));
     }
     out.put("verified", OVal::Bool(verified));
+    if c.no_reader {
+        out.put("noReader", OVal::Bool(true));
+        out.put("warning", s(&defaults::render("mesh_write.msg_send_label_no_reader", &[("to", &c.partition.unwrap_or_default())])));
+    }
     // the receipt (writeSendReceipt), written before verifyError/reason are added, exactly as Node orders it
     let receipt = Obj(vec![
         ("ts".into(), n(c.now as f64)),
@@ -917,5 +929,24 @@ mod descriptor_prefix_tests {
         assert!(descriptor_prefix_ids(&home, "deadbeef").is_empty());
         assert!(descriptor_prefix_ids(&home, "../x").is_empty());
         std::fs::remove_dir_all(&home).ok();
+    }
+}
+
+#[cfg(test)]
+mod label_tests {
+    use super::*;
+
+    fn row(id: &str, session: Option<&str>) -> Row {
+        Row { id: id.into(), worktree_path: Some("/w".into()), session_id: session.map(str::to_string), updated_at: None }
+    }
+
+    /// SkyCrew 2026-10-22: a send to the spawn's worktree label (`primary-da4fa4d6`) was "verified" into a partition no session read.
+    #[test]
+    fn a_worktree_label_nobody_reads_is_flagged_and_a_live_reader_is_not() {
+        assert!(label_without_reader(&row("primary-da4fa4d6", None), 0), "a pre-registered label with no session and no reader");
+        assert!(label_without_reader(&row("primary-da4fa4d6", Some("unclaimed:x")), 0), "a synthetic session is no session");
+        assert!(!label_without_reader(&row("primary-da4fa4d6", Some("485e7152")), 0), "a Primary with a session reads its partition");
+        assert!(!label_without_reader(&row("primary-da4fa4d6", None), 2), "a partition with a reader row is read");
+        assert!(!label_without_reader(&row("65a53880-1438", None), 0), "a child's own id is not a label");
     }
 }

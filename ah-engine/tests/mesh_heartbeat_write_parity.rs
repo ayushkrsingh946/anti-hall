@@ -128,7 +128,16 @@ fn no_node_path(root: &Path) -> String {
 }
 
 fn tree(home: &Path) -> std::collections::BTreeMap<String, Vec<u8>> {
-    home_files(home).into_iter().map(|(k, v)| (k, normalized(home, &v))).collect()
+    // the caller log of a session-less heartbeat names the writing process (pid, parent pid, its own argv): blanked on both sides
+    let who = regex::Regex::new(r#""pid":[0-9]+,"ppid":[0-9]+,"argv":"(?:[^"\\]|\\.)*""#).unwrap();
+    home_files(home)
+        .into_iter()
+        .map(|(k, v)| {
+            let v = normalized(home, &v);
+            let v = if k.ends_with("heartbeat-callers.log") { who.replace_all(&String::from_utf8_lossy(&v), r#""pid":0,"ppid":0,"argv":"""#).into_owned().into_bytes() } else { v };
+            (k, v)
+        })
+        .collect()
 }
 
 fn assert_same_home(name: &str, a: &Path, b: &Path, key: &str, what: &str) {
@@ -299,7 +308,7 @@ fn cases() -> Vec<Case> {
             argv: vec![s("heartbeat"), s("child-1"), s("--summary"), s("x")],
             extra: vec![],
             setup: nothing(),
-            native: false,
+            native: true,
             expect: vec!["\"meshBroadcast\""],
             code: 0,
         },

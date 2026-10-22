@@ -79,13 +79,6 @@ fn is_primary_label(id: &str) -> bool {
 }
 
 /// Whether the child's sender alias is already on file (writing it is Node's).
-fn alias_on_file(inv: &Inv, who: &ident::Caller) -> bool {
-    if who.kind != defaults::text("mesh_write.kind_child") {
-        return true;
-    }
-    let label = who.mesh_id.clone().unwrap_or_default();
-    common::read_aliases(&inv.home).into_iter().any(|(k, v)| k == label && v == who.identity)
-}
 
 // ---- done ---------------------------------------------------------------------------------------------------------------
 
@@ -132,6 +125,7 @@ pub fn done_with(inv: &Inv, a: &Args, runner: &dyn Runner) -> R<Answer> {
     let st = common::open_store(inv, &repo_key)?;
     let rows = rows_of(&st)?;
     let who = ident::sender_identity_detailed(&inv.env, cwd, &rows, &inv.home)?;
+    common::ensure_alias(inv, &who, cwd);
     let id = who.identity.clone();
     if let Some(x) = id_arg
         && x != id
@@ -145,9 +139,6 @@ pub fn done_with(inv: &Inv, a: &Args, runner: &dyn Runner) -> R<Answer> {
     }
     if is_primary_label(&id) {
         return defer("primary-label");
-    }
-    if !alias_on_file(inv, &who) {
-        return defer("sender-alias");
     }
     // the gate summarizes the registered rows: an id nobody registered would be written and then refused
     if !rows.iter().any(|r| r.id == id) {
@@ -359,9 +350,7 @@ pub fn relay(inv: &Inv, a: &Args) -> R<Answer> {
     let st = common::open_store(inv, &repo_key)?;
     let rows = rows_of(&st)?;
     let from = ident::sender_identity_detailed(&inv.env, cwd, &rows, &inv.home)?;
-    if !alias_on_file(inv, &from) {
-        return defer("sender-alias");
-    }
+    common::ensure_alias(inv, &from, cwd);
     let caller = from.identity.clone();
     if is_receipt_id(seq_arg) {
         return defer("receipt");
@@ -688,9 +677,7 @@ pub fn archive_request(inv: &Inv, a: &Args) -> R<Answer> {
     let st = common::open_store(inv, &repo_key)?;
     let rows = rows_of(&st)?;
     let who = ident::sender_identity_detailed(&inv.env, cwd, &rows, &inv.home)?;
-    if !alias_on_file(inv, &who) {
-        return defer("sender-alias");
-    }
+    common::ensure_alias(inv, &who, cwd);
     let from = who.identity;
     crate::meshw::summary::check(&st, inv, Some(&id))?;
     let Some(lock) = idlock::acquire(&inv.write_home, &id) else { return defer("lock-busy") };
