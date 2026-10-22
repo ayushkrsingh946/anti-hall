@@ -38,6 +38,9 @@ function runWrapper(event, payload, extraEnv, args = []) {
   return r;
 }
 
+// With no engine the wrapper may say once that the call went through unchecked; it must say nothing else.
+const NO_ENGINE_STDERR = /^(anti-hall: the engine did not answer this \w+ call \(no engine is installed\); it went through unchecked[^\n]*\n)?$/;
+
 test('no engine, guard event, no usable fallback list: fails open without hooks', { skip: !HAS_SH }, () => {
   const dir = scratch();
   const missing = path.join(dir, 'absent.list');
@@ -45,14 +48,14 @@ test('no engine, guard event, no usable fallback list: fails open without hooks'
     { AH_WRAPPER_TEST: '1', AH_ENGINE_BIN: '/no/such/engine', AH_FALLBACK_LIST: missing }, ['--tool-from-payload']);
   fs.rmSync(dir, { recursive: true, force: true });
   assert.strictEqual(r.status, 0, r.stderr);
-  assert.strictEqual(r.stderr, '');
+  assert.match(r.stderr, NO_ENGINE_STDERR); // nothing, or only the wrapper's one-line unchecked notice
 });
 
 test('no engine, guard event, real Node fallback: a harmless call is allowed without hand-over', { skip: !HAS_SH }, () => {
   const r = runWrapper('PreToolUse', { tool_name: 'Read', tool_input: { file_path: '/etc/hosts' }, session_id: 'fallback-test', cwd: os.tmpdir() },
     {}, ['--tool-from-payload']);
   assert.strictEqual(r.status, 0, r.stderr);
-  assert.strictEqual(r.stderr, '');
+  assert.match(r.stderr, NO_ENGINE_STDERR); // nothing, or only the wrapper's one-line unchecked notice
 });
 
 test('no engine, non-guard event: the Node fallback hooks do not run', { skip: !HAS_SH }, () => {
@@ -66,7 +69,7 @@ test('no engine, non-guard event: the Node fallback hooks do not run', { skip: !
   const ran = fs.existsSync(sentinel);
   fs.rmSync(dir, { recursive: true, force: true });
   assert.strictEqual(r.status, 0, r.stderr);
-  assert.strictEqual(r.stderr, '');
+  assert.match(r.stderr, NO_ENGINE_STDERR); // nothing, or only the wrapper's one-line unchecked notice
   assert.strictEqual(ran, false, 'the fallback hook should not run when the engine is absent');
 });
 
