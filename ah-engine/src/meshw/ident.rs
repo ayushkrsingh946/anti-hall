@@ -755,6 +755,21 @@ pub fn sender_identity_detailed(env: &Env, cwd: &str, rows: &[Row], home: &Path)
 
 // ---- the reader nonce (companion/lib/reader-identity.js) ------------------------------------------------------------
 
+/// The parent of `pid` as the kernel reports it, with no process spawned: `ps -ax` listed every process of the machine (about 16 ms of
+/// CPU and a fork per hook call, at every Stop and prompt of a DevSwarm Primary). Where the system gives no such lookup the table of
+/// `ps` is used.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn parent_of(pid: i64, _table: &mut Option<Option<HashMap<i64, i64>>>) -> Option<i64> {
+    crate::procid::parent(u32::try_from(pid).ok()?).map(i64::from)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn parent_of(pid: i64, table: &mut Option<Option<HashMap<i64, i64>>>) -> Option<i64> {
+    let t = table.get_or_insert_with(ppid_table);
+    t.as_ref().and_then(|m| m.get(&pid)).copied()
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 fn ppid_table() -> Option<HashMap<i64, i64>> {
     let out = std::process::Command::new(defaults::text("mesh_write.ps_bin"))
         .args(defaults::list("mesh_write.ps_ppid_args"))
@@ -779,6 +794,9 @@ fn ppid_table() -> Option<HashMap<i64, i64>> {
 
 /// `processStartMs(pid)`: `Date.parse` of `ps -o lstart= -p <pid>` (local time), or None.
 pub(crate) fn process_start_ms(pid: i64) -> Option<f64> {
+    if let Some(ms) = native_start_ms(pid) {
+        return Some(ms);
+    }
     let out = std::process::Command::new(defaults::text("mesh_write.ps_bin"))
         .args(defaults::list("mesh_write.ps_lstart_args"))
         .arg(pid.to_string())
@@ -790,6 +808,31 @@ pub(crate) fn process_start_ms(pid: i64) -> Option<f64> {
         return None;
     }
     parse_lstart(String::from_utf8_lossy(&out.stdout).trim())
+}
+
+/// The start of `pid` in whole seconds, in milliseconds, from the kernel (what `ps -o lstart=` prints, with no process spawned); `None`
+/// where the system gives no such lookup or the process is gone.
+#[cfg(target_os = "macos")]
+fn native_start_ms(pid: i64) -> Option<f64> {
+    crate::procid::start(u32::try_from(pid).ok()?).map(|us| (us / 1_000_000 * 1000) as f64)
+}
+
+#[cfg(target_os = "linux")]
+fn native_start_ms(pid: i64) -> Option<f64> {
+    static BOOT_SECS: std::sync::OnceLock<Option<u64>> = std::sync::OnceLock::new();
+    let boot = (*BOOT_SECS.get_or_init(|| {
+        let text = std::fs::read_to_string("/proc/stat").ok()?;
+        text.lines().find_map(|l| l.strip_prefix("btime ")?.trim().parse::<u64>().ok())
+    }))?;
+    // SAFETY: `sysconf` takes a constant and reads no memory.
+    let hz = u64::try_from(unsafe { libc::sysconf(libc::_SC_CLK_TCK) }).ok().filter(|h| *h > 0)?;
+    let ticks = crate::procid::start(u32::try_from(pid).ok()?)?;
+    Some(((boot + ticks / hz) * 1000) as f64)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn native_start_ms(_pid: i64) -> Option<f64> {
+    None
 }
 
 /// `Date.parse("Wed Oct  8 09:12:33 2026")` in the local time zone.
@@ -875,8 +918,7 @@ pub fn reader_nonce_from(home: &Path, start: i64) -> Option<String> {
                 return Some(format!("{}{pid}:{}", defaults::text("mesh_write.nonce_prefix"), crate::checks::jsport::num::to_js_string(start)));
             }
         }
-        let t = table.get_or_insert_with(ppid_table);
-        pid = *t.as_ref().and_then(|m| m.get(&pid))?;
+        pid = parent_of(pid, &mut table)?;
     }
     None
 }
@@ -914,6 +956,29 @@ pub(crate) mod fifo_kit {
 mod tests {
     use super::fifo_kit::*;
     use super::*;
+
+    /// The kernel lookups that replaced `ps` answer as `ps` does: the parent of this process, and its start to the second.
+    #[test]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    fn the_native_parent_and_start_answer_as_ps_does() {
+        let me = i64::from(std::process::id());
+        let ps = |args: &[&str]| {
+            let out = std::process::Command::new(defaults::text("mesh_write.ps_bin")).args(args).arg(me.to_string()).output().unwrap();
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        };
+        let mut table = None;
+        assert_eq!(parent_of(me, &mut table), ps(&["-o", "ppid=", "-p"]).parse::<i64>().ok());
+        let via_ps = {
+            let out = std::process::Command::new(defaults::text("mesh_write.ps_bin"))
+                .args(defaults::list("mesh_write.ps_lstart_args"))
+                .arg(me.to_string())
+                .output()
+                .unwrap();
+            parse_lstart(String::from_utf8_lossy(&out.stdout).trim())
+        };
+        assert_eq!(native_start_ms(me), via_ps);
+        assert_eq!(parent_of(i64::from(i32::MAX), &mut table), None, "a process that does not exist has no parent");
+    }
 
     #[test]
     fn a_fifo_is_skipped_and_counted_at_once_instead_of_blocking() {

@@ -233,7 +233,10 @@ pub fn write_crash_breadcrumb(request: &str, event: &str, check: &str, uptime_s:
         "uptime_s": uptime_s,
         "memory": memory,
     });
-    crate::discard::logged("crash_breadcrumb_write", crate::atomic::write(state_file("crash_breadcrumb"), v.to_string()));
+    // written at every request: a full sync of this file cost a few milliseconds of every hook call and buys nothing, a process
+    // crash leaves what was written in the page cache; only a power cut right after the rename could lose the context
+    let style = crate::atomic::Style { skip_sync: true, ..crate::atomic::Style::default() };
+    crate::discard::logged("crash_breadcrumb_write", crate::atomic::write_styled(state_file("crash_breadcrumb"), v.to_string(), style));
 }
 
 /// A healthy start clears an environment-class failure (the user fixed it); permanent ones stay.

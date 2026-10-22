@@ -3187,6 +3187,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `agent_scan.undefined_string` | `undefined` |  |  | What String() gives for a missing value. |
 | `agent_scan.utc_suffix` | ` UTC` |  |  | Suffix of a clock time in a note. |
 | `agent_scan.wide_tail_bytes` | `12582912` |  | bytes | Bytes read by the one widened scan that proves a zero running-agent count on a transcript longer than the default window (WIDE_TAIL_BYTES of hooks/lib/agent-scan.js). |
+| `agent_scan.window_quantum_pct` | `10` |  | percent | The scan window of a transcript longer than it starts at a multiple of this percent of the window, so it is the window up to this much longer. An exact window starts one byte later with every appended byte and the kept walk is rebuilt (the whole window read and filtered) whenever the start passes a line a launch, a notice or a stop came from, which in a busy session is nearly every Stop; a start that moves once per quantum rebuilds once per quantum. A longer window only ever sees more, never less. 0 is the exact window. |
 | `agent_scan.window_slack_pct` | `25` |  | percent | How far, as a percent of the scan window, the kept walk of a transcript longer than the window may begin before the window start; past that it is rebuilt from the window start. The walk is used only while it provably gives the answer of a fresh scan of the exact window (nothing older than the window start touched a launch, a stop or a teammate event, and no call older than it has its answer inside it), so this only bounds what the walk holds. 0 reads every window afresh. |
 
 ### agent_controls.toml / ask_guard
@@ -9848,6 +9849,8 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `opcli.review_shown_type` | `reminder-shown` |  |  | The `type` of the review metrics row that records a SessionStart reminder. |
 | `opcli.review_state_bad` | `review state: the entry of {id} is not an object; fix or remove ~/.anti-hall/...` |  |  | The review state holds an entry that is not an object, which the verb cannot update (nothing is written). Placeholder: {id}. |
 | `opcli.review_state_file` | `jev-review-state.json` |  |  | The durable shadow-review state, relative to the anti-hall home directory. |
+| `opcli.review_stats_fingerprint_bytes` | `4096` |  | bytes | Bytes at each end of the kept part of a Jev decision-log file that are compared with the file before its kept totals are used again; a file that differs there was rewritten and is read from its start. |
+| `opcli.review_stats_max_files` | `64` |  | count | How many decision-log files the review scan keeps totals for (the log and its numbered generations); the least recently used are dropped first and read again from their start. |
 | `opcli.review_write_failed` | `⚠️ anti-hall · jev-setup: could not save the review state: {error}` |  |  | A review-state write that failed after the verb was answered (best effort, as in Node: said, not fatal). Placeholder: {error}. |
 | `opcli.reviewed_late` | ` (was due for {hours}h)` |  |  | The part of the `reviewed` confirmation that says how long the review was due. Placeholder: {hours}. |
 | `opcli.reviewed_ok` | `{id} marked reviewed{late}` |  |  | `reviewed` confirmation. Placeholders: {id}, {late}. |
@@ -10421,6 +10424,9 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `mem.jev_review_scan_hard_bytes` | `1048576` |  | bytes | Bytes one scan of the Jev decision log may hold; a line or total past it stops the scan and the review state counts as unusable (no reminder this time), so a corrupt or runaway log never costs the daemon more than this. |
 | `mem.jev_review_scan_low_water_pct` | `80` |  |  | Percent of mem.jev_review_scan_soft_bytes at which a scan's soft trip re-arms. |
 | `mem.jev_review_scan_soft_bytes` | `262144` |  | bytes | Bytes one scan of the Jev decision log (the SessionStart review reminder, `jev-setup review-due`) may hold before the soft trip is logged: the line being read plus the per-integration totals. The scan streams the log, so a decision row (under 1 KB) and a few integrations stay far below this. |
+| `mem.jev_review_stats_hard_bytes` | `1048576` |  | bytes | Bytes of kept Jev decision-log totals at which an insert is refused (the scan still answers, it just reads the file again next time) and the cache is recycled. |
+| `mem.jev_review_stats_low_water_pct` | `80` |  |  | Percent of mem.jev_review_stats_soft_bytes the kept Jev decision-log totals are evicted down to when the soft limit is reached. |
+| `mem.jev_review_stats_soft_bytes` | `262144` |  | bytes | Bytes of kept Jev decision-log totals (per file, per integration) held before the least recently used are dropped down to the low-water mark; a few hundred bytes per file in practice. |
 | `mem.key_cache_hard_bytes` | `1048576` |  | bytes | Estimated bytes of cached cwd-to-project keys at which new cache entries are refused and recoverable keys are recycled. |
 | `mem.key_cache_low_water_pct` | `80` |  |  | Percent of mem.key_cache_soft_bytes cwd-to-project keys are evicted down to when the soft limit is reached. |
 | `mem.key_cache_max_entries` | `4096` |  |  | Cwd-to-project cache entries kept at most; past it the least recently used cwd is dropped first. |
