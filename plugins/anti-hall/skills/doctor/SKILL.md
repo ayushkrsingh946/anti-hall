@@ -160,7 +160,7 @@ Flags:
 
 | Invocation | Behavior |
 |---|---|
-| `sh scripts/ah-run.sh doctor` (no flags) | FULL detection, **read-only** — no repair pass. This is the default. |
+| `"$HOME/.anti-hall/ah-engine/bin/ah-hook" doctor` (no flags) | FULL detection, **read-only** — no repair pass. This is the default. |
 | `--repair` / `--fix` | FULL detection + apply AUTO-SAFE fixes + GATED daemon fixes only when the DevSwarm gate is open. |
 | `--dry-run` | Detection + print exactly what WOULD be fixed. **Writes nothing** (threads each installer's own `--dry-run`, migrate-state `dryRun:true`). |
 | `--check` | **PURE read-only** — detects + reports everything, mutates NOTHING. The CI / scripting path. |
@@ -231,10 +231,10 @@ subagent** (`model:"haiku"` — an execution-shaped spawn with no explicit model
 model-routing-guard's strict-mode block) and relay the report:
 
 ```
-sh "${CLAUDE_PLUGIN_ROOT}/scripts/ah-run.sh" doctor           # diagnose only (default, read-only)
-sh "${CLAUDE_PLUGIN_ROOT}/scripts/ah-run.sh" doctor --repair  # diagnose + apply the safe repairs
-sh "${CLAUDE_PLUGIN_ROOT}/scripts/ah-run.sh" doctor --dry-run # show what --repair would fix
-sh "${CLAUDE_PLUGIN_ROOT}/scripts/ah-run.sh" doctor --check   # read-only (CI)
+"$HOME/.anti-hall/ah-engine/bin/ah-hook" --plugin-root "${CLAUDE_PLUGIN_ROOT}" doctor           # diagnose only (default, read-only)
+"$HOME/.anti-hall/ah-engine/bin/ah-hook" --plugin-root "${CLAUDE_PLUGIN_ROOT}" doctor --repair  # diagnose + apply the safe repairs
+"$HOME/.anti-hall/ah-engine/bin/ah-hook" --plugin-root "${CLAUDE_PLUGIN_ROOT}" doctor --dry-run # show what --repair would fix
+"$HOME/.anti-hall/ah-engine/bin/ah-hook" --plugin-root "${CLAUDE_PLUGIN_ROOT}" doctor --check   # read-only (CI)
 ```
 
 The engine runs the doctor (`ah-engine doctor`); Node's `hooks/doctor.js` answers only when the engine is absent. The engine

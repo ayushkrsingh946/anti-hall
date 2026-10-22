@@ -20,7 +20,7 @@ ANTI_HALL_ROOT="$(cd "$(dirname "$SKILL_FILE")/../../.." && pwd)"
 test -d "$ANTI_HALL_ROOT/.codex-plugin" || { echo "anti-hall plugin root not found relative to $SKILL_FILE — aborting" >&2; exit 1; }
 ```
 
-All commands below run as `sh "$ANTI_HALL_ROOT/scripts/ah-run.sh" settings <verb>`.
+All commands below run as `"$HOME/.anti-hall/ah-engine/bin/ah-hook" --plugin-root "$ANTI_HALL_ROOT" settings <verb>`.
 
 ## No `/config` equivalent on Codex
 
@@ -38,7 +38,7 @@ On Claude Code, a non-default value stored in Claude Code's plugin options by ea
 If the user named the setting and the value ("turn off the merge gate", "set
 auto-handover to 80%", "disable Jev"), resolve it to a `section.key` and value and apply it:
 ```bash
-sh "$ANTI_HALL_ROOT/scripts/ah-run.sh" settings set <section.key> <value>
+"$HOME/.anti-hall/ah-engine/bin/ah-hook" --plugin-root "$ANTI_HALL_ROOT" settings set <section.key> <value>
 ```
 then confirm with the single-key line from `get <section.key>`. Never print the full
 table for a direct change. A validation failure (out-of-range number, unknown enum
@@ -86,8 +86,8 @@ thread run inline. Because that file lives in the working tree, a cloned repo co
 ship one — so it applies ONLY after the user trusts that exact file content with `trust-command-allow`:
 
 ```
-sh <plugin-root>/scripts/ah-run.sh settings trust-command-allow [<repo>]              # print patterns, record nothing
-sh <plugin-root>/scripts/ah-run.sh settings trust-command-allow [<repo>] --confirmed  # record the trust
+"$HOME/.anti-hall/ah-engine/bin/ah-hook" --plugin-root <plugin-root> settings trust-command-allow [<repo>]              # print patterns, record nothing
+"$HOME/.anti-hall/ah-engine/bin/ah-hook" --plugin-root <plugin-root> settings trust-command-allow [<repo>] --confirmed  # record the trust
 ```
 
 Trust is a sha256 of the file bytes stored OUTSIDE the repo in
@@ -108,8 +108,8 @@ delegating them. It uses the same trust model as the command allowlist and appli
 only after the user trusts that exact file content with `trust-edit-allow`:
 
 ```
-sh <plugin-root>/scripts/ah-run.sh settings trust-edit-allow [<repo>]              # print paths, record nothing
-sh <plugin-root>/scripts/ah-run.sh settings trust-edit-allow [<repo>] --confirmed  # record the trust
+"$HOME/.anti-hall/ah-engine/bin/ah-hook" --plugin-root <plugin-root> settings trust-edit-allow [<repo>]              # print paths, record nothing
+"$HOME/.anti-hall/ah-engine/bin/ah-hook" --plugin-root <plugin-root> settings trust-edit-allow [<repo>] --confirmed  # record the trust
 ```
 
 Trust lives in `~/.anti-hall/trusted-edit-allow.json`, and any edit to the file revokes
@@ -124,7 +124,7 @@ Kill-switch: `guards.projectEditAllow=false`.
 The opt-in speculation-judge (`jev.semanticJudge`, off by default) has a one-line switch:
 
 ```bash
-sh "$ANTI_HALL_ROOT/scripts/ah-run.sh" settings judge on|off|status
+"$HOME/.anti-hall/ah-engine/bin/ah-hook" --plugin-root "$ANTI_HALL_ROOT" settings judge on|off|status
 ```
 
 `on` sets the flag, then says whether an Anthropic key is visible to the CLI (never the key
@@ -157,11 +157,11 @@ have no switch on purpose, and why.
 1. `show` prints every section's tables — run it ONLY when the user explicitly asks to
    see their settings:
    ```bash
-   sh "$ANTI_HALL_ROOT/scripts/ah-run.sh" settings show        # or: show --section <key> [--all]
+   "$HOME/.anti-hall/ah-engine/bin/ah-hook" --plugin-root "$ANTI_HALL_ROOT" settings show        # or: show --section <key> [--all]
    ```
    Present the output as-is. Advanced/tuning knobs are hidden unless `--all`.
    The engine's own keys (cadences, limits, deadlines, widgets) are in the plugin's `engine/defaults/*.toml`: list them with
-   `sh "$ANTI_HALL_ROOT/scripts/ah-run.sh" settings tunables [<category|key prefix>] [--all]` (read-only; edit the file to change one).
+   `"$HOME/.anti-hall/ah-engine/bin/ah-hook" --plugin-root "$ANTI_HALL_ROOT" settings tunables [<category|key prefix>] [--all]` (read-only; edit the file to change one).
 
 2. To help the user pick without a wall of tables, Codex has no `AskUserQuestion`
    tool, so use **numbered lists** in prose:
@@ -281,7 +281,7 @@ Check the result with `ah-engine config --json` and `ah-engine config validate <
 
 ## Resetting a setting
 
-`sh "$ANTI_HALL_ROOT/scripts/ah-run.sh" settings reset <section.key>` removes the
+`"$HOME/.anti-hall/ah-engine/bin/ah-hook" --plugin-root "$ANTI_HALL_ROOT" settings reset <section.key>` removes the
 settings.json override for that one key, so the legacy source or schema default
 takes over again.
 
@@ -289,9 +289,9 @@ takes over again.
 
 Every subcommand takes `--json`:
 ```bash
-sh "$ANTI_HALL_ROOT/scripts/ah-run.sh" settings show --json
-sh "$ANTI_HALL_ROOT/scripts/ah-run.sh" settings get jev.enabled --json
-sh "$ANTI_HALL_ROOT/scripts/ah-run.sh" settings set limitConserve.threshold 90 --json
+"$HOME/.anti-hall/ah-engine/bin/ah-hook" --plugin-root "$ANTI_HALL_ROOT" settings show --json
+"$HOME/.anti-hall/ah-engine/bin/ah-hook" --plugin-root "$ANTI_HALL_ROOT" settings get jev.enabled --json
+"$HOME/.anti-hall/ah-engine/bin/ah-hook" --plugin-root "$ANTI_HALL_ROOT" settings set limitConserve.threshold 90 --json
 ```
 
 ## What this skill never does
