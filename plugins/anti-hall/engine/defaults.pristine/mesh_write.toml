@@ -607,6 +607,10 @@ value = "send-not-verified"
 doc = "`error` of that send. Placeholders: {hash}, {partition} (JSON-quoted)."
 value = "send appended a row (hash {hash}) but the readback against partition {partition} did not find it — the message is NOT confirmed delivered"
 
+[mesh_write.msg_send_label_no_reader]
+doc = "`warning` of a send whose recipient is a worktree label row that no session reads yet (a spawn pre-registers the label; the child registers under its own id). Placeholder: {to}."
+value = "stored in {to}, but no session reads that partition yet: it is a worktree label, not a registered live reader. The child receives it when reconcile folds the label into its own registration; send to the child's id, or wait for it to register, if it needs this now"
+
 [mesh_write.msg_mesh_read_hint]
 doc = "`hint` of a consuming mesh read."
 value = "consumed broadcasts stay re-readable without moving any cursor: `mesh history [--last N]`, or `inbox messages <id> --with-broadcasts`"

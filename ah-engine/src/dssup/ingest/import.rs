@@ -84,8 +84,22 @@ fn field(m: &OVal, k: &str) -> Option<String> {
     }
 }
 
+/// The id a message's dedupe hash is taken under: the mesh label of the partition's checkout. One checkout can be registered as
+/// several partitions (the app's own row, the worktree label a spawn pre-registers, a Primary's label), and the app's native
+/// queue is one stream: with the hash taken under the partition id, the same message ingested through two of them was stored twice
+/// (SkyCrew 2026-10-22: one `DONE:` notice read twice, empty sender, no seq). Under the checkout's label the store's UNIQUE(hash)
+/// keeps one. A partition with no registry row, or a path that has no label, keeps its own id.
+pub fn hash_scope(reader: &crate::mesh::MeshReader, workspace_id: &str) -> String {
+    registry_pairs(reader)
+        .iter()
+        .find(|(id, _)| id == workspace_id)
+        .and_then(|(_, wt)| crate::meshw::ident::primary_workspace_id(wt).ok())
+        .filter(|label| !label.is_empty())
+        .unwrap_or_else(|| workspace_id.to_string())
+}
+
 /// `messageHash(workspaceId, msg)`: `native:` + sha256 of the NUL-joined identifying fields (plus a canonical JSON of the whole
-/// message when it has no `createdAt` to tell two same-text messages apart).
+/// message when it has no `createdAt` to tell two same-text messages apart). `workspace_id` is the [`hash_scope`].
 pub fn message_hash(workspace_id: &str, m: &OVal) -> String {
     let keys = defaults::list("devswarm_ingest.hash_fields");
     let mut parts = vec![workspace_id.to_string()];
@@ -118,7 +132,7 @@ pub struct Row {
 }
 
 /// The rows of a batch.
-pub fn rows(workspace_id: &str, batch: &Batch, now: i64) -> Vec<Row> {
+pub fn rows(workspace_id: &str, scope: &str, batch: &Batch, now: i64) -> Vec<Row> {
     batch
         .messages
         .iter()
@@ -133,7 +147,7 @@ pub fn rows(workspace_id: &str, batch: &Batch, now: i64) -> Vec<Row> {
                 Parsed::Unknown => (now, true),
                 _ => (now, false),
             };
-            Row { workspace_id: workspace_id.to_string(), body, hash: message_hash(workspace_id, m), ts, sender: None, ts_fallback }
+            Row { workspace_id: workspace_id.to_string(), body, hash: message_hash(scope, m), ts, sender: None, ts_fallback }
         })
         .collect()
 }
@@ -225,7 +239,8 @@ pub struct Imported {
 /// `ingestPayload(s, raw, {workspaceId, home, now})`.
 pub fn ingest_payload(store: &MeshStore, home: &Path, workspace_id: &str, raw: &str, now: i64) -> Result<Imported, Refused> {
     let batch = parse_batch(raw);
-    let mut rows = rows(workspace_id, &batch, now);
+    let scope = hash_scope(store.reader(), workspace_id);
+    let mut rows = rows(workspace_id, &scope, &batch, now);
     let mut fallbacks = 0_usize;
     if !rows.is_empty() {
         // sender: the registry row checked out under the message's branch (a native message names only its branch)
@@ -345,4 +360,24 @@ mod tests {
         assert_eq!(rows[0]["sender"], serde_json::json!("primary-aaaa1111"), "the row is attributed, not NULL");
         crate::discard::harmless(std::fs::remove_dir_all(dir)); // keep: test cleanup; an absent directory is the goal state
     }
+
+    /// SkyCrew 2026-10-22: one native `DONE:` notice sat in the app row's partition AND the Primary label's partition (the same
+    /// checkout), so a union read returned it twice with an empty sender and no seq.
+    #[test]
+    fn the_same_native_message_through_two_partitions_of_one_checkout_is_stored_once() {
+        let dir = std::env::temp_dir().join(format!("ah-import-twin-{}", std::process::id()));
+        crate::discard::harmless(std::fs::remove_dir_all(&dir)); // keep: cleanup that raced; an absent directory is the goal state
+        std::fs::create_dir_all(&dir).unwrap();
+        let st = MeshStore::open(&dir.join("devswarm.db")).unwrap();
+        for (id, wt) in [("primary-aaaa1111", "/w/repo"), ("app-row", "/w/repo"), ("other", "/w/elsewhere")] {
+            let row = RegistryRow { id: id.into(), worktree_path: Some(wt.into()), session_id: None, inbox_path: None, cursor_path: None, nudge_command: None };
+            st.upsert_registry(&row, 1, |a, b| a == b).unwrap();
+        }
+        let raw = r#"[{"fromBranch":"x/y","message":"DONE: x/y - r@main@1","createdAt":"2026-01-01T00:00:00Z"}]"#;
+        assert_eq!(ingest_payload(&st, &dir, "primary-aaaa1111", raw, 1).unwrap().inserted, 1);
+        assert_eq!(ingest_payload(&st, &dir, "app-row", raw, 1).unwrap().inserted, 0, "the same checkout's other partition stores nothing");
+        assert_eq!(ingest_payload(&st, &dir, "other", raw, 1).unwrap().inserted, 1, "another checkout keeps its own copy");
+        crate::discard::harmless(std::fs::remove_dir_all(dir)); // keep: test cleanup; an absent directory is the goal state
+    }
 }
+

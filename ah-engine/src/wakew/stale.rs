@@ -35,7 +35,7 @@ struct Install {
     cache: PathBuf,
     /// The registry's `installed_plugins.json`.
     registry: PathBuf,
-    /// The marketplace's own directory (a directory-source marketplace is the source of the running root).
+    /// The marketplace's own directory, from the harness's record of it.
     marketplace: Option<PathBuf>,
 }
 
@@ -65,17 +65,19 @@ fn owning_install(p: &Proc) -> Option<Install> {
     let root = canon(Path::new(&p.root));
     let cache_top = canon(&plugins.join(t("wake_watch.cache_dir")));
     let name = string_of(json_at(&root.join(t("wake_watch.manifest_rel")))?.get(t("wake_watch.manifest_name_field")))?;
-    let (mkt, marketplace) = if let Ok(rel) = root.strip_prefix(&cache_top) {
-        (rel.components().next()?.as_os_str().to_string_lossy().into_owned(), None)
-    } else {
-        let known = json_at(&plugins.join(t("wake_watch.known_marketplaces_file")))?;
-        let J::Obj(entries) = &known else { return None };
-        let hit = entries.iter().find_map(|(k, v)| {
-            let loc = canon(Path::new(&string_of(v.get(t("wake_watch.install_location_field")))?));
-            root.starts_with(&loc).then(|| (k.clone(), loc))
-        })?;
-        (hit.0, Some(hit.1))
+    let known = json_at(&plugins.join(t("wake_watch.known_marketplaces_file")));
+    let location = |key: &str| -> Option<PathBuf> {
+        let J::Obj(entries) = known.as_ref()? else { return None };
+        let v = &entries.iter().find(|(k, _)| k == key)?.1;
+        Some(canon(Path::new(&string_of(v.get(t("wake_watch.install_location_field")))?)))
     };
+    let mkt = if let Ok(rel) = root.strip_prefix(&cache_top) {
+        rel.components().next()?.as_os_str().to_string_lossy().into_owned()
+    } else {
+        let J::Obj(entries) = known.as_ref()? else { return None };
+        entries.iter().find_map(|(k, _)| location(k).filter(|loc| root.starts_with(loc)).map(|_| k.clone()))?
+    };
+    let marketplace = location(&mkt);
     Some(Install {
         key: format!("{name}{}{mkt}", t("wake_watch.key_sep")),
         cache: cache_top.join(&mkt).join(&name),
@@ -117,7 +119,11 @@ pub fn check(p: &Proc, own: Option<&str>) -> Option<Stale> {
             cache = Some(n);
         }
     }
-    let marketplace = install.marketplace.as_ref().and_then(|m| {
+    // The marketplace clone counts only when it is the one `update` pulls from and installs out of: a directory-source marketplace
+    // (a development deploy) can carry a newer build that `/anti-hall:update` will never install, and advertising it sends the user
+    // to an update that cannot deliver it.
+    let updater = canon(Path::new(&crate::operator::update::marketplace_dir(p.env.get(defaults::text("env.update_marketplace_dir")).map(String::as_str).filter(|o| !o.is_empty()), &p.home.to_string_lossy()).0));
+    let marketplace = install.marketplace.as_ref().filter(|m| **m == updater).and_then(|m| {
         let j = json_at(&m.join(t("wake_watch.marketplace_plugin_rel")).join(t("wake_watch.manifest_rel")))?;
         string_of(j.get("version")).filter(|v| semver_ok(v))
     });
@@ -172,4 +178,67 @@ pub fn handoff_line(newest: &str, registered: bool, registered_version: Option<&
         None => defaults::text("wake_watch.handoff_not_registered").to_string(),
     };
     format!("{base}{}", defaults::render("wake_watch.handoff_cached_only", &[("still", &still)]))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::checks::git::util::Settings;
+
+    fn write(p: &Path, text: &str) {
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, text).unwrap();
+    }
+
+    fn manifest(dir: &Path, version: &str) {
+        write(&dir.join(t("wake_watch.manifest_rel")), &format!(r#"{{"name":"anti-hall","version":"{version}"}}"#));
+    }
+
+    /// Two marketplaces as on a development machine: `anti-hall` (the clone `update` installs from, 0.300.2) and a directory-source
+    /// deploy `engine-live` (0.301.0) whose build is the one running.
+    fn world(tag: &str) -> Proc {
+        let home = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target").join("test-wakew").join(format!("stale-{tag}-{}", std::process::id()));
+        crate::discard::harmless(std::fs::remove_dir_all(&home)); // keep: cleanup that raced; an absent dir is the goal state
+        let plugins = home.join(".claude/plugins");
+        let (clone, live) = (plugins.join("marketplaces/anti-hall"), home.join("live-mk"));
+        manifest(&clone.join(t("wake_watch.marketplace_plugin_rel")), "0.300.2");
+        manifest(&live.join(t("wake_watch.marketplace_plugin_rel")), "0.301.0");
+        let running = live.join(t("wake_watch.marketplace_plugin_rel"));
+        write(
+            &plugins.join(t("wake_watch.known_marketplaces_file")),
+            &format!(
+                r#"{{"anti-hall":{{"installLocation":"{}"}},"engine-live":{{"installLocation":"{}"}}}}"#,
+                clone.display(),
+                live.display()
+            ),
+        );
+        write(&plugins.join(t("wake_watch.installed_file")), r#"{"version":2,"plugins":{"anti-hall@engine-live":[{"version":"0.300.1"}]}}"#);
+        manifest(&plugins.join("cache/engine-live/anti-hall/0.300.1"), "0.300.1");
+        write(&home.join(t("wake_watch.user_settings_rel")), r#"{"enabledPlugins":{"anti-hall@engine-live":true}}"#);
+        let st = Settings { home: home.to_string_lossy().into_owned(), env: Default::default() };
+        Proc { home, cwd: "/".into(), env: Default::default(), st, root: running.to_string_lossy().into_owned() }
+    }
+
+    /// SkyCrew 2026-10-22: the watcher advertised 0.301.0 from the development deploy's marketplace while `update` installs from the
+    /// `anti-hall` clone (0.300.2), so the advertised update could never be installed.
+    #[test]
+    fn a_directory_marketplace_the_updater_does_not_use_advertises_nothing() {
+        let p = world("devdeploy");
+        assert_eq!(check(&p, Some("0.300.1")), None, "0.301.0 sits only in a marketplace `update` never installs from");
+    }
+
+    #[test]
+    fn the_marketplace_the_updater_installs_from_is_compared() {
+        let p = world("updater");
+        // the install whose marketplace IS the updater's clone: a newer clone is advertised as unregistered
+        let clone = p.home.join(".claude/plugins/marketplaces/anti-hall");
+        write(&p.home.join(".claude/plugins/known_marketplaces.json"), &format!(r#"{{"anti-hall":{{"installLocation":"{}"}}}}"#, clone.display()));
+        write(&p.home.join(".claude/plugins/installed_plugins.json"), r#"{"version":2,"plugins":{"anti-hall@anti-hall":[{"version":"0.300.1"}]}}"#);
+        write(&p.home.join(".claude/settings.json"), r#"{"enabledPlugins":{"anti-hall@anti-hall":true}}"#);
+        manifest(&p.home.join(".claude/plugins/cache/anti-hall/anti-hall/0.300.1"), "0.300.1");
+        let running = clone.join(t("wake_watch.marketplace_plugin_rel"));
+        let p = Proc { root: running.to_string_lossy().into_owned(), ..p };
+        let s = check(&p, Some("0.300.1")).expect("the clone's 0.300.2 is newer");
+        assert_eq!((s.newest.as_str(), s.registered), ("0.300.2", false));
+    }
 }
