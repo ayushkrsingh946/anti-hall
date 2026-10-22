@@ -54,7 +54,7 @@ function computed() {
     alsoCodex: [...claude.scripts].filter((s) => codex.scripts.has(s)).length,
     claudeSkills: dirs(P('skills')),
     codexSkills: dirs(P('codex', 'skills')),
-    hookFiles: fs.readdirSync(P('hooks')).filter((f) => f.endsWith('.js')).length,
+    hookFiles: fs.readdirSync(path.join(REPO, 'plugins', 'anti-hall-node', 'hooks')).filter((f) => f.endsWith('.js')).length,
     userConfig: Object.keys(JSON.parse(read(P('.claude-plugin', 'plugin.json'))).userConfig || {}).length,
     // per-section key counts, addressed as `section:<key>`
     ...Object.fromEntries(schema.SECTIONS.map((s) => [`section:${s.key}`, s.settings.length])),
