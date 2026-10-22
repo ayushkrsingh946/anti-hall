@@ -42,13 +42,31 @@ fn totals_json(t: &Totals) -> Value {
 
 /// The status document.
 pub(crate) fn document(env: &Env, st: &State, l: &super::sources::Listing) -> Value {
-    let mut agents: Vec<&super::Agent> = st.agents.values().collect();
+    // live agents always show; a finished one only while it is recent
+    let done = defaults::raw("agent_tracker.states").str_field("done");
+    let keep = super::lim("done_keep_ms");
+    let (mut agents, hidden): (Vec<&super::Agent>, Vec<&super::Agent>) =
+        st.agents.values().partition(|a| state_of(a) != done || env.now_ms.saturating_sub(a.last_output_ms) <= keep);
+    let live: Vec<&super::Agent> = agents.iter().copied().filter(|a| state_of(a) != done).collect();
+    let n = |f: &dyn Fn(&super::Agent) -> bool| live.iter().filter(|a| f(a)).count();
+    let kc = defaults::raw("agent_tracker.counts");
+    let counts = json!({
+        kc.str_field("sessions"): n(&|a| a.kind == super::kind_name("main") || a.kind == super::kind_name("workspace")),
+        kc.str_field("subagents"): n(&|a| a.kind == super::kind_name("subagent")),
+        kc.str_field("teammates"): n(&|a| a.kind == super::kind_name("teammate")),
+        kc.str_field("codex"): n(&|a| a.kind == super::kind_name("codex")),
+        kc.str_field("headless"): st.headless.len(),
+        kc.str_field("done_hidden"): hidden.len(),
+        kc.str_field("listed"): agents.len(),
+    });
     agents.sort_by(|a, b| b.flags.len().cmp(&a.flags.len()).then(b.last_output_ms.cmp(&a.last_output_ms)));
     let cli = defaults::raw("agent_tracker.claude_cli");
     let by_id: std::collections::BTreeMap<&str, &super::Agent> = st.agents.values().map(|a| (a.id.as_str(), a)).collect();
-    let kids = children(&agents);
+    let everyone: Vec<&super::Agent> = st.agents.values().collect();
+    let kids = children(&everyone);
     json!({
         "generated_ms": env.now_ms,
+        "summary": counts,
         "claude": {"version": l.cli_version, "agents_json": st.cli_ok, "used": l.cli_used, "verified_on": cli.get("verified").map(|v| v.to_json())},
         "agents": agents.iter().map(|a| row(a, env.now_ms, &by_id, &kids)).collect::<Vec<_>>(),
         "today": totals_json(&st.today(env)),

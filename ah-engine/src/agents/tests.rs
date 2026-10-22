@@ -1050,7 +1050,7 @@ fn a_live_process_is_running_or_waiting_whatever_its_transcript_says_and_a_dead_
 }
 
 fn teammate(h: &Path, n: u64) {
-    idle_subagent(h, n, 30);
+    idle_subagent(h, n, 20);
     std::fs::write(
         h.join(".claude/projects/p/parent/subagents/agent-w1.meta.json"),
         r#"{"agentType":"gauge","description":"gauge worker","name":"gauger","taskKind":"in_process_teammate","teamName":"team-7"}"#,
@@ -1125,4 +1125,39 @@ fn a_codex_rollout_is_a_codex_agent_running_while_it_is_written() {
     let (live, quiet) = (agent(&st, "01a16132-aaaa"), agent(&st, "01a16132-bbbb"));
     assert_eq!((live.kind.as_str(), state::of(live), live.cwd.as_str(), live.source.as_str()), ("codex", "running", "/cx", "codex"));
     assert_eq!((quiet.kind.as_str(), state::of(quiet)), ("codex", "waiting"));
+}
+
+#[test]
+fn headless_one_shot_runs_are_not_agents_and_are_not_counted() {
+    let h = home("headless");
+    let n = now0();
+    let line = |ts: u64| json!({"type": "user", "timestamp": iso(ts), "cwd": "/w", "entrypoint": "sdk-cli", "message": {"role": "user", "content": "judge"}}).to_string();
+    write(&sess(&h, "judge1"), &[json!({"type": "queue-operation", "timestamp": iso(n)}).to_string(), line(n - MIN), asst(n - MIN, "j1", 5, 5, json!([{"type": "text", "text": "{}"}]), Some("end_turn"))]);
+    write(&h.join(".claude/projects/-x-double-shot-latte/judge2.jsonl"), &[prompt(n - MIN, "/w")]);
+    write(&sess(&h, "real1"), &[prompt(n - MIN, "/w"), asst(n - MIN, "m1", 5, 5, json!([{"type": "text", "text": "ok"}]), None)]);
+    let mut st = State::default();
+    ticks(&h, &mut st, &[n, n + MIN]);
+    assert_eq!(st.agents.keys().collect::<Vec<_>>(), vec!["real1"], "only the interactive session is an agent");
+    let doc = status::document(&env(&h, n + MIN), &st, &sources::Listing::default());
+    assert_eq!((doc["summary"]["headless_skipped"].as_u64(), doc["agents"].as_array().unwrap().len()), (Some(2), 1));
+}
+
+#[test]
+fn the_list_is_live_agents_plus_a_short_recently_finished_window_and_the_summary_counts_live_ones() {
+    let h = home("window");
+    let n = now0();
+    write(&sess(&h, "parent"), &[prompt(n - 3 * 3_600_000, "/w"), asst(n - 2 * 3_600_000, "p1", 5, 5, json!([{"type": "text", "text": "x"}]), Some("end_turn"))]);
+    register(&h, std::process::id(), "parent", "busy", n);
+    let dir = h.join(".claude/projects/p/parent/subagents");
+    for (id, ago) in [("old", 2 * 3_600_000), ("fresh", 5 * MIN)] {
+        write(&dir.join(format!("agent-{id}.jsonl")), &[prompt(n - ago - MIN, "/w"), asst(n - ago, "s1", 5, 5, json!([{"type": "text", "text": "x"}]), Some("end_turn"))]);
+        std::fs::write(dir.join(format!("agent-{id}.meta.json")), r#"{"finished":true}"#).unwrap();
+    }
+    let mut st = State::default();
+    ticks(&h, &mut st, &[n, n + MIN]);
+    let doc = status::document(&env(&h, n + MIN), &st, &sources::Listing::default());
+    let ids: Vec<&str> = doc["agents"].as_array().unwrap().iter().map(|r| r["agent"].as_str().unwrap()).collect();
+    assert!(ids.contains(&"parent") && ids.contains(&"fresh") && !ids.contains(&"old"), "{ids:?}");
+    let s = &doc["summary"];
+    assert_eq!((s["sessions_live"].as_u64(), s["subagents_live"].as_u64(), s["done_hidden"].as_u64()), (Some(1), Some(0), Some(1)), "{s}");
 }

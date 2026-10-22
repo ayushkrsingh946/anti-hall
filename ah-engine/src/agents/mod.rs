@@ -255,6 +255,9 @@ pub struct Agent {
     /// The host's meta file records the agent as finished.
     #[serde(default)]
     pub finished: bool,
+    /// Its transcript start was checked and is not a headless run (checked once).
+    #[serde(default)]
+    pub interactive: bool,
     /// The pid of the live process the session registry joined to this agent (0 = none).
     #[serde(default)]
     pub pid: u32,
@@ -353,6 +356,9 @@ pub struct State {
     /// The ids of the main and workspace agents the last listing was taken for.
     #[serde(default)]
     pub cli_seen: Vec<String>,
+    /// Headless one-shot transcripts seen in the active window (not agents: never tracked or listed).
+    #[serde(default)]
+    pub headless: std::collections::BTreeSet<String>,
 }
 
 impl State {
