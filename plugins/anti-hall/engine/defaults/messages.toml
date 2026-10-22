@@ -787,6 +787,10 @@ value = "anti-hall: ignoring test-only variables (need AH_WRAPPER_TEST=1): {vars
 doc = "Printed when --host names a host the launcher does not serve; the default host is used."
 value = "anti-hall: ignoring unknown --host value"
 
+[msg.launcher_fallback_exec_failed]
+doc = "Written when the launcher cannot hand the call to the shell wrapper while the Node fallback switch is on; the engine answers instead. Placeholder: {err}."
+value = "anti-hall: cannot run the Node fallback wrapper: {err}; the engine answers"
+
 [msg.launcher_no_doctor]
 doc = "Printed by --doctor when the doctor script is missing."
 value = "anti-hall: ah-doctor.sh is missing next to ah-hook.sh; reinstall the plugin"

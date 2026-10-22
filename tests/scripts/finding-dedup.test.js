@@ -13,7 +13,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { makeHome } = require('../helpers/fixtures.js');
 
-const MOD = require('../../plugins/anti-hall/scripts/finding-dedup.js');
+const MOD = require('../../plugins/anti-hall-node/scripts/finding-dedup.js');
 const { buildPairs, groupPairs, makeUnionFind, dedupe, MAX_PAIRS, CONFIDENCE_FLOOR } = MOD;
 
 // ---------------------------------------------------------------------------
@@ -194,9 +194,9 @@ function noulHandler(n, hits) {
 }
 
 function freshAskPair() {
-  const LIB = require.resolve('../../plugins/anti-hall/scripts/finding-dedup.js');
-  const ASSIST = require.resolve('../../plugins/anti-hall/hooks/lib/jev-assist.js');
-  const CLIENT = require.resolve('../../plugins/anti-hall/hooks/lib/jev-client.js');
+  const LIB = require.resolve('../../plugins/anti-hall-node/scripts/finding-dedup.js');
+  const ASSIST = require.resolve('../../plugins/anti-hall-node/hooks/lib/jev-assist.js');
+  const CLIENT = require.resolve('../../plugins/anti-hall-node/hooks/lib/jev-client.js');
   delete require.cache[LIB];
   delete require.cache[ASSIST];
   delete require.cache[CLIENT];

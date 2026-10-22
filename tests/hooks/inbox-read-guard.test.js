@@ -16,7 +16,7 @@ const {
   classifyDevswarmPath,
   storeReadCliPresent,
   isStoreDenyTarget,
-} = require('../../plugins/anti-hall/hooks/lib/devswarm-inbox-paths.js');
+} = require('../../plugins/anti-hall-node/hooks/lib/devswarm-inbox-paths.js');
 
 const HOOK = 'inbox-read-guard.js';
 const DEVSWARM = { DEVSWARM_REPO_ID: 'repo-x' }; // isDevswarmActive auto-true

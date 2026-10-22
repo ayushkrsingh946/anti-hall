@@ -9,10 +9,10 @@ const assert = require('node:assert');
 const path = require('node:path');
 
 const { detect, isDevswarmActive, hasOnDiskDevswarmState } = require(path.join(
-  __dirname, '..', '..', 'plugins', 'anti-hall', 'hooks', 'lib', 'devswarm-detect.js',
+  __dirname, '..', '..', 'plugins', 'anti-hall-node', 'hooks', 'lib', 'devswarm-detect.js',
 ));
 const { makeHome } = require('../helpers/fixtures.js');
-const store = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
+const store = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
 const fs = require('node:fs');
 
 test('dormant: DEVSWARM_REPO_ID unset (auto) -> false', () => {

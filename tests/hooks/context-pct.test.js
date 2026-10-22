@@ -6,8 +6,8 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const path = require('node:path');
 const { makeHome } = require('../helpers/fixtures.js');
-const { getContextPct } = require('../../plugins/anti-hall/hooks/lib/context-pct.js');
-const store = require('../../plugins/anti-hall/hooks/lib/context-pct-store.js');
+const { getContextPct } = require('../../plugins/anti-hall-node/hooks/lib/context-pct.js');
+const store = require('../../plugins/anti-hall-node/hooks/lib/context-pct-store.js');
 
 function assistantUsageLine(usage, opts) {
   return JSON.stringify({

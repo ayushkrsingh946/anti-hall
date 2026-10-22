@@ -13,7 +13,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 
-const store = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
+const store = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
 
 // runNode(code) -> Promise resolved when a `node -e <code>` child exits. Used to
 // drive genuinely-concurrent writers against the same journal home.
@@ -466,7 +466,7 @@ test('writeSummaryAtomic stages to a UNIQUE tmp path per call (no shared .tmp ra
 test('[journal] concurrent writers never duplicate a deduped hash row (serialized append)', async () => {
   const home = tmpHome();
   try {
-    const storePath = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'lib', 'devswarm-store.js');
+    const storePath = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'lib', 'devswarm-store.js');
     const worker = ''
       + 'const store = require(' + JSON.stringify(storePath) + ');'
       + 'const s = store.openStore({ home: ' + JSON.stringify(home) + ", backend: 'journal' });"

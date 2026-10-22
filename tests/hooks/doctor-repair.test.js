@@ -23,17 +23,17 @@ const path = require('node:path');
 const cp = require('node:child_process');
 
 const REPO_ROOT = path.join(__dirname, '..', '..');
-const DOCTOR_JS = path.join(REPO_ROOT, 'plugins', 'anti-hall', 'hooks', 'doctor.js');
-const REPAIR_JS = path.join(REPO_ROOT, 'plugins', 'anti-hall', 'hooks', 'lib', 'doctor-repair.js');
-const INGEST_JS = path.join(REPO_ROOT, 'plugins', 'anti-hall', 'companion', 'install-devswarm-ingest.js');
-const STORE_JS = path.join(REPO_ROOT, 'plugins', 'anti-hall', 'companion', 'lib', 'devswarm-store.js');
-const DEVSWARM_SCRIPT_FOR_TEST = path.join(REPO_ROOT, 'plugins', 'anti-hall', 'scripts', 'devswarm.js');
+const DOCTOR_JS = path.join(REPO_ROOT, 'plugins', 'anti-hall-node', 'hooks', 'doctor.js');
+const REPAIR_JS = path.join(REPO_ROOT, 'plugins', 'anti-hall-node', 'hooks', 'lib', 'doctor-repair.js');
+const INGEST_JS = path.join(REPO_ROOT, 'plugins', 'anti-hall-node', 'companion', 'install-devswarm-ingest.js');
+const STORE_JS = path.join(REPO_ROOT, 'plugins', 'anti-hall-node', 'companion', 'lib', 'devswarm-store.js');
+const DEVSWARM_SCRIPT_FOR_TEST = path.join(REPO_ROOT, 'plugins', 'anti-hall-node', 'scripts', 'devswarm.js');
 
 const repair = require(REPAIR_JS);
 const ingest = require(INGEST_JS);
 const cli = require(DEVSWARM_SCRIPT_FOR_TEST);
 const storeLib = require(STORE_JS);
-const repokey = require(path.join(REPO_ROOT, 'plugins', 'anti-hall', 'companion', 'lib', 'devswarm-repokey.js'));
+const repokey = require(path.join(REPO_ROOT, 'plugins', 'anti-hall-node', 'companion', 'lib', 'devswarm-repokey.js'));
 
 function mkTmp(tag) { return fs.mkdtempSync(path.join(os.tmpdir(), 'antihall-repair-' + tag + '-')); }
 function rm(p) { try { fs.rmSync(p, { recursive: true, force: true }); } catch (_) {} }
@@ -88,13 +88,13 @@ function ingestUnitPath(home, platform) {
   return null;
 }
 // makeMarketplaceFixture — a throwaway dir shaped like install-devswarm-ingest.js's
-// resolveStableScript() expects (plugins/anti-hall/companion/devswarm-ingest.js
+// resolveStableScript() expects (plugins/anti-hall-node/companion/devswarm-ingest.js
 // under the marketplace root), pointed at via ANTIHALL_MARKETPLACE_DIR (the same
 // test-only override resolveStableScript itself documents honoring) instead of
 // faking a real ~/.claude/plugins/marketplaces/anti-hall on the test machine.
 function makeMarketplaceFixture(tag) {
   const dir = mkTmp('mp-' + tag);
-  const scriptDir = path.join(dir, 'plugins', 'anti-hall', 'companion');
+  const scriptDir = path.join(dir, 'plugins', 'anti-hall-node', 'companion');
   fs.mkdirSync(scriptDir, { recursive: true });
   const scriptPath = path.join(scriptDir, 'devswarm-ingest.js');
   fs.writeFileSync(scriptPath, '// fixture stable ingest daemon script\n');
@@ -279,7 +279,7 @@ test('doctor --dry-run: DevSwarm ACTIVE + git worktree -> gate OPENS (would inst
   const cwd = makeGitRepo('gate-open-cwd');
   try {
     // Since 2026-10-16 a first install needs a registered project (workspace descriptor naming its repoKey).
-    const repoKey = require(path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'lib', 'devswarm-repokey.js')).repoKeyForWorktree(cwd);
+    const repoKey = require(path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'lib', 'devswarm-repokey.js')).repoKeyForWorktree(cwd);
     fs.mkdirSync(path.join(home, '.anti-hall', 'devswarm', 'workspaces'), { recursive: true });
     fs.writeFileSync(path.join(home, '.anti-hall', 'devswarm', 'workspaces', 'primary-reg.json'), JSON.stringify({ id: 'primary-reg', repoKey, worktreePath: cwd, sessionId: 's' }));
     seedUserSettings(home);
@@ -421,7 +421,7 @@ test('runRepairs (in-process): sweep-lock-scratch FIXES stale lock scratch files
   const home = mkTmp('lock-scratch-home');
   const cwd = mkTmp('lock-scratch-cwd');
   try {
-    const recovery = require(path.join(REPO_ROOT, 'plugins', 'anti-hall', 'companion', 'lib', 'recovery.js'));
+    const recovery = require(path.join(REPO_ROOT, 'plugins', 'anti-hall-node', 'companion', 'lib', 'recovery.js'));
     const p = recovery.lockPathFor('some-id', home);
     const dir = path.dirname(p);
     fs.mkdirSync(dir, { recursive: true });
@@ -1503,7 +1503,7 @@ test('install-divergence: a REAL marketplace clone with divergent watcher conten
 // ---------------------------------------------------------------------------
 // Codex "is it wired" upgrade regression — a prior version of scanCodex()
 // (and doctor.js's read-only mirror) used a COARSE "does the
-// '/plugins/anti-hall/hooks/' fragment appear ANYWHERE in hooks.json" test.
+// '/plugins/anti-hall-node/hooks/' fragment appear ANYWHERE in hooks.json" test.
 // That made an EXISTING Codex install with only the OLDER event set (missing
 // a newly-added event, e.g. the PostToolUse reply-tracker hook) still match
 // on its older events and get reported "already wired" — so `doctor --fix`
@@ -1512,7 +1512,7 @@ test('install-divergence: a REAL marketplace clone with divergent watcher conten
 // event key in install-codex.js's ANTI_HALL_HOOKS to have a matching
 // anti-hall-owned group actually present, so a missing event is caught.
 // ---------------------------------------------------------------------------
-const CODEX_INSTALLER_JS = path.join(REPO_ROOT, 'plugins', 'anti-hall', 'codex', 'install-codex.js');
+const CODEX_INSTALLER_JS = path.join(REPO_ROOT, 'plugins', 'anti-hall-node', 'codex', 'install-codex.js');
 
 // buildCodexHooksFixture(dir, {dropEvents}) — writes a .codex/config.toml +
 // hooks.json into `dir` by actually running the REAL installer (so every

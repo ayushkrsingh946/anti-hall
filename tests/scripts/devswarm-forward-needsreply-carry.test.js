@@ -42,9 +42,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 
-const store = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
-const cli = require('../../plugins/anti-hall/scripts/devswarm.js');
-const installIngest = require('../../plugins/anti-hall/companion/install-devswarm-ingest.js');
+const store = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
+const cli = require('../../plugins/anti-hall-node/scripts/devswarm.js');
+const installIngest = require('../../plugins/anti-hall-node/companion/install-devswarm-ingest.js');
 
 const REPO_CWD = process.cwd();
 const MESH = installIngest.primaryWorkspaceId(REPO_CWD);

@@ -349,9 +349,13 @@ value = "devswarm {verb} is not allowed for the {role} role (main session only)"
 doc = "Printed for an unknown verb. {verb}."
 value = "unknown devswarm verb {verb}"
 
-[devswarm_wire.msg_deferred]
-doc = "Printed for a verb the engine hands to Node. {verb}."
-value = "devswarm {verb} is run by scripts/devswarm.js (the engine cannot yet reproduce its checks)"
+[devswarm_wire.not_ported_verbs]
+doc = "Owner verbs the engine does not implement (their checks are not reproduced): they fail with devswarm_wire.msg_not_ported and devswarm_wire.not_ported_exit."
+value = ["create"]
+
+[devswarm_wire.msg_not_ported]
+doc = "Printed for a verb the engine does not implement. Nothing was done. {verb}."
+value = "devswarm {verb} is NOT PORTED to the engine and was not run. Run it by hand with the plugin's own script: node <plugin root>/scripts/devswarm.js {verb} ..."
 
 [devswarm_wire.msg_missing_arg]
 doc = "Printed when a verb lacks a required flag. {flag}."
@@ -389,9 +393,9 @@ value = "--plan"
 doc = "Exit code for a refused or malformed owner verb."
 value = 64
 
-[devswarm_wire.deferred_exit]
-doc = "Exit code for a verb handed to Node (nothing was done)."
-value = 75
+[devswarm_wire.not_ported_exit]
+doc = "Exit code for a verb the engine does not implement (nothing was done): sysexits EX_UNAVAILABLE, never the 75 of a deferral."
+value = 69
 
 # ---- fact readers (the archive, prune and poke decisions) -------------------------------------------------------------------
 

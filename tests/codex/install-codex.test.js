@@ -8,7 +8,7 @@ const os = require('node:os');
 const { spawnSync } = require('node:child_process');
 
 const REPO = path.resolve(__dirname, '..', '..');
-const INSTALLER = path.join(REPO, 'plugins', 'anti-hall', 'codex', 'install-codex.js');
+const INSTALLER = path.join(REPO, 'plugins', 'anti-hall-node', 'codex', 'install-codex.js');
 
 function tmpProject() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'antihall-codex-install-'));
@@ -75,7 +75,7 @@ test('install-codex: preserves non anti-hall hooks and replaces stale anti-hall 
       hooks: {
         PreToolUse: [
           { matcher: 'Bash', hooks: [{ type: 'command', command: 'echo keep-me', timeout: 1 }] },
-          { matcher: 'Bash', hooks: [{ type: 'command', command: 'node /x/plugins/anti-hall/hooks/old.js', timeout: 1 }] },
+          { matcher: 'Bash', hooks: [{ type: 'command', command: 'node /x/plugins/anti-hall-node/hooks/old.js', timeout: 1 }] },
         ],
       },
     }, null, 2));

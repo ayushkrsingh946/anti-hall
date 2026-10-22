@@ -6,8 +6,8 @@ const assert = require('node:assert');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
-const HELPER = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'lib', 'sqlite-quiet.js');
-const APP_DB = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'lib', 'devswarm-app-db.js');
+const HELPER = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'lib', 'sqlite-quiet.js');
+const APP_DB = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'lib', 'devswarm-app-db.js');
 
 function run(code) {
   return spawnSync(process.execPath, ['-e', code], { encoding: 'utf8', timeout: 15000, env: { PATH: process.env.PATH } });

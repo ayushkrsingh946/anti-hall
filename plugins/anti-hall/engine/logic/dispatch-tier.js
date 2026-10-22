@@ -69,11 +69,11 @@ function decide(p) {
   if (ah.cfg('dispatch_tier.tools').indexOf(tool) < 0) return 'allow';
   var h = ah.env.get(ah.cfg('env.home'));
   if (h === null) h = ah.env.get(ah.cfg('env.home_alt'));
-  if (!h) { ah.unable('dispatch-tier:no_home'); return 'allow'; } // nothing to read or write without a home
+  if (!h) { ah.unable('dispatch-tier:no_home', 'abandoned'); return 'allow'; } // nothing to read or write without a home
   var jevId = ah.cfg('dispatch_tier.jev_id');
   if (ah.jev.mode(jevId) === 'off') return 'allow';
   var guard = ah.homeGuard();
-  if (guard.status !== 'ok') { ah.unable('dispatch-tier:home_guard'); return 'allow'; } // a guarded or unknown home keeps no state
+  if (guard.status !== 'ok') { ah.unable('dispatch-tier:home_guard', 'abandoned'); return 'allow'; } // a guarded or unknown home keeps no state
   var task = dtTask(p, tool);
   if (task === 'none') return 'allow';
   if (!task.content || dtOwnerBlocked(task)) return 'allow';

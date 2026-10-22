@@ -87,6 +87,6 @@ test('tasklistTrivial on + confident "small chore" -> no tasklist block; shadow 
 });
 
 test('consultRelax caps the synchronous budget at 1.5 s', () => {
-  const ja = require('../../plugins/anti-hall/hooks/lib/jev-assist.js');
+  const ja = require('../../plugins/anti-hall-node/hooks/lib/jev-assist.js');
   assert.strictEqual(ja.RELAX_SYNC_CAP_MS, 1500);
 });

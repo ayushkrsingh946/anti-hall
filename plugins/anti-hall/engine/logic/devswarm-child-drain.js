@@ -64,7 +64,7 @@ function decide(p, opts) {
   if (dgInertForChild('devswarm_gates.child_drain_setting', null)) return 'allow';
   var root = jx.isObj(opts) && typeof opts.plugin_root === 'string' ? opts.plugin_root : ah.env.get(ah.cfg('env.plugin_root'));
   var st = dwLaunchersNative(root, false);
-  if (!st) { ah.unable('devswarm-child-drain:no_launchers'); return 'allow'; } // no usable home or plugin root: no launcher can be named
-  if (!jx.isObj(p)) { ah.unable('devswarm-child-drain:payload_shape'); return 'allow'; }
+  if (!st) { ah.unable('devswarm-child-drain:no_launchers', 'abandoned'); return 'allow'; } // no usable home or plugin root: no launcher can be named
+  if (!jx.isObj(p)) { ah.unable('devswarm-child-drain:payload_shape', 'abandoned'); return 'allow'; }
   return cdDecide(p, st);
 }

@@ -272,6 +272,21 @@ ok "tree: --scope defaults is honoured" has "scope: defaults" "$W/check.out"
 run --check "$W/new/ah-engine" "$W/new/defaults" --scope tree >"$W/check.out" 2>&1; rc=$?
 ok "tree: --scope tree on a bare defaults dir refuses" test $rc -ne 0
 
+# --- window: the OLD binary reading the NEW defaults ------------------------------------------------------------------------
+setup window
+run --check "$W/new/ah-engine" "$W/new/defaults" >"$W/check.out" 2>&1
+ok "window: an additive release misses no key in the window" has "old (live) binary on this root AFTER the sync: loads, misses no key" "$W/check.out"
+printf '[a.renamed]\nvalue = 2\n' >"$W/new/defaults/a.toml"
+mk_engine "$W/new/ah-engine" "a.renamed wire.ack"
+run --check "$W/new/ah-engine" "$W/new/defaults" --allow-drop >"$W/check.out" 2>&1; rc=$?
+ok "window: a renamed key is reported, not failed (informational)" test $rc -eq 0
+ok "window: names the old binary's missed key" has "defaults/a.toml \[a.old\]" "$W/check.out"
+ok "window: says it WILL log defaults_fallback" has "WINDOW: the old (live) binary" "$W/check.out"
+ok "window: the old binary's own refusal is quoted" has "refuses: ah-engine: defaults unavailable: missing_key" "$W/check.out"
+ok "window: summary line counts the keys per root" has "WINDOW SUMMARY: 4 key(s)" "$W/check.out"
+before=$(tree_sum)
+ok "window: --check changed nothing" test "$before" = "$(tree_sum)"
+
 for f in $(find "$T" -name daemon.run 2>/dev/null); do kill "$(cat "$f")" 2>/dev/null; done
 printf '\n%s passed, %s failed (scratch: %s)\n' "$PASS" "$FAIL" "$T"
 [ "$FAIL" -eq 0 ]

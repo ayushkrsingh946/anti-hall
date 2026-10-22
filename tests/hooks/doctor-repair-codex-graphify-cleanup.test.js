@@ -21,7 +21,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const REPO_ROOT = path.join(__dirname, '..', '..');
-const REPAIR_JS = path.join(REPO_ROOT, 'plugins', 'anti-hall', 'hooks', 'lib', 'doctor-repair.js');
+const REPAIR_JS = path.join(REPO_ROOT, 'plugins', 'anti-hall-node', 'hooks', 'lib', 'doctor-repair.js');
 const repair = require(REPAIR_JS);
 
 function mkTmp(tag) { return fs.mkdtempSync(path.join(os.tmpdir(), 'antihall-repair-graphify-' + tag + '-')); }
@@ -33,12 +33,12 @@ function rm(p) { try { fs.rmSync(p, { recursive: true, force: true }); } catch (
 // check, not because the installer re-ran anyway.
 // The installer writes ONE generated thin trigger per event (ah-hook.sh <Event> --host codex). A scope is "wired" when
 // every expected event has such a group; the graphify groups are the stale leftovers the cleanup step strips.
-const EVENTS = Object.keys(require(path.join(REPO_ROOT, 'plugins', 'anti-hall', 'codex', 'install-codex.js')).ANTI_HALL_HOOKS);
+const EVENTS = Object.keys(require(path.join(REPO_ROOT, 'plugins', 'anti-hall-node', 'codex', 'install-codex.js')).ANTI_HALL_HOOKS);
 const thin = (ev) => ({ hooks: [{ type: 'command', command: 'sh "/x/plugins/anti-hall/hooks/ah-hook.sh" ' + ev + ' --host codex', timeout: 10 }] });
 const STALE_CONFIG = { hooks: Object.fromEntries(EVENTS.map((ev) => [ev, [thin(ev)]])) };
-STALE_CONFIG.hooks.SessionStart.push({ hooks: [{ type: 'command', command: 'node /x/plugins/anti-hall/hooks/graphify-session.js', timeout: 10 }] });
-STALE_CONFIG.hooks.Stop.push({ hooks: [{ type: 'command', command: 'node /x/plugins/anti-hall/hooks/graphify-reminder.js', timeout: 30 }] });
-STALE_CONFIG.hooks.PreToolUse.push({ matcher: 'Bash', hooks: [{ type: 'command', command: 'node /x/plugins/anti-hall/hooks/graphify-guard.js', timeout: 10 }] });
+STALE_CONFIG.hooks.SessionStart.push({ hooks: [{ type: 'command', command: 'node /x/plugins/anti-hall-node/hooks/graphify-session.js', timeout: 10 }] });
+STALE_CONFIG.hooks.Stop.push({ hooks: [{ type: 'command', command: 'node /x/plugins/anti-hall-node/hooks/graphify-reminder.js', timeout: 30 }] });
+STALE_CONFIG.hooks.PreToolUse.push({ matcher: 'Bash', hooks: [{ type: 'command', command: 'node /x/plugins/anti-hall-node/hooks/graphify-guard.js', timeout: 10 }] });
 
 function setupCodexScope(dir) {
   fs.mkdirSync(path.join(dir, '.codex'), { recursive: true });

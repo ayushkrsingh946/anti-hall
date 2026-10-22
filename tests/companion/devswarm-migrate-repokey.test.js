@@ -1,5 +1,5 @@
 'use strict';
-// proves: plugins/anti-hall/companion/devswarm-migrate.js#* — same-id copy: every migration below asserts the rows land in the SAME partition id they came from (per-partition listMessages / messageCount checks).
+// proves: plugins/anti-hall-node/companion/devswarm-migrate.js#* — same-id copy: every migration below asserts the rows land in the SAME partition id they came from (per-partition listMessages / messageCount checks).
 // devswarm-migrate — Phase 3 (v0.57 mesh, PLAN-v0.57-mesh.md D13): folding
 // today's legacy hash-keyed per-project stores (store/<8-hex>/) into the
 // shared repo-name-keyed layout (store/<repoKey>/), NON-DESTRUCTIVELY and
@@ -13,9 +13,9 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const migrate = require('../../plugins/anti-hall/companion/devswarm-migrate.js');
-const storeLib = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
-const { repoKeyForWorktree } = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
+const migrate = require('../../plugins/anti-hall-node/companion/devswarm-migrate.js');
+const storeLib = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
+const { repoKeyForWorktree } = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
 
 function tmpHome() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'anti-hall-migrate-repokey-'));

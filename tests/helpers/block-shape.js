@@ -1,11 +1,11 @@
 'use strict';
 // assertShape(text, guard, label[, opts]) — the shared guard/advisory message shape
-// (plugins/anti-hall/hooks/lib/block-message.js): a leading icon from the fixed set,
+// (plugins/anti-hall-node/hooks/lib/block-message.js): a leading icon from the fixed set,
 // `anti-hall · <guard>: <what>`, then only labelled lines (Why / Do instead /
 // Allowed here / Override ...); continuation lines (two-space indent) are allowed
 // after a labelled line. opts.maxLines (default 12), opts.requireWhy (default false).
 const assert = require('node:assert');
-const bm = require('../../plugins/anti-hall/hooks/lib/block-message.js');
+const bm = require('../../plugins/anti-hall-node/hooks/lib/block-message.js');
 
 const ICONS = Object.values(bm.ICONS);
 const LABELS = /^(Why|Do instead|Allowed here|Override \(only if the user explicitly asked\)): |^Override \(only if the user explicitly confirmed[^)]*\): /;

@@ -16,7 +16,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const LIVENESS = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'lib', 'liveness.js');
+const LIVENESS = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'lib', 'liveness.js');
 const liveness = require(LIVENESS);
 
 function tmpHome() {

@@ -10,10 +10,10 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const cli = require('../../plugins/anti-hall/scripts/devswarm.js');
-const storeLib = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
-const repokey = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
-const pullLib = require('../../plugins/anti-hall/companion/lib/devswarm-pull.js');
+const cli = require('../../plugins/anti-hall-node/scripts/devswarm.js');
+const storeLib = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
+const repokey = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
+const pullLib = require('../../plugins/anti-hall-node/companion/lib/devswarm-pull.js');
 
 function tmpHome() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'anti-hall-cli-'));
@@ -380,7 +380,7 @@ test('#11: an ensure pass that DOES change a field (e.g. inboxPath backfill) sti
 // sweeps) must let the app-archive grace elapse, so a FAKE hivecontrol
 // snapshot that stops listing the row is correctly read as app-archived. ----
 test('#11: N simulated reconcile-sweep no-op ensures do not block isAppArchived once a fake hivecontrol snapshot omits the row', () => {
-  const archivedCache = require('../../plugins/anti-hall/companion/lib/devswarm-archived-cache.js');
+  const archivedCache = require('../../plugins/anti-hall-node/companion/lib/devswarm-archived-cache.js');
   const home = tmpHome();
   try {
     // worktreePath must live under `.devswarm/repos/` — isAppArchived's
@@ -1192,7 +1192,7 @@ test('gate-intent with no active gate block recorded for the session -> ok:false
     assert.equal(r.code, 2);
     assert.equal(r.result.ok, false);
     assert.match(r.result.error, /no active devswarm-parent-gate block/);
-    const gateState = require('../../plugins/anti-hall/companion/lib/devswarm-gate-state.js');
+    const gateState = require('../../plugins/anti-hall-node/companion/lib/devswarm-gate-state.js');
     assert.equal(fs.existsSync(gateState.stateFileFor('never-blocked-sess', home)), false, 'must never create a state file out of thin air');
   } finally { rm(home); }
 });
@@ -1200,7 +1200,7 @@ test('gate-intent with no active gate block recorded for the session -> ok:false
 test('gate-intent attaches an intent to the CURRENT persisted sig, preserving every other field', () => {
   const home = tmpHome();
   try {
-    const gateState = require('../../plugins/anti-hall/companion/lib/devswarm-gate-state.js');
+    const gateState = require('../../plugins/anti-hall-node/companion/lib/devswarm-gate-state.js');
     const stateFile = gateState.stateFileFor('active-sess', home);
     fs.mkdirSync(path.dirname(stateFile), { recursive: true });
     fs.writeFileSync(stateFile, JSON.stringify({ sig: 'abc123', blocks: 2, escalated: false, qSig: '', qBlocks: 0, qEscalated: false }));
@@ -1221,7 +1221,7 @@ test('gate-intent attaches an intent to the CURRENT persisted sig, preserving ev
 test('gate-intent respects an explicit --session override', () => {
   const home = tmpHome();
   try {
-    const gateState = require('../../plugins/anti-hall/companion/lib/devswarm-gate-state.js');
+    const gateState = require('../../plugins/anti-hall-node/companion/lib/devswarm-gate-state.js');
     const stateFile = gateState.stateFileFor('explicit-sess', home);
     fs.mkdirSync(path.dirname(stateFile), { recursive: true });
     fs.writeFileSync(stateFile, JSON.stringify({ sig: 'zzz', blocks: 1, escalated: false }));
@@ -1270,7 +1270,7 @@ test('unknown command reports a closed-vocabulary error + exit 2', () => {
 });
 
 // ---- Primary/store READ path (inbox messages / read-primary) ---------------
-const inst = require('../../plugins/anti-hall/companion/install-devswarm-ingest.js');
+const inst = require('../../plugins/anti-hall-node/companion/install-devswarm-ingest.js');
 
 // Seed store rows for a workspace as the ingest daemon would (bodies + hashes).
 // opts.hash (v0.57 mesh) lets a test explicitly seed into the SHARED repoKey

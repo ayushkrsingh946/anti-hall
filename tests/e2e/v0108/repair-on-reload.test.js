@@ -21,7 +21,7 @@ const { spawnSync } = require('node:child_process');
 const { makeHome, rm, runHook, antiHallDir } = require('./lib.js');
 
 const REPO = path.join(__dirname, '..', '..', '..');
-const migrations = require(path.join(REPO, 'plugins', 'anti-hall', 'companion', 'lib', 'migrations.js'));
+const migrations = require(path.join(REPO, 'plugins', 'anti-hall-node', 'companion', 'lib', 'migrations.js'));
 const RUNNING_VERSION = JSON.parse(fs.readFileSync(path.join(REPO, 'plugins', 'anti-hall', '.claude-plugin', 'plugin.json'), 'utf8')).version;
 
 const HOOK = 'repair-on-reload.js';

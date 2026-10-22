@@ -14,9 +14,9 @@ const { testHook } = require('../helpers/spawn-hook.js');
 const { makeHome } = require('../helpers/fixtures.js');
 
 const ROOT = path.join(__dirname, '..', '..');
-const HOOK = path.join(ROOT, 'plugins', 'anti-hall', 'hooks', 'coordinator-work-guard.js');
-const LIB_PATH = path.join(ROOT, 'plugins', 'anti-hall', 'hooks', 'lib', 'coordinator-work.js');
-const REPORT = path.join(ROOT, 'plugins', 'anti-hall', 'scripts', 'dispatch-report.js');
+const HOOK = path.join(ROOT, 'plugins', 'anti-hall-node', 'hooks', 'coordinator-work-guard.js');
+const LIB_PATH = path.join(ROOT, 'plugins', 'anti-hall-node', 'hooks', 'lib', 'coordinator-work.js');
+const REPORT = path.join(ROOT, 'plugins', 'anti-hall-node', 'scripts', 'dispatch-report.js');
 const VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, 'plugins', 'anti-hall', '.claude-plugin', 'plugin.json'), 'utf8')).version;
 const COORD = { CLAUDE_CODE_ENTRYPOINT: 'cli' };
 const WAIT = { ANTIHALL_COORDINATOR_WORK_LOCK_WAIT_MS: '3000' };

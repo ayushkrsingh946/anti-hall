@@ -3,7 +3,7 @@
 // --no-concurrent-recompilation --no-concurrent-sparkplug. Without them Node 24+ can deadlock in process.exit()
 // (a background Maglev/Sparkplug compile waits for a main-thread GC while the main
 // thread waits to join it; nodejs/node#54918, #64274) and the hook hangs until the
-// harness timeout. See plugins/anti-hall/hooks/lib/node-hook-flags.js.
+// harness timeout. See plugins/anti-hall-node/hooks/lib/node-hook-flags.js.
 //
 // The statistical regression check at the bottom is slow (hundreds of hook runs),
 // so it only runs with ANTIHALL_SLOW_TESTS=1.

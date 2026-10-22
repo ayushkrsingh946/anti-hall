@@ -856,6 +856,15 @@ pub fn run() -> i32 {
         return 0;
     }
 
+    // the Node fallback switch is on (`ah-engine fallback node`): the shell wrapper runs the original Node hooks instead of the engine
+    if !state_dir.as_os_str().is_empty() && state_dir.join(s.text("files.fallback_switch")).exists() {
+        let wrapper = hooks_dir.join(s.text("launcher.script_hook"));
+        if wrapper.is_file() {
+            let err = Command::new("sh").arg(wrapper).args(&args).exec();
+            say(&s.msg("msg.launcher_fallback_exec_failed", &[("err", &err.to_string())]));
+        }
+    }
+
     let test = env_nonempty(&s.text("launcher.test_flag_env")).is_some_and(|v| v == "1");
     let knob_keys = [
         "launcher.knob_engine_bin",

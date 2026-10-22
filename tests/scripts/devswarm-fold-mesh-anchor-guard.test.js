@@ -53,7 +53,7 @@ const os = require('node:os');
 const path = require('node:path');
 const cp = require('node:child_process');
 
-const cli = require('../../plugins/anti-hall/scripts/devswarm.js');
+const cli = require('../../plugins/anti-hall-node/scripts/devswarm.js');
 // These fixtures test the fold DECISION (cursor / anchor logic) from the production
 // caller shape: the survivor is a REGISTERED row and the caller HOLDS its lock
 // (cmdRegister -> retireWorktreeDuplicates). A fake-home fixture gets a real tmp
@@ -71,9 +71,9 @@ function asSurvivorCaller(cliObj, s, home, survivorId, cands, opts) {
   if (r && r.lockBusy) throw new Error('fixture: survivor lock unavailable');
   return r;
 }
-const storeLib = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
-const inst = require('../../plugins/anti-hall/companion/install-devswarm-ingest.js');
-const repokey = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
+const storeLib = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
+const inst = require('../../plugins/anti-hall-node/companion/install-devswarm-ingest.js');
+const repokey = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
 const mutantKit = require('./lib/devswarm-mutant-kit.js');
 
 function tmpHome() {
@@ -311,7 +311,7 @@ test('MUTATION-KILL: removing the meshId-anchor guard reproduces the pre-fix cur
 // =======================================================================
 
 const meshStore = storeLib;
-const inboxCursor = require('../../plugins/anti-hall/companion/lib/devswarm-inbox-cursor.js');
+const inboxCursor = require('../../plugins/anti-hall-node/companion/lib/devswarm-inbox-cursor.js');
 
 // PATHS COME FROM THE HELPERS, NEVER FROM A HARDCODED FILENAME. The field
 // report and the code cite different extensions for the read-path ack file
@@ -558,7 +558,7 @@ test('REASON: an anchor left by the guard is reported as mesh-anchor-attended, n
 // ("never dormant") and the predicate fails open to live. Written through the
 // production path shape (heartbeats/<id>.json {ts}) that liveness.heartbeatTs
 // reads, via the exported heartbeatPathFor — never a hand-spelled filename.
-const liveness = require('../../plugins/anti-hall/companion/lib/liveness.js');
+const liveness = require('../../plugins/anti-hall-node/companion/lib/liveness.js');
 function writeStaleHeartbeat(home, id, ageMs) {
   const p = liveness.heartbeatPathFor(id, home);
   fs.mkdirSync(path.dirname(p), { recursive: true });

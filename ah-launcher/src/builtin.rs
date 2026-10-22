@@ -103,6 +103,7 @@ pub const STRS: &[(&str, &str)] = &[
     ("launcher.fallback_list_codex", "ah-fallback.codex.list"),
     ("launcher.script_integrity", "ah-engine-integrity.sh"),
     ("launcher.script_bootstrap", "ah-engine-bootstrap.sh"),
+    ("launcher.script_hook", "ah-hook.sh"),
     ("launcher.script_doctor", "ah-doctor.sh"),
     ("launcher.engine_lock_file", "ah-engine.lock"),
     ("launcher.engine_bin_rel", "bin/ah-engine"),
@@ -110,6 +111,7 @@ pub const STRS: &[(&str, &str)] = &[
     ("launcher.run_base_dir", "tmp"),
     ("launcher.tmp_dir_prefix", "ah-hook-"),
     ("launcher.run_dir_prefix", "ah-launch."),
+    ("files.fallback_switch", "fallback.node"),
     ("files.launcher_log", "launcher.log"),
     ("files.launcher_drops", "launcher.drops"),
     ("files.launcher_spawn_lock", "launcher.spawn.lock"),
@@ -121,6 +123,10 @@ pub const STRS: &[(&str, &str)] = &[
     (
         "msg.launcher_bad_host",
         "anti-hall: ignoring unknown --host value",
+    ),
+    (
+        "msg.launcher_fallback_exec_failed",
+        "anti-hall: cannot run the Node fallback wrapper: {err}; the engine answers",
     ),
     (
         "msg.launcher_no_doctor",

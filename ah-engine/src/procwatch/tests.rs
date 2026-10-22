@@ -195,7 +195,7 @@ fn unmarked_young_unreadable_and_protected_processes_are_never_candidates() {
     f.rows.push(row(952, 1, 5 * DAY, "/Users/u/.anti-hall/ah-engine-live/bundle/ah-engine serve"));
     f.envs.insert(952, marked(4_000_000));
     f.envs.insert(950, marked(4_000_000));
-    f.rows.push(row(951, 1, 5 * DAY, "/Users/u/.claude/plugins/marketplaces/anti-hall/plugins/anti-hall/companion/ingest.js"));
+    f.rows.push(row(951, 1, 5 * DAY, "/Users/u/.claude/plugins/marketplaces/anti-hall/plugins/anti-hall-node/companion/ingest.js"));
     f.envs.insert(951, marked(4_000_000));
     let found = classify_with(&mut f, &h);
     assert!(found.iter().all(|x| x.pid != 950 && x.pid != 951 && x.pid != 952), "the live engine and the plugin's companions are protected");
@@ -928,7 +928,7 @@ fn shadow_stuck_agents_match_the_node_watchdog_on_heartbeats() {
         std::fs::write(dir.join(format!("{id}.json")), json!({"id": id, "ts": ts, "status": status, "step": "x", "session": "s1"}).to_string()).expect("hb");
     }
     let out = std::process::Command::new("node")
-        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("../plugins/anti-hall/hooks/agent-watchdog.js"))
+        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("../plugins/anti-hall-node/hooks/agent-watchdog.js"))
         .arg((20.0 * min).to_string())
         .env("HOME", &home)
         .output()
@@ -953,7 +953,7 @@ fn shadow_stuck_agents_match_the_node_watchdog_on_heartbeats() {
 /// Whether the Node session-end reaper (the shadow of the engine's `session-end-mcp-reaper` script) selects `cmd` as an orphaned
 /// MCP server: parent PID 1, an MCP signature, not a test runner or dev server.
 fn node_reaper_selects(cmd: &str) -> bool {
-    let hooks = Path::new(env!("CARGO_MANIFEST_DIR")).join("../plugins/anti-hall/hooks");
+    let hooks = Path::new(env!("CARGO_MANIFEST_DIR")).join("../plugins/anti-hall-node/hooks");
     let js = "const r=require(process.argv[1]+'/session-end-mcp-reaper.js');const m=require(process.argv[1]+'/../companion/mcp-reaper.js');process.stdout.write(String(r.matchesInvariant({pid:10,ppid:1,cmd:process.argv[2]},m,null,null)));";
     let out = std::process::Command::new("node").args(["-e", js]).arg(&hooks).arg(cmd).output().expect("run node");
     String::from_utf8_lossy(&out.stdout) == "true"

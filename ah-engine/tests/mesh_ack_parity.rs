@@ -10,7 +10,7 @@
 //!   within ten minutes of the real clock is masked, since Node stamps `ackFor` and `setCursor` with `Date.now()`), and
 //!   every file of the home tree (cursor files, receipts, summaries; the cursor-write journals without their `ts` and
 //!   `pid`) are byte-identical to Node's;
-//! * a `defer` case: the engine must write NOTHING and exit 75 (`mesh_write.exit_defer`) when it cannot run Node (the
+//! * a `defer` case: the engine must write NOTHING and exit 75 (`mesh_write.exit_unable`) when it cannot run Node (the
 //!   third copy: `node` is not on its PATH), and hand the verb to Node otherwise (the second copy), whose output is then
 //!   the engine's output. That is the exit-75 contract: 75 means "deferred, nothing written".
 #![allow(clippy::unwrap_used, clippy::expect_used)] // a test crate: a panic is the failure report, and E2 exempts tests
@@ -525,14 +525,14 @@ fn ack_primary_matches_node_byte_for_byte_and_defers_without_writing() {
             deferred += 1;
             // handed to Node: the engine's result is Node's own (a deferral that Node answers with ok:true writes with its
             // own clock, so only the code and a refusal's text are compared exactly)
-            assert_eq!(e.code, 75, "{}: no Node to hand the verb to, the engine is unable (75)", c.name);
+            assert_eq!(e.code, 69, "{}: no Node to hand the verb to, the engine is unable (69, a visible error)", c.name);
             assert!(e.stdout.is_empty(), "{}: an unable engine prints nothing: {}", c.name, e.stdout);
-            // the contract: deferred means NOTHING written, and exit 75 when the engine cannot run Node
+            // the contract: deferred means NOTHING written, and exit 69 (exit_unable) when the engine cannot do it
             let before = fx.root.join(format!("{}-before", c.name));
             copy_tree(&fx.seed_home, &before);
             seed(&before, &fx, &c.spec);
             let d = engine_verb(&hd, &hd.join("state"), &cwd, &argv, now, None, &[extra.clone(), vec![("PATH", nonode.as_str())]].concat());
-            assert_eq!(d.code, 75, "{}: a deferral the engine cannot hand to Node exits 75, got {} / {}", c.name, d.code, d.stdout);
+            assert_eq!(d.code, 69, "{}: a deferral the engine cannot hand to Node exits 69 (exit_unable), got {} / {}", c.name, d.code, d.stdout);
             assert!(d.stdout.is_empty(), "{}: nothing is printed on a deferral: {}", c.name, d.stdout);
             assert_same_home(c.name, &before, &hd, &fx.repo_key, "deferral wrote");
         }

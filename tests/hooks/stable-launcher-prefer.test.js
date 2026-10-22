@@ -9,7 +9,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { testHook } = require('../helpers/spawn-hook.js');
 const { makeHome } = require('../helpers/fixtures.js');
-const sl = require('../../plugins/anti-hall/hooks/lib/stable-launcher.js');
+const sl = require('../../plugins/anti-hall-node/hooks/lib/stable-launcher.js');
 
 const PINNED = path.join('scripts', 'devswarm.js');
 

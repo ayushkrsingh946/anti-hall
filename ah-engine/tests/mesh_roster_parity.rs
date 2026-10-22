@@ -483,7 +483,7 @@ fn roster_matches_node_for_a_project_with_no_rows_and_defers_every_other() {
             assert_eq!(verify["result"], "none", "{}: a Node shadow record exists, but no shadow runs any more: {verify}", c.name);
         } else {
             deferred += 1;
-            assert_eq!(e.code, 75, "{}: no Node to hand the verb to, the engine is unable (75)", c.name);
+            assert_eq!(e.code, 69, "{}: no Node to hand the verb to, the engine is unable (69, a visible error)", c.name);
             let pre_tree = home_files(&hd);
             let pre_db = store_dump(&hd, &empty_key);
             let ran = stub.as_ref().map(|s| s.join("hivecontrol.ran"));
@@ -491,7 +491,7 @@ fn roster_matches_node_for_a_project_with_no_rows_and_defers_every_other() {
                 fs::remove_file(r).ok(); // Node's own run above started the stub
             }
             let d = run_engine(&hd, &nonode);
-            assert_eq!(d.code, 75, "{}: a deferral the engine cannot hand to Node exits 75, got {} / {}", c.name, d.code, d.stdout);
+            assert_eq!(d.code, 69, "{}: a deferral the engine cannot hand to Node exits 69 (exit_unable), got {} / {}", c.name, d.code, d.stdout);
             assert!(d.stdout.is_empty(), "{}: nothing is printed on a deferral: {}", c.name, d.stdout);
             assert_eq!(last_log(&hd.join("state"))["result"], "defer", "{}", c.name);
             assert!(pre_tree == home_files(&hd) && pre_db == store_dump(&hd, &empty_key), "{}: deferral wrote", c.name);

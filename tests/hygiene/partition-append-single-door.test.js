@@ -22,23 +22,23 @@ const PROOFS = 'tests/scripts/devswarm-partition-lock-proofs.test.js';
 
 // file -> { function (or '*'): { claim, proof: [test files] } }
 const ALLOWED = {
-  'plugins/anti-hall/scripts/devswarm.js': {
+  'plugins/anti-hall-node/scripts/devswarm.js': {
     appendIntoPartition: { claim: 'THE door itself', proof: ['tests/scripts/devswarm-partition-append.test.js', PROOFS] },
     cmdSend: { claim: 'writes the recipient partition only under its lock', proof: [PROOFS] },
     cmdArchiveRequest: { claim: 'writes the child partition only under its lock', proof: [PROOFS] },
     cmdHeartbeat: { claim: 'writes ONLY the shared broadcast partition', proof: [PROOFS] },
     cmdMergeVerb: { claim: 'writes ONLY the shared broadcast partition', proof: [PROOFS] },
   },
-  'plugins/anti-hall/companion/lib/devswarm-store.js': {
+  'plugins/anti-hall-node/companion/lib/devswarm-store.js': {
     '*': { claim: 'the store API itself writes exactly where it is told', proof: [PROOFS] },
   },
-  'plugins/anti-hall/companion/devswarm-migrate.js': {
+  'plugins/anti-hall-node/companion/devswarm-migrate.js': {
     '*': { claim: 'one-time migration: same-id copy — rows land in the partition they came from', proof: ['tests/companion/devswarm-migrate.test.js', 'tests/companion/devswarm-migrate-repokey.test.js'] },
   },
 };
 // scripts/devswarm.js and scripts/devswarm-lib/*.js are ONE logical unit: the
 // devswarm.js allowlist entry covers the lib modules too.
-const DEVSWARM_JS = 'plugins/anti-hall/scripts/devswarm.js';
+const DEVSWARM_JS = 'plugins/anti-hall-node/scripts/devswarm.js';
 const readUnit = (f) => (f === DEVSWARM_JS ? devswarmSource.readAll() : fs.readFileSync(path.join(REPO, f), 'utf8'));
 const CALL = /\b(appendMeshMessage|appendMeshRow|appendMessage)\s*\(/;
 
@@ -83,7 +83,7 @@ test('every allowlist entry is PROVEN by a named test carrying its `proves:` mar
   // The ingest writer goes through the door (see below) AND runs behind the
   // delivery WAL (fsynced before ingestPayload, replayed until closed), so a
   // door refusal (busy/gone) leaves the batch pending instead of dropping it.
-  const ingest = fs.readFileSync(path.join(REPO, 'plugins/anti-hall/companion/devswarm-ingest.js'), 'utf8');
+  const ingest = fs.readFileSync(path.join(REPO, 'plugins/anti-hall-node/companion/devswarm-ingest.js'), 'utf8');
   assert.match(ingest, /require\('\.\/lib\/devswarm-read-wal\.js'\)/, 'ingest must load the delivery WAL');
   assert.match(ingest, /readWal\.closeBatch\(/, 'ingest must close WAL batches only after ingestPayload');
 });
@@ -100,11 +100,11 @@ test('appendIntoPartition: verified lock (never a caller claim), registration re
   assert.doesNotMatch(src, /alreadyLocked|survivorLocked/, 'no caller-claimed lock opt-out exists');
   // Every cross-partition mover routes through it.
   for (const [file, fn] of [
-    ['plugins/anti-hall/scripts/devswarm.js', 'forwardArchivedOrphanUnread'],
-    ['plugins/anti-hall/scripts/devswarm.js', 'foldGroupIntoSurvivor'],
-    ['plugins/anti-hall/scripts/devswarm.js', 'rehomeAcrossStores'],
-    ['plugins/anti-hall/companion/lib/recovery.js', 'deliverEscalation'],
-    ['plugins/anti-hall/companion/devswarm-ingest.js', 'ingestPayload'],
+    ['plugins/anti-hall-node/scripts/devswarm.js', 'forwardArchivedOrphanUnread'],
+    ['plugins/anti-hall-node/scripts/devswarm.js', 'foldGroupIntoSurvivor'],
+    ['plugins/anti-hall-node/scripts/devswarm.js', 'rehomeAcrossStores'],
+    ['plugins/anti-hall-node/companion/lib/recovery.js', 'deliverEscalation'],
+    ['plugins/anti-hall-node/companion/devswarm-ingest.js', 'ingestPayload'],
   ]) {
     const s = readUnit(file);
     const i = s.indexOf('function ' + fn + '(');

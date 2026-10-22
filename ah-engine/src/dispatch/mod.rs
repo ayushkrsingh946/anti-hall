@@ -411,7 +411,7 @@ pub fn defer(event: &str, why: &str) -> Outcome {
 /// ([`closed`], bounded on Stop), `open` lets the call through with a loud stderr line. Every answer is logged and counted
 /// in telemetry as the `dispatcher-<path>` hook. Always `Some` (the launcher client still calls it as an `Option`).
 pub fn no_node_answer(event: &str, payload: Option<&Value>, path: &str, why: &str) -> Option<Outcome> {
-    crate::obs::counters::handback(crate::obs::counters::Handback::NativeUnable, &format!("dispatch:{path}"));
+    crate::obs::counters::handback(crate::obs::counters::Handback::Abandoned, &format!("dispatch:{path}"));
     use crate::telemetry::event::Outcome as T;
     let guard = guarded(event);
     let closed_mode = guard && defaults::raw("dispatch.failure_mode").get(path).and_then(|v| v.as_str()).unwrap_or("closed") != "open";
@@ -489,12 +489,26 @@ pub fn run(raw: &str, args: &Args) -> Outcome {
     o
 }
 
-/// An entry whose built-in check gave no answer (or that has none): its hook command is NOT launched any more. The hook ends as one
-/// that could not run, counted `native_unable` at `dispatch:hook:<id>`; a guard event then follows its configured failure mode
-/// (`dispatch.failure_mode`), any other event goes on without it.
+/// An entry without a built-in check: its hook command is NOT launched any more. The hook ends as one that could not run,
+/// counted `abandoned` at `dispatch:hook:<id>`; a guard event then follows its configured failure mode (`dispatch.failure_mode`),
+/// any other event goes on without it. No shipped entry is without a check (a test holds that), so this is reached only by an entry
+/// a user configured; an entry WITH a check never gets here: see [`resolve_unanswered`].
 fn start_node(e: &table::Entry, _raw: &[u8], _payload: Option<&File>) -> node::Running {
-    crate::obs::counters::handback(crate::obs::counters::Handback::NativeUnable, &format!("dispatch:hook:{}", e.id));
+    crate::obs::counters::handback(crate::obs::counters::Handback::Abandoned, &format!("dispatch:hook:{}", e.id));
     node::unavailable(e)
+}
+
+/// The decision for an entry whose built-in check gave no answer (a deferral of any origin: a cut call, an incomplete environment,
+/// a daemon that could not run it). There is no Node hook to hand it to, so the check's failure policy decides
+/// ([`crate::script::unanswered`]): `open` allows (counted `abandoned` and told to the user once per session), `closed` blocks on a
+/// guard event. Never a hook that "could not run", which on a guard event would fail the whole event closed.
+fn resolve_unanswered(e: &table::Entry, event: &str) -> combine::HookResult {
+    crate::obs::counters::handback(crate::obs::counters::Handback::Abandoned, &format!("dispatch:hook:{}", e.id));
+    let check = e.check.as_deref().unwrap_or(&e.id);
+    match native::answer_of(&e.id, Some(crate::script::unanswered(check, event))) {
+        native::Answer::Decided(r, _) => r,
+        native::Answer::Defer => combine::HookResult::quiet(&e.id), // unreachable: `unanswered` is never a deferral
+    }
 }
 
 /// [`start_node`] for a hook that runs for `event`, so its telemetry event says which.
@@ -748,7 +762,8 @@ fn run_core(raw: &str, args: &Args, payload: Option<&File>, complete: bool, tele
             // means the daemon was down or unusable and every entry runs its Node hook): this process runs it
             // below, once the other hooks are running beside it; the Node hook only if it still defers
             Some((_, Answer::Defer)) if parsed.is_some() && e.check.as_deref().is_some_and(|c| blocking_checks.contains(&c)) => blocking.push(i),
-            _ => started.push((i, start_node_for(e, &args.event, raw.as_bytes(), payload))),
+            _ if shadow[i] => {} // measured only: nothing decides in its place
+            _ => results[i] = Some(resolve_unanswered(e, &args.event)),
         }
     }
     if !blocking.is_empty() {
@@ -758,7 +773,8 @@ fn run_core(raw: &str, args: &Args, payload: Option<&File>, complete: bool, tele
             match parsed.as_ref().map(|p| native::run_entry(e, &meta, p)) {
                 Some(Answer::Decided(r, _)) if shadow[i] => shadow_results[i] = Some(r),
                 Some(Answer::Decided(r, _)) => results[i] = Some(r),
-                _ => started.push((i, start_node_for(e, &args.event, raw.as_bytes(), payload))),
+                _ if shadow[i] => {}
+                _ => results[i] = Some(resolve_unanswered(e, &args.event)),
             }
         }
     }
@@ -824,6 +840,7 @@ fn run_core(raw: &str, args: &Args, payload: Option<&File>, complete: bool, tele
             );
         }
     }
+    crate::nodeback::shadow::note(&entries, &results, &shadow); // what the engine decided per check (a no-op unless the shadow follows this call)
     let mut results: Vec<combine::HookResult> = results.into_iter().flatten().collect();
     if parsed.is_some() {
         inject::apply(&args.event, &p, &req_env, &mut results); // token cuts: pass on only what the model does not already hold
@@ -944,6 +961,7 @@ pub fn hook_main(args: &[String]) -> i32 {
         }
         // Non-guard events cannot block; keep matching Node's replacement-character decode there.
         let raw = String::from_utf8_lossy(raw_bytes).to_string();
+        let followed = crate::nodeback::shadow::begin(&a);
         let o = crate::failopen::with_notice(&raw, &a.event, run_inner(&raw, &a, payload.file.as_ref(), !over_cap && utf8.is_ok()));
         crate::discard::harmless(std::io::stderr().write_all(o.err.as_bytes())); // keep: a closed pipe leaves nobody to tell
         let mut so = std::io::stdout();
@@ -953,6 +971,7 @@ pub fn hook_main(args: &[String]) -> i32 {
         // Last step: until here the wrapper finds the wait marker (the answer is still being delivered) and from here the done mark
         // (launcher RCA: releasing it when `run_core` returned left a window with neither, in which a finished answer was killed).
         crate::client::release_wait_marker();
+        crate::nodeback::shadow::finish(followed, &raw, &o); // after the answer is out: the Node shadow can no longer touch it
         o.code
     });
     res.unwrap_or_else(|_| {
@@ -985,6 +1004,39 @@ mod tests {
     /// right entries are selected): only the top-level key counts, wherever it sits, whatever text elsewhere looks like one.
     fn scanned(json: &str) -> Result<Option<String>, ()> {
         scan_tool_name(&mut json.as_bytes())
+    }
+
+    /// Standing guarantee: no production deferral reaches `start_node`. Every shipped row has a built-in check (so only a
+    /// user-configured row can reach it), and an entry whose check gave no answer is resolved by the check's failure policy into
+    /// a decision (never "a hook that could not run", which fails a guard event closed), on every host, event and registered check.
+    #[test]
+    fn no_shipped_entry_can_defer_to_a_node_hook_that_is_not_launched() {
+        let mut rows = 0;
+        for host in table::hosts() {
+            for event in table::events(host) {
+                for e in table::entries(host, event) {
+                    rows += 1;
+                    let check = e.check.as_deref().unwrap_or_else(|| panic!("{host}/{event}/{}: a shipped row without a built-in check", e.id));
+                    assert!(crate::checks::get(check).is_some(), "{host}/{event}/{}: unknown check {check}", e.id);
+                    let r = resolve_unanswered(&e, event);
+                    assert_eq!(r.id, e.id);
+                    let closed = crate::script::failure_mode(check) == defaults::text("script.failure_mode_closed");
+                    let guard = defaults::list("dispatch.guard_events").contains(&event);
+                    assert_eq!(r.code, Some(if closed && guard { 2 } else { 0 }), "{host}/{event}/{}: an unanswered check is a decision", e.id);
+                }
+            }
+        }
+        assert!(rows > 50, "the shipped table was not read ({rows} rows)");
+    }
+
+    #[test]
+    fn an_unanswered_stop_guard_and_session_start_role_allow_instead_of_failing_the_event_closed() {
+        for (host, event, check) in [("claude", "Stop", "devswarm-parent-gate"), ("claude", "SessionStart", "devswarm-child-role")] {
+            let e = table::entries(host, event).into_iter().find(|e| e.check.as_deref() == Some(check)).unwrap_or_else(|| panic!("{check} on {event}"));
+            let r = resolve_unanswered(&e, event);
+            assert_eq!(r.code, Some(0), "{check}");
+            assert!(!r.err.contains("BLOCKED"), "{check}: {}", r.err);
+        }
     }
 
     #[test]

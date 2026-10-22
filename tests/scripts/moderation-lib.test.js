@@ -101,7 +101,7 @@ test('privacy-scan diff parser reports file:line of added lines only', () => {
 });
 
 test('prRules: size, type, risks, linked issue, release exemption', () => {
-  const files = [{ filename: '.github/workflows/x.yml', additions: 30, deletions: 5 }, { filename: 'plugins/anti-hall/hooks/git-guard.js', additions: 100, deletions: 0 }];
+  const files = [{ filename: '.github/workflows/x.yml', additions: 30, deletions: 5 }, { filename: 'plugins/anti-hall-node/hooks/git-guard.js', additions: 100, deletions: 0 }];
   const r = L.prRules({ title: 'fix(git-guard): allow feature push', body: 'Closes #12', files, headRef: 'feat', sameRepo: true, baseRef: 'dev' }, cfg);
   assert.strictEqual(r.size, 'size:M');
   assert.strictEqual(r.type, 'type:bug');
@@ -126,7 +126,7 @@ test('triageRules: form/labels win; keywords fill the rest', () => {
 
 test('verifiedPaths keeps only existing, relative, in-scope paths', () => {
   const root = path.resolve(__dirname, '..', '..');
-  const ok = verifiedPaths(['README.md', '/etc/passwd', '../x', 'docs/GUIDE.md', 'nope/missing.js', 'plugins/anti-hall/hooks'], root);
+  const ok = verifiedPaths(['README.md', '/etc/passwd', '../x', 'docs/GUIDE.md', 'nope/missing.js', 'plugins/anti-hall-node/hooks'], root);
   assert.ok(ok.includes('README.md') && !ok.includes('/etc/passwd') && !ok.includes('../x') && !ok.includes('nope/missing.js'));
   assert.deepStrictEqual(verifiedPaths(['plugins/anti-hall/README.md', 'README.md'], root, ['docs/', '*.md']), ['README.md']);
 });

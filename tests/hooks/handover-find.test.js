@@ -14,7 +14,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 
-const find = require('../../plugins/anti-hall/hooks/lib/handover-find.js');
+const find = require('../../plugins/anti-hall-node/hooks/lib/handover-find.js');
 
 function makeRepo() {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'antihall-repoRoot-')));
@@ -79,7 +79,7 @@ test('repoRoot(cwd): a dotfiles repo AT $HOME falls back to the raw cwd instead 
     process.env.HOME = fakeHome;
     // Sanity: the toplevel really does resolve to $HOME before the guard --
     // otherwise this test would pass vacuously.
-    const identity = require('../../plugins/anti-hall/companion/lib/identity.js');
+    const identity = require('../../plugins/anti-hall-node/companion/lib/identity.js');
     identity.clearCache();
     const rawCtx = identity.resolveContext(subdir);
     assert.strictEqual(rawCtx.toplevel, fakeHome, 'test setup sanity: the dotfiles repo toplevel must equal $HOME');

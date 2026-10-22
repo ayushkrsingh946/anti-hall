@@ -1273,5 +1273,37 @@ test_launcher_handoff() {
 }
 check launcher_handoff test_launcher_handoff
 
+# Node fallback switch (stage 2 of the Node backup): while the marker `fallback.node` exists in the state directory the wrapper (and the
+# launcher shim in front of it) runs the original Node hooks directly: a force push is blocked by the Node git-guard (exit 2), the
+# launcher and the engine are never started, and the verdict is in the shadow ledger with source node. Without the marker the launcher
+# is used again. Needs Node on PATH (the case is skipped without it: the no_node suite proves the engine path needs none).
+test_fallback_switch_runs_node_hooks() {
+  command -v node >/dev/null 2>&1 || return 0
+  fh=$tmp/fb-home
+  mkdir -p "$fh/.anti-hall/ah-engine/bin"
+  printf '#!/bin/sh\n: >"%s/fb.launcher-ran"\nexit 7\n' "$tmp" >"$fh/.anti-hall/ah-engine/bin/ah-hook"
+  chmod +x "$fh/.anti-hall/ah-engine/bin/ah-hook"
+  fbp=$tmp/fb-payload.json
+  printf '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git push --force origin main"},"cwd":"%s","session_id":"fb"}' "$tmp" >"$fbp"
+  : >"$fh/.anti-hall/ah-engine/fallback.node"
+  rm -f "$tmp/fb.launcher-ran"
+  set +e
+  HOME=$fh sh "$wrapper" PreToolUse <"$fbp" >"$tmp/fb.out" 2>"$tmp/fb.err"
+  rc=$?
+  set -e
+  [ "$rc" -eq 2 ] || return 1
+  grep -q 'force push' "$tmp/fb.out" "$tmp/fb.err" || return 1
+  [ ! -f "$tmp/fb.launcher-ran" ] || return 1
+  grep -q '"src":"node".*"chk":"git-guard","v":"block"' "$fh/.anti-hall/ah-engine/shadow.ndjson" || return 1
+  # switch off: the launcher is handed the call again
+  rm -f "$fh/.anti-hall/ah-engine/fallback.node"
+  set +e
+  HOME=$fh sh "$wrapper" PreToolUse <"$fbp" >/dev/null 2>&1
+  rc=$?
+  set -e
+  [ "$rc" -eq 7 ] && [ -f "$tmp/fb.launcher-ran" ]
+}
+check fallback_switch_runs_node_hooks test_fallback_switch_runs_node_hooks
+
 printf 'wrapper tests: %s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

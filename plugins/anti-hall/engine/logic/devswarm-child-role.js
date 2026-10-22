@@ -171,7 +171,7 @@ function decide(p, opts, event) {
   var root = jx.isObj(opts) && typeof opts.plugin_root === 'string' ? opts.plugin_root : ah.env.get(ah.cfg('env.plugin_root'));
   dwInstallLaunchers(root); // as the Node hook did when it was loaded, before anything else it does
   var l = dwLaunchersNative(root, true);
-  if (l === null) { ah.unable('devswarm-child-role:no_home_or_root'); return 'allow'; } // no usable home or plugin root: no launcher can be named
+  if (l === null) { ah.unable('devswarm-child-role:no_home_or_root', 'abandoned'); return 'allow'; } // no usable home or plugin root: no launcher can be named
   if (!ah.settings.bool('devswarm_role.sw_child_role') || !dwActive()) return 'allow';
   var child = dwNonBlank(ah.cfg('devswarm_role.branch_env'));
   var seat = child ? { notices: [], id: null } : dwPrimarySeat(p, l.cli, dwNonBlank(ah.cfg('devswarm_role.repo_env')));

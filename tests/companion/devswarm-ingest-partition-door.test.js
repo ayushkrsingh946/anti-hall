@@ -14,10 +14,10 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const ingest = require('../../plugins/anti-hall/companion/devswarm-ingest.js');
-const storeLib = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
-const readWal = require('../../plugins/anti-hall/companion/lib/devswarm-read-wal.js');
-const recovery = require('../../plugins/anti-hall/companion/lib/recovery.js');
+const ingest = require('../../plugins/anti-hall-node/companion/devswarm-ingest.js');
+const storeLib = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
+const readWal = require('../../plugins/anti-hall-node/companion/lib/devswarm-read-wal.js');
+const recovery = require('../../plugins/anti-hall-node/companion/lib/recovery.js');
 
 function tmpHome() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'anti-hall-ingest-door-'));

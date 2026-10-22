@@ -11,7 +11,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const ARCHIVED = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'lib', 'devswarm-archived.js');
+const ARCHIVED = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'lib', 'devswarm-archived.js');
 const { isArchivedWorkspace } = require(ARCHIVED);
 
 function tmpHome() {
@@ -71,7 +71,7 @@ test('item 3: the parent-gate consults it and drops the stale/escalated axis for
   // Stop hook: the suppressor must sit in the same suppressor chain as the
   // heartbeat and archive-ready ones, and must touch ONLY staleOrEscalated.
   const gate = fs.readFileSync(
-    path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'hooks', 'devswarm-parent-gate.js'), 'utf8');
+    path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'hooks', 'devswarm-parent-gate.js'), 'utf8');
   // v0.110: the predicate is reached through THE one row-eligibility
   // projection (which wraps the row-state reducer).
   assert.ok(gate.includes("require('../companion/lib/row-eligibility.js')"), 'gate must import the row-eligibility projection');

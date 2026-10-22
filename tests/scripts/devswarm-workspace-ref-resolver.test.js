@@ -14,9 +14,9 @@ const cp = require('node:child_process');
 
 process.env.ANTI_HALL_LOG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'anti-hall-wsref-log-'));
 
-const cli = require('../../plugins/anti-hall/scripts/devswarm.js');
-const storeLib = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
-const repokey = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
+const cli = require('../../plugins/anti-hall-node/scripts/devswarm.js');
+const storeLib = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
+const repokey = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
 
 function tmpHome() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'anti-hall-wsref-'));

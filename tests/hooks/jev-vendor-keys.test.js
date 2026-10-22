@@ -12,7 +12,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { makeHome } = require('../helpers/fixtures.js');
 
-const HOOKS = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'hooks', 'lib');
+const HOOKS = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'hooks', 'lib');
 const LIBS = ['jev-client.js', 'credentials.js', 'settings.js'].map((f) => require.resolve(path.join(HOOKS, f)));
 function fresh() { for (const l of LIBS) delete require.cache[l]; return require(path.join(HOOKS, 'jev-client.js')); }
 

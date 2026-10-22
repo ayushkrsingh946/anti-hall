@@ -35,14 +35,14 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const cp = require('node:child_process');
-const installIngest = require('../../plugins/anti-hall/companion/install-devswarm-ingest.js');
-const repokey = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
-const replyStateLib = require('../../plugins/anti-hall/companion/lib/devswarm-reply-state.js');
+const installIngest = require('../../plugins/anti-hall-node/companion/install-devswarm-ingest.js');
+const repokey = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
+const replyStateLib = require('../../plugins/anti-hall-node/companion/lib/devswarm-reply-state.js');
 
 const REPO_CWD = process.cwd();
 const REPO_KEY = repokey.repoKeyForWorktree(REPO_CWD);
 const OWN_ID = installIngest.primaryWorkspaceId(REPO_CWD);
-const HOOKS = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'hooks');
+const HOOKS = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'hooks');
 
 // --- unit: the shared primitive ------------------------------------------
 

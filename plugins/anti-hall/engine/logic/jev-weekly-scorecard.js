@@ -18,7 +18,7 @@ function pickCandidate(card) {
 }
 
 function decide(p, opts) {
-  if (!gates.homeKnown()) { ah.unable('jev-weekly-scorecard:no_home'); return 'allow'; } // no absolute HOME: no latch to keep
+  if (!gates.homeKnown()) { ah.unable('jev-weekly-scorecard:no_home', 'abandoned'); return 'allow'; } // no absolute HOME: no latch to keep
   var root = gates.pluginRoot(opts);
   if (gates.judgeChild()) return 'allow';
   if (!gates.isTrue('session_gates.jev_enabled_setting', gates.legacyEnabledStrict(), root)) return 'allow';
@@ -31,7 +31,7 @@ function decide(p, opts) {
   if (now - (last === undefined ? 0 : last) < ah.cfgNum('jev_weekly.period_ms')) return 'allow';
   ah.commit(); // the build below reads the whole decision log: the time limit is lifted from here
   var card = ah.jev.weeklyScorecard();
-  if (card === null) { ah.unable('jev-weekly-scorecard:report_not_built'); return 'allow'; } // nothing is stamped: the week is asked again
+  if (card === null) { ah.unable('jev-weekly-scorecard:report_not_built', 'abandoned'); return 'allow'; } // nothing is stamped: the week is asked again
   // `writeLatch`: best effort; a failure is swallowed and the notice still shows.
   ah.state.op(ah.home(), 'write', ah.cfg('session_gates.anti_hall_dir') + '/' + ah.cfg('jev_weekly.latch_file'), '{' + JSON.stringify(key) + ':' + Math.floor(now) + '}');
   var c = pickCandidate(card);

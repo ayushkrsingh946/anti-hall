@@ -620,15 +620,74 @@ pub fn overall_degraded(summary: &Value, fail_open_degraded: bool) -> bool {
     summary.get("degraded").and_then(serde_json::Value::as_bool).unwrap_or(false) || fail_open_degraded
 }
 
+/// Fold an unhealthy fail-open window into the summary as one more reason (`count` fail-opens, `top` the commonest cause), so the
+/// top-level flag, `degraded_reason` and `reasons` always agree. `None` (window ok) leaves the summary as it is.
+pub fn add_fail_open_reason(summary: &mut Value, unhealthy: Option<(u64, String)>) {
+    let Some((count, top)) = unhealthy else { return };
+    let row = json!({"group": defaults::text("health.group_fail_open"), "kind": "fail_open", "code": top, "count": count, "first_ts": Value::Null, "last_ts": now_ms(), "detail": ""});
+    let mut reasons = summary["reasons"].as_array().cloned().unwrap_or_default();
+    reasons.push(row);
+    let rendered = format!("fail_open:{top} x{count}");
+    if summary["degraded_reason"].is_null() {
+        summary["degraded_reason"] = json!(rendered);
+    } else if let Some(r) = summary["degraded_reason"].as_str() {
+        summary["degraded_reason"] = json!(format!("{r} +fail_open"));
+    }
+    summary["evidence"] = json!(summary["evidence"].as_u64().unwrap_or(0) + count);
+    summary["reasons"] = Value::Array(reasons);
+    summary["degraded"] = json!(true);
+}
+
 /// The engine's health over the last `health.degraded_window_s`: self-restarts by reason, the crash-loop breaker and the client
 /// breaker with when they tripped, and how often a call fell back to Node and why. `degraded` is true when the engine is
 /// not at full strength (a restart in the window, the crash-loop breaker tripped, the client breaker open, or a defaults
 /// fallback of a `health.degraded_kinds` kind in the window). Everything is
 /// read from the event log, so it works with the daemon down and survives a restart.
 pub fn summary() -> Value {
+    summary_from(&events(), now_ms(), crashloop_remaining(), breaker_remaining())
+}
+
+/// Every cause of `degraded`, each with how often it happened and when it was first and last seen: a restart (by kind and code) in
+/// the window, a defaults fallback in the window and not older than the running daemon (a fresh daemon reloads the defaults, so a
+/// fallback logged before its start is already answered; one still failing is logged again at start), the crash-loop breaker,
+/// the client breaker. `degraded` is exactly "this list is not empty", so the flag can never ship without its reason.
+fn degraded_reasons(ev: &[Event], now: u64, window: Duration, loop_left: Option<Duration>, breaker_left: Option<Duration>) -> Vec<Value> {
+    let floor = now.saturating_sub(window.as_millis() as u64);
+    let started = ev.iter().rev().find(|e| e.kind == defaults::text("health.start_kind")).map_or(0, |e| e.ts);
+    let (crashy, kinds, resolved) = (crashy(), defaults::list("health.degraded_kinds"), defaults::list("health.resolved_by_start_kinds"));
+    // (group, kind, code) -> (count, first_ts, last_ts, last detail)
+    let mut groups: std::collections::BTreeMap<(&str, String, String), (u64, u64, u64, String)> = std::collections::BTreeMap::new();
+    for e in ev.iter().filter(|e| e.ts >= floor) {
+        let group = if crashy.contains(&e.kind.as_str()) && e.kind != "crashloop" {
+            defaults::text("health.group_restart")
+        } else if kinds.contains(&e.kind.as_str()) && !(resolved.contains(&e.kind.as_str()) && e.ts < started) {
+            defaults::text("health.group_defaults")
+        } else {
+            continue;
+        };
+        let g = groups.entry((group, e.kind.clone(), e.code.clone())).or_insert((0, e.ts, e.ts, String::new()));
+        g.0 += 1;
+        g.2 = e.ts;
+        g.3 = e.detail.clone();
+    }
+    let mut out: Vec<Value> = groups
+        .into_iter()
+        .map(|((group, kind, code), (count, first, last, detail))| json!({"group": group, "kind": kind, "code": code, "count": count, "first_ts": first, "last_ts": last, "detail": detail}))
+        .collect();
+    let last_ts = |kind: &str| ev.iter().rev().find(|e| e.kind == kind).map_or(now, |e| e.ts);
+    for (left, kind, group) in [(loop_left, "crashloop", "health.group_crashloop"), (breaker_left, "breaker_open", "health.group_breaker")] {
+        if let Some(d) = left {
+            let t = last_ts(kind);
+            out.push(json!({"group": defaults::text(group), "kind": kind, "code": "tripped", "count": 1, "first_ts": t, "last_ts": t, "detail": format!("{}s remaining", d.as_secs() + 1)}));
+        }
+    }
+    out.sort_by_key(|r| r["first_ts"].as_u64().unwrap_or(0));
+    out
+}
+
+fn summary_from(ev: &[Event], now: u64, loop_left: Option<Duration>, breaker_left: Option<Duration>) -> Value {
     let window = defaults::secs("health.degraded_window_s");
-    let floor = now_ms().saturating_sub(window.as_millis() as u64);
-    let ev = events();
+    let floor = now.saturating_sub(window.as_millis() as u64);
     let recent: Vec<&Event> = ev.iter().filter(|e| e.ts >= floor).collect();
     let tally = |pick: &dyn Fn(&Event) -> Option<String>| -> serde_json::Map<String, Value> {
         let mut m: std::collections::BTreeMap<String, u64> = std::collections::BTreeMap::new();
@@ -646,17 +705,23 @@ pub fn summary() -> Value {
     let fallbacks = tally(&|e| matches!(e.kind.as_str(), "dispatch_defer" | "client_fail").then(|| format!("{}:{}", e.kind, e.code)));
     let total = |m: &serde_json::Map<String, Value>| m.values().filter_map(Value::as_u64).sum::<u64>();
     let last = |kind: &str| ev.iter().rev().find(|e| e.kind == kind).map(|e| json!({"ts": e.ts, "code": e.code, "detail": e.detail}));
-    let (loop_left, breaker_left) = (crashloop_remaining(), breaker_remaining());
-    let degraded_kinds = defaults::list("health.degraded_kinds");
-    let defaults_fb = tally(&|e| degraded_kinds.contains(&e.kind.as_str()).then(|| format!("{}:{}", e.kind, e.code)));
-    let last_defaults = ev
-        .iter()
-        .rev()
-        .find(|e| e.ts >= floor && degraded_kinds.contains(&e.kind.as_str()))
-        .map(|e| json!({"ts": e.ts, "kind": e.kind, "code": e.code, "detail": e.detail}));
-    let degraded = total(&restarts) > 0 || loop_left.is_some() || breaker_left.is_some() || total(&defaults_fb) > 0;
+    let reasons = degraded_reasons(ev, now, window, loop_left, breaker_left);
+    let defaults_rows: Vec<&Value> = reasons.iter().filter(|r| r["group"] == defaults::text("health.group_defaults")).collect();
+    let defaults_fb: serde_json::Map<String, Value> = defaults_rows.iter().map(|r| (format!("{}:{}", r["kind"].as_str().unwrap_or(""), r["code"].as_str().unwrap_or("")), r["count"].clone())).collect();
+    let last_defaults = defaults_rows.iter().max_by_key(|r| r["last_ts"].as_u64()).map(|r| json!({"ts": r["last_ts"], "kind": r["kind"], "code": r["code"], "detail": r["detail"]}));
+    let evidence: u64 = reasons.iter().filter_map(|r| r["count"].as_u64()).sum();
+    let since = reasons.iter().filter_map(|r| r["first_ts"].as_u64()).min();
+    let reason = reasons.first().map(|r| {
+        let n = reasons.len();
+        let base = format!("{}:{} x{} ({})", r["kind"].as_str().unwrap_or(""), r["code"].as_str().unwrap_or(""), r["count"], r["detail"].as_str().unwrap_or(""));
+        if n > 1 { format!("{base} +{} more", n - 1) } else { base }
+    });
     json!({
-        "degraded": degraded,
+        "degraded": !reasons.is_empty(),
+        "degraded_reason": reason,
+        "reasons": reasons,
+        "since": since,
+        "evidence": evidence,
         "window_s": window.as_secs(),
         "restarts": {"total": total(&restarts), "by_reason": restarts, "last_rss_trip": last("rss"), "last_memory_breakdown": last("memory")},
         "system_restarts": {"total": system_restarts, "last": last("system_restart")},
@@ -779,6 +844,68 @@ mod tests {
     }
 
     use super::*;
+
+    fn ev(ts: u64, kind: &str, code: &str, detail: &str) -> Event {
+        Event { ts, kind: kind.into(), code: code.into(), detail: detail.into() }
+    }
+
+    /// v3.0.1 live: right after a deploy `health.degraded` was true with no reason. The log held a watchdog restart and three
+    /// defaults fallbacks, all logged before the new daemon's `start` line.
+    #[test]
+    fn a_defaults_fallback_before_the_daemon_start_is_answered_and_a_restart_is_named() {
+        let log = vec![
+            ev(1_000, "watchdog", "stall", "accept loop stalled"),
+            ev(5_000, "defaults_fallback", "missing_key", "defaults mesh_write.toml mesh_write.exit_defer rejected (missing_key): using the pristine copy"),
+            ev(5_001, "defaults_fallback", "missing_key", "defaults devswarm_wire.toml devswarm_wire.msg_deferred rejected (missing_key): using the pristine copy"),
+            ev(9_000, "start", "-", "v0.1.0 pid 27794"),
+        ];
+        let s = summary_from(&log, 10_000, None, None);
+        assert_eq!(s["defaults"]["total"], 0, "the start answered the earlier fallbacks: {s}");
+        assert_eq!(s["degraded"], true, "the watchdog restart is still inside the window: {s}");
+        assert_eq!(s["reasons"].as_array().unwrap().len(), 1, "{s}");
+        assert_eq!(s["reasons"][0]["code"], "stall");
+        assert_eq!((s["since"].as_u64(), s["evidence"].as_u64()), (Some(1_000), Some(1)));
+        assert!(s["degraded_reason"].as_str().unwrap().contains("watchdog:stall"), "{s}");
+        // a fallback logged after the start is a live problem and counts, with its first-seen time and count
+        let mut live = log.clone();
+        live.push(ev(9_500, "defaults_fallback", "parse", "defaults engine.toml rejected (parse)"));
+        live.push(ev(9_600, "defaults_fallback", "parse", "defaults engine.toml rejected (parse)"));
+        let s = summary_from(&live, 10_000, None, None);
+        assert_eq!(s["defaults"]["by_reason"]["defaults_fallback:parse"], 2, "{s}");
+        let row = s["reasons"].as_array().unwrap().iter().find(|r| r["code"] == "parse").unwrap();
+        assert_eq!((row["count"].as_u64(), row["first_ts"].as_u64(), row["last_ts"].as_u64()), (Some(2), Some(9_500), Some(9_600)));
+    }
+
+    /// Prevention: whatever the log holds, `degraded: true` never ships without a reason, a first-seen time and an evidence count,
+    /// and `degraded: false` carries none.
+    #[test]
+    fn degraded_is_never_true_without_its_reason() {
+        let kinds = ["watchdog", "crash", "panic", "rss", "start_fail", "defaults_fallback", "defaults_heal_skipped", "start", "crashloop", "discard", "system_restart"];
+        for mask in 0u32..(1 << kinds.len()) {
+            let log: Vec<Event> = kinds.iter().enumerate().filter(|(i, _)| mask >> i & 1 == 1).map(|(i, k)| ev(1_000 + i as u64 * 100, k, "c", "d")).collect();
+            for (lp, br) in [(None, None), (Some(Duration::from_secs(5)), None), (None, Some(Duration::from_secs(5)))] {
+                let s = summary_from(&log, 5_000, lp, br);
+                let n = s["reasons"].as_array().unwrap().len();
+                assert_eq!(s["degraded"] == true, n > 0, "flag and reasons disagree: {s}");
+                if n > 0 {
+                    assert!(s["degraded_reason"].as_str().is_some_and(|r| !r.is_empty()), "no reason text: {s}");
+                    assert!(s["since"].as_u64().is_some() && s["evidence"].as_u64().unwrap() >= n as u64, "no since/evidence: {s}");
+                } else {
+                    assert!(s["degraded_reason"].is_null() && s["since"].is_null() && s["evidence"] == 0, "{s}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_fail_open_window_adds_its_own_reason() {
+        let mut s = summary_from(&[], 5_000, None, None);
+        assert_eq!(s["degraded"], false);
+        add_fail_open_reason(&mut s, Some((9, "deadline_cut".into())));
+        assert_eq!((s["degraded"].clone(), s["evidence"].clone()), (json!(true), json!(9)));
+        assert!(s["degraded_reason"].as_str().unwrap().contains("fail_open:deadline_cut"), "{s}");
+        assert_eq!(s["reasons"].as_array().unwrap().len(), 1);
+    }
 
     #[test]
     fn the_generation_does_not_depend_on_the_executable_path() {

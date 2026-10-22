@@ -436,7 +436,7 @@ value = "{skip} (records consent in ~/.anti-hall/skip.json, 15-min TTL), then re
 
 [command.devswarm_cli_rel]
 doc = "The devswarm CLI, relative to the plugin root."
-value = "scripts/devswarm.js"
+value = "../anti-hall-node/scripts/devswarm.js"
 
 [command.cd_delims]
 doc = "The delimiters after which a leading cd carries into the next segment (command-guard.js cdAwareContexts)."

@@ -13,9 +13,9 @@ const path = require('node:path');
 // Never let a log line fall back to the real home.
 if (!process.env.ANTI_HALL_LOG_DIR) process.env.ANTI_HALL_LOG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'anti-hall-walhealth-log-'));
 
-const readWal = require('../../plugins/anti-hall/companion/lib/devswarm-read-wal.js');
-const cli = require('../../plugins/anti-hall/scripts/devswarm.js');
-const doctorDevswarm = require('../../plugins/anti-hall/companion/lib/doctor-devswarm.js');
+const readWal = require('../../plugins/anti-hall-node/companion/lib/devswarm-read-wal.js');
+const cli = require('../../plugins/anti-hall-node/scripts/devswarm.js');
+const doctorDevswarm = require('../../plugins/anti-hall-node/companion/lib/doctor-devswarm.js');
 
 function tmpHome() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'anti-hall-walhealth-'));

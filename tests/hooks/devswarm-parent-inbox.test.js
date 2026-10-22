@@ -25,10 +25,10 @@ const path = require('node:path');
 const cp = require('node:child_process');
 const { testHook, testHookRaw } = require('../helpers/spawn-hook.js');
 const { makeHome } = require('../helpers/fixtures.js');
-const installIngest = require('../../plugins/anti-hall/companion/install-devswarm-ingest.js');
-const repokey = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
-const replyStateLib = require('../../plugins/anti-hall/companion/lib/devswarm-reply-state.js');
-const { projectDirFor } = require('../../plugins/anti-hall/companion/lib/liveness.js');
+const installIngest = require('../../plugins/anti-hall-node/companion/install-devswarm-ingest.js');
+const repokey = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
+const replyStateLib = require('../../plugins/anti-hall-node/companion/lib/devswarm-reply-state.js');
+const { projectDirFor } = require('../../plugins/anti-hall-node/companion/lib/liveness.js');
 
 const HOOK = 'devswarm-parent-inbox.js';
 const PRIMARY_ENV = { DEVSWARM_REPO_ID: 'repo-1' }; // active + no source-branch = Primary
@@ -908,7 +908,7 @@ test('WORDING: high-urgency also routes to the LOUD urgent segment', () => {
 
 // ---- item 5: CHILD NOT DRAINING — title (not bare id) + age surfacing ----
 
-const parentInboxNames = require('../../plugins/anti-hall/companion/lib/devswarm-names.js');
+const parentInboxNames = require('../../plugins/anti-hall-node/companion/lib/devswarm-names.js');
 
 test('CHILD NOT DRAINING: a registered workspace TITLE is shown in the human-facing list, not the bare mesh id', () => {
   const h = makeHome();
@@ -1357,7 +1357,7 @@ test('MONITOR-FAULT: healthy monitor (consecutiveMonitorFailures:0) -> neither b
 // tests lock in that: (1) with rows present, the fallback actually refreshes
 // the projection from the store; (2) with an EMPTY store, the non-destructive
 // has-rows guard still prevents a blind overwrite of a richer cache. ----
-const h4Store = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
+const h4Store = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
 function seedRegistryRow(home, id, worktreePath) {
   const s = h4Store.openStore({ home, workspaceId: id, hash: REPO_KEY });
   try {
@@ -1647,7 +1647,7 @@ test('OWN UNREAD DECIDE+REPLY REGRESSION: plain unread with no pendingQuestions 
     const r = testHook(HOOK, withCwd(payload), { home: h.home, env: PRIMARY_ENV, expectJson: true });
     assert.strictEqual(r.status, 0);
     const own = ownSegment(ctx(r));
-    const cliPath = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'scripts', 'devswarm.js');
+    const cliPath = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'scripts', 'devswarm.js');
     const expected =
       '⚠️ anti-hall · devswarm-own-inbox: priority — you have 4 unread parent/peer '
       + 'message(s) addressed to YOU (the Primary). STOP and read your unread '
@@ -2202,7 +2202,7 @@ test('ORPHANS+STALE: clean summary (neither field present) -> BYTE-IDENTICAL to 
     const r = testHook(HOOK, withCwd(payload), { home: h.home, env: PRIMARY_ENV, expectJson: true });
     assert.strictEqual(r.status, 0);
     const c = ctx(r);
-    const cliPath = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'scripts', 'devswarm.js');
+    const cliPath = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'scripts', 'devswarm.js');
     const expected = [
       OVERRIDE_REASSERT,
       // Header text changed: "live" was actively misleading once a dormant

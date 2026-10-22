@@ -192,7 +192,7 @@ test('milestone nag fires once usage grows nagStepPct past the fire point, not b
 test('nag:false in settings silences the milestone nag but the initial fire still happens', () => {
   const h = makeHome();
   try {
-    const settings = require('../../plugins/anti-hall/hooks/lib/settings.js');
+    const settings = require('../../plugins/anti-hall-node/hooks/lib/settings.js');
     settings.set('autoHandover', 'nag', false, { home: h.home });
 
     const tp1 = writeUsage(h, 85);
@@ -256,7 +256,7 @@ test('observed usage exceeding 200k with no known window -> inferred 1M latch, m
     assert.ok(/write a handover now/.test(ctx(r)), `expected the mandatory directive; got: ${ctx(r)}`);
     assert.ok(/inferred 1M window/.test(ctx(r)), `expected the inferred-1m label; got: ${ctx(r)}`);
 
-    const store = require('../../plugins/anti-hall/hooks/lib/context-pct-store.js');
+    const store = require('../../plugins/anti-hall-node/hooks/lib/context-pct-store.js');
     const tag = store.tagFromSessionId('s1');
     assert.strictEqual(store.readInferred1m(h.home, tag), true, 'expected the inferred-1m latch to persist');
   } finally {
@@ -341,7 +341,7 @@ test('token ceiling: below the opted-in ceiling -> silent; env override raises i
 test('token ceiling: settings.json maxTokens is honored; latch re-arms only once BOTH pct and tokens are back under', () => {
   const h = makeHome();
   try {
-    const settings = require('../../plugins/anti-hall/hooks/lib/settings.js');
+    const settings = require('../../plugins/anti-hall-node/hooks/lib/settings.js');
     settings.set('autoHandover', 'maxTokens', 250000, { home: h.home });
     const env = { ANTIHALL_EMIT_DEDUPE: '0', ANTIHALL_CONTEXT_WINDOW_TOKENS: '1000000' };
     const p = h.writeTranscript([]);
@@ -363,7 +363,7 @@ test('fire directive prints the exact /compact focus command with the expected h
   const os = require('node:os');
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'antihall-autohandover-cwd-'));
   try {
-    const find = require('../../plugins/anti-hall/hooks/lib/handover-find.js');
+    const find = require('../../plugins/anti-hall-node/hooks/lib/handover-find.js');
     const dir = path.join(cwd, '.anti-hall', 'handovers', find.localDate(), 'sess-x');
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, 'HANDOVER.md'), '# h\n');

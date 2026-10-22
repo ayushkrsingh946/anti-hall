@@ -27,7 +27,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const cacheLib = require('../../plugins/anti-hall/companion/lib/devswarm-archived-cache.js');
+const cacheLib = require('../../plugins/anti-hall-node/companion/lib/devswarm-archived-cache.js');
 
 const NOW = 1_700_000_000_000;
 const MAX_AGE = 60_000;

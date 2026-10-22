@@ -24,11 +24,11 @@ const os = require('node:os');
 const path = require('node:path');
 const cp = require('node:child_process');
 
-const DEVSWARM_PATH = path.join(__dirname, '../../plugins/anti-hall/scripts/devswarm.js');
+const DEVSWARM_PATH = path.join(__dirname, '../../plugins/anti-hall-node/scripts/devswarm.js');
 const cli = require(DEVSWARM_PATH);
-const storeLib = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
-const repokey = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
-const { lockPathFor } = require('../../plugins/anti-hall/companion/lib/devswarm-wake-watch.js');
+const storeLib = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
+const repokey = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
+const { lockPathFor } = require('../../plugins/anti-hall-node/companion/lib/devswarm-wake-watch.js');
 
 function tmpHome() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'anti-hall-inbox-tick-'));

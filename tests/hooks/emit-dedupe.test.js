@@ -15,8 +15,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const dedupe = require('../../plugins/anti-hall/hooks/lib/emit-dedupe.js');
-const inbox = require('../../plugins/anti-hall/hooks/devswarm-parent-inbox.js');
+const dedupe = require('../../plugins/anti-hall-node/hooks/lib/emit-dedupe.js');
+const inbox = require('../../plugins/anti-hall-node/hooks/devswarm-parent-inbox.js');
 const { testHook } = require('../helpers/spawn-hook.js');
 
 const ON = { ANTIHALL_EMIT_DEDUPE: '1' };

@@ -12,7 +12,7 @@ const { makeHome } = require('../helpers/fixtures.js');
 const {
   buildReport, buildHeadline, labelsLogPath, readLabels, latestHumanLabelByHash, cmdLabel,
   auditLogPath, readAuditSnippet, cmdPruneAudit, describeWindow, printWindow, parseIsoMs,
-} = require('../../plugins/anti-hall/scripts/jev-report.js');
+} = require('../../plugins/anti-hall-node/scripts/jev-report.js');
 
 // writeAuditRow(home, {ts, id, h, snippet}) — test helper, writes directly to
 // jev-audit.ndjson the way hooks/lib/jev-assist.js's maybeWriteAuditSnippet
@@ -352,7 +352,7 @@ test('buildReport: no row carries costUsd -> realCostTotal is null, not $0', () 
 });
 
 test('buildCostWindows: default windows are 24h and 7d, each re-running buildReport with its own cutoff', () => {
-  const { buildCostWindows } = require('../../plugins/anti-hall/scripts/jev-report.js');
+  const { buildCostWindows } = require('../../plugins/anti-hall-node/scripts/jev-report.js');
   const old = new Date(Date.now() - 3 * 86400000).toISOString(); // 3 days ago: in 7d, not 24h
   const recent = new Date().toISOString();
   const rows = [
@@ -581,12 +581,12 @@ test('cmdPruneAudit: invalid --days -> error, exit code 1, file untouched', () =
 // ---------------------------------------------------------------------------
 
 test('computeBudgetStatus: mode "unlimited" (default) -> null, nothing to show', () => {
-  const { computeBudgetStatus } = require('../../plugins/anti-hall/scripts/jev-report.js');
+  const { computeBudgetStatus } = require('../../plugins/anti-hall-node/scripts/jev-report.js');
   assert.strictEqual(computeBudgetStatus([row({ costUsd: 100 })], { mode: 'unlimited', usdPerDay: null, usdPerWeek: null }), null);
 });
 
 test('computeBudgetStatus: watch mode, usdPerDay only -> 24h computed, 7d null (not configured)', () => {
-  const { computeBudgetStatus } = require('../../plugins/anti-hall/scripts/jev-report.js');
+  const { computeBudgetStatus } = require('../../plugins/anti-hall-node/scripts/jev-report.js');
   const rows = [row({ id: 'speculation', costUsd: 3 }), row({ id: 'modelRouting', costUsd: 4 })];
   const status = computeBudgetStatus(rows, { mode: 'watch', usdPerDay: 5, usdPerWeek: null });
   assert.strictEqual(status['24h'].spentUsd, 7, 'spend sums across ALL integrations');
@@ -595,7 +595,7 @@ test('computeBudgetStatus: watch mode, usdPerDay only -> 24h computed, 7d null (
 });
 
 test('computeBudgetStatus: under budget -> exceeded false', () => {
-  const { computeBudgetStatus } = require('../../plugins/anti-hall/scripts/jev-report.js');
+  const { computeBudgetStatus } = require('../../plugins/anti-hall-node/scripts/jev-report.js');
   const status = computeBudgetStatus([row({ costUsd: 1 })], { mode: 'watch', usdPerDay: 5, usdPerWeek: null });
   assert.strictEqual(status['24h'].exceeded, false);
 });
@@ -605,7 +605,7 @@ test('computeBudgetStatus: under budget -> exceeded false', () => {
 // ---------------------------------------------------------------------------
 
 test('maybeWarnLowCredit: not applicable when mode is not "watch"', () => {
-  const { maybeWarnLowCredit } = require('../../plugins/anti-hall/scripts/jev-report.js');
+  const { maybeWarnLowCredit } = require('../../plugins/anti-hall-node/scripts/jev-report.js');
   const r = maybeWarnLowCredit({
     home: '/nonexistent', budget: { mode: 'unlimited', minCreditUsd: 10 },
     creditResult: { ok: true, balanceUsd: 1 },
@@ -614,7 +614,7 @@ test('maybeWarnLowCredit: not applicable when mode is not "watch"', () => {
 });
 
 test('maybeWarnLowCredit: not applicable when minCreditUsd is unset', () => {
-  const { maybeWarnLowCredit } = require('../../plugins/anti-hall/scripts/jev-report.js');
+  const { maybeWarnLowCredit } = require('../../plugins/anti-hall-node/scripts/jev-report.js');
   const r = maybeWarnLowCredit({
     home: '/nonexistent', budget: { mode: 'watch', minCreditUsd: null },
     creditResult: { ok: true, balanceUsd: 1 },
@@ -623,7 +623,7 @@ test('maybeWarnLowCredit: not applicable when minCreditUsd is unset', () => {
 });
 
 test('maybeWarnLowCredit: not applicable when the balance is unknown (credit check failed)', () => {
-  const { maybeWarnLowCredit } = require('../../plugins/anti-hall/scripts/jev-report.js');
+  const { maybeWarnLowCredit } = require('../../plugins/anti-hall-node/scripts/jev-report.js');
   const r = maybeWarnLowCredit({
     home: '/nonexistent', budget: { mode: 'watch', minCreditUsd: 10 },
     creditResult: { ok: false, reason: 'unsupported-transport' },
@@ -634,7 +634,7 @@ test('maybeWarnLowCredit: not applicable when the balance is unknown (credit che
 test('maybeWarnLowCredit: above threshold -> belowThreshold false, no state write', () => {
   const h = makeHome();
   try {
-    const { maybeWarnLowCredit, budgetStatePath } = require('../../plugins/anti-hall/scripts/jev-report.js');
+    const { maybeWarnLowCredit, budgetStatePath } = require('../../plugins/anti-hall-node/scripts/jev-report.js');
     const r = maybeWarnLowCredit({
       home: h.home, budget: { mode: 'watch', minCreditUsd: 10 },
       creditResult: { ok: true, balanceUsd: 50 },
@@ -647,7 +647,7 @@ test('maybeWarnLowCredit: above threshold -> belowThreshold false, no state writ
 test('maybeWarnLowCredit: below threshold -> warns once per day, then belowThreshold:true/warnedNow:false on repeat', () => {
   const h = makeHome();
   try {
-    const { maybeWarnLowCredit } = require('../../plugins/anti-hall/scripts/jev-report.js');
+    const { maybeWarnLowCredit } = require('../../plugins/anti-hall-node/scripts/jev-report.js');
     const budget = { mode: 'watch', minCreditUsd: 10 };
     const creditResult = { ok: true, balanceUsd: 2 };
     const r1 = maybeWarnLowCredit({ home: h.home, budget, creditResult });
@@ -660,7 +660,7 @@ test('maybeWarnLowCredit: below threshold -> warns once per day, then belowThres
 });
 
 test('buildTriageAnswerReport: separates urgent vs non-urgent time-to-answer', () => {
-  const { buildTriageAnswerReport } = require('../../plugins/anti-hall/scripts/jev-report.js');
+  const { buildTriageAnswerReport } = require('../../plugins/anti-hall-node/scripts/jev-report.js');
   const triageRows = [
     { type: 'answered', urgency: 'urgent', latencyMs: 1000 },
     { type: 'answered', urgency: 'urgent', latencyMs: 2000 },
@@ -684,7 +684,7 @@ test('buildTriageAnswerReport: separates urgent vs non-urgent time-to-answer', (
 // ---------------------------------------------------------------------------
 
 test('buildTriageAnswerReport: a REAL classification row (no `type` field at all -- jev-triage.js\'s actual appendTriageLog shape) is excluded, not just a fake "type:classification" row', () => {
-  const { buildTriageAnswerReport } = require('../../plugins/anti-hall/scripts/jev-report.js');
+  const { buildTriageAnswerReport } = require('../../plugins/anti-hall-node/scripts/jev-report.js');
   const triageRows = [
     // Exactly what hooks/lib/jev-triage.js's appendTriageLog writes: NO
     // `type` field at all (only recordAnswered rows carry type:'answered').
@@ -698,7 +698,7 @@ test('buildTriageAnswerReport: a REAL classification row (no `type` field at all
 });
 
 test('buildReport: per-integration p50/p95 (classifier `ms`) is computed ONLY from jev-assist.ndjson decision rows, even if triage answer-time rows are (incorrectly) mixed into the same array', () => {
-  const { buildReport } = require('../../plugins/anti-hall/scripts/jev-report.js');
+  const { buildReport } = require('../../plugins/anti-hall-node/scripts/jev-report.js');
   const rows = [
     { ts: '2026-01-01T00:00:00.000Z', id: 'speculation', h: 'a', base: false, jev: true, conf: 0.9, ms: 352, backend: 'jev', final: false, changed: null, cached: false, mode: 'shadow' },
     { ts: '2026-01-01T00:00:01.000Z', id: 'speculation', h: 'b', base: false, jev: true, conf: 0.9, ms: 1313, backend: 'jev', final: false, changed: null, cached: false, mode: 'shadow' },
@@ -755,14 +755,14 @@ test('buildReport: triage appears as its own integration (calls/backend/ms) sour
 // ---------------------------------------------------------------------------
 
 test('parseArgs: --by and --project are parsed', () => {
-  const { parseArgs } = require('../../plugins/anti-hall/scripts/jev-report.js');
+  const { parseArgs } = require('../../plugins/anti-hall-node/scripts/jev-report.js');
   const opts = parseArgs(['--by', 'session', '--project', 'anti-hall']);
   assert.strictEqual(opts.by, 'session');
   assert.strictEqual(opts.project, 'anti-hall');
 });
 
 test('groupKeyOf: falls back to "unknown" for a row missing the field (including a genuinely old pre-feature row)', () => {
-  const { groupKeyOf } = require('../../plugins/anti-hall/scripts/jev-report.js');
+  const { groupKeyOf } = require('../../plugins/anti-hall-node/scripts/jev-report.js');
   assert.strictEqual(groupKeyOf({ project: 'anti-hall' }, 'project'), 'anti-hall');
   assert.strictEqual(groupKeyOf({}, 'project'), 'unknown');
   assert.strictEqual(groupKeyOf({ id: 'speculation', base: false }, 'project'), 'unknown', 'an old row with no project field at all groups as unknown');
@@ -771,7 +771,7 @@ test('groupKeyOf: falls back to "unknown" for a row missing the field (including
 });
 
 test('groupRowsBy: partitions rows into one bucket per distinct project/session value', () => {
-  const { groupRowsBy } = require('../../plugins/anti-hall/scripts/jev-report.js');
+  const { groupRowsBy } = require('../../plugins/anti-hall-node/scripts/jev-report.js');
   const rows = [
     { id: 'speculation', project: 'anti-hall', sessionId: 's1' },
     { id: 'speculation', project: 'anti-hall', sessionId: 's2' },
@@ -788,7 +788,7 @@ test('groupRowsBy: partitions rows into one bucket per distinct project/session 
 });
 
 test('jev-assist.js finalize(): auto-populates `project` from cwd basename when the caller supplies none, and logs `sessionId` only when provided', () => {
-  const jevAssist = require('../../plugins/anti-hall/hooks/lib/jev-assist.js');
+  const jevAssist = require('../../plugins/anti-hall-node/hooks/lib/jev-assist.js');
   const h = require('../helpers/fixtures.js').makeHome();
   try {
     jevAssist.ask({ id: 'speculation', question: null, state: 'x', trust: 'add-block', baseline: false, home: h.home });
@@ -817,7 +817,7 @@ test('jev-assist.js finalize(): auto-populates `project` from cwd basename when 
 // ---------------------------------------------------------------------------
 
 test('sum cost per project: groupRowsBy + buildReport gives each project its own independent realCostTotal', () => {
-  const { groupRowsBy, buildReport } = require('../../plugins/anti-hall/scripts/jev-report.js');
+  const { groupRowsBy, buildReport } = require('../../plugins/anti-hall-node/scripts/jev-report.js');
   const rows = [
     row({ id: 'speculation', h: 'p1a', project: 'proj-a', backend: 'jev', costUsd: 0.001, costSource: 'default-price' }),
     row({ id: 'speculation', h: 'p1b', project: 'proj-a', backend: 'jev', costUsd: 0.002, costSource: 'default-price' }),
@@ -836,7 +836,7 @@ test('sum cost per project: groupRowsBy + buildReport gives each project its own
 });
 
 test('printRealCostSummary: renders total + per-integration real cost for a single group report', () => {
-  const { buildReport, printRealCostSummary } = require('../../plugins/anti-hall/scripts/jev-report.js');
+  const { buildReport, printRealCostSummary } = require('../../plugins/anti-hall-node/scripts/jev-report.js');
   const rows = [
     row({ id: 'speculation', h: 'x1', backend: 'jev', costUsd: 0.002, costSource: 'default-price' }),
     row({ id: 'modelRouting', h: 'x2', backend: 'jev', costUsd: 0.001, costSource: 'gateway' }),
@@ -853,7 +853,7 @@ test('printRealCostSummary: renders total + per-integration real cost for a sing
 });
 
 test('printRealCostSummary: silent no-op when nothing in the group carries a real cost', () => {
-  const { buildReport, printRealCostSummary } = require('../../plugins/anti-hall/scripts/jev-report.js');
+  const { buildReport, printRealCostSummary } = require('../../plugins/anti-hall-node/scripts/jev-report.js');
   const rows = [row({ id: 'speculation', h: 'x1' })];
   const report = buildReport(rows, {});
   const lines = [];
@@ -881,7 +881,7 @@ function makeRows(id, n, { changed = false } = {}) {
 }
 
 test('buildWeeklyScorecard: KEEP candidate gets a reason citing changed/good-outcome rates', () => {
-  const { buildWeeklyScorecard } = require('../../plugins/anti-hall/scripts/jev-report.js');
+  const { buildWeeklyScorecard } = require('../../plugins/anti-hall-node/scripts/jev-report.js');
   // 60 calls, all changed (100% >> 5%), each with a good outcome -> KEEP.
   const rows = [];
   for (let i = 0; i < 60; i++) {
@@ -900,7 +900,7 @@ test('buildWeeklyScorecard: KEEP candidate gets a reason citing changed/good-out
 });
 
 test('buildWeeklyScorecard: REVIEW (not enough data) reason is extracted verbatim from the suggestion', () => {
-  const { buildWeeklyScorecard } = require('../../plugins/anti-hall/scripts/jev-report.js');
+  const { buildWeeklyScorecard } = require('../../plugins/anti-hall-node/scripts/jev-report.js');
   const scorecard = buildWeeklyScorecard(makeRows('modelRouting', 3), { jevCfg: {} });
   const r = scorecard.integrations.find((x) => x.id === 'modelRouting');
   assert.match(r.suggestion, /^REVIEW/);
@@ -908,7 +908,7 @@ test('buildWeeklyScorecard: REVIEW (not enough data) reason is extracted verbati
 });
 
 test('buildWeeklyScorecard: mode defaults per getMode when jevCfg has no integrations map', () => {
-  const { buildWeeklyScorecard } = require('../../plugins/anti-hall/scripts/jev-report.js');
+  const { buildWeeklyScorecard } = require('../../plugins/anti-hall-node/scripts/jev-report.js');
   const scorecard = buildWeeklyScorecard(makeRows('speculation', 3), { jevCfg: { enabled: true } });
   const r = scorecard.integrations.find((x) => x.id === 'speculation');
   assert.strictEqual(r.mode, 'on', 'speculation is a LEGACY_ON_DEFAULT integration');
@@ -1009,7 +1009,7 @@ test('buildReport: label-only integration reports distinct-decision count (fresh
 // ---------------------------------------------------------------------------
 
 test('parseArgs: --since/--until/--exclude-window are parsed', () => {
-  const { parseArgs, parseIsoMs } = require('../../plugins/anti-hall/scripts/jev-report.js');
+  const { parseArgs, parseIsoMs } = require('../../plugins/anti-hall-node/scripts/jev-report.js');
   const opts = parseArgs(['--since', '2026-09-01T00:00:00Z', '--until', '2026-09-30T00:00:00Z',
     '--exclude-window', '2026-09-24T19:56:00Z..2026-09-24T22:23:00Z']);
   assert.strictEqual(opts.since, parseIsoMs('2026-09-01T00:00:00Z'));
@@ -1018,13 +1018,13 @@ test('parseArgs: --since/--until/--exclude-window are parsed', () => {
 });
 
 test('parseArgs: an unparseable --exclude-window value is dropped, not thrown', () => {
-  const { parseArgs } = require('../../plugins/anti-hall/scripts/jev-report.js');
+  const { parseArgs } = require('../../plugins/anti-hall-node/scripts/jev-report.js');
   const opts = parseArgs(['--exclude-window', 'not-a-window']);
   assert.strictEqual(opts.excludeWindows, undefined);
 });
 
 test('filterByTimeWindow: --since/--until bound the row set; a row with no ts passes through', () => {
-  const { filterByTimeWindow } = require('../../plugins/anti-hall/scripts/jev-report.js');
+  const { filterByTimeWindow } = require('../../plugins/anti-hall-node/scripts/jev-report.js');
   const rows = [
     { ts: '2026-09-01T00:00:00Z', id: 'a' },
     { ts: '2026-09-15T00:00:00Z', id: 'b' },
@@ -1036,7 +1036,7 @@ test('filterByTimeWindow: --since/--until bound the row set; a row with no ts pa
 });
 
 test('filterByTimeWindow: --exclude-window drops rows inside the interval, keeps rows outside it', () => {
-  const { filterByTimeWindow } = require('../../plugins/anti-hall/scripts/jev-report.js');
+  const { filterByTimeWindow } = require('../../plugins/anti-hall-node/scripts/jev-report.js');
   const rows = [
     { ts: '2026-09-24T19:00:00Z', id: 'before' },
     { ts: '2026-09-24T20:30:00Z', id: 'inside' },
@@ -1050,7 +1050,7 @@ test('filterByTimeWindow: --exclude-window drops rows inside the interval, keeps
 });
 
 test('buildReport via filterByTimeWindow: excluding the accidental run window removes those rows from the aggregate', () => {
-  const { filterByTimeWindow } = require('../../plugins/anti-hall/scripts/jev-report.js');
+  const { filterByTimeWindow } = require('../../plugins/anti-hall-node/scripts/jev-report.js');
   const accidentalRows = [];
   for (let i = 0; i < 50; i++) {
     accidentalRows.push(row({ id: 'supervisorBlockerLabel', h: 'acc' + i, ts: '2026-09-24T20:30:00.000Z' }));
@@ -1228,7 +1228,7 @@ test('buildReport: boolean integration is unaffected by the choice-label fix (la
 
 const { execFileSync } = require('node:child_process');
 
-const JEV_REPORT_CLI = path.join(__dirname, '../../plugins/anti-hall/scripts/jev-report.js');
+const JEV_REPORT_CLI = path.join(__dirname, '../../plugins/anti-hall-node/scripts/jev-report.js');
 
 // runJevReportCli(home, args) -> parsed --json output. HOME is pinned to the
 // disposable fixture home (both via env, since jev-client.js's credit check
@@ -1381,7 +1381,7 @@ test('rollups fill days the raw logs no longer cover; a day still in raw is neve
 
 // --exclude-project <name> (repeatable): drops raw rows of a leaked/scratch project.
 test('parseArgs: --exclude-project is repeatable', () => {
-  const { parseArgs } = require('../../plugins/anti-hall/scripts/jev-report.js');
+  const { parseArgs } = require('../../plugins/anti-hall-node/scripts/jev-report.js');
   const opts = parseArgs(['--exclude-project', 'v117-int', '--exclude-project', 'scratch']);
   assert.deepStrictEqual(opts.excludeProjects, ['v117-int', 'scratch']);
 });
@@ -1468,7 +1468,7 @@ test('jev-assist finalize: derivedFrom is written on the decision row (isolated 
   const { makeHome } = require('../helpers/fixtures.js');
   const h = makeHome();
   try {
-    const ja = require('../../plugins/anti-hall/hooks/lib/jev-assist.js');
+    const ja = require('../../plugins/anti-hall-node/hooks/lib/jev-assist.js');
     ja.finalize({
       id: 'parentGateQuestion', home: h.home, hash: 'x1', mode: 'shadow', trust: 'add-block', baseline: false,
       judge: () => true, threshold: 0.5, r: { ok: true, answer: true, confidence: 1, ms: 0 },

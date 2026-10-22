@@ -10,8 +10,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const { makeHome } = require('../helpers/fixtures.js');
-const M = require('../../plugins/anti-hall/companion/lib/migrations.js');
-const settings = require('../../plugins/anti-hall/hooks/lib/settings.js');
+const M = require('../../plugins/anti-hall-node/companion/lib/migrations.js');
+const settings = require('../../plugins/anti-hall-node/hooks/lib/settings.js');
 
 function jevPath(home) { return path.join(home, '.anti-hall', 'jev.json'); }
 

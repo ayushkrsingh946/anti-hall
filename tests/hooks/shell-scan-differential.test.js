@@ -61,7 +61,7 @@ function materializeBase() {
   const tarPath = path.join(dir, 'base.tar');
   fs.writeFileSync(tarPath, tar);
   execFileSync('tar', ['-x', '-f', tarPath, '-C', dir]);
-  return path.join(dir, 'plugins', 'anti-hall', 'hooks');
+  return path.join(dir, 'plugins', 'anti-hall-node', 'hooks');
 }
 
 before(() => {
@@ -74,7 +74,7 @@ after(() => {
   }
 });
 
-const NEW_HOOKS_DIR = path.join(REPO, 'plugins', 'anti-hall', 'hooks');
+const NEW_HOOKS_DIR = path.join(REPO, 'plugins', 'anti-hall-node', 'hooks');
 
 function isolatedHome() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'antihall-shell-scan-home-'));
@@ -179,11 +179,11 @@ const CG_ALLOW = [
   'git status', 'echo "npm run build"', "printf 'go test ./...'", 'eval "echo hi"',
   'git push --dry-run origin main', 'go env GOPATH', 'echo "hello world"',
   'node statusline/phase.js set PLAN "Planning feature X" 0 3', 'node statusline/phase.js advance',
-  'node hooks/agent-watchdog.js 1200000', 'node /Users/x/plugins/anti-hall/statusline/phase.js clear',
-  'node /Users/x/plugins/anti-hall/hooks/agent-watchdog.js',
+  'node hooks/agent-watchdog.js 1200000', 'node /Users/x/plugins/anti-hall-node/statusline/phase.js clear',
+  'node /Users/x/plugins/anti-hall-node/hooks/agent-watchdog.js',
   'node C:\\proj\\plugins\\anti-hall\\statusline\\phase.js agents 4',
   'node scripts/devswarm.js workspaces list', 'node scripts/devswarm.js gate w --set done',
-  'node /Users/x/plugins/anti-hall/scripts/devswarm.js migrate',
+  'node /Users/x/plugins/anti-hall-node/scripts/devswarm.js migrate',
   'node C:\\proj\\plugins\\anti-hall\\scripts\\devswarm.js register w',
   'node scripts/devswarm.js inbox pull x',
   "cat > f <<'EOF'\nrun firebase deploy then pytest\nEOF",

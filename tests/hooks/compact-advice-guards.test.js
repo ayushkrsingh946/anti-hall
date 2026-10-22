@@ -10,8 +10,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { testHook } = require('../helpers/spawn-hook.js');
 const { makeHome } = require('../helpers/fixtures.js');
-const { sessionTag, writeLatch } = require('../../plugins/anti-hall/hooks/lib/auto-handover-state.js');
-const advice = require('../../plugins/anti-hall/hooks/lib/compact-advice.js');
+const { sessionTag, writeLatch } = require('../../plugins/anti-hall-node/hooks/lib/auto-handover-state.js');
+const advice = require('../../plugins/anti-hall-node/hooks/lib/compact-advice.js');
 
 const STOP = 'compact-advice-guard.js';
 const PRE = 'compact-declaration-guard.js';
@@ -460,7 +460,7 @@ test('PreToolUse: a free-form RETRACT line in the same turn -> allow (explicit o
 // ------------------------------------------- L22: pause-nag <-> guard deadlock
 // The auto-handover pause nag MANDATES a closing /compact line; the guard must
 // never read that mandated text as a SAFE TO COMPACT declaration.
-const nagText = require('../../plugins/anti-hall/hooks/lib/auto-handover-text.js');
+const nagText = require('../../plugins/anti-hall-node/hooks/lib/auto-handover-text.js');
 const NAG_HP = '.anti-hall/handovers/2026-10-01/cadv-1/HANDOVER.md';
 const NAG_PAYLOAD = { session_id: SESSION, cwd: process.cwd() };
 const nagFooters = () => [

@@ -90,3 +90,4 @@ dssup/ingest/mod.rs | DROPPED | devswarm_ingest.drop_log_max_paths: when the map
 metrics.rs | PENDING | telemetry.max_series: bump() adds no new series once that many wait, and every metrics read or snapshot empties the map | counter bumps from code that holds no Metrics, until the next drain
 threads.rs | EXITED | diagnostics.tally_hard_keys: a new thread name past it is not kept | CPU of ended threads by thread name (status --threads exited_by_name)
 threads.rs | TALLY | diagnostics.tally_hard_keys: a new key past it is dropped and counted in tally_dropped | labelled work counters (site x cause) for status --threads
+nodeback/shadow.rs | CAPTURE | the checks of the call being shadowed, taken at its end | per-request

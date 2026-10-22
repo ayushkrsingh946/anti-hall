@@ -7,7 +7,7 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert');
-const { scanTranscript, runningAgents } = require('../../plugins/anti-hall/hooks/lib/agent-scan.js');
+const { scanTranscript, runningAgents } = require('../../plugins/anti-hall-node/hooks/lib/agent-scan.js');
 const { T, ms, spawn, send, idle, lines, idleBlock } = require('../helpers/teammate-fixtures.js');
 
 const NAME = 'rel-worker';

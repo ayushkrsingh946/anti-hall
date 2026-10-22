@@ -14,7 +14,7 @@ const { testHook, bashPayload } = require('../helpers/spawn-hook.js');
 const { makeHome } = require('../helpers/fixtures.js');
 
 const HOOK = 'git-guard.js';
-const HOOK_ABS = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'hooks', HOOK);
+const HOOK_ABS = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'hooks', HOOK);
 const CR = 'Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>';
 
 function run(command) {

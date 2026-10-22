@@ -15,11 +15,11 @@ const os = require('node:os');
 const path = require('node:path');
 const cp = require('node:child_process');
 
-const cli = require('../../plugins/anti-hall/scripts/devswarm.js');
-const storeLib = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
-const inst = require('../../plugins/anti-hall/companion/install-devswarm-ingest.js');
-const repokey = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
-const liveness = require('../../plugins/anti-hall/companion/lib/liveness.js');
+const cli = require('../../plugins/anti-hall-node/scripts/devswarm.js');
+const storeLib = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
+const inst = require('../../plugins/anti-hall-node/companion/install-devswarm-ingest.js');
+const repokey = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
+const liveness = require('../../plugins/anti-hall-node/companion/lib/liveness.js');
 
 function writeSessionFile(home, pid, rec) {
   const dir = liveness.sessionsDirFor(home);

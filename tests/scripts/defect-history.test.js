@@ -12,9 +12,9 @@ const os = require('node:os');
 const path = require('node:path');
 const cp = require('node:child_process');
 
-const store = require('../../plugins/anti-hall/hooks/lib/defect-store.js');
-const hist = require('../../plugins/anti-hall/hooks/lib/defect-history.js');
-const CLI = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'scripts', 'defect.js');
+const store = require('../../plugins/anti-hall-node/hooks/lib/defect-store.js');
+const hist = require('../../plugins/anti-hall-node/hooks/lib/defect-history.js');
+const CLI = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'scripts', 'defect.js');
 
 function tmpDir(prefix) {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
@@ -59,34 +59,34 @@ before(() => {
   git(['config', 'commit.gpgsign', 'false']);
   git(['config', 'tag.gpgsign', 'false']);
 
-  write('plugins/anti-hall/hooks/alpha-gate.js', lines(5, 'a'));
+  write('plugins/anti-hall-node/hooks/alpha-gate.js', lines(5, 'a'));
   write('CHANGELOG.md', '# Changelog\n');
   commit('init', 'feat: add alpha gate', '2026-01-01T00:00:00Z');
   git(['tag', 'v0.1.0']);
 
   // fix #1 on alpha-gate: the TEST file is the biggest change, but tests are
   // excluded, so the component must still be hooks/alpha-gate.
-  write('plugins/anti-hall/hooks/alpha-gate.js', lines(15, 'a'));
+  write('plugins/anti-hall-node/hooks/alpha-gate.js', lines(15, 'a'));
   write('tests/hooks/alpha-gate.test.js', lines(200, 't'));
   write('CHANGELOG.md', '# Changelog\n\n## 0.1.1\n\n### Fixes\n\n- **Archived workspaces no longer block the alpha gate.** The gate skipped nothing.\n- Unrelated bullet about statusline colors.\n');
   commit('fixA1', 'fix(alpha-gate): archived workspaces never block the gate', '2026-01-02T00:00:00Z');
   git(['tag', 'v0.1.1']);
 
-  write('plugins/anti-hall/companion/lib/beta-lock.js', lines(30, 'b'));
+  write('plugins/anti-hall-node/companion/lib/beta-lock.js', lines(30, 'b'));
   write('docs/GUIDE.md', lines(300, 'doc'));
   commit('fixB', 'fix(beta-lock): lock acquire race let two callers both win\n\nTOCTOU between check and rename.', '2026-01-03T00:00:00Z');
   git(['tag', 'v0.2.0']);
 
-  write('plugins/anti-hall/hooks/other.js', lines(3, 'o'));
+  write('plugins/anti-hall-node/hooks/other.js', lines(3, 'o'));
   commit('feat', 'feat: something new, not a fix', '2026-01-04T00:00:00Z');
 
-  write('plugins/anti-hall/hooks/alpha-gate.js', lines(25, 'a'));
+  write('plugins/anti-hall-node/hooks/alpha-gate.js', lines(25, 'a'));
   commit('fixA2', 'fix(alpha-gate): archived row blocks the gate again', '2026-01-05T00:00:00Z');
   // Tagged v0.10.0 BEFORE v0.3.0 exists on a later commit: lexical order
   // would say "v0.10.0" < "v0.2.0"; semver order must not be fooled.
   git(['tag', 'v0.10.0']);
 
-  write('plugins/anti-hall/hooks/alpha-gate.js', lines(35, 'a'));
+  write('plugins/anti-hall-node/hooks/alpha-gate.js', lines(35, 'a'));
   commit('fixA3', 'fix: alpha gate held partition still blocks', '2026-01-06T00:00:00Z');
   // untagged -> fixedIn null
 });
@@ -104,20 +104,20 @@ function runCli(args, home) {
 // ---------------------------------------------------------------------------
 
 test('normalizeComponent maps file paths to a stable module name', () => {
-  assert.equal(hist.normalizeComponent('plugins/anti-hall/hooks/devswarm-parent-gate.js'), 'hooks/devswarm-parent-gate');
+  assert.equal(hist.normalizeComponent('plugins/anti-hall-node/hooks/devswarm-parent-gate.js'), 'hooks/devswarm-parent-gate');
   assert.equal(hist.normalizeComponent('hooks/devswarm-parent-gate.js'), 'hooks/devswarm-parent-gate');
   assert.equal(hist.normalizeComponent('hooks/devswarm-parent-gate'), 'hooks/devswarm-parent-gate');
-  assert.equal(hist.normalizeComponent('plugins/anti-hall/companion/devswarm-ingest.js'), 'companion/devswarm-ingest');
-  assert.equal(hist.normalizeComponent('plugins/anti-hall/companion/lib/row-state.js'), 'companion/row-state');
-  assert.equal(hist.normalizeComponent('plugins/anti-hall/hooks/lib/defect-store.js'), 'hooks/defect-store');
+  assert.equal(hist.normalizeComponent('plugins/anti-hall-node/companion/devswarm-ingest.js'), 'companion/devswarm-ingest');
+  assert.equal(hist.normalizeComponent('plugins/anti-hall-node/companion/lib/row-state.js'), 'companion/row-state');
+  assert.equal(hist.normalizeComponent('plugins/anti-hall-node/hooks/lib/defect-store.js'), 'hooks/defect-store');
   assert.equal(hist.normalizeComponent('plugins\\anti-hall\\hooks\\x.js'), 'hooks/x');
   assert.equal(hist.normalizeComponent(''), null);
 });
 
 test('isSourceFile excludes tests, docs and manifests', () => {
-  assert.equal(hist.isSourceFile('plugins/anti-hall/hooks/a.js'), true);
+  assert.equal(hist.isSourceFile('plugins/anti-hall-node/hooks/a.js'), true);
   assert.equal(hist.isSourceFile('tests/hooks/a.test.js'), false);
-  assert.equal(hist.isSourceFile('plugins/anti-hall/hooks/a.test.js'), false);
+  assert.equal(hist.isSourceFile('plugins/anti-hall-node/hooks/a.test.js'), false);
   assert.equal(hist.isSourceFile('docs/GUIDE.md'), false);
   assert.equal(hist.isSourceFile('CHANGELOG.md'), false);
   assert.equal(hist.isSourceFile('plugins/anti-hall/skills/x/SKILL.md'), false);
@@ -126,8 +126,8 @@ test('isSourceFile excludes tests, docs and manifests', () => {
 
 test('dominantComponent: source beats tests/docs; test-only fixes name the tested module', () => {
   const f = (file, n) => ({ file, added: n, deleted: 0 });
-  assert.equal(hist.dominantComponent([f('tests/hooks/a.test.js', 500), f('plugins/anti-hall/hooks/b.js', 2), f('docs/X.md', 900)], null), 'hooks/b');
-  assert.equal(hist.dominantComponent([f('plugins/anti-hall/hooks/b.js', 2), f('plugins/anti-hall/companion/lib/c.js', 9)], null), 'companion/c');
+  assert.equal(hist.dominantComponent([f('tests/hooks/a.test.js', 500), f('plugins/anti-hall-node/hooks/b.js', 2), f('docs/X.md', 900)], null), 'hooks/b');
+  assert.equal(hist.dominantComponent([f('plugins/anti-hall-node/hooks/b.js', 2), f('plugins/anti-hall-node/companion/lib/c.js', 9)], null), 'companion/c');
   assert.equal(hist.dominantComponent([f('CHANGELOG.md', 3)], 'jev-report'), 'jev-report', 'no source -> conventional scope');
   assert.equal(hist.dominantComponent([f('CHANGELOG.md', 3), f('tests/hooks/api-guard.test.js', 4)], null), 'hooks/api-guard', 'test-only fix -> tested module');
   assert.equal(hist.dominantComponent([f('plugins/anti-hall/skills/deadly-loop/SKILL.md', 4)], null), 'skills/deadly-loop');
@@ -272,7 +272,7 @@ test('recurring honours an explicit regressionOf on a reported defect and --sinc
     const earlier = SHAS.fixB.slice(0, 12);
     const r = store.report({
       home, class: 'hook-crash', sev: 'p1', sym: 'beta lock double win again', v: '0.10.0',
-      proj: 'p', sid: 's', component: 'plugins/anti-hall/companion/lib/beta-lock.js',
+      proj: 'p', sid: 's', component: 'plugins/anti-hall-node/companion/lib/beta-lock.js',
       cause: 'lock-or-race', regressionOf: earlier,
     });
     assert.equal(r.outcome, 'recorded');
@@ -366,7 +366,7 @@ test('report/rule accept the optional new fields and validate cause/regressionOf
     assert.equal(badReg.outcome, 'invalid-regression-of');
 
     const r = runCli(['report', '--class', 'other', '--sev', 'p2', '--sym', 'cli new fields',
-      '--component', 'plugins/anti-hall/hooks/lib/defect-store.js', '--cause', 'wrong-default', '--json'], home);
+      '--component', 'plugins/anti-hall-node/hooks/lib/defect-store.js', '--cause', 'wrong-default', '--json'], home);
     assert.equal(r.status, 0, r.stderr);
     const fp = JSON.parse(r.stdout).fp;
     const ruled = runCli(['rule', fp, '--status', 'fixed', '--fixed-in', '1.2.3', '--commit', 'deadbeef', '--cause', 'fail-open-missing', '--json'], home);

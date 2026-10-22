@@ -22,12 +22,13 @@
 //! reads, so mail is announced within the layer's debounce instead of the poll interval. An early wake only happens while the
 //! reads are healthy, so the error back-off, which counts ticks, is exactly Node's.
 //!
-//! # What stays with Node
+//! # What the engine does not do
 //!
-//! Anything the engine cannot answer exactly as Node does is decided before a single line is printed or file is written, and
-//! the verb answers exit 75 (the launcher then runs the Node script): a checkout nested in another one, a settings file the
-//! engine cannot parse as JavaScript does, and a Primary with no live child (Node prints its one idle line and records the
-//! metric). After the first line nothing defers; every later failure takes the fail-open path Node takes.
+//! Anything the engine cannot answer exactly as the Node script did is decided before a single line is printed or file is
+//! written, and the verb says why on stderr and answers exit 75 (nothing written; no Node script is run for it): a checkout
+//! nested in another one, a settings file the engine cannot parse as JavaScript does, and a Primary with no live child (it prints
+//! its one idle line and records the metric). After the first line nothing stops the run; every later failure takes the fail-open
+//! path.
 pub mod arch;
 pub mod edge;
 pub mod read;

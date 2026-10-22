@@ -38,7 +38,7 @@ const path = require('node:path');
 const devswarmSource = require('./lib/devswarm-source.js');
 const cp = require('node:child_process');
 
-const DEVSWARM_PATH = path.join(__dirname, '../../plugins/anti-hall/scripts/devswarm.js');
+const DEVSWARM_PATH = path.join(__dirname, '../../plugins/anti-hall-node/scripts/devswarm.js');
 const cli = require(DEVSWARM_PATH);
 
 function tmpHome() {

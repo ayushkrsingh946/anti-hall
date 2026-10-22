@@ -12,7 +12,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const M = require(path.join(
-  __dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'lib', 'liveness.js',
+  __dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'lib', 'liveness.js',
 ));
 
 const IDLE = 15 * 60 * 1000;
@@ -445,8 +445,8 @@ test('P1-7: a FUTURE heartbeat does NOT short-circuit computeLiveness to alive (
 // read was BLIND to it.
 // ============================================================================
 
-const devswarmStoreForLiveness = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
-const repokeyForLiveness = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
+const devswarmStoreForLiveness = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
+const repokeyForLiveness = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
 
 const LIVENESS_REPO_CWD = process.cwd();
 const LIVENESS_REPO_KEY = repokeyForLiveness.repoKeyForWorktree(LIVENESS_REPO_CWD);
@@ -548,7 +548,7 @@ test('UNION FAIL-OPEN: an unresolvable worktree (non-git) degrades to the pre-fi
 //      live against the pre-fix module (see the reproduction note below).
 // ============================================================================
 
-const installIngestForLiveness = require('../../plugins/anti-hall/companion/install-devswarm-ingest.js');
+const installIngestForLiveness = require('../../plugins/anti-hall-node/companion/install-devswarm-ingest.js');
 
 // seedStoreOnlyBacklogFrom(home, id, rows) — rows: [{ sender, message }]. Same
 // store-only mesh-direct shape as seedStoreOnlyBacklog above, but with an
@@ -677,10 +677,10 @@ test('A3 guard: a row with NO resolvable sender (null) still drives stale — fa
 
 const mutantKit = require(path.join(__dirname, '..', 'scripts', 'lib', 'devswarm-mutant-kit.js'));
 const LIVE_LIVENESS_PATH = path.join(
-  __dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'lib', 'liveness.js',
+  __dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'lib', 'liveness.js',
 );
 const LIVE_TARGET_SESSION_PATH = path.join(
-  __dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'lib', 'target-session.js',
+  __dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'lib', 'target-session.js',
 );
 
 // createLivenessCopy: an isolated scratch copy of JUST liveness.js + its one

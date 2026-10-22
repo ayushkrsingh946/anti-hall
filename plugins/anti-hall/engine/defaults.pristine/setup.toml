@@ -213,11 +213,11 @@ value = [".anti-hall-progress.md", ".anti-hall-history.md"]
 
 [setup.cap_how_companion]
 doc = "How a companion is enabled. Placeholder: file."
-value = 'node "${CLAUDE_PLUGIN_ROOT}/companion/{file}"'
+value = 'node "${CLAUDE_PLUGIN_ROOT}/../anti-hall-node/companion/{file}"'
 
 [setup.cap_how_migrations]
 doc = "How pending state migrations are applied."
-value = 'node "${CLAUDE_PLUGIN_ROOT}/scripts/migrate-state.js"'
+value = 'node "${CLAUDE_PLUGIN_ROOT}/../anti-hall-node/scripts/migrate-state.js"'
 
 # ---- briefing (scripts/briefing.js) ------------------------------------------------------------------------------------
 
@@ -843,15 +843,15 @@ value = ".claude-plugin/plugin.json"
 
 [setup.brief_store_file]
 doc = "The DevSwarm store module, relative to the plugin root."
-value = "companion/lib/devswarm-store.js"
+value = "../anti-hall-node/companion/lib/devswarm-store.js"
 
 [setup.brief_cli_file]
 doc = "The DevSwarm command-line script, relative to the plugin root."
-value = "scripts/devswarm.js"
+value = "../anti-hall-node/scripts/devswarm.js"
 
 [setup.brief_companion_dir]
 doc = "The companion directory, relative to the plugin root, as it prefixes a companion's name."
-value = "companion/"
+value = "../anti-hall-node/companion/"
 
 [setup.brief_docs_rel]
 doc = "The repository docs directory, relative to the plugin root."

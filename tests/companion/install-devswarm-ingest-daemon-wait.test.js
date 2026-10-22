@@ -17,7 +17,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const m = require('../../plugins/anti-hall/companion/install-devswarm-ingest.js');
+const m = require('../../plugins/anti-hall-node/companion/install-devswarm-ingest.js');
 
 function tmpHome() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'anti-hall-ingest-wait-'));
@@ -106,7 +106,7 @@ test('waitForLaunchdUnitGone: DOES kill when the pid is confirmed still the inge
       sleep: () => { throw new Error('must not sleep — deadlineMs:0 means the loop is skipped'); },
       kill: (pid, sig) => { killed = { pid, sig }; },
       now: () => 0,
-      readCmdline: () => '/usr/local/bin/node /Users/x/.claude/plugins/marketplaces/anti-hall/plugins/anti-hall/companion/devswarm-ingest.js',
+      readCmdline: () => '/usr/local/bin/node /Users/x/.claude/plugins/marketplaces/anti-hall/plugins/anti-hall-node/companion/devswarm-ingest.js',
     },
     deadlineMs: 0,
   });
@@ -145,17 +145,17 @@ test('waitForLaunchdUnitGone: an inconclusive command-line probe (throws or retu
 // some later argument ends with /companion/devswarm-ingest.js.
 test('looksLikeIngestDaemonCmdline: matches the real daemon regardless of install location (marketplace copy or repo checkout)', () => {
   assert.equal(m.looksLikeIngestDaemonCmdline(
-    'node /Users/x/.claude/plugins/marketplaces/anti-hall/plugins/anti-hall/companion/devswarm-ingest.js',
+    'node /Users/x/.claude/plugins/marketplaces/anti-hall/plugins/anti-hall-node/companion/devswarm-ingest.js',
   ), true, 'marketplace install path');
   assert.equal(m.looksLikeIngestDaemonCmdline(
-    '/Users/x/.nvm/versions/node/v24.14.0/bin/node /Users/x/Projects/anti-hall/plugins/anti-hall/companion/devswarm-ingest.js',
+    '/Users/x/.nvm/versions/node/v24.14.0/bin/node /Users/x/Projects/anti-hall/plugins/anti-hall-node/companion/devswarm-ingest.js',
   ), true, 'repo checkout path, absolute node binary — must ALSO match, or reclaiming this shape regresses to duplicate daemons');
 });
 
 test('looksLikeIngestDaemonCmdline: rejects a non-node command that merely mentions the name/log/script (tail/vim/grep false-positive fix)', () => {
   assert.equal(m.looksLikeIngestDaemonCmdline('tail -f /Users/x/.anti-hall/devswarm-ingest.log'), false, 'tailing the log file');
   assert.equal(m.looksLikeIngestDaemonCmdline(
-    'vim /Users/x/Projects/anti-hall/plugins/anti-hall/companion/devswarm-ingest.js',
+    'vim /Users/x/Projects/anti-hall/plugins/anti-hall-node/companion/devswarm-ingest.js',
   ), false, 'editing the script');
   assert.equal(m.looksLikeIngestDaemonCmdline('grep devswarm-ingest foo'), false, 'grepping for the name');
 });
@@ -178,7 +178,7 @@ test('waitForLaunchdUnitGone end-to-end: a node process running the REAL daemon 
     io: {
       isAlive: () => true, sleep: () => { throw new Error('must not sleep'); }, now: () => 0,
       kill: (pid, sig) => { killed = { pid, sig }; },
-      readCmdline: () => '/usr/local/bin/node /Users/x/Projects/anti-hall/plugins/anti-hall/companion/devswarm-ingest.js',
+      readCmdline: () => '/usr/local/bin/node /Users/x/Projects/anti-hall/plugins/anti-hall-node/companion/devswarm-ingest.js',
     },
     deadlineMs: 0,
   });

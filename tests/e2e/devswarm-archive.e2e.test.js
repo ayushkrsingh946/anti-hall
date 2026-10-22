@@ -40,9 +40,9 @@ const path = require('node:path');
 const cp = require('node:child_process');
 const { testHook } = require('../helpers/spawn-hook.js');
 const H = require('./helpers.js');
-const cli = require('../../plugins/anti-hall/scripts/devswarm.js');
-const store = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
-const repokey = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
+const cli = require('../../plugins/anti-hall-node/scripts/devswarm.js');
+const store = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
+const repokey = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
 
 function ctxOf(r) {
   return (r.json && r.json.hookSpecificOutput && r.json.hookSpecificOutput.additionalContext) || '';

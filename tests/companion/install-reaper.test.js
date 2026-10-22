@@ -6,7 +6,7 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const path = require('node:path');
 
-const MOD = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'install-reaper.js');
+const MOD = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'install-reaper.js');
 const m = require(MOD);
 
 const NASTY = '/Users/a b & c/<x>/"q\'/node';

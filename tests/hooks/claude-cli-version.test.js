@@ -18,9 +18,9 @@ const PAYLOAD = { hook_event_name: 'SessionStart', session_id: 't' };
 const NOW = Date.now();
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-const drift = require(path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'hooks', 'lib', 'drift-baseline.js'));
-const refreshModule = require(path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'hooks', 'claude-cli-version-refresh.js'));
-const { CLAUDE_CLI_BASELINE } = require(path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'hooks', 'lib', 'claude-cli-baseline.js'));
+const drift = require(path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'hooks', 'lib', 'drift-baseline.js'));
+const refreshModule = require(path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'hooks', 'claude-cli-version-refresh.js'));
+const { CLAUDE_CLI_BASELINE } = require(path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'hooks', 'lib', 'claude-cli-baseline.js'));
 const BASELINE = CLAUDE_CLI_BASELINE;
 
 function writeCache(h, obj) {

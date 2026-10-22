@@ -21,7 +21,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const W = require(path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'lib', 'devswarm-wake-watch.js'));
+const W = require(path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'lib', 'devswarm-wake-watch.js'));
 const { tick, normalizeState, loadSeenState, saveSeenState, seenPath, attachBroadcastChannel } = W;
 
 const ID = 'primary-mixedwriters';

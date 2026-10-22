@@ -28,10 +28,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { testHookRaw } = require('../helpers/spawn-hook.js');
 const { makeHome } = require('../helpers/fixtures.js');
-const installIngest = require('../../plugins/anti-hall/companion/install-devswarm-ingest.js');
-const repokey = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
-const meshStore = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
-const rc = require('../../plugins/anti-hall/companion/lib/reader-cursors.js');
+const installIngest = require('../../plugins/anti-hall-node/companion/install-devswarm-ingest.js');
+const repokey = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
+const meshStore = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
+const rc = require('../../plugins/anti-hall-node/companion/lib/reader-cursors.js');
 
 const HOOK = 'devswarm-parent-gate.js';
 const PRIMARY_ENV = { DEVSWARM_REPO_ID: 'repo-1' };

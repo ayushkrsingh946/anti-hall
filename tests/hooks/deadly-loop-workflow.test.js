@@ -367,7 +367,7 @@ test('B2: a single confirmed P0 finding (multi-seat) still blocks convergence (g
 test('model-routing-guard: every seat brief template contains at least one complex token', () => {
   // Read the guard's COMPLEX list directly from the source — never duplicate it here.
   const guardSrc = fs.readFileSync(
-    path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'hooks', 'model-routing-guard.js'),
+    path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'hooks', 'model-routing-guard.js'),
     'utf8',
   );
   // Extract the COMPLEX array literal from the guard source.

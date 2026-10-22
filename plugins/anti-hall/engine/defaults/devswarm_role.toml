@@ -44,7 +44,7 @@ doc = "The agent name that has the idle-wake cron and monitor tools."
 value = "claude"
 
 [devswarm_role.test_markers]
-doc = "Environment variables that mark a test run; with one of them set and the home equal to the real home the Node settings reader refuses, so the check defers rather than guess what Node does."
+doc = "Environment variables that mark a test run; with one of them set and the home equal to the real home the Node settings reader refuses, so the script counts the case as abandoned and allows rather than guess what Node does."
 value = ["ANTIHALL_TEST", "ANTIHALL_TEST_ISOLATION"]
 
 [devswarm_role.real_home_escape]
@@ -103,11 +103,11 @@ value = ".anti-hall/bin"
 
 [devswarm_role.launcher_cli]
 doc = "The stable launcher of the DevSwarm CLI: its file name under the bin directory and the script it resolves, relative to the plugin root."
-value = { name = "devswarm.js", target = "scripts/devswarm.js" }
+value = { name = "devswarm.js", target = "../anti-hall-node/scripts/devswarm.js" }
 
 [devswarm_role.launcher_watcher]
 doc = "The stable launcher of the mailbox watcher: its file name under the bin directory and the script it resolves, relative to the plugin root."
-value = { name = "wake-watch.js", target = "companion/lib/devswarm-wake-watch.js" }
+value = { name = "wake-watch.js", target = "../anti-hall-node/companion/lib/devswarm-wake-watch.js" }
 
 [devswarm_role.out_prefix]
 doc = "The SessionStart hook output up to the directive text (host protocol; the text follows as a JSON string)."

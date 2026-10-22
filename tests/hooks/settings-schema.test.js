@@ -6,7 +6,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
 
-const SCHEMA = require('../../plugins/anti-hall/hooks/lib/settings-schema.js');
+const SCHEMA = require('../../plugins/anti-hall-node/hooks/lib/settings-schema.js');
 
 const VALID_TYPES = new Set(['boolean', 'number', 'string', 'enum', 'csv', 'object']);
 

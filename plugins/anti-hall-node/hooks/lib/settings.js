@@ -217,7 +217,7 @@ function readEnvOverride(entry, opts) {
 function pluginManifestDefault(entry, opts) {
   if (!entry.pluginOption) return undefined;
   try {
-    const p = (opts && opts.pluginJsonPath) || path.join(__dirname, '..', '..', '.claude-plugin', 'plugin.json');
+    const p = (opts && opts.pluginJsonPath) || path.join(__dirname, '..', '..', '..', 'anti-hall', '.claude-plugin', 'plugin.json');
     const pj = JSON.parse(fs.readFileSync(p, 'utf8'));
     const uc = pj && pj.userConfig && pj.userConfig[entry.pluginOption];
     return uc ? uc.default : undefined;

@@ -121,7 +121,7 @@ function runningAntiHallVersion() {
   if (_runningAntiHallVersionCache !== undefined) return _runningAntiHallVersionCache;
   let v = null;
   try {
-    const p = path.join(__dirname, '..', '..', '.claude-plugin', 'plugin.json');
+    const p = path.join(__dirname, '..', '..', '..', 'anti-hall', '.claude-plugin', 'plugin.json');
     const json = JSON.parse(fs.readFileSync(p, 'utf8'));
     v = (json && typeof json.version === 'string') ? json.version : null;
   } catch (_) { v = null; }

@@ -16,7 +16,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const M = require(path.join(
-  __dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'devswarm-supervisor.js',
+  __dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'devswarm-supervisor.js',
 ));
 
 const UUID = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
@@ -178,7 +178,7 @@ test('D12 item 1: isSessionAliveRow is skipped once grace/archive-ready already 
 });
 
 test('MUTATION: removing the idleAlive suppression restores poking an idle-alive row', () => {
-  const SUPERVISOR = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'devswarm-supervisor.js');
+  const SUPERVISOR = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'devswarm-supervisor.js');
   const src = fs.readFileSync(SUPERVISOR, 'utf8');
   const target = "if (graced || done || idleAlive || isPrimaryRow) {";
   assert.ok(src.includes(target), 'mutant target string not found verbatim');
@@ -221,7 +221,7 @@ test('MUTATION: removing the idleAlive suppression restores poking an idle-alive
 // escalation of a Primary anchor. Un-reverted (the CURRENT source, exercised
 // by the 'D12 item 1' tests above), the same fixture is suppressed instead.
 test('D12 RED-PROOF: pre-fix source (isSessionAliveRow clause reverted) escalates a live-pid row idle 15-30min', () => {
-  const SUPERVISOR = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'devswarm-supervisor.js');
+  const SUPERVISOR = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'devswarm-supervisor.js');
   const src = fs.readFileSync(SUPERVISOR, 'utf8');
   const target = "const idleAlive = !graced && !done\n          && (\n            (deps.rowLivenessState || rowLivenessState)(rowForLiveness, home, { now: nowTs }) === 'idle-alive'\n            || (deps.isSessionAliveRow || isSessionAliveRow)(rowForLiveness, home, { now: nowTs })\n          );";
   assert.ok(src.includes(target), 'D12 mutant target string not found verbatim — supervisor.js shape changed');

@@ -1199,7 +1199,7 @@ function resolveMonitorTimeoutSec(explicit, env) {
 function readInstalledPluginVersion(fsi) {
   const F = fsi || fs;
   try {
-    const p = path.join(__dirname, '..', '.claude-plugin', 'plugin.json');
+    const p = path.join(__dirname, '..', '..', 'anti-hall', '.claude-plugin', 'plugin.json');
     const json = JSON.parse(F.readFileSync(p, 'utf8'));
     return (json && typeof json.version === 'string') ? json.version : null;
   } catch (_) { return null; }

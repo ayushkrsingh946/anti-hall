@@ -12,8 +12,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { testHook, testHookRaw } = require('../helpers/spawn-hook.js');
 const { makeHome } = require('../helpers/fixtures.js');
-const { readDescriptors } = require('../../plugins/anti-hall/companion/devswarm-supervisor.js');
-const storeLib = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
+const { readDescriptors } = require('../../plugins/anti-hall-node/companion/devswarm-supervisor.js');
+const storeLib = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
 
 const HOOK = 'devswarm-child-turn.js';
 // Stable substring surviving the v0.58 hook-text sweep (the OLD marker,
@@ -569,7 +569,7 @@ test('ARCHIVE REQUEST ABSENT: unread messages with no marker -> no archive-reque
 // it drains their native parent->child queue via `inbox pull`). Requires a
 // resolvable git worktree (REPO_CWD), same precondition as the descriptor-
 // registration tests above. -----
-const repokey = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
+const repokey = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
 const REPO_KEY = repokey.repoKeyForWorktree(REPO_CWD);
 const CHILD_ENV = { DEVSWARM_REPO_ID: 'repo-1', DEVSWARM_SOURCE_BRANCH: 'main', DEVSWARM_BUILDER_ID: 'child-stale' };
 
@@ -745,7 +745,7 @@ test('CHILD MONITOR-FAULT: healthy monitor (consecutiveMonitorFailures:0) -> nei
 // NDJSON-based unreadInfo/buildUnreadSegment reception path above (both can
 // coexist). -----
 
-const meshStore = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
+const meshStore = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
 
 // seedMeshDirect(home, id, count, urgency) — inserts `count` REAL mesh-direct
 // rows addressed to `id` into the shared store (the SAME production
@@ -1146,7 +1146,7 @@ test('MISMATCH FIX: REMINDER names heartbeat --summary as satisfying the Stop-ga
 // mechanical SessionStart store-register path, so the phantom's real directs are
 // forwarded into the child's builder-id partition and the phantom is tombstoned on the
 // child's FIRST self-register. -----
-const instP0 = require('../../plugins/anti-hall/companion/install-devswarm-ingest.js');
+const instP0 = require('../../plugins/anti-hall-node/companion/install-devswarm-ingest.js');
 
 test('P0 phantom-rescue: the SessionStart store-register FOLDS a same-worktree spawn phantom — forwards its real directs into the child\'s builder-id partition and tombstones the phantom, deterministically (not only on a later inbox pull)', () => {
   const h = makeHome();
@@ -1194,7 +1194,7 @@ test('P0 phantom-rescue: the SessionStart store-register FOLDS a same-worktree s
 // of the shared registry row for an id (alongside cmdRegister and
 // rekeySubdirRegistryRows, both of which take the per-id lock) — it must ALSO run
 // its upsertRegistry write under withIdLock(id), never unlocked, mirroring G1/G5. -----
-const recoveryP1c = require('../../plugins/anti-hall/companion/lib/recovery.js');
+const recoveryP1c = require('../../plugins/anti-hall-node/companion/lib/recovery.js');
 
 test('F1: registerStoreDescriptor does NOT write the shared registry while the id\'s lock is held, and writes it once released', () => {
   const h = makeHome();
@@ -1630,7 +1630,7 @@ test('HEARTBEAT PUSH-STATE: no resolvable worktree (default /tmp cwd) -> keys om
 // ---------------------------------------------------------------------------
 
 const cpMod = require('node:child_process');
-const HOOK_ABS = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'hooks', HOOK);
+const HOOK_ABS = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'hooks', HOOK);
 
 function lockPath(home, id) {
   return path.join(home, '.anti-hall', 'devswarm', 'locks', id + '.lock');
@@ -1860,7 +1860,7 @@ test('ARCHIVED CHILD: metrics record the refused re-registration and the turn-af
 
     testHook(HOOK, promptPayload(sessId, REPO_CWD), { home: h.home, env });
 
-    const metricsLib = require('../../plugins/anti-hall/companion/lib/archived-child-metrics.js');
+    const metricsLib = require('../../plugins/anti-hall-node/companion/lib/archived-child-metrics.js');
     const m = metricsLib.readMetrics(h.home);
     assert.strictEqual(m.totals['reregistration-refused'], 1);
     assert.strictEqual(m.totals['turn-after-archive'], 1);

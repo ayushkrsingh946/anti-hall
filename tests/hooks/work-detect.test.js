@@ -12,7 +12,7 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert');
-const wd = require('../../plugins/anti-hall/hooks/lib/work-detect.js');
+const wd = require('../../plugins/anti-hall-node/hooks/lib/work-detect.js');
 
 test('isDevswarmHousekeepingOnly: a chained inbox pull && inbox ack is housekeeping-only', () => {
   assert.strictEqual(

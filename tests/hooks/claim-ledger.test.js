@@ -637,7 +637,7 @@ test('LAM: Jev turnRef is kept when the transcript is up to date (payload equals
 });
 
 test('unit: numberInEvidence matches by value at the claim precision', () => {
-  const { numberInEvidence, collectNumbers } = require('../../plugins/anti-hall/hooks/claim-ledger.js');
+  const { numberInEvidence, collectNumbers } = require('../../plugins/anti-hall-node/hooks/claim-ledger.js');
   const ev = 'cpu 34.887 total; 28.706 total; 1326 messages; 0.3421s';
   const nums = collectNumbers(ev);
   assert.strictEqual(numberInEvidence('34.9', ev, nums), true);

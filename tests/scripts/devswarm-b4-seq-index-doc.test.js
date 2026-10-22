@@ -11,7 +11,7 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const CLI_PATH = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'scripts', 'devswarm.js');
+const CLI_PATH = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'scripts', 'devswarm.js');
 const SKILL_PATH = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'skills', 'devswarm', 'SKILL.md');
 const CODEX_SKILL_PATH = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'codex', 'skills', 'anti-hall-devswarm', 'SKILL.md');
 
@@ -53,7 +53,7 @@ test('B4: codex/skills/anti-hall-devswarm/SKILL.md documents seq vs index (dual-
 });
 
 test('B4: no field was renamed — devswarm-store.js still emits BOTH seq and index on every message row', () => {
-  const storePath = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'lib', 'devswarm-store.js');
+  const storePath = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'lib', 'devswarm-store.js');
   const src = fs.readFileSync(storePath, 'utf8');
   const matches = src.match(/index: i \+ 1,\s*\n\s*seq: physicalSeq,/g) || [];
   assert.ok(matches.length >= 2, `expected both listMessages implementations to emit index+seq together; found ${matches.length}`);

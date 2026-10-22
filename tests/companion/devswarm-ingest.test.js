@@ -11,10 +11,10 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const ingest = require('../../plugins/anti-hall/companion/devswarm-ingest.js');
-const storeLib = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
-const installIngest = require('../../plugins/anti-hall/companion/install-devswarm-ingest.js');
-const repokey = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
+const ingest = require('../../plugins/anti-hall-node/companion/devswarm-ingest.js');
+const storeLib = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
+const installIngest = require('../../plugins/anti-hall-node/companion/install-devswarm-ingest.js');
+const repokey = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
 
 function tmpHome() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'anti-hall-ingest-'));
@@ -1191,7 +1191,7 @@ test('runIngestLoop still surfaces a NON-lock store error (does not swallow arbi
 // ---------------------------------------------------------------------------
 
 test('logFilePath matches the installer\'s stable LOG constant (same file both sides write/read)', () => {
-  const installer = require('../../plugins/anti-hall/companion/install-devswarm-ingest.js');
+  const installer = require('../../plugins/anti-hall-node/companion/install-devswarm-ingest.js');
   const home = tmpHome();
   try {
     assert.strictEqual(ingest.logFilePath(home), path.join(home, '.anti-hall', 'devswarm-ingest.log'));
@@ -1672,7 +1672,7 @@ test('runIngestLoop: an unwritable WAL path -> no destructive monitor read at al
 test('runIngestLoop: a WAL batch-write failure spills the raw batch and blocks reads until it is absorbed', () => {
   const home = tmpHome();
   try {
-    const readWal = require('../../plugins/anti-hall/companion/lib/devswarm-read-wal.js');
+    const readWal = require('../../plugins/anti-hall-node/companion/lib/devswarm-read-wal.js');
     const batch = JSON.stringify([{ fromBranch: 'c', message: 'spilled-1', createdAt: '2026-01-01T00:00:01Z' }]);
     const badFs = Object.assign({}, fs, {
       writeSync(fd, data, ...rest) {

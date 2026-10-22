@@ -28,7 +28,7 @@ const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');
 
-const INBOX = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'hooks', 'devswarm-parent-inbox.js');
+const INBOX = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'hooks', 'devswarm-parent-inbox.js');
 const src = fs.readFileSync(INBOX, 'utf8');
 
 test('item 2: the archived branch now consults notDrainingFlag instead of an unconditional swap', () => {

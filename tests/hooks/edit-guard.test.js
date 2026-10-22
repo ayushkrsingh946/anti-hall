@@ -14,7 +14,7 @@ const path = require('node:path');
 const { testHook, testHookRaw, editPayload } = require('../helpers/spawn-hook.js');
 const { makeHome } = require('../helpers/fixtures.js');
 
-const { skipCommand } = require('../../plugins/anti-hall/hooks/lib/skip-cmd.js');
+const { skipCommand } = require('../../plugins/anti-hall-node/hooks/lib/skip-cmd.js');
 
 const HOOK = 'edit-guard.js';
 const COORD = { CLAUDE_CODE_ENTRYPOINT: 'cli' };
@@ -181,7 +181,7 @@ test('LEGACY CONTINUE-HERE: EXISTING ./CONTINUE-HERE.md (leading ./) -> Edit sta
 // escape hatch — 'node scripts/devswarm.js skip edit-guard' — instead of
 // leaving the agent to guess or invent a wrong skip key).
 const PLAIN_REASON = (tool) =>
-  require('../../plugins/anti-hall/hooks/lib/block-message.js').blockMessage({
+  require('../../plugins/anti-hall-node/hooks/lib/block-message.js').blockMessage({
     guard: 'edit-guard',
     what: tool + ' blocked: the coordinator does not touch files directly.',
     why: 'Raw edits never happen in the main thread; the coordinator synthesizes a summary.',
@@ -253,7 +253,7 @@ test("PLAN MODE case-insensitive: permission_mode:'Plan' + doc -> ALLOWED", () =
 const PLAN_SOURCE_BLOCKED = [
   'src/app.js',
   'plugins/anti-hall/scripts/foo.js',
-  'plugins/anti-hall/hooks/edit-guard.js',
+  'plugins/anti-hall-node/hooks/edit-guard.js',
   'scripts/build.sh',
   'companion/x.py',
   'statusline/render.ts',
@@ -587,7 +587,7 @@ test('DEVSWARM CHILD: block reason is UNCHANGED (no workspace redirect — child
   assert.strictEqual(r.status, 2, `stdout: ${r.stdout}`);
   assert.strictEqual(
     r.json.reason,
-    require('../../plugins/anti-hall/hooks/lib/block-message.js').blockMessage({
+    require('../../plugins/anti-hall-node/hooks/lib/block-message.js').blockMessage({
       guard: 'edit-guard',
       what: 'Edit blocked: the orchestrator does not touch files directly.',
       why: 'Raw edits in the main thread flood it; a worker returns a tight summary instead.',
@@ -1080,7 +1080,7 @@ test('v0.116 A NEGATIVE: dotted child worktree Write to a repo file still BLOCKS
 });
 
 test('v0.116 A: encodeHarnessCwd replaces every non-alphanumeric char', () => {
-  const { encodeHarnessCwd } = require('../../plugins/anti-hall/hooks/lib/scratchpad.js');
+  const { encodeHarnessCwd } = require('../../plugins/anti-hall-node/hooks/lib/scratchpad.js');
   assert.strictEqual(encodeHarnessCwd('/Users/u/.devswarm/repos/0-ab_c'), '-Users-u--devswarm-repos-0-ab-c');
   assert.strictEqual(encodeHarnessCwd('/Users/u/Projects/anti-hall'), '-Users-u-Projects-anti-hall');
   assert.strictEqual(encodeHarnessCwd(''), null);

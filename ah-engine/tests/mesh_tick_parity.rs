@@ -925,11 +925,11 @@ fn tick_matches_node_byte_for_byte_and_defers_without_writing() {
             assert_eq!(v["result"], "none", "{}: a Node shadow record exists, but no shadow runs any more: {v}", c.name);
         } else {
             deferred += 1;
-            assert_eq!(e.code, 75, "{}: no Node to hand the verb to, the engine is unable (75)", c.name);
+            assert_eq!(e.code, 69, "{}: no Node to hand the verb to, the engine is unable (69, a visible error)", c.name);
             // the seeded home itself, before the engine runs (seeding twice stamps different wall-clock times into the registry)
             let (pre_tree, pre_db) = (tree(&hd), store_dump(&hd, &fx.repo_key));
             let d = engine_verb(&hd, &hd.join("state"), &cwd, &av, now, None, &[extra.clone(), vec![("PATH", nonode.as_str())]].concat());
-            assert_eq!(d.code, 75, "{}: a deferral the engine cannot hand to Node exits 75, got {} / {}", c.name, d.code, d.stdout);
+            assert_eq!(d.code, 69, "{}: a deferral the engine cannot hand to Node exits 69 (exit_unable), got {} / {}", c.name, d.code, d.stdout);
             assert!(d.stdout.is_empty(), "{}: nothing is printed on a deferral: {}", c.name, d.stdout);
             let reason = last_log(&hd.join("state"));
             assert_eq!(reason["result"], "defer", "{}: logged as a deferral: {reason}", c.name);

@@ -38,7 +38,7 @@ const path = require('node:path');
 const { testHook } = require('../helpers/spawn-hook.js');
 const { makeHome } = require('../helpers/fixtures.js');
 
-const HOOKS_DIR = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'hooks');
+const HOOKS_DIR = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'hooks');
 
 const HOOKS = [
   'speculation-guard.js',

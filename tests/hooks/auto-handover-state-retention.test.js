@@ -15,7 +15,7 @@ const path = require('node:path');
 
 const {
   runRepairs, sweepAutoHandoverState, sweepContextPctState,
-} = require('../../plugins/anti-hall/hooks/lib/doctor-repair.js');
+} = require('../../plugins/anti-hall-node/hooks/lib/doctor-repair.js');
 
 const DAY = 24 * 60 * 60 * 1000;
 

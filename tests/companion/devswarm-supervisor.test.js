@@ -15,7 +15,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const M = require(path.join(
-  __dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'devswarm-supervisor.js',
+  __dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'devswarm-supervisor.js',
 ));
 
 const UUID = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
@@ -232,7 +232,7 @@ test('sweepOnce: nudgeWindowMs is threaded through to computeLiveness for every 
 
 test('end-to-end: ANTIHALL_DEVSWARM_IDLE_SEC moves the stale cutoff seen by computeLiveness', () => {
   const { computeLiveness, projectDirFor } = require(path.join(
-    __dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'lib', 'liveness.js',
+    __dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'lib', 'liveness.js',
   ));
   const { home, cleanup } = makeHome();
   try {
@@ -264,13 +264,13 @@ test('end-to-end: ANTIHALL_DEVSWARM_IDLE_SEC moves the stale cutoff seen by comp
 
 test('sweepOnce (real computeLiveness + pokeOrEscalate): escalation appends ONE parent-store notice; repeated sweeps do not duplicate it (#19)', () => {
   const { projectDirFor, livenessPathFor } = require(path.join(
-    __dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'lib', 'liveness.js',
+    __dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'lib', 'liveness.js',
   ));
   const inst = require(path.join(
-    __dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'install-devswarm-ingest.js',
+    __dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'install-devswarm-ingest.js',
   ));
   const storeLib = require(path.join(
-    __dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'lib', 'devswarm-store.js',
+    __dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'lib', 'devswarm-store.js',
   ));
   const { home, cleanup } = makeHome();
   try {
@@ -504,10 +504,10 @@ test('sweepOnce: mesh-urgency path NEVER resolves a pid / never kills — recove
 
 test('sweepOnce (real notifyParentEscalation + real store): urgent mesh unread on a stale-but-nudged workspace still appends a parent-store escalate notice', () => {
   const inst = require(path.join(
-    __dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'install-devswarm-ingest.js',
+    __dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'install-devswarm-ingest.js',
   ));
   const storeLib = require(path.join(
-    __dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'lib', 'devswarm-store.js',
+    __dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'lib', 'devswarm-store.js',
   ));
   const { home, cleanup } = makeHome();
   try {
@@ -599,7 +599,7 @@ test('sweepOnce: urgency-forced escalation threads the injected fsi through to n
 // ---------------------------------------------------------------------------
 test('sweepOnce (REAL deriveSummary + REAL readMeshUrgency): an unread urgent NON-heartbeat BROADCAST, with NO direct message at all, still forces escalation (P1 fix)', () => {
   const storeLib = require(path.join(
-    __dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'lib', 'devswarm-store.js',
+    __dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'lib', 'devswarm-store.js',
   ));
   const { home, cleanup } = makeHome();
   try {
@@ -635,7 +635,7 @@ test('sweepOnce (REAL deriveSummary + REAL readMeshUrgency): an unread urgent NO
 
 test('sweepOnce (REAL deriveSummary + REAL readMeshUrgency): an unread NORMAL-urgency broadcast (no direct message) -> NO escalation', () => {
   const storeLib = require(path.join(
-    __dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'lib', 'devswarm-store.js',
+    __dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'lib', 'devswarm-store.js',
   ));
   const { home, cleanup } = makeHome();
   try {
@@ -670,7 +670,7 @@ test('sweepOnce (REAL deriveSummary + REAL readMeshUrgency): an unread NORMAL-ur
 
 test('sweepOnce (REAL deriveSummary + REAL readMeshUrgency): an unread URGENT HEARTBEAT-only broadcast (no direct message) -> NO escalation (D22 exclusion holds)', () => {
   const storeLib = require(path.join(
-    __dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'lib', 'devswarm-store.js',
+    __dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'lib', 'devswarm-store.js',
   ));
   const { home, cleanup } = makeHome();
   try {

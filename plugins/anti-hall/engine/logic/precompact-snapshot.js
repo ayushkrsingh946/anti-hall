@@ -154,7 +154,7 @@ function decide(p) {
   var ctx = ho.context(cwd), h = ah.home(), rh = ah.fs.realpath(h) || h;
   if (ctx.unsure) { ah.unable('precompact-snapshot:repo_root'); ctx = { unsure: false, toplevel: null, root: null }; } // a checkout the host cannot classify is read as the directory itself
   var repoRoot = ctx.toplevel && ctx.toplevel !== rh ? ctx.toplevel : cwd, today = ho.localDate();
-  if (today === null) { ah.unable('precompact-snapshot:local_date'); return 'allow'; } // no local date, no snapshot path
+  if (today === null) { ah.unable('precompact-snapshot:local_date', 'abandoned'); return 'allow'; } // no local date, no snapshot path
   var root = ah.path.join(repoRoot, ah.cfg('codex_handover.handovers_dir'));
   var tp = typeof p.transcript_path === 'string' ? p.transcript_path : null;
   if (tp) tp = hookProc.open(p, tp);
@@ -167,7 +167,7 @@ function decide(p) {
   for (var i = 0; i < names.length; i++) {
     var m = ho.precompactRe.exec(names[i]);
     if (m) {
-      if (m[1].length > ah.cfgNum('codex_handover.seq_max_digits')) { ah.unable('precompact-snapshot:seq_digits'); return 'allow'; } // parseInt past 20 digits is implementation-defined: no new snapshot name
+      if (m[1].length > ah.cfgNum('codex_handover.seq_max_digits')) { ah.unable('precompact-snapshot:seq_digits', 'abandoned'); return 'allow'; } // parseInt past 20 digits is implementation-defined: no new snapshot name
       n = Math.max(n, parseInt(m[1], 10) + 1);
     }
   }

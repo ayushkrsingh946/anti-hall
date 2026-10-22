@@ -34,10 +34,10 @@ const path = require('node:path');
 const devswarmSource = require('./lib/devswarm-source.js');
 const cp = require('node:child_process');
 
-const DEVSWARM_PATH = path.join(__dirname, '../../plugins/anti-hall/scripts/devswarm.js');
+const DEVSWARM_PATH = path.join(__dirname, '../../plugins/anti-hall-node/scripts/devswarm.js');
 const cli = require(DEVSWARM_PATH);
-const repokey = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
-const devswarmUnread = require('../../plugins/anti-hall/companion/lib/devswarm-unread.js');
+const repokey = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
+const devswarmUnread = require('../../plugins/anti-hall-node/companion/lib/devswarm-unread.js');
 const mutantKit = require('./lib/devswarm-mutant-kit.js');
 const { testHook } = require('../helpers/spawn-hook.js');
 

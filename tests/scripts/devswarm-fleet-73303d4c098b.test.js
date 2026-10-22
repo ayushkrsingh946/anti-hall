@@ -2,7 +2,7 @@
 // Defect 73303d4c098b (P1): foldGroupIntoSurvivor tombstones a retired twin row
 // with no redirect; send/read-primary against the OLD id then fail closed.
 //
-// Root cause (file:line, HEAD 5631695): plugins/anti-hall/scripts/devswarm.js:2851
+// Root cause (file:line, HEAD 5631695): plugins/anti-hall-node/scripts/devswarm.js:2851
 // `s.removeRegistryIf(row.id, ...)` deletes the retired row's registry entry
 // outright (both backends fully remove it from listRegistry()) with NO trace of
 // which survivor it was folded into. resolveSendTarget (devswarm.js:9376-9411,

@@ -9,7 +9,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { testHook } = require('../helpers/spawn-hook.js');
 const { makeHome } = require('../helpers/fixtures.js');
-const { isExpectedNonzero, isHarnessRefusal } = require('../../plugins/anti-hall/hooks/lib/expected-failure.js');
+const { isExpectedNonzero, isHarnessRefusal } = require('../../plugins/anti-hall-node/hooks/lib/expected-failure.js');
 
 const HOOK = 'failure-root-cause-nudge.js';
 const ctx = (r) => (r.json && r.json.hookSpecificOutput && r.json.hookSpecificOutput.additionalContext) || '';

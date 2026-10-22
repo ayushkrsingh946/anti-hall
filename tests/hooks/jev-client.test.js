@@ -11,7 +11,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { makeHome } = require('../helpers/fixtures.js');
 
-const LIB = require.resolve('../../plugins/anti-hall/hooks/lib/jev-client.js');
+const LIB = require.resolve('../../plugins/anti-hall-node/hooks/lib/jev-client.js');
 
 // Fresh require each time so module-level state (there is none, but be safe)
 // never leaks between tests, and so env-driven config is always re-read.
@@ -740,7 +740,7 @@ test('endpoint override: loopback hosts honoured; default endpoint unchanged whe
 });
 
 test('endpoint override: ANTIHALL_JEV=1 from env enables the feature but credentials only go to vendor hosts (anthropic senders have no override)', () => {
-  const root = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'hooks');
+  const root = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'hooks');
   for (const f of ['speculation-judge.js', 'lib/jev-triage-worker.js']) {
     const src = fs.readFileSync(path.join(root, f), 'utf8');
     assert.ok(/hostname: 'api\.anthropic\.com'/.test(src), f + ' pins the vendor host');

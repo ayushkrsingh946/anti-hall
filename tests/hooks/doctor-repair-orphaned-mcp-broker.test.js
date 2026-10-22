@@ -29,7 +29,7 @@ const assert = require('node:assert');
 const path = require('node:path');
 
 const REPO_ROOT = path.join(__dirname, '..', '..');
-const REPAIR_JS = path.join(REPO_ROOT, 'plugins', 'anti-hall', 'hooks', 'lib', 'doctor-repair.js');
+const REPAIR_JS = path.join(REPO_ROOT, 'plugins', 'anti-hall-node', 'hooks', 'lib', 'doctor-repair.js');
 const repair = require(REPAIR_JS);
 
 // Build a fake `ps -axo pid=,ppid=,command=` line.

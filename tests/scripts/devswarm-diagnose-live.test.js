@@ -18,9 +18,9 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const cli = require('../../plugins/anti-hall/scripts/devswarm.js');
-const storeLib = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
-const cacheLib = require('../../plugins/anti-hall/companion/lib/devswarm-archived-cache.js');
+const cli = require('../../plugins/anti-hall-node/scripts/devswarm.js');
+const storeLib = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
+const cacheLib = require('../../plugins/anti-hall-node/companion/lib/devswarm-archived-cache.js');
 
 const NOW = 1_800_000_000_000;
 const GRACE_MS = 10 * 60 * 1000; // DEFAULT_ARCHIVED_GRACE_MS

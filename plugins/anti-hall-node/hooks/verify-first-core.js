@@ -130,7 +130,7 @@ const CHILD_WORKSPACE_MAILBOX_NOTE =
 const path = require('path');
 
 const PLUGIN_ROOT = path.resolve(__dirname, '..');
-const PROTOCOL_PATH = path.join(PLUGIN_ROOT, 'PROTOCOL.md');
+const PROTOCOL_PATH = path.join(PLUGIN_ROOT, '..', 'anti-hall', 'PROTOCOL.md'); // PROTOCOL.md stays in the published plugin
 
 // Today's text under the plan's D1 names.
 const CORE_FULL = CORE_LINES;

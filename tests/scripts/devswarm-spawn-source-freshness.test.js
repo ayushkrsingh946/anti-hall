@@ -22,7 +22,7 @@ const LOG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'anti-hall-spawnsrc-log-')
 process.env.ANTI_HALL_LOG_DIR = LOG_DIR;
 process.on('exit', () => { try { fs.rmSync(LOG_DIR, { recursive: true, force: true }); } catch (_) {} });
 
-const cli = require('../../plugins/anti-hall/scripts/devswarm.js');
+const cli = require('../../plugins/anti-hall-node/scripts/devswarm.js');
 
 // Fixture git runs under an isolated HOME (never the real one).
 const GIT_ENV = Object.assign({}, process.env, {

@@ -10,7 +10,7 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const path = require('node:path');
 const cp = require('node:child_process');
-const { isHandoverPath } = require('../../plugins/anti-hall/hooks/lib/handover-find.js');
+const { isHandoverPath } = require('../../plugins/anti-hall-node/hooks/lib/handover-find.js');
 
 const REPO = path.join(__dirname, '..', '..');
 

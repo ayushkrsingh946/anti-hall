@@ -11,10 +11,10 @@ const os = require('node:os');
 const path = require('node:path');
 
 const D = require(path.join(
-  __dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'lib', 'doctor-devswarm.js',
+  __dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'lib', 'doctor-devswarm.js',
 ));
 const { projectDirFor, writeVerdict } = require(path.join(
-  __dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'lib', 'liveness.js',
+  __dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'lib', 'liveness.js',
 ));
 
 function makeHome() {
@@ -597,7 +597,7 @@ test('versionMismatchCheck: malformed cache JSON => fail-open, never throws (WAR
 
 test('versionMismatchCheck: baseline used for comparison is the SAME constant hooks/devswarm-version.js uses (P2-C)', () => {
   const { DEVSWARM_BASELINE } = require(path.join(
-    __dirname, '..', '..', 'plugins', 'anti-hall', 'hooks', 'lib', 'devswarm-baseline.js',
+    __dirname, '..', '..', 'plugins', 'anti-hall-node', 'hooks', 'lib', 'devswarm-baseline.js',
   ));
   const { home, cleanup } = makeHome();
   try {

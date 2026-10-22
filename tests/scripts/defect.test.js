@@ -10,11 +10,11 @@ const os = require('node:os');
 const path = require('node:path');
 const cp = require('node:child_process');
 
-const store = require('../../plugins/anti-hall/hooks/lib/defect-store.js');
-const defectCli = require('../../plugins/anti-hall/scripts/defect.js');
-const repokey = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
-const CLI = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'scripts', 'defect.js');
-const NUDGE_HOOK = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'hooks', 'defect-nudge.js');
+const store = require('../../plugins/anti-hall-node/hooks/lib/defect-store.js');
+const defectCli = require('../../plugins/anti-hall-node/scripts/defect.js');
+const repokey = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
+const CLI = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'scripts', 'defect.js');
+const NUDGE_HOOK = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'hooks', 'defect-nudge.js');
 
 function tmpHome() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'anti-hall-defect-'));
@@ -96,7 +96,7 @@ test('50 parallel raw appendLine calls from separate processes produce 50 parsea
     fs.writeFileSync(file, '');
 
     const workerSrc = `
-      const store = require(${JSON.stringify(path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'hooks', 'lib', 'defect-store.js'))});
+      const store = require(${JSON.stringify(path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'hooks', 'lib', 'defect-store.js'))});
       const file = process.argv[2];
       const i = process.argv[3];
       const line = JSON.stringify({ t: 'report', at: new Date().toISOString(), v: '0.0.0', proj: 'p', sid: 's' + i, class: 'other', sev: 'p2', sym: 'worker ' + i, repro: '', claimed: '', observed: '' });
@@ -856,7 +856,7 @@ test('a flag valid for a DIFFERENT subcommand names that subcommand in the error
 });
 
 test('checkFlags() rejects a flag unknown to every subcommand with a generic message (not a bogus cross-reference)', () => {
-  const errors = require('../../plugins/anti-hall/scripts/defect.js').checkFlags('report', { 'totally-made-up': 'x' });
+  const errors = require('../../plugins/anti-hall-node/scripts/defect.js').checkFlags('report', { 'totally-made-up': 'x' });
   assert.ok(errors);
   assert.match(errors[0], /--totally-made-up is not a valid flag for `report`/);
 });

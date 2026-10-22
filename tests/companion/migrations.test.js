@@ -12,8 +12,8 @@ const os = require('node:os');
 const path = require('node:path');
 
 const REPO = path.join(__dirname, '..', '..');
-const M = require(path.join(REPO, 'plugins', 'anti-hall', 'companion', 'lib', 'migrations.js'));
-const U = require(path.join(REPO, 'plugins', 'anti-hall', 'skills', 'update', 'scripts', 'update.js'));
+const M = require(path.join(REPO, 'plugins', 'anti-hall-node', 'companion', 'lib', 'migrations.js'));
+const U = require(path.join(REPO, 'plugins', 'anti-hall-node', 'skills', 'update', 'scripts', 'update.js'));
 
 function mkHome() { return fs.mkdtempSync(path.join(os.tmpdir(), 'ah-migr-')); }
 function rm(p) { try { fs.rmSync(p, { recursive: true, force: true }); } catch (_) {} }

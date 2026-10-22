@@ -41,6 +41,10 @@ value = "--confirm-ids"
 doc = "Directory to treat as the working directory instead of the current one."
 value = "--cwd"
 
+[flag.daily]
+doc = "Add a line per UTC day (`shadow-compare`)."
+value = "--daily"
+
 [flag.days]
 doc = "Look-back window in days, or the snooze length for `jev-setup snooze`."
 value = "--days"

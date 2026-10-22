@@ -80,7 +80,7 @@ pub fn run_entry(entry: &Entry, meta: &Meta, p: &Value) -> Answer {
 }
 
 /// The bytes the Node hook `id` would have produced for a check's verdict.
-fn answer_of(id: &str, verdict: Option<Verdict>) -> Answer {
+pub(crate) fn answer_of(id: &str, verdict: Option<Verdict>) -> Answer {
     match verdict {
         Some(Verdict::Routed(inner, routes)) => match answer_of(id, Some(*inner)) {
             Answer::Decided(r, _) => Answer::Decided(r, routes),
@@ -152,7 +152,7 @@ pub fn evaluate(meta: &Meta, p: &Value, over_cpu: &dyn Fn() -> bool, observe: &d
                         &crate::defaults::render("msg.log_budget_crossed", &[("check", &check), ("cpu_us", &cpu_us), ("wall_us", &wall_us)]),
                     );
                 }
-                // the Node hook decides this entry, or the CPU budget was crossed while it ran: what the check staged must not
+                // the check gave no answer (its failure policy decides), or the CPU budget was crossed while it ran: what the check staged must not
                 // land for a decision nobody received.
                 crate::deadline::discard_staged_since(mark);
                 Answer::Defer
@@ -259,17 +259,22 @@ mod tests {
         }
     }
 
-    /// Load: past the client's deadline no entry is started, each defers to its own Node hook (a loaded machine costs single
-    /// entries, never the whole event's reply).
+    /// Load: past the client's deadline no entry is started and each gives no answer (the dispatcher then applies the check's failure
+    /// policy: a loaded machine costs single entries, never the whole event's reply). A check that fails closed on a guard event keeps
+    /// only its own limit, so it still decides.
     #[test]
-    fn past_the_clients_deadline_every_entry_defers_without_running() {
+    fn past_the_clients_deadline_every_open_entry_gives_no_answer_without_running() {
         let p = json!({"session_id": "s", "cwd": "/", "hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "git push --force origin main"}});
         crate::deadline::begin(std::time::Instant::now());
         crate::deadline::client_deadline(0);
         let got = evaluate(&meta(), &p, &|| false, &|_, _, _| {});
         crate::deadline::end();
         assert!(!got.is_empty());
-        assert!(got.iter().all(|(_, a)| matches!(a, Answer::Defer)), "{:?}", got.iter().map(|(id, _)| id).collect::<Vec<_>>());
+        assert!(got.iter().any(|(_, a)| matches!(a, Answer::Defer)), "{:?}", got.iter().map(|(id, _)| id).collect::<Vec<_>>());
+        for (id, a) in &got {
+            let closed = crate::script::failure_mode(&entry_check(id)) == crate::defaults::text("script.failure_mode_closed");
+            assert_eq!(matches!(a, Answer::Defer), !closed, "{id}: only an open check is cut at the deadline");
+        }
         let again = evaluate(&meta(), &p, &|| false, &|_, _, _| {});
         assert!(again.iter().any(|(id, a)| id == "git-guard" && matches!(a, Answer::Decided(r, _) if r.code == Some(2))), "in time it decides");
     }
@@ -387,10 +392,16 @@ mod tests {
         assert_eq!(got.iter().find(|(id, _)| id == "git-guard").unwrap().1, Answer::Decided(HookResult::quiet("git-guard"), Vec::new()));
     }
 
+    /// The check name of the table entry `id` (PreToolUse, Claude).
+    fn entry_check(id: &str) -> String {
+        crate::dispatch::table::entries("claude", "PreToolUse").into_iter().find(|e| e.id == id).and_then(|e| e.check).unwrap_or_else(|| id.to_string())
+    }
+
     /// Review P1: an incomplete request environment (dropped over the cap, absent, no HOME) must not be evaluated: with
-    /// it the ship-it gate reads as off and the engine would allow an Edit Node blocks. Every env-reading check defers.
+    /// it the ship-it gate reads as off and the engine would allow an Edit Node blocks. No check is evaluated: each takes its
+    /// failure policy, and a blocking guard (ship-it-guard) fails closed.
     #[test]
-    fn an_incomplete_environment_defers_every_check() {
+    fn an_incomplete_environment_applies_the_failure_policy_to_every_check() {
         let p = json!({"session_id": "s", "cwd": "/", "hook_event_name": "PreToolUse", "tool_name": "Edit", "tool_input": {"file_path": "migrations/a.sql"}});
         let mut m = meta();
         m.env = crate::reqenv::RequestEnv::from_pairs([("ANTIHALL_SHIPIT_GATE", "1"), ("HOME", "/h")]);
@@ -399,10 +410,14 @@ mod tests {
         assert!(matches!(ship(&whole), Answer::Decided(ref r, _) if r.code == Some(2)), "control: the gate is on, so it blocks");
         m.env = crate::reqenv::RequestEnv::incomplete();
         let got = evaluate(&m, &p, &|| false, &|_, _, _| {});
-        assert!(!got.is_empty() && got.iter().all(|(_, a)| *a == Answer::Defer), "every check defers: {got:?}");
+        assert!(!got.is_empty() && got.iter().all(|(_, a)| !matches!(a, Answer::Defer)), "every check is decided by its policy: {got:?}");
+        assert!(matches!(ship(&got), Answer::Decided(ref r, _) if r.code == Some(2) && r.err.contains("request environment incomplete")), "{got:?}");
         let big = "x".repeat(crate::defaults::num("request_env.max_bytes") as usize);
         m.env = crate::reqenv::RequestEnv::from_pairs([("ANTIHALL_SHIPIT_GATE", "1".to_string()), ("ANTIHALL_X", big)]);
-        assert_eq!(ship(&evaluate(&m, &p, &|| false, &|_, _, _| {})), Answer::Defer, "an environment dropped over the cap defers too");
+        assert!(
+            matches!(ship(&evaluate(&m, &p, &|| false, &|_, _, _| {})), Answer::Decided(ref r, _) if r.code == Some(2)),
+            "an environment dropped over the cap takes the same policy"
+        );
     }
 
     /// Replay payload L3 (a force push): Node's command-guard blocks it as a state-changing remote command in the main thread. The
@@ -428,7 +443,7 @@ mod tests {
         let d = std::env::temp_dir().join(format!("ah-native-vf-{}", std::process::id()));
         crate::discard::harmless(std::fs::remove_dir_all(&d)); // keep: cleanup that raced; an absent file is the goal state
         std::fs::create_dir_all(d.join("plugin/hooks")).unwrap();
-        std::fs::write(d.join("plugin/hooks/verify-first-core.js"), "").unwrap();
+        std::fs::write(d.join("plugin/hooks/ah-hook.sh"), "").unwrap();
         std::fs::create_dir_all(d.join("home")).unwrap();
         let root = std::fs::canonicalize(d.join("plugin")).unwrap().to_string_lossy().to_string();
         let env = crate::reqenv::RequestEnv::from_pairs([("HOME", d.join("home").to_string_lossy().to_string())]);

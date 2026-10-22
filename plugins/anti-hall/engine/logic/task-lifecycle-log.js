@@ -31,7 +31,7 @@ function decide(p) {
   var line = '- ' + iso + sep + event + sep + 'task_id=' + taskId;
   if (teammate !== '') line += sep + 'teammate=' + teammate;
   if (subject !== '') line += sep + subject;
-  if (ah.home() === '') { ah.unable('task-lifecycle-log:no_home'); return 'allow'; } // no home: nowhere to keep the ledger
+  if (ah.home() === '') { ah.unable('task-lifecycle-log:no_home', 'abandoned'); return 'allow'; } // no home: nowhere to keep the ledger
   var cwd = p.cwd;
   if (!ah.path.isAbsolute(cwd)) { ah.unable('task-lifecycle-log:relative_cwd'); cwd = hookProc.cwd(p); } // resolved against the stand-in directory
   // The session's project: the outermost superproject's work tree. Where the cheap file-level answer cannot classify the checkout (a

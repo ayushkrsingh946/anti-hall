@@ -662,12 +662,12 @@ value = "stale"
 # ---- the front door and the shadow ---------------------------------------------------------------------------------
 
 [mesh_write.msg_unable]
-doc = "stderr line when the engine cannot answer a mesh verb (an unported verb, a case it defers, no plugin context). Nothing was written; the exit code is mesh_write.exit_defer."
-value = "ah-engine mesh: this verb or case is not available natively; nothing was done"
+doc = "stderr line when the engine cannot answer a mesh verb (an unported verb, a case it cannot do, no plugin context). Nothing was written; the exit code is mesh_write.exit_unable. Placeholder: {site}, where it gave up."
+value = "ah-engine mesh: ERROR: this verb or case cannot be done by the engine ({site}); nothing was done. Run the verb by hand with node <plugin root>/scripts/devswarm.js, or report this site."
 
 [mesh_write.msg_disabled]
-doc = "stderr line when the mesh write verbs are switched off (mesh.engine_writes = off). Nothing was done; the exit code is mesh_write.exit_defer."
-value = "ah-engine mesh: the mesh write verbs are switched off (mesh.engine_writes = off); nothing was done"
+doc = "stderr line when the mesh write verbs are switched off (mesh.engine_writes = off). Nothing was done; the exit code is mesh_write.exit_unable. Placeholder: {site}."
+value = "ah-engine mesh: ERROR: the mesh write verbs are switched off (mesh.engine_writes = off, {site}); nothing was done. Turn the setting on to run mesh verbs."
 
 [mesh_write.shadow_log]
 doc = "The shadow log, one JSON line per replayed call, under the engine state directory."
@@ -861,9 +861,9 @@ value = 70
 min = 1
 max = 255
 
-[mesh_write.exit_defer]
-doc = "Exit code meaning: the engine did not act and wrote nothing, so the caller should run the verb in Node (sysexits EX_TEMPFAIL, 75). `ah-engine mesh` runs a deferred verb in Node itself, so it exits with this only when it cannot start Node (it replaces the former 127 for that case). Never used after a write: see exit_committed_failure."
-value = 75
+[mesh_write.exit_unable]
+doc = "Exit code of a mesh verb the engine could not do or that is switched off: nothing was written, and the failure is a visible error (sysexits EX_UNAVAILABLE, 69), not the former silent deferral code 75. Never used after a write: see exit_committed_failure."
+value = 69
 min = 1
 max = 255
 

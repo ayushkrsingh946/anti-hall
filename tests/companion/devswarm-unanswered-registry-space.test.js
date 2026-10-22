@@ -35,7 +35,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 
-const replyState = require('../../plugins/anti-hall/companion/lib/devswarm-reply-state.js');
+const replyState = require('../../plugins/anti-hall-node/companion/lib/devswarm-reply-state.js');
 
 test('M1 — a reply recorded under a REGISTRY-ONLY alias clears the question', () => {
   // The question resolved to the family's slug row; the reply was addressed to

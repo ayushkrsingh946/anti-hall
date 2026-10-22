@@ -89,8 +89,19 @@ fn placeholders(template: &str) -> Vec<String> {
 }
 
 impl Run<'_> {
+    /// A file of the plugin tree. A `..` in `rel` (the Node backup tree is a sibling of the plugin, see `nodeback.node_dir`) is resolved
+    /// in the text, so the paths the stages show name the real place.
     fn plugin(&self, rel: &str) -> std::path::PathBuf {
-        Path::new(&self.paths.plugin_src).join(rel)
+        let mut out = std::path::PathBuf::new();
+        for part in Path::new(&self.paths.plugin_src).join(rel).components() {
+            match part {
+                std::path::Component::ParentDir if matches!(out.components().next_back(), Some(std::path::Component::Normal(_))) => {
+                    out.pop();
+                }
+                other => out.push(other.as_os_str()),
+            }
+        }
+        out
     }
 
     fn files_there(&self, files: &[&str]) -> bool {
@@ -146,7 +157,7 @@ impl Run<'_> {
     /// A stage the native path cannot decide this time: counted `native_unable` at `postpull:<name>`, accounted `held`, answered with
     /// `update_post.held_json`. Nothing is run or written for it; the next update or doctor pass tries it again.
     fn held_stage(&self, name: &str, why: &str) -> J {
-        crate::obs::counters::handback(crate::obs::counters::Handback::NativeUnable, &format!("postpull:{name}"));
+        crate::obs::counters::handback(crate::obs::counters::Handback::Abandoned, &format!("postpull:{name}"));
         self.outcome.set(Some(crate::obs::counters::Outcome::Held));
         fill(parse_json(text("update_post.held_json")), &[("name", name), ("why", why)])
     }

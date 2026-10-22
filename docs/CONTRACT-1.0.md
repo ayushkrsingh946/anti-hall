@@ -10,8 +10,8 @@ right and this document gets a fix.
 
 | Surface | Count | Source of truth |
 |---|---|---|
-| Settings keys | 331 in 20 sections | `plugins/anti-hall/hooks/lib/settings-schema.js` (`SECTIONS`) |
-| `devswarm.js` verbs | 47 | `plugins/anti-hall/scripts/devswarm.js` (the `run()` switch; `help` lists it) |
+| Settings keys | 331 in 20 sections | `plugins/anti-hall-node/hooks/lib/settings-schema.js` (`SECTIONS`) |
+| `devswarm.js` verbs | 47 | `plugins/anti-hall-node/scripts/devswarm.js` (the `run()` switch; `help` lists it) |
 | Other user-facing CLIs | 6 | `settings.js`, `doctor.js`, `update.js`, `migrate-state.js`, `capability-scan.js` |
 | Hook scripts | 62 (84 registrations, 12 events) | `plugins/anti-hall/hooks/hooks.registry.json` (`hooks.json` itself is one thin trigger per event, generated from the engine's dispatch table) |
 | Codex hook scripts | 44 (60 registrations, 7 events) | `plugins/anti-hall/codex/hooks/hooks.registry.json` (`hooks.json`: one thin trigger per event) |
@@ -19,7 +19,7 @@ right and this document gets a fix.
 
 ## 1. Settings keys
 
-**Schema:** `plugins/anti-hall/hooks/lib/settings-schema.js`. Each entry has `key`, `type`
+**Schema:** `plugins/anti-hall-node/hooks/lib/settings-schema.js`. Each entry has `key`, `type`
 (`boolean`, `number`, `string`, `enum`, `csv`, `object`), `default`, and optionally `env`,
 `values`, `min`/`max`, `legacy`, `pluginOption`, `advanced`, `locked`, `homeOnly`. A key is
 addressed as `<section>.<key>` (for example `safety.gitGuard`, `devswarm.autoArchive.mode`).
@@ -52,7 +52,7 @@ have an env override, 14 are `locked` (safety keys), 3 are `homeOnly`. The full 
 defaults is [GUIDE.md, "Every setting"](./GUIDE.md#every-setting);
 `tests/hygiene/docs-coverage.test.js` fails if any schema key is missing from it.
 
-**Precedence** (`plugins/anti-hall/hooks/lib/settings.js`, `get()` and `resolveBelowFile()`),
+**Precedence** (`plugins/anti-hall-node/hooks/lib/settings.js`, `get()` and `resolveBelowFile()`),
 highest first:
 
 1. **env**: the key's own env var (`entry.env`), then any deprecated `envAliases` (the canonical `ANTIHALL_*` name wins when both are set), when the value parses for the key's type. `guards.scanThrottle` and `maintenance.sessionEndReaper` keep their old `ANTI_HALL_SCAN_THROTTLE` / `ANTI_HALL_SESSION_END_REAPER` names as aliases.
@@ -92,7 +92,7 @@ forward-migrated (`companion/lib/migrations.js` `migrateSettingsFromLegacy`).
 
 ### `scripts/devswarm.js`
 
-Source: the `run()` switch in `plugins/anti-hall/scripts/devswarm.js`. `devswarm.js help`
+Source: the `run()` switch in `plugins/anti-hall-node/scripts/devswarm.js`. `devswarm.js help`
 (and `help --short`, `help <verb>`, `<verb> --help`, `-h`) lists the verbs from that switch,
 and so does the `unknown command:` error, so neither can drift from the dispatcher. 47 verbs:
 

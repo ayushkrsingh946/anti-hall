@@ -14,7 +14,7 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const path = require('node:path');
 
-const REPAIR_JS = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'hooks', 'lib', 'doctor-repair.js');
+const REPAIR_JS = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'hooks', 'lib', 'doctor-repair.js');
 const repair = require(REPAIR_JS);
 
 // A fake `scripts/devswarm.js` module (the exact seam checkResurrectedRows's

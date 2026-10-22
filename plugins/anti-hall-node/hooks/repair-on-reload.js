@@ -86,7 +86,7 @@ const path = require('path');
 const { spawn } = require('child_process');
 
 const PLUGIN_ROOT = path.join(__dirname, '..');
-const PLUGIN_JSON = path.join(PLUGIN_ROOT, '.claude-plugin', 'plugin.json');
+const PLUGIN_JSON = path.join(PLUGIN_ROOT, '..', 'anti-hall', '.claude-plugin', 'plugin.json');
 // Fallback ONLY (see resolveDoctorJs below): whatever doctor.js sits next to
 // THIS running hook — i.e. the cache-version dir the harness bound __dirname
 // to when it loaded this file for the current session.

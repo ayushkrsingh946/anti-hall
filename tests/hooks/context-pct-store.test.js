@@ -5,7 +5,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
 const { makeHome } = require('../helpers/fixtures.js');
-const store = require('../../plugins/anti-hall/hooks/lib/context-pct-store.js');
+const store = require('../../plugins/anti-hall-node/hooks/lib/context-pct-store.js');
 
 test('tagFromSessionId: sanitizes and bounds; null for absent/blank', () => {
   assert.strictEqual(store.tagFromSessionId('abc-123_XYZ'), 'abc-123_XYZ');

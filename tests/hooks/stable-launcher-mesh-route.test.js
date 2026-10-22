@@ -11,7 +11,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
-const sl = require('../../plugins/anti-hall/hooks/lib/stable-launcher.js');
+const sl = require('../../plugins/anti-hall-node/hooks/lib/stable-launcher.js');
 
 function setup({ mode, engine, timeoutMs }) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ah-meshroute-'));

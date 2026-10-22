@@ -29,6 +29,11 @@ pub(super) fn plugin() -> PathBuf {
     repo().join("plugins/anti-hall")
 }
 
+/// The Node backup tree, a sibling of the published plugin (`nodeback.node_dir`).
+pub(super) fn plugin_node() -> PathBuf {
+    repo().join("plugins/anti-hall-node")
+}
+
 fn sh(dir: &Path, prog: &str, args: &[&str]) -> String {
     let o = Command::new(prog)
         .args(args)
@@ -137,6 +142,7 @@ pub(super) fn world(o: &Opt) -> World {
     let dst = seed.join("plugins");
     fs::create_dir_all(&dst).unwrap();
     sh(&root, "cp", &["-R", plugin().to_str().unwrap(), dst.join("anti-hall").to_str().unwrap()]);
+    sh(&root, "cp", &["-R", plugin_node().to_str().unwrap(), dst.join("anti-hall-node").to_str().unwrap()]);
     put(&seed, "plugins/anti-hall/.claude-plugin/plugin.json", manifest(if o.unknown_installed { "dev" } else { V1 }));
     put(&seed, "CHANGELOG.md", changelog(V1));
     sh(&seed, "git", &["add", "-A"]);

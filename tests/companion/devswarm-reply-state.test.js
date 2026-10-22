@@ -15,7 +15,7 @@ const { Worker } = require('node:worker_threads');
 const { makeHome } = require('../helpers/fixtures.js');
 
 const MODULE_PATH = path.join(
-  __dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'lib', 'devswarm-reply-state.js',
+  __dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'lib', 'devswarm-reply-state.js',
 );
 const M = require(MODULE_PATH);
 
@@ -375,7 +375,7 @@ test('migrate-state.js migrateReplyState wrapper delegates to the reply-state mo
     fs.mkdirSync(path.dirname(p), { recursive: true });
     fs.writeFileSync(p, JSON.stringify({ 'child-a': { lastReplyTs: 7 } }));
 
-    const migrateState = require(path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'scripts', 'migrate-state.js'));
+    const migrateState = require(path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'scripts', 'migrate-state.js'));
     const dry = migrateState.migrateReplyState({ dryRun: true, home });
     assert.equal(dry.pending, 1);
     const applied = migrateState.migrateReplyState({ home });

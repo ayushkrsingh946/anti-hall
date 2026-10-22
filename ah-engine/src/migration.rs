@@ -5,7 +5,7 @@
 //!
 //! | kind | source | node | partial | native |
 //! |---|---|---|---|---|
-//! | hook | [`crate::checks::registry`] | the check has a Node twin (not in `script.engine_only_checks`) | its script has a real `return 'defer'` (`opcli.migration_defer_re`) | otherwise |
+//! | hook | [`crate::checks::registry`] | the check is not classified in `script.engine_only_checks` (a test fails on one) | its script has a real `return 'defer'` (`opcli.migration_defer_re`) | otherwise |
 //! | duty | `devswarm_sup.duties` | the duty runs as Node's function | it runs natively but its kind is still `node` (a Node witness or remainder) | kind `native` |
 //! | stage | `update_post.stages` | the stage names a Node function (`fn`) | | the stage names a native port (`native`) |
 //! | verb | `cmd.*` | the command is planned (its Node script answers) | implemented, but a key of `opcli.migration_verb_node_keys` still ships | implemented |

@@ -721,7 +721,7 @@ test('FAIL-OPEN: transcript_path points at a missing file -> exit 0, no crash', 
 test('SIGNATURE-ACK: acking the exact stale-agent signature silences it; a different set still nudges', () => {
   const h = makeHome();
   try {
-    const stopAck = require('../../plugins/anti-hall/hooks/lib/stop-ack.js');
+    const stopAck = require('../../plugins/anti-hall-node/hooks/lib/stop-ack.js');
     const agentId = 'ccce100000000001';
     const out = writeOutputFile(h, 'worker-ack.output', THRESHOLD_MS + 60000);
     const tp = h.writeTranscript([
@@ -760,7 +760,7 @@ test('SIGNATURE-ACK: acking the exact stale-agent signature silences it; a diffe
 test('SETTING OFF: guards.stopAck=false ignores an existing ack and blocks again', () => {
   const h = makeHome();
   try {
-    const stopAck = require('../../plugins/anti-hall/hooks/lib/stop-ack.js');
+    const stopAck = require('../../plugins/anti-hall-node/hooks/lib/stop-ack.js');
     const agentId = 'eeee100000000003';
     const out = writeOutputFile(h, 'worker-ack-off.output', THRESHOLD_MS + 60000);
     const tp = h.writeTranscript([
@@ -792,7 +792,7 @@ test('TERMINAL: killed/cancelled/canceled agents (notification and task_status s
       ]);
       const r = testHook(HOOK, stopPayload(tp), { home: h.home });
       assert.ok(!isBlock(r), status + ' must be terminal, not silent: ' + JSON.stringify(r.json));
-      const scan = require('../../plugins/anti-hall/hooks/lib/agent-scan.js').runningAgents(tp);
+      const scan = require('../../plugins/anti-hall-node/hooks/lib/agent-scan.js').runningAgents(tp);
       assert.deepStrictEqual(scan.map((a) => a.id), [], status + ' must not be reported as running');
     } finally { h.cleanup(); }
   }
@@ -1011,7 +1011,7 @@ test('RESUME: a prefix-only resume matching TWO completed agents un-terminates n
       notificationLine(idA, 'completed', isoMinutesAgo(60)),
       notificationLine(idB, 'completed', isoMinutesAgo(60)),
     ];
-    const { scanTranscript } = require('../../plugins/anti-hall/hooks/lib/agent-scan.js');
+    const { scanTranscript } = require('../../plugins/anti-hall-node/hooks/lib/agent-scan.js');
     const ambiguous = scanTranscript(h.writeTranscript(base.concat([prefixOnly('bbbb1111', isoMinutesAgo(30))])));
     assert.ok(ambiguous.terminal.has(idA) && ambiguous.terminal.has(idB), 'ambiguous prefix must un-terminate neither');
     const none = scanTranscript(h.writeTranscript(base.concat([prefixOnly('cccc9999', isoMinutesAgo(30))])));
@@ -1045,7 +1045,7 @@ test('QUEUED MESSAGE: a leaf that merely QUOTES the phrase (not the JSON message
 // re-opened by an unrelated notification whose result text quoted "Resuming
 // agent <prefix>"). A resume counts only from a genuine tool_result.
 // ---------------------------------------------------------------------------
-const AGENT_SCAN = '../../plugins/anti-hall/hooks/lib/agent-scan.js';
+const AGENT_SCAN = '../../plugins/anti-hall-node/hooks/lib/agent-scan.js';
 const QUOTE = (id) => 'Report: the harness prints "Resuming agent ' + id.slice(0, 7) + '" on a SendMessage resume.';
 
 function killedBase(h, id) {

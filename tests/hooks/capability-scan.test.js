@@ -19,7 +19,7 @@ const {
   discoverCompanions,
   companionActive,
   migrationsCapability,
-} = require('../../plugins/anti-hall/scripts/capability-scan.js');
+} = require('../../plugins/anti-hall-node/scripts/capability-scan.js');
 
 function makeTmpDir(prefix) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix || 'capscan-test-'));
@@ -226,7 +226,7 @@ test('companionActive: fail-open -> "unknown" when the installer exports no LABE
 // off its real listInstalledIngestUnits export.
 // ---------------------------------------------------------------------------
 
-const REAL_INGEST_INSTALLER = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'install-devswarm-ingest.js');
+const REAL_INGEST_INSTALLER = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'install-devswarm-ingest.js');
 
 test('companionActive: a per-worktree-ONLY ingest install (no legacy unit) reports active=true', { skip: process.platform === 'win32' }, () => {
   const real = require(REAL_INGEST_INSTALLER);

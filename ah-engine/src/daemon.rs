@@ -129,6 +129,8 @@ pub struct Shared {
     forced_timer: AtomicBool,
     /// ms since `started` at the last accept-loop iteration
     loop_beat: AtomicU64,
+    /// The accept loop has returned (a clean drain); the watchdog no longer judges it.
+    loop_ended: AtomicBool,
     /// per worker: 0 = idle, else (ms since `started`) + 1 at its last progress on the current request (picked up, a check
     /// started or finished, the interpreter ran: [`crate::deadline::beat`]); the watchdog's stuck rule measures from it
     busy_since: Vec<Arc<AtomicU64>>,
@@ -208,6 +210,7 @@ impl Shared {
             db_closed: AtomicBool::new(false),
             forced_timer: AtomicBool::new(false),
             loop_beat: AtomicU64::new(0),
+            loop_ended: AtomicBool::new(false),
             busy_since: (0..workers).map(|_| Arc::new(AtomicU64::new(0))).collect(),
             stall_ms: AtomicU64::new(0),
             test_thread_panics: AtomicU64::new(0),
@@ -471,7 +474,10 @@ impl Shared {
         let gs = crate::gate::global().stats();
         // one flag for `degraded` and `health.degraded`: the health summary's own reasons or an unhealthy fail-open window
         let mut health_summary = health::summary();
-        let degraded = health::overall_degraded(&health_summary, crate::failopen::state(crate::failopen::window().0) != defaults::text("fail_open.state_ok"));
+        let (fo_n, fo_top) = crate::failopen::window();
+        let fo_unhealthy = crate::failopen::state(fo_n) != defaults::text("fail_open.state_ok");
+        health::add_fail_open_reason(&mut health_summary, fo_unhealthy.then(|| (fo_n, fo_top)));
+        let degraded = health::overall_degraded(&health_summary, fo_unhealthy);
         health_summary["degraded"] = serde_json::Value::Bool(degraded);
         let mut v = serde_json::json!({
             "running": true,
@@ -763,7 +769,7 @@ impl crate::hookio::Observer for DaemonObserver<'_> {
         observe_check_cost_in(self.t, self.event, check, micros);
         crate::obs::trace::push("check", check, telemetry::decision_name(verdict), micros);
         if matches!(verdict, crate::checks::Verdict::Defer) {
-            crate::obs::counters::handback(crate::obs::counters::Handback::NativeUnable, &format!("check:{check}"));
+            crate::obs::counters::handback(crate::obs::counters::Handback::Abandoned, &format!("check:{check}"));
         }
         self.t.observe_check_in(self.event, check, rule_id, verdict, micros, self.project);
     }
@@ -1545,6 +1551,20 @@ fn await_close(closing: &AtomicBool, closed: &AtomicBool, max: Duration, poll: D
     closed.load(SeqCst)
 }
 
+/// True when the accept loop counts as stalled at `now` (ms since the daemon's start) given its last beat. A beat of 0 = the
+/// loop has not run its first round: the daemon is still starting (database open, spool drain, scheduler and wiring start),
+/// judged by the longer `start_stall_ms`. `ended` = the loop returned (a clean drain): what follows is the shutdown tail
+/// (telemetry flush, database close), bounded by the drain timer; a loop that has ended is not a loop that stalled.
+fn loop_stalled(beat: u64, ended: bool, now: u64, stall_ms: u64, start_stall_ms: u64) -> bool {
+    if ended {
+        return false;
+    }
+    if beat == 0 {
+        return now > start_stall_ms;
+    }
+    now.saturating_sub(beat) > stall_ms
+}
+
 fn watchdog(sh: Arc<Shared>) {
     let mut last_rss = Instant::now();
     let mut last_idle_check = Instant::now();
@@ -1579,7 +1599,7 @@ fn watchdog(sh: Arc<Shared>) {
             sh.busy_since.iter().filter(|b| b.load(SeqCst) != 0).count() <= cfg.workers,
             defaults::render("msg.inv_busy_workers", &[("workers", &cfg.workers)])
         );
-        if now.saturating_sub(sh.loop_beat.load(SeqCst)) > cfg.stall.as_millis() as u64 {
+        if loop_stalled(sh.loop_beat.load(SeqCst), sh.loop_ended.load(SeqCst), now, cfg.stall.as_millis() as u64, cfg.start_stall.as_millis() as u64) {
             health::log_event("watchdog", "stall", defaults::text("msg.log_stall"));
             health::record_failure("watchdog", "stall", defaults::text("msg.failure_stall"));
             begin_drain(&sh, defaults::text("msg.exit_reason_stall"), true);
@@ -1609,6 +1629,7 @@ fn watchdog(sh: Arc<Shared>) {
             crate::debug_log!("daemon/cpu", defaults::render("msg.dbg_cpu_window", &[("ms", &format!("{:.0}", wall * 1000.0)), ("pct", &format!("{pct:.2}"))]));
             let edge = lk(&sh.budget).cpu_window(pct, cfg.effective.num("diagnostics.budget_cpu_pct"), cfg.effective.num("diagnostics.budget_cpu_windows"));
             report_budget_edge(edge, &format!("{pct:.1}"), cfg.effective.num("diagnostics.budget_cpu_pct"), "msg.log_budget_cpu");
+            crate::nodeback::shadow::hold(lk(&sh.budget).mask() & 1 == 1); // the Node shadow starts nothing while the CPU budget is breached
             if warn_pct > 0.0 && pct >= warn_pct {
                 let backoff_ms = cfg.effective.num("schedule.cpu_backoff_ms");
                 if let Some(sched) = sh.sched.get() {
@@ -1967,6 +1988,7 @@ pub fn serve() {
         spawn_service(&sh, "telemetry_flusher", Arc::new(move || telemetry_flusher(s.clone())));
     }
     accept_loop(&sh, &listener);
+    sh.loop_ended.store(true, SeqCst); // the shutdown tail below is bounded by the drain timer, not judged as a stalled loop
     crate::wire::withdraw();
     crate::dssup::ingest::join_all(); // a monitor call in flight has already taken its messages off the native queue
     if let Some(db) = &sh.db {
@@ -2034,6 +2056,7 @@ fn start_scheduler(sh: &Arc<Shared>) {
                 crate::procwatch::run_job(&crate::paths::dir(), &home, &rec)
             }
             "test_panic" if sh.cfg().test_hooks => std::panic::resume_unwind(Box::new(defaults::text("msg.reply_test_panic").to_string())),
+            "shadow_report" => crate::nodeback::report::scheduled(),
             "devswarm_reconcile" => Ok(crate::dswire::scheduled()),
             "devswarm_supervisor" => Ok(crate::dssup::cli::scheduled()),
             "noop" => Ok(String::new()),
@@ -2138,7 +2161,7 @@ fn accept_loop(sh: &Arc<Shared>, listener: &UnixListener) {
     // a connection was accepted after the last accept error (the recovery line is then due)
     let mut accepted_since_error = false;
     loop {
-        sh.loop_beat.store(sh.ms(), SeqCst);
+        sh.loop_beat.store(sh.ms().max(1), SeqCst); // never the not-started value
         let st = sh.stall_ms.swap(0, SeqCst);
         if st > 0 {
             std::thread::sleep(Duration::from_millis(st)); // test hook: simulate a wedged loop
@@ -2153,7 +2176,7 @@ fn accept_loop(sh: &Arc<Shared>, listener: &UnixListener) {
         unsafe { libc::poll(&mut pfd, 1, timeout) };
         let mut got_any = false;
         loop {
-            sh.loop_beat.store(sh.ms(), SeqCst);
+            sh.loop_beat.store(sh.ms().max(1), SeqCst);
             let s = match listener.accept() {
                 Ok((s, _)) => s,
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break, // nothing pending: back to poll
@@ -2246,6 +2269,17 @@ fn accept_loop(sh: &Arc<Shared>, listener: &UnixListener) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_watchdog_judges_startup_and_shutdown_by_their_own_clocks_not_the_loops() {
+        // 18:45Z deploy: a clean shutdown whose tail (flush + db close) outlasted stall_ms was killed as "accept loop stalled";
+        // the same applied to a start whose pre-loop work outlasted it
+        assert!(!loop_stalled(10_000, true, 600_000, 5_000, 60_000), "a loop that returned is draining, not stalled");
+        assert!(!loop_stalled(0, false, 30_000, 5_000, 60_000), "startup work longer than stall_ms is not a stall");
+        assert!(loop_stalled(0, false, 61_000, 5_000, 60_000), "a start that never reaches the loop is still caught");
+        assert!(loop_stalled(10_000, false, 15_001, 5_000, 60_000), "a running loop silent past stall_ms is a stall");
+        assert!(!loop_stalled(10_000, false, 15_000, 5_000, 60_000));
+    }
 
     #[test]
     fn the_exit_timer_waits_for_a_close_in_progress_and_gives_up_on_a_wedged_one() {

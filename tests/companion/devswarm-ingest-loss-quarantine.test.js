@@ -34,7 +34,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const ingest = require('../../plugins/anti-hall/companion/devswarm-ingest.js');
+const ingest = require('../../plugins/anti-hall-node/companion/devswarm-ingest.js');
 
 function tmpHome() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'anti-hall-lossq-'));

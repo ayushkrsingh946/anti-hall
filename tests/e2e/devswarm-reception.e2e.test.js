@@ -53,11 +53,11 @@ const path = require('node:path');
 const { testHook, bashPayload } = require('../helpers/spawn-hook.js');
 const H = require('./helpers.js');
 
-const store = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
-const ingest = require('../../plugins/anti-hall/companion/devswarm-ingest.js');
-const installIngest = require('../../plugins/anti-hall/companion/install-devswarm-ingest.js');
-const recovery = require('../../plugins/anti-hall/companion/lib/recovery.js');
-const liveness = require('../../plugins/anti-hall/companion/lib/liveness.js');
+const store = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
+const ingest = require('../../plugins/anti-hall-node/companion/devswarm-ingest.js');
+const installIngest = require('../../plugins/anti-hall-node/companion/install-devswarm-ingest.js');
+const recovery = require('../../plugins/anti-hall-node/companion/lib/recovery.js');
+const liveness = require('../../plugins/anti-hall-node/companion/lib/liveness.js');
 
 const PRIMARY_ENV = { DEVSWARM_REPO_ID: 'repo-1' };
 const COORD_ENV = { CLAUDE_CODE_ENTRYPOINT: 'cli', DEVSWARM_REPO_ID: 'repo-1' };

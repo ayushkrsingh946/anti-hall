@@ -11,7 +11,7 @@ const path = require('node:path');
 const { testHook } = require('../helpers/spawn-hook.js');
 const { makeHome } = require('../helpers/fixtures.js');
 
-const QUOTA = require('../../plugins/anti-hall/hooks/lib/codex-quota.js');
+const QUOTA = require('../../plugins/anti-hall-node/hooks/lib/codex-quota.js');
 const LIMIT = "Codex error: You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at ";
 
 function writeLog(home, repo, name, body, mtimeMs) {

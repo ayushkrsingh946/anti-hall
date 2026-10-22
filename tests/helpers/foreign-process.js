@@ -12,7 +12,7 @@ const cp = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
-const ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
+const ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
 
 const SCRIPT = `
 const a = JSON.parse(process.env.FOREIGN_ARGS);

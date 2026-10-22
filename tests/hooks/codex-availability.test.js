@@ -94,7 +94,7 @@ test('QUOTA: a live recorded quota outage is surfaced with the routing fallback,
   const h = makeHome();
   try {
     const until = Date.now() + 30 * 60 * 1000;
-    require('../../plugins/anti-hall/hooks/lib/codex-quota.js').recordQuota({
+    require('../../plugins/anti-hall-node/hooks/lib/codex-quota.js').recordQuota({
       until, reason: 'out of quota until later today', home: h.home,
     });
 
@@ -115,7 +115,7 @@ test('QUOTA: an expired quota record is treated as available again — no prefix
     // recordQuota() self-heals an already-past `until` (never records an
     // instantly-expired outage) — write the record directly to simulate real
     // time having passed since it was legitimately recorded in the future.
-    const quota = require('../../plugins/anti-hall/hooks/lib/codex-quota.js');
+    const quota = require('../../plugins/anti-hall-node/hooks/lib/codex-quota.js');
     fs.mkdirSync(path.dirname(quota.statePath(h.home)), { recursive: true });
     fs.writeFileSync(quota.statePath(h.home), JSON.stringify({
       quota: { available: false, until: Date.now() - 1000, reason: 'stale', recordedAt: Date.now() - 5000 },

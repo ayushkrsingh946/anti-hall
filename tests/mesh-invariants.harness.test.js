@@ -47,7 +47,7 @@ const inv = require('./harness/invariants.js');
 const scenarios = require('./harness/scenarios.js');
 
 const REPO_ROOT = path.join(__dirname, '..');
-const DOCTOR_JS = path.join(REPO_ROOT, 'plugins', 'anti-hall', 'hooks', 'doctor.js');
+const DOCTOR_JS = path.join(REPO_ROOT, 'plugins', 'anti-hall-node', 'hooks', 'doctor.js');
 const SPAWN_PRELOAD = path.join(__dirname, 'harness', 'spawn-count-preload.js');
 
 const STRICT = process.env.ANTIHALL_HARNESS_STRICT === '1';
@@ -159,7 +159,7 @@ test('I6: heartbeat push/liveness selection is idempotent to CLI-vs-child-turn a
 });
 
 test('I7: doctor --check (in-process runChecks) writes nothing under the isolated HOME', () => {
-  const doctorDevswarm = require(path.join(REPO_ROOT, 'plugins', 'anti-hall', 'companion', 'lib', 'doctor-devswarm.js'));
+  const doctorDevswarm = require(path.join(REPO_ROOT, 'plugins', 'anti-hall-node', 'companion', 'lib', 'doctor-devswarm.js'));
   const fixture = makeFixture(['r1'], 'i7');
   try {
     // seed one registered workspace so runChecks has something to look at.

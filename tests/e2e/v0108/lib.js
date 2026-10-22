@@ -68,7 +68,7 @@ function isolatedEnv(home, extra) {
 }
 
 // runHook(hookFile, payload, home, extraEnv) -> { status, stdout, stderr, json }
-// Spawns a REAL hook script from plugins/anti-hall/hooks with JSON on stdin,
+// Spawns a REAL hook script from plugins/anti-hall-node/hooks with JSON on stdin,
 // exactly as Claude Code's hook dispatcher does.
 function runHook(hookFile, payload, home, extraEnv) {
   const hookAbs = path.join(HOOKS_DIR, hookFile);

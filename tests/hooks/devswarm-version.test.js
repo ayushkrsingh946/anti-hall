@@ -14,7 +14,7 @@ const { testHook, testHookRaw } = require('../helpers/spawn-hook.js');
 const { makeHome } = require('../helpers/fixtures.js');
 
 const HOOK    = 'devswarm-version.js';
-const HOOK_ABS = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'hooks', HOOK);
+const HOOK_ABS = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'hooks', HOOK);
 const PAYLOAD = { hook_event_name: 'SessionStart', session_id: 't' };
 const NOW     = Date.now();
 const DAY_MS  = 24 * 60 * 60 * 1000;
@@ -23,8 +23,8 @@ const BASELINE = '2.5.1';
 // Direct module require (no process spawn) — module.exports pure helpers.
 // require.main !== module in this context, so main()/process.exit() never fire.
 const dv = require(HOOK_ABS);
-const refreshModule = require(path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'hooks', 'devswarm-version-refresh.js'));
-const { DEVSWARM_BASELINE } = require(path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'hooks', 'lib', 'devswarm-baseline.js'));
+const refreshModule = require(path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'hooks', 'devswarm-version-refresh.js'));
+const { DEVSWARM_BASELINE } = require(path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'hooks', 'lib', 'devswarm-baseline.js'));
 
 // Write the version cache to the fake home's ~/.anti-hall/devswarm-version.json.
 function writeCache(h, obj) {

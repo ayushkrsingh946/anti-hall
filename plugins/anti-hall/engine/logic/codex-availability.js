@@ -206,7 +206,7 @@ function cxQuotaNote(home, codex) {
 function decide(p) {
   if (cxJudgeChild()) return 'allow';
   var home = cxHome();
-  if (home === null) { ah.unable('codex-availability:no_home'); return 'allow'; } // no usable home (or the real home under a test): no state to keep
+  if (home === null) { ah.unable('codex-availability:no_home', 'abandoned'); return 'allow'; } // no usable home (or the real home under a test): no state to keep
   var codex = cxIsCodex(p), available = cxProbe(ah.env.get('PATH') || '');
   // writeState: merge, never clobber the quota half of the file.
   // A file this script cannot read exactly (over the read cap, unparsable depth, a `__proto__` key) is never overwritten: the write is skipped

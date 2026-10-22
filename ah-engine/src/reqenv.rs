@@ -24,7 +24,7 @@ pub fn presence_only(name: &str) -> bool {
 ///
 /// It is *incomplete* when the checks cannot trust it to say what the Node guards would read: the client's variables
 /// were dropped (over `request_env.max_bytes`), the request carried no environment line, or the client had no usable
-/// `HOME`. An incomplete environment makes every check that reads the environment defer to Node (see
+/// `HOME`. An incomplete environment makes every check that reads the environment take its failure policy instead (see
 /// [`crate::checks::run_env_guarded`]), because evaluating with no home and default switches would answer for a
 /// different session (a gate that is on would read as off, and the engine would allow what Node blocks).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
@@ -85,12 +85,12 @@ impl RequestEnv {
         e
     }
 
-    /// An environment the checks must not evaluate with (see the type's docs): they defer to Node instead.
+    /// An environment the checks must not evaluate with (see the type's docs): each takes its failure policy instead.
     pub fn incomplete() -> RequestEnv {
         RequestEnv { vars: BTreeMap::new(), incomplete: true, peer_pid: None }
     }
 
-    /// True when the checks that read the environment must defer to Node.
+    /// True when the checks that read the environment must take their failure policy.
     pub fn is_incomplete(&self) -> bool {
         self.incomplete
     }
@@ -129,7 +129,7 @@ impl RequestEnv {
 
 /// Split a hook request body into its environment and the payload. A body without the environment line (or with one
 /// that does not parse) has an incomplete, empty environment: the daemon never fills the gap from its own, and its
-/// checks defer.
+/// checks take their failure policy.
 pub fn split_request(body: &str) -> (RequestEnv, &str) {
     let Some(rest) = body.strip_prefix(defaults::text("request_env.line_prefix")) else { return (RequestEnv::incomplete(), body) };
     let (line, payload) = rest.split_once('\n').unwrap_or((rest, ""));
@@ -199,7 +199,7 @@ mod tests {
     fn an_oversized_environment_is_dropped_whole() {
         let big = "x".repeat(defaults::num("request_env.max_bytes") as usize);
         let e = RequestEnv::from_pairs([("HOME", big)]);
-        assert_eq!((e.get("HOME"), e.is_incomplete()), (None, true), "dropped whole, and flagged so the checks defer");
+        assert_eq!((e.get("HOME"), e.is_incomplete()), (None, true), "dropped whole, and flagged so the checks take their failure policy");
     }
 
     #[test]

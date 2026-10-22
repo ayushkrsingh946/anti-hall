@@ -71,7 +71,7 @@ test('light devswarm segment chained to read-only ls | grep -c stays allowed', (
 
 test('devswarm.js exemption: file name must end exactly at devswarm.js', () => {
   for (const ok of ['node ~/.anti-hall/bin/devswarm.js roster', 'node ~/.anti-hall/bin/devswarm.js',
-    'node $HOME/.anti-hall/bin/devswarm.js roster', 'node plugins/anti-hall/scripts/devswarm.js roster',
+    'node $HOME/.anti-hall/bin/devswarm.js roster', 'node plugins/anti-hall-node/scripts/devswarm.js roster',
     'node /x/cache/anti-hall/0.1.0/scripts/devswarm.js send --to a']) {
     assert.strictEqual(blocked(ok), false, ok);
   }

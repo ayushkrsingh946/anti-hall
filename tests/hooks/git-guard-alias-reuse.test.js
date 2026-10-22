@@ -16,7 +16,7 @@ const { testHook, bashPayload } = require('../helpers/spawn-hook.js');
 const { makeHome } = require('../helpers/fixtures.js');
 
 const HOOK = 'git-guard.js';
-const HOOK_ABS = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'hooks', HOOK);
+const HOOK_ABS = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'hooks', HOOK);
 const PUSH = 'pu' + 'sh';
 const FORCE = '--' + 'force';
 const CR = 'Co-' + 'Authored-By: Claude Sonnet 5 <noreply@' + 'anthropic.com>';
@@ -272,7 +272,7 @@ test('AUDIT: an editor that writes the trailer is flagged after `git commit` (an
 
 // ---------------------------------------------------------------- lib units
 test('commitSources parses the message-source options', () => {
-  const { commitSources } = require('../../plugins/anti-hall/hooks/lib/git-alias-scan.js');
+  const { commitSources } = require('../../plugins/anti-hall-node/hooks/lib/git-alias-scan.js');
   const t = (s) => s.split(' ').map((x) => ({ text: x }));
   assert.deepStrictEqual(
     [commitSources(t('-am x')).message, commitSources(t('-aC abc')).reuse, commitSources(t('--reedit-message=abc')).reedit,

@@ -17,7 +17,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 
-const MODULE_PATH = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'lib', 'devswarm-wake-watch.js');
+const MODULE_PATH = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'lib', 'devswarm-wake-watch.js');
 const { checkStaleVersion, formatStaleVersionLine, formatUpdateAvailableLine, claimUpdateAnnouncement } = require(MODULE_PATH);
 
 // Same pattern as tests/companion/devswarm-wake-watch.test.js's own helper of

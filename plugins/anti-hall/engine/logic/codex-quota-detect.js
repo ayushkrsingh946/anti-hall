@@ -68,11 +68,11 @@ function decide(p) {
   var blob = cxBlob(p);
   if (blob === '') return 'allow';
   var hit = cxDetect(blob);
-  if (hit === 'unsure') { ah.unable('codex-quota-detect:reason_unsure'); return 'allow'; } // a reason cut through a surrogate pair: the text cannot match Node's
+  if (hit === 'unsure') { ah.unable('codex-quota-detect:reason_unsure', 'abandoned'); return 'allow'; } // a reason cut through a surrogate pair: the text cannot match Node's
   if (hit === null) return 'allow';
   if (hit.dateUnsure) ah.unable('codex-quota-detect:date_unsure'); // a date only V8 reads exactly: the outage is recorded with the default cooldown
   var home = cxHome();
-  if (home === null) { ah.unable('codex-quota-detect:no_home'); return 'allow'; } // no usable home: no state to keep
+  if (home === null) { ah.unable('codex-quota-detect:no_home', 'abandoned'); return 'allow'; } // no usable home: no state to keep
   if (cxRecordQuota(home, hit.until, hit.reason, ah.clock.now()) === null) ah.unable('codex-quota-detect:record_unsure'); // the warning still goes out
   var until;
   if (hit.until) {

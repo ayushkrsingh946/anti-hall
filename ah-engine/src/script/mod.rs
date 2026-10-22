@@ -119,7 +119,7 @@ pub struct Deadline {
     /// The wall-clock backstop (ns since the pool epoch).
     pub wall: AtomicU64,
     /// When the client of the request being answered stops waiting (ns since the pool epoch; 0 = none): past it nobody reads the
-    /// answer, so the call is cut and the check defers to its own Node hook. Never moved by blocked time (the client waits in
+    /// answer, so the call is cut and the check takes its failure policy. Never moved by blocked time (the client waits in
     /// real time); lifted with the other limits by `commit()`.
     pub req: AtomicU64,
     /// Which limit interrupted the call in progress ([`Trip`] as a number; 0 = none yet). The first limit to fire stays.
@@ -478,35 +478,88 @@ fn verdict_of(v: &Value) -> Result<Option<Verdict>, String> {
 }
 
 /// What a check does when its script cannot give an answer (missing file, exception, interrupt, out of memory, a verdict of
-/// the wrong shape). The rule (D88 condition b), all of it configuration:
+/// the wrong shape). No Node hook is launched any more, so there is nothing to defer to: the check's failure mode
+/// (`script.failure_mode_by_check`, else `script.failure_mode_default`) decides, for every check:
 ///
-/// - a check that has a Node twin (every check not listed in `script.engine_only_checks`) DEFERS: the Node hook decides, so a
-///   broken script never changes a decision;
-/// - an ENGINE-ONLY check has no Node hook to defer to (its fallback command is a no-op). Its failure mode
-///   (`script.failure_mode_by_check`, else `script.failure_mode_default`) decides: `closed` BLOCKS on a guard event
-///   (`dispatch.guard_events`) with `script.msg_fail_closed`, for a security guard whose silent allow would let through what it
-///   exists to stop; `open` (every advisory check) ALLOWS, because a check's own failure must never block the user's agent.
-///   Every other event allows whatever the mode.
+/// - `closed` BLOCKS on a guard event (`dispatch.guard_events`) with `script.msg_fail_closed`, for a security guard whose silent allow
+///   would let through what it exists to stop;
+/// - `open` (every other check) ALLOWS, because a check's own failure must never block the user's agent. The allow is never silent:
+///   the failure is logged, counted, and the user gets one notice per session and check (`script.msg_guard_down`).
 ///
-/// Every failure is logged (`script_error`, rate-limited) and counted (a telemetry check event with outcome `error`).
+/// Every other event allows whatever the mode. Every failure is logged (`script_error`, rate-limited) and counted (a telemetry
+/// check event with outcome `error`).
 pub fn failed(name: &str, event: &str, why: &str) -> Verdict {
     crate::discard::note("script_error", &format!("{name}: {why}"));
     crate::telemetry::emit::queue(crate::telemetry::emit::script_failure(name, event));
-    failure_verdict(name, event, why, defaults::list("script.engine_only_checks").contains(&name), failure_mode(name))
+    with_notice(name, why, failure_verdict(name, event, why, failure_mode(name)))
 }
 
-/// [`failed`]'s decision for a check that is (or is not) engine-only and has failure mode `mode`.
-fn failure_verdict(name: &str, event: &str, why: &str, engine_only: bool, mode: &str) -> Verdict {
-    if !engine_only {
-        return Verdict::Defer;
-    }
+/// The decision for a check that gave no answer at all (a deferral of any origin: a cut call, a verdict that says nothing, a daemon
+/// that could not run it): the same failure policy as [`failed`], so a deferral never reaches a Node hook that is not launched.
+pub fn unanswered(name: &str, event: &str) -> Verdict {
+    let why = defaults::text("script.msg_unanswered");
+    with_notice(name, why, failure_verdict(name, event, why, failure_mode(name)))
+}
+
+/// [`failed`]'s decision for a check with failure mode `mode`.
+fn failure_verdict(name: &str, event: &str, why: &str, mode: &str) -> Verdict {
     if mode == defaults::text("script.failure_mode_closed") && defaults::list("dispatch.guard_events").contains(&event) {
         return Verdict::Block(defaults::render("script.msg_fail_closed", &[("check", &name), ("why", &why)]));
     }
     Verdict::Allow
 }
 
-/// The failure mode of engine-only check `name`: its entry in `script.failure_mode_by_check`, else `script.failure_mode_default`.
+/// The session of the request being answered on each serving thread (set by [`set_session`]), by thread; bounded by `script.notice_max`.
+static SESSIONS: std::sync::Mutex<std::collections::BTreeMap<String, String>> = std::sync::Mutex::new(std::collections::BTreeMap::new());
+
+fn thread_key() -> String {
+    format!("{:?}", std::thread::current().id())
+}
+
+/// Names the session of the request this thread is answering, so a guard that is not guarding is told to the user once per session.
+pub fn set_session(id: &str) {
+    let mut m = SESSIONS.lock().unwrap_or_else(|e| e.into_inner());
+    if m.len() >= defaults::num("script.notice_max") as usize {
+        m.clear();
+    }
+    m.insert(thread_key(), id.to_string());
+}
+
+fn session() -> String {
+    SESSIONS.lock().unwrap_or_else(|e| e.into_inner()).get(&thread_key()).cloned().unwrap_or_default()
+}
+
+/// The (session, check) pairs already told; bounded by `script.notice_max` (cleared when full: at worst one notice repeats).
+fn noticed() -> &'static std::sync::Mutex<std::collections::HashSet<(String, String)>> {
+    static SEEN: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<(String, String)>>> = std::sync::OnceLock::new();
+    SEEN.get_or_init(Default::default)
+}
+
+/// A fail-open `Allow` of a check that could not run says so, once per session and check: a guard that is not guarding must not be
+/// silent. Any other verdict (a block) already tells the user.
+fn with_notice(name: &str, why: &str, v: Verdict) -> Verdict {
+    if v != Verdict::Allow {
+        return v;
+    }
+    let session = session();
+    if session.is_empty() {
+        return v; // no session to tell (a call outside a hook request)
+    }
+    let first = {
+        let mut seen = noticed().lock().unwrap_or_else(|e| e.into_inner());
+        if seen.len() >= defaults::num("script.notice_max") as usize {
+            seen.clear();
+        }
+        seen.insert((session, name.to_string()))
+    };
+    if !first {
+        return v;
+    }
+    let msg = defaults::render("script.msg_guard_down", &[("check", &name), ("why", &why)]);
+    Verdict::Advisory(serde_json::json!({ defaults::text("script.notice_key"): msg }).to_string())
+}
+
+/// The failure mode of check `name`: its entry in `script.failure_mode_by_check`, else `script.failure_mode_default`.
 pub fn failure_mode(name: &str) -> &'static str {
     defaults::raw("script.failure_mode_by_check").get(name).and_then(defaults::V::as_str).unwrap_or_else(|| defaults::text("script.failure_mode_default"))
 }
@@ -738,17 +791,15 @@ pub fn call_fn(name: &str, func: &str, args: &Value) -> Option<Value> {
 }
 
 /// Whether a call of check `name` on `event` is cut at its request's client deadline (`script.cut_at_request_deadline`). A cut call
-/// defers to the check's Node hook; the one check it would weaken is an engine-only check whose failure mode is `closed` on a
-/// guard event (its Node hook is a no-op, so a deferral would allow what its failure blocks): that one keeps only its own limit.
+/// ends as [`unanswered`] (its failure policy); a check whose failure mode is `closed` on a guard event would allow what its
+/// failure blocks, so that one keeps only its own limit.
 pub fn cut_at_deadline(name: &str, event: &str) -> bool {
     defaults::num("script.cut_at_request_deadline") == 1
-        && !(defaults::list("script.engine_only_checks").contains(&name)
-            && failure_mode(name) == defaults::text("script.failure_mode_closed")
-            && defaults::list("dispatch.guard_events").contains(&event))
+        && !(failure_mode(name) == defaults::text("script.failure_mode_closed") && defaults::list("dispatch.guard_events").contains(&event))
 }
 
-/// A call cut at its request's client deadline: no failure of the script (nothing is counted as an error), the check defers to
-/// its own Node hook, which the client runs for this entry alone.
+/// A call cut at its request's client deadline: no failure of the script (nothing is counted as an error); the check gave no answer
+/// and the dispatcher resolves it with the check's failure policy ([`unanswered`]).
 pub fn cut(name: &str, event: &str) -> Verdict {
     crate::failopen::note(defaults::text("fail_open.reason_deadline"), name, event);
     crate::discard::note("script_deadline", &defaults::render("script.msg_deadline_cut", &[("check", &name), ("event", &event)]));
