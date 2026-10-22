@@ -20,13 +20,21 @@ fn git(dir: &Path, args: &[&str]) {
 
 /// (exit code, stderr) of `ah-engine check command` for one Bash command run as the main thread from `cwd`.
 fn verdict(dir: &Path, home: &Path, cwd: &Path, command: &str) -> (i32, String) {
-    let payload = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "session_id": "w6", "cwd": cwd, "tool_input": {"command": command}});
+    verdict_on(dir, home, cwd, command, false)
+}
+
+/// Same, on a Codex payload (`turn_id` + `model`) when `codex` is set.
+fn verdict_on(dir: &Path, home: &Path, cwd: &Path, command: &str, codex: bool) -> (i32, String) {
+    let mut payload = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "session_id": "w6", "cwd": cwd, "tool_input": {"command": command}});
+    if codex {
+        payload["turn_id"] = json!("t1");
+        payload["model"] = json!("gpt-5");
+    }
     let mut c = Command::new(env!("CARGO_BIN_EXE_ah-engine"));
     c.args(["check", "command"])
         .env_clear()
         .env("PATH", std::env::var("PATH").unwrap_or_default())
         .env("HOME", home)
-        .env("CLAUDE_CODE_ENTRYPOINT", "cli")
         .env("AH_ENGINE_DIR", dir.join("state"))
         .env("AH_ENGINE_NOSPAWN", "1")
         .env("ANTIHALL_TEST_ISOLATION", "1")
@@ -36,6 +44,9 @@ fn verdict(dir: &Path, home: &Path, cwd: &Path, command: &str) -> (i32, String) 
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    if !codex {
+        c.env("CLAUDE_CODE_ENTRYPOINT", "cli"); // a Codex main thread carries no entrypoint (coordinator-detect.js isCoordinator)
+    }
     let mut ch = c.spawn().unwrap();
     ch.stdin.take().unwrap().write_all(payload.to_string().as_bytes()).unwrap();
     let o = ch.wait_with_output().unwrap();
@@ -68,13 +79,12 @@ fn single_small_state_changing_commands_are_allowed_and_the_real_cases_still_blo
     };
     allowed(&format!(r#"node -e 'const j=require("{}");console.log(j["git-guard"], j.plugins["anti-hall@anti-hall"])'"#, skip.display()));
 
-    // #256 (owner decision): filing an issue from a prepared body file and `cargo clean` are bookkeeping, not floods; the config rows are
-    // command.light_exceptions. An inline body, a pull request, a release and the builds stay heavy.
+    // #256 / #263 (owner decision): filing and tending issues, labels and pull requests (command.gh_light_writes) and `cargo clean` are
+    // bookkeeping, not floods, whatever the body. Merge, release, repo settings, secrets and gh api writes stay blocked, for a stated reason.
     allowed(r#"gh issue create --repo o/r --title "x (y)" --body-file /tmp/f.md"#);
     allowed(&format!("cd {} && gh issue create --repo o/r --title x --body-file /tmp/f.md 2>&1 | tail -1", main.display()));
     allowed("gh issue comment 5 --repo o/r --body-file /tmp/f.md");
     allowed("cargo clean");
-    blocked(r#"gh issue create --repo o/r --title "x" --body "inline""#);
     blocked("cargo build");
     blocked("cargo clean && cargo build");
     // #235: a plain push exempts the CURRENT branch only; another existing local branch (a sibling worktree's) does not
@@ -87,7 +97,64 @@ fn single_small_state_changing_commands_are_allowed_and_the_real_cases_still_blo
     blocked(r#"node -e 'require("fs")["writeFileSync"]("/tmp/x","y")'"#);
     blocked(r#"node -e 'require("fs")["write"+"FileSync"]("/tmp/x","y")'"#);
     blocked("gh issue delete 5");
-    blocked(r#"gh pr create --repo o/r --title "x" --body-file /tmp/f.md"#);
-    blocked("gh release create v1 --notes x");
+
+    // #263: every light pair passes (inline body, global -R flag, tail, per-segment chain); on both hosts
+    for codex in [false, true] {
+        let ok = |c: &str| {
+            let (code, err) = verdict_on(&dir, &home, &main, c, codex);
+            assert_eq!((code, err.as_str()), (0, ""), "codex={codex} should be allowed: {c}");
+        };
+        let no = |c: &str, why: Option<&str>| {
+            let (code, err) = verdict_on(&dir, &home, &main, c, codex);
+            assert!(code == 2 && err.contains("command-guard"), "codex={codex} should be blocked: {c} -> {code} {err}");
+            match why {
+                Some(w) => assert!(err.contains(w) && (w == "floods" || !err.contains("floods")), "codex={codex} wrong reason for {c}: {err}"),
+                None => {}
+            }
+        };
+        for c in [
+            r#"gh issue create --repo o/r --title "x" --body "inline body with (parens) and 'quotes'""#,
+            "gh issue comment 5 -R o/r --body hi",
+            "gh issue edit 5 --add-label bug",
+            "gh issue close 5 --comment done",
+            "gh issue reopen 5",
+            "gh label create bug --color ff0000",
+            "gh label edit bug --description x",
+            r#"gh pr create --repo o/r --title "x" --body "inline""#,
+            "gh pr comment 5 --body hi",
+            "gh pr edit 5 --title y",
+            "gh -R o/r issue create --title x --body y",
+            "gh --repo o/r pr comment 5 --body y",
+            "gh issue create --title x --body y | tail -1",
+            "ls && gh issue create --title x --body y",
+        ] {
+            ok(c);
+        }
+        let reason = Some("cannot be undone");
+        for c in [
+            "gh pr merge 5 --squash",
+            "gh -R o/r pr merge 5",
+            "gh release create v1 --notes x",
+            "gh release upload v1 a.zip",
+            "gh repo edit --visibility private",
+            "gh repo delete o/r --yes",
+            "gh secret set TOKEN --body x",
+            "gh secret delete TOKEN",
+            "gh api -X POST repos/o/r/issues",
+            "gh api --method PUT repos/o/r/x",
+            "gh api -X PATCH repos/o/r/x",
+            "gh api -X DELETE repos/o/r/x",
+            "gh api repos/o/r/issues -f title=x",
+            "ls && gh pr merge 5",
+            "gh issue create --title x --body y && gh pr merge 5",
+        ] {
+            no(c, reason);
+        }
+        no("gh issue delete 5", None);
+        // gcloud / kubectl are unchanged: their reads pass, their writes keep the flood reason
+        ok("kubectl get pods");
+        no("kubectl apply -f x.yaml", Some("floods"));
+        no("gcloud run deploy svc", Some("floods"));
+    }
     ah_engine::discard::harmless(std::fs::remove_dir_all(&dir));
 }

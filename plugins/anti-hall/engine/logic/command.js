@@ -332,6 +332,7 @@ function require(n) {
 // tables
 
 function cmdSet(k) { return new Set(ah.cfg(k)); }
+function ghTable(k) { var o = {}; Object.keys(ah.cfg(k)).forEach(function (g) { o[g] = new Set(ah.cfg(k)[g]); }); return o; }
 function cmdRe(src, flags) {
   var f = flags || '';
   if (src.slice(0, 4) === '(?i)') { src = src.slice(4); f += 'i'; }
@@ -383,7 +384,7 @@ function cmdBuildTables() {
   Object.keys(ah.cfg('command.gh_mutating_subcommands')).forEach(function (g) { t.ghMutating[g] = new Set(ah.cfg('command.gh_mutating_subcommands')[g]); });
   t.ghOneliner = {};
   Object.keys(ah.cfg('command.gh_oneliner_subcommands')).forEach(function (g) { t.ghOneliner[g] = new Set(ah.cfg('command.gh_oneliner_subcommands')[g]); });
-  t.ghOnelinerApi = cmdSet('command.gh_oneliner_api_methods'); t.ghOnelinerMax = ah.cfgNum('command.gh_oneliner_max_chars');
+  t.ghLight = ghTable('command.gh_light_writes'); t.ghIrreversible = ghTable('command.gh_irreversible_subcommands'); t.ghOnelinerMax = ah.cfgNum('command.gh_oneliner_max_chars');
   t.ghOnelinerRe = new RegExp(ah.cfg('command.gh_oneliner_deny_re'));
   t.scratchSyncSubs = cmdSet('command.scratch_clone_sync_subs');
   t.ghApiMethods = cmdSet('command.gh_api_mutating_methods'); t.ghGqlValue = cmdSet('command.gh_gql_value_flags'); t.ghGqlBool = cmdSet('command.gh_gql_bool_flags');
@@ -2393,6 +2394,36 @@ function isReadOnlyGhGraphql(tokens, ghIdx) {
   return queries === 1;
 }
 
+// ghCommandPath(tokens, ghIdx) -> [group, sub], the first two words after `gh` that are not global flags (-R/--repo
+// take a value, so `gh -R o/r issue create` is still issue/create).
+function ghCommandPath(tokens, ghIdx) {
+  const words = [];
+  for (let i = ghIdx + 1; i < tokens.length && words.length < 2; i++) {
+    const t = tokens[i];
+    if (t === '-R' || t === '--repo') { i++; continue; }
+    if (t.startsWith('-')) continue;
+    words.push(t.toLowerCase());
+  }
+  return [words[0] || '', words[1] || ''];
+}
+
+function ghIrreversiblePair(group, sub) {
+  const set = T.ghIrreversible[group];
+  return !!set && (set.has('*') || set.has(sub));
+}
+
+// isIrreversibleGhSegment(segment) -> true for a gh command blocked for a stated reason (merge, release, repo settings, secrets, a
+// gh api write), not for output flooding. Used to word the block reason and to keep these out of the light writes.
+function isIrreversibleGhSegment(segment) {
+  if (effectiveVerb(segment) !== 'gh') return false;
+  const tokens = tokenizeQuoted(segment);
+  const ghIdx = tokens.findIndex((t) => basename(t).toLowerCase() === 'gh');
+  if (ghIdx === -1) return false;
+  const path = ghCommandPath(tokens, ghIdx);
+  if (ghIrreversiblePair(path[0], path[1])) return true;
+  return path[0] === 'api' && isHeavyGhSegment(segment, segment, true);
+}
+
 // isHeavyGhSegment(segment) -> true iff this is a `gh` invocation of a
 // mutating subcommand: pr merge/close/edit/create/review, issue
 // create/close/delete/edit, release create/delete/edit/upload, repo
@@ -2407,9 +2438,11 @@ function isHeavyGhSegment(segment, command, strict) {
   const tokens = tokenizeQuoted(segment);
   const ghIdx = tokens.findIndex((t) => basename(t).toLowerCase() === 'gh');
   if (ghIdx === -1) return false;
-  const group = (tokens[ghIdx + 1] || '').toLowerCase();
-  const sub = (tokens[ghIdx + 2] || '').toLowerCase();
+  const path = ghCommandPath(tokens, ghIdx);
+  const group = path[0];
+  const sub = path[1];
   if (group === 'workflow' && sub === 'run') return true;
+  if (!strict && !ghIrreversiblePair(group, sub) && T.ghLight[group] && T.ghLight[group].has(sub)) return false;
   const oneLine = !strict && typeof command === 'string' && command.length <= T.ghOnelinerMax && !T.ghOnelinerRe.test(command);
   if (oneLine && T.ghOneliner[group] && T.ghOneliner[group].has(sub)) return false;
   if (T.ghMutating[group] && T.ghMutating[group].has(sub)) return true;
@@ -2419,17 +2452,6 @@ function isHeavyGhSegment(segment, command, strict) {
     if (isReadOnlyGhGraphql(tokens, ghIdx) && !(command || '').includes('`')) return false;
     // `gh api graphql` always POSTs: heavy unless proven a read above.
     if (tokens.slice(ghIdx + 2).some((t) => RX44.test(t))) return true;
-    if (oneLine) {
-      // an explicit POST/PATCH/PUT (or the implicit POST of a field flag) on one short line is light; DELETE and a body file are not
-      let method = '', body = false;
-      for (let i = ghIdx + 2; i < tokens.length; i++) {
-        const t = tokens[i];
-        if ((t === '-X' || t === '--method') && tokens[i + 1] !== undefined) method = tokens[i + 1].toUpperCase();
-        else if (/^--method=/.test(t)) method = t.slice(9).toUpperCase();
-        if (t === '--input' || /^--input=/.test(t)) body = true;
-      }
-      if (!body && (method === '' || T.ghOnelinerApi.has(method))) return false;
-    }
     for (let i = ghIdx + 2; i < tokens.length; i++) {
       const t = tokens[i];
       if (t === '-f' || t === '-F' || t === '--field' || t === '--raw-field') return true;
@@ -2643,7 +2665,7 @@ function classifyHeavy(command, depth) {
   const d = typeof depth === 'number' ? depth : 0;
   for (const seg of splitSegments(command)) {
     if (isHeavySegment(seg, command)) {
-      if (isHeavyGhSegment(seg) || isGitPushSegment(seg) || isGitPullFetchSegment(seg)) return { kind: 'remote', label: ah.cfg('command.msg_heavy_remote') };
+      if (isHeavyGhSegment(seg) || isGitPushSegment(seg) || isGitPullFetchSegment(seg)) return { kind: 'remote', label: ah.cfg('command.msg_heavy_remote'), risk: isIrreversibleGhSegment(seg) };
       const verb = effectiveVerb(seg);
       if (verb && T.heavyVerbs.has(verb)) return { kind: 'verb', label: verb };
       return { kind: 'category', label: ah.cfg('command.heavy_pattern_label') };
@@ -5005,7 +5027,7 @@ function mainFlow(payload) {
   const reason = bm.blockMessage({
     guard: ah.cfg('command.guard_name'),
     what: heavyWhat,
-    why: ah.cfg('command.msg_heavy_why'),
+    why: ah.cfg(cls && cls.risk ? 'command.msg_gh_irreversible_why' : 'command.msg_heavy_why'),
     instead: (devswarmPrimary && tierText
       ? text.render(ah.cfg('command.msg_heavy_instead_tier'), { delegate: delegateTo, sub: SUB })
       : delegateTo + '.') + cdJoinHint,

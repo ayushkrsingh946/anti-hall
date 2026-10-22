@@ -958,11 +958,12 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `command.gh_api_mutating_methods` | `POST, PATCH, PUT, DELETE` |  |  | gh api methods that are heavy (command-guard.js GH_API_MUTATING_METHODS). |
 | `command.gh_gql_bool_flags` | `--paginate, --slurp, --silent, -i, --include, --verbose` |  |  | gh api graphql options without a value (command-guard.js GH_GQL_BOOL_FLAGS). |
 | `command.gh_gql_value_flags` | `8 items` |  |  | gh api graphql options that take a value (command-guard.js GH_GQL_VALUE_FLAGS). |
+| `command.gh_irreversible_subcommands` | `4 entries` |  |  | gh group and subcommand pairs blocked in the main thread for a stated reason (msg_gh_irreversible_why) rather than for output flooding; "*" matches every subcommand of the group. A gh api write (-X/--method POST\|PUT\|PATCH\|DELETE, a -f/-F field or --input body, graphql) is blocked for the same reason. |
+| `command.gh_light_writes` | `3 entries` |  |  | gh group and subcommand pairs allowed in the main thread whatever their body, title or flags (GH #263): filing and tending issues, labels and pull requests prints a line and floods nothing. Matched on the exact gh command path, after any global flag such as -R owner/repo. The pairs in command.gh_irreversible_subcommands and a gh api write are never light. |
 | `command.gh_mutating_subcommands` | `6 entries` |  |  | gh group and subcommand pairs that are heavy (command-guard.js GH_MUTATING_SUBCOMMANDS, plus `workflow run`). |
-| `command.gh_oneliner_api_methods` | `POST, PATCH, PUT` |  |  | gh api methods that are light on a one-line command (command-guard.js GH_ONELINER_API_METHODS); DELETE, a body file and graphql stay heavy. |
 | `command.gh_oneliner_deny_re` | `[\n\r`]\|\$\(\|<<\|<\(\|>\(` |  |  | JavaScript regex source: a command holding a newline, a backtick, a command or process substitution or a heredoc is not a plain one-liner (command-guard.js isOneLineCommand). |
 | `command.gh_oneliner_max_chars` | `600` |  | chars | The longest whole command that counts as one short line for the gh one-liner exemption (command-guard.js GH_ONELINER_MAX_CHARS). |
-| `command.gh_oneliner_subcommands` | `4 entries` |  |  | gh group and subcommand pairs that are light when the whole command is one short plain line (command-guard.js GH_ONELINER_SUBCOMMANDS): they print a line or two and flood nothing, so a subagent for them is noise. |
+| `command.gh_oneliner_subcommands` | `3 entries` |  |  | gh group and subcommand pairs that are light when the whole command is one short plain line (command-guard.js GH_ONELINER_SUBCOMMANDS): they print a line or two and flood nothing, so a subagent for them is noise. |
 | `command.git_always_work` | `12 items` |  |  | git subcommands that always count as work for the coordinator work window (command-guard.js GIT_ALWAYS_WORK). |
 | `command.git_branch_argv` | `symbolic-ref, --short, HEAD` |  |  | The git arguments that print the current branch (plain-push carve-out). |
 | `command.git_fetch_dangerous_flags` | `--prune, -p, --prune-tags, --force, -f` |  |  | git fetch options that rewrite or delete local refs (command-guard.js GIT_FETCH_DANGEROUS_FLAGS). |
@@ -988,7 +989,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `command.jq_safe_flags` | `9 items` |  |  | jq flags the narrow gcloud read accepts. |
 | `command.launcher_marker` | `.anti-hall` |  |  | A command without this text cannot name a stable launcher. |
 | `command.launcher_scripts` | `devswarm.js, wake-watch.js` |  |  | The stable launcher scripts under ~/.anti-hall/bin that are light (command-guard.js ANTI_HALL_CLI_PATTERNS). |
-| `command.light_exceptions` | `19 items` |  |  | Patterns over the raw segment (and the segment without a leading `timeout N`) that make it light (command-guard.js LIGHT_EXCEPTIONS, the entries without a negative lookahead; a trailing `(?=\s\|$)` is written as `(?:\s\|$)`). |
+| `command.light_exceptions` | `18 items` |  |  | Patterns over the raw segment (and the segment without a leading `timeout N`) that make it light (command-guard.js LIGHT_EXCEPTIONS, the entries without a negative lookahead; a trailing `(?=\s\|$)` is written as `(?:\s\|$)`). |
 | `command.light_exceptions_neg` | `3 entries, 3 entries, 3 entries` |  |  | LIGHT_EXCEPTIONS entries of the form HEAD`\b(?![^\n]*NOT)`: the segment is light when some match of `head` ends (at a word boundary, right after the text `end`) where `not_after` does not match before the end of that line (jev-report.js, doctor.js and `go env`). |
 | `command.mailbox_flag_skip` | `(?:-\S+(?:\s+[^-\s]\S*)?\s+)*` |  |  | Regex source: optional flags (with an optional value each) before a devswarm.js verb (command-guard.js FLAG_SKIP_SRC). |
 | `command.mailbox_guard` | `devswarm-subagent-mailbox-guard` |  |  | The skip id of the subagent mailbox guard. |
@@ -1014,6 +1015,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `command.msg_edit_who_orch` | `orchestrator` |  |  | Who is blocked when DevSwarm is active. |
 | `command.msg_edit_why` | `Raw edits never happen in the main thread; the coordinator synthesizes a summ...` |  |  | Why a Bash write is blocked. |
 | `command.msg_edit_why_orch` | `Raw edits in the main thread flood it; a worker returns a tight summary instead.` |  |  | Why a Bash write is blocked while DevSwarm is active. |
+| `command.msg_gh_irreversible_why` | `It cannot be undone or it publishes: a merge, a release, a repository setting...` |  |  | Why an irreversible gh command (merge, release, repo settings, secrets, a gh api write) is blocked in the main thread. |
 | `command.msg_heavy_allowed` | `piped to tail/head/wc/grep -c: `node --test <1-2 files>`, `python3 -m pytest ...` |  |  | What stays allowed inline (first part). |
 | `command.msg_heavy_allowed_claude` | `; or a read-only scratchpad script (executable, absolute path, no VAR= prefix...` |  |  | End of the allowed text on Claude (the scratchpad script path). |
 | `command.msg_heavy_allowed_codex` | `.` |  |  | End of the allowed text on Codex. |

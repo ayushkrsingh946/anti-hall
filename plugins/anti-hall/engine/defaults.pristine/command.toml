@@ -98,7 +98,6 @@ value = [
   '(?i)\bgo\s+version\b',
   '(?i)\bcargo\s+(?:--version|version)\b',
   '(?i)\bcargo\s+clean\b',
-  '(?i)^\s*(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*gh\s+issue\s+(?:create|comment)\b[^\n]*\s--body-file\s+\S+',
   '(?i)\bgit\s+(?:push|pull)\b[^\n]*\s--dry-run\b',
   '(?i)\bdocker\s+(?:ps|images|inspect|logs|stats)\b',
   '(?i)^\s*(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*node\s+(?:\S*[\\/])?scripts[\\/]jev-setup\.js\s+(?:-\S+\s+)*status\b',
@@ -234,19 +233,27 @@ value = ["firebase", "gcloud", "aws", "az", "kubectl", "helm", "terraform", "pul
 
 [command.gh_mutating_subcommands]
 doc = "gh group and subcommand pairs that are heavy (command-guard.js GH_MUTATING_SUBCOMMANDS, plus `workflow run`)."
-value = { pr = ["merge", "close", "edit", "create", "review"], issue = ["create", "close", "delete", "edit"], release = ["create", "delete", "edit", "upload"], repo = ["delete", "edit"], secret = ["set", "delete"], workflow = ["run"] }
+value = { pr = ["merge", "close", "review"], issue = ["delete"], release = ["create", "delete", "edit", "upload"], repo = ["delete", "edit"], secret = ["set", "delete"], workflow = ["run"] }
+
+[command.gh_light_writes]
+doc = "gh group and subcommand pairs allowed in the main thread whatever their body, title or flags (GH #263): filing and tending issues, labels and pull requests prints a line and floods nothing. Matched on the exact gh command path, after any global flag such as -R owner/repo. The pairs in command.gh_irreversible_subcommands and a gh api write are never light."
+value = { issue = ["create", "comment", "edit", "close", "reopen"], label = ["create", "edit"], pr = ["create", "comment", "edit"] }
+
+[command.gh_irreversible_subcommands]
+doc = "gh group and subcommand pairs blocked in the main thread for a stated reason (msg_gh_irreversible_why) rather than for output flooding; \"*\" matches every subcommand of the group. A gh api write (-X/--method POST|PUT|PATCH|DELETE, a -f/-F field or --input body, graphql) is blocked for the same reason."
+value = { pr = ["merge"], release = ["*"], repo = ["edit", "delete"], secret = ["*"] }
+
+[command.msg_gh_irreversible_why]
+doc = "Why an irreversible gh command (merge, release, repo settings, secrets, a gh api write) is blocked in the main thread."
+value = "It cannot be undone or it publishes: a merge, a release, a repository setting, a secret or a raw gh api write. Hand it to a worker, or ask the owner."
 
 [command.gh_oneliner_subcommands]
 doc = "gh group and subcommand pairs that are light when the whole command is one short plain line (command-guard.js GH_ONELINER_SUBCOMMANDS): they print a line or two and flood nothing, so a subagent for them is noise."
-value = { pr = ["merge", "close", "edit", "review", "comment", "ready", "reopen"], issue = ["close", "edit", "comment", "reopen"], secret = ["set"], label = ["create", "edit"] }
+value = { pr = ["close", "edit", "review", "comment", "ready", "reopen"], issue = ["close", "edit", "comment", "reopen"], label = ["create", "edit"] }
 
 [command.scratch_clone_sync_subs]
 doc = "git subcommands that are light in the main thread when run in a git checkout outside the session's own tree (git -C <abs|~ dir> or one leading cd <abs|~ dir>), chained with && or ; only to light segments and at most one final | tail/head -N, on one plain line (command-guard.js isAllowedScratchCloneSync, SCRATCH_CLONE_SYNC_SUBS). A sync prints a few lines; the output-flood rule is for unbounded runners and builds. Empty turns the exemption off."
 value = ["pull", "fetch"]
-
-[command.gh_oneliner_api_methods]
-doc = "gh api methods that are light on a one-line command (command-guard.js GH_ONELINER_API_METHODS); DELETE, a body file and graphql stay heavy."
-value = ["POST", "PATCH", "PUT"]
 
 [command.gh_oneliner_max_chars]
 doc = "The longest whole command that counts as one short line for the gh one-liner exemption (command-guard.js GH_ONELINER_MAX_CHARS)."
