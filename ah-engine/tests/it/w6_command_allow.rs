@@ -1,5 +1,5 @@
 //! W6: command-guard allows a short `node -e` JSON filter that indexes a key like `j["git-guard"]`, and still blocks what the Node guard
-//! blocks (a block is never weaker than Node's, #235 / #236): a `gh issue create` (a remote write that needs delegation), a push of
+//! blocks (a block is never weaker than Node's, #235 / #236): an inline-body `gh issue create` (a remote write that needs delegation), a push of
 //! any branch but the current one (also an existing non-protected branch of a sibling worktree), a push of a protected or missing
 //! branch, a force push, a `node -e` that writes through a computed or bracketed API name, and the other gh mutations.
 #![allow(clippy::unwrap_used, clippy::expect_used)] // a test crate: a panic is the failure report, and E2 exempts tests
@@ -68,9 +68,15 @@ fn single_small_state_changing_commands_are_allowed_and_the_real_cases_still_blo
     };
     allowed(&format!(r#"node -e 'const j=require("{}");console.log(j["git-guard"], j.plugins["anti-hall@anti-hall"])'"#, skip.display()));
 
-    // #236: the remote write `gh issue create` stays heavy, as in the Node guard
-    blocked(r#"gh issue create --repo o/r --title "x" --body-file /tmp/f.md"#);
-    blocked(&format!("cd {} && gh issue create --repo o/r --title x --body-file /tmp/f.md 2>&1 | tail -1", main.display()));
+    // #256 (owner decision): filing an issue from a prepared body file and `cargo clean` are bookkeeping, not floods; the config rows are
+    // command.light_exceptions. An inline body, a pull request, a release and the builds stay heavy.
+    allowed(r#"gh issue create --repo o/r --title "x (y)" --body-file /tmp/f.md"#);
+    allowed(&format!("cd {} && gh issue create --repo o/r --title x --body-file /tmp/f.md 2>&1 | tail -1", main.display()));
+    allowed("gh issue comment 5 --repo o/r --body-file /tmp/f.md");
+    allowed("cargo clean");
+    blocked(r#"gh issue create --repo o/r --title "x" --body "inline""#);
+    blocked("cargo build");
+    blocked("cargo clean && cargo build");
     // #235: a plain push exempts the CURRENT branch only; another existing local branch (a sibling worktree's) does not
     blocked("git push -u origin feat2");
     blocked("git push origin feat2");
