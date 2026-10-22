@@ -688,7 +688,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `paths.lock_suffix` | `.lock` |  |  | Suffix appended to the socket path for the singleton lock file. |
 | `paths.plugin_rules_file` | `engine/rules.json` |  |  | The shipped rules file, relative to the plugin root (the engine reads it from the plugin, never from its own install). |
 | `paths.private_dir_prefix` | `anti-hall-` |  |  | Prefix of the private per-user directory that holds a short-path socket (the uid is appended). |
-| `paths.rules_file` | `rules.json` |  |  | Name of the user's rules override inside the state directory; when that file exists it replaces the plugin's rules file. |
+| `paths.rules_file` | `rules.json` |  |  | Name of the user's rules file inside the state directory; when it exists its rules are merged over the plugin's by id (a known id changes that rule, a new id adds one; see layers.toml). It no longer replaces the plugin's file. |
 | `paths.short_socket_ext` | `.sock` |  |  | Extension of a short-path socket file (its name is a stable hash of the state directory). |
 | `paths.socket_file` | `e.sock` |  |  | Socket file name inside the state directory. |
 | `paths.socket_max_len` | `100` |  | bytes | Longest socket path used as is; unix socket paths are capped at 104 bytes on macOS (108 on Linux), so this leaves headroom. |
@@ -1239,7 +1239,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 |---|---|---|---|---|
 | `config.debounce_ms` | `300` | `AH_ENGINE_CONFIG_DEBOUNCE_MS` | ms | A change must stay unchanged this long before it is loaded, so a half-written or rapidly edited file is read once. |
 | `config.false_tokens` | `0, off, false, no` |  |  | Words a settings.json boolean may be written as to mean false (matches FALSE_TOKENS in hooks/lib/settings-schema.js). |
-| `config.locked` | `7 items` |  |  | Settings (exact keys, or prefixes ending in a dot or in *) the owner's files may not change: the names of the environment variables (the contract between the wrapper, the client and the daemon), the settings that say where the config files are, these two lists, the dispatch table (the generated hooks.json is built from it; hooks are configured in [events.*] and [entries.*], whose guard rules keep a guard from being turned off) and the command registry (its read-only flags feed the role gate). config.toml naming one is invalid; settings.json naming one is ignored. |
+| `config.locked` | `14 items` |  |  | Settings (exact keys, or prefixes ending in a dot or in *) the owner's files may not change: the names of the environment variables (the contract between the wrapper, the client and the daemon), the settings that say where the config files are, these two lists, the dispatch table (the generated hooks.json is built from it; hooks are configured in [events.*] and [entries.*], whose guard rules keep a guard from being turned off) and the command registry (its read-only flags feed the role gate). config.toml naming one is invalid; settings.json naming one is ignored. |
 | `config.restart_only` | `10 items` |  |  | Settings (or key prefixes ending in a dot) that only take effect when the daemon starts, because the daemon reads them once when a thread starts (the file watcher reads realtime.*, the DevSwarm wire thread its wait and reconcile gap); an edit is held as pending (config --json lists it under pending_restart) until the next start. |
 | `config.settings_file` | `settings.json` |  |  | Name of anti-hall's settings file inside the base directory (the file hooks/lib/settings.js reads). |
 | `config.true_tokens` | `1, on, true, yes` |  |  | Words a settings.json boolean may be written as to mean true (matches TRUE_TOKENS in hooks/lib/settings-schema.js). |
@@ -1252,6 +1252,33 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 |---|---|---|---|---|
 | `env.config` | `AH_ENGINE_CONFIG` |  |  | Overrides the path of the engine's own user config file (default: config.toml in the state directory). |
 | `env.settings` | `AH_ENGINE_SETTINGS` |  |  | Overrides the path of anti-hall's settings.json (default: settings.json in the base directory under the home directory). |
+
+### layers.toml / layers
+
+| Key | Default | Env override | Unit | What it is |
+|---|---|---|---|---|
+| `layers.action_rank` | `context, warn, deny` |  |  | Rule actions from the least to the most strict; a tighten-only layer may only move a rule up this list. |
+| `layers.explain_rule_prefix` | `rule:` |  |  | `config explain <prefix><rule id>` explains a rule instead of a setting. |
+| `layers.layer_names` | `env, project, settings, config_toml, default` |  |  | Names of the layers in `config explain`, highest precedence first: env, project, settings.json, user config.toml, shipped. |
+| `layers.locked_rules` | `git-no-force-push, git-no-ai-self-credit` |  |  | Rule ids no file may loosen, not even the user's (they can still be tightened). |
+| `layers.log_kind` | `layer_notice` |  |  | Kind of the health-log line written for a layer file that was ignored or an entry that was refused. |
+| `layers.max_field_len` | `4096` |  | bytes | Longest `pattern`, `message`, `id` or path a rule of a project file may hold. |
+| `layers.max_file_bytes` | `65536` |  | bytes | Largest project-layer file the engine reads; a bigger one is ignored with a notice. |
+| `layers.max_projects` | `64` |  |  | Most project layers kept in memory at once (the least recently used is dropped); the daemon is shared by every project. |
+| `layers.max_rule_files` | `32` |  |  | Most rule files read from one layer's rules directory (the first ones by name); the rest are ignored with a notice. |
+| `layers.max_rules` | `256` |  |  | Most rules one layer may add or change; a layer over it is ignored whole with a notice. |
+| `layers.origin_names` | `shipped, user, project` |  |  | Names of the layers in notices and in `config explain`: shipped, user, project (in that order). |
+| `layers.project_dir` | `.anti-hall` |  |  | The project layer's directory, relative to the project root (the git top level of the payload's cwd). |
+| `layers.project_may_loosen` | `` |  |  | Rule ids and setting keys a project file may loosen. Empty: a project only tightens. Honoured only when set in the USER layer (config.toml); a project file cannot grant itself this. |
+| `layers.project_rule_fields` | `9 items` |  |  | Fields a PROJECT rule may have (data only: `check` and `options` run engine code and are refused). |
+| `layers.project_settings` | `speculation_guard.max_blocks:up, task_guard.max_blocks:up` |  |  | Settings a project file may set, each as `key:direction`, direction being the stricter one: `up` (a higher number), `down` (a lower number), `on` (true), `off` (false), `add` (a list may only gain entries). A setting not listed is refused in a project file. |
+| `layers.recheck_ms` | `500` |  | ms | How often the files of a project layer are looked at again for a change while its sessions keep calling. |
+| `layers.regex_size_limit` | `262144` |  | bytes | Compiled-size limit of a project rule's regex (the regex crate's size_limit); a pattern over it is refused. |
+| `layers.rule_fields` | `11 items` |  |  | Fields a rule may have in a rule file; any other field makes the file invalid. |
+| `layers.rules_dir` | `rules` |  |  | Name of the directory of rule files inside a layer's directory (`<home>/<base_dir>/<this>` for the user layer, `<root>/<project_dir>/<this>` for a project). |
+| `layers.rules_ext` | `.toml` |  |  | Extension of a rule file; other files in the rules directory are ignored. |
+| `layers.state_names` | `applied, shadowed, refused, -` |  |  | The state words of a layer in `config explain`: applied (its value is the effective one), shadowed (a higher layer wins), refused (the layer's value was refused), absent (the layer does not set the key). |
+| `layers.tighten_fields` | `action, message` |  |  | Fields a tighten-only layer may change on a rule a lower layer defines (everything else would narrow or switch off the rule). |
 
 ### transcript.toml / transcript
 
@@ -10919,6 +10946,31 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `msg.cfg_type_table` | Type name used in config errors. |
 | `msg.cfg_valid` | Printed by `config validate` when the file is valid. |
 | `msg.cfg_validate_usage` | Printed by `config validate` without a file. |
+| `msg.layer_explain_header` | First line of `config explain`. Placeholders: {key}, {value}, {source}. |
+| `msg.layer_explain_line` | One layer line of `config explain`. Placeholders: {layer}, {state}, {value}. |
+| `msg.layer_explain_unknown` | `config explain` was given a key that is not a setting or a rule. Placeholder: {key}. |
+| `msg.layer_explain_usage` | Usage of `config explain`. |
+| `msg.layer_ignored_file` | A layer file was ignored whole (unreadable, too big, not a regular file, invalid). |
+| `msg.layer_refused` | One entry of a layer file was refused; the rest of the file still applies. |
+| `msg.layer_why_action` | Reason: the action is not one of layers.action_rank. Placeholder: {action}. |
+| `msg.layer_why_count` | Reason: a layer holds more rules than layers.max_rules. |
+| `msg.layer_why_dup` | Reason: a rule id appears twice in one layer; the first is kept. |
+| `msg.layer_why_field` | Reason: a rule has a field the layer does not allow. Placeholders: {id}, {field}. |
+| `msg.layer_why_incomplete` | Reason: a rule with a new id has no action (only a rule that changes a lower layer's rule may leave fields out). Placeholder: {id}. |
+| `msg.layer_why_len` | Reason: a rule field is too long. Placeholders: {id}, {field}, {max}. |
+| `msg.layer_why_loosen_action` | Reason: the rule would get a less strict action. Placeholders: {id}, {from}, {to}. |
+| `msg.layer_why_loosen_field` | Reason: the field would change a rule of a lower layer (narrowing it). Placeholders: {id}, {field}. |
+| `msg.layer_why_loosen_off` | Reason: the rule would be switched off. |
+| `msg.layer_why_no_id` | Reason: a project rule has no id, so it cannot be told apart from another. |
+| `msg.layer_why_not_file` | Reason: the path is not a plain file (a symlink, a pipe, a directory). |
+| `msg.layer_why_regex` | Reason: the pattern does not compile (or is over layers.regex_size_limit). Placeholders: {id}, {err}. |
+| `msg.layer_why_setting_dir` | Reason: a layers.project_settings entry has no known direction. Placeholder: {key}. |
+| `msg.layer_why_setting_loosen` | Reason: the project value is less strict than the one below it. Placeholders: {key}, {value}, {below}, {dir}. |
+| `msg.layer_why_setting_unlisted` | Reason: the project file names a setting that is not in layers.project_settings. Placeholder: {key}. |
+| `msg.layer_why_size` | Reason: the file is over layers.max_file_bytes. |
+| `msg.layer_why_toml` | Reason: the text is not valid TOML. Placeholder: {err}. |
+| `msg.layer_why_top` | Reason: a rule file may only hold `rules` (an array of tables). Placeholder: {key}. |
+| `msg.layer_why_type` | Reason: a rule field has the wrong type. Placeholders: {id}, {field}. |
 | `msg.jev_bad_default_mode` | Why the shipped integration table is invalid: an integration lists a mode that is not on, shadow or off. Placeholder: id. |
 | `msg.jev_endpoint_ignored` | Printed once per process to stderr when a test endpoint override is refused because its host is not loopback; it never names the URL or a key. |
 | `msg.jev_generic_key_bound` | Why a vendor-less Jev key option was not used: it is bound to the other vendor. Placeholders: bound, option, vendor. |
