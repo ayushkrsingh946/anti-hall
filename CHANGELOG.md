@@ -6,25 +6,37 @@ no `version` to avoid the silent-precedence trap where `plugin.json` wins silent
 behavioral change MUST bump `plugin.json` `version` or installed users will not receive
 the update.
 
-## Unreleased
+## 0.301.0 (2026-10-22)
+
+**Engine-only.** The Rust `ah-engine` now decides every hook on Claude Code and Codex; the plugin ships no Node runtime and needs no Node.js. The published plugin is 385 files and meets the plugin directory limits (at most 512 files, no non-image file of 256 KiB or more; checked by `ah-engine/tests/plugin-dir-limits.sh`).
+
+### Changed
+
+- **Node runtime moved out of the published plugin** into `plugins/anti-hall-node` (hooks, companion, scripts, statusline, the update script, the Codex Node files). Moved, not deleted; it is a local backup and the test harness only. The engine reaches it through `nodeback.node_dir`; shadow and fallback are logged no-ops when it is missing, and `ah-engine fallback node|off` switches the backup.
+- **No hook launches a Node hook.** `hooks/hooks.json` holds only `sh` triggers; the dispatcher launches no hook command; every former hand-back to a Node hook is decided natively and counted. A hook call with no engine passes through with one notice per session instead of running a fallback.
+- **`ah-engine <verb>` replaces `node <script>.js`** in skills, launchers and docs (`scripts/ah-run.sh` forwards). Node is no longer listed as a requirement in the README files, llms.txt or the guide.
+- **`plugin.json`**: removed the `documentationUrl`, `supportUrl`, `privacyPolicyUrl` and `termsOfServiceUrl` fields, which Claude Code does not read (the links stay in the README and the directory listing).
 
 ### Added
 
-- **An idle coordinating session is woken when an agent it launched goes idle with open work, loops, burns tokens or a watched process ends (#256).** New route target `wake` (config rows in `agent_tracker.targets`), the Monitor `ah-engine agents wake-watch --auto` armed at SessionStart (off switch `agents.wakeWatch`), and the config-defined signals `idle_open_task` and `watched_exit`. `monitor_unarmed` now sees a live wake-watch and is one short line.
+- **Every agent is tracked by the engine** (primary, solo, subagent, teammate, workspace, codex): process liveness from the session registry, tree links, headless one-shot runs left out, a short recently-finished window. A teammate that the host's roster no longer lists, or that was stopped by name, is done, not hung.
+- **An idle coordinating session is woken when an agent it launched goes idle with open work, loops, burns tokens or a watched process ends (#256).** New route target `wake` (config rows in `agent_tracker.targets`), the Monitor `ah-engine agents wake-watch --auto` armed at SessionStart (off switch `agents.wakeWatch`), and the config-driven signals `idle_open_task` and `watched_exit`. `monitor_unarmed` sees a live wake-watch and is one short line.
+- **Deploy kit** (`engine-deploy.sh`): pre-check that runs the old binary against the new defaults and lists every key it would miss, a maintenance hold, safe order (defaults before binary swap), staged rename in one fast pass, running-daemon verification, whole-tree sync, roll-back; automatic defaults heal never writes during a hold.
+- **Checksum roll-back of a damaged engine binary (#158).** `hooks/ah-engine-integrity.sh` keeps the last binary that ran healthy and restores it when the installed one differs from the recorded sha256, never ran healthy and keeps failing; the set-aside binary is renamed, never deleted. Thresholds are in `engine.toml` (`[rollback.*]`).
+- **Plugin directory fit guard**: `plugin-dir-limits.sh` fails over 512 tracked files or a non-image file of 256 KiB or more (limits in `plugin-dir-limits.toml`).
+- **README**: a section on what the plugin runs, sends and fetches.
 
 ### Fixed
 
-- **A DevSwarm workspace Primary was never told of its own signals (e.g. `monitor_unarmed`).** The reminders went only to the mesh outbox, which nothing reads; they now also reach the workspace's session queue.
-- **`gh issue create|comment --body-file` and `cargo clean` are no longer blocked in the main thread** (rows of `command.light_exceptions`).
+- **Guards**: `gh issue create|comment --body-file` and `cargo clean` are allowed in the main thread (rows of `command.light_exceptions`, #256); a single `gh issue create`, a push of another existing non-protected branch and `node -e` filters with plain quoted keys are no longer blocked; plain push exempts the current branch only (#235); `gh issue create` stays heavy for the coordinator (#236).
+- **Stop and task guards**: tasks in a transcript line only `JSON.parse` accepts are kept (#237); a TaskCreate with a numeric id or an object subject is a task (#244); the tasklist guard resolves the project root of a nested repository (#242); the child Stop gate keeps an unreadable durable store as unknown, never allow (#226); the parent Stop gate blocks on an undelivered escalation (#227), keeps a corroborated stale verdict (#228) and honours the owner's held partitions (#230); the mailbox-wake block is per condition and re-arms after a clean pass (#240).
+- **Crash-loop breaker catches a binary that exits at once (#158)**; the watchdog judges start-up and shutdown by their own clocks (no stall false positive); the degraded flag always carries reasons, since and evidence.
+- **Spawned-process CPU**: the scheduled `gh_poll` and `agent_tick` jobs skip work that cannot change; the daemon warms its interpreter probes after its socket is listening; one install lock serves every writer of the engine binary.
+- **Other**: a DevSwarm workspace Primary is told of its own signals (e.g. `monitor_unarmed`); the speculation judge works again (the model call moves to the one-shot dispatcher); handover-resume reads the home for the writer line (#241); native `recover` is refused before any side effect (#233); the retention fold removes a raw journal only after the merge is recorded (#234); `devswarm create` fails loudly and mesh write verbs exit 69 with the site; every unreachable-engine path tells the session once (#229); an uncertain retry date still records the quota outage (#243); task-tracker dedupe stays quiet on an unchanged second turn (#245).
 
-- **Spawned-process CPU: the scheduled `gh_poll` and `agent_tick` jobs stop paying for work that cannot change.** The scheduler now skips `gh_poll` (no re-exec of the engine, no state parse, no `git` or `gh` child) unless a directory is unresolved, a push or checkout shows in the git files (stat only), a repo's poll time has come or a merge follow-up is due; a root git cannot read (a repository with no commit) was looked at again at every tick and is now retried on the done cadence. The agent tracker asks the host for its session listing (`claude agents --json`, one heavy process) at most every `agent_tracker.limits.cli_list_ttl_ms` (300 s), earlier when a main or workspace session the last listing did not cover appears; between listings each agent keeps the host state and gone flag of the last one, and a failed listing is not retried at every tick. New state fields default, so an older state file loads unchanged.
-- **First guard call after a daemon start no longer probes the interpreters cold.** The daemon warms its probe cache (the version probes of `python3` and `python`) on a background thread once its socket is listening (`host_spawn.prewarm`, `host_spawn.prewarm_programs`, `host_spawn.prewarm_timeout_ms`), so api-guard's first call finds them kept instead of skipping verification inside the 300 ms deadline.
-- **One install lock for every writer of the engine binary.** The integrity script's check and roll-back, the bootstrap's and ah-update's install and roll-back, and the recording of the expected sha256 now share one lock (`rollback.install_lock`, `rollback.lock_wait_s`, `rollback.lock_hook_wait_s`, `rollback.lock_stale_s`); a lock whose holder is gone is broken at once, a held lock never holds a session, and the hook wrapper's check skips instead of waiting.
-- **Crash-loop breaker now catches a binary that exits at once (#158).** Such a daemon reports no crash, so the existing rule never counted it and every hook respawned it. The daemon starts are counted too (`client.spawn_n` / `client.spawn_window_s`, default 6 in 60 s); the stop also gates the failed and slow client paths, ends early when the binary is replaced, and events from before a trip or reset no longer re-trip it.
+### Docs
 
-### Added
-
-- **Checksum roll-back of a damaged engine binary (#158).** `hooks/ah-engine-integrity.sh` (POSIX sh; verbs `record`, `accept`, `check`, `fail`, `status`) keeps `bin/ah-engine.good` (a binary that ran healthy for `daemon.healthy_after_s`) and restores it when the installed binary differs from the installer's recorded sha256, never ran healthy and keeps failing. The set-aside binary is renamed `ah-engine.rolledback-<UTC time>-<sha8>`, never deleted. Wired into the hook wrapper (failure counting, SessionStart check), the bootstrap and `ah-update.sh` (record). All names and thresholds are in `engine.toml` (`[rollback.*]`).
+- README files, llms.txt, the guide, the Codex port README and the skills describe the engine as the only runtime and call `ah-engine <verb>` where they ran a Node script.
 
 ## 0.300.1 (2026-10-10)
 
