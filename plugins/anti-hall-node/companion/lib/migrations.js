@@ -173,7 +173,7 @@ function runBudgetMs(env) {
 // pluginVersion() -> this plugin tree's own version (the marker's version key).
 function pluginVersion() {
   try {
-    const pj = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', '.claude-plugin', 'plugin.json'), 'utf8'));
+    const pj = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', '..', 'anti-hall', '.claude-plugin', 'plugin.json'), 'utf8'));
     return pj && typeof pj.version === 'string' ? pj.version : null;
   } catch (_) { return null; }
 }

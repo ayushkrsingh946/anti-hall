@@ -247,7 +247,7 @@ function readInstalledPluginVersion() {
     // '.claude-plugin', 'plugin.json')`, correct FOR ITS OWN location one
     // level up from companion/). Needs one more '..' to reach the real
     // manifest at plugins/anti-hall/.claude-plugin/plugin.json.
-    const p = path.join(__dirname, '..', '..', '.claude-plugin', 'plugin.json');
+    const p = path.join(__dirname, '..', '..', '..', 'anti-hall', '.claude-plugin', 'plugin.json');
     const json = JSON.parse(fs.readFileSync(p, 'utf8'));
     return (json && typeof json.version === 'string') ? json.version : null;
   } catch (_) { return null; }

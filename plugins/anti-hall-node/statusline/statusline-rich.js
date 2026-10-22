@@ -235,7 +235,7 @@ function getSubagentCount() {
 // in the repo and when installed to a user's plugin directory.
 function getAhVersion() {
   try {
-    const pluginJson = path.join(__dirname, '..', '.claude-plugin', 'plugin.json');
+    const pluginJson = path.join(__dirname, '..', '..', 'anti-hall', '.claude-plugin', 'plugin.json');
     const obj = JSON.parse(fs.readFileSync(pluginJson, 'utf8'));
     const v = obj && typeof obj.version === 'string' && obj.version.trim();
     return v || null;

@@ -810,13 +810,13 @@ function scanForeignConflicts(opts) {
   const F = o.fsi || fs;
   const results = [];
 
-  const ownHooksPath = path.join(__dirname, '..', '..', 'hooks', 'hooks.registry.json'); // D87: the per-hook registry; hooks.json is thin
+  const ownHooksPath = path.join(__dirname, '..', '..', '..', 'anti-hall', 'hooks', 'hooks.registry.json'); // D87: the per-hook registry; hooks.json is thin
   const ownCfg = readJsonBounded(ownHooksPath, F);
   const ownEntries = extractHookEntries(ownCfg);
   const ownHasStop = ownEntries.some((e) => e.event === 'Stop');
   let ownSkillNames = [];
   try {
-    const skillsDir = path.join(__dirname, '..', '..', 'skills');
+    const skillsDir = path.join(__dirname, '..', '..', '..', 'anti-hall', 'skills');
     ownSkillNames = F.readdirSync(skillsDir).filter((n) => {
       try { return F.statSync(path.join(skillsDir, n)).isDirectory(); } catch (_) { return false; }
     });
