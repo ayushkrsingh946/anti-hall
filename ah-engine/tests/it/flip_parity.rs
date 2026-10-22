@@ -674,6 +674,13 @@ fn check(rig: &Rig, row: &Row, n: usize) -> Result<(), String> {
     } else {
         got.code == want.code && same_stdout(&got.out, &want.out) && got.err == want.err
     };
+    // A guard event whose payload a check cannot read exactly (not JSON, a lone surrogate, over the stdin cap) was once handed to the
+    // Node hook, which let it through. No hook is launched any more, so the event follows the engine's infra failure mode (the
+    // payload could not be guarded: the call is held, or let through with the notice once the same failure repeats): stricter than
+    // Node, never weaker, and it names the event.
+    let unreadable = ["not-json", "lone-surrogate", "over-cap"].contains(&row.class);
+    let infra_notice = format!("anti-hall: the engine could not run the guards for {}", row.event);
+    let ok = ok || (unreadable && defaults::list("dispatch.guard_events").contains(&row.event.as_str()) && got.err.starts_with(&infra_notice));
     if ok {
         Ok(())
     } else {

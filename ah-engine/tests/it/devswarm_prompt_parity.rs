@@ -333,14 +333,17 @@ fn engine_and_node_agree_on_every_scenario() {
                 }
             } else if answered {
                 native += 1;
+                // the old engine handed the scenarios Node acts on to the Node hook; it now answers them itself: the answer may say
+                // less than Node's (the advisory text is dropped on purpose) or more, but where Node blocks the engine must block
                 if !node_silent {
-                    problems.push(format!(
-                        "{label}: engine answered but Node acted (code {ncode}, out {:?}, state changed {state_changed})",
-                        String::from_utf8_lossy(&nout)
-                    ));
-                }
-                if want == Expect::Act {
-                    problems.push(format!("{label}: engine answered a scenario Node must act on"));
+                    if let Err(w) = crate::common::not_weaker_than_node((ncode, &String::from_utf8_lossy(&nout)), (ecode, &String::from_utf8_lossy(&eout))) {
+                        problems.push(format!("{label}: {w}"));
+                    }
+                    if want == Expect::Act {
+                        acted += 1;
+                    }
+                } else if want == Expect::Act {
+                    problems.push(format!("{label}: scenario flagged Act but Node was silent (vacuous row)"));
                 }
             } else {
                 deferred += 1;

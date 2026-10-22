@@ -212,13 +212,23 @@ fn exec(case: &Case) -> (String, Option<String>) {
     let eng_home = if case.no_home { None } else { Some(case.home_override.clone().unwrap_or_else(|| home.clone())) };
     let (ecode, eout, eerr) = engine(case, eng_home.as_deref(), &root, &input);
     assert_eq!(ecode, 0, "{}: engine exit {ecode}: {eerr}", case.name);
-    assert_eq!(tree(&home_dir), before, "{}: the engine changed the home", case.name);
+    // the engine installs the stable launcher copies the directive names (.anti-hall/bin) itself now; nothing else may change
+    let outside_bin = |m: BTreeMap<String, Vec<u8>>| m.into_iter().filter(|(k, _)| !k.starts_with(".anti-hall/bin/")).collect::<BTreeMap<_, _>>();
+    assert_eq!(outside_bin(tree(&home_dir)), outside_bin(before.clone()), "{}: the engine changed the home", case.name);
     let deferred = eout.trim_end() == FALLBACK;
     if deferred {
         assert_eq!(case.want, Want::Defer, "{}: engine deferred but the case expects an answer", case.name);
         return ("defer".into(), None);
     }
-    assert_eq!(case.want, Want::Answer, "{}: engine answered {eout:?} but the case expects a deferral", case.name);
+    if case.want == Want::Defer {
+        // the old engine handed this case to the Node hook; it now answers it itself: the answer may say less than Node's
+        // (advisory text is dropped on purpose) or more, but where Node blocks the engine must block
+        let (ncode, nout, _) = node(case, &home, &root, &input);
+        if let Err(w) = crate::common::not_weaker_than_node((ncode, &nout), (ecode, &eout)) {
+            panic!("{}: {w}", case.name);
+        }
+        return ("defer".into(), None);
+    }
     assert!(!case.no_home && case.home_override.is_none(), "{}: an answer without the real home must not be compared", case.name);
     let (ncode, nout, nerr) = node(case, &home, &root, &input);
     assert_eq!((ecode, &eout, &eerr), (ncode, &nout, &nerr), "{}: engine and Node differ", case.name);

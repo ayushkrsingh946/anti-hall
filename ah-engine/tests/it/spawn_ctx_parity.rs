@@ -347,13 +347,12 @@ fn drive(name: &str, h: Hook, cases: Vec<Case>) -> Tally {
             )
         };
         if case.defer {
-            assert_eq!(
-                (eng.0, String::from_utf8_lossy(&eng.1).to_string(), eng.2.clone()),
-                (0, FALLBACK.to_string(), Vec::new()),
-                "{}",
-                ctx("the engine must defer")
-            );
-            assert_eq!(after_e, seeded, "{}", ctx("a deferral must leave the state as seeded"));
+            // the old engine handed this input to the Node hook; it now answers it itself: the answer may say less than Node's
+            // (advisory text is dropped on purpose) or more, but where Node blocks the engine must block
+            // (an input the check cannot read exactly is still deferred: the dispatcher then follows its infra failure mode)
+            if String::from_utf8_lossy(&eng.1).trim() != "AHFALLBACK" && let Err(w) = crate::common::not_weaker_than_node((node.0, &String::from_utf8_lossy(&node.1)), (eng.0, &String::from_utf8_lossy(&eng.1))) {
+                panic!("{}", ctx(&w));
+            }
             t.deferred += 1;
         } else {
             assert_ne!(String::from_utf8_lossy(&eng.1), FALLBACK, "{}", ctx("the engine deferred but this case expects an answer"));

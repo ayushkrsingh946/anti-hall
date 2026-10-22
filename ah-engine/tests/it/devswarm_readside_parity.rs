@@ -223,7 +223,6 @@ fn exec(case: &Case) -> &'static str {
         assert_ne!(case.want, Want::Answer, "{}: engine deferred but the case expects an answer", case.name);
         return "defer";
     }
-    assert_eq!(case.want, Want::Answer, "{}: engine answered {eout:?} but the case expects a deferral", case.name);
     // the engine's home (a nudge records its throttle state), then the same home put back for Node
     let after_engine = tree(&home_dir);
     std::fs::remove_dir_all(&home_dir).unwrap();
@@ -233,6 +232,14 @@ fn exec(case: &Case) -> &'static str {
         std::fs::write(p, body).unwrap();
     }
     let (ncode, nout, nerr) = node(case, &home, &root, &input);
+    if case.want != Want::Answer {
+        // the old engine handed this case to the Node hook; it now answers it itself: the answer may say less than Node's
+        // (advisory text is dropped on purpose) or more, but where Node blocks the engine must block
+        if let Err(w) = crate::common::not_weaker_than_node((ncode, &nout), (ecode, &format!("{eout}{eerr}"))) {
+            panic!("{}: {w}", case.name);
+        }
+        return "defer";
+    }
     assert_eq!((ecode, &eout, &eerr), (ncode, &nout, &nerr), "{}: engine and Node differ", case.name);
     assert_eq!(masked(after_engine), masked(tree(&home_dir)), "{}: the home differs after the engine and after Node", case.name);
     "answer"

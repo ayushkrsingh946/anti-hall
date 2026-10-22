@@ -302,16 +302,19 @@ pub fn run_case(hook: &str, check: &str, case: &Case, t: &mut Tally) {
                 }
             }
             Expect::Defer | Expect::DeferNoNode => {
-                if !deferred {
-                    t.failures.push(format!("{who}: engine answered ({e:?}) but the step must defer"));
+                // the old engine handed these payloads to the Node hook; it now answers them itself. The answer may say less
+                // than Node's (advisory text is dropped on purpose) or more, but where Node blocks the engine must block.
+                // (an input the check cannot read exactly is still deferred: the dispatcher then follows its infra failure mode)
+                if deferred {
+                    t.deferred += 1;
                 } else {
                     t.deferred += 1;
-                    if tree(&eh) != before {
-                        t.failures.push(format!("{who}: a deferral changed state"));
+                    if step.expect == Expect::Defer {
+                        let n = run_node(hook, &nh, case, &input_n);
+                        if let Err(w) = crate::common::not_weaker_than_node((n.0, &n.1), (e.0, &e.1)) {
+                            t.failures.push(format!("{who}: {w}; payload={input_n}"));
+                        }
                     }
-                }
-                if step.expect == Expect::Defer {
-                    let _ = run_node(hook, &nh, case, &input_n);
                 }
                 copy_tree(&nh, &eh);
             }

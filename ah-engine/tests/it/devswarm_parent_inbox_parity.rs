@@ -1138,7 +1138,12 @@ fn run_scene(s: &Scene) -> Result<bool, String> {
             }
             Ok(false)
         }
-        (Want::Defer, false) => Err(format!("{}: expected a deferral, the engine answered {:?}", s.name, e.1)),
+        // the old engine handed these scenes to the Node hook; it now answers them itself: the answer may say less than Node's
+        // (advisory text is dropped on purpose) or more, but where Node blocks the engine must block
+        (Want::Defer, false) => {
+            crate::common::not_weaker_than_node((n.0, &n.1), (e.0, &e.1)).map_err(|w| format!("{}: {w}", s.name))?;
+            Ok(false)
+        }
         (Want::Same, true) => Err(format!("{}: expected a native answer, the engine deferred", s.name)),
         (Want::Same, false) => {
             if (n.0, mask_ages(&n.1), &n.2) != (e.0, mask_ages(&e.1), &e.2) {

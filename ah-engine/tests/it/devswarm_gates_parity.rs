@@ -229,7 +229,10 @@ fn compare(repo: &Path, hook: &str, check: &str, variants: &[Variant], payloads:
                 String::from_utf8_lossy(&nout),
                 String::from_utf8_lossy(&nerr)
             );
-            assert_eq!(before, snapshot(&home), "{label}: Node changed state the engine allow skipped");
+            // the Node hook's runtime installs its own stable launcher copies under .anti-hall/bin on its first run; that is Node's
+            // housekeeping, which the engine (it launches no hook) has no use for
+            let own_state = |m: BTreeMap<String, Vec<u8>>| m.into_iter().filter(|(k, _)| !k.starts_with(".anti-hall/bin")).collect::<BTreeMap<_, _>>();
+            assert_eq!(own_state(before), own_state(snapshot(&home)), "{label}: Node changed state the engine allow skipped");
             ah_engine::discard::harmless(std::fs::remove_dir_all(&home));
         }
     }
@@ -683,7 +686,17 @@ fn pg_exec(case: &PgCase) -> PgTally {
             t.deferred += 1;
             continue;
         }
-        assert_eq!(*want, PgWant::Answer, "{label}: the engine answered {:?}, the case expects a deferral", String::from_utf8_lossy(&eout));
+        if *want == PgWant::Defer {
+            // the old engine handed this case to the Node hook; it now answers it itself: the answer may say less than Node's
+            // (advisory text is dropped on purpose) or more, but where Node blocks the engine must block
+            pg_restore(&home, &before, &times);
+            let (ncode, nout, _) = node_run(&input);
+            if let Err(w) = crate::common::not_weaker_than_node((ncode, &String::from_utf8_lossy(&nout)), (ecode, &format!("{}{}", String::from_utf8_lossy(&eout), String::from_utf8_lossy(&eerr)))) {
+                panic!("{label}: {w}");
+            }
+            t.deferred += 1;
+            continue;
+        }
         if case.diverges {
             let all = format!("{}{}", String::from_utf8_lossy(&eout), String::from_utf8_lossy(&eerr));
             match case.expects[i].strip_prefix('!') {
@@ -1553,7 +1566,17 @@ fn cx_exec(case: &Cx, agent: &str) -> CxTally {
             t.deferred += 1;
             continue;
         }
-        assert_eq!(*want, PgWant::Answer, "{label}: the engine answered {:?} {:?}, the case expects a deferral", String::from_utf8_lossy(&eout), String::from_utf8_lossy(&eerr));
+        if *want == PgWant::Defer {
+            // the old engine handed this case to the Node hook; it now answers it itself: the answer may say less than Node's
+            // (advisory text is dropped on purpose) or more, but where Node blocks the engine must block
+            pg_restore(&home, &before, &times);
+            let (ncode, nout, _) = node_run(&input);
+            if let Err(w) = crate::common::not_weaker_than_node((ncode, &String::from_utf8_lossy(&nout)), (ecode, &format!("{}{}", String::from_utf8_lossy(&eout), String::from_utf8_lossy(&eerr)))) {
+                panic!("{label}: {w}");
+            }
+            t.deferred += 1;
+            continue;
+        }
         if let Some(rel) = case.keeps {
             let rel = fill(rel);
             assert_eq!(snapshot(&home).get(&rel), before.get(&rel), "{label}: the engine rewrote {rel}, a file it could not read exactly");

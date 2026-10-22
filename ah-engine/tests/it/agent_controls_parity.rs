@@ -436,7 +436,13 @@ fn check_one(root: &Path, idx: usize, s: &Sc, mismatches: &mut Vec<String>) -> O
     let deferred = er.out.trim_end() == "AHFALLBACK";
     let tag = |m: &str| format!("{} [{}]: {m}", s.name, s.hook);
     match (s.expect, deferred) {
-        (Expect::Defer, false) => mismatches.push(tag(&format!("expected a deferral, engine answered code={} out={:?}", er.code, er.out))),
+        // the old engine handed this payload to the Node hook; it now answers it itself: the answer may say less than Node's
+        // (advisory text is dropped on purpose) or more, but where Node blocks the engine must block
+        (Expect::Defer, false) => {
+            if let Err(w) = crate::common::not_weaker_than_node((nr.code, &nr.out), (er.code, &er.out)) {
+                mismatches.push(tag(&w));
+            }
+        }
         (Expect::Same, true) => mismatches.push(tag(&format!("engine deferred where it should answer (node: code={} out={:?})", nr.code, nout))),
         (Expect::Auto, true) if kind != "stop-block" => {
             mismatches.push(tag(&format!("engine deferred where Node did not block (node: code={} out={:?})", nr.code, nout)))
@@ -464,7 +470,7 @@ fn check_one(root: &Path, idx: usize, s: &Sc, mismatches: &mut Vec<String>) -> O
                 mismatches.push(tag(&format!("files differ: {}", diff.join(" || "))));
             }
         }
-        (Expect::Defer, true) => {}
+        (Expect::Defer, true) => {} // an input the check cannot read exactly is still deferred: the dispatcher follows its infra failure mode
     }
     Outcome { deferred, node_kind: kind }
 }

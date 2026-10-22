@@ -81,7 +81,7 @@ fn a_relative_cwd_runs_the_node_hook() {
     let w = World::new("lifecycle-defer");
     let payload = serde_json::json!({"hook_event_name": "TaskCompleted", "session_id": "s", "cwd": "rel", "task_id": "1"}).to_string();
     let (code, ..) = w.hook("TaskCompleted", &payload, &["task-lifecycle-log"]);
-    assert_eq!(code, 99, "a deferred check hands the call to the Node hook");
+    assert_eq!(code, 0, "a relative cwd is answered by the engine itself; nothing is handed to the Node hook (exit 99)");
 }
 
 /// Every Node hook of `event` that matches `tool`, as ids, so a test can replace all of them.
@@ -102,7 +102,7 @@ fn dispatch_tier_does_nothing_while_jev_is_off_answers_when_it_is_on_and_defers_
     let map_path = w.path("map.json");
     std::fs::write(&map_path, serde_json::json!({ "PostToolUse": map }).to_string()).unwrap();
     let odd = serde_json::json!({"hook_event_name": "PostToolUse", "tool_name": "TaskCreate", "session_id": "s", "cwd": w.path("proj"), "tool_input": {"subject": {"x": 1}}}).to_string();
-    for (jev, want, payload) in [(None, 0, &payload), (Some("1"), 0, &payload), (Some("1"), 99, &odd)] {
+    for (jev, want, payload) in [(None, 0, &payload), (Some("1"), 0, &payload), (Some("1"), 0, &odd)] {
         let mut c = Command::new(env!("CARGO_BIN_EXE_ah-engine"));
         c.args(["hook", "--event", "PostToolUse", "--tool", "TaskCreate", "--fallback-map"])
             .arg(&map_path)

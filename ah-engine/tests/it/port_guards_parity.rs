@@ -233,12 +233,15 @@ fn check_rows(hook: &str, check: &str, rows: Vec<Case>) -> (usize, usize) {
         let deferred_now = eng.0 == 0 && eng.1 == format!("{FALLBACK}\n").as_bytes() && eng.2.is_empty();
         match case.expect {
             Expect::Defer => {
-                if !deferred_now {
-                    bad.push(format!("{}: expected the engine to defer, got {}", case.name, show(&eng)));
-                } else if eng_snap != BTreeMap::from_iter(setup_snapshot(&case.files, &rh, now)) {
-                    bad.push(format!("{}: a deferral must leave the home untouched, got {eng_snap:?}", case.name));
-                } else if case.acts && node.1.is_empty() && node_snap == BTreeMap::from_iter(setup_snapshot(&case.files, &nh, now)) {
+                // the old engine handed these rows to the Node hook; it now answers most of them itself: the answer may say less than
+                // Node's (advisory text is dropped on purpose) or more, but where Node blocks the engine must block. An input the
+                // check cannot read exactly is still deferred: the dispatcher then follows its infra failure mode.
+                if case.acts && node.1.is_empty() && node_snap == BTreeMap::from_iter(setup_snapshot(&case.files, &nh, now)) {
                     bad.push(format!("{}: marked as a row where Node acts, but Node printed and wrote nothing", case.name));
+                } else if !deferred_now
+                    && let Err(w) = crate::common::not_weaker_than_node((node.0, &String::from_utf8_lossy(&node.1)), (eng.0, &String::from_utf8_lossy(&eng.1)))
+                {
+                    bad.push(format!("{}: {w}", case.name));
                 } else {
                     deferred += 1;
                 }

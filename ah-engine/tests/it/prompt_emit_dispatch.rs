@@ -166,7 +166,9 @@ fn verify_first_answers_a_devswarm_primary_itself_and_defers_only_without_a_work
     let nocwd = serde_json::json!({"session_id": "sq", "hook_event_name": "UserPromptSubmit", "prompt": "x"}).to_string();
     let (code, out, _) = e.run(&args, true, &nocwd, &[("DEVSWARM_REPO_ID", "r1")]);
     assert_eq!(code, 0);
-    assert_eq!(ctx(&out), "NODE-RAN", "without a working directory the tier gate is the Node hook's");
+    // no Node hook is launched any more: the engine answers a prompt without a working directory itself (the Primary's text may
+    // be shorter than Node's; it is context, never a block)
+    assert!(out.contains("VERIFY-FIRST: ") && !out.contains("NODE-RAN"), "without a working directory the engine answers itself: {out}");
     let (_, out, _) = e.run(&args, true, &p, &[("DEVSWARM_REPO_ID", "r1"), ("DEVSWARM_SOURCE_BRANCH", "feature")]);
     assert!(out.contains("VERIFY-FIRST: ") && !out.contains("NODE-RAN"), "a child workspace is answered by the engine: {out}");
     assert!(e.home().join(".anti-hall/emit-dedupe/dedupe-sp.json").exists());
@@ -177,12 +179,12 @@ fn a_deferred_verify_first_wrote_no_state_before_deferring() {
     let e = Env::new("vf-nostate");
     let map = e.map("UserPromptSubmit", "verify-first");
     let args = ["hook", "--event", "UserPromptSubmit", "--fallback-map", map.to_str().unwrap()];
-    // a relative transcript path is something only Node resolves
+    // a relative transcript path was something only Node resolved; the engine answers it itself now
     let p = serde_json::json!({"session_id": "ns", "cwd": "/tmp", "hook_event_name": "UserPromptSubmit", "prompt": "x", "transcript_path": "rel/t.jsonl"})
         .to_string();
-    let (_, out, _) = e.run(&args, true, &p, &[]);
-    assert_eq!(ctx(&out), "NODE-RAN");
-    assert!(!e.home().join(".anti-hall/emit-dedupe").exists(), "the deferral must come before any write");
+    let (code, out, _) = e.run(&args, true, &p, &[]);
+    assert_eq!(code, 0);
+    assert!(out.contains("VERIFY-FIRST: ") && !out.contains("NODE-RAN"), "the engine answers a relative transcript path itself: {out}");
 }
 
 #[test]
@@ -193,12 +195,13 @@ fn session_start_marks_the_context_loss_through_the_dispatcher() {
         let args = ["hook", "--event", "SessionStart", "--fallback-map", map.to_str().unwrap()];
         let p = serde_json::json!({"session_id": "rs", "cwd": "/tmp", "hook_event_name": "SessionStart", "source": "compact"}).to_string();
         let file = e.home().join(".anti-hall/emit-dedupe/dedupe-rs.json");
-        // through the daemon the first call is the Node fallback (the shell map: nothing written), later ones are the check's
+        // through the daemon the first calls can find no daemon yet (nothing written), later ones are the check's
         for _ in 0..80 {
             let (code, out, err) = e.run(&args, in_process, &p, &[]);
             // the other SessionStart checks (verify-first-full, verify-first-orch, ...) answer with their own context: only the exit
             // and stderr are asserted here, the reset is proven by the state file below
-            assert_eq!((code, err.as_str()), (0, ""), "{out}");
+            // through the daemon the first call can reach no daemon yet: the engine says so on stderr and lets the call through
+            assert!(code == 0 && (err.is_empty() || (!in_process && err.starts_with("anti-hall: the engine did not answer this SessionStart call"))), "{code} {err} {out}");
             if file.exists() {
                 break;
             }

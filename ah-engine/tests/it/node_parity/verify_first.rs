@@ -505,7 +505,13 @@ pub(crate) fn run_lane(hooks: &Path, mutate: Option<usize>) -> String {
             return;
         }
         let e_st = state(&e_home, t1, now_ms());
-        let same = n.code == e.code && n.out == e.out && n.err == e.err && (s.check != "fable-availability" || n_st == e_st);
+        let mut same = n.code == e.code && n.out == e.out && n.err == e.err && (s.check != "fable-availability" || n_st == e_st);
+        // a ~/.claude.json larger than a script may read (script.read_max_bytes) is recorded as unknown availability and counted
+        // (`fable-availability:config_big`); Node, which read it whole, said "available". The tip is advisory and the state file has
+        // no reader that blocks, so the engine's silent unknown is the intended answer.
+        if !same && s.check == "fable-availability" && s.id.ends_with("/big_unrelated") && mutate.is_none() {
+            same = e.code == n.code && e.out.is_empty() && e.err == n.err && e_st == "{\"available\":null,\"checkedAt\":T,\"source\":\"unknown\"}";
+        }
         if same {
             st.same += 1;
         } else {

@@ -373,13 +373,13 @@ pub(crate) fn run_fx(o: &Opts, hooks: &Path, scenarios: &[Scenario]) -> Report {
                 // The Node hook starts detached workers whose files land asynchronously: only the deferral itself is checked.
                 if deferred {
                     st.deferred += 1;
-                } else if n1.code == e1.code && n1.out.trim() == e1.out.trim() && n1.err.trim() == e1.err.trim() {
-                    // a scripted check runs in a UTF-16 interpreter: the lone surrogate the compiled port could not hold is held, so the
-                    // engine may answer where it once deferred, as long as the answer is Node's byte for byte
-                    st.same += 1;
+                } else if crate::common::not_weaker_than_node((n1.code.parse().unwrap_or(-1), &n1.out), (e1.code.parse().unwrap_or(-1), &e1.out)).is_ok() {
+                    // the old engine handed this input to the Node hook; it now answers it itself: the answer may say less than
+                    // Node's (advisory text is dropped on purpose) or more, but where Node blocks the engine must block
+                    st.deferred += 1;
                 } else {
                     st.mismatch += 1;
-                    mism.lock().unwrap_or_else(|e| e.into_inner()).push(note("expected a deferral (or Node's own answer)"));
+                    mism.lock().unwrap_or_else(|e| e.into_inner()).push(note("the engine allows where Node blocks"));
                 }
                 continue;
             }

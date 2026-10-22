@@ -439,11 +439,12 @@ fn the_jev_backend_switch_and_the_api_backend_never_call_the_cli() {
     c.env = vec![("ANTIHALL_JEV_SPECULATION_BACKEND", "jev".into())];
     let e = judge_side(&c, true, None);
     assert_eq!((e.outs[0].0, e.outs[0].1.as_str(), e.calls.len(), e.tree.len(), e.telemetry.len()), (0, "", 0, 0, 0), "{:?}", e.outs);
-    // the API route with a key is Node's: the engine defers before any call
+    // the API route with a key: the engine never sends a key (no hand-back to Node any more), so it makes no call and allows
+    // (the script counts `speculation-judge:api_route` as unable)
     let mut c = JudgeCase::new("api-with-key", &block);
     c.env = vec![("ANTIHALL_JUDGE_BACKEND", "api".into()), ("CLAUDE_PLUGIN_OPTION_ANTHROPIC_API_KEY", "parity-key-not-real".into())];
     let e = judge_side(&c, true, None);
-    assert_eq!((e.outs[0].1.trim(), e.calls.len()), ("AHFALLBACK", 0));
+    assert_eq!((e.outs[0].0, e.outs[0].1.as_str(), e.calls.len()), (0, "", 0), "{:?}", e.outs);
 }
 
 /// A copy of the plugin's engine directory with `edit` applied to judge.toml, for a test that needs a smaller limit.

@@ -426,6 +426,9 @@ fn parity(name: &str, o: &Opt, args: &[&str]) -> String {
     let (ta, tb) = (tree(&a.home), tree(&b.home));
     let keys: Vec<&String> = ta.keys().chain(tb.keys()).collect();
     for k in keys {
+        if k.contains("logs/devswarm-recon-witness.ndjson") && ta.get(k).is_none() {
+            continue; // the engine's own ledger of the native sweep jobs it ran; the Node script keeps none
+        }
         if moved && (k.contains("update-sweep-state") || k.contains("logs/devswarm.jsonl")) {
             continue; // the Node script's two passes stamp differently (see assert_same_update)
         }
