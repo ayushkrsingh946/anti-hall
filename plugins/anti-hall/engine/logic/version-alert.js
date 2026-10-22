@@ -68,7 +68,7 @@ function vaHarnessVersion(home) {
 function decide(p, opts) {
   if (sess.judgeChild()) return 'allow';
   var home = spawn.osHome(), root = sess.pluginRoot(opts);
-  if (home === null || root === null) { ah.unable('version-alert:no_home_or_root'); return 'allow'; } // nothing to read, nothing to say
+  if (home === null || root === null) { ah.unable('version-alert:no_home_or_root', 'abandoned'); return 'allow'; } // nothing to read, nothing to say
   var guard = ah.cfg('session.version_alert_guard');
   if (!ah.settings.bool('session.setting_version_alert') || ah.settings.skipped(guard)) return 'allow';
   if (p && typeof p === 'object' && (p.agent_id || p.agent_type || p.isSidechain === true || p.is_sidechain === true)) return 'allow';

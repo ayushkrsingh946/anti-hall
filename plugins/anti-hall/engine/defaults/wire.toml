@@ -232,7 +232,7 @@ doc = "What each fail_open reason means for the session, as reason=text entries;
 value = [
   "internal_error=a request hit an internal error and got no verdict from the engine",
   "busy=requests were shed because the engine was busy and got no verdict from the engine",
-  "deadline_cut=a check was cut at the client deadline and deferred to its Node hook",
+  "deadline_cut=a check was cut at the client deadline and took its failure policy (an allow, or a block for a fail-closed guard)",
   "script_timeout=a scripted check ran out of time and gave no verdict",
   "jev_breaker_open=the Jev judgement was skipped because its circuit breaker is open",
   "missing_key=a config reload was rejected, the previous settings keep serving and checks needing the new settings cannot run",

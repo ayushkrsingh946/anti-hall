@@ -340,12 +340,12 @@ function decide(p) {
   // HOME unset: Node's os.homedir() is the passwd home, and state, settings and skips live under it (adopted for the call, as the other guards do)
   if (ah.env.get(ah.cfg('env.home')) === null) {
     var nh = hookProc.nodeHome();
-    if (nh.home === undefined) { ah.unable('task-guard:no_home'); return 'allow'; }
-    if (hookProc.testGuarded(nh.home)) { ah.unable('task-guard:home_test_guard'); return 'allow'; } // the real home under a test marker is never touched
+    if (nh.home === undefined) { ah.unable('task-guard:no_home', 'abandoned'); return 'allow'; }
+    if (hookProc.testGuarded(nh.home)) { ah.unable('task-guard:home_test_guard', 'abandoned'); return 'allow'; } // the real home under a test marker is never touched
     ah.useHome(nh.home);
   }
   var home = ah.home();
-  if (!home) { ah.unable('task-guard:no_home'); return 'allow'; } // no home: no state to read or write, and nothing to guard it with
+  if (!home) { ah.unable('task-guard:no_home', 'abandoned'); return 'allow'; } // no home: no state to read or write, and nothing to guard it with
   var given = p.session_id ? String(p.session_id) : '';
   var sessionId = given === '' ? ah.sha1(transcript).slice(0, ah.cfgNum('task_guard.session_hash_len')) : given;
   var safeSession = tk.safeKey(sessionId);

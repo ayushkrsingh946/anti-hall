@@ -589,7 +589,7 @@ fn cases(fx: &Fx) -> Vec<Case> {
             native: true,
             expect: vec!["\"ok\":true"],
         },
-        // ---- deferrals: nothing written, exit 75 without Node ----
+        // ---- deferrals: nothing written, exit 69 without Node ----
         Case {
             name: "no-session",
             cwd: "child",
@@ -768,13 +768,13 @@ fn heartbeat_matches_node_byte_for_byte_and_defers_without_writing() {
             assert_eq!(v["result"], "none", "{}: a Node shadow record exists, but no shadow runs any more: {v}", c.name);
         } else {
             deferred += 1;
-            assert_eq!(e.code, 75, "{}: no Node to hand the verb to, the engine is unable (75)", c.name);
-            // the contract: deferred means NOTHING written, and exit 75 when the engine cannot run Node
+            assert_eq!(e.code, 69, "{}: no Node to hand the verb to, the engine is unable (69, a visible error)", c.name);
+            // the contract: deferred means NOTHING written, and exit 69 (exit_unable) when the engine cannot do it
             let before = fx.root.join(format!("{}-before", c.name));
             copy_tree(&fx.seed_home, &before);
             seed(&before, &fx, c);
             let d = engine_verb(&hd, &hd.join("state"), &cwd, &av, now, None, &[extra.clone(), vec![("PATH", nonode.as_str())]].concat());
-            assert_eq!(d.code, 75, "{}: a deferral the engine cannot hand to Node exits 75, got {} / {}", c.name, d.code, d.stdout);
+            assert_eq!(d.code, 69, "{}: a deferral the engine cannot hand to Node exits 69 (exit_unable), got {} / {}", c.name, d.code, d.stdout);
             assert!(d.stdout.is_empty(), "{}: nothing is printed on a deferral: {}", c.name, d.stdout);
             let reason = last_log(&hd.join("state"));
             assert_eq!(reason["result"], "defer", "{}: logged as a deferral: {reason}", c.name);
@@ -940,11 +940,11 @@ fn faulty_inputs_are_reproduced_or_deferred_without_a_write() {
             assert_same_home(f.name, &hn, &he, &fx.repo_key, "node vs engine");
         } else {
             deferred += 1;
-            assert_eq!(e.code, 75, "{}: no Node to hand the verb to, the engine is unable (75)", f.name);
+            assert_eq!(e.code, 69, "{}: no Node to hand the verb to, the engine is unable (69, a visible error)", f.name);
             let before = fx.root.join(format!("{}-before", f.name));
             seed_one(&before);
             let d = engine_verb(&hd, &hd.join("state"), &fx.child, &av, now, None, &[("PATH", nonode.as_str())]);
-            assert_eq!((d.code, d.stdout.is_empty()), (75, true), "{}: deferral contract: {} / {}", f.name, d.code, d.stdout);
+            assert_eq!((d.code, d.stdout.is_empty()), (69, true), "{}: deferral contract: {} / {}", f.name, d.code, d.stdout);
             assert_same_home(f.name, &before, &hd, &fx.repo_key, "deferral wrote");
         }
     }

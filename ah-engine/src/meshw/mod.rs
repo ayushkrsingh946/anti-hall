@@ -5,16 +5,17 @@
 //!
 //! * `on` (shipped default; `shadow`, a position of earlier versions, reads as `on`): the engine runs the verb. One it cannot
 //!   answer (an [`ident::Defer`], an unported verb, no plugin context) is UNABLE: nothing was written, it is counted
-//!   (`native_unable`), one line says so on stderr and the exit code is `mesh_write.exit_defer`;
-//! * `off`: the diagnostic switch. Nothing is done; it is counted, said on stderr, and the exit code is `mesh_write.exit_defer`.
+//!   (`abandoned`), one line says so on stderr and the exit code is `mesh_write.exit_unable`;
+//! * `off`: the diagnostic switch. Nothing is done; it is counted, said on stderr, and the exit code is `mesh_write.exit_unable`.
 //!   Never a silent success.
 //!
 //! Ported verbs: `send` (direct, `--to-primary`, `--broadcast`), `mesh read` (consuming and `--peek`), `mesh history`,
 //! `roster --ack`, `inbox ack-primary`, the plain `heartbeat`, `inbox tick <id>`, the single-partition `inbox read-primary` and the plain `roster`; and the store-free verbs of [`simple`] (`help`, the unknown-command answer, `skip`, `archive-ignore`, `archive-unignore`, `gate-intent`, `notice --list`), plus the plan, scope, gate, workspace and extension verbs.
 //!
-//! The exit-code contract (`mesh_write.exit_defer`, `mesh_write.exit_committed_failure`):
+//! The exit-code contract (`mesh_write.exit_unable`, `mesh_write.exit_committed_failure`):
 //!
-//! * exit 75 (`exit_defer`, sysexits EX_TEMPFAIL) is "unable or switched off, nothing written". It is never used after a write.
+//! * exit 69 (`exit_unable`, sysexits EX_UNAVAILABLE) is "unable or switched off, nothing written", with a stderr line naming the site.
+//!   It is a visible error, never the silent 75 of a deferral, and is never used after a write.
 //! * a failure AFTER the first store write (a panic, or a deferral decided late by a bug) exits `exit_committed_failure`
 //!   (70): running the verb again would write twice.
 //! * every other code is the verb's own result and passes through.
@@ -138,7 +139,7 @@ pub fn verify_log(rec: &serde_json::Value) {
 /// The two positions of `mesh.engine_writes`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
-    /// Switched off: the mesh write verbs do nothing (counted, with a message, exit `mesh_write.exit_defer`).
+    /// Switched off: the mesh write verbs do nothing (counted, with a message, exit `mesh_write.exit_unable`).
     Off,
     /// The engine acts (`shadow`, a position of earlier versions, reads as `on`).
     On,
@@ -286,19 +287,19 @@ pub fn inv_from_process(stdin: Option<String>) -> Option<Inv> {
     Some(Inv { write_home: home.clone(), home, env, cwd, now, stdin, store_override: None })
 }
 
-/// The engine cannot answer this call and there is no Node to hand it to: count it, say so, and exit with the code that means
-/// "nothing was done" (`mesh_write.exit_defer`).
+/// The engine cannot answer this call and there is no Node to hand it to: count it, say so on stderr with the site, and exit with
+/// the visible error code `mesh_write.exit_unable` (nothing was done; never the 75 of a deferral).
 fn unable(site: &str) -> i32 {
-    crate::obs::counters::handback(crate::obs::counters::Handback::NativeUnable, site);
-    eprintln!("{}", defaults::text("mesh_write.msg_unable"));
-    defaults::num("mesh_write.exit_defer") as i32
+    crate::obs::counters::handback(crate::obs::counters::Handback::Abandoned, site);
+    eprintln!("{}", defaults::render("mesh_write.msg_unable", &[("site", &site)]));
+    defaults::num("mesh_write.exit_unable") as i32
 }
 
 /// The switch is off: nothing is done, and it is counted and said, never a silent success.
 fn disabled(site: &str) -> i32 {
-    crate::obs::counters::handback(crate::obs::counters::Handback::NativeUnable, site);
-    eprintln!("{}", defaults::text("mesh_write.msg_disabled"));
-    defaults::num("mesh_write.exit_defer") as i32
+    crate::obs::counters::handback(crate::obs::counters::Handback::Abandoned, site);
+    eprintln!("{}", defaults::render("mesh_write.msg_disabled", &[("site", &site)]));
+    defaults::num("mesh_write.exit_unable") as i32
 }
 
 fn emit(stdout: &[u8]) {
@@ -407,9 +408,10 @@ mod tests {
     }
 
     #[test]
-    fn exit_75_and_the_committed_failure_code_are_different_codes() {
-        assert_eq!(defaults::num("mesh_write.exit_defer"), 75, "75 is sysexits EX_TEMPFAIL, the engine-wide 'deferred, nothing written'");
-        assert_ne!(defaults::num("mesh_write.exit_committed_failure"), defaults::num("mesh_write.exit_defer"));
+    fn the_unable_code_and_the_committed_failure_code_are_different_visible_errors() {
+        assert_ne!(defaults::num("mesh_write.exit_unable"), 75, "an unable or switched-off verb is a visible error, never the silent 75 of a deferral");
+        assert_ne!(defaults::num("mesh_write.exit_unable"), 0);
+        assert_ne!(defaults::num("mesh_write.exit_committed_failure"), defaults::num("mesh_write.exit_unable"));
         assert_ne!(defaults::num("mesh_write.exit_committed_failure"), 0);
     }
 

@@ -64,7 +64,7 @@ fn checks_share_one_context_but_not_their_declarations() {
         assert_eq!(run_forced("zz-a", &json!({}), &e), Some(Some(Verdict::Block("a1".into()))));
         assert_eq!(run_forced("zz-b", &json!({}), &e), Some(Some(Verdict::Block("undefined1".into()))), "zz-a's helper leaked");
         assert_eq!(run_forced("zz-a", &json!({}), &e), Some(Some(Verdict::Block("a1".into()))), "zz-b replaced zz-a's entry");
-        assert_eq!(run_forced("zz-none", &json!({}), &e), Some(Some(Verdict::Defer)), "no entry: a failure, Node decides");
+        assert_eq!(run_forced("zz-none", &json!({}), &e), Some(Some(Verdict::Allow)), "no entry: a failure, the failure policy decides (open)");
         assert_eq!(super::pool_usage().map(|u| u.0), Some(2), "two checks loaded");
         // a lib edit rebuilds the shared context: the counter starts over
         std::fs::write(format!("{lib}/zz-count.js"), "var zzLoads = 10;").unwrap();
@@ -114,7 +114,7 @@ fn a_runaway_script_is_interrupted_and_defers() {
     let e = env(&h);
     put_override(&h, "zz-loop", "function decide() { for (;;) {} }");
     let t = Instant::now();
-    assert_eq!(run_forced("zz-loop", &json!({}), &e), Some(Some(Verdict::Defer)));
+    assert_eq!(run_forced("zz-loop", &json!({}), &e), Some(Some(Verdict::Allow)));
     assert!(
         t.elapsed() < std::time::Duration::from_millis(defaults::num("script.time_limit_ms") * defaults::num("script.time_hard_factor") * 3),
         "{:?}",
@@ -123,7 +123,7 @@ fn a_runaway_script_is_interrupted_and_defers() {
     // a catastrophic native regex is interrupted too
     put_override(&h, "zz-redos", "function decide() { return /^(a+)+$/.test('a'.repeat(40) + 'b') ? 'allow' : 'defer'; }");
     let t = Instant::now();
-    assert_eq!(run_forced("zz-redos", &json!({}), &e), Some(Some(Verdict::Defer)));
+    assert_eq!(run_forced("zz-redos", &json!({}), &e), Some(Some(Verdict::Allow)));
     assert!(
         t.elapsed() < std::time::Duration::from_millis(defaults::num("script.time_limit_ms") * defaults::num("script.time_hard_factor") * 3),
         "{:?}",
@@ -140,11 +140,11 @@ fn a_script_past_its_memory_ceiling_defers() {
     let h = home("oom");
     let e = env(&h);
     put_override(&h, "zz-oom", "function decide() { var a = []; for (;;) a.push('x'.repeat(1 << 16) + a.length); }");
-    assert_eq!(run_forced("zz-oom", &json!({}), &e), Some(Some(Verdict::Defer)));
+    assert_eq!(run_forced("zz-oom", &json!({}), &e), Some(Some(Verdict::Allow)));
     put_override(&h, "zz-deep", "function f(n) { return f(n + 1) + 1; } function decide() { return f(0); }");
-    assert_eq!(run_forced("zz-deep", &json!({}), &e), Some(Some(Verdict::Defer)));
+    assert_eq!(run_forced("zz-deep", &json!({}), &e), Some(Some(Verdict::Allow)));
     put_override(&h, "zz-shape", "function decide() { return 42; }");
-    assert_eq!(run_forced("zz-shape", &json!({}), &e), Some(Some(Verdict::Defer)));
+    assert_eq!(run_forced("zz-shape", &json!({}), &e), Some(Some(Verdict::Allow)));
     put_override(&h, "zz-ok", "function decide() { return 'allow'; }");
     assert_eq!(run_forced("zz-ok", &json!({}), &e), Some(Some(Verdict::Allow)));
     crate::discard::harmless(std::fs::remove_dir_all(&h)); // keep: cleanup
@@ -167,7 +167,7 @@ fn a_worker_thread_tears_its_runtime_down_cleanly() {
                 assert!(run_forced(name, &json!({"tool_name": "Bash", "tool_input": {"command": "ls"}}), &e).is_some());
             }
             put_override(&h2, "zz-cycle", "var keep2 = [{}]; function decide() { return 'defer'; }");
-            assert_eq!(run_forced("zz-cycle", &json!({}), &e), Some(Some(Verdict::Defer)));
+            assert_eq!(run_forced("zz-cycle", &json!({}), &e), Some(Some(Verdict::Defer)), "an explicit defer is the script's own answer (the dispatcher resolves it)");
         })
         .join()
         .expect("the worker thread exits without a teardown abort");
@@ -266,7 +266,7 @@ fn a_script_that_tries_to_escape_the_state_directory_fails_and_defers() {
     put_override(&h, "zz-escape", "function decide(p){ ah.state.writeAtomic('.anti-hall/../escaped', 'x'); return 'allow'; }");
     put_override(&h, "zz-write", "function decide(p){ return ah.state.writeAtomic('.anti-hall/zz/ok.txt', 'hello') ? 'allow' : 'defer'; }");
     let e = env(&h);
-    assert_eq!(run_forced("zz-escape", &json!({}), &e), Some(Some(Verdict::Defer)), "the refusal is a script failure, so Node decides");
+    assert_eq!(run_forced("zz-escape", &json!({}), &e), Some(Some(Verdict::Allow)), "the refusal is a script failure: the failure policy decides (open)");
     assert!(!std::path::Path::new(&format!("{h}/escaped")).exists());
     assert_eq!(run_forced("zz-write", &json!({}), &e), Some(Some(Verdict::Allow)));
     assert_eq!(std::fs::read_to_string(format!("{h}/.anti-hall/zz/ok.txt")).unwrap(), "hello");
@@ -298,11 +298,53 @@ fn a_call_past_its_request_deadline_is_cut_and_defers_without_counting_an_error(
     crate::discard::harmless(std::fs::remove_dir_all(&h)); // keep: cleanup
 }
 
-#[test]
-fn a_check_with_a_node_twin_defers_when_its_script_fails_on_any_event() {
-    for event in ["PreToolUse", "Stop", "SessionStart", "UserPromptSubmit", "PostToolUse"] {
-        assert_eq!(failed("ship-it-guard", event, "boom"), Verdict::Defer, "{event}");
+/// The verdict body of `v` when it is the guard-down notice (an advisory), else the verdict itself.
+fn without_notice(v: Verdict) -> Verdict {
+    match v {
+        Verdict::Advisory(j) if j.contains("systemMessage") => Verdict::Allow,
+        other => other,
     }
+}
+
+#[test]
+fn no_check_defers_to_a_node_hook_when_its_script_fails_on_any_event() {
+    for event in ["PreToolUse", "Stop", "SessionStart", "UserPromptSubmit", "PostToolUse"] {
+        for name in ["ship-it-guard", "devswarm-parent-gate", "devswarm-child-role"] {
+            assert_ne!(failed(name, event, "boom"), Verdict::Defer, "{name} on {event}");
+            assert_ne!(super::unanswered(name, event), Verdict::Defer, "{name} on {event}");
+        }
+    }
+}
+
+#[test]
+fn the_stop_guard_and_the_session_start_role_fail_open_when_their_script_fails() {
+    for (name, event) in [("devswarm-parent-gate", "Stop"), ("devswarm-child-role", "SessionStart")] {
+        assert_eq!(super::failure_mode(name), "open", "{name}");
+        assert_eq!(without_notice(failed(name, event, "boom")), Verdict::Allow, "{name} on {event}: a failed script must not block the agent");
+        assert_eq!(without_notice(super::unanswered(name, event)), Verdict::Allow, "{name} on {event}: no answer must not block the agent");
+    }
+}
+
+#[test]
+fn every_registered_check_is_classified_in_the_engine_only_list() {
+    let listed = defaults::list("script.engine_only_checks");
+    for c in crate::checks::registry() {
+        assert!(listed.contains(&c.name()), "{} is a registered check but is not in script.engine_only_checks", c.name());
+    }
+    for name in &listed {
+        assert!(crate::checks::get(name).is_some(), "{name} is listed but is not a registered check");
+    }
+}
+
+#[test]
+fn a_failed_open_check_tells_the_user_once_per_session_and_check() {
+    super::set_session("notice-session-a");
+    let first = failed("sibling-sweep", "SubagentStop", "boom");
+    assert!(matches!(&first, Verdict::Advisory(j) if j.contains("sibling-sweep") && j.contains("boom") && j.contains("systemMessage")), "{first:?}");
+    assert_eq!(failed("sibling-sweep", "SubagentStop", "boom"), Verdict::Allow, "the same session and check is told once");
+    assert!(matches!(failed("handover-hygiene", "SubagentStop", "boom"), Verdict::Advisory(_)), "another check in the session is told");
+    super::set_session("notice-session-b");
+    assert!(matches!(failed("sibling-sweep", "SubagentStop", "boom"), Verdict::Advisory(_)), "another session is told");
 }
 
 #[test]
@@ -310,12 +352,13 @@ fn an_advisory_engine_only_check_never_blocks_when_its_script_fails() {
     let engine_only = defaults::list("script.engine_only_checks");
     assert!(engine_only.contains(&"sibling-sweep"));
     for name in &engine_only {
-        assert!(crate::checks::get(name).is_some(), "{name} is not a registered check");
-        assert_eq!(super::failure_mode(name), "open", "{name}: every shipped engine-only check is advisory (fail open)");
+        if super::failure_mode(name) == defaults::text("script.failure_mode_closed") {
+            continue; // a security guard (script.failure_mode_by_check): the matrix test below
+        }
         for event in
             defaults::list("dispatch.guard_events").into_iter().chain(["SessionStart", "UserPromptSubmit", "PostToolUse", "SubagentStart", "PreCompact"])
         {
-            assert_eq!(failed(name, event, "boom"), Verdict::Allow, "{name} on {event}: a check's own failure never blocks");
+            assert_eq!(without_notice(failed(name, event, "boom")), Verdict::Allow, "{name} on {event}: a check's own failure never blocks");
         }
     }
     // a failure is counted: one telemetry check event with outcome error per failure
@@ -327,16 +370,34 @@ fn an_advisory_engine_only_check_never_blocks_when_its_script_fails() {
 }
 
 #[test]
-fn a_fail_closed_engine_only_check_blocks_on_a_guard_event_only_and_a_node_twin_always_defers() {
+fn only_pre_tool_use_guards_fail_closed_and_a_stop_or_session_start_check_never_does() {
+    let closed: Vec<&str> = defaults::list("script.engine_only_checks").into_iter().filter(|n| super::failure_mode(n) == "closed").collect();
+    assert!(closed.contains(&"git") && closed.contains(&"ship-it-guard"), "{closed:?}");
+    for host in crate::dispatch::table::hosts() {
+        for event in crate::dispatch::table::events(host) {
+            for e in crate::dispatch::table::entries(host, event) {
+                let check = e.check.as_deref().unwrap_or_default();
+                if closed.contains(&check) {
+                    assert!(["PreToolUse", "PermissionRequest"].contains(&event), "{check} fails closed but is registered on {event}");
+                }
+            }
+        }
+    }
+    for event in defaults::list("dispatch.guard_events") {
+        assert!(matches!(failed("git", event, "boom"), Verdict::Block(m) if m.contains("boom")), "{event}");
+    }
+    assert_eq!(without_notice(failed("git", "SessionStart", "boom")), Verdict::Allow, "never block a non-guard event");
+}
+
+#[test]
+fn a_fail_closed_check_blocks_on_a_guard_event_only() {
     let closed = defaults::text("script.failure_mode_closed");
     for event in defaults::list("dispatch.guard_events") {
-        assert!(matches!(super::failure_verdict("g", event, "boom", true, closed), Verdict::Block(m) if m.contains("boom") && m.contains('g')), "{event}");
-        assert_eq!(super::failure_verdict("g", event, "boom", true, "open"), Verdict::Allow, "{event}");
-        // a check with a Node twin defers to it, whatever its mode
-        assert_eq!(super::failure_verdict("g", event, "boom", false, closed), Verdict::Defer, "{event}");
+        assert!(matches!(super::failure_verdict("g", event, "boom", closed), Verdict::Block(m) if m.contains("boom") && m.contains('g')), "{event}");
+        assert_eq!(super::failure_verdict("g", event, "boom", "open"), Verdict::Allow, "{event}");
     }
     for event in ["SessionStart", "UserPromptSubmit", "PostToolUse"] {
-        assert_eq!(super::failure_verdict("g", event, "boom", true, closed), Verdict::Allow, "{event}: never block a non-guard event");
+        assert_eq!(super::failure_verdict("g", event, "boom", closed), Verdict::Allow, "{event}: never block a non-guard event");
     }
     assert_eq!(super::failure_mode("no-such-check"), defaults::text("script.failure_mode_default"));
 }
@@ -357,7 +418,7 @@ fn the_policy_applies_to_every_kind_of_script_failure() {
     put_override(&h, "sibling-sweep", "this is not javascript (");
     assert_eq!(go("Stop"), Verdict::Allow, "a script that does not load");
     // a registered scripted check with no script file at all follows the same policy
-    assert_eq!(crate::script::missing("ship-it-guard", "PreToolUse"), Some(Verdict::Defer));
+    assert!(matches!(crate::script::missing("ship-it-guard", "PreToolUse"), Some(Verdict::Block(_))), "a blocking guard without its script fails closed");
     assert_eq!(crate::script::missing("sibling-sweep", "Stop"), Some(Verdict::Allow));
     assert_eq!(crate::script::missing("sibling-sweep", "SessionStart"), Some(Verdict::Allow));
 }
@@ -507,7 +568,9 @@ pub(super) fn golden_report(check: &str, limit: usize) {
         }
         let got = golden::run_case(check, &l, golden::repeat_of(c)).unwrap_or_else(|| panic!("{check}: no shipped script"));
         let got = golden::verdict_json(&got, &l);
-        let mut ok = got == c["expect"];
+        // a frozen "defer" (the script could not answer; Node was to decide) is now decided by the check's failure policy: an allow, or a block for a fail-closed guard
+        let policy = c["expect"] == json!({"v": "defer"}) && (got == json!({"v": "allow"}) || got["v"] == "block");
+        let mut ok = got == c["expect"] || policy;
         if ok && c.get("watch").is_some() {
             let w = golden::watched_all_pub(c, &l);
             ok = w == c["writes"];
@@ -1893,4 +1956,44 @@ fn a_primary_session_registers_adopts_and_keeps_its_seat_and_the_launchers_are_i
     let adopted = run(&l);
     let text = adopted["out"].as_str().unwrap_or_default();
     assert!(text.contains("adopted Primary") && text.contains("old-session"), "{adopted}");
+}
+
+/// The count of site `site` under hand-back counter `kind` so far (this process's journal).
+fn handbacks(kind: &str, site: &str) -> u64 {
+    crate::obs::counters::snapshot()["node_handback"]["sites"][site][kind].as_u64().unwrap_or(0)
+}
+
+#[test]
+fn unable_counts_a_stand_in_by_default_and_an_abandoned_decision_with_the_second_argument() {
+    crate::discard::harmless(std::fs::create_dir_all(crate::paths::dir())); // keep: the scratch state dir of this test run
+    let h = home("unable");
+    let e = env(&h);
+    // sites unique to this run: the journal of the scratch state directory outlives a run
+    let tag = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.subsec_nanos());
+    put_override(&h, "zz-unable", &format!("function decide(p) {{ ah.unable('z:s{tag}'); ah.unable('z:d{tag}', 'abandoned'); return 'allow'; }}"));
+    let prefix = defaults::text("script.unable_prefix");
+    let (stand, drop) = (format!("{prefix}z:s{tag}"), format!("{prefix}z:d{tag}"));
+    let before = (handbacks("stand_in", &stand), handbacks("abandoned", &drop));
+    assert_eq!(run_forced("zz-unable", &json!({}), &e), Some(Some(Verdict::Allow)));
+    assert_eq!(handbacks("stand_in", &stand), before.0 + 1, "a case the script went on with is a stand-in");
+    assert_eq!(handbacks("abandoned", &drop), before.1 + 1, "a dropped decision is abandoned");
+    assert_eq!(handbacks("abandoned", &stand), 0, "and not the other way round");
+    crate::discard::harmless(std::fs::remove_dir_all(&h)); // keep: cleanup
+}
+
+/// The hot spots of the live counters: with no usable home or plugin root no launcher can be named. The Stop gate and the
+/// SessionStart role answer themselves (an allow, counted abandoned), never a deferral and never a block.
+#[test]
+fn the_parent_gate_and_the_child_role_decide_natively_when_no_launcher_can_be_named() {
+    crate::discard::harmless(std::fs::create_dir_all(crate::paths::dir())); // keep: the scratch state dir of this test run
+    let e = RequestEnv::from_pairs([("HOME", "relative-home")]);
+    let p = json!({"session_id": "s1", "cwd": "/", "transcript_path": "/nonexistent/t.jsonl"});
+    let prefix = defaults::text("script.unable_prefix");
+    for (check, event, site) in [("devswarm-parent-gate", "Stop", "no_launchers"), ("devswarm-child-role", "SessionStart", "no_home_or_root")] {
+        let full = format!("{prefix}{check}:{site}");
+        let before = handbacks("abandoned", &full);
+        let got = super::run_forced(check, &p, &Value::Null, event, &e);
+        assert_eq!(got, Some(Some(Verdict::Allow)), "{check}: decided natively, no deferral and no block");
+        assert_eq!(handbacks("abandoned", &full), before + 1, "{check}: the dropped decision is counted abandoned at {site}");
+    }
 }

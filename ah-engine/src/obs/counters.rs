@@ -2,7 +2,8 @@
 //!
 //! Two kinds of count share one store:
 //!
-//! * the hand-back counters (`native_unable`: the native path cannot do this and handed it back; `fallback_intent`: a fall back
+//! * the hand-back counters (`stand_in`: the native path could not model a case exactly, logged it and went on; `abandoned`: it could not
+//!   decide and dropped the decision; `native_unable`: the name both had before they were split, only read from old journals; `fallback_intent`: a fall back
 //!   to Node was decided; `node_launch`: a Node process was actually started), each keyed by a stable site id;
 //! * the accounting of every duty and post-update stage: calls, CPU, wall time and one of five outcomes (`ok`, `error`,
 //!   `disabled`, `held`, `refused`).
@@ -27,8 +28,12 @@ use std::sync::Mutex;
 /// What a hand-back counter counts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Handback {
-    /// The native path cannot do this input and handed it back.
+    /// Journal lines of the name before the split into [`Handback::StandIn`] and [`Handback::Abandoned`]; nothing counts it any more.
     NativeUnable,
+    /// The native path could not model this input exactly, logged the case and went on with a stand-in value (the decision was still made).
+    StandIn,
+    /// The native path could not decide this input and dropped the decision (an allow, a held step, a refused verb; nothing was decided).
+    Abandoned,
     /// A fall back to Node was decided.
     FallbackIntent,
     /// A Node process was started.
@@ -37,14 +42,16 @@ pub enum Handback {
 
 impl Handback {
     /// Every kind, in report order.
-    pub fn all() -> [Handback; 3] {
-        [Handback::NativeUnable, Handback::FallbackIntent, Handback::NodeLaunch]
+    pub fn all() -> [Handback; 5] {
+        [Handback::NativeUnable, Handback::StandIn, Handback::Abandoned, Handback::FallbackIntent, Handback::NodeLaunch]
     }
 
     /// The name used in the journal and in `status --json`.
     pub fn name(self) -> &'static str {
         match self {
             Handback::NativeUnable => "native_unable",
+            Handback::StandIn => "stand_in",
+            Handback::Abandoned => "abandoned",
             Handback::FallbackIntent => "fallback_intent",
             Handback::NodeLaunch => "node_launch",
         }

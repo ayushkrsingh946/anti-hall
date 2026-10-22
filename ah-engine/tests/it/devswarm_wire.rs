@@ -989,7 +989,9 @@ fn a_subagent_calling_an_owner_action_is_refused_before_anything_is_read() {
     }
     assert_eq!(cli::run_with(&p(&["bogus"]), &sub), 64);
     let main = env_of(&[]);
-    assert_eq!(cli::run_with(&p(&["create", "--branch", "x"]), &main), 75, "create is left to Node: nothing done");
+    let not_ported = ah_engine::defaults::num("devswarm_wire.not_ported_exit") as i32;
+    assert_ne!(not_ported, 75, "an unported verb is never the silent 75 of a deferral");
+    assert_eq!(cli::run_with(&p(&["create", "--branch", "x"]), &main), not_ported, "create is not ported: a loud failure, nothing done");
     // `merge` is a devswarm.js verb the engine now runs itself (covered by tests/devswarm_dsB_parity.rs against a recording hivecontrol stub); it is not called here, where the real hivecontrol would be
 }
 

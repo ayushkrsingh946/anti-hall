@@ -155,7 +155,7 @@ function swgBlock(reason) { return { exact: { code: 2, out: text.blockJson(reaso
 function decide(p) {
   if (p === null || typeof p !== 'object') p = {};
   var home = hookProc.home(p);
-  if (home === null) { ah.unable('swarm-guard:no_home'); return 'allow'; } // no home at all: no log to count in (Node's own fail-open)
+  if (home === null) { ah.unable('swarm-guard:no_home', 'abandoned'); return 'allow'; } // no home at all: no log to count in (Node's own fail-open)
   if (!ah.path.isAbsolute(ah.env.get(ah.cfg('env.home')) || '')) ah.unable('swarm-guard:home_resolved'); // HOME unset or relative: the passwd/stand-in home is used
   if (!ah.settings.bool('swarm_guard.setting')) return 'allow';
   if (ah.settings.skipped(ah.cfg('swarm_guard.guard_name'))) return 'allow';

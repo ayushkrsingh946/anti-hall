@@ -58,10 +58,10 @@ function reviewLine(due) {
 }
 
 function decide(p, opts) {
-  if (!gates.homeKnown()) { ah.unable('jev-review-reminder:no_home'); return 'allow'; } // no absolute HOME: no state to read or keep
+  if (!gates.homeKnown()) { ah.unable('jev-review-reminder:no_home', 'abandoned'); return 'allow'; } // no absolute HOME: no state to read or keep
   var root = gates.pluginRoot(opts);
   if (gates.judgeChild() || subagentPayload(p)) return 'allow';
-  if (realHomeUnderTest()) { ah.unable('jev-review-reminder:test_guard'); return 'allow'; } // the real home under a test is never touched
+  if (realHomeUnderTest()) { ah.unable('jev-review-reminder:test_guard', 'abandoned'); return 'allow'; } // the real home under a test is never touched
   var lines = [];
   // `credentials.sessionNotice`: Jev on (settings chain, default off) or the semantic judge on.
   var jevOn = gates.isTrue('session_gates.jev_enabled_setting', false, root);

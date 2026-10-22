@@ -56,7 +56,7 @@ function sjClaim(s) {
 function decide(p) {
   if (ah.env.get(ah.cfg('speculation_judge.child_env')) === ah.cfg('speculation_judge.child_value')) return 'allow';
   var home = ah.env.get(ah.cfg('env.home'));
-  if (!home) { ah.unable('speculation-judge:no_home'); return 'allow'; } // no home: no state to keep, no judge call
+  if (!home) { ah.unable('speculation-judge:no_home', 'abandoned'); return 'allow'; } // no home: no state to keep, no judge call
   if (!ah.settings.bool('speculation_judge.setting')) return 'allow';
   if (ah.settings.skipped(ah.cfg('speculation_judge.guard_name'))) return 'allow';
   // the per-integration backend switch: `jev` leaves the speculation question to speculation-guard's Jev path alone
@@ -69,7 +69,7 @@ function decide(p) {
   if (!transcript) return 'allow';
   var route = sjRoute();
   if (route === 'nokey') return 'allow';
-  if (route !== 'cli') { ah.unable('speculation-judge:api_route'); return 'allow'; } // an API call, or a key this request cannot show: the engine never sends a key
+  if (route !== 'cli') { ah.unable('speculation-judge:api_route', 'abandoned'); return 'allow'; } // an API call, or a key this request cannot show: the engine never sends a key
   if (transcript.charAt(0) !== '/') { ah.unable('speculation-judge:relative_transcript'); }
   var tpOpen = hookProc.open(p, transcript); // a relative path opens against the stand-in directory
   var session;
@@ -104,7 +104,7 @@ function decide(p) {
   // one-shot dispatcher process (judge.dispatch_blocking_checks), which runs this same script where the call may be made.
   if (!ah.judge.canBlock()) return { dispatcher: true };
   var call = ah.judge.cli({ transcript: tpOpen, message: last });
-  if (call === null) { ah.unable('speculation-judge:model_call_unavailable'); return 'allow'; } // a transcript line only V8 reads: no verdict on this reply
+  if (call === null) { ah.unable('speculation-judge:model_call_unavailable', 'abandoned'); return 'allow'; } // a transcript line only V8 reads: no verdict on this reply
   var d = call.decision;
   // fail-open: no answer, a non-object, a missing decision field or "allow"
   if (d === null || typeof d !== 'object' || d.decision !== ah.cfg('speculation_judge.decision_block')) return 'allow';

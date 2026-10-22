@@ -64,7 +64,7 @@ function dcLabel(kind, what) { return { advisory: text.advisoryJson('PreToolUse'
 
 function decide(p, opts) {
   var home = hookProc.home(p);
-  if (home === null) { ah.unable('devswarm-comms-guard:no_home'); return 'allow'; } // no home at all: no session index to read
+  if (home === null) { ah.unable('devswarm-comms-guard:no_home', 'abandoned'); return 'allow'; } // no home at all: no session index to read
   if (!ah.path.isAbsolute(ah.env.get(ah.cfg('env.home')) || '')) ah.unable('devswarm-comms-guard:home_resolved');
   var root = jx.isObj(opts) && typeof opts.plugin_root === 'string' ? opts.plugin_root : (ah.env.get(ah.cfg('env.plugin_root')) || '');
   var en = ah.settings.get('devswarm_comms.setting', undefined, root);

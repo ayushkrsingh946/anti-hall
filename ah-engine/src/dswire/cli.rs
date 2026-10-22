@@ -2,8 +2,8 @@
 //! (`devswarm_wire.role_matrix`). Reads are open to every role; the verbs that act (`archive`, `plan-prune`, `prune`) are for the
 //! main session only, so a subagent, a Codex session or a workspace child that calls one is refused before anything is read.
 //!
-//! `create` and `merge` answer `deferred` (exit 75, nothing done): their Node checks (the source-freshness check, the merge gate)
-//! are not reproduced by the engine yet, and a verb the engine cannot do exactly as Node does is left to Node.
+//! `create` is NOT PORTED: it fails loudly (`devswarm_wire.not_ported_exit`, never 75, nothing done) and names the manual Node script
+//! that still runs it (its source-freshness check is not reproduced by the engine yet). `merge` is ported (a compat verb: `meshw`).
 use super::live::RtLive;
 use crate::cli::Parsed;
 use crate::defaults;
@@ -76,7 +76,7 @@ pub fn run(p: &Parsed) -> i32 {
 /// [`run`] with the caller's environment given (the role comes from it).
 pub fn run_with(p: &Parsed, env: &dyn Fn(&str) -> Option<String>) -> i32 {
     let verb = p.rest.first().cloned().unwrap_or_default();
-    let (usage, deferred) = (defaults::num("devswarm_wire.usage_exit") as i32, defaults::num("devswarm_wire.deferred_exit") as i32);
+    let usage = defaults::num("devswarm_wire.usage_exit") as i32;
     let compat = defaults::list("devswarm_wire.compat_verbs").contains(&verb.as_str());
     if !compat && !defaults::list("devswarm_wire.owner_verbs").contains(&verb.as_str()) {
         return fail(p, defaults::render("devswarm_wire.msg_unknown_verb", &[("verb", &verb)]), usage);
@@ -91,9 +91,8 @@ pub fn run_with(p: &Parsed, env: &dyn Fn(&str) -> Option<String>) -> i32 {
     if verb == defaults::text("wake_watch.verb") {
         return crate::wakew::run(&p.rest[1..]);
     }
-    if verb == "create" || verb == "merge" {
-        out(p, json!({"outcome": Word::Deferred.text(), "verb": verb, "why": defaults::render("devswarm_wire.msg_deferred", &[("verb", &verb)])}));
-        return deferred;
+    if defaults::list("devswarm_wire.not_ported_verbs").contains(&verb.as_str()) {
+        return fail(p, defaults::render("devswarm_wire.msg_not_ported", &[("verb", &verb)]), defaults::num("devswarm_wire.not_ported_exit") as i32);
     }
     let Some((home, state_dir)) = paths() else { return fail(p, defaults::text("devswarm_wire.msg_inert").to_string(), usage) };
     let rest = &p.rest[1..];

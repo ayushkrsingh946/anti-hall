@@ -444,8 +444,8 @@ fn app_database_heartbeats_match_node_byte_for_byte_and_defer_without_writing() 
             verified += 1;
         } else {
             deferred += 1;
-            assert_eq!(e.code, 75, "{}: no Node to hand the verb to, the engine is unable (75)", case.name);
-            // the contract: deferred means NOTHING written, and exit 75 when the engine cannot run Node
+            assert_eq!(e.code, 69, "{}: no Node to hand the verb to, the engine is unable (69, a visible error)", case.name);
+            // the contract: deferred means NOTHING written, and exit 69 (exit_unable) when the engine cannot do it
             let before = fx.root.join(format!("{}-before", case.name));
             copy_tree(&fx.seed_home, &before);
             seed(&before, &fx, case, &fx.child);
@@ -457,7 +457,7 @@ fn app_database_heartbeats_match_node_byte_for_byte_and_defer_without_writing() 
                 }
             }
             let dd = engine_verb(&hd, &hd.join("state"), &fx.child, &av, now, None, &[extra.clone(), vec![("PATH", nonode.as_str())]].concat());
-            assert_eq!(dd.code, 75, "{}: a deferral the engine cannot hand to Node exits 75, got {} / {}", case.name, dd.code, dd.stdout);
+            assert_eq!(dd.code, 69, "{}: a deferral the engine cannot hand to Node exits 69 (exit_unable), got {} / {}", case.name, dd.code, dd.stdout);
             assert!(dd.stdout.is_empty(), "{}: nothing is printed on a deferral: {}", case.name, dd.stdout);
             assert_eq!(last_log(&hd.join("state"))["result"], "defer", "{}: logged as a deferral", case.name);
             if case.pre_ms.is_none() {
