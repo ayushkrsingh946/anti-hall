@@ -422,7 +422,7 @@ impl Tail {
         if size == 0 {
             return None;
         }
-        let n = size.min(max);
+        let n = window_len(size, max);
         f.seek(SeekFrom::Start(size - n)).ok()?;
         crate::load::note_scan(n);
         Some(Tail { r: std::io::BufReader::with_capacity(defaults::num("agent_scan.reader_buf_bytes") as usize, f.take(n)), drop_first: size > n })
@@ -1226,6 +1226,22 @@ pub fn scan_transcript(path: &str, tail: u64, opts: &Opts) -> Res<Option<Scan>> 
 }
 
 /// How far before the window start a kept walk may begin before it is rebuilt: `agent_scan.window_slack_pct` percent of the window.
+/// The bytes the scan of a `size`-byte file reads for the nominal window `tail`: all of a file that fits, else the window with its
+/// start rounded down to a multiple of `agent_scan.window_quantum_pct` percent of `tail` (the window is then `tail` to `tail` plus
+/// that much). The start of an exact window moves with every appended byte, and a kept walk is rebuilt whenever it moves past a
+/// line a launch or a notice came from, which in a busy transcript is nearly every call; a start that moves only once per quantum
+/// rebuilds once per quantum. Kept and fresh scans use the same window, so they still answer alike. 0 is the exact window.
+fn window_len(size: u64, tail: u64) -> u64 {
+    if size <= tail {
+        return size;
+    }
+    let q = tail / 100 * defaults::num("agent_scan.window_quantum_pct");
+    if q == 0 {
+        return tail;
+    }
+    tail + (size - tail) % q
+}
+
 fn slack_of(tail: u64) -> u64 {
     tail / 100 * defaults::num("agent_scan.window_slack_pct")
 }
@@ -1271,7 +1287,7 @@ fn window_start(f: &std::fs::File, size: u64, tail: u64) -> Option<u64> {
     if size <= tail {
         return Some(0);
     }
-    let s = size - tail;
+    let s = size - window_len(size, tail);
     let mut rd = std::io::BufReader::with_capacity(defaults::num("agent_scan.reader_buf_bytes") as usize, f);
     rd.seek(SeekFrom::Start(s)).ok()?;
     let mut first: Vec<u8> = Vec::new();
@@ -1296,7 +1312,7 @@ fn scan_kept(path: &str, tail: u64, f: std::fs::File, m: &std::fs::Metadata, opt
     let size = m.len();
     let fp = defaults::num("agent_scan.cache_fingerprint_bytes").max(1);
     let gen_ = defaults::generation();
-    let s = size.saturating_sub(tail);
+    let s = size - window_len(size, tail);
     let slack = slack_of(tail);
     let Some(start) = window_start(&f, size, tail) else { return scan_window(path, tail, opts) };
     let key = (path.to_string(), tail);

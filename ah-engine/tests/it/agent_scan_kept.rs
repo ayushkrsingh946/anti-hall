@@ -240,8 +240,19 @@ fn a_sliding_window_reads_only_what_was_appended_and_answers_as_a_fresh_scan() {
     std::fs::remove_dir_all(s.path.parent().unwrap()).ok();
 }
 
+/// The exact window (no quantum): the tests of the window edge below move it one line at a time.
+fn exact_window() {
+    quantum(0);
+}
+
+fn quantum(pct: u64) {
+    ah_engine::defaults::init().unwrap();
+    ah_engine::defaults::set_overlay(&[("agent_scan.window_quantum_pct", json!(pct))]);
+}
+
 #[test]
 fn a_sliding_window_that_loses_a_launch_is_rebuilt_and_answers_as_the_exact_window() {
+    exact_window();
     let s = slide("slide-loses", 1);
     settle(&s, false);
     let (kept, fresh, _) = scans(&s, false);
@@ -263,6 +274,7 @@ fn a_sliding_window_that_loses_a_launch_is_rebuilt_and_answers_as_the_exact_wind
 
 #[test]
 fn a_sliding_window_that_loses_the_call_of_an_answer_it_still_holds_answers_as_the_exact_window() {
+    exact_window();
     let dir = scratch("slide-straddle");
     let path = dir.join("t.jsonl");
     let call =
@@ -292,6 +304,7 @@ fn a_sliding_window_that_loses_the_call_of_an_answer_it_still_holds_answers_as_t
 
 #[test]
 fn a_sliding_window_that_loses_a_pending_call_whose_answer_then_arrives_answers_as_the_exact_window() {
+    exact_window();
     let dir = scratch("slide-straddle-new");
     let path = dir.join("t.jsonl");
     let call =
@@ -316,6 +329,33 @@ fn a_sliding_window_that_loses_a_pending_call_whose_answer_then_arrives_answers_
     assert_eq!(snap(&kept), snap(&fresh), "the newly completed result must not use a call the exact window no longer holds");
     let described = |k: &Option<Scan>| k.as_ref().unwrap().rows().into_iter().map(|r| r.description).collect::<Vec<_>>();
     assert_eq!(described(&fresh), [""]);
+    std::fs::remove_dir_all(s.path.parent().unwrap()).ok();
+}
+
+#[test]
+fn a_quantized_window_slides_past_a_launch_without_a_rebuild_and_answers_as_a_fresh_scan() {
+    // the same transcript as the exact-window test, a line at a time: an exact window passes the launch after one line and the walk
+    // that holds it is rebuilt at every step after; the quantized start moves once per quantum (about 20 lines here), so over twelve
+    // lines it moves at most once and at most one scan reads more than the appended line
+    quantum(10);
+    let s = slide("slide-quantum", 1);
+    settle(&s, false);
+    let mut rebuilds = 0;
+    for i in 0..12 {
+        let last = ah_engine::defaults::generation();
+        let added = append(&s, 1, 2000 + i);
+        let (kept, fresh, read) = scans(&s, false);
+        assert_eq!(snap(&kept), snap(&fresh), "step {i}");
+        if last == ah_engine::defaults::generation() && read != added {
+            rebuilds += 1;
+        }
+    }
+    assert!(rebuilds <= 1, "{rebuilds} rebuilds in twelve one-line slides");
+    // far enough on, the quantized start passes the launch: rebuilt, and gone from both answers
+    let _ = append(&s, 60, 3000);
+    let (kept, fresh, _) = scans(&s, false);
+    assert_eq!(snap(&kept), snap(&fresh));
+    assert_eq!(running(&kept), 0, "the window has moved past the launch");
     std::fs::remove_dir_all(s.path.parent().unwrap()).ok();
 }
 
