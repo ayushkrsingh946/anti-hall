@@ -117,11 +117,13 @@ done
 BK=$E/deploys/$(cat "$E/deploys/latest")
 ok "good: replaced file kept in the backup" has "value = 1" "$BK/root1/defaults/a.toml"
 ok "good: hold released at the end" test "$(cat "$E/daemon.down.until")" -le "$(( $(date +%s) * 1000 ))"
-ok "good: keys were synced before the binary was swapped" test "$(grep -n ' sync defaults into root 2' "$BK/deploy.log" | head -n 1 | cut -d: -f1)" -lt "$(grep -n 'swap the binary' "$BK/deploy.log" | cut -d: -f1)"
-ok "good: the engine was stopped before the sync" test "$(grep -n ' stop the engine$' "$BK/deploy.log" | head -n 1 | cut -d: -f1)" -lt "$(grep -n ' sync defaults into root 1' "$BK/deploy.log" | head -n 1 | cut -d: -f1)"
+ok "good: keys were synced before the binary was swapped" test "$(grep -n ' stage defaults into root 2' "$BK/deploy.log" | head -n 1 | cut -d: -f1)" -lt "$(grep -n 'commit: rename' "$BK/deploy.log" | cut -d: -f1)"
+ok "good: the engine was stopped before the sync" test "$(grep -n ' stop the engine$' "$BK/deploy.log" | head -n 1 | cut -d: -f1)" -lt "$(grep -n ' stage defaults into root 1' "$BK/deploy.log" | head -n 1 | cut -d: -f1)"
 ok "good: probe verified" has "force-push probe blocked 2/2" "$BK/deploy.log"
 ok "good: defaults.total delta 0 verified" has "defaults.total delta 0" "$BK/deploy.log"
 ok "good: running daemon verified as the new binary" has "executes the new binary" "$BK/deploy.log"
+ok "good: staging (all roots + binary) precedes the one commit pass, which precedes the swap-done line" test "$(grep -n 'stage the binary' "$BK/deploy.log" | cut -d: -f1)" -lt "$(grep -n 'commit: rename' "$BK/deploy.log" | cut -d: -f1)" -a "$(grep -n 'commit: rename' "$BK/deploy.log" | cut -d: -f1)" -lt "$(grep -n 'swap done' "$BK/deploy.log" | cut -d: -f1)"
+ok "good: no staged temp file is left behind" test -z "$(find "$MKT" "$CACHE" "$E/bin" -name '*.deploy.*' -o -name '*.new.*' 2>/dev/null)"
 ok "good: stopped twice" test "$(grep -c "stop the engine" "$BK/deploy.log")" -eq 2
 ok "good: no defaults.error written" test ! -e "$E/defaults.error"
 
