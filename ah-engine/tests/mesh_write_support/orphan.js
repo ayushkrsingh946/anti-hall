@@ -3,7 +3,7 @@
 // so the summary refresh needs Node's orphan classification and the engine must hand the verb to Node.
 // usage: node orphan.js <home> <repoKey>
 const path = require('path');
-const store = require(path.join(__dirname, '..', '..', '..', 'plugins', 'anti-hall', 'companion', 'lib', 'devswarm-store.js'));
+const store = require(path.join(__dirname, '..', '..', '..', 'plugins', 'anti-hall-node', 'companion', 'lib', 'devswarm-store.js'));
 const [home, repoKey] = process.argv.slice(2);
 if (!home || home === require('os').userInfo().homedir) { process.stderr.write('refusing: needs a scratch home\n'); process.exit(2); }
 const s = store.openStore({ home, hash: repoKey });

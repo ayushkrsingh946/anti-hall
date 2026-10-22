@@ -88,7 +88,6 @@ const SCOPE_UNKNOWN_RE = /(?:^|\s)(?:cd|pushd|GIT_DIR=|GIT_WORK_TREE=|--git-dir|
 const PUSH_UNSCOPED_OPTS_RE = /^(?:--(?:all|mirror|tags|follow-tags|prune|branches|push-option|repo|receive-pack|exec)|-o)$/;
 const PLAIN_BRANCH_RE = /^[A-Za-z0-9][A-Za-z0-9._/@-]*$/;
 const GIT_FILE_MAX = 4096;
-const GIT_DIR_LEVELS = 64;
 
 const quoted = (cmd) => maskShellQuotes(cmd) !== String(cmd || '');
 const words = (s) => s.split(/\s+/).filter(Boolean);
@@ -115,23 +114,7 @@ function segDir(s, cwd, cmdQuoted) {
 function scopeOf(dir) {
   const none = { gitdir: '', branch: '' };
   if (typeof dir !== 'string' || dir === '' || !path.isAbsolute(dir)) return none;
-  let d = path.resolve(dir), gitdir = '';
-  for (let i = 0; i < GIT_DIR_LEVELS && d !== ''; i++) {
-    let st = null;
-    try { st = fs.lstatSync(path.join(d, '.git')); } catch (_) { st = null; }
-    if (st && st.isDirectory()) { gitdir = path.join(d, '.git'); break; }
-    if (st && st.isFile()) {
-      const t = readHead(path.join(d, '.git'));
-      const m = t === null ? null : /^gitdir:[^\n]+/m.exec(t);
-      if (!m) return none;
-      const g = m[0].replace(/^gitdir:\s*/, '').trim();
-      gitdir = path.isAbsolute(g) ? g : path.join(d, g);
-      break;
-    }
-    if (st) return none;
-    const up = d.lastIndexOf('/');
-    d = up <= 0 ? (d === '/' ? '' : '/') : d.slice(0, up);
-  }
+  const gitdir = require('../../companion/lib/identity.js').checkoutGitdir(dir) || '';
   if (gitdir === '') return none;
   const head = readHead(path.join(gitdir, 'HEAD'));
   const r = head === null ? null : /^ref:\s*refs\/heads\/[^\s]+/.exec(head);

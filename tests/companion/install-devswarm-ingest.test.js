@@ -379,7 +379,7 @@ test('listInstalledIngestUnits fail-opens to [] when nothing is installed', () =
 test('capability-scan discovers and reports the devswarm-ingest companion', () => {
   const { scanCapabilities } = require('../../plugins/anti-hall-node/scripts/capability-scan.js');
   // Real plugin root so the actual install-devswarm-ingest.js is discovered.
-  const root = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
+  const root = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ingest-capscan-'));
   try {
     const report = scanCapabilities({ root, home, cwd: home, platform: 'darwin' });

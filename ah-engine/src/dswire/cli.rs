@@ -2,8 +2,8 @@
 //! (`devswarm_wire.role_matrix`). Reads are open to every role; the verbs that act (`archive`, `plan-prune`, `prune`) are for the
 //! main session only, so a subagent, a Codex session or a workspace child that calls one is refused before anything is read.
 //!
-//! `create` is NOT PORTED: it fails loudly (`devswarm_wire.not_ported_exit`, never 75, nothing done) and names the manual Node script
-//! that still runs it (its source-freshness check is not reproduced by the engine yet). `merge` is ported (a compat verb: `meshw`).
+//! `create` and `merge` are compat verbs (`meshw`): `create` is the spawn create path ([`crate::meshw::spawnverb`]). A verb listed in
+//! `devswarm_wire.not_ported_verbs` (none today) fails loudly with `devswarm_wire.not_ported_exit` (never 75, nothing done).
 use super::live::RtLive;
 use crate::cli::Parsed;
 use crate::defaults;

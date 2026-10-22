@@ -54,6 +54,7 @@ pub mod rosterrows;
 pub mod rostertail;
 pub mod send;
 pub mod simple;
+pub mod spawnverb;
 pub mod store;
 pub mod summary;
 pub mod tick;

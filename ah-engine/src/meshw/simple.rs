@@ -77,7 +77,8 @@ pub fn classify(a: &Args) -> Option<Simple> {
         Some(Simple::Logs)
     } else if is("devswarm_cli.verb_wake_directive") {
         Some(Simple::WakeDirective)
-    } else if cmd.is_some_and(|c| defaults::list("devswarm_cli.verbs").contains(&c)) {
+    } else if cmd.is_some_and(|c| defaults::list("devswarm_cli.verbs").contains(&c)) || is("devswarm_cli.verb_create") {
+        // `create` is the engine's other name of `spawn` (not one of devswarm.js's verbs)
         None
     } else {
         Some(Simple::Unknown)

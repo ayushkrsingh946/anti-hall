@@ -190,7 +190,7 @@ struct Out {
 }
 
 fn node_cli(home: &Path, cwd: &Path, argv: &[String], now: i64, env: &[(String, String)]) -> Out {
-    let cli = plugin_root().join("scripts").join("devswarm.js");
+    let cli = node_root().join("scripts").join("devswarm.js");
     let mut c = Command::new("node");
     let e: Vec<(&str, &str)> = env.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
     c.arg("-e").arg(SNIPPET).arg(&cli).arg(now.to_string()).args(argv).current_dir(cwd).env_clear().envs(base_env(home, &home.join("state"), &e));
@@ -326,7 +326,7 @@ fn run_cases(fx: &Fx, w: &W, cases: &[Lc], min_native: usize, min_deferred: usiz
             }
         } else {
             deferred += 1;
-            assert_eq!(e.code, 75, "{}: no Node to hand the verb to, the engine is unable (75)", c.name);
+            assert_eq!(e.code, 69, "{}: no Node to hand the verb to, the engine is unable (mesh_write.exit_unable)", c.name);
             let snap = |h: &Path| {
                 let mut t = tree(h);
                 t.retain(|k, _| !k.starts_with("hc/calls.log"));
@@ -334,7 +334,7 @@ fn run_cases(fx: &Fx, w: &W, cases: &[Lc], min_native: usize, min_deferred: usiz
             };
             let pre = snap(&homes[2]);
             let d = engine_cli(&homes[2], &cwd, &c.argv, now, &env_for(path_with(&nonode)));
-            assert_eq!(d.code, 75, "{}: a deferral the engine cannot hand to Node exits 75, got {} / {} / {}", c.name, d.code, d.stdout, d.stderr);
+            assert_eq!(d.code, 69, "{}: a deferral the engine cannot hand to Node exits mesh_write.exit_unable, got {} / {} / {}", c.name, d.code, d.stdout, d.stderr);
             assert!(d.stdout.is_empty(), "{}: nothing is printed on a deferral: {}", c.name, d.stdout);
             assert_eq!(last_log(&homes[2].join("state"))["result"], "defer", "{}", c.name);
             assert!(pre == snap(&homes[2]), "{}: a deferral wrote", c.name);
@@ -787,7 +787,7 @@ fn spawn_tick(tool: Tool, home: &Path, cwd: &Path, now: i64, env: &[(String, Str
     let mut c = match tool {
         Tool::Node => {
             let mut c = Command::new("node");
-            c.arg("-e").arg(SNIPPET).arg(plugin_root().join("scripts").join("devswarm.js")).arg(now.to_string()).args(&argv);
+            c.arg("-e").arg(SNIPPET).arg(node_root().join("scripts").join("devswarm.js")).arg(now.to_string()).args(&argv);
             c
         }
         Tool::Engine => {

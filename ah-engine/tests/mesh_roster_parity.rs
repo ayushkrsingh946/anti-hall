@@ -86,7 +86,7 @@ fn stub_dir(root: &Path, name: &str, body: &str, lists: bool) -> PathBuf {
 
 /// Node's own probe (and, for a stub without the verb, Node's recording of the dormant line), run once on a home.
 fn prime_cache(home: &Path, path: &str, dormant: bool) {
-    let caps = plugin_root().join("companion/lib/devswarm-capabilities.js");
+    let caps = node_root().join("companion/lib/devswarm-capabilities.js");
     let dorm = if dormant { "c.can('workspace.list',{env:process.env,home:process.env.HOME});" } else { "" };
     let src = format!("const c=require({:?});c.probe({{env:process.env,home:process.env.HOME}});{dorm}", caps);
     let o = Command::new("node").args(["-e", &src]).env_clear().env("PATH", path).env("HOME", home).output().unwrap();

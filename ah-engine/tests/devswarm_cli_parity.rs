@@ -255,7 +255,7 @@ fn plan_key(h: &Path) -> String {
     // the worktree's mesh id, as the plan file is named
     let o = Command::new("node")
         .args(["-e", "console.log(require(process.argv[1]).resolveContext(process.argv[2]).meshId)"])
-        .arg(plugin_root().join("companion/lib/identity.js"))
+        .arg(node_root().join("companion/lib/identity.js"))
         .arg(wt(h))
         .env_clear()
         .env("PATH", std::env::var("PATH").unwrap())
@@ -853,7 +853,7 @@ fn tools_path(root: &Path, with_node: bool) -> String {
 }
 
 fn node_cli(home: &Path, cwd: &Path, argv: &[String], now: i64, env: &[(&str, &str)]) -> Run {
-    let cli = plugin_root().join("scripts").join("devswarm.js");
+    let cli = node_root().join("scripts").join("devswarm.js");
     let mut c = Command::new("node");
     c.arg("-e").arg(SNIPPET).arg(&cli).arg(now.to_string()).args(argv).current_dir(cwd).env_clear().envs(base_env(home, &home.join("state"), env));
     let o = run(&mut c, None);
@@ -908,7 +908,7 @@ fn the_store_free_cli_verbs_match_node_and_defer_what_they_cannot_reproduce() {
     // the verb list is Node's own (also checks the shipped list)
     let o = Command::new("node")
         .args(["-e", "console.log(JSON.stringify(require(process.argv[1]).run(['help']).result.verbs))"])
-        .arg(plugin_root().join("scripts").join("devswarm.js"))
+        .arg(node_root().join("scripts").join("devswarm.js"))
         .env_clear()
         .env("PATH", &tools)
         .env("HOME", &root)
@@ -975,7 +975,7 @@ fn the_store_free_cli_verbs_match_node_and_defer_what_they_cannot_reproduce() {
             }
         } else {
             deferred += 1;
-            assert_eq!(e.code, 75, "{}: no Node to hand the verb to, the engine is unable (75)", c.name);
+            assert_eq!(e.code, 69, "{}: no Node to hand the verb to, the engine is unable (mesh_write.exit_unable)", c.name);
             // Node's own run (the fallback) uses the real clock: the digits of a timestamp are masked
             let mask = |t: &str, h: &Path| {
                 t.replace(h.to_string_lossy().as_ref(), "<HOME>").chars().map(|c| if c.is_ascii_digit() { '#' } else { c }).collect::<String>()
@@ -983,7 +983,7 @@ fn the_store_free_cli_verbs_match_node_and_defer_what_they_cannot_reproduce() {
             assert_eq!(mask(&e.stdout, &homes[1]), mask(&n.stdout, &homes[0]), "{}: the fallback prints what Node prints", c.name);
             let pre = tree(&homes[2]);
             let d = engine_cli(&homes[2], &cwd, &c.argv, now, &with_path(refs(&env_d), nonode.as_str()));
-            assert_eq!(d.code, 75, "{}: a deferral the engine cannot hand to Node exits 75, got {} / {}", c.name, d.code, d.stdout);
+            assert_eq!(d.code, 69, "{}: a deferral the engine cannot hand to Node exits mesh_write.exit_unable, got {} / {}", c.name, d.code, d.stdout);
             assert!(d.stdout.is_empty(), "{}: nothing is printed on a deferral: {}", c.name, d.stdout);
             assert_eq!(last_log(&homes[2].join("state"))["result"], "defer", "{}", c.name);
             assert!(pre == tree(&homes[2]), "{}: a deferral wrote", c.name);
@@ -1070,10 +1070,10 @@ fn the_devswarm_command_runs_the_cli_verbs_under_the_role_matrix() {
     let (code, _, err) = engine(&hs, &["skip", "tg"], &sub);
     assert!(code == 64 && err.contains("subagent"), "{code} {err}");
     assert_eq!(engine(&hs, &["help", "skip"], &sub).0, 0);
-    // engine off: nothing runs (there is no Node to run the verb), it says so and exits 75
+    // engine off: nothing runs (there is no Node to run the verb), it says so and exits mesh_write.exit_unable (69)
     let ho = mk("off", false);
     let (code, out, err) = engine(&ho, &["help", "skip"], &[]);
-    assert_eq!(code, 75, "{out} {err}");
+    assert_eq!(code, 69, "{out} {err}");
     assert!(out.is_empty() && !err.is_empty(), "off prints nothing and says why: {out} {err}");
     assert!(!ho.join("state").join("mesh-shadow.jsonl").exists(), "off: the engine did not answer");
     // an unknown verb is still refused by the command, before anything runs
@@ -1111,7 +1111,7 @@ fn child_descriptor(h: &Path) {
 fn stranded_descriptor(h: &Path) {
     let o = Command::new("node")
         .args(["-e", "console.log(require(process.argv[1]).hashFromWorkspaceId('stray-1'))"])
-        .arg(plugin_root().join("companion/lib/devswarm-store.js"))
+        .arg(node_root().join("companion/lib/devswarm-store.js"))
         .env_clear()
         .env("PATH", std::env::var("PATH").unwrap())
         .env("HOME", h)
@@ -1223,10 +1223,10 @@ fn gate_and_workspaces_list_match_node_on_a_seeded_store() {
             pending.push((c.name.to_string(), homes[1].join("state")));
         } else {
             deferred += 1;
-            assert_eq!(e.code, 75, "{}: no Node to hand the verb to, the engine is unable (75)", c.name);
+            assert_eq!(e.code, 69, "{}: no Node to hand the verb to, the engine is unable (mesh_write.exit_unable)", c.name);
             let pre = (tree(&homes[2]), raw_dump(&key_dir(&homes[2])));
             let d = engine_cli(&homes[2], &cwd, &argv, now, &[("PATH", nonode.as_str())]);
-            assert_eq!(d.code, 75, "{}: a deferral the engine cannot hand to Node exits 75, got {} / {}", c.name, d.code, d.stdout);
+            assert_eq!(d.code, 69, "{}: a deferral the engine cannot hand to Node exits mesh_write.exit_unable, got {} / {}", c.name, d.code, d.stdout);
             assert!(d.stdout.is_empty(), "{}: nothing is printed on a deferral: {}", c.name, d.stdout);
             assert_eq!(last_log(&homes[2].join("state"))["result"], "defer", "{}", c.name);
             assert!(pre == (tree(&homes[2]), raw_dump(&key_dir(&homes[2]))), "{}: a deferral wrote", c.name);

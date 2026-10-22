@@ -190,6 +190,17 @@ function rawGitInfo(dir, opts) {
   }
 }
 
+// checkoutGitdir(dir) -> the realpath'd PRIVATE gitdir of the checkout that directly owns `dir` (a linked worktree's own gitdir,
+// not the common dir), or null. Same nearest-.git walk as rawGitInfo, for callers that need HEAD of that checkout.
+function checkoutGitdir(dir, opts) {
+  const F = (opts && opts.fs) || fs;
+  try {
+    const T = nearestDotGit(F, F.realpathSync(path.resolve(String(dir))));
+    const info = T ? gitdirOf(F, T) : null;
+    return info ? info.G : null;
+  } catch (_) { return null; }
+}
+
 function defaultSpawn(cmd, args, options) { return cp.spawnSync(cmd, args, options); }
 
 function freeze(o) { return Object.freeze(o); }
@@ -421,6 +432,6 @@ function sessionWorktreeCoherent(sessionId, worktreePath, opts) {
 
 module.exports = {
   resolveContext, clearCache, sessionWorktreeCoherent, findNestedCheckouts,
-  repoKeyForCommonDir, meshIdForRealPath, rawGitInfo,
+  repoKeyForCommonDir, meshIdForRealPath, rawGitInfo, checkoutGitdir,
   sanitizeRepoName, GIT_SPAWN_TIMEOUT_MS,
 };
