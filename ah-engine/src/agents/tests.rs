@@ -999,3 +999,130 @@ fn the_wake_watch_prints_each_row_once_and_marks_the_session_armed() {
     assert!(lines[0].starts_with("[agent-wake] ") && lines[0].contains("gauge worker"), "{lines:?}");
     assert!(!sinks::wake_armed(&e, "parent"), "a stopped watcher removes its stamp");
 }
+
+// ---- every kind of agent (process liveness, teammates, Codex, the tree) -----------------------------------
+
+/// A registry file of the host: one live (or dead) session process.
+fn register(h: &Path, pid: u32, sid: &str, status: &str, started: u64) {
+    let dir = h.join(".claude/sessions");
+    std::fs::create_dir_all(&dir).unwrap();
+    let rec = json!({"pid": pid, "sessionId": sid, "cwd": "/w", "startedAt": started, "kind": "interactive", "status": status});
+    std::fs::write(dir.join(format!("{pid}.json")), rec.to_string()).unwrap();
+}
+
+/// Make a file look last written `ago_ms` ago.
+fn age_file(p: &Path, ago_ms: u64) {
+    let t = std::time::SystemTime::now() - std::time::Duration::from_millis(ago_ms);
+    std::fs::OpenOptions::new().write(true).open(p).unwrap().set_modified(t).unwrap();
+}
+
+fn dead_pid() -> u32 {
+    let mut c = std::process::Command::new("true").spawn().unwrap();
+    let pid = c.id();
+    c.wait().unwrap();
+    pid
+}
+
+#[test]
+fn a_live_process_is_running_or_waiting_whatever_its_transcript_says_and_a_dead_one_is_done() {
+    let h = home("liveproc");
+    let n = now0();
+    let quiet = |id: &str| {
+        let p = sess(&h, id);
+        write(&p, &[prompt(n - 9 * 3_600_000, "/w"), asst(n - 8 * 3_600_000, "m1", 5, 5, json!([{"type": "text", "text": "done"}]), Some("end_turn"))]);
+        age_file(&p, 8 * 3_600_000); // older than limits.active_window_ms: only the process keeps it in view
+    };
+    quiet("busy1");
+    quiet("idle1");
+    write(&sess(&h, "dead1"), &[prompt(n - 5 * MIN, "/w"), asst(n - 4 * MIN, "m2", 5, 5, json!([{"type": "text", "text": "x"}]), None)]);
+    let me = std::process::id();
+    register(&h, me, "busy1", "busy", n);
+    register(&h, dead_pid(), "dead1", "busy", n);
+    // a second live process (this test's parent shell is not guaranteed, so reuse our own pid under another session id)
+    let dir = h.join(".claude/sessions");
+    std::fs::write(dir.join("other.json"), json!({"pid": me, "sessionId": "idle1", "cwd": "/w", "startedAt": n, "status": "idle"}).to_string()).unwrap();
+    let mut st = State::default();
+    ticks(&h, &mut st, &[n, n + MIN]);
+    let (b, i, d) = (agent(&st, "busy1"), agent(&st, "idle1"), agent(&st, "dead1"));
+    assert_eq!((b.kind.as_str(), state::of(b), b.pid), ("main", "running", me), "a busy process is running though its transcript ended its turn 8 h ago");
+    assert_eq!((state::of(i), i.pid), ("waiting", me), "an idle process waits");
+    assert_eq!(state::of(d), "done", "a session whose process is gone is done, even with an unfinished turn");
+}
+
+fn teammate(h: &Path, n: u64) {
+    idle_subagent(h, n, 30);
+    std::fs::write(
+        h.join(".claude/projects/p/parent/subagents/agent-w1.meta.json"),
+        r#"{"agentType":"gauge","description":"gauge worker","name":"gauger","taskKind":"in_process_teammate","teamName":"team-7"}"#,
+    )
+    .unwrap();
+}
+
+#[test]
+fn an_in_process_teammate_is_its_own_kind_with_its_parent_and_team() {
+    let h = home("mate");
+    let n = now0();
+    teammate(&h, n);
+    let mut st = State::default();
+    ticks(&h, &mut st, &[n, n + MIN]);
+    let a = agent(&st, "w1");
+    assert_eq!((a.kind.as_str(), a.parent.as_str(), a.name.as_str(), a.team.as_str()), ("teammate", "parent", "gauger", "team-7"));
+    // the tree: the parent lists it and is a primary; the teammate shows its parent, project and transcript
+    let doc = status::document(&env(&h, n + MIN), &st, &sources::Listing::default());
+    let row = |id: &str| doc["agents"].as_array().unwrap().iter().find(|r| r["agent"] == id).unwrap().clone();
+    assert_eq!((row("parent")["role"].as_str(), row("parent")["children"][0].as_str()), (Some("primary"), Some("w1")));
+    let r = row("w1");
+    assert_eq!((r["parent"].as_str(), r["project"].as_str(), r["team"].as_str()), (Some("parent"), Some("/w"), Some("team-7")));
+    assert!(r["transcript"].as_str().unwrap().ends_with("agent-w1.jsonl"));
+}
+
+#[test]
+fn an_idle_teammate_with_an_open_task_wakes_its_parent_not_itself() {
+    let h = home("mate-wake");
+    let n = now0();
+    teammate(&h, n);
+    let mut st = State::default();
+    ticks(&h, &mut st, &[n, n + MIN]);
+    assert!(agent(&st, "w1").flags.contains_key("idle_open_task"));
+    let wake = wake_rows(&h, "parent");
+    assert_eq!(wake.len(), 1, "{wake:?}");
+    assert!(wake[0]["text"].as_str().unwrap().contains("gauger"), "{wake:?}");
+    assert!(wake_rows(&h, "w1").is_empty(), "the teammate's own feed is not the target");
+}
+
+#[test]
+fn a_solo_session_outside_devswarm_is_main_running_and_solo() {
+    let h = home("solo");
+    let n = now0();
+    write(&sess(&h, "solo1"), &[prompt(n - 5 * MIN, "/proj"), asst(n - 4 * MIN, "m1", 5, 5, json!([{"type": "text", "text": "ok"}]), Some("end_turn"))]);
+    register(&h, std::process::id(), "solo1", "busy", n);
+    let mut st = State::default();
+    ticks(&h, &mut st, &[n, n + MIN]);
+    let a = agent(&st, "solo1");
+    assert_eq!((a.kind.as_str(), state::of(a)), ("main", "running"));
+    let doc = status::document(&env(&h, n + MIN), &st, &sources::Listing::default());
+    let r = &doc["agents"][0];
+    assert_eq!((r["role"].as_str(), r["project"].as_str(), r["pid"].as_u64()), (Some("solo"), Some("/proj"), Some(std::process::id() as u64)));
+}
+
+#[test]
+fn a_codex_rollout_is_a_codex_agent_running_while_it_is_written() {
+    let h = home("codex");
+    let n = now0();
+    let day = h.join(".codex/sessions/2026/10/22");
+    std::fs::create_dir_all(&day).unwrap();
+    let rollout = |stamp: &str, id: &str| {
+        let p = day.join(format!("rollout-{stamp}-{id}.jsonl"));
+        let meta = json!({"type": "session_meta", "payload": {"id": id, "cwd": "/cx"}}).to_string();
+        write(&p, &[meta, json!({"type": "response_item", "payload": {}}).to_string()]);
+        p
+    };
+    rollout("2026-10-22T05-21-20", "01a16132-aaaa");
+    let old = rollout("2026-10-22T01-00-00", "01a16132-bbbb");
+    age_file(&old, 30 * MIN);
+    let mut st = State::default();
+    ticks(&h, &mut st, &[n, n + MIN]);
+    let (live, quiet) = (agent(&st, "01a16132-aaaa"), agent(&st, "01a16132-bbbb"));
+    assert_eq!((live.kind.as_str(), state::of(live), live.cwd.as_str(), live.source.as_str()), ("codex", "running", "/cx", "codex"));
+    assert_eq!((quiet.kind.as_str(), state::of(quiet)), ("codex", "waiting"));
+}
