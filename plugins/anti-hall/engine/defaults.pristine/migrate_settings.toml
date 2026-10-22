@@ -122,6 +122,7 @@ value = [
   "{\"section\":\"maintenance\",\"key\":\"sessionEndReaper\",\"type\":\"boolean\",\"default\":true,\"env\":\"ANTIHALL_SESSION_END_REAPER\",\"envAliases\":[\"ANTI_HALL_SESSION_END_REAPER\"],\"pluginOption\":\"maintenance_session_end_reaper\"}",
   "{\"section\":\"agents\",\"key\":\"tracker\",\"type\":\"boolean\",\"default\":true,\"env\":\"ANTIHALL_AGENT_TRACKER\"}",
   "{\"section\":\"agents\",\"key\":\"reminders\",\"type\":\"boolean\",\"default\":true,\"env\":\"ANTIHALL_AGENT_REMINDERS\"}",
+  "{\"section\":\"agents\",\"key\":\"wakeWatch\",\"type\":\"boolean\",\"default\":true,\"env\":\"ANTIHALL_AGENT_WAKE_WATCH\"}",
   "{\"section\":\"agents\",\"key\":\"ownerNotify\",\"type\":\"boolean\",\"default\":false,\"env\":\"ANTIHALL_AGENT_OWNER_NOTIFY\"}",
   "{\"section\":\"versionAlerts\",\"key\":\"antiHall\",\"type\":\"boolean\",\"default\":true,\"env\":\"ANTIHALL_VERSION_ALERT\",\"pluginOption\":\"version_alerts_anti_hall\"}",
   "{\"section\":\"versionAlerts\",\"key\":\"claudeCli\",\"type\":\"boolean\",\"default\":true,\"env\":\"ANTIHALL_CLAUDE_CLI_VERSION_ALERT\",\"pluginOption\":\"version_alerts_claude_cli\"}",

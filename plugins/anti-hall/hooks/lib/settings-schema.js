@@ -241,6 +241,7 @@ const SECTIONS = [
     settings: [
       { key: 'tracker', type: 'boolean', default: true, env: 'ANTIHALL_AGENT_TRACKER', description: 'agent tracker (engine job agent_tick): track agents and raise signals; off, a tick does nothing.' },
       { key: 'reminders', type: 'boolean', default: true, env: 'ANTIHALL_AGENT_REMINDERS', description: 'agent-reminders (UserPromptSubmit, PostToolUse): deliver the tracker\'s queued reminders to the agent that owns them; off, signals are recorded but nothing is queued.' },
+      { key: 'wakeWatch', type: 'boolean', default: true, env: 'ANTIHALL_AGENT_WAKE_WATCH', description: 'session wake-watch (Monitor armed at SessionStart): wakes an idle session when an agent it launched goes idle with open work, loops, burns tokens or a watched process ends; off, nothing is armed.' },
       { key: 'ownerNotify', type: 'boolean', default: false, env: 'ANTIHALL_AGENT_OWNER_NOTIFY', description: 'agent tracker owner notices: also append hung / looping / token-waste advisories to the owner notices file.' },
     ],
   },

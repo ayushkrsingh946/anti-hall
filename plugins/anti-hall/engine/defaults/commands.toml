@@ -79,8 +79,8 @@ doc = "The scheduled agent tracker tick (the `agent_tick` job): one tracker tick
 value = { args = "", read_only = false, status = "implemented" }
 
 [cmd.agents]
-doc = "The agent tracker (feature 21): `status` lists every tracked agent (main sessions, subagents and background tasks, DevSwarm workspaces) with tokens, progress, last output, state and flags, plus today's reminder and recovery totals; `tick` runs one tracker tick now (the scheduled job `agent_tick` does the same every minute). It never stops or kills an agent."
-value = { args = "<status|tick> [--json]", read_only = false, read_only_args = ["status"], status = "implemented" }
+doc = "The agent tracker (feature 21): `status` lists every tracked agent (main sessions, subagents and background tasks, DevSwarm workspaces) with tokens, progress, last output, state and flags, plus today's reminder and recovery totals; `tick` runs one tracker tick now (the scheduled job `agent_tick` does the same every minute); `wake-watch [--auto]` is the Monitor armed at session start that wakes an idle session when the tracker queues a wake row for it. It never stops or kills an agent."
+value = { args = "<status|tick|wake-watch> [--json]", read_only = false, read_only_args = ["status"], status = "implemented" }
 [cmd.gh]
 doc = "GitHub realtime (feature #20, independent of DevSwarm): `status` prints, from the state file with no network, what is followed (the repos of the working directories of live sessions, their pull request, review, CI and mergeability), the rate-limit budget, the hold in force (backoff, budget, gh missing, logged out or offline) and the measured rate-limit cost of 200 and 304 answers; `segment [--cwd <dir>]` prints the statusline piece for the repo that holds the directory (empty when there is nothing to say); `poll [--force]` runs one tick now."
 value = { args = "<status|segment|poll> [--cwd <dir>] [--force]", read_only = false, read_only_args = ["status", "segment"], status = "implemented" }

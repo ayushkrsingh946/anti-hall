@@ -1090,6 +1090,16 @@ reminded. It never kills, stops or edits an agent: it warns and reminds. Everyth
 switches are `agents.tracker` (the whole feature), `agents.reminders` (queue nothing, only record) and `agents.ownerNotify` (default
 off: the owner channel).
 
+**Waking an idle coordinator (#256).** A reminder reaches a session through hook output at its next turn, which never comes while it
+sits idle. The route target `wake` (a row of `agent_tracker.targets`: `to` names whose session, `via` how it is delivered) also writes
+the reminder to the session's wake feed, and the Monitor `agents wake-watch --auto` (armed from `monitors.json` at SessionStart; off
+with `agents.wakeWatch`) prints it as one `[agent-wake]` line, which wakes the session. It reads one small file and costs no tokens
+while quiet; its stamp is what `monitor_unarmed` reads, so a main session with running agents and no wake path is told once, in one
+line. Two signals exist for it: `idle_open_task` (a subagent or workspace finished its turn with a task open and was silent
+`limits.idle_open_ms`) and `watched_exit` (a background shell command an agent started has ended). Both fire once per state change
+(`once` in `agent_tracker.cooldowns`); hung, looping, token waste and a stale heartbeat go to the same channel. A new target or
+route is config; only a new kind of delivery needs code. The Codex port has no Monitor tool, so it keeps the queue delivery.
+
 **What it follows.** Main Claude Code sessions, their subagents and background tasks (the transcripts under `~/.claude/projects`),
 agents known only by a heartbeat file (`~/.anti-hall/agents/<id>.json`, the file the Node watchdog reads), and DevSwarm workspaces
 (descriptor, plan and wake-watch lock under `~/.anti-hall/devswarm`; inert when that directory does not exist). Where the Claude Code

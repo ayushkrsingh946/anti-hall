@@ -38,6 +38,30 @@ pub fn start(_pid: u32) -> Option<u64> {
     None
 }
 
+/// The parent of `pid`. `None` when the process is gone or the system will not say.
+#[cfg(target_os = "linux")]
+pub fn parent(pid: u32) -> Option<u32> {
+    let text = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    crate::procwatch::table::parse_proc_stat(&text).map(|f| f.1)
+}
+
+/// The parent of `pid`. `None` when the process is gone or the system will not say.
+#[cfg(target_os = "macos")]
+pub fn parent(pid: u32) -> Option<u32> {
+    // SAFETY: a zeroed proc_bsdinfo is a valid value of the plain C struct.
+    let mut bsd: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+    let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+    // SAFETY: `bsd` is a live, writable struct of the flavour and size passed.
+    let rc = unsafe { libc::proc_pidinfo(pid as libc::c_int, libc::PROC_PIDTBSDINFO, 0, (&mut bsd as *mut libc::proc_bsdinfo).cast(), size) };
+    (rc == size).then_some(bsd.pbi_ppid)
+}
+
+/// No parent lookup on other systems.
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+pub fn parent(_pid: u32) -> Option<u32> {
+    None
+}
+
 /// The executable `pid` runs, as the system reports it. `None` when the process is gone or the system will not say.
 #[cfg(target_os = "linux")]
 pub fn exe(pid: u32) -> Option<PathBuf> {

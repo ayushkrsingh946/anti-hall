@@ -97,6 +97,8 @@ value = [
   '(?i)\bflutter\s+--version\b',
   '(?i)\bgo\s+version\b',
   '(?i)\bcargo\s+(?:--version|version)\b',
+  '(?i)\bcargo\s+clean\b',
+  '(?i)^\s*(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*gh\s+issue\s+(?:create|comment)\b[^\n]*\s--body-file\s+\S+',
   '(?i)\bgit\s+(?:push|pull)\b[^\n]*\s--dry-run\b',
   '(?i)\bdocker\s+(?:ps|images|inspect|logs|stats)\b',
   '(?i)^\s*(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*node\s+(?:\S*[\\/])?scripts[\\/]jev-setup\.js\s+(?:-\S+\s+)*status\b',
