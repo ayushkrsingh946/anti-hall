@@ -976,10 +976,9 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `command.gh_gql_bool_flags` | `--paginate, --slurp, --silent, -i, --include, --verbose` |  |  | gh api graphql options without a value (command-guard.js GH_GQL_BOOL_FLAGS). |
 | `command.gh_gql_value_flags` | `8 items` |  |  | gh api graphql options that take a value (command-guard.js GH_GQL_VALUE_FLAGS). |
 | `command.gh_mutating_subcommands` | `6 entries` |  |  | gh group and subcommand pairs that are heavy (command-guard.js GH_MUTATING_SUBCOMMANDS, plus `workflow run`). |
-| `command.gh_oneliner_api_methods` | `POST, PATCH, PUT` |  |  | gh api methods that are light on a one-line command (command-guard.js GH_ONELINER_API_METHODS); DELETE, a body file and graphql stay heavy. |
 | `command.gh_oneliner_deny_re` | `[\n\r`]\|\$\(\|<<\|<\(\|>\(` |  |  | JavaScript regex source: a command holding a newline, a backtick, a command or process substitution or a heredoc is not a plain one-liner (command-guard.js isOneLineCommand). |
 | `command.gh_oneliner_max_chars` | `600` |  | chars | The longest whole command that counts as one short line for the gh one-liner exemption (command-guard.js GH_ONELINER_MAX_CHARS). |
-| `command.gh_oneliner_subcommands` | `4 entries` |  |  | gh group and subcommand pairs that are light when the whole command is one short plain line (command-guard.js GH_ONELINER_SUBCOMMANDS): they print a line or two and flood nothing, so a subagent for them is noise. |
+| `command.gh_oneliner_subcommands` | `3 entries` |  |  | gh group and subcommand pairs that are light when the whole command is one short plain line (command-guard.js GH_ONELINER_SUBCOMMANDS): they print a line or two and flood nothing, so a subagent for them is noise. |
 | `command.git_always_work` | `12 items` |  |  | git subcommands that always count as work for the coordinator work window (command-guard.js GIT_ALWAYS_WORK). |
 | `command.git_branch_argv` | `symbolic-ref, --short, HEAD` |  |  | The git arguments that print the current branch (plain-push carve-out). |
 | `command.git_fetch_dangerous_flags` | `--prune, -p, --prune-tags, --force, -f` |  |  | git fetch options that rewrite or delete local refs (command-guard.js GIT_FETCH_DANGEROUS_FLAGS). |
@@ -1005,7 +1004,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `command.jq_safe_flags` | `9 items` |  |  | jq flags the narrow gcloud read accepts. |
 | `command.launcher_marker` | `.anti-hall` |  |  | A command without this text cannot name a stable launcher. |
 | `command.launcher_scripts` | `devswarm.js, wake-watch.js` |  |  | The stable launcher scripts under ~/.anti-hall/bin that are light (command-guard.js ANTI_HALL_CLI_PATTERNS). |
-| `command.light_exceptions` | `19 items` |  |  | Patterns over the raw segment (and the segment without a leading `timeout N`) that make it light (command-guard.js LIGHT_EXCEPTIONS, the entries without a negative lookahead; a trailing `(?=\s\|$)` is written as `(?:\s\|$)`). |
+| `command.light_exceptions` | `18 items` |  |  | Patterns over the raw segment (and the segment without a leading `timeout N`) that make it light (command-guard.js LIGHT_EXCEPTIONS, the entries without a negative lookahead; a trailing `(?=\s\|$)` is written as `(?:\s\|$)`). |
 | `command.light_exceptions_neg` | `3 entries, 3 entries, 3 entries` |  |  | LIGHT_EXCEPTIONS entries of the form HEAD`\b(?![^\n]*NOT)`: the segment is light when some match of `head` ends (at a word boundary, right after the text `end`) where `not_after` does not match before the end of that line (jev-report.js, doctor.js and `go env`). |
 | `command.mailbox_flag_skip` | `(?:-\S+(?:\s+[^-\s]\S*)?\s+)*` |  |  | Regex source: optional flags (with an optional value each) before a devswarm.js verb (command-guard.js FLAG_SKIP_SRC). |
 | `command.mailbox_guard` | `devswarm-subagent-mailbox-guard` |  |  | The skip id of the subagent mailbox guard. |
@@ -1054,6 +1053,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `command.msg_rawread_inbox_what` | `a shell read of the raw DevSwarm inbox file is blocked.` |  |  | Heading of the raw inbox read block. |
 | `command.msg_rawread_inbox_why` | `It does not drain the queue, but bypasses the durable cursor, so messages get...` |  |  | Why a raw inbox read is blocked. |
 | `command.msg_rawread_override` | `set DISABLE_ANTIHALL_DEVSWARM=1 to disable this guard entirely` |  |  | The override of the raw read block. |
+| `command.msg_remote_block_why` | `It is irreversible or sensitive: a merge, a release, a repository setting, a ...` |  |  | Why a command on command.remote_block is blocked in the main thread. |
 | `command.msg_send_guard` | `devswarm-mesh-only` |  |  | The message id of the native-send block. |
 | `command.msg_send_instead` | ``node scripts/devswarm.js send --to-primary --message-file <path>` (or `--to ...` |  |  | What to do instead of a native send. |
 | `command.msg_send_override` | `set DISABLE_ANTIHALL_DEVSWARM=1 to disable this guard entirely` |  |  | The override of the native-send block. |
@@ -1082,6 +1082,12 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `command.port_max` | `65535` |  |  | Largest TCP port a URL may carry. |
 | `command.python_script_ext` | `(?i)\.py$` |  |  | Script file extension of the other interpreters for the flagged-interpreter test (command-guard.js isFlaggedInterpreterScript). |
 | `command.realpath_max_links` | `40` |  |  | How many symbolic links one real-path walk follows before it gives up (the walk of fs.realpathSync, which keeps every component's spelling). |
+| `command.remote_allow` | `10 items` |  |  | Remote commands that run in the main thread whatever their body or output (GH #263). Each entry is a command prefix: the binary and its leading subcommand words, global flags such as -R/--repo skipped, optionally followed by an option and its value (`gh api -X POST`). Works for any binary. Block wins over allow; a command in neither list keeps the default rule (reads pass, mutations block). Change it in your own config.toml (`[command]` table) with remote_allow_add and remote_allow_remove. |
+| `command.remote_allow_add` | `` |  |  | Entries the owner adds to command.remote_allow in config.toml; the effective list is the shipped one minus remote_allow_remove plus these. |
+| `command.remote_allow_remove` | `` |  |  | Entries the owner removes from the shipped command.remote_allow in config.toml, e.g. to stop allowing or blocking one. |
+| `command.remote_block` | `13 items` |  |  | Remote commands always blocked in the main thread, named in the block text as irreversible or sensitive (msg_remote_block_why). Same entry format as command.remote_allow; wins over it. |
+| `command.remote_block_add` | `` |  |  | Entries the owner adds to command.remote_block in config.toml; the effective list is the shipped one minus remote_block_remove plus these. |
+| `command.remote_block_remove` | `` |  |  | Entries the owner removes from the shipped command.remote_block in config.toml, e.g. to stop allowing or blocking one. |
 | `command.scratch_clone_sync_subs` | `pull, fetch` |  |  | git subcommands that are light in the main thread when run in a git checkout outside the session's own tree (git -C <abs\|~ dir> or one leading cd <abs\|~ dir>), chained with && or ; only to light segments and at most one final \| tail/head -N, on one plain line (command-guard.js isAllowedScratchCloneSync, SCRATCH_CLONE_SYNC_SUBS). A sync prints a few lines; the output-flood rule is for unbounded runners and builds. Empty turns the exemption off. |
 | `command.scratch_leaf` | `scratchpad` |  |  | Name of the scratchpad directory of a session. |
 | `command.scratch_uid_prefix` | `claude-` |  |  | Prefix of the per-user directory under a tmp root that holds session scratchpads. |

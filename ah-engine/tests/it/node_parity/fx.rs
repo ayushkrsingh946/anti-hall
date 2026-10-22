@@ -260,7 +260,7 @@ fn lock(m: &Mutex<Stats>) -> std::sync::MutexGuard<'_, Stats> {
 }
 
 pub(crate) fn run_fx(o: &Opts, hooks: &Path, scenarios: &[Scenario]) -> Report {
-    let plugin_root = hooks.parent().expect("hooks directory has a parent").to_path_buf();
+    let plugin_root = engine_plugin_root(hooks);
     let hook = hooks.join(o.hook_file);
     let scratch = Scratch::new(&format!("fx-{}", o.name));
     let tmp = scratch.path().to_path_buf();
