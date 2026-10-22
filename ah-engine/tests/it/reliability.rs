@@ -504,13 +504,16 @@ fn bad_replies_fail_open_never_block() {
 }
 
 #[test]
-fn healthy_non_ok_replies_use_the_fallback_contract() {
+fn healthy_non_ok_replies_follow_the_guard_events_failure_mode() {
     use ah_engine::frame::{Kind, encode};
     for (name, reply) in [("busy", encode(Kind::Busy, "")), ("err", encode(Kind::Err, "boom"))] {
         let e = Env::new("non-ok", &[("AH_ENGINE_NOSPAWN", "1")]);
         fake_server(&e, move || Some(reply.clone()));
-        let (out, _, code, elapsed) = e.hook(DENY_IN, true);
-        assert_eq!((out.as_str(), code), ("NODE-FALLBACK", 2), "case {name}");
+        let (out, err, code, elapsed) = e.hook(DENY_IN, true);
+        // no hook command is launched any more: a healthy refusal is no verdict, and a guard event follows its configured
+        // infra failure mode (closed: exit 2 with the engine's own line)
+        assert_eq!((out.as_str(), code), ("", 2), "case {name}: {err:?}");
+        assert!(err.contains("could not run the guards") && !err.contains("NODE-FALLBACK"), "case {name}: {err:?}");
         assert!(elapsed < common::scaled(Duration::from_secs(1)), "case {name} took {elapsed:?}");
     }
 }
@@ -692,7 +695,10 @@ fn oversize_input_skips_engine_and_daemon_rejects_oversize_requests() {
     let e = Env::new("big", &[]);
     e.warm();
     let big = format!(r#"{{"hook_event_name":"PreToolUse","tool_input":{{"command":"{}"}}}}"#, "a".repeat(1_100_000));
-    assert_eq!(e.hook(&big, true).0, "NODE-FALLBACK", "client never ships > 1 MiB to the engine");
+    // the client never ships > 1 MiB to the engine, so a guard event it cannot send follows its infra failure mode (closed)
+    let (out, err, code, _) = e.hook(&big, true);
+    assert_eq!((out.as_str(), code), ("", 2), "{err:?}");
+    assert!(err.contains("could not run the guards"), "{err:?}");
     let reply = raw_exchange(&e, &vec![b'x'; 1_200_000]);
     let (k, _) = ah_engine::frame::decode(&reply).unwrap();
     assert_eq!(k, ah_engine::frame::Kind::Err, "daemon refuses oversize requests");
@@ -765,7 +771,9 @@ fn wrapper_respawns_a_daemon_killed_right_after_its_start() {
     while calls < 2 && fresh.is_none() {
         calls += 1;
         let (code, _, dt) = wrapper_once(&e);
-        assert_eq!(code, 0, "wrapper call {calls} after kill -9 must fail open");
+        // the engine answers a call itself: a fail-open pass-through (0) or, when a daemon is already back up, its guard verdict
+        // (exit 2: the payload is a force push), never a hang or a Node hand-over
+        assert!(code == 0 || code == 2, "wrapper call {calls} after kill -9 must pass through or be answered natively, got {code}");
         assert!(dt < common::scaled(Duration::from_secs(1)), "wrapper call {calls} after kill -9 took {dt:?}");
         fresh = wait_for(|| e.pid().is_some_and(|p| p != old)).then(|| e.pid().unwrap());
     }
@@ -790,23 +798,36 @@ fn twenty_concurrent_wrapper_calls_after_a_kill_leave_exactly_one_daemon() {
         let o = ch.wait_with_output().unwrap();
         assert!(matches!(o.status.code(), Some(0) | Some(2)), "a wrapper call after the kill must fail open or fall back, got {:?}", o.status.code());
     }
-    assert!(wait_for(|| e.pid().is_some_and(|p| p != old)), "no new daemon after 20 wrapper calls following kill -9{}", e.diag());
-    std::thread::sleep(Duration::from_secs(3)); // a spawn storm shows up as late extra daemons
+    // A spawn storm shows up as late extra daemons, so the count is taken over a window, not once. A daemon of a throwaway state
+    // directory ends once the client that started it is gone (`daemon.orphan_check_ms`: parent_gone), so the window must stay
+    // shorter than that, and the answer is the most daemons seen at once.
+    //
     // every `serve` process of THIS state directory (the daemon may fork away from the logged pid, so ask the process table). The
     // engine's own process table reads command lines and environments on both platforms (`ps -E` is BSD-only: procps on Linux
     // rejects it, which left this list empty there).
     let mine = e.eng().display().to_string();
     let mut table = ah_engine::procwatch::table::Table::new();
-    let rows = table.list();
-    let mut daemons: Vec<u32> = rows
-        .into_iter()
-        .filter(|r| r.cmd.split_whitespace().any(|a| a == "serve"))
-        .filter(|r| table.environ(r.pid).iter().any(|(k, v)| k == "AH_ENGINE_DIR" && *v == mine))
-        .map(|r| r.pid)
-        .collect();
-    daemons.sort_unstable();
-    daemons.dedup();
+    let mut seen_at_once = 0;
+    let mut daemons: Vec<u32> = Vec::new();
+    let window = Instant::now();
+    while window.elapsed() < Duration::from_millis(1200) {
+        let rows = table.list();
+        let mut now: Vec<u32> = rows
+            .into_iter()
+            .filter(|r| r.cmd.split_whitespace().any(|a| a == "serve"))
+            .filter(|r| table.environ(r.pid).iter().any(|(k, v)| k == "AH_ENGINE_DIR" && *v == mine))
+            .map(|r| r.pid)
+            .collect();
+        now.sort_unstable();
+        now.dedup();
+        if now.len() >= seen_at_once {
+            seen_at_once = now.len();
+            daemons = now;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
     assert_eq!(daemons.len(), 1, "exactly one daemon must be running, found {daemons:?}{}", e.diag());
+    assert!(!daemons.contains(&old), "the killed daemon is not the one running: new daemon expected after 20 wrapper calls following kill -9{}", e.diag());
 }
 
 /// The start-up probe warm-up runs on its own thread after the socket is listening: a slow interpreter probe (a fake `python3` that
@@ -1142,8 +1163,10 @@ fn a_non_slow_reply_between_slow_ones_breaks_the_slow_streak() {
         }
     });
     for (i, want_down, node) in [(0, false, false), (1, false, true), (2, false, false)] {
-        // a slow call fails open (no Node hook); the completed BUSY reply is a refusal, so its call runs the Node hook
-        assert_eq!(e.hook(DENY_IN, true).0, if node { "NODE-FALLBACK" } else { "" }, "call {i}");
+        let (out, err, code, _) = e.hook(DENY_IN, true);
+        // a slow call fails open; the completed BUSY reply is a refusal, so its guard call follows the infra failure mode (closed)
+        assert_eq!((out.as_str(), code), ("", if node { 2 } else { 0 }), "call {i}: {err:?}");
+        assert_eq!(err.contains("could not run the guards"), node, "call {i}: {err:?}");
         assert_eq!(e.fresh_down_marker(), want_down, "slow, BUSY, slow must not mark the daemon down (call {i})");
     }
     // two slow replies in a row still do (the streak itself works)
@@ -1181,28 +1204,18 @@ fn wrapper_returns_the_guards_block_when_the_daemon_is_slow() {
 }
 
 #[test]
-fn an_ok_reply_that_defers_to_node_keeps_the_wait_until_the_node_deny_is_ready() {
-    // Codex final Prior-1B: the daemon answers OK at once but leaves the entries to their Node hooks; one denies after the fail-fast
-    // budget. The wait marker must stay while that Node work is unresolved, or the wrapper's watchdog kills the call and allows.
+fn an_ok_reply_that_decides_nothing_fails_a_guard_event_closed_at_once() {
+    // The daemon answers OK with no decided answer for any entry. There is no Node hook to hand the entries to (the dispatcher
+    // launches none, so no wait marker is held for one): every entry ends as a hook that could not run, and the guard event follows
+    // its configured infra failure mode (closed: exit 2) straight away.
     let _timing = wrapper_timing_lock();
-    let tag = "okdefer";
-    let map = format!("/tmp/ah-r-{tag}-{}/map.json", std::process::id());
-    let e = Env::new(tag, &[("AH_ENGINE_NOSPAWN", "1"), ("AH_ENGINE_SLOW_DOWN_N", "9"), ("AH_FALLBACK_MAP", map.as_str())]);
-    let entries = ah_engine::dispatch::table::entries("claude", "PreToolUse");
-    let first_node = entries.iter().position(|x| x.check.is_none()).unwrap_or(0);
-    let late_deny = "sleep 1.2; echo NODE-LATE-DENY >&2; exit 2";
-    let m: serde_json::Map<String, serde_json::Value> =
-        entries.iter().enumerate().map(|(i, x)| (x.id.clone(), if i == first_node { late_deny } else { "true" }.into())).collect();
-    std::fs::write(&map, serde_json::json!({ "PreToolUse": m }).to_string()).unwrap();
-    // an OK frame with no decided answer: every entry is deferred to its Node hook
+    let e = Env::new("okdefer", &[("AH_ENGINE_NOSPAWN", "1"), ("AH_ENGINE_SLOW_DOWN_N", "9")]);
     fake_server(&e, || Some(ah_engine::frame::encode(ah_engine::frame::Kind::Ok, "[]")));
-    let fail_fast_ms = clamped_num("client.deadline_ms", 300) + clamped_num("client.deadline_slack_ms", 0) + clamped_num("client.wrapper_extra_ms", 0);
     let max_ms = clamped_num("client.slow_fallback_max_ms", 3000);
-    let (_, code, dt) = e.wrapper_hook(DENY_IN);
-    println!("TIMING wrapper ok-defer-late-node-deny wall_ms={:.1} fail_fast_ms={fail_fast_ms}", dt.as_secs_f64() * 1000.0);
-    assert!(dt > Duration::from_millis(fail_fast_ms), "the Node deny must land after the fail-fast budget to prove the wait: {dt:?} <= {fail_fast_ms} ms");
-    assert_eq!(code, 2, "a Node deny after the fail-fast budget must still block: {dt:?}{}", e.diag());
-    assert!(dt < common::scaled(Duration::from_millis(max_ms)), "bounded by client.slow_fallback_max_ms = {max_ms} ms: {dt:?}");
+    let (out, code, dt) = e.wrapper_hook(DENY_IN);
+    println!("TIMING wrapper ok-defer-fails-closed wall_ms={:.1}", dt.as_secs_f64() * 1000.0);
+    assert_eq!(code, 2, "a guard event whose entries cannot run must not be let through: out={out:?}{}", e.diag());
+    assert!(dt < common::scaled(Duration::from_millis(max_ms)), "answered at once, bounded by client.slow_fallback_max_ms = {max_ms} ms: {dt:?}");
 }
 
 #[test]
@@ -1589,22 +1602,23 @@ fn accept_loop_survives_a_hundred_client_flood_with_silent_peers() {
 }
 
 #[test]
-fn rate_limited_session_gets_busy_so_it_uses_the_fallback_contract() {
+fn rate_limited_session_gets_busy_so_it_follows_the_failure_mode() {
     let e = Env::new("rate", &[("AH_ENGINE_SESSION_RPS", "1"), ("AH_ENGINE_SESSION_BURST", "2")]);
     e.warm(); // consumes some of s1's burst
     let mut fell_back = false;
     for _ in 0..6 {
-        if e.hook(DENY_IN, true).0 == "NODE-FALLBACK" {
+        let (out, err, code, _) = e.hook(DENY_IN, true);
+        if code == 2 && out.is_empty() && err.contains("could not run the guards") {
             fell_back = true;
         }
     }
-    assert!(fell_back, "per-session limit never produced a healthy BUSY/ERR fallback");
+    assert!(fell_back, "per-session limit never produced a healthy BUSY/ERR (a guard call that follows the failure mode)");
     let other = DENY_IN.replace("s1", "fresh-session");
     assert!(e.hook(&other, true).0.contains("engine-blocked"), "other sessions are unaffected");
 }
 
 #[test]
-fn cpu_budget_trip_uses_the_fallback_contract() {
+fn cpu_budget_trip_follows_the_failure_mode() {
     let e = Env::new("cpu", &[("AH_ENGINE_EVAL_BUDGET_US", "1")]);
     // a heavy-ish rule set so evaluation takes > 1 us of thread CPU
     let rules: Vec<String> = (0..200).map(|i| format!(r#"{{"pattern":"zzz{i}[a-z]+q","action":"warn","message":"m"}}"#)).collect();
@@ -1612,7 +1626,9 @@ fn cpu_budget_trip_uses_the_fallback_contract() {
     let mut daemon = e.cmd().arg("serve").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap();
     assert!(wait_for(|| e.pid().is_some()));
     e.clear_down_marker();
-    assert_eq!(e.hook(DENY_IN, true).0, "NODE-FALLBACK", "budget exceeded => healthy ERR => fallback contract");
+    let (out, err, code, _) = e.hook(DENY_IN, true);
+    assert_eq!((out.as_str(), code), ("", 2), "budget exceeded => healthy ERR => the guard event follows its failure mode: {err:?}");
+    assert!(err.contains("could not run the guards"), "{err:?}");
     e.warm_status_budget();
     drop(e.ctl("stop"));
     ah_engine::discard::harmless(daemon.wait());
