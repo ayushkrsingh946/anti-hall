@@ -444,7 +444,7 @@ pub fn run_guard(o: &Opts, hooks: &Path, scenarios: &[Scenario]) -> Report {
 }
 
 fn run_guard_with(o: &Opts, hooks: &Path, scenarios: &[Scenario], golden: &Golden, pad: &str) -> Report {
-    let plugin_root = hooks.parent().unwrap().to_path_buf();
+    let plugin_root = engine_plugin_root(hooks);
     let scratch = Scratch::new(&format!("{}{pad}", o.name));
     let tmp = scratch.path().to_path_buf();
     let base_path = std::env::var("PATH").unwrap_or_default();

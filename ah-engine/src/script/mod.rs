@@ -929,3 +929,6 @@ mod tests_host_e;
 #[cfg(test)]
 #[path = "host_tests_f/tests.rs"]
 mod tests_host_f;
+#[cfg(test)]
+#[path = "home_unset_tests/tests.rs"]
+mod tests_home_unset;
