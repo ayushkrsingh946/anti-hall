@@ -372,8 +372,9 @@ function positions(store, opts) {
   }
   const out = { floor, rows, view: 'floor', store: floor.store, nd: floor.nd };
   if (o.liveBase) { // the roster's base (liveBaseOf): a position per namespace, the floor where the namespace has no live row
-    if (o.liveBase.store != null) out.store = o.liveBase.store;
-    if (o.liveBase.nd != null) out.nd = o.liveBase.nd;
+    // never below the floor: everything at or below it was read (a live reader row seeded under the legacy cursor must not resurrect it)
+    if (o.liveBase.store != null) out.store = Math.max(o.liveBase.store, floor.store);
+    if (o.liveBase.nd != null) out.nd = Math.max(o.liveBase.nd, floor.nd);
     out.view = 'live-min';
   }
   if (reader) {

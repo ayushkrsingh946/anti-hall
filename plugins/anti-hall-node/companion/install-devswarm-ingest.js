@@ -83,7 +83,7 @@ function resolveStableScript(env, home) {
   if (override) {
     try { if (path.isAbsolute(override) && fs.statSync(override).isDirectory()) marketplaceDir = override; } catch (_) {}
   }
-  const candidate = path.join(marketplaceDir, 'plugins', 'anti-hall', 'companion', 'devswarm-ingest.js');
+  const candidate = path.join(marketplaceDir, 'plugins', 'anti-hall-node', 'companion', 'devswarm-ingest.js');
   try { if (fs.statSync(candidate).isFile()) return candidate; } catch (_) {}
   return null;
 }

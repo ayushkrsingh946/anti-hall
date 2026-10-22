@@ -219,7 +219,7 @@ function main() {
       guard: 'devswarm-comms-guard',
       what: 'SendMessage target "' + to + '" resolves to a DevSwarm workspace-backed peer session (cwd: ' + session.cwd + ').',
       why: 'Direct Claude remote-agent messaging between a DevSwarm Primary/child and a workspace is prohibited (owner rule 2026-09-04, defect 1c74863863e5).',
-      instead: 'use the DevSwarm mesh: `node plugins/anti-hall/scripts/devswarm.js send --to <meshId> --message "..."` (resolve <meshId> from the DevSwarm workspace registry, not this session name).',
+      instead: 'use the DevSwarm mesh: `node plugins/anti-hall-node/scripts/devswarm.js send --to <meshId> --message "..."` (resolve <meshId> from the DevSwarm workspace registry, not this session name).',
     }));
   }
 

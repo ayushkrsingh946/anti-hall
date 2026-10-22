@@ -11,8 +11,9 @@ const os = require('node:os');
 const path = require('node:path');
 
 const ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const cursors = require(path.join(ROOT, 'scripts', 'devswarm-lib', 'cursors.js'));
-const storeLib = require(path.join(ROOT, 'companion', 'lib', 'devswarm-store.js'));
+const NODE_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const cursors = require(path.join(NODE_ROOT, 'scripts', 'devswarm-lib', 'cursors.js'));
+const storeLib = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-store.js'));
 
 test('applyReadAckOps: a failing summary refresh does not fail the ack and is recorded in the cursor-log', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'anti-hall-sumfail-home-'));

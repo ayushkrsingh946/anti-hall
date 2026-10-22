@@ -125,7 +125,8 @@ test('a blocked call prints only its block JSON and does not use up the note', (
 
 test('schema / manifest parity for the inline-work settings', () => {
   const plugin = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-  const schema = require(path.join(plugin, 'hooks', 'lib', 'settings-schema.js'));
+  const NODE_plugin = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+  const schema = require(path.join(NODE_plugin, 'hooks', 'lib', 'settings-schema.js'));
   const m = JSON.parse(fs.readFileSync(path.join(plugin, '.claude-plugin', 'plugin.json'), 'utf8'));
   const a = schema.findSetting('devswarm', 'inlineWorkNudge');
   const b = schema.findSetting('devswarm', 'inlineWorkNudgeThreshold');

@@ -15,8 +15,9 @@ const os = require('node:os');
 const path = require('node:path');
 
 const ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const caps = require(path.join(ROOT, 'companion', 'lib', 'devswarm-capabilities.js'));
-const doctor = require(path.join(ROOT, 'companion', 'lib', 'doctor-devswarm.js'));
+const NODE_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const caps = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-capabilities.js'));
+const doctor = require(path.join(NODE_ROOT, 'companion', 'lib', 'doctor-devswarm.js'));
 const { fakeHivecontrol, readCalls } = require('../helpers/fake-hivecontrol.js');
 
 const FIX = path.join(__dirname, '..', 'fixtures', 'devswarm-capabilities');
@@ -207,7 +208,7 @@ test('gatedRun: --version / --help / workspace --help are explicit ungated regis
 
 test('every hivecontrol invocation in the shipped code maps to a registered capability', () => {
   const fsx = require('node:fs');
-  const ROOTP = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
+  const ROOTP = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
   const files = ['scripts/devswarm.js', 'companion/lib/devswarm-pull.js', 'companion/lib/devswarm-lifecycle.js'];
   const shapes = new Set();
   for (const f of files) {

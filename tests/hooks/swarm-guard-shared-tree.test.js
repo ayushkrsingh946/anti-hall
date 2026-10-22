@@ -12,6 +12,7 @@ const { makeHome } = require('../helpers/fixtures.js');
 
 const ROOT = path.join(__dirname, '..', '..');
 const PLUGIN = path.join(ROOT, 'plugins', 'anti-hall');
+const NODE_PLUGIN = path.join(ROOT, 'plugins', 'anti-hall-node');
 
 function launch(tuid, agentId, input) {
   const text = 'Async agent launched successfully. (This tool result is internal metadata.)\n'
@@ -94,7 +95,7 @@ test('repo that says no worktrees -> wording without worktree', () => {
 });
 
 test('schema: settings file + env only, no manifest row', () => {
-  const e = require(path.join(PLUGIN, 'hooks', 'lib', 'settings-schema.js')).findSetting('guards', 'sharedTreeAgentNote');
+  const e = require(path.join(NODE_PLUGIN, 'hooks', 'lib', 'settings-schema.js')).findSetting('guards', 'sharedTreeAgentNote');
   assert.ok(e);
   assert.strictEqual(e.default, true);
   assert.strictEqual(e.env, 'ANTIHALL_SHARED_TREE_AGENT_NOTE');

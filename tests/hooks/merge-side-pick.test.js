@@ -9,8 +9,9 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
 const PLUGIN = path.resolve(__dirname, '..', '..', 'plugins', 'anti-hall');
-const HOOK = path.join(PLUGIN, 'hooks', 'merge-side-pick.js');
-const lib = require(path.join(PLUGIN, 'hooks', 'lib', 'merge-side-pick.js'));
+const NODE_PLUGIN = path.resolve(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const HOOK = path.join(NODE_PLUGIN, 'hooks', 'merge-side-pick.js');
+const lib = require(path.join(NODE_PLUGIN, 'hooks', 'lib', 'merge-side-pick.js'));
 
 function mkHome() { return fs.mkdtempSync(path.join(os.tmpdir(), 'ah-msp-')); }
 
@@ -126,7 +127,7 @@ test('registered on both ports; setting declared default-on', () => {
     assert.match(t, /merge-side-pick\.js\\"",/);
     assert.match(t, /merge-side-pick\.js\\" --post/);
   }
-  const e = require(path.join(PLUGIN, 'hooks', 'lib', 'settings-schema.js'));
+  const e = require(path.join(NODE_PLUGIN, 'hooks', 'lib', 'settings-schema.js'));
   const all = JSON.stringify(e);
   assert.match(all, /mergeSidePickAdvisory/);
 });

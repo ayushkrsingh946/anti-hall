@@ -199,8 +199,12 @@ test('WAKE: Claude child -> CronCreate directive, default off-minute 30-min sche
 
 test('WAKE: Claude Primary -> CronCreate directive using the read-primary drain verb, with the REGISTERED resolved primary id (not the raw placeholder)', () => {
   const h = makeHome();
+  // A fixture primary checkout: the ambient cwd is a linked worktree when the suite runs from one, which is not a Primary checkout.
+  const repo = require('node:fs').realpathSync(require('node:fs').mkdtempSync(require('node:path').join(require('node:os').tmpdir(), 'ah-wake-primary-')));
+  require('node:child_process').spawnSync('git', ['init', '-q', repo]);
+  require('node:child_process').spawnSync('git', ['-C', repo, '-c', 'user.email=a@b.c', '-c', 'user.name=T', 'commit', '-q', '--allow-empty', '-m', 'init']);
   try {
-    const c = ctx(testHook(HOOK, sessionPayload(), { home: h.home, expectJson: true, env: CLAUDE_PRIMARY }));
+    const c = ctx(testHook(HOOK, Object.assign(sessionPayload(), { cwd: repo }), { home: h.home, expectJson: true, env: CLAUDE_PRIMARY }));
     assert.ok(/MAILBOX WAKE/.test(c), `Primary has a mailbox too and must get the wake directive; ctx=${c}`);
     // MAILBOX WAKE fix (field evidence 2026-09-26): the directive must name the
     // RESOLVED, now-REGISTERED `primary-<hash>` id — the SAME id wake-watch and
@@ -231,8 +235,9 @@ test('WAKE: Claude Primary -> CronCreate directive using the read-primary drain 
   const cp = require('node:child_process');
   const os = require('node:os');
   const ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-  const cli = require(path.join(ROOT, 'scripts', 'devswarm.js'));
-  const inst = require(path.join(ROOT, 'companion', 'install-devswarm-ingest.js'));
+  const NODE_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+  const cli = require(path.join(NODE_ROOT, 'scripts', 'devswarm.js'));
+  const inst = require(path.join(NODE_ROOT, 'companion', 'install-devswarm-ingest.js'));
 
   function rm(p) { try { fs.rmSync(p, { recursive: true, force: true }); } catch (_) {} }
   function repoFixture() {

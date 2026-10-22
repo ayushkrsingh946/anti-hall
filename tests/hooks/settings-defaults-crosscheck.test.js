@@ -20,7 +20,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const REPO = path.join(__dirname, '..', '..');
-const P = (...parts) => path.join(REPO, 'plugins', 'anti-hall', ...parts);
+const P = (...parts) => path.join(REPO, 'plugins', 'anti-hall-node', ...parts);
 
 const SCHEMA = require(P('hooks', 'lib', 'settings-schema.js'));
 

@@ -23,8 +23,10 @@ const cp = require('node:child_process');
 
 const ROOT = process.env.ANTIHALL_TEST_PLUGIN_ROOT
   || path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const cli = require(path.join(ROOT, 'scripts', 'devswarm.js'));
-const storeLib = require(path.join(ROOT, 'companion', 'lib', 'devswarm-store.js'));
+const NODE_ROOT = process.env.ANTIHALL_TEST_PLUGIN_ROOT
+  || path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const cli = require(path.join(NODE_ROOT, 'scripts', 'devswarm.js'));
+const storeLib = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-store.js'));
 
 function tmpHome() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ah-8b21x-'));
@@ -44,7 +46,7 @@ function makeGitRepo(tag) {
 }
 function backend() { return (storeLib.sqliteAvailable && storeLib.sqliteAvailable()) ? 'sqlite' : 'journal'; }
 function repoKeyOf(repo) {
-  return require(path.join(ROOT, 'companion', 'lib', 'devswarm-repokey.js')).repoKeyForWorktree(repo);
+  return require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-repokey.js')).repoKeyForWorktree(repo);
 }
 // Register a row DIRECTLY in the store so a cross-link (row.sessionId === the
 // other row's id) can be set up exactly as the field shape produces it.
@@ -222,7 +224,7 @@ test('8b211241bbe9 §2e: --ack-as-owner on a retired id redirecting to a LIVE ow
     assert.strictEqual(r.redirectedTo, survivor);
     // R3 item 4: the refusal must also be JOURNALED, so a later investigation
     // can see that an override was aimed at a live owner and stopped.
-    const rk = require(path.join(ROOT, 'companion', 'lib', 'devswarm-repokey.js')).repoKeyForWorktree(repo);
+    const rk = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-repokey.js')).repoKeyForWorktree(repo);
     const recs = cli.readCursorLog(home, rk, 100)
       .concat(cli.readCursorLog(home, 'unknown', 100));
     const rec = recs.find((x) => x && x.gate === 'redirect-to-live');

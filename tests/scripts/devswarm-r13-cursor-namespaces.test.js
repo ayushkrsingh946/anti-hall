@@ -34,10 +34,11 @@ const devswarmSource = require('./lib/devswarm-source.js');
 const cp = require('node:child_process');
 
 const PLUGIN = path.join(__dirname, '../../plugins/anti-hall');
-const cli = require(path.join(PLUGIN, 'scripts/devswarm.js'));
-const storeLib = require(path.join(PLUGIN, 'companion/lib/devswarm-store.js'));
-const repokey = require(path.join(PLUGIN, 'companion/lib/devswarm-repokey.js'));
-const inboxCursor = require(path.join(PLUGIN, 'companion/lib/devswarm-inbox-cursor.js'));
+const NODE_PLUGIN = path.join(__dirname, '../../plugins/anti-hall-node');
+const cli = require(path.join(NODE_PLUGIN, 'scripts/devswarm.js'));
+const storeLib = require(path.join(NODE_PLUGIN, 'companion/lib/devswarm-store.js'));
+const repokey = require(path.join(NODE_PLUGIN, 'companion/lib/devswarm-repokey.js'));
+const inboxCursor = require(path.join(NODE_PLUGIN, 'companion/lib/devswarm-inbox-cursor.js'));
 
 const rm = (p) => { try { fs.rmSync(p, { recursive: true, force: true }); } catch (_) {} };
 
@@ -410,7 +411,7 @@ test('R13 item 4: cmdSend stamps repoKey (and cwd) onto every send receipt', () 
 // own copy of this logic.
 // ---------------------------------------------------------------------------
 
-const liveness = require(path.join(PLUGIN, 'companion/lib/liveness.js'));
+const liveness = require(path.join(NODE_PLUGIN, 'companion/lib/liveness.js'));
 function beat(home, id) {
   const p = liveness.heartbeatPathFor(id, home);
   fs.mkdirSync(path.dirname(p), { recursive: true });
@@ -539,14 +540,14 @@ test('R13 item 11: a fold copy and its sibling original are delivered ONCE, not 
 test('R13 item 11: the supervisor sweep and update.js both call the SAME exported fold (no separate code path)', () => {
   // The two UNATTENDED entry points. Asserted against the source so neither can
   // quietly grow its own copy of foldOne's forward window.
-  const sup = fs.readFileSync(path.join(PLUGIN, 'companion/devswarm-supervisor.js'), 'utf8');
-  const upd = fs.readFileSync(path.join(PLUGIN, 'skills/update/scripts/update.js'), 'utf8');
+  const sup = fs.readFileSync(path.join(NODE_PLUGIN, 'companion/devswarm-supervisor.js'), 'utf8');
+  const upd = fs.readFileSync(path.join(NODE_PLUGIN, 'skills/update/scripts/update.js'), 'utf8');
   assert.ok(sup.includes('devswarmCli.foldMeshDuplicates(home, { repoKey, env })'),
     'the supervisor\'s periodic runFold must delegate to devswarm.js\'s foldMeshDuplicates');
   assert.ok(upd.includes('devswarm.foldMeshDuplicates(home, { cwd, env })'),
     'update.js\'s in-process fold must delegate to the same export');
   // And there is exactly ONE implementation to inherit from.
-  const src = devswarmSource.readAll(PLUGIN);
+  const src = devswarmSource.readAll(NODE_PLUGIN);
   assert.equal((src.match(/^function foldMeshDuplicates\(/gm) || []).length, 1,
     'exactly one foldMeshDuplicates implementation exists');
 });

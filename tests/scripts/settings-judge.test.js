@@ -10,8 +10,9 @@ const cp = require('node:child_process');
 const { makeHome } = require('../helpers/fixtures.js');
 
 const ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const CLI = path.join(ROOT, 'scripts', 'settings.js');
-const DOCTOR = path.join(ROOT, 'hooks', 'doctor.js');
+const NODE_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const CLI = path.join(NODE_ROOT, 'scripts', 'settings.js');
+const DOCTOR = path.join(NODE_ROOT, 'hooks', 'doctor.js');
 const SECRET = 'sk-ant-TESTSECRET-0123456789';
 const COST = 'about $0.0001–0.001 and 1–3 s per turn end, estimated, not measured; precision 0.78–0.81 and recall 1.0 measured on eval/inference-bench.js (84 synthetic cases)';
 

@@ -20,6 +20,7 @@ const path = require('node:path');
 
 const REPO = path.join(__dirname, '..', '..');
 const PLUGIN = path.join(REPO, 'plugins', 'anti-hall');
+const NODE_PLUGIN = path.join(REPO, 'plugins', 'anti-hall-node');
 const read = (...p) => fs.readFileSync(path.join(REPO, ...p), 'utf8');
 
 const schema = require(path.join(PLUGIN, '..', 'anti-hall-node', 'hooks', 'lib', 'settings-schema.js'));
@@ -63,7 +64,7 @@ const mentionsVerb = (text, verb) => new RegExp('`(?:[^`\\n]*[ /])?' + verb.repl
 // that load them (doctor.js's own self-test ids excluded).
 function jevIntegrationIds() {
   const ids = new Set();
-  const dirs = [path.join(PLUGIN, 'hooks'), path.join(PLUGIN, 'hooks', 'lib')];
+  const dirs = [path.join(NODE_PLUGIN, 'hooks'), path.join(NODE_PLUGIN, 'hooks', 'lib')];
   for (const d of dirs) {
     for (const f of fs.readdirSync(d)) {
       if (!f.endsWith('.js') || f === 'doctor.js') continue;
@@ -147,7 +148,7 @@ test('the SessionStart foundation points agents at the operator guide by name', 
   // session core (the default) carries the same pointer in its SKILLS line.
   const src = read('plugins', 'anti-hall-node', 'hooks', 'verify-first-core.js');
   assert.match(src, /\/anti-hall:system-briefing \(Codex: anti-hall-system-briefing\)/);
-  const core = require(path.join(PLUGIN, 'hooks', 'verify-first-core.js'));
+  const core = require(path.join(NODE_PLUGIN, 'hooks', 'verify-first-core.js'));
   assert.match(core.coreCompactSession('/x'), /system-briefing \(operator guide; Codex: anti-hall-system-briefing\)/);
 });
 

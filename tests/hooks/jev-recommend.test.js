@@ -12,9 +12,10 @@ const { spawnSync } = require('node:child_process');
 
 const REPO = path.join(__dirname, '..', '..');
 const PLUGIN = path.join(REPO, 'plugins', 'anti-hall');
-const HOOK = path.join(PLUGIN, 'hooks', 'jev-review-reminder.js');
-const rec = require(path.join(PLUGIN, 'hooks', 'lib', 'jev-recommend.js'));
-const schema = require(path.join(PLUGIN, 'hooks', 'lib', 'settings-schema.js'));
+const NODE_PLUGIN = path.join(REPO, 'plugins', 'anti-hall-node');
+const HOOK = path.join(NODE_PLUGIN, 'hooks', 'jev-review-reminder.js');
+const rec = require(path.join(NODE_PLUGIN, 'hooks', 'lib', 'jev-recommend.js'));
+const schema = require(path.join(NODE_PLUGIN, 'hooks', 'lib', 'settings-schema.js'));
 
 function tmpHome() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'jev-rec-'));

@@ -14,8 +14,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const repokey = require(path.join(ROOT, 'companion', 'lib', 'devswarm-repokey.js'));
-const names = require(path.join(ROOT, 'companion', 'lib', 'devswarm-names.js'));
+const NODE_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const repokey = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-repokey.js'));
+const names = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-names.js'));
 const { testHook } = require('../helpers/spawn-hook.js');
 const { buildAppDb, rmFixture } = require('../helpers/app-db-fixture.js');
 

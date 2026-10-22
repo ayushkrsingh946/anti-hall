@@ -281,6 +281,31 @@ validate an edit with `ah-engine config validate <file>`, restore a missing key 
 to the last-known-good copy, then the pristine copy, then Node. Never edit `engine/defaults.pristine/`. Skipping the engine
 download is the setting `engine.bootstrap` (boolean, default true; `settings.js set engine.bootstrap false`), or the env var `AH_ENGINE_BOOTSTRAP=0`, which overrides the setting. The crash-loop and roll-back switches are engine tunables too: `client.spawn_n` / `client.spawn_window_s` (daemon starts that stop respawning), `daemon.healthy_after_s` (uptime that makes a binary "known good") and `rollback.*` (`rollback.on_mismatch=0` turns the checksum roll-back off; `rollback.fail_n` / `rollback.fail_window_s` set how many wrapper failures count; the install lock has four more: `rollback.install_lock` (the directory of the one lock every writer of the engine binary shares), `rollback.lock_wait_s` (how long an install, ah-update roll-back or sha recording waits for it), `rollback.lock_hook_wait_s` (how long the hook wrapper's integrity check waits before skipping; a held lock never holds a session) and `rollback.lock_stale_s` (a lock held longer is broken; one whose holder is gone is broken at once); list them with `settings tunables rollback`. The start-up probe warm-up is `host_spawn.prewarm` (on by default), `host_spawn.prewarm_programs` (the interpreters whose version probe it runs) and `host_spawn.prewarm_timeout_ms`.
 
+## Allow or block remote commands
+
+Two plain lists in the engine config decide which remote commands (any binary: `gh`, `kubectl`, `firebase`, ...) the main thread may run:
+
+- `command.remote_allow`: always runs in the main thread (shipped: gh issue/label/pr create, comment, edit, close, reopen).
+- `command.remote_block`: always blocked, with an "irreversible or sensitive" reason (shipped: gh pr merge, release, repo edit/delete, secret, `gh api -X POST|PUT|PATCH|DELETE`).
+- Block wins over allow. A command in neither list keeps the default rule (reads pass, mutations block).
+- An entry is a command prefix: binary, then leading subcommand words (global flags like `-R owner/repo` are skipped), then optionally an option and its value (`gh api -X POST`).
+
+Ask the user first: **this project or the whole machine?** The lists live in the engine's `config.toml` in the engine state directory (`ah-engine config --json` shows the effective value of every key and which file set it), which is machine-wide (user level); there is no per-project layer for these keys, so say so if they ask for project scope. Do not edit the plugin's `engine/defaults/` files.
+
+Add and remove with four more lists in `config.toml`; the effective list is the shipped one, minus `*_remove`, plus `*_add`:
+
+```toml
+[command]
+remote_allow_add = ["firebase hosting:channel:deploy"]
+remote_allow_remove = ["gh pr create"]
+remote_block_add = ["kubectl delete"]
+remote_block_remove = ["gh secret"]
+```
+
+(Setting `remote_allow` / `remote_block` themselves replaces the shipped list outright; prefer add/remove.)
+
+Check the result with `ah-engine config --json` and `ah-engine config validate <file>`.
+
 ## Resetting a setting
 
 `sh "${CLAUDE_PLUGIN_ROOT}/scripts/ah-run.sh" settings reset <section.key>` removes the

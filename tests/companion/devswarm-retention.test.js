@@ -12,10 +12,11 @@ const path = require('node:path');
 const zlib = require('node:zlib');
 
 const ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const storeLib = require(path.join(ROOT, 'companion', 'lib', 'devswarm-store.js'));
-const rc = require(path.join(ROOT, 'companion', 'lib', 'reader-cursors.js'));
-const ret = require(path.join(ROOT, 'companion', 'lib', 'devswarm-retention.js'));
-const cli = require(path.join(ROOT, 'scripts', 'devswarm.js'));
+const NODE_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const storeLib = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-store.js'));
+const rc = require(path.join(NODE_ROOT, 'companion', 'lib', 'reader-cursors.js'));
+const ret = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-retention.js'));
+const cli = require(path.join(NODE_ROOT, 'scripts', 'devswarm.js'));
 
 const HASH = 'ret-test-abcdef';
 const P = 'ws-alpha';

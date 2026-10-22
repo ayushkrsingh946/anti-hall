@@ -17,6 +17,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const PLUGIN = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
+const NODE_PLUGIN = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node'); // hook sources live in the Node backup tree
 const HOOKS_JSON = path.join(PLUGIN, 'codex', 'hooks', 'hooks.registry.json');
 const LOOKBACK = 4;
 const STDERR_RE = /fs\.writeSync\(\s*2\s*,|process\.stderr\.write\(/;
@@ -27,7 +28,7 @@ function registeredHookFiles() {
   for (const groups of Object.values(cfg.hooks)) {
     for (const g of groups) {
       for (const h of g.hooks) {
-        const m = /\$\{PLUGIN_ROOT\}\/(hooks\/[^"\s]+\.js)/.exec(h.command);
+        const m = /\$\{PLUGIN_ROOT\}\/(?:\.\.\/anti-hall-node\/)?(hooks\/[^"\s]+\.js)/.exec(h.command);
         if (m) files.add(m[1]);
       }
     }
@@ -38,18 +39,18 @@ function registeredHookFiles() {
 // Local modules a hook requires (hooks/lib/*.js and sibling hooks), one level
 // deep: an exit 2 inside a helper counts for the hook that calls it.
 function localRequires(rel) {
-  const src = fs.readFileSync(path.join(PLUGIN, rel), 'utf8');
+  const src = fs.readFileSync(path.join(NODE_PLUGIN, rel), 'utf8');
   const out = new Set();
   for (const m of src.matchAll(/require\(\s*'(\.\/[^']+)'\s*\)/g)) {
     const p = path.posix.normalize(path.posix.join(path.posix.dirname(rel), m[1]));
     const withExt = p.endsWith('.js') ? p : p + '.js';
-    if (withExt.startsWith('hooks/') && fs.existsSync(path.join(PLUGIN, withExt))) out.add(withExt);
+    if (withExt.startsWith('hooks/') && fs.existsSync(path.join(NODE_PLUGIN, withExt))) out.add(withExt);
   }
   return [...out];
 }
 
 function violations(rel, src) {
-  const lines = (src === undefined ? fs.readFileSync(path.join(PLUGIN, rel), 'utf8') : src).split('\n');
+  const lines = (src === undefined ? fs.readFileSync(path.join(NODE_PLUGIN, rel), 'utf8') : src).split('\n');
   const bad = [];
   lines.forEach((line, i) => {
     const code = line.replace(/\/\/.*$/, '');

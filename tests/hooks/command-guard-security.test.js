@@ -234,7 +234,7 @@ test('verify-allow (script): a checkout shipping BOTH plugin manifests (Claude +
 test('verify-allow (script): a script under the hook\'s OWN plugin root never qualifies, even with no manifest there', () => {
   // Copy hooks/ + companion/ into a root with no plugin manifest at all, so
   // only the own-root (hooks/..) check can recognise the script.
-  const src = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
+  const src = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cgsec-ownroot-')));
   const h = makeHome();
   try {

@@ -20,6 +20,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const PLUGIN_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
+const NODE_PLUGIN_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
 const MONITORS_JSON = path.join(PLUGIN_ROOT, 'monitors', 'monitors.json');
 
 const RAW = fs.readFileSync(MONITORS_JSON, 'utf8');
@@ -74,16 +75,14 @@ test('command never references ${user_config.*} — REJECTED as of Claude Code v
   assert.doesNotMatch(RAW, /\$\{user_config\./, 'monitors.json must not use ${user_config.*} substitution');
 });
 
-test('the devswarm-wake-watch command tries the engine first and falls back to the legacy launcher only when the engine is unavailable', () => {
+test('the devswarm-wake-watch command runs the engine verb directly (the Node watcher is the backup tree, not a monitor fallback)', () => {
   const entry = JSON.parse(RAW).find((m) => m.name === 'devswarm-wake-watch');
   assert.ok(entry, 'devswarm-wake-watch entry must be present');
-  assert.match(entry.command, /^AH_ENGINE_PLUGIN_ROOT="\$\{CLAUDE_PLUGIN_ROOT\}" "\$HOME\/\.anti-hall\/ah-engine\/bin\/ah-engine" devswarm wake-watch --auto; rc=\$\?; case \$rc in 70\|75\|126\|127\)/);
-  assert.match(entry.command, /exec sh "\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/ah-run\.sh" devswarm wake-watch -- "\$\{CLAUDE_PLUGIN_ROOT\}\/companion\/lib\/devswarm-wake-watch\.js" --auto/);
-  assert.match(entry.command, /\*\) exit \$rc;; esac$/);
+  assert.match(entry.command, /^AH_ENGINE_PLUGIN_ROOT="\$\{CLAUDE_PLUGIN_ROOT\}" exec "\$HOME\/\.anti-hall\/ah-engine\/bin\/ah-engine" devswarm wake-watch --auto$/);
 });
 
 test('the watcher script the entry points at is require()-loadable and side-effect-free on require (main() guarded)', () => {
-  const watcherPath = path.join(PLUGIN_ROOT, 'companion', 'lib', 'devswarm-wake-watch.js');
+  const watcherPath = path.join(NODE_PLUGIN_ROOT, 'companion', 'lib', 'devswarm-wake-watch.js');
   let mod;
   assert.doesNotThrow(() => { mod = require(watcherPath); });
   assert.strictEqual(typeof mod.tick, 'function');
@@ -94,7 +93,6 @@ test('the watcher script the entry points at is require()-loadable and side-effe
 test('the devswarm-wake-watch command passes --auto so harness-started refusals stay silent on stdout', () => {
   const entry = JSON.parse(RAW).find((m) => m.name === 'devswarm-wake-watch');
   assert.match(entry.command, /devswarm wake-watch --auto/);
-  assert.match(entry.command, /devswarm-wake-watch\.js" --auto/);
 });
 
 test('every monitor command quotes ${CLAUDE_PLUGIN_ROOT} (a path with spaces must not split)', () => {

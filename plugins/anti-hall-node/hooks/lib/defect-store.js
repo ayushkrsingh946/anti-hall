@@ -121,7 +121,7 @@ const CAUSE_ENUM = [
 function normalizeComponent(p) {
   if (typeof p !== 'string') return null;
   let s = p.trim().replace(/\\/g, '/').replace(/^\.\//, '');
-  s = s.replace(/^plugins\/anti-hall\//, '');
+  s = s.replace(/^plugins\/anti-hall(?:-node)?\//, '');
   s = s.replace(/\/lib\//g, '/');
   s = s.replace(/\.(c|m)?js$|\.(sh|py|ts|json)$/, '');
   s = s.replace(/[\x00-\x1f\x7f]/g, '').slice(0, 120);

@@ -20,9 +20,10 @@ const os = require('node:os');
 const path = require('node:path');
 
 const ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const cli = require(path.join(ROOT, 'scripts', 'devswarm.js'));
-const storeLib = require(path.join(ROOT, 'companion', 'lib', 'devswarm-store.js'));
-const rc = require(path.join(ROOT, 'companion', 'lib', 'reader-cursors.js'));
+const NODE_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const cli = require(path.join(NODE_ROOT, 'scripts', 'devswarm.js'));
+const storeLib = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-store.js'));
+const rc = require(path.join(NODE_ROOT, 'companion', 'lib', 'reader-cursors.js'));
 const { runForeign } = require('../helpers/foreign-process.js');
 
 function tmpHome() {

@@ -16,6 +16,7 @@ const path = require('node:path');
 const devswarmSource = require('../scripts/lib/devswarm-source.js');
 
 const PLUGIN_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
+const NODE_PLUGIN_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
 const EXEMPT = new Set(['companion/lib/identity.js', 'companion/lib/reader-identity.js']);
 
 const PATTERNS = {
@@ -59,8 +60,8 @@ function walk(dir, out) {
 
 function scan() {
   const found = {};
-  for (const abs of walk(PLUGIN_ROOT, [])) {
-    const rel = path.relative(PLUGIN_ROOT, abs).split(path.sep).join('/');
+  for (const [abs, base] of [PLUGIN_ROOT, NODE_PLUGIN_ROOT].flatMap((r) => walk(r, []).map((a) => [a, r]))) {
+    const rel = path.relative(base, abs).split(path.sep).join('/');
     if (EXEMPT.has(rel)) continue;
     const lines = fs.readFileSync(abs, 'utf8').split('\n');
     // scripts/devswarm-lib/* is one logical unit with scripts/devswarm.js.

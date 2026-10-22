@@ -13,6 +13,7 @@ const { makeHome } = require('../helpers/fixtures.js');
 const { assertShape } = require('../helpers/block-shape.js');
 
 const ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
+const NODE_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
 const ctx = (r) => (r.json && r.json.hookSpecificOutput && r.json.hookSpecificOutput.additionalContext) || '';
 const HEAD = /^(⛔|⚠️|💡|✅|⬆️|❌) anti-hall · [a-z0-9-]+: \S/;
 // Segment shape: first line is the headline; later lines are free-form body.
@@ -22,7 +23,7 @@ const assertHead = (text, guard, label) => {
   if (guard) assert.ok(first.includes(' · ' + guard + ':'), label + ': guard ' + guard + '\n' + first);
   assert.doesNotMatch(first, /\bDEVSWARM [A-Z]{3,}|^WARNING|^ERROR|^BLOCKED/, label + ': no old banner');
 };
-const run = (script, args, home, extra) => cp.spawnSync(process.execPath, [path.join(ROOT, script)].concat(args || []), {
+const run = (script, args, home, extra) => cp.spawnSync(process.execPath, [path.join(NODE_ROOT, script)].concat(args || []), {
   cwd: home, encoding: 'utf8', timeout: 30000,
   env: Object.assign({ PATH: process.env.PATH, HOME: home, USERPROFILE: home, ANTIHALL_TEST_ISOLATION: '1' }, extra || {}),
 });
@@ -84,17 +85,17 @@ test('installer forced-dry-run notices keep their facts in the Why / Override sh
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'antihall-cliFam-inst-'));
   try {
     const bare = { PATH: process.env.PATH, HOME: home, USERPROFILE: home };
-    const r = cp.spawnSync(process.execPath, [path.join(ROOT, 'companion', 'install-reaper.js'), '--dry-run'], { cwd: home, env: bare, encoding: 'utf8', timeout: 30000 });
+    const r = cp.spawnSync(process.execPath, [path.join(NODE_ROOT, 'companion', 'install-reaper.js'), '--dry-run'], { cwd: home, env: bare, encoding: 'utf8', timeout: 30000 });
     // --dry-run is explicit, so the guard stays quiet; run without it to see the notice.
-    const r2 = cp.spawnSync(process.execPath, [path.join(ROOT, 'companion', 'install-reaper.js')], { cwd: home, env: bare, encoding: 'utf8', timeout: 30000 });
+    const r2 = cp.spawnSync(process.execPath, [path.join(NODE_ROOT, 'companion', 'install-reaper.js')], { cwd: home, env: bare, encoding: 'utf8', timeout: 30000 });
     assert.ok(r.status === 0 || r.status === 1);
     const lines = assertShape(r2.stderr, 'install-reaper', 'install-reaper notice', { requireWhy: true });
     assert.match(r2.stderr, /forced dry-run \(HOME .* temp directory\)/);
     assert.ok(lines.some((l) => /^Override \(only if the user explicitly asked\): .*ANTIHALL_REAPER_ALLOW_TMP_HOME=1/.test(l)));
-    const sup = cp.spawnSync(process.execPath, [path.join(ROOT, 'companion', 'install-devswarm-supervisor.js')], { cwd: home, env: bare, encoding: 'utf8', timeout: 30000 });
+    const sup = cp.spawnSync(process.execPath, [path.join(NODE_ROOT, 'companion', 'install-devswarm-supervisor.js')], { cwd: home, env: bare, encoding: 'utf8', timeout: 30000 });
     assertShape(sup.stderr, 'install-devswarm-supervisor', 'supervisor notice', { requireWhy: true });
     assert.match(sup.stderr, /ANTIHALL_SUPERVISOR_ALLOW_TMP_HOME=1/);
-    const ing = cp.spawnSync(process.execPath, [path.join(ROOT, 'companion', 'install-devswarm-ingest.js'), '--bogus'], { cwd: home, env: bare, encoding: 'utf8', timeout: 30000 });
+    const ing = cp.spawnSync(process.execPath, [path.join(NODE_ROOT, 'companion', 'install-devswarm-ingest.js'), '--bogus'], { cwd: home, env: bare, encoding: 'utf8', timeout: 30000 });
     assert.match(ing.stderr.split('\n')[0], /^❌ anti-hall · install-devswarm-ingest: unknown option: --bogus$/);
   } finally { fs.rmSync(home, { recursive: true, force: true }); }
 });
@@ -118,7 +119,7 @@ test('statusline installer is retired and writes no shared-shape block', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'antihall-cliFam-sl-'));
   try {
     // The installer is a retained no-op. It must not resurrect the old settings-path refusal flow or write settings.
-    const r = cp.spawnSync(process.execPath, [path.join(ROOT, 'statusline', 'install-statusline.js')], {
+    const r = cp.spawnSync(process.execPath, [path.join(NODE_ROOT, 'statusline', 'install-statusline.js')], {
       cwd: home, encoding: 'utf8', timeout: 30000,
       env: { PATH: process.env.PATH, HOME: '/Users/nobody-antihall', USERPROFILE: '/Users/nobody-antihall', ANTIHALL_TEST_ISOLATION: '1' },
     });
@@ -130,12 +131,12 @@ test('statusline installer is retired and writes no shared-shape block', () => {
 });
 
 test('DevSwarm injection segments lead with the shared headline (no ALL-CAPS banners)', () => {
-  const health = require(path.join(ROOT, 'companion', 'lib', 'ingest-health.js'));
+  const health = require(path.join(NODE_ROOT, 'companion', 'lib', 'ingest-health.js'));
   const stale = health.buildStaleBanner(Date.now() - 3600 * 1000, Date.now());
   assertHead(stale, 'devswarm-stale-data', 'stale data');
-  const src = fs.readFileSync(path.join(ROOT, 'hooks', 'devswarm-parent-inbox.js'), 'utf8')
-    + fs.readFileSync(path.join(ROOT, 'hooks', 'devswarm-child-turn.js'), 'utf8')
-    + fs.readFileSync(path.join(ROOT, 'companion', 'lib', 'primary-seat.js'), 'utf8');
+  const src = fs.readFileSync(path.join(NODE_ROOT, 'hooks', 'devswarm-parent-inbox.js'), 'utf8')
+    + fs.readFileSync(path.join(NODE_ROOT, 'hooks', 'devswarm-child-turn.js'), 'utf8')
+    + fs.readFileSync(path.join(NODE_ROOT, 'companion', 'lib', 'primary-seat.js'), 'utf8');
   assert.doesNotMatch(src, /['"`](⚠ )?DEVSWARM [A-Z]{3,}[A-Z -]*[:(—]/, 'no old DEVSWARM <KIND>: banners left in code strings');
   for (const g of ['devswarm-parent-inbox', 'devswarm-urgent-inbox', 'devswarm-workspaces', 'devswarm-archive-ready', 'devswarm-child-inbox', 'devswarm-child-workspace', 'devswarm-plan']) {
     assert.ok(src.includes(' · ' + g + ': '), g + ' headline present');
@@ -149,7 +150,7 @@ test('no old-style banners remain in shipped hook/CLI strings', () => {
     'scripts/devswarm-lib/core.js', 'scripts/devswarm-lib/misc-verbs.js',
   ];
   for (const f of files) {
-    const s = fs.readFileSync(path.join(ROOT, f), 'utf8');
+    const s = fs.readFileSync(path.join(NODE_ROOT, f), 'utf8');
     assert.doesNotMatch(s, /(console\.(error|log)|stderr\.write)\(\s*['"`](ERROR|WARNING|SAFETY|anti-hall): /, f + ': old prefix');
     assert.doesNotMatch(s, /\[devswarm\] WARNING/, f + ': old [devswarm] WARNING');
   }

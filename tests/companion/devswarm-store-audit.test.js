@@ -18,9 +18,10 @@ const os = require('node:os');
 const path = require('node:path');
 
 const ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const audit = require(path.join(ROOT, 'companion', 'lib', 'devswarm-store-audit.js'));
-const store = require(path.join(ROOT, 'companion', 'lib', 'devswarm-store.js'));
-const reportCli = require(path.join(ROOT, 'scripts', 'devswarm-store-leak-report.js'));
+const NODE_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const audit = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-store-audit.js'));
+const store = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-store.js'));
+const reportCli = require(path.join(NODE_ROOT, 'scripts', 'devswarm-store-leak-report.js'));
 
 function tmpHome(prefix) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), prefix || 'store-audit-test-'));

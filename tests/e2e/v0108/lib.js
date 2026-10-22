@@ -23,8 +23,9 @@ const { after } = require('node:test');
 
 const REPO_ROOT = path.join(__dirname, '..', '..', '..');
 const PLUGIN_ROOT = path.join(REPO_ROOT, 'plugins', 'anti-hall');
-const HOOKS_DIR = path.join(PLUGIN_ROOT, 'hooks');
-const SCRIPTS_DIR = path.join(PLUGIN_ROOT, 'scripts');
+const NODE_PLUGIN_ROOT = path.join(REPO_ROOT, 'plugins', 'anti-hall-node');
+const HOOKS_DIR = path.join(NODE_PLUGIN_ROOT, 'hooks');
+const SCRIPTS_DIR = path.join(NODE_PLUGIN_ROOT, 'scripts');
 
 // Safety-net sweep: track every makeHome() dir and remove anything still
 // standing when the test file finishes, in case a caller's finally-block
@@ -110,7 +111,7 @@ function runCliScript(scriptFile, args, home, extraEnv, opts) {
 // launchd operates on the user session, not the $HOME env var. That surface
 // is out of scope for this suite and must never run from an automated test.
 function runMigrationsLib(fnName, home, extraArgObj) {
-  const migrationsPath = path.join(PLUGIN_ROOT, 'companion', 'lib', 'migrations.js');
+  const migrationsPath = path.join(NODE_PLUGIN_ROOT, 'companion', 'lib', 'migrations.js');
   const code = `
     const lib = require(${JSON.stringify(migrationsPath)});
     const result = lib.${fnName}(${JSON.stringify(home)}, ${JSON.stringify(extraArgObj || {})});

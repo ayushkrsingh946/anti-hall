@@ -17,10 +17,11 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
 const PLUGIN = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const CLI = path.join(PLUGIN, 'scripts', 'devswarm.js');
-const identity = require(path.join(PLUGIN, 'companion', 'lib', 'identity.js'));
-const storeLib = require(path.join(PLUGIN, 'companion', 'lib', 'devswarm-store.js'));
-const repokey = require(path.join(PLUGIN, 'companion', 'lib', 'devswarm-repokey.js'));
+const NODE_PLUGIN = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const CLI = path.join(NODE_PLUGIN, 'scripts', 'devswarm.js');
+const identity = require(path.join(NODE_PLUGIN, 'companion', 'lib', 'identity.js'));
+const storeLib = require(path.join(NODE_PLUGIN, 'companion', 'lib', 'devswarm-store.js'));
+const repokey = require(path.join(NODE_PLUGIN, 'companion', 'lib', 'devswarm-repokey.js'));
 const { buildAppDb, rmFixture } = require('../helpers/app-db-fixture.js');
 let sqlite = null;
 try { sqlite = require('node:sqlite'); } catch (_) { sqlite = null; }
@@ -101,8 +102,8 @@ test('C: send --to-primary from the child submodule cwd is not refused as self-a
 });
 
 test('D: a child row registered against the Primary path is repaired from the app record (idempotent, no delete)', { skip }, () => {
-  const fold = require(path.join(PLUGIN, 'scripts', 'devswarm-lib', 'fold.js'));
-  const core = require(path.join(PLUGIN, 'scripts', 'devswarm-lib', 'core.js'));
+  const fold = require(path.join(NODE_PLUGIN, 'scripts', 'devswarm-lib', 'fold.js'));
+  const core = require(path.join(NODE_PLUGIN, 'scripts', 'devswarm-lib', 'core.js'));
   // seed the OLD bad state: the child id mapped to the monorepo root, descriptor too
   withStore((s) => s.upsertRegistry({ id: CHILD, worktreePath: main, sessionId: 'sess-child', inboxPath: path.join(main, '.devswarm-temp', 'inbox.ndjson') }, { allowPathChange: true }));
   core.writeDescriptorAtomic(home, CHILD, { id: CHILD, worktreePath: main, sessionId: 'sess-child', inboxPath: path.join(main, '.devswarm-temp', 'inbox.ndjson'), ownerKey: repoKey, repoKey });
@@ -145,7 +146,7 @@ test('E: a child registered against the Primary path never receives --to-primary
 
 test('F: a heartbeat report sent from the child submodule cwd satisfies the child Stop gate (no re-hold)', { skip }, () => {
   const { testHook } = require('../helpers/spawn-hook.js');
-  const core = require(path.join(PLUGIN, 'scripts', 'devswarm-lib', 'core.js'));
+  const core = require(path.join(NODE_PLUGIN, 'scripts', 'devswarm-lib', 'core.js'));
   // the child is registered at its own worktree again (D repaired it); corroborate it for the gate
   withStore((s) => s.upsertRegistry({ id: CHILD, worktreePath: child, sessionId: 'sess-child' }, { allowPathChange: true }));
   core.writeDescriptorAtomic(home, CHILD, { id: CHILD, worktreePath: child, sessionId: 'sess-child', ownerKey: repoKey, repoKey });

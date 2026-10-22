@@ -23,7 +23,9 @@ const cp = require('node:child_process');
 
 const antiHallDir = process.env.DEVSWARM_ANTIHALL_DIR
   || path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const cli = require(path.join(antiHallDir, 'scripts', 'devswarm.js'));
+const NODE_antiHallDir = process.env.DEVSWARM_ANTIHALL_DIR
+  || path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const cli = require(path.join(NODE_antiHallDir, 'scripts', 'devswarm.js'));
 
 function tmpHome() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'anti-hall-meshread-'));

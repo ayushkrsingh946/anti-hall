@@ -20,11 +20,12 @@ const path = require('node:path');
 const cp = require('node:child_process');
 
 const ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const storeLib = require(path.join(ROOT, 'companion', 'lib', 'devswarm-store.js'));
-const rc = require(path.join(ROOT, 'companion', 'lib', 'reader-cursors.js'));
-const unread = require(path.join(ROOT, 'companion', 'lib', 'devswarm-unread.js'));
-const inboxCursor = require(path.join(ROOT, 'companion', 'lib', 'devswarm-inbox-cursor.js'));
-const liveness = require(path.join(ROOT, 'companion', 'lib', 'liveness.js'));
+const NODE_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const storeLib = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-store.js'));
+const rc = require(path.join(NODE_ROOT, 'companion', 'lib', 'reader-cursors.js'));
+const unread = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-unread.js'));
+const inboxCursor = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-inbox-cursor.js'));
+const liveness = require(path.join(NODE_ROOT, 'companion', 'lib', 'liveness.js'));
 
 const HASH = 'rc-unit-abcdef';
 const BACKENDS = storeLib.sqliteAvailable && storeLib.sqliteAvailable() ? ['sqlite', 'journal'] : ['journal'];
@@ -289,8 +290,8 @@ for (const backend of BACKENDS) {
       const s0 = open(home, backend);
       try { seedMsgs(s0, 'w', 40); } finally { s0.close(); }
       const script = `
-        const rc = require(${JSON.stringify(path.join(ROOT, 'companion', 'lib', 'reader-cursors.js'))});
-        const st = require(${JSON.stringify(path.join(ROOT, 'companion', 'lib', 'devswarm-store.js'))});
+        const rc = require(${JSON.stringify(path.join(NODE_ROOT, 'companion', 'lib', 'reader-cursors.js'))});
+        const st = require(${JSON.stringify(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-store.js'))});
         const [home, backend, reader] = process.argv.slice(1);
         const s = st.openStore({ home, hash: ${JSON.stringify(HASH)}, backend });
         rc.declare(s, { partition: 'w', reader, home, procTable: new Map() });

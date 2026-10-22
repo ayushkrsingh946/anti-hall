@@ -195,7 +195,8 @@ test('runUpdate: never writes installed_plugins.json directly (harness-owned con
 function reexecFixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ah-reg-reexec-'));
   const src = path.join(root, 'plugins', 'anti-hall');
-  const f = path.join(src, 'skills', 'update', 'scripts', 'update.js');
+  const NODE_src = path.join(root, 'plugins', 'anti-hall-node');
+  const f = path.join(NODE_src, 'skills', 'update', 'scripts', 'update.js');
   fs.mkdirSync(path.dirname(f), { recursive: true });
   fs.writeFileSync(f, '// placeholder; spawnReexec is injected\n');
   return { root, paths: { pluginSrcDir: src, marketplaceDir: root } };

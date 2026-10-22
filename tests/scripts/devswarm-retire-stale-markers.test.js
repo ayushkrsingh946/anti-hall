@@ -16,10 +16,11 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const dw = require(path.join(ROOT, 'scripts', 'devswarm.js'));
-const M = require(path.join(ROOT, 'companion', 'lib', 'migrations.js'));
-const { isArchivedWorkspace } = require(path.join(ROOT, 'companion', 'lib', 'devswarm-archived.js'));
-const storeLib = require(path.join(ROOT, 'companion', 'lib', 'devswarm-store.js'));
+const NODE_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const dw = require(path.join(NODE_ROOT, 'scripts', 'devswarm.js'));
+const M = require(path.join(NODE_ROOT, 'companion', 'lib', 'migrations.js'));
+const { isArchivedWorkspace } = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-archived.js'));
+const storeLib = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-store.js'));
 const { buildAppDb, rmFixture } = require('../helpers/app-db-fixture.js');
 
 let sqlite = null;

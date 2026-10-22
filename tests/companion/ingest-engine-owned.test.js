@@ -17,10 +17,11 @@ const cp = require('child_process');
 
 const ROOT = path.join(__dirname, '..', '..');
 const PLUGIN = path.join(ROOT, 'plugins', 'anti-hall');
-const health = require(path.join(PLUGIN, 'companion', 'lib', 'ingest-health.js'));
-const cli = require(path.join(PLUGIN, 'scripts', 'devswarm.js'));
-const repair = require(path.join(PLUGIN, 'hooks', 'lib', 'doctor-repair.js'));
-const update = require(path.join(PLUGIN, 'skills', 'update', 'scripts', 'update.js'));
+const NODE_PLUGIN = path.join(ROOT, 'plugins', 'anti-hall-node');
+const health = require(path.join(NODE_PLUGIN, 'companion', 'lib', 'ingest-health.js'));
+const cli = require(path.join(NODE_PLUGIN, 'scripts', 'devswarm.js'));
+const repair = require(path.join(NODE_PLUGIN, 'hooks', 'lib', 'doctor-repair.js'));
+const update = require(path.join(NODE_PLUGIN, 'skills', 'update', 'scripts', 'update.js'));
 
 function tmp(tag) { return fs.mkdtempSync(path.join(os.tmpdir(), 'ah-ingest-owned-' + tag + '-')); }
 function rm(d) { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
@@ -111,7 +112,7 @@ test('installer main (every caller\'s choke point): engine owns ingest -> instal
   const repo = makeGitRepo('installer');
   try {
     writeMarker(home, 'engine', Date.now(), 3600000);
-    const r = cp.spawnSync(process.execPath, [path.join(PLUGIN, 'companion', 'install-devswarm-ingest.js')], {
+    const r = cp.spawnSync(process.execPath, [path.join(NODE_PLUGIN, 'companion', 'install-devswarm-ingest.js')], {
       cwd: repo, encoding: 'utf8', timeout: 30000,
       env: Object.assign({}, process.env, { HOME: home, USERPROFILE: home, ANTIHALL_INGEST_DRY_RUN: '1' }),
     });

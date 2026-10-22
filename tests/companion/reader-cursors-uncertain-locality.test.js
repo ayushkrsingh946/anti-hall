@@ -31,10 +31,11 @@ const os = require('node:os');
 const path = require('node:path');
 
 const ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const storeLib = require(path.join(ROOT, 'companion', 'lib', 'devswarm-store.js'));
-const rc = require(path.join(ROOT, 'companion', 'lib', 'reader-cursors.js'));
-const liveness = require(path.join(ROOT, 'companion', 'lib', 'liveness.js'));
-const identity = require(path.join(ROOT, 'companion', 'lib', 'identity.js'));
+const NODE_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const storeLib = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-store.js'));
+const rc = require(path.join(NODE_ROOT, 'companion', 'lib', 'reader-cursors.js'));
+const liveness = require(path.join(NODE_ROOT, 'companion', 'lib', 'liveness.js'));
+const identity = require(path.join(NODE_ROOT, 'companion', 'lib', 'identity.js'));
 
 const HASH = 'fixture-repo-uncertain-locality';
 const STARTED = 1791000000000;

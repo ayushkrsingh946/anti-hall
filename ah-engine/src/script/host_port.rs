@@ -114,11 +114,7 @@ fn jev_key_notice(jev_on: bool, judge_on: bool, allow_anthropic: bool) -> rquick
             continue;
         }
         let present = if is_jev {
-            let var = match transport {
-                crate::jev::settings::Vendor::Typesafe => defaults::text("env.jev_legacy_key_typesafe"),
-                crate::jev::settings::Vendor::Vercel => defaults::text("env.jev_legacy_key_vercel"),
-            };
-            env.get(var).is_some_and(|v| !v.is_empty()) || std::fs::metadata(&key_file).is_ok_and(|m| m.is_file() && m.len() > 0)
+            std::fs::metadata(&key_file).is_ok_and(|m| m.is_file() && m.len() > 0)
         } else {
             env.get(defaults::text("judge.anthropic_legacy_env")).is_some_and(|v| !v.is_empty())
         };
