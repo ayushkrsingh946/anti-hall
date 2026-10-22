@@ -357,7 +357,7 @@ fn refusals_print_the_same_and_an_idle_primary_is_left_to_node() {
     assert_eq!((a.exited(), b.exited()), (Some(0), Some(0)));
     assert_eq!(a.lines(), vec!["[wake-watch] REFUSED TO ARM: disabled-by-settings".to_string()]);
     assert_eq!(a.lines(), b.lines());
-    // a Primary with no live child: Node prints its one idle line; the engine answers 75 and prints nothing
+    // a Primary with no live child: both print one idle-skip line and exit 0 (the engine's wording is the cautious one, without a cron claim)
     let fx = pair("idle");
     let ids: Vec<(String, String)> = [&fx.0, &fx.1].iter().map(|f| primary_fixture(f, false)).collect();
     for (i, f) in [&fx.0, &fx.1].into_iter().enumerate() {
@@ -366,10 +366,10 @@ fn refusals_print_the_same_and_an_idle_primary_is_left_to_node() {
     let repo_env = [("DEVSWARM_REPO_ID", "repo-1")];
     let (mut a, mut b) = (fx.0.spawn(Kind::Node, &repo_env, &["--auto"]), fx.1.spawn(Kind::Engine, &repo_env, &["--auto"]));
     assert_eq!(a.exited(), Some(0));
-    assert_eq!(b.exited(), Some(75), "the engine leaves the idle line to Node");
+    assert_eq!(b.exited(), Some(0), "the engine answers the idle line itself");
     assert!(a.lines().len() == 1 && a.lines()[0].starts_with("[wake-watch] idle-skip: no live child workspaces"), "{:?}", a.lines());
-    assert!(b.lines().is_empty(), "nothing printed before a deferral");
-    assert!(fx.1.read("rearm-cues.jsonl").is_none() && fx.1.read("wake").is_none(), "nothing written before a deferral");
+    assert!(b.lines().len() == 1 && b.lines()[0].starts_with("[wake-watch] idle-skip: no live child workspaces"), "{:?}", b.lines());
+    assert!(fx.1.read("wake").is_none(), "nothing armed");
 }
 
 #[test]

@@ -169,7 +169,7 @@ fn monitor_unarmed(env: &Env, a: &Agent, st: &State, now: u64) -> Option<Raised>
     if let Some(Some(armed)) = a.ws.as_ref().map(|w| w.armed) {
         return (!armed && !a.gone).then(|| (0, a.ws.as_ref().map(|w| w.id.clone()).unwrap_or_default()));
     }
-    if a.kind == kind_name("main") && sinks::wake_armed(env, &a.id) {
+    if (a.kind == kind_name("main") || a.ws.is_some()) && sinks::wake_armed(env, &a.id) {
         return None;
     }
     let subs = st.agents.values().filter(|s| super::is_child(s) && s.parent == a.id && running(s)).count() as u64;
@@ -286,8 +286,9 @@ fn text_for(env: &Env, a: &Agent, sig: &str, f: &Flag) -> String {
         ),
         "watched_exit" => defaults::render("msg.agent_watched_exit", &[("agent", &who), ("kind", &kind), ("count", &f.evidence), ("task", &f.text)]),
         _ if a.ws.as_ref().is_some_and(|w| w.armed == Some(false)) => {
-            let root = env.plugin_root.as_ref().map(|r| r.join(pth("watcher")).to_string_lossy().to_string()).unwrap_or_else(|| pth("watcher").to_string());
-            defaults::render("msg.agent_monitor_unarmed_devswarm", &[("command", &format!("node {root}"))])
+            let root = env.plugin_root.as_ref().map_or_else(|| defaults::text("agent_tracker.wake_root_fallback").to_string(), |r| r.to_string_lossy().to_string());
+            let command = defaults::render("agent_tracker.wake_command", &[("root", &root)]);
+            defaults::render("msg.agent_monitor_unarmed_devswarm", &[("command", &command)])
         }
         _ => defaults::render("msg.agent_monitor_unarmed", &[("count", &f.evidence), ("armed", &f.text)]),
     };

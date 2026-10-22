@@ -187,7 +187,9 @@ fn devswarm(env: &Env, st: &mut State) {
         if !step.is_empty() {
             facts::set_step(a, &step);
         }
-        a.ws = Some(Ws { id: id.clone(), armed: Some(watcher_armed(env, &id)), step, done });
+        // a Primary's DevSwarm watcher arms only while it has a live child (its idle-skip), so "unarmed" says nothing about it
+        let armed = (!id.starts_with(defaults::text("agent_tracker.primary_prefix"))).then(|| watcher_armed(env, &id));
+        a.ws = Some(Ws { id: id.clone(), armed, step, done });
     }
 }
 
