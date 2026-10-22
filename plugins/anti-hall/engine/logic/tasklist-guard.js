@@ -562,6 +562,13 @@ function decide(p, opts) {
   }
   var transcript = p.transcript_path;
   if (!transcript || typeof transcript !== 'string') return 'allow';
+  // HOME unset: Node's os.homedir() is the passwd home, and state, settings and skips live under it (adopted for the call, as the other guards do)
+  if (ah.env.get(ah.cfg('env.home')) === null) {
+    var nh = hookProc.nodeHome();
+    if (nh.home === undefined) { ah.unable('tasklist-guard:no_home'); return 'allow'; }
+    if (hookProc.testGuarded(nh.home)) { ah.unable('tasklist-guard:home_test_guard'); return 'allow'; } // the real home under a test marker is never touched
+    ah.useHome(nh.home);
+  }
   var home = ah.home();
   if (!home) { ah.unable('tasklist-guard:no_home'); return 'allow'; } // no home: no state, ledgers or progress files to judge
   var rawSid = p.session_id !== undefined && p.session_id !== null ? String(p.session_id) : '';
