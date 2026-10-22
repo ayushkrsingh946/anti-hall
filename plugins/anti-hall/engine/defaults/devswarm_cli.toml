@@ -3502,3 +3502,7 @@ doc = "How many characters of a commit id a warning shows."
 value = 12
 min = 4
 max = 40
+
+[devswarm_cli.reg_retire_fields]
+doc = "The fields a registration adds when it folded other registry rows of the same worktree into its id: the retired ids, the forwarded message count, the rows left (descriptor-backed), the rows not done this pass."
+value = ["retiredDuplicates", "forwardedMessages", "leftDuplicates", "pendingDuplicates"]

@@ -503,9 +503,6 @@ fn register_core(inv: &Inv, a: &Args, require_new: bool, primary: Option<&str>) 
             Some(v) => Some(v.stringify()),
         },
     };
-    if has_duplicate_rows(inv, &current, id, wt_text.as_deref())? {
-        return defer("duplicate-registry-rows");
-    }
     let reader = match crate::meshw::tick::open_reader(inv, &current)? {
         Some(r) => Some(r),
         // the Primary's first registration of a project creates its store, as Node's `openStore` does
@@ -549,7 +546,11 @@ fn register_core(inv: &Inv, a: &Args, require_new: bool, primary: Option<&str>) 
             crate::meshw::log_summary_failure(defaults::text("devswarm_cli.verb_register"), &why);
         }
     }
+    // `retireWorktreeDuplicates`: another registry row of this physical worktree (a spawn's seed row, a legacy registration) is
+    // folded into this id, its unread mail forwarded first; fail-open, as Node's catch is
+    let dup = !failed && has_duplicate_rows(inv, &current, id, wt_text.as_deref()).unwrap_or(false);
     lock.release();
+    let retire = if dup { retire_duplicates(inv, id, wt_text.as_deref()) } else { None };
     if failed {
         return defer("committed:registry");
     }
@@ -568,7 +569,43 @@ fn register_core(inv: &Inv, a: &Args, require_new: bool, primary: Option<&str>) 
             .put("worktree", s(wt))
             .put("descriptor", out_desc),
     };
+    if let Some(r) = retire.as_ref().and_then(|v| OVal::parse(&v.to_string())) {
+        let keys = defaults::list("devswarm_cli.reg_retire_fields");
+        o.put(keys[0], r.get("retired").cloned().unwrap_or(OVal::Arr(Vec::new())));
+        o.put(keys[1], r.get("forwarded").cloned().unwrap_or(OVal::Num(0.0)));
+        if let Some(l) = r.get("left") {
+            o.put(keys[2], l.clone());
+        }
+        if let Some(p) = r.get("pending") {
+            o.put(keys[3], p.clone());
+        }
+    }
     Ok(answer(0, o.done()))
+}
+
+/// `retireWorktreeDuplicates(home, desc, ctx)` after a registration: fold every other registry row of the same physical worktree into
+/// `id` (forwarding its unread mail first; a row with a descriptor of its own is left). `None` is Node's `null` (nothing to report,
+/// or a step the engine could not do, which Node's catch also reports as `null`).
+fn retire_duplicates(inv: &Inv, id: &str, worktree: Option<&str>) -> Option<serde_json::Value> {
+    let wt = worktree.filter(|w| !w.is_empty())?;
+    let st = inv.settings();
+    // the plugin root of the context named Node's functions for the old witness; the native gate does not read it
+    let ctx = crate::dssup::tick::Ctx { home: &inv.home, root: &inv.home, st: &st, now: inv.now, engine_pokes: false };
+    let runner = crate::dsact::runner::System::configured();
+    let hooks = crate::dssup::recon::Hooks { at: &|_| {} };
+    let run = crate::dssup::recon::dup::retire_worktree_duplicates(&ctx, &runner, &inv.cwd, id, wt, &hooks).ok()?;
+    let mut result = run.result?;
+    // a unit the applier handed back (a busy lock, a drifted precondition) was not done: its row is pending, not retired
+    let prefix = defaults::text("devswarm_recon.fold_unit_prefix");
+    let pending: Vec<(String, String)> = run.deferred.iter().filter_map(|(label, why)| label.strip_prefix(prefix).map(|i| (i.to_string(), why.clone()))).collect();
+    if !pending.is_empty() {
+        if let Some(serde_json::Value::Array(r)) = result.get_mut("retired") {
+            r.retain(|v| !pending.iter().any(|(i, _)| v.as_str() == Some(i.as_str())));
+        }
+        let list: Vec<serde_json::Value> = pending.iter().map(|(i, why)| serde_json::json!({"id": i, "reason": why})).collect();
+        result["pending"] = serde_json::Value::Array(list);
+    }
+    Some(result)
 }
 
 /// `ensure <id> [--worktree P --session S --inbox P --cursor P]`.
