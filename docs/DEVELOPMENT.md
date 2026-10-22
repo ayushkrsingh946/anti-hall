@@ -9,7 +9,7 @@ Every shell command in this guide is run by `ah-engine/scripts/doc-check.sh` in 
 | Tool | Version | Used for |
 |---|---|---|
 | Rust | `1.99.0`, pinned in [`ah-engine/rust-toolchain.toml`](../ah-engine/rust-toolchain.toml) with `rustfmt` and `clippy` | building and testing `ah-engine/` |
-| Node.js | 22 or newer (`engines` in `package.json`; CI runs 22 and 24) | the plugin, which is still the live implementation, plus `tools/`, `evals/` and the parity harnesses. No `npm install`: everything is built-ins only |
+| Node.js | 22 or newer (`engines` in `package.json`; CI runs 22 and 24) | the Node backup (`plugins/anti-hall-node`, not published; the engine is the live implementation), its test suite, `tools/`, `evals/` and the parity harnesses. No `npm install`: everything is built-ins only |
 | git | any recent | everything |
 | `actionlint` | tested with 1.7.12 | linting `.github/workflows/*.yml` |
 | `shellcheck` | tested with 0.11.0 | linting the shell scripts |
@@ -227,7 +227,7 @@ Set `AH_PARITY_DUMP=<dir>` to write each lane's corpus and summary there, `AH_PA
 
 ## Run the plugin against a local engine
 
-The plugin's hooks call the engine whenever a binary is installed at `~/.anti-hall/ah-engine/bin/ah-engine` (the bootstrap installs the release pinned by `ah-engine.lock` and never overwrites a binary it did not install, so a local build copied there stays). To keep a test run off your real home, exercise the engine directly, in a throwaway state directory (keep its path short, because the daemon's socket lives there):
+The plugin's hooks run the thin client `~/.anti-hall/ah-engine/bin/ah-hook`, which calls the engine installed at `~/.anti-hall/ah-engine/bin/ah-engine` (the installer installs the release pinned by `ah-engine.lock` and never overwrites a binary it did not install, so a local build copied there stays). To keep a test run off your real home, exercise the engine directly, in a throwaway state directory (keep its path short, because the daemon's socket lives there):
 
 ```sh
 E="$PWD/ah-engine/target/release/ah-engine"
@@ -368,7 +368,7 @@ benchmark with live-like data went from 22.0 % to 1.23 % of a core. The lesson f
 
 ## Porting a guard to the engine
 
-The workflow is the one in D31 and D57: port check by check, each through parity, shadow and review. The plugin stays Node and live until a guard has passed all three.
+The workflow is the one in D31 and D57: port check by check, each through parity, shadow and review. (Historical: every guard has been ported; the engine decides every hook and the Node hooks are a backup outside the published plugin. New guards are written for the engine only, see CONTRIBUTING.md.)
 
 1. **Read the Node guard** and its tests under `plugins/anti-hall/hooks/` and `tests/hooks/`. The guard's `evaluate(payload, env)` is the authority; a mismatch is a Rust bug, never a reason to change the Node guard.
 2. **Implement `Check`** in its own module under `ah-engine/src/checks/`, and list it in the registry. Put every table, limit and message in `plugins/anti-hall/engine/defaults/*.toml` (the `no_hardcoded_tunables` test fails otherwise) and cite the Node function each Rust function mirrors. Where the engine cannot decide exactly, return a deferral so Node decides; never guess.
