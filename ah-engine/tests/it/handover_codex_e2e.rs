@@ -19,6 +19,7 @@ impl Env {
         let dir = std::env::temp_dir().join(format!("ahd-hc-{name}-{}", std::process::id()));
         ah_engine::discard::harmless(std::fs::remove_dir_all(&dir));
         std::fs::create_dir_all(dir.join("home/.anti-hall")).unwrap();
+        std::fs::create_dir_all(dir.join("tmp")).unwrap();
         // the verify-first SessionStart texts (a native check of their own) would push the joined context of a `compact`
         // start past the 10000 inline cap; these tests are about the handover and Codex checks only
         std::fs::write(dir.join("home/.anti-hall/settings.json"), r#"{"context":{"verifyFirstSession":false,"verifyFirstOrchestration":false}}"#).unwrap();
@@ -69,7 +70,8 @@ impl Env {
         let mut last = (0, String::new(), String::new());
         for _ in 0..80 {
             last = self.run(event, id, false, payload, extra);
-            if !last.1.contains("NODE-RAN") && (last.0 != 0 || !last.1.is_empty() || !last.2.is_empty()) {
+            // a cold daemon passes the call through with a one-line notice on stderr: that is not readiness either
+            if !last.1.contains("NODE-RAN") && !last.2.starts_with("anti-hall: the engine did not answer") && (last.0 != 0 || !last.1.is_empty() || !last.2.is_empty()) {
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(50));

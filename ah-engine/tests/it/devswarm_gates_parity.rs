@@ -577,6 +577,16 @@ fn pg_mask_times(mut snap: BTreeMap<String, Vec<u8>>) -> BTreeMap<String, Vec<u8
     snap
 }
 
+thread_local! {
+    /// The steps where Node blocks and the engine does not: collected over the whole corpus and reported together at its end.
+    static WEAKER: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+fn assert_never_weaker() {
+    let weaker = WEAKER.with(|v| std::mem::take(&mut *v.borrow_mut()));
+    assert!(weaker.is_empty(), "{} steps where the engine is weaker than Node on a block:\n{}", weaker.len(), weaker.join("\n"));
+}
+
 /// What one case did: steps answered, steps deferred, answered blocks, answered escalations.
 #[derive(Default)]
 struct PgTally {
@@ -692,7 +702,7 @@ fn pg_exec(case: &PgCase) -> PgTally {
             pg_restore(&home, &before, &times);
             let (ncode, nout, _) = node_run(&input);
             if let Err(w) = crate::common::not_weaker_than_node((ncode, &String::from_utf8_lossy(&nout)), (ecode, &format!("{}{}", String::from_utf8_lossy(&eout), String::from_utf8_lossy(&eerr)))) {
-                panic!("{label}: {w}");
+                WEAKER.with(|v| v.borrow_mut().push(format!("{label}: {w}")));
             }
             t.deferred += 1;
             continue;
@@ -1320,6 +1330,7 @@ fn parent_gate_answers_match_node_byte_for_byte() {
         "devswarm-parent-gate parity: {cases} cases, {} steps answered byte-identically to Node ({} blocks, {} escalations), {} deferred",
         sum.answered, sum.blocks, sum.escalations, sum.deferred
     );
+    assert_never_weaker();
     assert!(only.is_some() || answers_only || cases >= 50 && sum.answered >= 50 && sum.blocks >= 20 && sum.escalations >= 2, "the corpus shrank or stopped blocking");
 }
 
@@ -1572,7 +1583,7 @@ fn cx_exec(case: &Cx, agent: &str) -> CxTally {
             pg_restore(&home, &before, &times);
             let (ncode, nout, _) = node_run(&input);
             if let Err(w) = crate::common::not_weaker_than_node((ncode, &String::from_utf8_lossy(&nout)), (ecode, &format!("{}{}", String::from_utf8_lossy(&eout), String::from_utf8_lossy(&eerr)))) {
-                panic!("{label}: {w}");
+                WEAKER.with(|v| v.borrow_mut().push(format!("{label}: {w}")));
             }
             t.deferred += 1;
             continue;
@@ -1630,6 +1641,7 @@ fn cx_report(what: &str, cases: Vec<Cx>) -> CxTally {
         sum.stderr,
         sum.deferred
     );
+    assert_never_weaker();
     sum
 }
 
