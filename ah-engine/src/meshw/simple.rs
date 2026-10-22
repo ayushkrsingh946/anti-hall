@@ -711,17 +711,8 @@ fn wake_directive(inv: &Inv, a: &Args) -> R<Answer> {
     let home = home_str(inv)?;
     let env = crate::reqenv::RequestEnv::capture();
     let Some(st) = crate::checks::devswarm_role::usable_settings(&env) else { return defer("settings") };
-    let Some(root) = defaults::root().and_then(|r| r.to_str().map(str::to_string)).and_then(|r| crate::checks::devswarm_role::node_root(&r)) else {
-        return defer("plugin-root");
-    };
-    // the stable launcher when it is a file, else the script where this plugin keeps it
-    let path_of = |key: &str| {
-        let l = defaults::raw(key);
-        let raw = posix_normalize(&format!("{root}/{}", l.str_field("target")));
-        let stable = posix_normalize(&format!("{home}/{}/{}", defaults::text("devswarm_role.bin_dir"), l.str_field("name")));
-        if std::fs::metadata(&stable).is_ok_and(|m| m.is_file()) { stable } else { raw }
-    };
-    let (cli, watcher) = (path_of("devswarm_role.launcher_cli"), path_of("devswarm_role.launcher_watcher"));
+    // the engine shims agents run (devswarm_role.engine_cli / engine_watcher)
+    let (cli, watcher) = (crate::checks::devswarm_role::text::engine_cli(&home), crate::checks::devswarm_role::text::engine_watcher(&home));
     let agent_raw = inv.env.get(defaults::text("devswarm_role.agent_env")).map(String::as_str).unwrap_or("");
     if !agent_raw.is_ascii() {
         return defer("agent-name"); // JavaScript and Rust lower-case some non-ASCII letters differently

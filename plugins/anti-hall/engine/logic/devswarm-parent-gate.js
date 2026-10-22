@@ -824,8 +824,8 @@ function pgGate(p, root, l) {
     ? pgReason(blocking, own, escalateTimes, hasIntent,
       { unanswered: unanswered, informational: informational, truncated: truncated, qEscalate: qEscalateTimes, waiting: pgWaitingSeg(home, blocking) })
     : ah.cfg('devswarm_role.pg_reason_parked_only');
-  var cli = root + '/' + ah.cfg('devswarm_role.launcher_cli').target;
-  var skip = text.render(ah.cfg('devswarm_role.pg_skip_cmd'), { cli: pgShQuote(ah.path.resolveAbs(cli)), guard: ah.cfg('devswarm_role.gate_guard') });
+  var cli = dwEngineCmd('devswarm_role.engine_cli', ah.env.get(ah.cfg('env.home')) || '');
+  var skip = text.render(ah.cfg('devswarm_role.pg_skip_cmd'), { cli: pgShQuote(cli), guard: ah.cfg('devswarm_role.gate_guard') });
   fx.out = JSON.stringify({ decision: ah.cfg('devswarm_role.pg_decision_block'), reason: pgFrame(base + (parked !== null ? ah.cfg('devswarm_role.pg_parked_joiner') + parked : '') + wake, skip) }) + '\n';
   return fx;
 }

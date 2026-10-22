@@ -108,7 +108,7 @@ mod task_tracker_parity;
 mod w2_behaviour_matrix;
 mod telemetry;
 mod temp_leaks;
-mod template_drift;
+mod devswarm_shims;
 mod transcript_index;
 mod transcript_parity;
 mod update_parity;
