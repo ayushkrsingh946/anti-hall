@@ -38,6 +38,10 @@ pub(super) fn legacy_of(ctx: &Ctx, hash: &str) -> Value {
         return json!({"eligible": false, "reason": "no-journal", "files": []});
     }
     if crate::dssup::setting(ctx.st, "devswarm_sup.set_rt_fold_alone").as_bool().unwrap_or(false) {
+        // the armed fold holds a store whose merge into sqlite is not proven complete: the report says the same
+        if let Some(reason) = super::fold::ineligible(ctx.home, hash) {
+            return json!({"eligible": false, "reason": reason, "files": []});
+        }
         return json!({"eligible": true, "reason": null, "files": super::fold::files_json(&mine)});
     }
     json!({"eligible": false, "reason": defaults::text("devswarm_sup.rt_why_fold_off"), "files": []})
