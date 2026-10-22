@@ -137,7 +137,7 @@ fn refs(file: &Path, src: &str, plugin: &Path) -> Vec<PathBuf> {
     out
 }
 
-/// The fingerprint of `entries` (paths relative to the repository root, e.g. `plugins/anti-hall/hooks/api-guard.js`) and their
+/// The fingerprint of `entries` (paths relative to the repository root, e.g. `plugins/anti-hall-node/hooks/api-guard.js`) and their
 /// require-closure, plus `.claude-plugin/plugin.json` (read by the settings layer) and the tools' versions.
 pub fn fingerprint(entries: &[&str], tools: &[Tool]) -> Fingerprint {
     let root = repo_root();

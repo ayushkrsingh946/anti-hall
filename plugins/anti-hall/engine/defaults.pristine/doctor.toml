@@ -1326,11 +1326,11 @@ value = "not a file"
 
 [doctor.statusline_dispatcher]
 doc = "The statusline dispatcher script, relative to the plugin root; the render check requires it to be installed."
-value = "statusline/statusline.js"
+value = "../anti-hall-node/statusline/statusline.js"
 
 [doctor.statusline_rich]
 doc = "The line-1 renderer script, relative to the plugin root."
-value = "statusline/statusline-rich.js"
+value = "../anti-hall-node/statusline/statusline-rich.js"
 
 
 [doctor.statusline_sample]

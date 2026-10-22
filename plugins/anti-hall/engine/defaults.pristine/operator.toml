@@ -1224,8 +1224,8 @@ doc = "The shell flag that takes the command."
 value = "-c"
 
 [statusline.dir]
-doc = "The status line directory of the plugin."
-value = "statusline"
+doc = "The status line renderer directory, relative to the plugin root. The renderers are Node and live in the Node backup tree (nodeback.node_dir), outside the published plugin."
+value = "../anti-hall-node/statusline"
 
 [statusline.rich_file]
 doc = "The rich renderer file."

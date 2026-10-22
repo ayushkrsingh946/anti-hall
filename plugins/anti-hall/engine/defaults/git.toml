@@ -443,7 +443,7 @@ value = "(?i)\\.anti-hall[\\\\/]+bin(?:[\\\\/]|$)"
 
 [git.skip_script]
 doc = "Script, relative to the plugin directory, that records a skip for a guard."
-value = "scripts/devswarm.js"
+value = "../anti-hall-node/scripts/devswarm.js"
 
 [git.skip_command]
 doc = "Command that records a skip for a guard; {script} is the quoted script path and {key} the guard id."

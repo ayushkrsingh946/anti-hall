@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Full-outcome parity for the built-in `git` check: the Node git-guard (authority) vs the engine, comparing
 // exit code, stdout and stderr exactly (trailing whitespace trimmed).
-//   node run-git.js --engine ../target/release/ah-engine --hooks <repo>/plugins/anti-hall/hooks --corpus c.jsonl
+//   node run-git.js --engine ../target/release/ah-engine --hooks <repo>/plugins/anti-hall-node/hooks --corpus c.jsonl
 //        [--mode oneshot|daemon|both] [--limit N] [--conc 8] [--show 15] [--out mismatches.json]
 // Corpus lines: {"command": "...", "cwd": "/optional/dir", "source": "..."}.
 // Node side runs `git-guard.js`; engine side runs `ah-engine check git` (oneshot: the logic in-process) and/or

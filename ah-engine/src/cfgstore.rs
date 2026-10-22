@@ -4,7 +4,7 @@
 //!
 //! Every shipped setting (the plugin's `engine/defaults/*.toml`, read AT RUN TIME through `defaults.rs`: at start-up, on plugin update
 //! and on file change; nothing is compiled in, `build.rs` only collects the key names as a schema) is resolved from these sources, highest first.
-//! The order mirrors `get()` in `plugins/anti-hall/hooks/lib/settings.js` (env, then `settings.json`, then the tiers
+//! The order mirrors `get()` in `plugins/anti-hall-node/hooks/lib/settings.js` (env, then `settings.json`, then the tiers
 //! below the file, then the default), with the engine's own TOML in the slot Node gives to its "below the file" tiers:
 //!
 //! 1. **env**: the setting's own `env` variable (numeric settings only, as `defaults::num` already did).

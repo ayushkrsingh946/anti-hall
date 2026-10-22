@@ -222,7 +222,7 @@ fn judge_side(c: &JudgeCase, engine: bool, plugin_root: Option<&Path>) -> JudgeS
             cmd
         } else {
             let mut cmd = Command::new("node");
-            cmd.arg(repo().join("plugins/anti-hall/hooks/speculation-judge.js"));
+            cmd.arg(repo().join("plugins/anti-hall-node/hooks/speculation-judge.js"));
             cmd
         };
         cmd.env_clear()
@@ -598,7 +598,7 @@ fn triage_side(engine: bool, env: &[(&str, String)], answers: Value, model_text:
         cmd
     } else {
         let mut cmd = Command::new("node");
-        cmd.arg("-r").arg(&stub).arg(repo().join("plugins/anti-hall/hooks/lib/jev-triage-worker.js"));
+        cmd.arg("-r").arg(&stub).arg(repo().join("plugins/anti-hall-node/hooks/lib/jev-triage-worker.js"));
         cmd
     };
     cmd.env_clear()

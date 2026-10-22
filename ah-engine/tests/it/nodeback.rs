@@ -15,6 +15,7 @@ fn plugin() -> PathBuf {
 
 struct Env {
     dir: PathBuf,
+    plugin: PathBuf,
 }
 
 impl Env {
@@ -24,7 +25,18 @@ impl Env {
         std::fs::create_dir_all(dir.join("home")).unwrap();
         std::fs::create_dir_all(dir.join("state")).unwrap();
         std::fs::write(dir.join("state/config.toml"), config).unwrap();
-        Env { dir }
+        Env { plugin: plugin(), dir }
+    }
+
+    /// An environment whose plugin is a copy WITHOUT the Node backup directory (the published plugin alone, as the directory ships it).
+    fn without_node(name: &str, config: &str) -> Env {
+        let mut e = Env::new(name, config);
+        let root = e.dir.join("pub");
+        std::fs::create_dir_all(&root).unwrap();
+        let copied = Command::new("cp").arg("-R").arg(plugin()).arg(root.join("anti-hall")).status().unwrap();
+        assert!(copied.success());
+        e.plugin = root.join("anti-hall");
+        e
     }
 
     fn state(&self) -> PathBuf {
@@ -38,8 +50,8 @@ impl Env {
             .env("HOME", self.dir.join("home"))
             .env("AH_ENGINE_DIR", self.state())
             .env("AH_ENGINE_VERSION", "nodeback-e2e")
-            .env("AH_ENGINE_PLUGIN_ROOT", plugin())
-            .env("CLAUDE_PLUGIN_ROOT", plugin())
+            .env("AH_ENGINE_PLUGIN_ROOT", &self.plugin)
+            .env("CLAUDE_PLUGIN_ROOT", &self.plugin)
             .env("AH_ENGINE_DISPATCH_IN_PROCESS", "1")
             .env("ANTIHALL_PROCWATCH", "0")
             .current_dir(&self.dir)
@@ -225,4 +237,29 @@ fn the_fallback_switch_makes_the_wrapper_run_the_node_hooks_and_off_returns_to_t
     let (code, ..) = run(&e);
     assert_eq!(code, 2, "the engine blocks too");
     assert_eq!(e.ledger().len(), before, "Node was not run");
+}
+
+#[test]
+fn without_the_node_directory_the_shadow_is_a_counted_no_op() {
+    let e = Env::without_node("nonode-shadow", ON);
+    let (c, ..) = e.engine(&["hook", "--event", "PreToolUse", "--tool", "Bash"], &e.payload(FORCE));
+    assert_eq!(c, 2, "the engine still decides alone");
+    assert!(e.counters().contains("shadow\tskip_no_node"), "skip counted: {}", e.counters());
+    std::thread::sleep(Duration::from_millis(1000));
+    assert!(e.ledger().is_empty(), "no Node run was started");
+}
+
+#[test]
+fn without_the_node_directory_the_fallback_switch_is_a_logged_no_op_and_the_engine_decides() {
+    let e = Env::without_node("nonode-fb", "");
+    let (code, _, err, _) = e.engine(&["fallback", "node"], "");
+    assert_eq!(code, 0);
+    assert!(err.contains("missing") || e.engine(&["fallback", "status"], "").1.contains("marker: yes"));
+    let wrapper = e.plugin.join("hooks/ah-hook.sh");
+    let mut c = e.cmd(Path::new("/bin/sh"));
+    c.arg(&wrapper).arg("PreToolUse").env("AH_WRAPPER_TEST", "1").env("AH_ENGINE_BIN", env!("CARGO_BIN_EXE_ah-engine")).env("AH_HOOK_TIMEOUT_S", "30");
+    let (code, out, err, _) = e.run(&mut c, &e.payload(FORCE));
+    assert_eq!(code, 2, "the engine blocks the force push: {out} {err}");
+    assert!(err.contains("Node backup directory"), "the no-op is logged: {err}");
+    assert!(e.ledger().iter().all(|r| r["src"] != "node"), "no Node row: {:?}", e.ledger());
 }

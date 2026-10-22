@@ -217,3 +217,11 @@ value = "shadow-report.json"
 [nodeback.verdict_words]
 doc = "The verdict words the ledger holds, from least to most severe: `allow`, `advise`, `block`. Others (`error`, `timeout`, `skip`) mean the side gave no verdict and are counted as errors, never as agreement or disagreement."
 value = ["allow", "advise", "block"]
+
+[nodeback.node_dir]
+doc = "The directory of the Node backup (the original Node hooks, companion and scripts), relative to the plugin root. It is NOT part of the published plugin (plugins/anti-hall-node, a sibling of plugins/anti-hall); the install that ships both trees has it. When the directory is missing the shadow and the fallback switch are logged no-ops: the engine keeps deciding, nothing blocks."
+value = "../anti-hall-node"
+
+[nodeback.msg_no_node_dir]
+doc = "Logged (and printed by `ah-engine fallback node`) when the Node backup directory is missing. Placeholders: {dir}."
+value = "anti-hall: the Node backup directory {dir} is missing, so the Node shadow and fallback do nothing; the engine keeps deciding"

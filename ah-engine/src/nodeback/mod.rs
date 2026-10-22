@@ -26,6 +26,14 @@ pub(crate) fn state_sub(key: &str) -> PathBuf {
     crate::paths::dir().join(crate::defaults::text(key))
 }
 
+/// The Node backup directory (`nodeback.node_dir`, relative to the plugin root) of a host's plugin root, when it exists. The backup is not part
+/// of the published plugin, so on an install without it the shadow and the fallback switch are no-ops, never a block.
+pub(crate) fn node_dir(host: &str) -> Option<PathBuf> {
+    let root = crate::dispatch::table::plugin_root(host).or_else(|| crate::defaults::root().map(|p| p.to_string_lossy().into_owned()))?;
+    let dir = PathBuf::from(root).join(crate::defaults::text("nodeback.node_dir"));
+    dir.is_dir().then_some(dir)
+}
+
 /// Days since the epoch of a `YYYY-MM-DD` date, or `None` for anything else.
 pub(crate) fn parse_day(date: &str) -> Option<i64> {
     let mut it = date.trim().splitn(3, '-');

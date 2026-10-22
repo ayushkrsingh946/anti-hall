@@ -505,7 +505,7 @@ fn defect_reports_and_listings_agree_with_node() -> R {
         "report --class nope --sev p1 --sym x --proj pa",
         "report --class doc --sev p1 --sym x --proj pa --bogus 1",
         "report --class doc --sev p1 --sym x --proj pa --fixed-in 1.0",
-        "report --class hook-crash --sev p0 --sym crash on 12345abcdef start --proj pa --repro r --claimed c --observed o --component plugins/anti-hall/hooks/lib/x.js --cause lock-or-race",
+        "report --class hook-crash --sev p0 --sym crash on 12345abcdef start --proj pa --repro r --claimed c --observed o --component plugins/anti-hall-node/hooks/lib/x.js --cause lock-or-race",
         "report --class doc --sev p1 --sym x --proj pa --cause bogus",
         "report --class doc --sev p1 --sym x --proj pa --regression-of zz",
         "report --class doc --sev p1 --sym",
@@ -975,7 +975,7 @@ fn install_agrees_with_node_in_the_user_scope() -> R {
         (Some(installed.clone()), vec![]),
         (Some(r#"{"statusLine":{"type":"command","command":"node /x/anti-hall/statusline/statusline.js"}}"#.into()), vec![]),
         (Some(r#"{"statusLine":{"type":"command","command":"node /x/other/statusline.js"}}"#.into()), vec![]),
-        (Some("{}".into()), vec![(".claude/plugins/marketplaces/anti-hall/plugins/anti-hall/statusline/statusline.js", "")]),
+        (Some("{}".into()), vec![(".claude/plugins/marketplaces/anti-hall/plugins/anti-hall-node/statusline/statusline.js", "")]),
     ];
     for (settings, extra) in &cases {
         let seed = home_with(settings.as_deref(), extra)?;

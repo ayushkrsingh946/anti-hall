@@ -69,7 +69,7 @@ fn mock() -> (u16, Arc<Mutex<usize>>) {
 fn node_ask(home: &Path, port: u16, state: &str) -> Value {
     let js = format!(
         "const a=require({:?});(async()=>{{const d=await a.ask({{id:'speculation',question:{{type:'noul',instructions:'q',criteria:{{true:'t',false:'f'}}}},state:process.argv[1],trust:'add-block',baseline:false,home:process.env.HOME}});console.log(JSON.stringify(d));}})()",
-        repo().join("plugins/anti-hall/hooks/lib/jev-assist.js").to_string_lossy()
+        repo().join("plugins/anti-hall-node/hooks/lib/jev-assist.js").to_string_lossy()
     );
     let out = Command::new("node")
         .arg("-e")

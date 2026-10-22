@@ -1065,10 +1065,21 @@ node_fallback_on() {
   nf_toml=${defaults_file%/*}/nodeback.toml
   nf_name=$(engine_default_text files.fallback_switch || true)
   nf_dir=${AH_ENGINE_DIR:-"$HOME/.anti-hall/ah-engine"}
+  nf_on=0
   if [ -n "$nf_name" ] && [ -e "$nf_dir/$nf_name" ]; then
+    nf_on=1
+  elif [ "$(engine_default_text nodeback.fallback "$nf_toml" || true)" = node ]; then
+    nf_on=1
+  fi
+  [ "$nf_on" -eq 1 ] || return 1
+  # The Node backup lives outside the published plugin (nodeback.node_dir). Without it the switch is a logged no-op: the engine decides.
+  nf_rel=$(engine_default_text nodeback.node_dir "$nf_toml" || true)
+  if [ -z "$nf_rel" ] || [ -d "$dir/../$nf_rel" ]; then
     return 0
   fi
-  [ "$(engine_default_text nodeback.fallback "$nf_toml" || true)" = node ]
+  nf_msg=$(engine_default_text nodeback.msg_no_node_dir "$nf_toml" || true)
+  [ -n "$nf_msg" ] && printf '%s\n' "$(printf '%s' "$nf_msg" | sed "s|{dir}|$dir/../$nf_rel|")" >&2
+  return 1
 }
 
 # The ledger id of a hook: the dispatch-table id the map file gives its command (the engine rows use the same ids), else the script name.

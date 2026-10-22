@@ -89,8 +89,19 @@ fn placeholders(template: &str) -> Vec<String> {
 }
 
 impl Run<'_> {
+    /// A file of the plugin tree. A `..` in `rel` (the Node backup tree is a sibling of the plugin, see `nodeback.node_dir`) is resolved
+    /// in the text, so the paths the stages show name the real place.
     fn plugin(&self, rel: &str) -> std::path::PathBuf {
-        Path::new(&self.paths.plugin_src).join(rel)
+        let mut out = std::path::PathBuf::new();
+        for part in Path::new(&self.paths.plugin_src).join(rel).components() {
+            match part {
+                std::path::Component::ParentDir if matches!(out.components().next_back(), Some(std::path::Component::Normal(_))) => {
+                    out.pop();
+                }
+                other => out.push(other.as_os_str()),
+            }
+        }
+        out
     }
 
     fn files_there(&self, files: &[&str]) -> bool {

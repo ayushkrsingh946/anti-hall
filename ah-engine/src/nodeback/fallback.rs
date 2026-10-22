@@ -32,6 +32,10 @@ pub fn run(p: &Parsed) -> i32 {
         }
         crate::health::log_event(defaults::text("nodeback.log_kind"), word, &defaults::render("nodeback.msg_fallback_on", &[("file", &shown)]));
         say(defaults::render("nodeback.msg_fallback_on", &[("file", &shown)]));
+        if super::node_dir("claude").is_none() {
+            let dir = defaults::text("nodeback.node_dir").to_string();
+            say(defaults::render("nodeback.msg_no_node_dir", &[("dir", &dir)]));
+        }
         0
     } else if word == w(1) {
         match std::fs::remove_file(&marker) {

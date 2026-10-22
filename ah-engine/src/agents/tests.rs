@@ -553,7 +553,7 @@ fn the_heartbeat_rule_agrees_with_the_node_watchdog_on_running_agents() {
     for (id, age) in [("old", 30 * MIN), ("fresh", MIN), ("older", 90 * MIN)] {
         std::fs::write(hb.join(format!("{id}.json")), json!({"id": id, "ts": n - age, "status": "running"}).to_string()).unwrap();
     }
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../plugins/anti-hall/hooks/agent-watchdog.js");
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../plugins/anti-hall-node/hooks/agent-watchdog.js");
     let out = std::process::Command::new("node").arg(root).arg(lim("heartbeat_stale_ms").to_string()).env("HOME", &h).output().unwrap();
     let mut node_ids: Vec<String> = String::from_utf8_lossy(&out.stdout)
         .lines()

@@ -304,7 +304,7 @@ fn sup_log(h: &Path) -> Vec<Value> {
 
 /// What Node's own `strayingLine` prints for these active entries (None when node is not installed).
 fn node_line(active: &Value, scratch: &Path) -> Option<String> {
-    let lib = Path::new(env!("CARGO_MANIFEST_DIR")).join("../plugins/anti-hall/companion/lib/devswarm-supervision.js");
+    let lib = Path::new(env!("CARGO_MANIFEST_DIR")).join("../plugins/anti-hall-node/companion/lib/devswarm-supervision.js");
     let out = Command::new("node")
         .args(["-e", "const s=require(process.argv[1]);const a=JSON.parse(process.argv[2]);console.log(s.strayingLine(a.map(e=>({id:'kid',step:e.step,reason:e.reason,jev:e.jev}))))"])
         .arg(&lib)
@@ -475,7 +475,7 @@ fn a_step_map_answer_writes_the_inferred_step_into_the_plan_once_and_leaves_the_
     assert_eq!(r["decided"][0]["acted"], Value::Null);
     assert_eq!(sup_log(&h).len(), 1);
     // the plan label Node shows
-    let lib = Path::new(env!("CARGO_MANIFEST_DIR")).join("../plugins/anti-hall/companion/lib/devswarm-plan.js");
+    let lib = Path::new(env!("CARGO_MANIFEST_DIR")).join("../plugins/anti-hall-node/companion/lib/devswarm-plan.js");
     if let Ok(o) = Command::new("node")
         .args(["-e", "const p=require(process.argv[1]);console.log(p.finishLabel(JSON.parse(process.argv[2]),Date.now()))"])
         .arg(&lib)

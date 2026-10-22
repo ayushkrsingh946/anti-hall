@@ -182,7 +182,9 @@ pub fn finish(armed: Option<Armed>, raw: &str, o: &Outcome) {
         return; // not in the sample, and nothing the "always follow a block" rule asks for
     }
     let t0 = Instant::now();
-    let skip = if super::state_file("files.shadow_hold").exists() {
+    let skip = if super::node_dir(&a.host).is_none() {
+        Some("skip_no_node")
+    } else if super::state_file("files.shadow_hold").exists() {
         Some("skip_cpu")
     } else if load_too_high() {
         Some("skip_load")
