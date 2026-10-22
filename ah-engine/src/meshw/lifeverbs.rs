@@ -17,6 +17,8 @@ use crate::dssup::recon::{Hooks, UnitEnd, apply, view};
 use crate::meshw::actverbs::{Resolved, resolve_archive_id};
 use crate::meshw::args::Args;
 use crate::meshw::common::{self, Inv, Obj, s};
+use crate::meshw::cursors;
+use crate::migrate::readercur::{Cx, Handle, raise_all_loss_free};
 use crate::meshw::ident::{self, R, defer};
 use crate::meshw::idlock::{self, is_safe_id};
 use crate::meshw::send::{Answer, Effect};
@@ -969,41 +971,221 @@ pub fn reap_orphans(inv: &Inv, a: &Args) -> R<Answer> {
     } else {
         None
     };
-    // the refusals above do not depend on the candidates; a result that lists or retires them does: any partition with unread mail
-    // and no live reader defers here
-    crate::meshw::summary::compute(&store, inv, None)?;
+    // the candidates are the summary's orphans[] (partitions with unread mail and no live reader), the very set the per-turn warning lists
+    let sum = crate::meshw::summary::compute(&store, inv, None)?;
+    let candidates = candidates_of(&store, &sum);
     let n_ = crate::meshw::common::n;
+    let reaped_dir = idlock::devswarm_root(&inv.home).join(defaults::text("devswarm_cli.reap_dir"));
+    let dir_text = reaped_dir.to_string_lossy().into_owned();
     let o = match max_n {
-        None => reap_result(
-            true,
-            &[
-                ("mode", s(defaults::text("devswarm_cli.reap_mode_dry_run"))),
-                ("repoKey", s(&repo_key)),
-                ("candidateCount", n_(0.0)),
-                ("candidates", OVal::Arr(Vec::new())),
-                ("note", s(defaults::text("devswarm_cli.msg_reap_none"))),
-            ],
-        ),
+        None => {
+            let note = if candidates.is_empty() {
+                defaults::text("devswarm_cli.msg_reap_none").to_string()
+            } else {
+                crate::meshw::extverbs::tpl("devswarm_cli.msg_reap_dry_run", &[("dir", &dir_text)])
+            };
+            reap_result(
+                true,
+                &[
+                    ("mode", s(defaults::text("devswarm_cli.reap_mode_dry_run"))),
+                    ("repoKey", s(&repo_key)),
+                    ("candidateCount", n_(candidates.len() as f64)),
+                    ("candidates", OVal::Arr(candidates.iter().map(Candidate::to_oval).collect())),
+                    ("note", s(&note)),
+                ],
+            )
+        }
         Some(max) => {
-            let reaped_dir = idlock::devswarm_root(&inv.home).join(defaults::text("devswarm_cli.reap_dir"));
+            let take = if max >= candidates.len() as f64 { candidates.len() } else { max as usize };
+            let targets = &candidates[..take];
+            let (mut reaped, mut failed) = (Vec::new(), Vec::new());
+            for c in targets {
+                match retire(&store, inv, &repo_key, &reaped_dir, c)? {
+                    Ok(r) => reaped.push(r),
+                    Err(f) => failed.push(f),
+                }
+            }
+            if !reaped.is_empty()
+                && let Some(why) = crate::meshw::summary::derive_after_write(&store, inv, &repo_key)
+            {
+                crate::meshw::log_summary_failure(defaults::text("devswarm_cli.verb_reap_orphans"), &why);
+            }
             reap_result(
                 true,
                 &[
                     ("mode", s(defaults::text("devswarm_cli.reap_mode_apply"))),
                     ("repoKey", s(&repo_key)),
                     ("max", n_(max)),
-                    ("candidateCount", n_(0.0)),
-                    ("consideredCount", n_(0.0)),
-                    ("reapedCount", n_(0.0)),
-                    ("reaped", OVal::Arr(Vec::new())),
-                    ("failedCount", n_(0.0)),
-                    ("failed", OVal::Arr(Vec::new())),
-                    ("capped", OVal::Bool(false)),
-                    ("remaining", n_(0.0)),
-                    ("note", s(&crate::meshw::extverbs::tpl("devswarm_cli.msg_reap_applied", &[("dir", &reaped_dir.to_string_lossy())]))),
+                    ("candidateCount", n_(candidates.len() as f64)),
+                    ("consideredCount", n_(targets.len() as f64)),
+                    ("reapedCount", n_(reaped.len() as f64)),
+                    ("reaped", OVal::Arr(reaped.clone())),
+                    ("failedCount", n_(failed.len() as f64)),
+                    ("failed", OVal::Arr(failed.clone())),
+                    ("capped", OVal::Bool(candidates.len() > targets.len())),
+                    ("remaining", n_((candidates.len() - targets.len()) as f64)),
+                    ("note", s(&crate::meshw::extverbs::tpl("devswarm_cli.msg_reap_applied", &[("dir", &dir_text)]))),
                 ],
             )
         }
     };
     Ok(answer(0, o.done()))
+}
+
+/// One candidate of `collectOrphanCandidates`.
+struct Candidate {
+    id: String,
+    unread: f64,
+    message_count: f64,
+    last_ts: Option<f64>,
+}
+
+impl Candidate {
+    fn to_oval(&self) -> OVal {
+        let n_ = crate::meshw::common::n;
+        let mut o = Obj::default();
+        o.put("partitionId", s(&self.id))
+            .put("unread", n_(self.unread))
+            .put("messageCount", n_(self.message_count))
+            .put("lastMessageTs", self.last_ts.map_or(OVal::Null, n_))
+            .put("reason", s(defaults::text("devswarm_cli.reap_reason_unread")));
+        o.done()
+    }
+}
+
+/// `collectOrphanCandidates`: the summary's `orphans[]` entries with a safe id, each with the newest message ts in its partition.
+fn candidates_of(store: &crate::meshw::store::MeshStore, sum: &OVal) -> Vec<Candidate> {
+    let Some(OVal::Arr(list)) = sum.get("orphans") else { return Vec::new() };
+    let num = |v: Option<&OVal>| match v {
+        Some(OVal::Num(x)) if x.is_finite() => *x,
+        _ => 0.0,
+    };
+    let mut out = Vec::new();
+    for e in list {
+        let Some(OVal::Str(id)) = e.get("id") else { continue };
+        if !is_safe_id(id) {
+            continue;
+        }
+        let mut last: Option<f64> = None;
+        let _ = store.reader().for_each_message(id, 0, |m| {
+            if let Some(t) = m["ts"].as_f64().filter(|t| t.is_finite())
+                && last.is_none_or(|l| t > l)
+            {
+                last = Some(t);
+            }
+            true
+        });
+        out.push(Candidate { id: id.clone(), unread: num(e.get("unread")), message_count: num(e.get("messageCount")), last_ts: last });
+    }
+    out
+}
+
+/// Node's message row as `JSON.stringify` writes it (the key order of `listMessages`).
+fn row_oval(m: &serde_json::Value) -> OVal {
+    let conv = |v: &serde_json::Value| match v {
+        serde_json::Value::Null => OVal::Null,
+        serde_json::Value::Bool(b) => OVal::Bool(*b),
+        serde_json::Value::Number(x) => crate::meshw::common::n(x.as_f64().unwrap_or(0.0)),
+        serde_json::Value::String(t) => s(t),
+        _ => OVal::Null,
+    };
+    let keys = defaults::list("devswarm_cli.reap_row_keys");
+    OVal::Obj(keys.iter().map(|k| (k.to_string(), conv(&m[*k]))).collect())
+}
+
+/// Archive, verify, then retire one partition (`cmdReapOrphans`' loop body). The inner `Err` is the `failed[]` entry.
+fn retire(
+    store: &crate::meshw::store::MeshStore,
+    inv: &Inv,
+    repo_key: &str,
+    reaped_dir: &std::path::Path,
+    c: &Candidate,
+) -> R<Result<OVal, OVal>> {
+    let n_ = crate::meshw::common::n;
+    let fail = |reason: &str, extra: Vec<(&str, OVal)>| -> OVal {
+        let mut o = Obj::default();
+        o.put("partitionId", s(&c.id)).put("reason", s(reason));
+        for (k, v) in extra {
+            o.put(k, v);
+        }
+        o.done()
+    };
+    let pid = c.id.as_str();
+    let cursor = crate::meshw::summary::store_floor(store, &inv.home, pid);
+    let total = match store.reader().message_count(pid) {
+        Ok(t) => t as f64,
+        Err(e) => return Ok(Err(fail(defaults::text("devswarm_cli.reap_reason_error"), vec![("error", s(&e.to_string()))]))),
+    };
+    let mut unread: Vec<serde_json::Value> = Vec::new();
+    let since = if cursor.is_finite() && cursor > 0.0 { cursor.floor() as u64 } else { 0 };
+    if let Err(e) = store.reader().for_each_message(pid, since, |m| {
+        unread.push(m);
+        true
+    }) {
+        return Ok(Err(fail(defaults::text("devswarm_cli.reap_reason_error"), vec![("error", s(&e.to_string()))])));
+    }
+    if unread.is_empty() {
+        return Ok(Err(fail(defaults::text("devswarm_cli.reap_reason_no_unread"), vec![])));
+    }
+    let at = crate::checks::jsport::date::to_iso(common::now_ms() as f64).unwrap_or_default();
+    let mut payload = String::new();
+    for m in &unread {
+        let mut line = Obj::default();
+        line.put("partitionId", s(pid)).put("reapedAt", s(&at)).put("message", row_oval(m));
+        payload.push_str(&line.done().stringify());
+        payload.push('\n');
+    }
+    let archive = reaped_dir.join(format!("{pid}{}", defaults::text("devswarm_cli.reap_archive_suffix")));
+    let written = std::fs::create_dir_all(reaped_dir).and_then(|()| std::fs::write(&archive, &payload)).and_then(|()| std::fs::read_to_string(&archive));
+    let read_back = match written {
+        Ok(t) => t,
+        Err(e) => return Ok(Err(fail(defaults::text("devswarm_cli.reap_reason_error"), vec![("error", s(&e.to_string()))]))),
+    };
+    let landed: Vec<&str> = read_back.split('\n').filter(|l| !l.trim().is_empty()).collect();
+    if landed.len() != unread.len() {
+        return Ok(Err(fail(
+            defaults::text("devswarm_cli.reap_reason_verify_failed"),
+            vec![("expected", n_(unread.len() as f64)), ("got", n_(landed.len() as f64))],
+        )));
+    }
+    if landed.iter().any(|l| OVal::parse(l).is_none()) {
+        return Ok(Err(fail(defaults::text("devswarm_cli.reap_reason_unparseable"), vec![])));
+    }
+    // raiseAllLossFree: every row of the store namespace (the floor included) rises to the count, a retired row's line with it; the
+    // legacy cursors are imported first when the partition has no floor row yet
+    let ns = defaults::text("mesh_write.ns_store");
+    let handle = Handle::Rw(common::open_store(inv, repo_key)?);
+    let mut cx = Cx::new(&inv.home.to_string_lossy());
+    cx.now = inv.now;
+    let raised = raise_all_loss_free(&mut cx, &handle, pid, ns, total as i64);
+    if cx.deferred {
+        return defer("reap-cursor-import");
+    }
+    if let Err(e) = raised {
+        return Ok(Err(fail(defaults::text("devswarm_cli.reap_reason_error"), vec![("error", s(&e))])));
+    }
+    cursors::log_cursor_write(
+        &inv.home,
+        &cursors::LogRec {
+            id: pid,
+            caller_id: None,
+            ns: defaults::text("mesh_write.log_ns_store"),
+            from: Some(cursor as i64),
+            to: Some(total),
+            delivered: None,
+            nonce: None,
+            gate: defaults::text("devswarm_cli.reap_log_gate"),
+            verb: defaults::text("devswarm_cli.verb_reap_orphans"),
+            cwd: None,
+            ok: true,
+            err: None,
+            repo_key: Some(repo_key),
+        },
+    );
+    let mut o = Obj::default();
+    o.put("partitionId", s(pid))
+        .put("unread", n_(unread.len() as f64))
+        .put("archivePath", s(&archive.to_string_lossy()))
+        .put("cursorAdvancedTo", n_(total));
+    Ok(Ok(o.done()))
 }

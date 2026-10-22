@@ -97,12 +97,30 @@ fn mask_log(text: &str) -> String {
     pid.replace_all(&ts.replace_all(text, r#"{"ts":"T""#), r#""pid":0,"msg""#).into_owned()
 }
 
+/// The cursor journal's lines carry the wall-clock `ts` and the writer's `pid`, which differ by design (Node's clock is faked, the
+/// engine's is not, and they are two processes): both are blanked on both sides; every other field is compared.
+fn mask_cursor_log(text: &str) -> String {
+    let ts = regex::Regex::new(r#"(?m)^\{"ts":[0-9]+"#).unwrap();
+    let pid = regex::Regex::new(r#""pid":[0-9]+"#).unwrap();
+    pid.replace_all(&ts.replace_all(text, r#"{"ts":0"#), r#""pid":0"#).into_owned()
+}
+
 fn tree(home: &Path) -> BTreeMap<String, String> {
     home_files(home)
         .into_iter()
         .map(|(k, v)| {
             let text = String::from_utf8_lossy(&v).replace(home.to_string_lossy().as_ref(), "<HOME>");
-            (k.clone(), if k.contains("devswarm.jsonl") && !k.ends_with(".lock") { mask_log(&text) } else { text })
+            let text = if k.contains("devswarm.jsonl") && !k.ends_with(".lock") {
+                mask_log(&text)
+            } else if k.contains("cursor-log/") {
+                mask_cursor_log(&text)
+            } else if k.contains("devswarm/reaped/") {
+                // `reapedAt` is `new Date()` on both sides: two real clocks
+                regex::Regex::new(r#""reapedAt":"[^"]*""#).unwrap().replace_all(&text, r#""reapedAt":"T""#).into_owned()
+            } else {
+                text
+            };
+            (k.clone(), text)
         })
         .collect()
 }

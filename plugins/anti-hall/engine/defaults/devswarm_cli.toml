@@ -2055,6 +2055,42 @@ value = "no orphaned partitions with unread mail in this project"
 doc = "The note of a pass that acted; {dir} is the directory the archives go to."
 value = "unread rows were archived + verified under {dir} and each partition retired by advancing its cursor; NO message rows were deleted"
 
+[devswarm_cli.reap_reason_unread]
+doc = "The `reason` every reap-orphans candidate carries."
+value = "unread-with-no-live-reader"
+
+[devswarm_cli.reap_reason_error]
+doc = "The `reason` of a partition whose reap failed with an error (the text goes in `error`)."
+value = "error"
+
+[devswarm_cli.reap_reason_no_unread]
+doc = "The `reason` of a candidate that no longer holds an unread row."
+value = "no-unread-rows"
+
+[devswarm_cli.reap_reason_verify_failed]
+doc = "The `reason` of a partition whose archive did not read back with the rows written (nothing is retired)."
+value = "archive-verify-failed"
+
+[devswarm_cli.reap_reason_unparseable]
+doc = "The `reason` of a partition whose archive read back with a line that is not JSON (nothing is retired)."
+value = "archive-verify-unparseable"
+
+[devswarm_cli.reap_archive_suffix]
+doc = "The suffix of a partition's archive file under the reap directory."
+value = ".ndjson"
+
+[devswarm_cli.reap_log_gate]
+doc = "The `gate` a reap writes into the cursor journal."
+value = "lockstep"
+
+[devswarm_cli.reap_row_keys]
+doc = "The fields of an archived message row, in the order the store's listMessages returns them."
+value = ["index", "seq", "ts", "hash", "body", "sender", "recipient", "mtype", "urgency", "isHeartbeat", "needsReply", "origHash", "instanceNonce", "storeSeq"]
+
+[devswarm_cli.msg_reap_dry_run]
+doc = "The note of a listing that found candidates; {dir} is the directory the archives would go to."
+value = "DRY RUN \u2014 nothing was changed. To act, re-run with `--apply --max N` (N = the most partitions this pass may retire). Each retired partition's unread rows are archived to {dir}/<partitionId>.ndjson and verified BEFORE its cursor is advanced; no message row is deleted."
+
 # ---- merge, the maintenance verbs, and the guarded fronts of spawn / respawn (lane dsB) -----------------------------------
 
 [devswarm_cli.verb_merge]

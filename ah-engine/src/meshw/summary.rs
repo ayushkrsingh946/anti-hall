@@ -255,6 +255,12 @@ impl Cursors {
     }
 }
 
+/// `floorCursor(store, id, home)` (a failed read is 0): the store-namespace floor of one partition.
+pub(crate) fn store_floor(st: &MeshStore, home: &Path, id: &str) -> f64 {
+    let mut cur = Cursors::new(home);
+    floor_of(st, &mut cur, home, id, false).unwrap_or(0.0)
+}
+
 /// `floorOf(store, partition, ns)`: the `#floor` reader-cursor row, else the legacy floor.
 fn floor_of(st: &MeshStore, cur: &mut Cursors, home: &Path, id: &str, nd: bool) -> R<f64> {
     let rows = st.reader().reader_cursors(id).or_else(|e| err("reader-cursors", e))?;
