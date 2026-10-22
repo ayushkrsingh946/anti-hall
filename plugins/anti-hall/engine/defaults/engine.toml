@@ -1089,6 +1089,10 @@ value = ".bak-"
 doc = "Event-log detail (and `config heal` output) when missing settings were added to an edited defaults file from the pristine copy. Placeholders: {file}, {keys}, {backup} (the backup file, or empty when one already existed)."
 value = "defaults {file}: added missing {keys} from the pristine copy (backup {backup})"
 
+[defaults_load.msg_heal_held]
+doc = "Event-log detail when missing settings were not written because a deploy hold (the daemon-down marker) is active: a deploy is replacing the plugin files, and a heal from the binary being replaced would write into the half-synced defaults. Placeholders: {file}, {keys}."
+value = "defaults {file}: missing keys {keys}: not written during a deploy hold; the next load heals them once the hold ends"
+
 [defaults_load.msg_heal_skipped]
 doc = "Event-log detail when missing settings were not written because the plugin root is a version-controlled checkout. Placeholders: {file}, {keys}."
 value = "defaults {file}: missing keys {keys}: run `ah-engine config heal` to add them"

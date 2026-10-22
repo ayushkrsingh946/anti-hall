@@ -145,6 +145,21 @@ tree_files() {
     grep -v -e '^engine/defaults/' -e '^engine/defaults\.pristine/' -e '\.bak' -e '\.deploy\.' -e '/\.DS_Store$' -e '^\.DS_Store$'
 }
 
+# put_file SRC DIR NAME: put SRC at DIR/NAME through a sibling temp file (same volume, so the rename is atomic). With PEND set the
+# rename is deferred: the temp is only staged and listed in PEND (commit_pending renames them all in one fast pass).
+PEND=
+put_file() {
+  cp -p "$1" "$2/.$3.deploy.$$" || return 1
+  if [ -n "$PEND" ]; then printf '%s\t%s\n' "$2/.$3.deploy.$$" "$2/$3" >>"$PEND"
+  else mv "$2/.$3.deploy.$$" "$2/$3" || return 1; fi
+}
+
+# commit_pending: rename every staged temp into place, in the order staged (defaults first, then the tree); nothing is copied here
+commit_pending() {
+  [ -n "$PEND" ] && [ -s "$PEND" ] || return 0
+  while IFS="$(printf '\t')" read -r _t _d; do mv "$_t" "$_d" || return 1; done <"$PEND"
+}
+
 # apply_tree SRC DST BACKUP MANIFEST: copy each tree file SRC/rel to DST/rel. A replaced file goes to BACKUP/rel first; the new one is
 # renamed into place. Nothing is removed. Prints the number of files changed to $SCRATCH/tree.n
 apply_tree() {
@@ -162,7 +177,7 @@ apply_tree() {
     fi
     mkdir -p "$d" || return 1
     [ -n "${4:-}" ] && printf 'F\t%s\t%s\t%s\t%s\n' "$d" "$b" "$had" "$bk" >>"$4"
-    cp -p "$f" "$d/.$b.deploy.$$" && mv "$d/.$b.deploy.$$" "$t" || return 1
+    put_file "$f" "$d" "$b" || return 1
     _n=$((_n + 1))
   done <"$SCRATCH/tree.list"
   echo "$_n" >"$SCRATCH/tree.n"
@@ -232,7 +247,7 @@ apply_dir() {
       had=1; bk=$3/$b
     fi
     [ -n "${4:-}" ] && printf 'F\t%s\t%s\t%s\t%s\n' "$2" "$b" "$had" "$bk" >>"$4"
-    cp -p "$f" "$2/.$b.deploy.$$" && mv "$2/.$b.deploy.$$" "$2/$b" || return 1
+    put_file "$f" "$2" "$b" || return 1
   done
 }
 
@@ -540,18 +555,27 @@ do_deploy() {
       fi
     done
   }
-  sync_all "sync defaults" "" "$MAN"
-
-  step "swap the binary"
+  # STAGE everything first (the live files are untouched, so an old binary run directly still reads the old defaults), then COMMIT
+  # with renames only, defaults and binary together: the window in which the old binary could see half-new defaults is milliseconds
+  PEND=$SCRATCH/pending.tsv; : >"$PEND"
+  sync_all "stage defaults" "" "$MAN"
+  step "stage the binary"
   mkdir -p "$ENGINE_DIR/bin" || fail_deploy "cannot create $ENGINE_DIR/bin"
   had=0
   if [ -e "$BIN" ]; then
     had=1
     if [ -e "$BIN.prev" ]; then cp -p "$BIN.prev" "$BK/ah-engine.prev.before" || fail_deploy "cannot back up the old .prev"; fi
-    cp -p "$BIN" "$BIN.prev.new.$$" && mv "$BIN.prev.new.$$" "$BIN.prev" || fail_deploy "cannot keep the old binary as .prev"
+    cp -p "$BIN" "$BIN.prev.new.$$" || fail_deploy "cannot keep the old binary as .prev"
   fi
   printf 'B\t%s\t%s\n' "$BIN" "$had" >>"$MAN"
-  cp -p "$NEW" "$BIN.new.$$" && chmod +x "$BIN.new.$$" && mv "$BIN.new.$$" "$BIN" || fail_deploy "cannot install the new binary at $BIN"
+  cp -p "$NEW" "$BIN.new.$$" && chmod +x "$BIN.new.$$" || fail_deploy "cannot stage the new binary at $BIN"
+
+  step "commit: rename the staged files and the binary into place"
+  commit_pending || fail_deploy "a staged file could not be renamed into place"
+  PEND=
+  [ "$had" = 1 ] && { mv "$BIN.prev.new.$$" "$BIN.prev" || fail_deploy "cannot keep the old binary as .prev"; }
+  mv "$BIN.new.$$" "$BIN" || fail_deploy "cannot install the new binary at $BIN"
+  step "swap done"
 
   integ=$(printf '%s\n' "$ROOTS" | head -n 1)/hooks/ah-engine-integrity.sh
   if [ -f "$integ" ]; then
