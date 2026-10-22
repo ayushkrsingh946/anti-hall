@@ -1,7 +1,7 @@
 'use strict';
 // rollback-legacy — v0.57 mesh -> <=0.56 legacy per-worktree units (D13,
 // PLAN-v0.57-mesh.md Phase 6b). Covers ONLY `rollbackToLegacyUnits` (exported
-// from plugins/anti-hall/skills/update/scripts/update.js — the ACTUAL update
+// from plugins/anti-hall-node/skills/update/scripts/update.js — the ACTUAL update
 // helper; `companion/update.js` does not exist in this tree).
 //
 // NO real launchctl/systemctl/crontab/git spawn anywhere in this file:
@@ -20,10 +20,10 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const U = require('../../plugins/anti-hall/skills/update/scripts/update.js');
-const installIngest = require('../../plugins/anti-hall/companion/install-devswarm-ingest.js');
-const repokey = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
-const { devswarmRoot } = require('../../plugins/anti-hall/companion/lib/liveness.js');
+const U = require('../../plugins/anti-hall-node/skills/update/scripts/update.js');
+const installIngest = require('../../plugins/anti-hall-node/companion/install-devswarm-ingest.js');
+const repokey = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
+const { devswarmRoot } = require('../../plugins/anti-hall-node/companion/lib/liveness.js');
 
 const REAL_PLUGIN_SRC_DIR = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
 

@@ -2,7 +2,7 @@
 // Defect 7d0a948031cd (P1): cmdRegisterPrimary never checks for an existing
 // LIVE Primary row on the same worktree/checkout before upserting.
 //
-// Root cause (file:line, HEAD 5631695): plugins/anti-hall/scripts/devswarm.js
+// Root cause (file:line, HEAD 5631695): plugins/anti-hall-node/scripts/devswarm.js
 // cmdRegisterPrimary (~7837-7863) derives a DETERMINISTIC id from the worktree
 // (`inst.primaryWorkspaceId(worktree)`) and calls `cmdRegister(id, ...)`
 // unconditionally. cmdRegister is a plain upsert keyed on that id — a SECOND

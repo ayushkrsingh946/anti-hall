@@ -14,9 +14,9 @@ const cp = require('node:child_process');
 
 process.env.ANTI_HALL_LOG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'anti-hall-prefix-log-'));
 
-const cli = require('../../plugins/anti-hall/scripts/devswarm.js');
-const storeLib = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
-const repokey = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
+const cli = require('../../plugins/anti-hall-node/scripts/devswarm.js');
+const storeLib = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
+const repokey = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
 
 function tmpHome() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'anti-hall-prefix-'));
@@ -91,7 +91,7 @@ test('#203: a prefix matching nothing still fails closed as unregistered-recipie
 
 // #203 follow-up: a Primary's registry id is a mesh id (`primary-<hash>`); the first 8 chars
 // were `primary-`, useless as a label and ambiguous. The short form keeps the hash.
-const names = require('../../plugins/anti-hall/companion/lib/devswarm-names.js');
+const names = require('../../plugins/anti-hall-node/companion/lib/devswarm-names.js');
 const PRIMARY = 'primary-d7a18d81';
 
 test('#203: a primary-<hash> id shortens to a form that keeps its hash; uuids keep 8 chars', () => {

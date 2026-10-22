@@ -10,7 +10,7 @@ const os = require('node:os');
 const path = require('node:path');
 const cp = require('node:child_process');
 
-const CLI_PATH = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'scripts', 'devswarm.js');
+const CLI_PATH = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'scripts', 'devswarm.js');
 
 function rm(p) { try { fs.rmSync(p, { recursive: true, force: true }); } catch (_) {} }
 function run(fx, args) {

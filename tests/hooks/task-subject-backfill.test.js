@@ -12,7 +12,7 @@ const path = require('node:path');
 const { testHook } = require('../helpers/spawn-hook.js');
 const { makeHome } = require('../helpers/fixtures.js');
 
-const { backfillSubjects } = require('../../plugins/anti-hall/hooks/lib/task-subject-backfill.js');
+const { backfillSubjects } = require('../../plugins/anti-hall-node/hooks/lib/task-subject-backfill.js');
 
 function create(n, subject, toolId) {
   return [

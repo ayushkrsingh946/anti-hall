@@ -28,10 +28,10 @@ const os = require('node:os');
 const path = require('node:path');
 const cp = require('node:child_process');
 
-const cli = require('../../plugins/anti-hall/scripts/devswarm.js');
-const storeLib = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
-const inst = require('../../plugins/anti-hall/companion/install-devswarm-ingest.js');
-const repokey = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
+const cli = require('../../plugins/anti-hall-node/scripts/devswarm.js');
+const storeLib = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
+const inst = require('../../plugins/anti-hall-node/companion/install-devswarm-ingest.js');
+const repokey = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
 
 const BACKEND = 'journal';
 
@@ -304,8 +304,8 @@ test('MIGRATION: fail-open — no archived dir at all -> clean no-op, never thro
 // DUAL-PATH WIRING: doctor + update (this repo's persisted-shape rule — a shape
 // change ships its forward-migration in BOTH).
 // ---------------------------------------------------------------------------
-const doctorRepair = require('../../plugins/anti-hall/hooks/lib/doctor-repair.js');
-const U = require('../../plugins/anti-hall/skills/update/scripts/update.js');
+const doctorRepair = require('../../plugins/anti-hall-node/hooks/lib/doctor-repair.js');
+const U = require('../../plugins/anti-hall-node/skills/update/scripts/update.js');
 const REAL_PLUGIN_SRC_DIR = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
 
 test('DOCTOR WIRING: fold-archived-family-descriptors detects (dry-run) and retires (apply), then is idempotent', () => {
@@ -699,7 +699,7 @@ test('V5b DOCTOR WIRING: a family safety refusal is NOT reported as "nothing to 
 // --repair` reported FAILED on every run; `left` also counted one twin once per
 // tombstone that named it.
 // ---------------------------------------------------------------------------
-const migrationsLib = require('../../plugins/anti-hall/companion/lib/migrations.js');
+const migrationsLib = require('../../plugins/anti-hall-node/companion/lib/migrations.js');
 
 test('GATED-a: gone worktree + archived/<twin>.json at a DIFFERENT inode/bytes -> dry-run `left` (archived-tombstone-differs), 0 pending, doctor row not failed and names the id', () => {
   const home = tmpHome();

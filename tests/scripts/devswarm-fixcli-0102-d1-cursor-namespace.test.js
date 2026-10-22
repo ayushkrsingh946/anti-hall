@@ -16,7 +16,7 @@
 //      after `read-primary` reported (and acked) every message.
 //
 // VACUITY CHECK (recorded, not re-asserted here): the repro below, run against
-// a scratch copy of `git show HEAD:plugins/anti-hall/scripts/devswarm.js` (the
+// a scratch copy of `git show HEAD:plugins/anti-hall-node/scripts/devswarm.js` (the
 // pre-fix code — this fix's own edits are uncommitted working-tree changes, so
 // HEAD is genuinely pre-fix), printed:
 //   REPRO:CONFIRMED unreadTotal=3 (phantom unread persists after ack)
@@ -39,9 +39,9 @@ const os = require('node:os');
 const path = require('node:path');
 const cp = require('node:child_process');
 
-const cli = require('../../plugins/anti-hall/scripts/devswarm.js');
-const inboxCursor = require('../../plugins/anti-hall/companion/lib/devswarm-inbox-cursor.js');
-const liveness = require('../../plugins/anti-hall/companion/lib/liveness.js');
+const cli = require('../../plugins/anti-hall-node/scripts/devswarm.js');
+const inboxCursor = require('../../plugins/anti-hall-node/companion/lib/devswarm-inbox-cursor.js');
+const liveness = require('../../plugins/anti-hall-node/companion/lib/liveness.js');
 
 function tmpHome() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'fixcli0102-d1-home-'));
@@ -138,9 +138,9 @@ test('D1: the descriptor cursor still receives the MIN projection after a read-p
     inboxCursor.ackTo(slowerInstancePath, 0);
     // ...and a slower LIVE DECLARED reader (a reader_cursors row at 0, ns 'nd')
     // pins the floor: the descriptor projection may never pass it.
-    const rkLib = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
-    const storeLib = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
-    const readerCursors = require('../../plugins/anti-hall/companion/lib/reader-cursors.js');
+    const rkLib = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
+    const storeLib = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
+    const readerCursors = require('../../plugins/anti-hall-node/companion/lib/reader-cursors.js');
     const s0 = storeLib.openStore({ home, hash: rkLib.repoKeyForWorktree(repo), backend: 'journal' });
     try {
       readerCursors.declare(s0, { partition: id, reader: 'h:424242:1700000000000', home, cursorPath, procTable: new Map() });

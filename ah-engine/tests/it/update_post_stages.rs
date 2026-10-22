@@ -1329,7 +1329,7 @@ fn the_resurrected_report_removes_nothing() {
 // So `unloadable_watcher` leaves out exactly that branch: the answer members `shipped`, `detail` and `stateDirEnsured`, and the
 // `.anti-hall/devswarm/wake/` directory the engine goes on to make. Everything else is compared.
 
-const WATCHER_REL: &str = ".claude/plugins/marketplaces/anti-hall/plugins/anti-hall/companion/lib/devswarm-wake-watch.js";
+const WATCHER_REL: &str = ".claude/plugins/marketplaces/anti-hall/plugins/anti-hall-node/companion/lib/devswarm-wake-watch.js";
 
 /// A registered workspace whose worktree is the working directory (the stage resolves its identity from it).
 fn wake_workspace(home: &Path) {

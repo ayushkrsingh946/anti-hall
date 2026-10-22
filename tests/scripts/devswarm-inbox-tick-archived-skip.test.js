@@ -14,7 +14,7 @@ const os = require('node:os');
 const path = require('node:path');
 const cp = require('node:child_process');
 
-const cli = require(path.join(__dirname, '../../plugins/anti-hall/scripts/devswarm.js'));
+const cli = require(path.join(__dirname, '../../plugins/anti-hall-node/scripts/devswarm.js'));
 
 function tmpHome() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'anti-hall-tick-archived-skip-'));
@@ -55,7 +55,7 @@ test('archived child: tick --child -> watcherArmed "archived-skip", never false;
     const ticked = cli.run(['inbox', 'tick', 'kid1', '--child'], ctx(home, { cwd: repo })).result;
     assert.strictEqual(ticked.watcherArmed, 'archived-skip');
     assert.strictEqual(cueRows(home).filter((r) => r.trigger === 'archived-skip').length, 1);
-    const { inboxTickQuietLine } = require(path.join(__dirname, '../../plugins/anti-hall/scripts/devswarm-lib/inbox-cmd.js'));
+    const { inboxTickQuietLine } = require(path.join(__dirname, '../../plugins/anti-hall-node/scripts/devswarm-lib/inbox-cmd.js'));
     assert.match(inboxTickQuietLine({ ok: true, id: 'kid1', unreadTotal: 2, known: true, meshGapWithheld: false, watcherArmed: 'archived-skip' }), /unread 2, known true, meshGap false, watcherArmed archived-skip$/);
   } finally { rm(home); rm(repo); }
 });

@@ -7,7 +7,7 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert');
-const { safeLabel } = require('../../plugins/anti-hall/statusline/statusline-rich.js');
+const { safeLabel } = require('../../plugins/anti-hall-node/statusline/statusline-rich.js');
 
 const RLO = '‮'; // RIGHT-TO-LEFT OVERRIDE — the classic filename-spoof char
 

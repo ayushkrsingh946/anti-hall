@@ -12,10 +12,10 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { testHook } = require('../helpers/spawn-hook.js');
 const { makeHome } = require('../helpers/fixtures.js');
-const installIngest = require('../../plugins/anti-hall/companion/install-devswarm-ingest.js');
-const repokey = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
-const replyStateLib = require('../../plugins/anti-hall/companion/lib/devswarm-reply-state.js');
-const names = require('../../plugins/anti-hall/companion/lib/devswarm-names.js');
+const installIngest = require('../../plugins/anti-hall-node/companion/install-devswarm-ingest.js');
+const repokey = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
+const replyStateLib = require('../../plugins/anti-hall-node/companion/lib/devswarm-reply-state.js');
+const names = require('../../plugins/anti-hall-node/companion/lib/devswarm-names.js');
 
 const HOOK = 'devswarm-parent-inbox.js';
 const PRIMARY_ENV = { DEVSWARM_REPO_ID: 'repo-1' };
@@ -163,7 +163,7 @@ test('no cached title -> short id; no preview in the summary -> line without one
 });
 
 test('store: pendingQuestionPreviews is a sibling projection and pendingQuestions keeps its shape (both backends)', () => {
-  const store = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
+  const store = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
   const inst = installIngest;
   const backends = ['journal'];
   if (store.sqliteAvailable()) backends.push('sqlite');

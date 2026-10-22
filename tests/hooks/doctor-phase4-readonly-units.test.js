@@ -15,8 +15,8 @@ const path = require('node:path');
 const cp = require('node:child_process');
 
 const REPO = path.join(__dirname, '..', '..');
-const DR = require(path.join(REPO, 'plugins', 'anti-hall', 'hooks', 'lib', 'doctor-repair.js'));
-const DOCTOR_JS = path.join(REPO, 'plugins', 'anti-hall', 'hooks', 'doctor.js');
+const DR = require(path.join(REPO, 'plugins', 'anti-hall-node', 'hooks', 'lib', 'doctor-repair.js'));
+const DOCTOR_JS = path.join(REPO, 'plugins', 'anti-hall-node', 'hooks', 'doctor.js');
 
 function rm(p) { try { fs.rmSync(p, { recursive: true, force: true }); } catch (_) {} }
 function plist(label, workingDir, script) {

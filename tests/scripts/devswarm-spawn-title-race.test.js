@@ -33,8 +33,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const cli = require('../../plugins/anti-hall/scripts/devswarm.js');
-const names = require('../../plugins/anti-hall/companion/lib/devswarm-names.js');
+const cli = require('../../plugins/anti-hall-node/scripts/devswarm.js');
+const names = require('../../plugins/anti-hall-node/companion/lib/devswarm-names.js');
 
 function buildDb(dbFile, label, branchName) {
   const sqlite = require('node:sqlite');

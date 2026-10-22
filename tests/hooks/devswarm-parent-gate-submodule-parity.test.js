@@ -46,10 +46,10 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { testHook } = require('../helpers/spawn-hook.js');
-const installIngest = require('../../plugins/anti-hall/companion/install-devswarm-ingest.js');
-const repokey = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
+const installIngest = require('../../plugins/anti-hall-node/companion/install-devswarm-ingest.js');
+const repokey = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
 
-const HOOKS_DIR = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'hooks');
+const HOOKS_DIR = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'hooks');
 const FIXED_HOOK = path.join(HOOKS_DIR, 'devswarm-parent-gate.js');
 const PRIMARY_ENV = { DEVSWARM_REPO_ID: 'repo-1' };
 
@@ -206,7 +206,7 @@ test('BLOCK: gate firing from inside a git submodule derives the SAME own.id as 
 // ---------------------------------------------------------------------------
 
 test('EDIT 2: guard predicate matches the shipped hook source, and refuses to force a survivor id absent from registryRows', () => {
-  const identityFamily = require('../../plugins/anti-hall/companion/lib/devswarm-identity-family.js');
+  const identityFamily = require('../../plugins/anti-hall-node/companion/lib/devswarm-identity-family.js');
 
   // Drift-guard: keep this test honest against the ACTUAL shipped condition,
   // not a copy that quietly went stale.
@@ -260,7 +260,7 @@ test('VACUITY PROOF: the naive pre-fix resolver and the real shipped resolver DI
   if (!GIT_AVAILABLE) { t.skip('git not available on PATH'); return; }
   const { superRepo, submodulePath, home, root } = mkSuperprojectWithSubmodule();
   try {
-    const { resolveWorktreeNoSpawn } = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
+    const { resolveWorktreeNoSpawn } = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
 
     // --- THE DEFECT, PROVEN DIRECTLY AT THE RESOLVER BOUNDARY ---
     // naive walk-up (pre-fix behavior): stops AT the submodule's own `.git`

@@ -840,6 +840,7 @@ fn run_core(raw: &str, args: &Args, payload: Option<&File>, complete: bool, tele
             );
         }
     }
+    crate::nodeback::shadow::note(&entries, &results, &shadow); // what the engine decided per check (a no-op unless the shadow follows this call)
     let mut results: Vec<combine::HookResult> = results.into_iter().flatten().collect();
     if parsed.is_some() {
         inject::apply(&args.event, &p, &req_env, &mut results); // token cuts: pass on only what the model does not already hold
@@ -960,6 +961,7 @@ pub fn hook_main(args: &[String]) -> i32 {
         }
         // Non-guard events cannot block; keep matching Node's replacement-character decode there.
         let raw = String::from_utf8_lossy(raw_bytes).to_string();
+        let followed = crate::nodeback::shadow::begin(&a);
         let o = crate::failopen::with_notice(&raw, &a.event, run_inner(&raw, &a, payload.file.as_ref(), !over_cap && utf8.is_ok()));
         crate::discard::harmless(std::io::stderr().write_all(o.err.as_bytes())); // keep: a closed pipe leaves nobody to tell
         let mut so = std::io::stdout();
@@ -969,6 +971,7 @@ pub fn hook_main(args: &[String]) -> i32 {
         // Last step: until here the wrapper finds the wait marker (the answer is still being delivered) and from here the done mark
         // (launcher RCA: releasing it when `run_core` returned left a window with neither, in which a finished answer was killed).
         crate::client::release_wait_marker();
+        crate::nodeback::shadow::finish(followed, &raw, &o); // after the answer is out: the Node shadow can no longer touch it
         o.code
     });
     res.unwrap_or_else(|_| {

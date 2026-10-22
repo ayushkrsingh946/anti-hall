@@ -188,7 +188,7 @@ const ALLOWED = (r) => r.code === 0;
 // --- repair-on-reload's automatic pass: migrations only, no diagnostics ----
 if (MIGRATIONS_ONLY && DO_REPAIR) {
   let v = '(unknown)';
-  try { v = require(path.join(ROOT, '.claude-plugin', 'plugin.json')).version; } catch (_) { /* unknown */ }
+  try { v = require(path.join(ROOT, '..', 'anti-hall', '.claude-plugin', 'plugin.json')).version; } catch (_) { /* unknown */ }
   let rows = [];
   let error = null;
   try {
@@ -209,7 +209,7 @@ if (nodeMajor >= 22) ok(`Node ${process.version} (>= 22) — hooks can run`);
 else bad(`Node ${process.version} is < 22 — plugin.json requires Node.js >= 22 on PATH; hooks may silently no-op. Install Node >= 22.`);
 ok(`Platform ${process.platform} / ${process.arch}`);
 let version = '(unknown)';
-try { version = require(path.join(ROOT, '.claude-plugin', 'plugin.json')).version; } catch (e) {}
+try { version = require(path.join(ROOT, '..', 'anti-hall', '.claude-plugin', 'plugin.json')).version; } catch (e) {}
 ok(`anti-hall plugin version ${version}`);
 
 // installed_plugins.json is HARNESS-OWNED (see skills/update/scripts/update.js's
@@ -307,8 +307,8 @@ let registered = [];
 let hooksConfig = null;
 try {
   // D87: hooks.json is one thin trigger per event; the per-hook registry the table generates lists the hook scripts.
-  JSON.parse(fs.readFileSync(path.join(HOOKS, 'hooks.json'), 'utf8'));
-  hooksConfig = JSON.parse(fs.readFileSync(path.join(HOOKS, 'hooks.registry.json'), 'utf8'));
+  JSON.parse(fs.readFileSync(path.join(ROOT, '..', 'anti-hall', 'hooks', 'hooks.json'), 'utf8'));
+  hooksConfig = JSON.parse(fs.readFileSync(path.join(ROOT, '..', 'anti-hall', 'hooks', 'hooks.registry.json'), 'utf8'));
   const cmds = JSON.stringify(hooksConfig).match(/[\w-]+\.js/g) || [];
   registered = [...new Set(cmds)];
   ok(`hooks.json is valid JSON (${registered.length} hook script(s) registered)`);

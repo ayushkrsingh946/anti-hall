@@ -3,7 +3,7 @@
 // broadcast seq at or below the cursor is permanently lost, because
 // `mesh read` always advances the cursor.
 //
-// Root cause (file:line, HEAD 5631695): plugins/anti-hall/scripts/devswarm.js
+// Root cause (file:line, HEAD 5631695): plugins/anti-hall-node/scripts/devswarm.js
 // cmdMeshRead (~10659-10690) filters `storeSeq > cursor` and then
 // UNCONDITIONALLY calls `s.advanceBroadcastCursor(cursorKey)` — there is no
 // `--peek`/`--seq` mode anywhere in the function, so a message once read can

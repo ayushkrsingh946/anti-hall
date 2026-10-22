@@ -41,11 +41,11 @@ const path = require('node:path');
 const { testHook, testHookRaw, bashPayload } = require('../helpers/spawn-hook.js');
 const H = require('./helpers.js');
 
-const store = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
-const ingest = require('../../plugins/anti-hall/companion/devswarm-ingest.js');
-const { readDescriptors } = require('../../plugins/anti-hall/companion/devswarm-supervisor.js');
-const { DEFAULT_IDLE_MS } = require('../../plugins/anti-hall/companion/lib/liveness.js');
-const repokey = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
+const store = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
+const ingest = require('../../plugins/anti-hall-node/companion/devswarm-ingest.js');
+const { readDescriptors } = require('../../plugins/anti-hall-node/companion/devswarm-supervisor.js');
+const { DEFAULT_IDLE_MS } = require('../../plugins/anti-hall-node/companion/lib/liveness.js');
+const repokey = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
 
 // v0.57 mesh (PLAN-v0.57-mesh.md Phase 8): devswarm-parent-inbox.js now reads
 // ONE shared summaries/<repoKey>.json (keyed by repoKeyForWorktree(cwd)), not a
@@ -355,7 +355,7 @@ test('4 CHILD-GATE: a child stop is forced to emit a heartbeat / self-report (de
   try {
     // devswarm-child-gate.js gates on isChildWorkspaceCorroborated(), which
     // requires ON-DISK evidence in addition to DEVSWARM_SOURCE_BRANCH (defect
-    // a55d6b71a76f fix, root cause C — see plugins/anti-hall/hooks/lib/devswarm-role.js).
+    // a55d6b71a76f fix, root cause C — see plugins/anti-hall-node/hooks/lib/devswarm-role.js).
     // A real child always carries DEVSWARM_BUILDER_ID and has a registered
     // workspaces/<id>.json descriptor (written by cmdRegister/cmdHeartbeat's
     // auto-ensure); model that here the same way

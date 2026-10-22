@@ -15,7 +15,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const D = require(path.join(
-  __dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'lib', 'doctor-descriptors.js',
+  __dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'lib', 'doctor-descriptors.js',
 ));
 
 function makeHome() {
@@ -244,7 +244,7 @@ test('SAFETY: the module exposes no repair/delete surface', () => {
     ['PASS', 'UUID_CANONICAL', 'UUID_SHAPED', 'WARN', 'checkResults', 'scanDescriptors'],
     'adding a fix/repair/prune export here is out of scope by design');
   const src = fs.readFileSync(path.join(
-    __dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'lib', 'doctor-descriptors.js',
+    __dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'lib', 'doctor-descriptors.js',
   ), 'utf8');
   for (const forbidden of ['unlinkSync', 'rmSync', 'renameSync', 'writeFileSync', 'rmdirSync', 'copyFileSync']) {
     assert.ok(!src.includes(forbidden), 'doctor-descriptors.js must not call ' + forbidden);

@@ -22,7 +22,7 @@ const path = require('node:path');
 const { makeHome } = require('../helpers/fixtures.js');
 
 const REPO_ROOT = path.join(__dirname, '..', '..');
-const REPAIR_JS = path.join(REPO_ROOT, 'plugins', 'anti-hall', 'hooks', 'lib', 'doctor-repair.js');
+const REPAIR_JS = path.join(REPO_ROOT, 'plugins', 'anti-hall-node', 'hooks', 'lib', 'doctor-repair.js');
 const repair = require(REPAIR_JS);
 
 function cursorsDir(home) { return path.join(home, '.anti-hall', 'devswarm', 'cursors'); }

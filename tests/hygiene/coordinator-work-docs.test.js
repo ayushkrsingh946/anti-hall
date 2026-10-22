@@ -16,7 +16,7 @@ const CHANGELOG = read('CHANGELOG.md');
 // The newest section (## Unreleased while unreleased, ## <version> once released), up to the next heading.
 const sections = CHANGELOG.split(/\n(?=## )/);
 const unreleased = sections.find((s) => s.includes('Bash writes are judged like the Edit tool')) || sections[1] || '';
-const REPORT = read('plugins/anti-hall/scripts/dispatch-report.js');
+const REPORT = read('plugins/anti-hall-node/scripts/dispatch-report.js');
 
 const PARITY = 'Bash writes are judged like the Edit tool: a repo file the Edit tool may not write (including gitignored outputs like build/ or .env) is blocked; write under .anti-hall/ or the scratchpad, or delegate.';
 
@@ -51,14 +51,14 @@ test('CONTRACT §4 lists the coordinator-work state files', () => {
 });
 
 test('baseline output labels share as recorded (no enforcement) and attempted as with enforcement', () => {
-  const lib = require(path.join(ROOT, 'plugins', 'anti-hall', 'scripts', 'coordinator-work-baseline.js'));
+  const lib = require(path.join(ROOT, 'plugins', 'anti-hall-node', 'scripts', 'coordinator-work-baseline.js'));
   assert.strictEqual(typeof lib.run, 'function');
-  const src = read('plugins/anti-hall/scripts/coordinator-work-baseline.js');
+  const src = read('plugins/anti-hall-node/scripts/coordinator-work-baseline.js');
   assert.match(src, /as recorded \(no enforcement\)/);
   assert.match(src, /with enforcement/);
   assert.match(REPORT, /as recorded \(no enforcement\)/);
   assert.match(read('docs/TASK-WORK.md'), /as recorded \(no enforcement\)[\s\S]*with enforcement/);
-  const r = childProcess.spawnSync(process.execPath, [path.join(ROOT, 'plugins', 'anti-hall', 'scripts', 'dispatch-report.js')],
+  const r = childProcess.spawnSync(process.execPath, [path.join(ROOT, 'plugins', 'anti-hall-node', 'scripts', 'dispatch-report.js')],
     { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: process.env.HOME, ANTIHALL_TEST_ISOLATION: '1' } });
   assert.match(r.stdout, /share = as recorded \(no enforcement\), attempted = with enforcement/);
 });

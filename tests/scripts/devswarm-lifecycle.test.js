@@ -30,11 +30,11 @@ const LOG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'anti-hall-lifecycle-log-'
 process.env.ANTI_HALL_LOG_DIR = LOG_DIR;
 process.on('exit', () => { try { fs.rmSync(LOG_DIR, { recursive: true, force: true }); } catch (_) {} });
 
-const cli = require('../../plugins/anti-hall/scripts/devswarm.js');
-const storeLib = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
-const inst = require('../../plugins/anti-hall/companion/install-devswarm-ingest.js');
-const repokey = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
-const liveness = require('../../plugins/anti-hall/companion/lib/liveness.js');
+const cli = require('../../plugins/anti-hall-node/scripts/devswarm.js');
+const storeLib = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
+const inst = require('../../plugins/anti-hall-node/companion/install-devswarm-ingest.js');
+const repokey = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
+const liveness = require('../../plugins/anti-hall-node/companion/lib/liveness.js');
 
 function tmpHome() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'anti-hall-lifecycle-'));
@@ -658,7 +658,7 @@ test('spawn: an explicit -t/--title runs the update-title follow-up with that EX
     assert.equal(calls.length, 2, 'create THEN a separate update-title call');
     assert.deepEqual(calls[1].args, ['workspace', 'update-title', '-b', 'feature/z', 'my nice title']);
 
-    const names = require('../../plugins/anti-hall/companion/lib/devswarm-names.js');
+    const names = require('../../plugins/anti-hall-node/companion/lib/devswarm-names.js');
     const cached = names.readName(home, r.result.meshId);
     assert.equal(cached, 'my nice title', 'the explicit title must be cached locally so the roster shows it, not the raw meshId');
   } finally { rm(home); rm(repo); }
@@ -684,7 +684,7 @@ test('spawn: a -p-derived title keeps the full first line (no 60-char cap, no el
     const r = cli.run(['spawn', 'feature/full', '-p', '# ' + line + '\n\nmore detail'], ctx(home, { cwd: repo, io }));
     assert.equal(r.result.titled, true);
     assert.deepEqual(calls[1].args, ['workspace', 'update-title', '-b', 'feature/full', line]);
-    const names = require('../../plugins/anti-hall/companion/lib/devswarm-names.js');
+    const names = require('../../plugins/anti-hall-node/companion/lib/devswarm-names.js');
     assert.equal(names.readName(home, r.result.meshId), line);
     assert.equal(cli.deriveTitleFromBrief('  \n- ' + line), line);
     assert.equal(cli.deriveTitleFromBrief('   '), null);
@@ -724,7 +724,7 @@ test('spawn: -t whose update-title call FAILS still reports titled:false and nev
     const r = cli.run(['spawn', 'feature/zzz', '-t', 'will not stick'], ctx(home, { cwd: repo, io }));
     assert.equal(r.result.ok, true, 'a failed title follow-up never fails the spawn verb itself');
     assert.equal(r.result.titled, false);
-    const names = require('../../plugins/anti-hall/companion/lib/devswarm-names.js');
+    const names = require('../../plugins/anti-hall-node/companion/lib/devswarm-names.js');
     assert.equal(names.readName(home, r.result.meshId), null);
   } finally { rm(home); rm(repo); }
 });
@@ -1549,7 +1549,7 @@ test('P2-10: a burst of heartbeats (unique temp names) all succeed with an intac
 // ensure/archive hash-bucket-vs-cross-project, GH1 stranded-workspace
 // visibility, GH2 migrateOwnerKeys raw active enumeration.
 // ============================================================================
-const recovery = require('../../plugins/anti-hall/companion/lib/recovery.js');
+const recovery = require('../../plugins/anti-hall-node/companion/lib/recovery.js');
 function writeActiveDesc(home, id, d) {
   const p = cli.descriptorPath(home, id);
   fs.mkdirSync(path.dirname(p), { recursive: true });

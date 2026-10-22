@@ -1316,7 +1316,7 @@ fn repair_on_reload_matches_node() {
 fn repair_migration_keys_match_the_node_list() {
     let out = Command::new("node")
         .arg("-e")
-        .arg("process.stdout.write(JSON.stringify(require('./plugins/anti-hall/companion/lib/migrations.js').defaultMigrations().map(m => m.key)))")
+        .arg("process.stdout.write(JSON.stringify(require('./plugins/anti-hall-node/companion/lib/migrations.js').defaultMigrations().map(m => m.key)))")
         .current_dir(repo())
         .env("ANTIHALL_TEST_ISOLATION", "1")
         .output()
@@ -1335,7 +1335,7 @@ fn the_engine_and_node_respect_each_others_swarm_lock() {
     let home = temp_home("lock");
     let lock = home.join(".anti-hall/swarm-spawns.lock");
     let node = |script: &str| Command::new("node").arg("-e").arg(script).arg(&lock).current_dir(repo()).env("ANTIHALL_TEST_ISOLATION", "1").output().unwrap();
-    let lib = "const L=require('./plugins/anti-hall/companion/lib/lock.js');const p=process.argv[1];";
+    let lib = "const L=require('./plugins/anti-hall-node/companion/lib/lock.js');const p=process.argv[1];";
     // Node holds, the engine (via a spawn through the check) must not take it: the guard fails open without recording.
     let held =
         node(&format!("{lib}const h=L.acquire(p,{{staleMs:5000,liveStaleMs:5000,maxTries:Infinity,waitMs:50,stepMs:5}});process.stdout.write(h?'held':'no');"));

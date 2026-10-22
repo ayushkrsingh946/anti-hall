@@ -14,8 +14,8 @@ const os = require('node:os');
 const path = require('node:path');
 const cp = require('node:child_process');
 
-const DOCTOR_JS = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'hooks', 'doctor.js');
-const INSTALL_SUPERVISOR_JS = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'install-devswarm-supervisor.js');
+const DOCTOR_JS = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'hooks', 'doctor.js');
+const INSTALL_SUPERVISOR_JS = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'install-devswarm-supervisor.js');
 
 function makeFakeHome() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'antihall-doctor-home-'));
@@ -135,14 +135,14 @@ test('doctor: Codex config.toml present in cwd -> reports detected, flags missin
 // Upgrade-path regression: an EXISTING Codex install with only the OLDER event
 // set (missing the newly-added PostToolUse reply-tracker hook) must be
 // reported as unwired, not "already wired". A prior version of this
-// detection matched a coarse "'/plugins/anti-hall/hooks/' appears ANYWHERE in
+// detection matched a coarse "'/plugins/anti-hall-node/hooks/' appears ANYWHERE in
 // hooks.json" test, which still matched on the surviving older events and
 // silently hid the missing PostToolUse event from the user.
 test('doctor: Codex hooks.json missing only a newly-added event (PostToolUse) -> reports unwired, not "already wired"', () => {
   const { home, cleanup } = makeFakeHome();
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'antihall-doctor-cwd-'));
   try {
-    const installer = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'codex', 'install-codex.js');
+    const installer = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'codex', 'install-codex.js');
     const install = cp.spawnSync(process.execPath, [installer], { cwd, encoding: 'utf8' });
     assert.strictEqual(install.status, 0, install.stderr || install.stdout);
     const hooksPath = path.join(cwd, '.codex', 'hooks.json');
@@ -169,7 +169,7 @@ test('doctor: Codex hooks.json with the FULL current event set -> reports "has a
   const { home, cleanup } = makeFakeHome();
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'antihall-doctor-cwd-'));
   try {
-    const installer = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'codex', 'install-codex.js');
+    const installer = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'codex', 'install-codex.js');
     const install = cp.spawnSync(process.execPath, [installer], { cwd, encoding: 'utf8' });
     assert.strictEqual(install.status, 0, install.stderr || install.stdout);
 

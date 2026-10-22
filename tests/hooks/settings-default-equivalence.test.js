@@ -7,8 +7,8 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
 const { makeHome } = require('../helpers/fixtures.js');
-const settings = require('../../plugins/anti-hall/hooks/lib/settings.js');
-const SCHEMA = require('../../plugins/anti-hall/hooks/lib/settings-schema.js');
+const settings = require('../../plugins/anti-hall-node/hooks/lib/settings.js');
+const SCHEMA = require('../../plugins/anti-hall-node/hooks/lib/settings-schema.js');
 const manifest = require('../../plugins/anti-hall/.claude-plugin/plugin.json');
 
 test('empty home + empty env: every schema setting resolves to its schema default', () => {

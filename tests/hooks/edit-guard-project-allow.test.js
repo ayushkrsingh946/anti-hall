@@ -16,9 +16,9 @@ const { testHook } = require('../helpers/spawn-hook.js');
 const { makeHome } = require('../helpers/fixtures.js');
 
 const HOOK = 'edit-guard.js';
-const allowLib = require('../../plugins/anti-hall/hooks/lib/command-allow.js');
-const SETTINGS_JS = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'scripts', 'settings.js');
-const DOCTOR_JS = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'hooks', 'doctor.js');
+const allowLib = require('../../plugins/anti-hall-node/hooks/lib/command-allow.js');
+const SETTINGS_JS = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'scripts', 'settings.js');
+const DOCTOR_JS = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'hooks', 'doctor.js');
 
 function makeRepo() {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'egallow-repo-')));

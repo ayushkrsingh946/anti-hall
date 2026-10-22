@@ -16,7 +16,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const repair = require('../../plugins/anti-hall/hooks/lib/doctor-repair.js');
+const repair = require('../../plugins/anti-hall-node/hooks/lib/doctor-repair.js');
 const { sweepChildGateFiles, runRepairs, CHILD_GATE_RETENTION_DAYS_DEFAULT } = repair;
 
 const rm = (p) => { try { fs.rmSync(p, { recursive: true, force: true }); } catch (_) {} };

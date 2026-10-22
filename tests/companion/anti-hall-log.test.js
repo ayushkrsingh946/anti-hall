@@ -13,7 +13,7 @@ const path = require('node:path');
 const { Worker } = require('node:worker_threads');
 
 const MODULE_PATH = path.join(
-  __dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'lib', 'anti-hall-log.js',
+  __dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'lib', 'anti-hall-log.js',
 );
 
 function freshLogger(envDir) {

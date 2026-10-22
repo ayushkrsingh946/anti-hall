@@ -23,13 +23,13 @@ const os = require('node:os');
 const path = require('node:path');
 
 const M = require(path.join(
-  __dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'devswarm-supervisor.js',
+  __dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'devswarm-supervisor.js',
 ));
 const updateJs = require(path.join(
-  __dirname, '..', '..', 'plugins', 'anti-hall', 'skills', 'update', 'scripts', 'update.js',
+  __dirname, '..', '..', 'plugins', 'anti-hall-node', 'skills', 'update', 'scripts', 'update.js',
 ));
 const devswarmCli = require(path.join(
-  __dirname, '..', '..', 'plugins', 'anti-hall', 'scripts', 'devswarm.js',
+  __dirname, '..', '..', 'plugins', 'anti-hall-node', 'scripts', 'devswarm.js',
 ));
 
 function makeHome() {

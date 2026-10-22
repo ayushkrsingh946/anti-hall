@@ -97,7 +97,7 @@ fn run(mut cmd: Command, input: &str) -> (i32, Vec<u8>, Vec<u8>) {
 
 fn run_node(repo: &Path, home: &Path, case: &Case, input: &str) -> (i32, Vec<u8>, Vec<u8>) {
     let mut c = Command::new("node");
-    c.arg(repo.join("plugins/anti-hall/hooks/model-routing-guard.js"))
+    c.arg(repo.join("plugins/anti-hall-node/hooks/model-routing-guard.js"))
         .env_clear()
         .env("PATH", std::env::var("PATH").unwrap_or_default())
         .env("HOME", home)
@@ -523,13 +523,13 @@ fn cases() -> Vec<Case> {
         ("update-other-project", "Run node scripts/update.js for the billing project"),
         (
             "update-helper-quoted",
-            "Run exactly: node \"$HOME/.claude/plugins/marketplaces/anti-hall/plugins/anti-hall/skills/update/scripts/update.js\" --check",
+            "Run exactly: node \"$HOME/.claude/plugins/marketplaces/anti-hall/plugins/anti-hall-node/skills/update/scripts/update.js\" --check",
         ),
         ("update-helper-qualified", "In the anti-hall checkout run node ./update.js and report"),
     ] {
         add(&mut out, name, json!({"model":"sonnet","subagent_type":"general-purpose","description":"research task","prompt":prompt}));
     }
-    add(&mut out, "update-setting-off", json!({"model":"sonnet","description":"update","prompt":"Run node plugins/anti-hall/skills/update/scripts/update.js"}));
+    add(&mut out, "update-setting-off", json!({"model":"sonnet","description":"update","prompt":"Run node plugins/anti-hall-node/skills/update/scripts/update.js"}));
     out.last_mut().unwrap().env.push(("ANTIHALL_UPDATE_IN_SESSION", "0"));
     add(&mut out, "routing-setting-off", json!({"model":"opus","prompt":"fetch and download dump, tail logs"}));
     out.last_mut().unwrap().env.push(("ANTIHALL_MODEL_ROUTING", "off"));
@@ -780,7 +780,7 @@ fn same_home_repeated_handover_and_update_parity() {
             ["advise", "block"],
         ),
         ("update", json!({"model":"sonnet","prompt":"Please run /anti-hall:update and report"}), ["block", "block"]),
-        ("update-helper", json!({"model":"sonnet","prompt":"Run node plugins/anti-hall/skills/update/scripts/update.js"}), ["block", "block"]),
+        ("update-helper", json!({"model":"sonnet","prompt":"Run node plugins/anti-hall-node/skills/update/scripts/update.js"}), ["block", "block"]),
     ] {
         let mut p = payload(ti);
         p["session_id"] = json!(format!("sequence-{name}"));

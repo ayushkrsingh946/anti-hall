@@ -16,7 +16,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
-const INSTALLER = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'install-devswarm-supervisor.js');
+const INSTALLER = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'install-devswarm-supervisor.js');
 
 // hygiene:no-test-marker — this suite proves the installer's OWN guards (temp
 // HOME, NODE_TEST_CONTEXT) with the marker deliberately absent; PATH is an

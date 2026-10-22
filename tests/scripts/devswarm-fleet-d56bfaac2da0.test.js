@@ -5,7 +5,7 @@
 // returns the submodule toplevel), passes with the patch applied.
 //
 // MODULE_UNDER_TEST env var selects which devswarm.js to load:
-//   HEAD    -> the real repo file (plugins/anti-hall/scripts/devswarm.js)
+//   HEAD    -> the real repo file (plugins/anti-hall-node/scripts/devswarm.js)
 //   PATCHED -> the scratch copy with d56bfaac2da0's fix applied (d56.js)
 // Isolates HOME/USERPROFILE to a scratch temp dir; never touches ~/.anti-hall.
 
@@ -18,7 +18,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const MODULE_PATH = process.env.MODULE_UNDER_TEST
-  || path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'scripts', 'devswarm.js');
+  || path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'scripts', 'devswarm.js');
 
 function git(args, cwd) {
   return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();

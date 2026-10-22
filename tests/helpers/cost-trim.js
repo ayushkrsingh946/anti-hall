@@ -8,7 +8,7 @@ const { testHook } = require('./spawn-hook.js');
 const { makeHome } = require('./fixtures.js');
 
 const PLUGIN = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const CORE = require(path.join(PLUGIN, 'hooks', 'verify-first-core.js'));
+const CORE = require(path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'hooks', 'verify-first-core.js'));
 const SID = 'ct-session-0001';
 const FLAG = ['--host=claude'];
 // 64-char representative root, as the injection profile uses.

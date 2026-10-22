@@ -13,7 +13,7 @@ const cp = require('node:child_process');
 
 const REPO = path.join(__dirname, '..', '..');
 const PLUGIN = 'plugins/anti-hall/';
-const OWNER = 'plugins/anti-hall/companion/lib/migrations.js';
+const OWNER = 'plugins/anti-hall-node/companion/lib/migrations.js';
 
 function productionFiles() {
   const r = cp.spawnSync('git', ['ls-files', '-co', '--exclude-standard', PLUGIN], { cwd: REPO, encoding: 'utf8' });

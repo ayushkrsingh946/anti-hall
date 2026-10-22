@@ -25,7 +25,7 @@ const os = require('node:os');
   const isolated = require('node:fs').mkdtempSync(require('node:path').join(require('node:os').tmpdir(), 'update-test-home-'));
   process.env.HOME = isolated; process.env.USERPROFILE = isolated;
 }
-const U = require('../../plugins/anti-hall/skills/update/scripts/update.js');
+const U = require('../../plugins/anti-hall-node/skills/update/scripts/update.js');
 
 const REAL_PLUGIN_SRC_DIR = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
 

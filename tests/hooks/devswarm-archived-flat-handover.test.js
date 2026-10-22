@@ -13,8 +13,8 @@ const os = require('node:os');
 const path = require('node:path');
 const { testHook } = require('../helpers/spawn-hook.js');
 const { makeHome } = require('../helpers/fixtures.js');
-const seat = require('../../plugins/anti-hall/companion/lib/primary-seat.js');
-const metricsLib = require('../../plugins/anti-hall/companion/lib/archived-child-metrics.js');
+const seat = require('../../plugins/anti-hall-node/companion/lib/primary-seat.js');
+const metricsLib = require('../../plugins/anti-hall-node/companion/lib/archived-child-metrics.js');
 
 const HOUR = 3600 * 1000;
 const CHILD_ENV = { DEVSWARM_REPO_ID: 'repo-1', DEVSWARM_SOURCE_BRANCH: 'feat/x', PATH: path.join(os.tmpdir(), 'antihall-flat-handover-no-bin') };

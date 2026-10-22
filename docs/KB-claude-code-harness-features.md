@@ -269,7 +269,7 @@ and drops silently otherwise.
 **Recommended posture: LAYER, don't replace.** Keep the mesh as the durable store of
 record; Claude's native messaging is a candidate LOW-LATENCY WAKE + live-coordination
 layer over it — conceptually what
-`plugins/anti-hall/companion/lib/devswarm-wake-watch.js` already does with a `Monitor`.
+`plugins/anti-hall-node/companion/lib/devswarm-wake-watch.js` already does with a `Monitor`.
 The one genuinely NEW capability it unlocks is **cross-machine** reach, which a local
 SQLite mesh structurally cannot provide.
 

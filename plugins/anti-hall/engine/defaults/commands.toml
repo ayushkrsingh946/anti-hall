@@ -157,6 +157,18 @@ value = { args = "", read_only = false, status = "implemented" }
 doc = "Take an older anti-hall status line out of the host's settings (L9a, the port of statusline/uninstall-statusline.js): restores the saved original statusLine, else the settings backup, else removes the key; `--project` for ./.claude/settings.local.json, `--purge-base` to also remove the shared base configuration."
 value = { args = "[--user|--project] [--purge-base]", read_only = false, status = "implemented" }
 
+[cmd.shadow-compare]
+doc = "Report how the engine and the original Node hooks agree (the Node backup, stage 1): pairs the shadow ledger's engine rows and node rows and prints, per check, the compared pairs, agreement, engine-weaker, engine-stricter and the errors of each side, plus what the shadow skipped (CPU, load, payload size, busy slots). `--days N` sets the window (default nodeback.report_days), `--check ID` and `--event NAME` narrow it, `--daily` adds a line per UTC day, `--json` prints everything. Works without the daemon; a daily job (shadow_report) also writes the JSON report to nodeback.report_file."
+value = { args = "[--days N] [--check ID] [--event NAME] [--daily]", read_only = true, status = "implemented" }
+
+[cmd.shadow-run]
+doc = "Internal: the detached half of the Node shadow. Runs the Node hooks of one followed hook event on their own, in a scratch home, and writes the engine rows and the node rows to the shadow ledger; started by the engine, not by people."
+value = { args = "<job file>", read_only = false, status = "implemented" }
+
+[cmd.fallback]
+doc = "The manual fallback switch of the Node backup (stage 2): `node` makes the launcher run the original Node hooks directly instead of the engine (it writes the marker file files.fallback_switch), `off` makes the engine answer again, `status` shows the switch. It never flips by itself; while it is on the Node hooks' verdicts are written to the shadow ledger with source node."
+value = { args = "<node|off|status>", read_only = false, read_only_args = ["status"], status = "implemented" }
+
 [cmd.schedule]
 doc = "The scheduler (D33): `list` the jobs with their next run and last result, `run <job>` now (waits briefly for the result), or show the run `history` from hot.db; adding and removing jobs from the command line is planned (D33), today they come from schedules.toml and schedules.json."
 value = { args = "<list|run <job>|history> [--job <name>] [--limit <n>]", read_only = false, read_only_args = ["list", "history"], status = "implemented" }

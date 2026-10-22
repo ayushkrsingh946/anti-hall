@@ -25,9 +25,9 @@ const path = require('node:path');
 const { makeHome } = require('../helpers/fixtures.js');
 
 const REPO_ROOT = path.join(__dirname, '..', '..');
-const REPAIR_JS = path.join(REPO_ROOT, 'plugins', 'anti-hall', 'hooks', 'lib', 'doctor-repair.js');
+const REPAIR_JS = path.join(REPO_ROOT, 'plugins', 'anti-hall-node', 'hooks', 'lib', 'doctor-repair.js');
 const repair = require(REPAIR_JS);
-const drainMarkerLib = require(path.join(REPO_ROOT, 'plugins', 'anti-hall', 'companion', 'lib', 'devswarm-drain-marker.js'));
+const drainMarkerLib = require(path.join(REPO_ROOT, 'plugins', 'anti-hall-node', 'companion', 'lib', 'devswarm-drain-marker.js'));
 
 function drainDir(home) {
   return path.join(home, '.anti-hall', 'devswarm', 'drain');

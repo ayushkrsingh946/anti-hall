@@ -505,7 +505,7 @@ value = 4194304
 
 [devswarm_parent.cli_rel]
 doc = "The DevSwarm CLI of a cached version, relative to the version directory."
-value = "scripts/devswarm.js"
+value = "../anti-hall-node/scripts/devswarm.js"
 
 [devswarm_parent.stale_build_message]
 doc = "The text for a child that runs an older anti-hall build than the machine's newest. Placeholders: {version}, {cmd}."

@@ -84,6 +84,7 @@ mod model_routing_parity;
 mod native_session_checks;
 mod no_compiled_config;
 mod no_hardcoded_tunables;
+mod nodeback;
 mod node_parity;
 mod operator_parity;
 mod port_guards_parity;

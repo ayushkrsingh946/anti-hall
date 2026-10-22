@@ -10,7 +10,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { testHook, bashPayload, HOOKS_DIR } = require('../helpers/spawn-hook.js');
 const { makeHome } = require('../helpers/fixtures.js');
-const bm = require('../../plugins/anti-hall/hooks/lib/block-message.js');
+const bm = require('../../plugins/anti-hall-node/hooks/lib/block-message.js');
 
 const ICONS = Object.values(bm.ICONS);
 const LABELS = /^(Why|Do instead|Allowed here|Override \(only if the user explicitly asked\)): /;
@@ -109,7 +109,7 @@ test('model-routing-guard strict block has the shared shape and its override', (
 }));
 
 test('coordinator-work-guard block + nudge text have the shared shape', () => {
-  const lib = require('../../plugins/anti-hall/hooks/lib/coordinator-work.js');
+  const lib = require('../../plugins/anti-hall-node/hooks/lib/coordinator-work.js');
   const cfg = { windowMs: 600000, blockAt: 8 };
   const b = lib.BLOCK(8, cfg, 'node skip coordinator-work-guard');
   assertShape(b, 'coordinator-work-guard', 'coordinator-work block');

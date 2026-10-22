@@ -22,7 +22,7 @@ const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { testHook, HOOKS_DIR } = require('../helpers/spawn-hook.js');
 const { makeHome } = require('../helpers/fixtures.js');
-const repokey = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
+const repokey = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
 
 // HERMETIC: testHook's isolatedEnv (POSIX) already sends only {PATH, HOME} to
 // the spawned hook, and testHookAsync below does the same — neither inherits

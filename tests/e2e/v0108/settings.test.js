@@ -334,7 +334,7 @@ test('migration: idempotent — a second run with the same version reports skipp
 
     // Simulate a user override AFTER the first migration — the marker means
     // a second run for the SAME version must not stomp it back to legacy.
-    const setAfter = require(path.join(__dirname, '..', '..', '..', 'plugins', 'anti-hall', 'hooks', 'lib', 'settings.js'));
+    const setAfter = require(path.join(__dirname, '..', '..', '..', 'plugins', 'anti-hall-node', 'hooks', 'lib', 'settings.js'));
     setAfter.set('jev', 'transport', 'vercel', { home });
 
     const second = runMigrationsLib('runSettingsMigration', home, { version: '0.108.0-test' });

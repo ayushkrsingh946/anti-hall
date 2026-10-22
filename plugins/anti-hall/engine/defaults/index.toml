@@ -88,5 +88,6 @@ files = [
     "mem.toml",
     "wire.toml",
     "devswarm_parent.toml",
+    "nodeback.toml",
 ]
 extra_dir = "hooks.d"

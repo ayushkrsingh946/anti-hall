@@ -9,7 +9,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const ignoreLib = require('../../plugins/anti-hall/companion/lib/devswarm-ignore.js');
+const ignoreLib = require('../../plugins/anti-hall-node/companion/lib/devswarm-ignore.js');
 
 function tmpHome() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'anti-hall-ignore-'));

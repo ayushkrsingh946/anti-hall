@@ -18,8 +18,8 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 
 const MODULE_PATH = process.env.MODULE_UNDER_TEST
-  || path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'scripts', 'devswarm.js');
-const REPOKEY_PATH = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'lib', 'devswarm-repokey.js');
+  || path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'scripts', 'devswarm.js');
+const REPOKEY_PATH = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'lib', 'devswarm-repokey.js');
 
 function git(args, cwd) { return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim(); }
 
@@ -38,7 +38,7 @@ function mkGitRepo() {
 // Since 2026-10-16 only a registered project qualifies for an automatic
 // (selfHeal) ingest install: register the repo the test runs in.
 function registerRepo(home, repoCwd) {
-  const repokey = require(path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'lib', 'devswarm-repokey.js'));
+  const repokey = require(path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'lib', 'devswarm-repokey.js'));
   const key = repokey.repoKeyForWorktree(repoCwd);
   const dir = path.join(home, '.anti-hall', 'devswarm', 'workspaces');
   fs.mkdirSync(dir, { recursive: true });
@@ -132,7 +132,7 @@ test('selfHeal reports retryAfterMs during the self-heal cooldown window (2e8653
 test('selfHeal with ANTIHALL_INGEST_DRY_RUN=1 and no io mock never registers a real unit under a temp HOME (ec33954162ef belt-and-braces)', () => {
   if (process.platform !== 'darwin' && process.platform !== 'linux') return; // no daemon on win32
   const dev = require(MODULE_PATH);
-  const installer = require(path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'install-devswarm-ingest.js'));
+  const installer = require(path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'install-devswarm-ingest.js'));
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'antihall-2e8-home3-'));
   const repoCwd = mkGitRepo();
   try {

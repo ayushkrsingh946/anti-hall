@@ -12,7 +12,7 @@ const assert = require('node:assert');
 const ops = require('../harness/ops.js');
 const fs = require('node:fs');
 const path = require('node:path');
-const stableLauncherLib = require('../../plugins/anti-hall/hooks/lib/stable-launcher.js');
+const stableLauncherLib = require('../../plugins/anti-hall-node/hooks/lib/stable-launcher.js');
 
 const T0 = 1_700_000_000_000;
 const READER_A = 'h:4242:1700000000000';

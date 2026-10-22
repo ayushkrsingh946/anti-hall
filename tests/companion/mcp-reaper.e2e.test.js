@@ -27,7 +27,7 @@ const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
 
 const MOD = path.join(
-  __dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'mcp-reaper.js'
+  __dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'mcp-reaper.js'
 );
 
 // Wave D9 hygiene fix: mcp-reaper.js's main() unconditionally mkdir+appends its

@@ -13,10 +13,10 @@ const os = require('node:os');
 const path = require('node:path');
 const cp = require('node:child_process');
 
-const pull = require('../../plugins/anti-hall/companion/lib/devswarm-pull.js');
-const storeLib = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
-const { readUnread } = require('../../plugins/anti-hall/companion/lib/devswarm-inbox-cursor.js');
-const { resolveSelfId } = require('../../plugins/anti-hall/companion/lib/liveness.js');
+const pull = require('../../plugins/anti-hall-node/companion/lib/devswarm-pull.js');
+const storeLib = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
+const { readUnread } = require('../../plugins/anti-hall-node/companion/lib/devswarm-inbox-cursor.js');
+const { resolveSelfId } = require('../../plugins/anti-hall-node/companion/lib/liveness.js');
 const { testHook } = require('../helpers/spawn-hook.js');
 
 // makeGitRepo(tag) — a REAL, minimal git repo on disk (D3 sender tests need a
@@ -667,7 +667,7 @@ test('WAL fail-closed: a batch-write failure spills the raw bytes, blocks furthe
     });
     const first = pull.pullOnce({ home, id: 'child-1', backend: 'journal', io: { run: makeRun({ count: 2, batch: TWO }).run, fs: badFs } });
     assert.equal(first.ok, false);
-    const spilled = require('../../plugins/anti-hall/companion/lib/devswarm-read-wal.js').spillPending(fs, pull.walPath(home, 'child-1'));
+    const spilled = require('../../plugins/anti-hall-node/companion/lib/devswarm-read-wal.js').spillPending(fs, pull.walPath(home, 'child-1'));
     assert.equal(spilled.length, 1, 'the popped batch is recoverable from the spill quarantine');
     assert.equal(JSON.parse(fs.readFileSync(spilled[0], 'utf8')).raw, TWO, 'byte-exact raw');
     // Still broken: the spill cannot be absorbed -> no new destructive read.
@@ -701,7 +701,7 @@ test('WAL prior reader key: an open batch in another pull WAL for the SAME workt
   const home = tmpHome();
   try {
     const { inboxPath, cursorPath } = seedDescriptor(home, 'child-new');
-    const readWal = require('../../plugins/anti-hall/companion/lib/devswarm-read-wal.js');
+    const readWal = require('../../plugins/anti-hall-node/companion/lib/devswarm-read-wal.js');
     const oldWal = pull.walPath(home, 'child-old');
     readWal.appendBatch(fs, oldWal, TWO, 1, { worktree: '/wt/child-new' });
     readWal.appendBatch(fs, pull.walPath(home, 'child-other'), TWO, 1, { worktree: '/wt/somewhere-else' });
@@ -716,7 +716,7 @@ test('WAL prior reader key: an open batch in another pull WAL for the SAME workt
 
 test('WAL double failure: WAL AND spill fail mid-operation -> last-resort file in os.tmpdir(), reader stays blocked, recovers once writable', () => {
   const home = tmpHome();
-  const readWal = require('../../plugins/anti-hall/companion/lib/devswarm-read-wal.js');
+  const readWal = require('../../plugins/anti-hall-node/companion/lib/devswarm-read-wal.js');
   const wal = pull.walPath(home, 'child-1');
   try {
     const { inboxPath, cursorPath } = seedDescriptor(home, 'child-1');
@@ -764,7 +764,7 @@ test('WAL double failure: WAL AND spill fail mid-operation -> last-resort file i
 
 test('WAL adoption race: two same-worktree readers adopting one prior-key WAL -> exactly one applies', () => {
   const home = tmpHome();
-  const readWal = require('../../plugins/anti-hall/companion/lib/devswarm-read-wal.js');
+  const readWal = require('../../plugins/anti-hall-node/companion/lib/devswarm-read-wal.js');
   try {
     const a = seedDescriptor(home, 'child-a');
     const b = seedDescriptor(home, 'child-b');

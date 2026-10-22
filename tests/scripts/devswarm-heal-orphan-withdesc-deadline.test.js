@@ -22,10 +22,10 @@ const os = require('node:os');
 const path = require('node:path');
 const cp = require('node:child_process');
 
-const cli = require('../../plugins/anti-hall/scripts/devswarm.js');
-const storeLib = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
-const inst = require('../../plugins/anti-hall/companion/install-devswarm-ingest.js');
-const repokey = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
+const cli = require('../../plugins/anti-hall-node/scripts/devswarm.js');
+const storeLib = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
+const inst = require('../../plugins/anti-hall-node/companion/install-devswarm-ingest.js');
+const repokey = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
 
 function tmpHome() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'anti-hall-healorphan-dl-'));
@@ -128,7 +128,7 @@ test('healOrphanPartitions: deadline-deferred ids are reported as deadlineSkippe
 });
 
 test('healOrphanPartitionsPostUpdate: a deadline that expires mid-heal is NOT stamped; the next run completes and IS stamped', () => {
-  const U = require('../../plugins/anti-hall/skills/update/scripts/update.js');
+  const U = require('../../plugins/anti-hall-node/skills/update/scripts/update.js');
   const pluginSrcDir = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
   const home = tmpHome();
   const W1 = makeGitRepo('healdlstamp');

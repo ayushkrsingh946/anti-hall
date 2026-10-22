@@ -10,7 +10,7 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert');
-const { reconstructTasks } = require('../../plugins/anti-hall/hooks/lib/task-state.js');
+const { reconstructTasks } = require('../../plugins/anti-hall-node/hooks/lib/task-state.js');
 
 function taskUpdateEntry(tuid, input) {
   return {

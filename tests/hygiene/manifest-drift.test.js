@@ -26,11 +26,11 @@ const CLAUDE_PLUGIN_JSON = path.join(ANTI_HALL, '.claude-plugin', 'plugin.json')
 const CODEX_PLUGIN_JSON = path.join(ANTI_HALL, '.codex-plugin', 'plugin.json');
 const CLAUDE_HOOKS_JSON = path.join(ANTI_HALL, 'hooks', 'hooks.registry.json');
 const CODEX_HOOKS_JSON = path.join(ANTI_HALL, 'codex', 'hooks', 'hooks.registry.json');
-const CLAUDE_HOOKS_DIR = path.join(ANTI_HALL, 'hooks');
+const CLAUDE_HOOKS_DIR = path.join(REPO, 'plugins', 'anti-hall-node', 'hooks');
 // codex/hooks/hooks.json's `${PLUGIN_ROOT}/hooks/xxx.js` commands, and
 // install-codex.js's own HOOK_ROOT (= path.resolve(__dirname, '..', 'hooks')
-// from plugins/anti-hall/codex/install-codex.js), BOTH resolve to the SAME
-// shared plugins/anti-hall/hooks/ directory — codex/hooks/ itself holds only
+// from plugins/anti-hall-node/codex/install-codex.js), BOTH resolve to the SAME
+// shared plugins/anti-hall-node/hooks/ directory — codex/hooks/ itself holds only
 // hooks.json, no .js files of its own (verified: `ls plugins/anti-hall/codex/
 // hooks/` lists only hooks.json). Codex hooks are the shared Claude hook
 // files, referenced from a separate manifest, not a separate copy.
@@ -186,7 +186,7 @@ test('manifest-drift: every file referenced by either hooks.json exists on disk'
           const m = eo || command.match(/([\w.-]+\.js)/);
           assert.ok(m, 'hooks.json command names no .js script: ' + command);
           const file = m[1];
-          const abs = path.join(hooksDir, file);
+          const abs = eo ? path.join(ANTI_HALL, 'hooks', file) : path.join(hooksDir, file); // engine-only no-ops stay in the published plugin
           if (!fs.existsSync(abs)) missing.push(`${path.relative(REPO, hooksJsonPath)} -> ${file}`);
         }
       }
@@ -198,8 +198,8 @@ test('manifest-drift: every file referenced by either hooks.json exists on disk'
 });
 
 test('manifest-drift: install-codex.js ANTI_HALL_HOOKS names only the wrapper, and the wrapper exists on disk', () => {
-  delete require.cache[require.resolve(path.join(ANTI_HALL, 'codex', 'install-codex.js'))];
-  const { ANTI_HALL_HOOKS } = require(path.join(ANTI_HALL, 'codex', 'install-codex.js'));
+  delete require.cache[require.resolve(path.join(REPO, 'plugins', 'anti-hall-node', 'codex', 'install-codex.js'))];
+  const { ANTI_HALL_HOOKS } = require(path.join(REPO, 'plugins', 'anti-hall-node', 'codex', 'install-codex.js'));
   const bad = [];
   for (const [event, groups] of Object.entries(ANTI_HALL_HOOKS || {})) {
     for (const g of Array.isArray(groups) ? groups : []) {

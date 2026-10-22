@@ -16,7 +16,7 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const path = require('node:path');
 
-const WAKE = require('../../plugins/anti-hall/hooks/lib/devswarm-wake.js');
+const WAKE = require('../../plugins/anti-hall-node/hooks/lib/devswarm-wake.js');
 const { wakeDirective, wakeReassert, WAKE_CRON_DEFAULT, drainCmd } = WAKE;
 
 // fl-wave3 fix (item 3): a bare 38-char fixture path let the pre-fix 3x-

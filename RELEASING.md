@@ -18,7 +18,7 @@ Every behavioral or shipped-content change bumps the version and follows this ch
    - [ ] `llms.txt` — hooks list, skills, disciplines, docs list.
    - [ ] `README.md` (root) and `plugins/anti-hall/README.md` — only if the change touches what they cover (overview, privacy/network table, escape hatch).
    - [ ] relevant other `docs/*.md` (and `docs/KB.md` topic map).
-4. - [ ] Verify: `node --test` (all pass) and `node plugins/anti-hall/hooks/doctor.js --check` (anti-hall ACTIVE). Never claim done without these THIS change.
+4. - [ ] Verify: `node --test` (all pass) and `node plugins/anti-hall-node/hooks/doctor.js --check` (anti-hall ACTIVE). Never claim done without these THIS change.
 5. - [ ] Commit on `dev` (NO AI-credit / Co-Authored-By trailer — git-guard blocks them) and push `dev`. Pushes to `dev` run no CI.
 6. - [ ] **Optional full-matrix gate on `dev`.** Pull-request CI runs a reduced matrix (ubuntu × Node 22/24 plus macOS × Node 24). For a release that needs the full matrix, push a candidate tag at the `dev` commit — `test.yml` runs on `rc-v*` tags (ubuntu + macOS × Node 22/24, each cell sharded; `v*` tags do not trigger it):
    - `git tag rc-v<version>` then `git push origin rc-v<version>`

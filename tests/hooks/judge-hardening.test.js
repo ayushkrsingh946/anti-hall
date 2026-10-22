@@ -11,7 +11,7 @@ const path = require('node:path');
 const { testHookRaw } = require('../helpers/spawn-hook.js');
 const { makeHome } = require('../helpers/fixtures.js');
 
-const HOOKS = path.resolve(__dirname, '../../plugins/anti-hall/hooks');
+const HOOKS = path.resolve(__dirname, '../../plugins/anti-hall-node/hooks');
 const { scrubSecrets } = require(HOOKS + '/lib/secret-scrub.js');
 const jc = require(HOOKS + '/lib/judge-core.js');
 

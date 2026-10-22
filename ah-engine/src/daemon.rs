@@ -1612,6 +1612,7 @@ fn watchdog(sh: Arc<Shared>) {
             crate::debug_log!("daemon/cpu", defaults::render("msg.dbg_cpu_window", &[("ms", &format!("{:.0}", wall * 1000.0)), ("pct", &format!("{pct:.2}"))]));
             let edge = lk(&sh.budget).cpu_window(pct, cfg.effective.num("diagnostics.budget_cpu_pct"), cfg.effective.num("diagnostics.budget_cpu_windows"));
             report_budget_edge(edge, &format!("{pct:.1}"), cfg.effective.num("diagnostics.budget_cpu_pct"), "msg.log_budget_cpu");
+            crate::nodeback::shadow::hold(lk(&sh.budget).mask() & 1 == 1); // the Node shadow starts nothing while the CPU budget is breached
             if warn_pct > 0.0 && pct >= warn_pct {
                 let backoff_ms = cfg.effective.num("schedule.cpu_backoff_ms");
                 if let Some(sched) = sh.sched.get() {
@@ -2037,6 +2038,7 @@ fn start_scheduler(sh: &Arc<Shared>) {
                 crate::procwatch::run_job(&crate::paths::dir(), &home, &rec)
             }
             "test_panic" if sh.cfg().test_hooks => std::panic::resume_unwind(Box::new(defaults::text("msg.reply_test_panic").to_string())),
+            "shadow_report" => crate::nodeback::report::scheduled(),
             "devswarm_reconcile" => Ok(crate::dswire::scheduled()),
             "devswarm_supervisor" => Ok(crate::dssup::cli::scheduled()),
             "noop" => Ok(String::new()),

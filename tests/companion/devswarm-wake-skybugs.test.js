@@ -14,8 +14,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const wake = require('../../plugins/anti-hall/companion/lib/devswarm-wake-watch.js');
-const liveChildren = require('../../plugins/anti-hall/companion/lib/devswarm-live-children.js');
+const wake = require('../../plugins/anti-hall-node/companion/lib/devswarm-wake-watch.js');
+const liveChildren = require('../../plugins/anti-hall-node/companion/lib/devswarm-live-children.js');
 
 function tmpHome() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'anti-hall-wake-skybugs-'));
@@ -154,7 +154,7 @@ test('tick: the Primary\'s own send (raw total +1, inbound unchanged) does not w
 });
 
 test('computeSummary: directTotalFromOthers excludes rows the workspace\'s own identity family sent', () => {
-  const storeLib = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
+  const storeLib = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
   const home = tmpHome();
   try {
     const s = storeLib.openStore({ home, hash: 'k-own', backend: 'journal' });

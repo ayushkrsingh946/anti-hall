@@ -14,7 +14,7 @@ const { spawnSync } = require('node:child_process');
 const { testHook } = require('../helpers/spawn-hook.js');
 const { makeHome } = require('../helpers/fixtures.js');
 
-const HOOK = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'hooks', 'command-guard.js');
+const HOOK = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'hooks', 'command-guard.js');
 const COORD = { CLAUDE_CODE_ENTRYPOINT: 'cli' };
 const EXPORTS = ['classifyBashWork', 'isStateChangingGitSegment', 'isRecoveryGitSegment', 'bashWriteTargets',
   'isHeavyCommand', 'isHeavyGhSegment', 'isScratchpadOrTmpPath', 'splitSegmentsDetailed', 'effectiveVerb'];
@@ -26,7 +26,7 @@ const probe = spawnSync(process.execPath, ['-e',
 { input: '', encoding: 'utf8' });
 const cg = probe.stdout === EXPORTS.map(() => 'function').join(',') ? require(HOOK) : {};
 
-const allowLib = require('../../plugins/anti-hall/hooks/lib/command-allow.js');
+const allowLib = require('../../plugins/anti-hall-node/hooks/lib/command-allow.js');
 
 function git(cwd, ...args) {
   const r = spawnSync('git', ['-c', 'user.email=t@e', '-c', 'user.name=t', ...args], { cwd, encoding: 'utf8' });

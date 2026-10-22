@@ -35,8 +35,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const ingest = require('../../plugins/anti-hall/companion/devswarm-ingest.js');
-const installIngest = require('../../plugins/anti-hall/companion/install-devswarm-ingest.js');
+const ingest = require('../../plugins/anti-hall-node/companion/devswarm-ingest.js');
+const installIngest = require('../../plugins/anti-hall-node/companion/install-devswarm-ingest.js');
 
 const STALE_MS = ingest.INGEST_LOCK_STALE_MS;
 

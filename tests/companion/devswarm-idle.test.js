@@ -9,7 +9,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
 
-const I = require(path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'lib', 'devswarm-idle.js'));
+const I = require(path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'lib', 'devswarm-idle.js'));
 
 const CLI = '/x/anti-hall/scripts/devswarm.js';
 const WATCH = '/x/anti-hall/companion/lib/devswarm-wake-watch.js';
@@ -364,7 +364,7 @@ function isoHome() {
   return { home, cleanup: () => { try { fs.rmSync(home, { recursive: true, force: true }); } catch (_) {} } };
 }
 function writeTranscriptFor(home, worktreePath, sessionId, text, ageMin) {
-  const liveness = require(path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'lib', 'liveness.js'));
+  const liveness = require(path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'lib', 'liveness.js'));
   const dir = liveness.projectDirFor(worktreePath, home);
   fs.mkdirSync(dir, { recursive: true });
   const f = path.join(dir, sessionId + '.jsonl');

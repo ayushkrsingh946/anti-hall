@@ -3,7 +3,7 @@
 //
 // PROVEN ROOT CAUSE: doctor.test.js / doctor-repair.test.js /
 // doctor-repair-reclaim.test.js / doctor-logs.test.js each spawn doctor.js
-// (plugins/anti-hall/hooks/doctor.js) as a real subprocess through a local
+// (plugins/anti-hall-node/hooks/doctor.js) as a real subprocess through a local
 // runDoctor() helper whose DEFAULT env merge used to set `HOME: undefined,
 // USERPROFILE: undefined`. That default is NOT isolation: when HOME is
 // unset, Node's os.homedir() falls back through the platform passwd db to
@@ -199,7 +199,7 @@ test('real store untouched: ~/.anti-hall/devswarm/store mtime is unchanged by a 
     // Spawn doctor.js itself (read-only --check) through the fixed pattern,
     // with no caller HOME override — the exact shape of a runDoctor() call
     // that forgot to pass one.
-    const DOCTOR_JS = path.join(REPO_ROOT, 'plugins', 'anti-hall', 'hooks', 'doctor.js');
+    const DOCTOR_JS = path.join(REPO_ROOT, 'plugins', 'anti-hall-node', 'hooks', 'doctor.js');
     cp.spawnSync(process.execPath, [DOCTOR_JS, '--check'], {
       cwd: fallbackHome,
       encoding: 'utf8',

@@ -18,9 +18,9 @@ const os = require('node:os');
 const path = require('node:path');
 const cp = require('node:child_process');
 
-const REPAIR = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'hooks', 'lib', 'doctor-repair.js');
-const INSTALLER = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'install-devswarm-ingest.js');
-const INGEST = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'devswarm-ingest.js');
+const REPAIR = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'hooks', 'lib', 'doctor-repair.js');
+const INSTALLER = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'install-devswarm-ingest.js');
+const INGEST = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'devswarm-ingest.js');
 const repair = require(REPAIR);
 const installer = require(INSTALLER);
 const ingest = require(INGEST);
@@ -113,7 +113,7 @@ function writeHealthyProjectDaemon(home, worktree) {
 }
 
 function requireRepoKey(worktree) {
-  const repokey = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
+  const repokey = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
   const key = repokey.repoKeyForWorktree(worktree);
   assert.ok(key, 'test setup: repoKeyForWorktree must resolve for a real git repo fixture');
   return key;
@@ -200,7 +200,7 @@ test('reapOrphanedLegacyUnits: a repoKey (per-project) unit is NOT matched by th
   const home = tmpHome();
   const repo = makeGitRepo('project-unit');
   try {
-    const repokey = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
+    const repokey = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
     const repoKey = repokey.repoKeyForWorktree(repo);
     writeProjectUnit(home, PLATFORM, repoKey, repo, '/tmp/proj.js');
     const { io, calls } = schedMocks();

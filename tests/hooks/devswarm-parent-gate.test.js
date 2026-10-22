@@ -15,13 +15,13 @@ const { testHook, testHookRaw } = require('../helpers/spawn-hook.js');
 const { makeHome } = require('../helpers/fixtures.js');
 const cp = require('node:child_process');
 const os = require('node:os');
-const installIngest = require('../../plugins/anti-hall/companion/install-devswarm-ingest.js');
-const repokey = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
-const replyStateLib = require('../../plugins/anti-hall/companion/lib/devswarm-reply-state.js');
-const meshStore = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
-const { WAKE_CRON_DEFAULT } = require('../../plugins/anti-hall/hooks/lib/devswarm-wake.js');
-const gateStateLib = require('../../plugins/anti-hall/companion/lib/devswarm-gate-state.js');
-const drainMarkerLib = require('../../plugins/anti-hall/companion/lib/devswarm-drain-marker.js');
+const installIngest = require('../../plugins/anti-hall-node/companion/install-devswarm-ingest.js');
+const repokey = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
+const replyStateLib = require('../../plugins/anti-hall-node/companion/lib/devswarm-reply-state.js');
+const meshStore = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
+const { WAKE_CRON_DEFAULT } = require('../../plugins/anti-hall-node/hooks/lib/devswarm-wake.js');
+const gateStateLib = require('../../plugins/anti-hall-node/companion/lib/devswarm-gate-state.js');
+const drainMarkerLib = require('../../plugins/anti-hall-node/companion/lib/devswarm-drain-marker.js');
 
 const HOOK = 'devswarm-parent-gate.js';
 const PRIMARY_ENV = { DEVSWARM_REPO_ID: 'repo-1' }; // active + Primary (no SOURCE_BRANCH)
@@ -299,7 +299,7 @@ test('BLOCK: unread backlog past cursor -> decision:block naming the workspace +
 test('IGNORE LIST: a listed id never blocks the Stop hook, even with real unread', () => {
   const h = makeHome();
   try {
-    const { ignoreFilePath } = require('../../plugins/anti-hall/companion/lib/devswarm-ignore.js');
+    const { ignoreFilePath } = require('../../plugins/anti-hall-node/companion/lib/devswarm-ignore.js');
     const p = ignoreFilePath(h.home);
     fs.mkdirSync(path.dirname(p), { recursive: true });
     fs.writeFileSync(p, JSON.stringify({ ids: ['ws1'] }));
@@ -313,7 +313,7 @@ test('IGNORE LIST: a listed id never blocks the Stop hook, even with real unread
 test('IGNORE LIST: a NON-ignored sibling workspace still blocks normally (scoping guard)', () => {
   const h = makeHome();
   try {
-    const { ignoreFilePath } = require('../../plugins/anti-hall/companion/lib/devswarm-ignore.js');
+    const { ignoreFilePath } = require('../../plugins/anti-hall-node/companion/lib/devswarm-ignore.js');
     const p = ignoreFilePath(h.home);
     fs.mkdirSync(path.dirname(p), { recursive: true });
     fs.writeFileSync(p, JSON.stringify({ ids: ['ws-other'] }));
@@ -1109,7 +1109,7 @@ test('FAIL-FIRST PROOF: the ghost fixture actually has a nonzero RAW unread coun
       cursor: 0,
       verdict: { status: 'alive' },
     });
-    const inboxCursor = require('../../plugins/anti-hall/companion/lib/devswarm-inbox-cursor.js');
+    const inboxCursor = require('../../plugins/anti-hall-node/companion/lib/devswarm-inbox-cursor.js');
     const u = inboxCursor.readUnread(seeded.inboxPath, seeded.cursorPath);
     assert.strictEqual(u.known, true);
     assert.strictEqual(u.count, 1, 'the raw line-count classifier the OLD code used would have blocked on this');
@@ -1425,7 +1425,7 @@ test('BUG 2 (v0.109 safety review F1): a fresh heartbeat ALONE is not busy evide
 // though the child "looks" busy. writeSessionTranscript seeds the transcript
 // file the SAME reader (companion/lib/devswarm-idle.js, via
 // devswarm-parent-gate.js's `waitingOnUserInput`) reads.
-const liveness = require('../../plugins/anti-hall/companion/lib/liveness.js');
+const liveness = require('../../plugins/anti-hall-node/companion/lib/liveness.js');
 function writeSessionTranscript(home, worktreePath, sessionId, lines) {
   const dir = liveness.projectDirFor(worktreePath, home);
   fs.mkdirSync(dir, { recursive: true });
@@ -2902,7 +2902,7 @@ test('FAIL-CLOSED TO BLOCK: worktreePath that EXISTS as a dangling symlink is NO
 //
 // Mutation to apply for RED: remove the `worktreeGoneChildren` block (and its
 // `if (worktreeGoneChildren.length > 0) { ... }` body) from buildReason() in
-// plugins/anti-hall/hooks/devswarm-parent-gate.js — the GONE test below fails
+// plugins/anti-hall-node/hooks/devswarm-parent-gate.js — the GONE test below fails
 // (no `--ack-as-owner` hint in the reason) while the LIVE test still passes.
 // ---------------------------------------------------------------------------
 
@@ -2911,7 +2911,7 @@ test('FAIL-CLOSED TO BLOCK: worktreePath that EXISTS as a dangling symlink is NO
 // context, resolving to a REAL project key) — NEVER the gone/foreign
 // worktree, which does not exist. Mirrors how a live Primary actually issues
 // these commands: from its own repo, never cd'd into a dead child's worktree.
-const DEVSWARM_CLI = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'scripts', 'devswarm.js');
+const DEVSWARM_CLI = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'scripts', 'devswarm.js');
 function runCliVerb(home, args) {
   const r = cp.spawnSync(process.execPath, [DEVSWARM_CLI, ...args], {
     env: { PATH: process.env.PATH, HOME: home },

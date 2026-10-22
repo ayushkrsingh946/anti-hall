@@ -19,7 +19,7 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const GATE_PATH = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'hooks', 'devswarm-parent-gate.js');
+const GATE_PATH = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'hooks', 'devswarm-parent-gate.js');
 
 // B3 MUTATION-CHECK (killed):
 //   1. Revert to the pre-fix `--message "..."` string (no --message-file) ->

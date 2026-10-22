@@ -28,8 +28,8 @@ const LOG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'anti-hall-spawnspeed-log-
 process.env.ANTI_HALL_LOG_DIR = LOG_DIR;
 process.on('exit', () => { try { fs.rmSync(LOG_DIR, { recursive: true, force: true }); } catch (_) {} });
 
-const cli = require('../../plugins/anti-hall/scripts/devswarm.js');
-const pull = require('../../plugins/anti-hall/companion/lib/devswarm-pull.js');
+const cli = require('../../plugins/anti-hall-node/scripts/devswarm.js');
+const pull = require('../../plugins/anti-hall-node/companion/lib/devswarm-pull.js');
 
 const GIT_ENV = Object.assign({}, process.env, {
   HOME: LOG_DIR, USERPROFILE: LOG_DIR,

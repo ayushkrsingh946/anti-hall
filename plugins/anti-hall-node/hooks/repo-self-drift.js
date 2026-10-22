@@ -139,7 +139,7 @@ function scan(hooksDir) {
 
   const kbPath = resolveKbPath(hooksDir);
   const actualHooks = countJsFiles(hooksDir);
-  const actualSkills = countSkillDirs(path.join(hooksDir, '..', 'skills'));
+  const actualSkills = countSkillDirs(path.join(hooksDir, '..', '..', 'anti-hall', 'skills'));
 
   if (kbPath) {
     let kbText = null;

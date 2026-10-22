@@ -92,7 +92,7 @@ repo).
   see CLAUDE.md: "Explore... lacks the Agent tool and structurally cannot
   recurse"). Used the live, currently-running real subagent session as the
   specimen instead:
-  1. Ran `node plugins/anti-hall/hooks/verify-first-subagent.js` with synthetic
+  1. Ran `node plugins/anti-hall-node/hooks/verify-first-subagent.js` with synthetic
      `{"hook_event_name":"SubagentStart","session_id":"probe-test"}` on stdin to
      capture the hook's ACTUAL current stdout (`hookSpecificOutput.additionalContext`,
      6415 chars).

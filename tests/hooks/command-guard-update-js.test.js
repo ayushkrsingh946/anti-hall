@@ -18,20 +18,20 @@ function blocked(command) {
   } finally { h.cleanup(); }
 }
 
-const MKT = 'node "$HOME/.claude/plugins/marketplaces/anti-hall/plugins/anti-hall/skills/update/scripts/update.js"';
+const MKT = 'node "$HOME/.claude/plugins/marketplaces/anti-hall/plugins/anti-hall-node/skills/update/scripts/update.js"';
 
 test('update.js: skill invocations (marketplace, cache, checkout, flags, sink) are allowed', () => {
   for (const ok of [
     MKT, `${MKT} --check`, `${MKT} --check 2>&1 | tail -40`,
     'node ~/.claude/plugins/cache/anti-hall/anti-hall/0.120.6/skills/update/scripts/update.js',
-    'node plugins/anti-hall/skills/update/scripts/update.js --check',
-    'node /Users/x/anti-hall/plugins/anti-hall/skills/update/scripts/update.js | head -50',
+    'node plugins/anti-hall-node/skills/update/scripts/update.js --check',
+    'node /Users/x/anti-hall/plugins/anti-hall-node/skills/update/scripts/update.js | head -50',
   ]) assert.strictEqual(blocked(ok), false, ok);
 });
 
 test('update.js: look-alikes and chained heavy commands stay blocked', () => {
   for (const bad of [
-    'node plugins/anti-hall/skills/update/scripts/update.js.evil',
+    'node plugins/anti-hall-node/skills/update/scripts/update.js.evil',
     'node plugins/anti-hall/skills/other/scripts/update.js',
     'node plugins/anti-hall/skills/update/update.js',
     'node scripts/update.js',
@@ -39,7 +39,7 @@ test('update.js: look-alikes and chained heavy commands stay blocked', () => {
     `${MKT}; npm test`,
     `${MKT} && npm run build`,
     `${MKT} | npm test`,
-    'npm run build -- node plugins/anti-hall/skills/update/scripts/update.js',
+    'npm run build -- node plugins/anti-hall-node/skills/update/scripts/update.js',
   ]) assert.ok(blocked(bad), bad);
 });
 

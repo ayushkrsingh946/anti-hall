@@ -18,7 +18,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 
-const MODULE_PATH = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'lib', 'devswarm-wake-watch.js');
+const MODULE_PATH = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'lib', 'devswarm-wake-watch.js');
 const { canHandoff, attemptHandoff, formatHandoffLine, HANDOFF_ENV_VAR } = require(MODULE_PATH);
 
 function tmpHome() {

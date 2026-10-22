@@ -63,6 +63,7 @@ pub mod metrics;
 pub mod migrate;
 pub mod migration;
 pub mod operator;
+pub mod nodeback;
 pub mod obs;
 pub mod ops;
 pub mod paths;

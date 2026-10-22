@@ -21,7 +21,7 @@ require('../helpers/isolate-home.js'); // HOME -> empty temp dir: this file read
 const { test } = require('node:test');
 const assert = require('node:assert');
 
-const inbox = require('../../plugins/anti-hall/hooks/devswarm-parent-inbox.js');
+const inbox = require('../../plugins/anti-hall-node/hooks/devswarm-parent-inbox.js');
 
 function summaryWith(entry) {
   return { requiredGates: ['done', 'merged', 'tests_passed'], workspaces: { w1: entry } };

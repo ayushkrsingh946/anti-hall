@@ -16,12 +16,12 @@ const os = require('node:os');
 const path = require('node:path');
 const cp = require('node:child_process');
 
-const cli = require('../../plugins/anti-hall/scripts/devswarm.js');
-const storeLib = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
-const repokey = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
-const inst = require('../../plugins/anti-hall/companion/install-devswarm-ingest.js');
-const capsLib = require('../../plugins/anti-hall/companion/lib/devswarm-capabilities.js');
-const inbox = require('../../plugins/anti-hall/hooks/devswarm-parent-inbox.js');
+const cli = require('../../plugins/anti-hall-node/scripts/devswarm.js');
+const storeLib = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
+const repokey = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
+const inst = require('../../plugins/anti-hall-node/companion/install-devswarm-ingest.js');
+const capsLib = require('../../plugins/anti-hall-node/companion/lib/devswarm-capabilities.js');
+const inbox = require('../../plugins/anti-hall-node/hooks/devswarm-parent-inbox.js');
 const { fakeHivecontrol, readCalls } = require('../helpers/fake-hivecontrol.js');
 
 const BACKEND = 'journal';
@@ -386,7 +386,7 @@ test('(3) doctor: detection is READ-ONLY; --repair runs the VERIFIED app archive
     assert.strictEqual(archiveCalls(t.fake).length, 0, 'detection never spawns');
     assert.deepStrictEqual(dbRow(t.dbPath, ID_A), { isActive: 1, isHidden: 0 });
     // doctor-repair dry-run: reports, spawns nothing
-    const dr = require('../../plugins/anti-hall/hooks/lib/doctor-repair.js');
+    const dr = require('../../plugins/anti-hall-node/hooks/lib/doctor-repair.js');
     const dry = dr.runRepairs({ cwd: t.W, env: t.ctx.env, home: t.home, dryRun: true }).find((x) => x.id === 'app-live-archived');
     assert.match(dry.msg, /would run: hivecontrol workspace archive qa\/ui-field-audit/);
     assert.strictEqual(archiveCalls(t.fake).length, 0);
@@ -404,7 +404,7 @@ test('(3) doctor --repair with a no-op hivecontrol reports FAILED with the manua
   const t = setup('repairfail', {});
   try {
     cli.cmdArchive(ID_A, t.ctx, { appArchive: false });
-    const dr = require('../../plugins/anti-hall/hooks/lib/doctor-repair.js');
+    const dr = require('../../plugins/anti-hall-node/hooks/lib/doctor-repair.js');
     const rep = dr.runRepairs({ cwd: t.W, env: t.ctx.env, home: t.home, dryRun: false }).find((x) => x.id === 'app-live-archived');
     assert.strictEqual(rep.status, 'failed', JSON.stringify(rep));
     assert.match(rep.msg, /hivecontrol workspace archive qa\/ui-field-audit/);
@@ -416,7 +416,7 @@ test('(3) doctor-devswarm appDbChecks names the app-live archived workspace + co
   try {
     cli.cmdArchive(ID_A, t.ctx, { appArchive: false });
     cli.syncAppState(t.home, { env: t.ctx.env, now: Date.now() });
-    const dd = require('../../plugins/anti-hall/companion/lib/doctor-devswarm.js');
+    const dd = require('../../plugins/anti-hall-node/companion/lib/doctor-devswarm.js');
     const fn = dd.appDbChecks || dd.appDbCheck;
     assert.strictEqual(typeof fn, 'function', 'exports: ' + Object.keys(dd).join(','));
     const rows = fn({ home: t.home, env: t.ctx.env, cwd: t.W, now: Date.now(), fsi: fs });

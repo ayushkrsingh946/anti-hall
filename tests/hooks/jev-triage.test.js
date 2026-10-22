@@ -34,7 +34,7 @@ for (const k of Object.keys(process.env)) {
   }
 }
 
-const LIB = require.resolve('../../plugins/anti-hall/hooks/lib/jev-triage.js');
+const LIB = require.resolve('../../plugins/anti-hall-node/hooks/lib/jev-triage.js');
 const { triageMessagesSync, loadTriageConfig, hashMessage, noteLabeledInbound, recordAnswered } = require(LIB);
 
 function tmpHome() {
@@ -425,7 +425,7 @@ test('budget cut-off: items the worker never attempted are NOT cached as permane
 test('runArrivalWorker fails closed: a stolen arrival lock (stale token) leaves the queue and the new owner lock untouched', () => {
   const home = tmpHome();
   try {
-    const lock = require('../../plugins/anti-hall/companion/lib/lock.js');
+    const lock = require('../../plugins/anti-hall-node/companion/lib/lock.js');
     const tri = require(LIB);
     const lp = tri.arrivalLockPath(home);
     const qp = tri.arrivalQueuePath(home);

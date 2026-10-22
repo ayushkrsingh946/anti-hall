@@ -9,7 +9,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const ri = require(path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'lib', 'reader-identity.js'));
+const ri = require(path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'lib', 'reader-identity.js'));
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'anti-hall-reader-id-'));
 const sess = path.join(home, '.claude', 'sessions');

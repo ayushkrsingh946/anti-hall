@@ -8,8 +8,8 @@ const path = require('node:path');
 const { makeHome } = require('../helpers/fixtures.js');
 const {
   readConfig, writeConfig, resolveEffective, DEFAULT_PCT, DEFAULT_NAG_STEP_PCT, DEFAULT_NAG_QUIET_MIN,
-} = require('../../plugins/anti-hall/hooks/lib/auto-handover-config.js');
-const settings = require('../../plugins/anti-hall/hooks/lib/settings.js');
+} = require('../../plugins/anti-hall-node/hooks/lib/auto-handover-config.js');
+const settings = require('../../plugins/anti-hall-node/hooks/lib/settings.js');
 
 test('resolveEffective(): default-on with no settings file at all', () => {
   const h = makeHome();
@@ -109,7 +109,7 @@ test('writeConfig(): read-modify-write never clobbers sibling settings sections'
   try {
     // A real, schema-declared sibling setting (settings.set rejects unknown
     // section/key pairs outright, so this must be a setting the canonical
-    // settings-schema.js actually declares — see plugins/anti-hall/hooks/lib/
+    // settings-schema.js actually declares — see plugins/anti-hall-node/hooks/lib/
     // settings-schema.js's "guards" section).
     const r = settings.set('guards', 'mergeGate', true, { home: h.home });
     assert.strictEqual(r.ok, true, r.error);
@@ -124,7 +124,7 @@ test('writeConfig(): read-modify-write never clobbers sibling settings sections'
 
 // --- CLI (scripts/auto-handover-config.js) ---------------------------------
 
-const CLI = require('../../plugins/anti-hall/scripts/auto-handover-config.js');
+const CLI = require('../../plugins/anti-hall-node/scripts/auto-handover-config.js');
 
 function withHomeEnv(home, fn) {
   const prevHome = process.env.HOME;
@@ -200,7 +200,7 @@ test('CLI nag/nag-step/nag-quiet: persist their values', () => {
 });
 
 test('maxTokens: default 0 (off, opt-in), env override, 0 stays disabled; overThreshold picks pct / tokens / pct-unknown-window', () => {
-  const { overThreshold, DEFAULT_MAX_TOKENS } = require('../../plugins/anti-hall/hooks/lib/auto-handover-config.js');
+  const { overThreshold, DEFAULT_MAX_TOKENS } = require('../../plugins/anti-hall-node/hooks/lib/auto-handover-config.js');
   const h = makeHome();
   try {
     // Default: OFF. The real per-session context-window pct trigger (default

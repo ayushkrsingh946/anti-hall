@@ -20,7 +20,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { runRepairs } = require('../../plugins/anti-hall/hooks/lib/doctor-repair.js');
+const { runRepairs } = require('../../plugins/anti-hall-node/hooks/lib/doctor-repair.js');
 
 const rm = (p) => { try { fs.rmSync(p, { recursive: true, force: true }); } catch (_) {} };
 const DAY = 24 * 60 * 60 * 1000;

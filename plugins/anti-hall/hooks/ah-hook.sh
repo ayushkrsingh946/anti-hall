@@ -1,8 +1,8 @@
 #!/bin/sh
-# thin launcher shim: hand the call to the Rust launcher when it is installed; otherwise (or for --doctor, which the launcher
+# thin launcher shim: hand the call to the Rust launcher when it is installed and the fallback switch (the fallback.node marker) is off; otherwise (or for --doctor, which the launcher
 # itself delegates back here) run this wrapper unchanged. Builtins only (no dirname/cd/pwd forks) on the hot path.
 ah_l=${HOME:-}/.anti-hall/ah-engine/bin/ah-hook
-if [ -x "$ah_l" ]; then
+if [ -x "$ah_l" ] && [ ! -e "${AH_ENGINE_DIR:-${HOME:-}/.anti-hall/ah-engine}/fallback.node" ]; then
   case " $* " in
     *" --doctor "*) ;;
     *)
@@ -654,10 +654,12 @@ is_stop_active_payload() {
 }
 
 tool=
+tool_match_all=0
 if [ "$tool_from_payload" -eq 1 ]; then
   extracted=$(json_tool_name 2>/dev/null || printf 'FAIL')
   case "$extracted" in
     OK*) tool=$(printf '%s\n' "$extracted" | sed 's/^OK	//') ;;
+    *) tool_match_all=1 ;;
   esac
 fi
 
@@ -1045,6 +1047,517 @@ cold_guard_notice() {
   fi
   printf '%s\n' "$cg_text" | sed "s/{event}/$event/g" >&2
 }
+
+# ---- the Node fallback (owner decision 2026-10-22, stage 2 of the Node backup) -----------------------------------------------------
+# A manual switch: `ah-engine fallback node` creates the marker file files.fallback_switch (nodeback.toml) in the state directory (or the
+# shipped default nodeback.fallback says node); while it is on this wrapper runs the original Node hooks of the list itself, one by
+# one, instead of asking the engine, and writes each hook's verdict to the shadow ledger (source node). It never flips by itself. These
+# functions are the proven Node fallback of the wrapper before the engine took over (restored; no new Node code).
+
+nf_manual=0
+
+nf_note() {
+  [ "$nf_manual" -eq 1 ] && return 0
+  printf 'anti-hall: engine fallback for %s: %s\n' "$event" "$1" >&2
+}
+
+node_fallback_on() {
+  nf_toml=${defaults_file%/*}/nodeback.toml
+  nf_name=$(engine_default_text files.fallback_switch || true)
+  nf_dir=${AH_ENGINE_DIR:-"$HOME/.anti-hall/ah-engine"}
+  nf_on=0
+  if [ -n "$nf_name" ] && [ -e "$nf_dir/$nf_name" ]; then
+    nf_on=1
+  elif [ "$(engine_default_text nodeback.fallback "$nf_toml" || true)" = node ]; then
+    nf_on=1
+  fi
+  [ "$nf_on" -eq 1 ] || return 1
+  # The Node backup lives outside the published plugin (nodeback.node_dir). Without it the switch is a logged no-op: the engine decides.
+  nf_rel=$(engine_default_text nodeback.node_dir "$nf_toml" || true)
+  if [ -z "$nf_rel" ] || [ -d "$dir/../$nf_rel" ]; then
+    return 0
+  fi
+  nf_msg=$(engine_default_text nodeback.msg_no_node_dir "$nf_toml" || true)
+  [ -n "$nf_msg" ] && printf '%s\n' "$(printf '%s' "$nf_msg" | sed "s|{dir}|$dir/../$nf_rel|")" >&2
+  return 1
+}
+
+# The ledger id of a hook: the dispatch-table id the map file gives its command (the engine rows use the same ids), else the script name.
+nf_id_of() {
+  nf_esc=$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g')
+  nf_map=$dir/ah-fallback.map.json
+  [ "$host" = codex ] && nf_map=$dir/ah-fallback.codex.map.json
+  nf_id=
+  [ -r "$nf_map" ] && nf_id=$(awk -v ev="$event" -v want="$nf_esc" '
+    $0 ~ "^  \"" ev "\": \\{" { in_ev = 1; next }
+    in_ev && /^  \}/ { exit }
+    in_ev {
+      line = $0; sub(/^ *"/, "", line); k = line; sub(/".*/, "", k)
+      v = line; sub(/^[^"]*": "/, "", v); sub(/",?$/, "", v)
+      if (v == want) { print k; exit }
+    }' "$nf_map" 2>/dev/null)
+  if [ -z "$nf_id" ]; then
+    nf_id=$(printf '%s\n' "$1" | sed -n 's/.*\/\([A-Za-z0-9._-]*\)\.js.*/\1/p' | head -n 1)
+  fi
+  printf '%s' "$nf_id" | sed 's/[^A-Za-z0-9._:@+-]/_/g'
+}
+
+# One ledger row for the hook just run: $1 command, $2 its exit status (124 timed out, 125 could not run), $3 stdout file, $4 stderr file, $5 start ms.
+nf_record() {
+  nf_name=$(engine_default_text files.shadow_ledger "${defaults_file%/*}/nodeback.toml" || true)
+  [ -n "$nf_name" ] || return 0
+  nf_dir=${AH_ENGINE_DIR:-"$HOME/.anti-hall/ah-engine"}
+  nf_err=
+  case "$2" in
+    124) nf_v=timeout; nf_err=timeout ;;
+    125|12[9-9]|1[3-9][0-9]|2[0-5][0-9]) nf_v=error; nf_err=died ;;
+    2) nf_v=block ;;
+    0)
+      if json_blocks_file "$3"; then nf_v=block
+      elif [ -s "$3" ] || [ -s "$4" ]; then nf_v=advise
+      else nf_v=allow
+      fi ;;
+    *) nf_v=error; nf_err=exit ;;
+  esac
+  nf_now=$(now_ms)
+  [ -n "${nf_inv:-}" ] || nf_inv=fb$(printf '%x%x' "$self_pid" "$nf_now")
+  nf_tool=$(printf '%s' "$tool" | sed 's/[^A-Za-z0-9._:@+-]/_/g')
+  mkdir -p "$nf_dir" 2>/dev/null
+  printf '{"ts":%s,"inv":"%s","src":"node","host":"%s","ev":"%s","tool":"%s","chk":"%s","v":"%s","ms":%s,"err":"%s"}\n' \
+    "$nf_now" "$nf_inv" "$host" "$event" "$nf_tool" "$(nf_id_of "$1")" "$nf_v" "$((nf_now - $5))" "$nf_err" >>"$nf_dir/$nf_name" 2>/dev/null || true
+}
+
+json_blocks_file() {
+  awk '
+    { s=s $0 "\n" }
+    END {
+      sub(/\n$/, "", s)
+      t=s
+      gsub(/^[ \t\r\n]+/, "", t)
+      gsub(/[ \t\r\n]+$/, "", t)
+      if(substr(t,1,1)!="{" || substr(t,length(t),1)!="}") exit 1
+      if(index(t, "\"decision\"") && index(t, "\"block\"")) exit 0
+      if(index(t, "\"permissionDecision\"") && index(t, "\"deny\"")) exit 0
+      exit 1
+    }
+  ' "$1"
+}
+
+matches_tool() {
+  matcher=$1
+  [ "$tool_match_all" -eq 1 ] && return 0
+  case "$matcher" in
+    ""|"*") return 0 ;;
+  esac
+  if [ -z "$tool" ]; then
+    [ "$guard_event" -eq 1 ] && return 0
+    return 1
+  fi
+  if printf '%s\n' "$matcher" | grep -Eq '^[A-Za-z0-9_ ,|-]+$'; then
+    old_ifs=$IFS
+    IFS='|,'
+    set -- $matcher
+    IFS=$old_ifs
+    for name do
+      name=$(printf '%s\n' "$name" | sed 's/^ *//; s/ *$//')
+      [ "$name" = "$tool" ] && return 0
+    done
+    return 1
+  fi
+  awk -v s="$tool" -v r="$matcher" 'BEGIN { exit !(s ~ r) }'
+}
+
+launch_shell_group() {
+  cmd=$1
+  out=$2
+  err=$3
+  pid_file=$4
+  group_file=$5
+  if command -v setsid >/dev/null 2>&1; then
+    setsid sh -c "$cmd" <"$payload" >"$out" 2>"$err" &
+    printf '%s\n' "$!" >"$pid_file"
+    printf '1\n' >"$group_file"
+    return
+  fi
+  if ( set -m ) 2>/dev/null; then
+    set -m 2>/dev/null || true
+    # bash-as-sh (macOS) prints "child setpgid: Operation not permitted" from the forked child before its own
+    # redirections apply, when parent and child race to create the group (the group still exists; the kill path
+    # also walks the process tree). The braces keep that line off the host-visible stderr.
+    { sh -c "$cmd" <"$payload" >"$out" 2>"$err" & } 2>/dev/null
+    printf '%s\n' "$!" >"$pid_file"
+    printf '1\n' >"$group_file"
+    set +m 2>/dev/null || true
+    return
+  fi
+  sh -c "$cmd" <"$payload" >"$out" 2>"$err" &
+  printf '%s\n' "$!" >"$pid_file"
+  printf '0\n' >"$group_file"
+}
+
+# Timeout watchdog. It never gets signalled: it polls once a second and leaves when the watched pid is
+# gone. (Root cause of the "engine timed out after ~11 s" bug under dash and macOS sh: the old timer was a
+# `( sleep N; ... ) &` subshell that the waiter killed. A TERM that lands in the window between the fork and
+# the subshell's own `trap -` is swallowed by the parent's inherited handler, the kill is lost, the timer
+# sleeps its full timeout, `wait` blocks on it, and a healthy instant engine is then judged timed out.)
+# Its stdio is detached so a lingering timer can never hold the host's pipes open.
+start_watchdog() {
+  w_pid=$1; w_timeout=$2; w_group=$3; w_timed=$4
+  (
+    trap - 0 HUP INT TERM
+    n=0
+    while [ "$n" -lt "$w_timeout" ]; do
+      sleep 1
+      kill -0 "$w_pid" 2>/dev/null || exit 0
+      if ! kill -0 "$self_pid" 2>/dev/null; then
+        # The wrapper itself is gone (SIGKILL): do not leave the hook running or its payload behind.
+        terminate_process_group "$w_pid" "$w_group"
+        [ -n "$tmp" ] && rm -rf "$tmp"
+        exit 0
+      fi
+      n=$((n + 1))
+    done
+    : >"$w_timed"
+    terminate_process_group "$w_pid" "$w_group"
+  ) </dev/null >/dev/null 2>&1 &
+  watch=$!
+}
+
+run_hook_command() {
+  cmd=$1
+  timeout=$2
+  out=$3
+  err=$4
+  timed=$5
+  validate_positive_int "$timeout" hook_timeout
+  : >"$out"; : >"$err"; rm -f "$timed"
+  # A row that names ${CLAUDE_PLUGIN_ROOT}/... or ${PLUGIN_ROOT}/... must point at a readable script, or it
+  # is unrunnable (node would exit 1, which looks like the hook's own non-blocking failure).
+  ref=$(printf '%s\n' "$cmd" | sed -n 's/.*\${\(\(CLAUDE_\)\{0,1\}PLUGIN_ROOT\)}\(\/[^" 	]*\).*/\1 \3/p' | head -n 1)
+  if [ -n "$ref" ]; then
+    ref_var=${ref%% *}
+    ref_rel=${ref#* }
+    case "$ref_var" in
+      CLAUDE_PLUGIN_ROOT) ref_root=${CLAUDE_PLUGIN_ROOT:-} ;;
+      *) ref_root=${PLUGIN_ROOT:-} ;;
+    esac
+    if [ -z "$ref_root" ]; then
+      ref_root=$(CDPATH= cd -- "$dir/.." 2>/dev/null && pwd -P) || return 125
+      case "$ref_var" in
+        CLAUDE_PLUGIN_ROOT) CLAUDE_PLUGIN_ROOT=$ref_root; export CLAUDE_PLUGIN_ROOT ;;
+        *) PLUGIN_ROOT=$ref_root; export PLUGIN_ROOT ;;
+      esac
+    fi
+    if [ ! -f "$ref_root$ref_rel" ] || [ ! -r "$ref_root$ref_rel" ]; then
+      printf 'anti-hall: hook script not found: %s%s\n' "$ref_root" "$ref_rel" >&2
+      return 125
+    fi
+  fi
+  first_word=${cmd%%[ 	]*}
+  case "$first_word" in
+    /*)
+      if [ ! -e "$first_word" ] || [ ! -x "$first_word" ]; then
+        return 125
+      fi
+      ;;
+  esac
+  pid_file=$tmp/hook.pid.$$
+  group_file=$tmp/hook.group.$$
+  launch_shell_group "$cmd" "$out" "$err" "$pid_file" "$group_file" || return 125
+  pid=$(cat "$pid_file"); group_pid=$(cat "$group_file")
+  children="$children $pid"
+  rm -f "$pid_file" "$group_file"
+  start_watchdog "$pid" "$timeout" "$group_pid" "$timed"
+  wait "$pid" 2>/dev/null
+  wait_rc=$?
+  settle_watchdog "$timed"
+  remove_child "$pid"
+  if [ -f "$timed" ]; then
+    return 124
+  fi
+  if [ "$group_pid" -eq 1 ] && kill -0 "-$pid" 2>/dev/null; then
+    terminate_process_group "$pid" "$group_pid"
+    if [ "$wait_rc" -eq 2 ] || grep -q '"decision"[[:space:]]*:[[:space:]]*"block"\|"permissionDecision"[[:space:]]*:[[:space:]]*"deny"' "$out"; then
+      return "$wait_rc"
+    fi
+    return 125
+  fi
+  return "$wait_rc"
+}
+
+# One value of a [dispatch.<name>] table in the plugin's shipped defaults (D88: the joiners are config, not code).
+# Empty when the file or key is absent; the caller then uses the same default the file ships.
+dispatch_cfg() {
+  [ -r "$dir/../engine/defaults/dispatch.toml" ] || return 0
+  awk -v sec="[dispatch.$1]" '
+    $0 == sec { f = 1; next }
+    /^\[/ { f = 0 }
+    f && /^value[ \t]*=/ { sub(/^value[ \t]*=[ \t]*/, ""); print; exit }
+  ' "$dir/../engine/defaults/dispatch.toml" 2>/dev/null
+}
+
+# Emit what the fallback hooks printed as ONE answer (mirrors ah-engine/src/dispatch/combine.rs `sequential` + `merge` + `tidy`;
+# the host reads a hook's whole stdout as one JSON object or as plain text, so several JSON lines are rejected).
+#   - no JSON object among them: the plain texts, one after another (unchanged);
+#   - one non-empty stdout: verbatim;
+#   - several: additionalContext values joined by dispatch.context_joiner, systemMessage values by dispatch.message_joiner,
+#     empty contexts dropped, an object left with nothing is no output; plain text next to JSON is folded into the context on
+#     dispatch.plain_context_events, else moved to stderr. Field order: the first object's, minus the merged fields.
+#   Limitation vs the engine: fields other than additionalContext/systemMessage/hookEventName are taken from the FIRST object;
+#   a later object that carries a different set of them is noted on stderr (the engine defers the call in that case).
+flush_fallback() {
+  [ -n "$fb_ids" ] || return 0
+  fb_files=
+  fb_count=0
+  for fb_id in $fb_ids; do
+    fb_files="$fb_files $tmp/fb.out.$fb_id"
+    fb_count=$((fb_count + 1))
+  done
+  if [ "$fb_count" -eq 1 ]; then
+    cat "$tmp/fb.out.${fb_ids# }"
+    return 0
+  fi
+  fb_cj=$(dispatch_cfg context_joiner); fb_cj=${fb_cj#\"}; fb_cj=${fb_cj%\"}; [ -n "$fb_cj" ] || fb_cj='\n\n'
+  fb_mj=$(dispatch_cfg message_joiner); fb_mj=${fb_mj#\"}; fb_mj=${fb_mj%\"}; [ -n "$fb_mj" ] || fb_mj='\n'
+  fb_plain_ctx=0
+  case "$(dispatch_cfg plain_context_events)" in *\"$event\"*) fb_plain_ctx=1 ;; esac
+  fb_rc=0
+  # shellcheck disable=SC2086
+  # the joiners are JSON-escaped text: ENVIRON, because awk -v would turn their backslash escapes into raw control bytes
+  FB_CJ=$fb_cj FB_MJ=$fb_mj LC_ALL=C awk -v pc="$fb_plain_ctx" -v ev="$event" '
+    function trim(s) { gsub(/^[ \t\r\n]+/, "", s); gsub(/[ \t\r\n]+$/, "", s); return s }
+    function esc(s,   o, i, c, n) {
+      o = ""; n = length(s)
+      for (i = 1; i <= n; i++) {
+        c = substr(s, i, 1)
+        if (c == "\\") o = o "\\\\"
+        else if (c == "\"") o = o "\\\""
+        else if (c == "\n") o = o "\\n"
+        else if (c == "\r") o = o "\\r"
+        else if (c == "\t") o = o "\\t"
+        else if (c < " ") o = o sprintf("\\u%04x", ord[c])
+        else o = o c
+      }
+      return o
+    }
+    # locate the string value of "key" in t: sets P_s (start of the key), P_e (index of the closing quote), P_v (raw escaped text)
+    function find(t, key,   re, i, n, c) {
+      re = "\"" key "\"[ \t]*:[ \t]*\""
+      if (!match(t, re)) return 0
+      P_s = RSTART; i = RSTART + RLENGTH; n = length(t)
+      while (i <= n) {
+        c = substr(t, i, 1)
+        if (c == "\\") { i += 2; continue }
+        if (c == "\"") break
+        i++
+      }
+      if (i > n) return 0
+      P_e = i; P_v = substr(t, RSTART + RLENGTH, i - RSTART - RLENGTH)
+      return 1
+    }
+    # remove the "key":"..." pair of t with one adjoining comma; JSON whitespace may sit between the pair and that comma
+    function strip(t, key,   a, b) {
+      if (!find(t, key)) return t
+      a = P_e + 1
+      while (substr(t, a, 1) ~ /[ \t]/) a++
+      if (substr(t, a, 1) == ",") return substr(t, 1, P_s - 1) substr(t, a + 1)
+      b = P_s - 1
+      while (b > 0 && substr(t, b, 1) ~ /[ \t]/) b--
+      if (substr(t, b, 1) == ",") return substr(t, 1, b - 1) substr(t, P_e + 1)
+      return substr(t, 1, P_s - 1) substr(t, P_e + 1)
+    }
+    # cheap structural check of a merged object: with the strings blanked, no comma may sit next to a brace/bracket or another comma
+    function sane(t) {
+      gsub(/"([^"\\]|\\.)*"/, "\"\"", t)
+      return !(t ~ /,[ \t]*[}\]]/ || t ~ /[{\[][ \t]*,/ || t ~ /,[ \t]*,/)
+    }
+    function residual(t) {
+      gsub(/"hookSpecificOutput"[ \t]*:[ \t]*\{/, "", t)
+      gsub(/"hookEventName"[ \t]*:[ \t]*"[^"]*"/, "", t)
+      gsub(/[{}, \t]/, "", t)
+      return t
+    }
+    BEGIN { cj = ENVIRON["FB_CJ"]; mj = ENVIRON["FB_MJ"]; for (i = 1; i < 32; i++) ord[sprintf("%c", i)] = i }
+    FNR == 1 { nf++; body[nf] = "" }
+    { body[nf] = body[nf] (FNR > 1 ? "\n" : "") $0 }
+    END {
+      nj = 0; np = 0; nctx = 0; nmsg = 0; ename = ""
+      for (f = 1; f <= nf; f++) {
+        t = trim(body[f])
+        if (substr(t, 1, 1) == "{" && substr(t, length(t), 1) == "}") {
+          gsub(/\n/, " ", t)
+          nj++; obj[nj] = t
+          if (match(t, /"hookEventName"[ \t]*:[ \t]*"[^"]*"/) && ename == "") { e = substr(t, RSTART, RLENGTH); sub(/^[^:]*:[ \t]*"/, "", e); sub(/"$/, "", e); ename = e }
+          item[f] = "J"
+        } else { item[f] = "P"; np++ }
+      }
+      if (nj == 0) exit 3
+      for (f = 1; f <= nf; f++) {
+        if (item[f] == "P") {
+          if (pc) { p = body[f]; sub(/\n+$/, "", p); if (p != "") ctx[++nctx] = esc(p) }
+          else { p = body[f]; printf "%s%s", p, (p ~ /\n$/ ? "" : "\n") > "/dev/stderr" }
+          continue
+        }
+        j++; t = obj[j]
+        if (find(t, "additionalContext") && P_v != "") ctx[++nctx] = P_v
+        t = strip(t, "additionalContext")
+        if (find(t, "systemMessage") && P_v != "") msg[++nmsg] = P_v
+        t = strip(t, "systemMessage")
+        st[j] = t
+      }
+      T = st[1]
+      for (k = 2; k <= nj; k++) if (residual(st[k]) != residual(T)) { print "anti-hall: fallback merge kept the first hook'"'"'s other fields; a later hook set different ones" > "/dev/stderr"; break }
+      # an hookSpecificOutput left with only its event name says nothing
+      if (match(T, /"hookSpecificOutput"[ \t]*:[ \t]*\{[ \t]*("hookEventName"[ \t]*:[ \t]*"[^"]*")?[ \t]*\}/)) {
+        e = substr(T, RSTART + RLENGTH, 1)
+        if (e == ",") T = substr(T, 1, RSTART - 1) substr(T, RSTART + RLENGTH + 1)
+        else if (substr(T, RSTART - 1, 1) == ",") T = substr(T, 1, RSTART - 2) substr(T, RSTART + RLENGTH)
+        else T = substr(T, 1, RSTART - 1) substr(T, RSTART + RLENGTH)
+      }
+      J = ""; for (k = 1; k <= nctx; k++) J = J (k > 1 ? cj : "") ctx[k]
+      M = ""; for (k = 1; k <= nmsg; k++) M = M (k > 1 ? mj : "") msg[k]
+      if (J != "") {
+        if (match(T, /"hookSpecificOutput"[ \t]*:[ \t]*\{/)) {
+          at = RSTART + RLENGTH; sep = ""
+          if (match(substr(T, at), /^[ \t]*"hookEventName"[ \t]*:[ \t]*"[^"]*"/)) { at += RLENGTH; sep = "," }
+          rest = substr(T, at); r = rest; sub(/^[ \t]+/, "", r)
+          if (substr(r, 1, 1) == ",") { rest = substr(r, 2); tail = "," }
+          else if (substr(r, 1, 1) == "}") tail = ""
+          else tail = ","
+          T = substr(T, 1, at - 1) sep "\"additionalContext\":\"" J "\"" tail rest
+        } else {
+          hso = "\"hookSpecificOutput\":{" (ename != "" ? "\"hookEventName\":\"" ename "\"," : "\"hookEventName\":\"" ev "\",") "\"additionalContext\":\"" J "\"}"
+          inner = T; sub(/^\{[ \t]*/, "", inner); sub(/[ \t]*\}$/, "", inner)
+          T = "{" (inner == "" ? "" : inner ",") hso "}"
+        }
+      }
+      if (M != "") {
+        inner = T; sub(/^\{[ \t]*/, "", inner); sub(/[ \t]*\}$/, "", inner)
+        T = "{\"systemMessage\":\"" M "\"" (inner == "" ? "" : "," inner) "}"
+      }
+      inner = T; sub(/^\{[ \t]*/, "", inner); sub(/[ \t]*\}$/, "", inner)
+      if (inner == "") exit 0
+      if (!sane(T)) { print "anti-hall: fallback merge produced an invalid object; kept the first hook'"'"'s output" > "/dev/stderr"; T = obj[1] }
+      print T
+    }
+  ' $fb_files >"$tmp/fb.merged" || fb_rc=$?
+  if [ "$fb_rc" -eq 0 ]; then
+    cat "$tmp/fb.merged"
+  else
+    # no JSON among them (exit 3), or awk failed: print them as they were, one after another
+    # shellcheck disable=SC2086
+    cat $fb_files
+  fi
+}
+
+run_node_fallback() {
+  reason=$1
+  if [ ! -r "$list" ] || { [ "$guard_event" -eq 1 ] && [ ! -s "$list" ]; }; then
+    [ "$guard_event" -eq 1 ] && fail_closed "no fallback list"
+    nf_note "$reason"
+    exit 0
+  fi
+  selected=0; fb_ids=; ran=0; first_block_err=; hard_failure=0; code=0; in_event=0; event_seen=0; event_empty=0
+  timeout_default=$(event_timeout)
+  [ -n "$timeout_default" ] || timeout_default=$timeout_env
+  validate_positive_int "$timeout_default" event_timeout
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      ""|"#"*) continue ;;
+      @*)
+        header=${line#@}; ev=${header%%	*}
+        if [ "$ev" = "$event" ]; then
+          in_event=1; event_seen=1
+          # an event row ending in the word "empty" has no hook of its own: it is only a trigger (D87)
+          case "$header" in *"	empty") event_empty=1 ;; esac
+        else
+          in_event=0
+        fi
+        continue ;;
+    esac
+    [ "$in_event" -eq 1 ] || continue
+    matcher=${line%%	*}
+    rest=${line#*	}
+    [ "$rest" != "$line" ] || continue
+    field2=${rest%%	*}
+    if [ "$field2" = "$rest" ]; then hook_timeout=$timeout_default; cmd=$field2; else hook_timeout=$field2; cmd=${rest#*	}; fi
+    matches_tool "$matcher" || continue
+    selected=$((selected + 1))
+    out=$tmp/fb.out.$selected; err=$tmp/fb.err.$selected; timed=$tmp/fb.timed.$selected
+    nf_t0=$(now_ms)
+    run_hook_command "$cmd" "$hook_timeout" "$out" "$err" "$timed"
+    rc=$?
+    # node exits 1 when it cannot load the script or a module: unrunnable, not the hook's own decision.
+    if [ "$rc" -eq 1 ] && grep -q "MODULE_NOT_FOUND" "$err" 2>/dev/null && grep -q "Cannot find module" "$err" 2>/dev/null; then
+      rc=125
+    fi
+    nf_record "$cmd" "$rc" "$out" "$err" "$nf_t0"
+    case "$rc" in
+      124) continue ;;
+      125|12[9-9]|13[0-9]|14[0-9]|15[0-9]|16[0-9]|17[0-9]|18[0-9]|19[0-9]|20[0-9]|21[0-9]|22[0-9]|23[0-9]|24[0-9]|25[0-5]) hard_failure=1; continue ;;
+    esac
+    ran=1
+    if [ "$rc" -eq 2 ]; then
+      flush_fallback
+      cat "$out"
+      cat "$err" >&2
+      exit 2
+    fi
+    if json_blocks_file "$out"; then
+      # a JSON block is the whole answer, byte for byte (earlier advisories are dropped: two JSON objects are not one answer)
+      cat "$out"
+      cat "$err" >&2
+      exit 0
+    fi
+    # non-blocking stdout is buffered and emitted once, merged, after the last hook (flush_fallback)
+    [ -s "$out" ] && fb_ids="$fb_ids $selected"
+  done <"$list"
+  flush_fallback
+  if [ "$code" -eq 2 ]; then
+    [ -n "$first_block_err" ] && cat "$first_block_err" >&2
+    exit 2
+  fi
+  if [ "$event_empty" -eq 1 ]; then
+    # D87: the table has no hook for this event, so there is nothing to run and nothing to guard: the neutral no-op
+    nf_note "$reason"
+    exit 0
+  fi
+  if [ "$hard_failure" -eq 1 ] && [ "$guard_event" -eq 1 ]; then
+    nf_note "$reason"
+    fail_closed "fallback hook failed before producing a complete answer"
+  fi
+  if [ "$ran" -eq 0 ] && [ "$guard_event" -eq 1 ]; then
+    if [ "$selected" -eq 0 ]; then
+      # D74: PermissionRequest and SubagentStop are guard events, but hooks.json registers no Node hook for them, so the
+      # generated list has no section. Node alone would allow; the section must exist for PreToolUse and Stop (a list
+      # missing those means a damaged list, which stays fail-closed).
+      case "$event" in
+        PermissionRequest|SubagentStop)
+          if [ "$event_seen" -eq 0 ]; then
+            nf_note "$reason"
+            exit 0
+          fi ;;
+      esac
+      # The tool name was read structurally and no row names it: the host would have run nothing.
+      # (a list with no section for the event at all is damaged, whatever the tool: that stays fail-closed)
+      if [ "$event_seen" -eq 1 ] && [ "$tool_from_payload" -eq 1 ] && [ "$tool_match_all" -eq 0 ] && [ -n "$tool" ]; then
+        nf_note "$reason"
+        exit 0
+      fi
+      fail_closed "no matching fallback hooks"
+    fi
+    fail_closed "fallback hooks did not run"
+  fi
+  nf_note "$reason"
+  exit 0
+}
+
+# The switch is on: the original Node hooks answer; the engine is not asked. (With no temp dir at all there is no payload file to hand
+# the hooks, so that rare case still goes to the engine.)
+if [ "$mem_mode" -ne 1 ] && node_fallback_on; then
+  nf_manual=1
+  run_node_fallback "the fallback switch is on"
+fi
 
 cold_guard_wait
 

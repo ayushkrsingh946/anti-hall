@@ -11,8 +11,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { testHook } = require('../helpers/spawn-hook.js');
 const { makeHome } = require('../helpers/fixtures.js');
-const settings = require('../../plugins/anti-hall/hooks/lib/settings.js');
-const { sessionTag, writeLatch } = require('../../plugins/anti-hall/hooks/lib/auto-handover-state.js');
+const settings = require('../../plugins/anti-hall-node/hooks/lib/settings.js');
+const { sessionTag, writeLatch } = require('../../plugins/anti-hall-node/hooks/lib/auto-handover-state.js');
 
 const HOOK = 'auto-handover-pause-nag.js';
 const SESSION = 's1';
@@ -100,7 +100,7 @@ test('re-nags inside the quiet window once context rose >= nagStepPct past lastN
     const tp = writeUsage(h, 91);
     const r = testHook(HOOK, payload({ transcript_path: tp }), { home: h.home, expectJson: true });
     assert.ok(/~91%/.test(decision(r) || ''), 'risen 6 >= 5 -> nag despite the quiet window');
-    const { readLatch } = require('../../plugins/anti-hall/hooks/lib/auto-handover-state.js');
+    const { readLatch } = require('../../plugins/anti-hall-node/hooks/lib/auto-handover-state.js');
     const l = readLatch(h.home, tag);
     assert.strictEqual(Math.round(l.lastNagPct), 91, 'step baseline advanced');
     assert.strictEqual(l.lastPauseNagPct, 91);
@@ -134,7 +134,7 @@ test('stops nagging once usage drops below threshold (and re-arms the latch)', (
     const tp = writeUsage(h, 40);
     const r = testHook(HOOK, payload({ transcript_path: tp }), { home: h.home, expectJson: true });
     assert.strictEqual(decision(r), null);
-    const { readLatch } = require('../../plugins/anti-hall/hooks/lib/auto-handover-state.js');
+    const { readLatch } = require('../../plugins/anti-hall-node/hooks/lib/auto-handover-state.js');
     assert.strictEqual(readLatch(h.home, tag).fired, false);
   } finally {
     h.cleanup();

@@ -16,8 +16,8 @@ const os = require('node:os');
 const path = require('node:path');
 const cp = require('node:child_process');
 
-const health = require('../../plugins/anti-hall/companion/lib/ingest-health.js');
-const cli = require('../../plugins/anti-hall/scripts/devswarm.js');
+const health = require('../../plugins/anti-hall-node/companion/lib/ingest-health.js');
+const cli = require('../../plugins/anti-hall-node/scripts/devswarm.js');
 
 function tmpHome() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'anti-hall-ingest-health-'));
@@ -525,7 +525,7 @@ test('withSelfHeal: merges heal fields onto the action result without clobbering
 test('D27 contract: a lazy require of a nonexistent module resolves to null, never throws, matching the hooks\' guard idiom', () => {
   let mod = null;
   assert.doesNotThrow(() => {
-    try { mod = require('../../plugins/anti-hall/companion/lib/does-not-exist-ingest-health.js'); } catch (_) { mod = null; }
+    try { mod = require('../../plugins/anti-hall-node/companion/lib/does-not-exist-ingest-health.js'); } catch (_) { mod = null; }
   });
   assert.strictEqual(mod, null);
 });

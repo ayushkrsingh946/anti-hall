@@ -28,7 +28,7 @@ const PRE_CAP = 20;
 
 const VERSION = (() => {
   try {
-    const v = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', '.claude-plugin', 'plugin.json'), 'utf8')).version;
+    const v = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', '..', 'anti-hall', '.claude-plugin', 'plugin.json'), 'utf8')).version;
     return typeof v === 'string' && v ? v : 'unknown';
   } catch (_) { return 'unknown'; }
 })();

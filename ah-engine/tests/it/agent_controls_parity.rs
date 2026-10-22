@@ -1210,7 +1210,7 @@ fn silent_agent_nudge_state_with_real_snapshots() {
             .unwrap();
         }
         let mut n = Command::new("node");
-        n.arg(repo().join("plugins/anti-hall/hooks/silent-agent-nudge.js"));
+        n.arg(repo().join("plugins/anti-hall-node/hooks/silent-agent-nudge.js"));
         base_env(&mut n, &nh);
         let mut e = Command::new(env!("CARGO_BIN_EXE_ah-engine"));
         e.arg("check").arg("silent-agent-nudge");

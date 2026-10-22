@@ -70,7 +70,7 @@ const history = require(path.join(__dirname, '..', 'hooks', 'lib', 'defect-histo
 
 function readVersion() {
   try {
-    const pkg = require(path.join(__dirname, '..', '.claude-plugin', 'plugin.json'));
+    const pkg = require(path.join(__dirname, '..', '..', 'anti-hall', '.claude-plugin', 'plugin.json'));
     return pkg.version || 'unknown';
   } catch (_) {
     return 'unknown';

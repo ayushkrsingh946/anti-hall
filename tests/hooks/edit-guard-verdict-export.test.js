@@ -10,7 +10,7 @@ const { spawnSync } = require('node:child_process');
 const { testHook, editPayload } = require('../helpers/spawn-hook.js');
 const { makeHome } = require('../helpers/fixtures.js');
 
-const HOOK = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'hooks', 'edit-guard.js');
+const HOOK = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'hooks', 'edit-guard.js');
 const COORD = { CLAUDE_CODE_ENTRYPOINT: 'cli' };
 
 function blockReason(filePath, cwd) {
@@ -53,7 +53,7 @@ test('(c) new root HANDOVER-x.md: skip path is an absolute existing script', () 
 });
 
 test("(d) shQuote round-trips a path with a space, $ and '", () => {
-  const { shQuote } = require('../../plugins/anti-hall/hooks/lib/skip-cmd.js');
+  const { shQuote } = require('../../plugins/anti-hall-node/hooks/lib/skip-cmd.js');
   const s = "/tmp/a b/$x/it's";
   const r = spawnSync('sh', ['-c', 'printf %s ' + shQuote(s)]);
   assert.strictEqual(r.stdout.toString(), s);

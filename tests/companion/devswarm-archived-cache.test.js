@@ -23,7 +23,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const cacheLib = require('../../plugins/anti-hall/companion/lib/devswarm-archived-cache.js');
+const cacheLib = require('../../plugins/anti-hall-node/companion/lib/devswarm-archived-cache.js');
 
 const NOW = 1_700_000_000_000;
 const MAX_AGE = 60_000;
@@ -142,7 +142,7 @@ test('writeActiveCache refuses an empty snapshot and leaves no file behind', () 
 });
 
 test('the freshness bound defaults to 2x the sweep interval and is env-tunable', () => {
-  const sup = require('../../plugins/anti-hall/companion/devswarm-supervisor.js');
+  const sup = require('../../plugins/anti-hall-node/companion/devswarm-supervisor.js');
   const env = {};
   assert.strictEqual(cacheLib.resolveArchivedCacheMaxAgeMs(env), 2 * sup.resolveReconcileCooldownMs(env));
   assert.strictEqual(cacheLib.resolveArchivedCacheMaxAgeMs(ENV), MAX_AGE);

@@ -19,7 +19,7 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const HOOKS_DIR = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'hooks');
+const HOOKS_DIR = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'hooks');
 
 const EMITTERS = [
   'devswarm-child-role.js',   // SessionStart directive
@@ -48,7 +48,7 @@ test('devswarm-wake.js wakeReassert never re-derives the watcher path from $CLI 
   // stable-launcher case is CLI/WATCHER as SIBLING files, where the old
   // $(dirname "$CLI")/../companion/lib/... derivation resolves to a path
   // that does not exist.
-  const { wakeReassert } = require('../../plugins/anti-hall/hooks/lib/devswarm-wake.js');
+  const { wakeReassert } = require('../../plugins/anti-hall-node/hooks/lib/devswarm-wake.js');
   const stableCli = '/Users/someone/.anti-hall/bin/devswarm.js';
   const stableWatcher = '/Users/someone/.anti-hall/bin/wake-watch.js';
   const out = wakeReassert({ DEVSWARM_AI_AGENT: 'claude' }, stableCli, true, stableWatcher);
@@ -60,7 +60,7 @@ test('devswarm-wake.js wakeReassert never re-derives the watcher path from $CLI 
 });
 
 test("wakeReassert's tick command always appends --quiet, matching the cron job wakeDirective actually creates", () => {
-  const { wakeDirective, wakeReassert } = require('../../plugins/anti-hall/hooks/lib/devswarm-wake.js');
+  const { wakeDirective, wakeReassert } = require('../../plugins/anti-hall-node/hooks/lib/devswarm-wake.js');
   const env = { DEVSWARM_AI_AGENT: 'claude' };
   const cli = '/Users/someone/.anti-hall/bin/devswarm.js';
   for (const isChild of [true, false]) {

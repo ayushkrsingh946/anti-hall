@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Full-outcome parity for the built-in `command` check: the Node command-guard (authority) vs the engine, comparing
 // exit code, stdout and stderr exactly (trailing whitespace trimmed).
-//   node run-command.js --engine ../target/release/ah-engine --hooks <repo>/plugins/anti-hall/hooks --corpus c.jsonl
+//   node run-command.js --engine ../target/release/ah-engine --hooks <repo>/plugins/anti-hall-node/hooks --corpus c.jsonl
 //        [--profiles coord,sub,plain,devswarm] [--mode oneshot|daemon|both] [--limit N] [--conc 8] [--show 15]
 //        [--out mismatches.json]
 // Corpus lines: {"command": "...", "cwd": "/optional/dir", "sub": false, "source": "..."} (a field command, run once

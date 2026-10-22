@@ -15,9 +15,9 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const cli = require('../../plugins/anti-hall/scripts/devswarm.js');
+const cli = require('../../plugins/anti-hall-node/scripts/devswarm.js');
 const devswarmSrc = fs.readFileSync(
-  path.join(__dirname, '../../plugins/anti-hall/scripts/devswarm.js'),
+  path.join(__dirname, '../../plugins/anti-hall-node/scripts/devswarm.js'),
   'utf8'
 );
 

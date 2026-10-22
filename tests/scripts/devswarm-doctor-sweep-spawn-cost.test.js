@@ -23,8 +23,8 @@ const path = require('node:path');
 const cp = require('node:child_process');
 
 const REPO_ROOT = path.join(__dirname, '..', '..');
-const DEVSWARM = path.join(REPO_ROOT, 'plugins', 'anti-hall', 'scripts', 'devswarm.js');
-const STORE = path.join(REPO_ROOT, 'plugins', 'anti-hall', 'companion', 'lib', 'devswarm-store.js');
+const DEVSWARM = path.join(REPO_ROOT, 'plugins', 'anti-hall-node', 'scripts', 'devswarm.js');
+const STORE = path.join(REPO_ROOT, 'plugins', 'anti-hall-node', 'companion', 'lib', 'devswarm-store.js');
 const PRELOAD = path.join(REPO_ROOT, 'tests', 'harness', 'spawn-count-preload.js');
 const ROWS = 50;
 const BUCKET = 'proj-abc123';

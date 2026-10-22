@@ -33,7 +33,7 @@ process.env.HOME = fx.home;
 process.env.USERPROFILE = fx.home;
 process.env.ANTIHALL_INGEST_DRY_RUN = '1';
 
-const identity = require(path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'lib', 'identity.js'));
+const identity = require(path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'lib', 'identity.js'));
 
 after(() => { try { fx.cleanup(); } catch (_) {} });
 

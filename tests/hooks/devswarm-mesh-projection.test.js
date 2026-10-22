@@ -37,7 +37,7 @@ const path = require('node:path');
 const cp = require('node:child_process');
 const { testHook, testHookRaw } = require('../helpers/spawn-hook.js');
 const { makeHome } = require('../helpers/fixtures.js');
-const repokey = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
+const repokey = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
 
 const PARENT_INBOX = 'devswarm-parent-inbox.js';
 const PARENT_GATE = 'devswarm-parent-gate.js';

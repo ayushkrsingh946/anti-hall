@@ -21,7 +21,7 @@ fn home(tag: &str) -> PathBuf {
 
 /// Run a snippet of Node with the Jev assist module as `a` and the JSON `arg` as `A`.
 fn node(script: &str, arg: &Value) {
-    let hooks = repo().join("plugins/anti-hall/hooks/lib/jev-assist.js");
+    let hooks = repo().join("plugins/anti-hall-node/hooks/lib/jev-assist.js");
     let code = format!("const a=require({});const A=JSON.parse(process.argv[1]);{script}", serde_json::to_string(&hooks.to_string_lossy()).unwrap());
     let out = Command::new("node")
         .arg("-e")

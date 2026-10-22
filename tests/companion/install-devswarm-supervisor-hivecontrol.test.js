@@ -30,11 +30,11 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const path = require('node:path');
 
-const MOD = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'install-devswarm-supervisor.js');
+const MOD = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'install-devswarm-supervisor.js');
 const m = require(MOD);
 
 test('resolveHivecontrolPath/unitEnvFor are the SAME functions install-devswarm-ingest.js exports (no re-derived copy)', () => {
-  const ingest = require(path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'install-devswarm-ingest.js'));
+  const ingest = require(path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'install-devswarm-ingest.js'));
   assert.strictEqual(m.resolveHivecontrolPath, ingest.resolveHivecontrolPath, 'must be the identical function reference, not a duplicate');
   assert.strictEqual(m.unitEnvFor, ingest.unitEnvFor, 'must be the identical function reference, not a duplicate');
 });

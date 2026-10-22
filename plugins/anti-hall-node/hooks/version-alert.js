@@ -63,7 +63,7 @@ const os   = require('os');
 const { spawn } = require('child_process');
 const { alreadyAdvisedKey, persistAdvisedKey, readCache: readDriftCache } = require('./lib/drift-baseline.js');
 
-const PLUGIN_JSON  = path.join(__dirname, '..', '.claude-plugin', 'plugin.json');
+const PLUGIN_JSON  = path.join(__dirname, '..', '..', 'anti-hall', '.claude-plugin', 'plugin.json');
 const CACHE_FILE   = path.join(os.homedir(), '.anti-hall', 'version-check.json');
 // CASE 2's own dedupe marker — kept SEPARATE from CACHE_FILE (the remote-latest
 // cache) so a session that never had a network check (cache absent) still gets

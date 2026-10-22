@@ -10,7 +10,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const LIB = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'lib');
+const LIB = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'lib');
 const re = require(path.join(LIB, 'row-eligibility.js'));
 const cacheLib = require(path.join(LIB, 'devswarm-archived-cache.js'));
 const appDb = require(path.join(LIB, 'devswarm-app-db.js'));

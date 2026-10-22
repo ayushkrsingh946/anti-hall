@@ -13,7 +13,7 @@ const path = require('node:path');
 const childProcess = require('node:child_process');
 
 const ROOT = path.join(__dirname, '..', '..');
-const cg = require(path.join(ROOT, 'plugins', 'anti-hall', 'hooks', 'command-guard.js'));
+const cg = require(path.join(ROOT, 'plugins', 'anti-hall-node', 'hooks', 'command-guard.js'));
 const FIXTURE = require(path.join(ROOT, 'tests', 'fixtures', 'coordinator-drift-replay.json'));
 const H = process.env.HOME; // isolated test HOME = @HOME@
 delete process.env.S;
@@ -46,7 +46,7 @@ const sub = (s) => s.split('@SCRATCH_ROOT@').join(BASE).split('@SCRATCH@').join(
 const rows = FIXTURE.map((r) => Object.assign({}, r, r.command ? { command: sub(r.command), cwd: REPO } : {}));
 const DEFAULTS = { tMs: 600000, nudgeAt: 4, blockAt: 7, cap: 50 };
 
-function lib() { return require(path.join(ROOT, 'plugins', 'anti-hall', 'hooks', 'lib', 'coordinator-work.js')); }
+function lib() { return require(path.join(ROOT, 'plugins', 'anti-hall-node', 'hooks', 'lib', 'coordinator-work.js')); }
 let cached = null;
 function enforced() {
   if (!cached) cached = lib().replay(rows, DEFAULTS, cg.classifyBashWork);
