@@ -75,6 +75,16 @@ These are the notable things it runs and writes outside the project. Hook state 
 | Launcher scripts that find the current plugin version | Written by the DevSwarm hooks in DevSwarm sessions | `~/.anti-hall/bin/` |
 | Local reads of `~/.claude.json` (`userID`, Fable availability) and the OMC usage cache | By the limit-conservation and model-availability hooks; never sent anywhere | `~/.claude.json`, `~/.claude/plugins/oh-my-claudecode/.usage-cache-anthropic.json` |
 
+## What it runs, sends and fetches
+
+| | What happens |
+|---|---|
+| **Runs** | Hooks run on Claude Code tool events (one thin trigger per event, `hooks/ah-hook.sh`). They read the event, decide, and print a verdict or a note. No hook sends project content anywhere. |
+| **Fetches** | The `ah-engine` binary is downloaded once at install, only from this repository's GitHub releases. Its SHA-256 is pinned in `ah-engine.lock` and verified before the binary runs; a mismatch means it is not used and the Node fallback runs instead. The only other request is the optional update check (a GitHub tag-list request, no project data). |
+| **Sends** | Only if you turn on Jev (opt-in, off by default): review questions go to the one vendor whose API key you entered in the plugin options, and to no other. Nothing else is sent. No analytics, no telemetry upload; usage counters stay on your machine. |
+
+Details and every setting: [PRIVACY.md](PRIVACY.md).
+
 ## Documentation
 
 **[Documentation start page](docs/README.md)**: install and uninstall, what each guard blocks and how to turn it off, settings, Jev, DevSwarm, troubleshooting, contributing, security and the changelog.

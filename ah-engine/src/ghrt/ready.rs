@@ -3,7 +3,7 @@
 //! * The rule for "ready" is the plugin script (`rules/gh-rt.js`, `ghReady`); this module carries its answer.
 //! * The notice is the `ready` edge (once per head commit: the ledger key `ready:<repo>#<number>:<sha>`), told to sessions by the
 //!   gh-rt-advisory check when `github_rt.ready_notify` is on.
-//! * The auto-merge (`github_rt.ready_auto_merge`, default on by owner decision) runs `gh pr merge --merge --match-head-commit`
+//! * The auto-merge (`github_rt.ready_auto_merge`, default off, owner rule: no auto-merge) runs `gh pr merge --merge --match-head-commit`
 //!   (`ready_merge_argv`, never `--admin`: GitHub's branch protection and required reviews still decide) once per head commit
 //!   (key `merge:<repo>#<number>:<sha>`, claimed in the ledger BEFORE the command runs, so a crash in between never repeats it),
 //!   after a live re-check of every condition. GitHub's own refusal is logged as `refused`, not as an error.
