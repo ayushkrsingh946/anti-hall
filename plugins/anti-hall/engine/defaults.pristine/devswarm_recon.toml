@@ -478,8 +478,8 @@ exit 97
 """
 
 [devswarm_recon.env_strip]
-doc = "Environment variables a sweep drain removes: it speaks for no session, so it must not carry the identity of the session that started it."
-value = ["CLAUDE_CODE_SESSION_ID", "DEVSWARM_BUILDER_ID"]
+doc = "Environment variables a sweep drain removes: it speaks for no session, so it must not carry the identity of the session that started it (the builder id AND the AI pane id: hivecontrol checks the pane belongs to the targeted workspace and refuses a drain of a child run with the Primary's pane)."
+value = ["CLAUDE_CODE_SESSION_ID", "DEVSWARM_BUILDER_ID", "DEVSWARM_BUILDER_TERMINAL_ID", "DEVSWARM_BUILDER_TERMINAL_GENERATION"]
 
 [devswarm_recon.env_sweep_flag]
 doc = "The environment variable that marks a process as a reconcile sweep drain (the pull then never promotes an unclaimed session)."

@@ -251,3 +251,23 @@ pub fn drain(ctx: &Ctx, runner: &dyn Runner, repo_key: &str, staged: Vec<Staged>
     }
     results
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// hivecontrol refuses a drain of workspace X run with another workspace's AI pane ("Current AI pane ... was not found in this
+    /// Workspace"), so a sweep drain carries neither the builder id nor the pane id of the session that started it.
+    #[test]
+    fn a_sweep_drain_carries_no_session_or_pane_identity() {
+        let mut base = ident::Env::new();
+        for k in ["CLAUDE_CODE_SESSION_ID", "DEVSWARM_BUILDER_ID", "DEVSWARM_BUILDER_TERMINAL_ID", "DEVSWARM_BUILDER_TERMINAL_GENERATION", "PATH"] {
+            base.insert(k.to_string(), "x".to_string());
+        }
+        let env = sweep_env(&base, Path::new("/h"));
+        for gone in ["CLAUDE_CODE_SESSION_ID", "DEVSWARM_BUILDER_ID", "DEVSWARM_BUILDER_TERMINAL_ID", "DEVSWARM_BUILDER_TERMINAL_GENERATION"] {
+            assert!(!env.contains_key(gone), "{gone} must not reach a sweep drain");
+        }
+        assert!(env.contains_key("PATH"));
+    }
+}
