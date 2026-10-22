@@ -2,10 +2,10 @@
 //! engine's own `"<engine>" statusline`, no launcher and no Node script), and the migration that moves an existing install
 //! (Node-only or launcher form) to it.
 //!
-//! The launcher runs the engine first and the Node script when the engine is absent or answers "leave this to Node" (exit 75,
-//! 64, 70, or the shell's 126/127); any other exit is the command's own. With `--stdin` the host's JSON is read once and given to
-//! whichever runs. Without it (a Monitor) the engine runs as a child so a deferral can still fall back, and SIGTERM/SIGINT are
-//! passed on. The migration is engine-only (Node's repair pass has no such step); it is idempotent, fail-open and keeps the
+//! The launcher runs the engine and nothing else: the legacy Node script it is given is ignored, every engine exit (75, 64,
+//! 70, 126/127 included) is the command's own, and with no engine the status line stays silent (exit 0) while any other command
+//! says so on stderr and exits 127. With `--stdin` the host's JSON is handed to the engine unchanged. Without it (a Monitor)
+//! the engine runs as a child and SIGTERM/SIGINT are passed on. The migration is engine-only (Node's repair pass has no such step); it is idempotent, fail-open and keeps the
 //! one-time backup. Nothing here touches the real home.
 #![allow(clippy::unwrap_used, clippy::expect_used)] // a test crate: a panic is the failure report, and E2 exempts tests
 use ah_engine::db::TempDir;
@@ -99,7 +99,7 @@ fn the_engine_answers_and_the_node_script_never_runs() {
 }
 
 #[test]
-fn a_deferral_hands_the_same_stdin_to_node_and_flags_only_are_passed_on() {
+fn a_former_deferral_exit_is_the_commands_own_and_node_never_runs() {
     if !have_node() {
         return;
     }
@@ -107,7 +107,7 @@ fn a_deferral_hands_the_same_stdin_to_node_and_flags_only_are_passed_on() {
         let t = TempDir::new("launch-defer");
         let eng = script(&t.0, "eng.sh", &format!("#!/bin/sh\ncat >/dev/null\nexit {code}\n"));
         let o = launch(&t, Some(&eng), true, &node_echo(&t.0), &["devswarm", "wake-watch"], &["--auto"], "{\"b\":2}\n");
-        assert_eq!((o.code, o.stdout.as_str()), (0, "NODE[--auto]{\"b\":2}\n"), "exit {code} falls back to Node with the flags and the same stdin");
+        assert_eq!((o.code, o.stdout.as_str()), (code, ""), "exit {code} is passed on; the legacy Node script is not run");
     }
 }
 
@@ -125,33 +125,36 @@ fn any_other_engine_exit_is_the_commands_own() {
 }
 
 #[test]
-fn without_an_engine_node_runs() {
+fn without_an_engine_nothing_runs() {
     if !have_node() {
         return;
     }
     let t = TempDir::new("launch-none");
-    let o = launch(&t, None, true, &node_echo(&t.0), &["statusline"], &[], "{\"c\":3}");
-    // no engine under the scratch HOME and none on PATH named ah-engine in a clean checkout of the test machine
-    if o.stdout.starts_with("NODE[") {
-        assert_eq!(o.stdout, "NODE[]{\"c\":3}");
-    }
+    // the status line is cosmetic: with no engine it stays silent and exits 0 (no Node, whatever the machine has installed)
     let mut cmd = Command::new("sh");
     cmd.arg(plugin().join("scripts/ah-run.sh")).args(["--stdin", "statusline", "--"]).arg(node_echo(&t.0));
     cmd.env_clear().env("PATH", bare_path()).env("HOME", t.0.join("home2"));
     let o = finish(cmd, "in");
-    assert_eq!((o.code, o.stdout.as_str()), (0, "NODE[]in"));
+    assert_eq!((o.code, o.stdout.as_str()), (0, ""));
+    // any other command says so on stderr and exits 127
+    let mut cmd = Command::new("sh");
+    cmd.arg(plugin().join("scripts/ah-run.sh")).args(["devswarm", "wake-watch", "--"]).arg(node_echo(&t.0));
+    cmd.env_clear().env("PATH", bare_path()).env("HOME", t.0.join("home2"));
+    let o = finish(cmd, "");
+    assert_eq!((o.code, o.stdout.as_str()), (127, ""), "{}", o.stderr);
+    assert!(!o.stderr.is_empty(), "the missing engine is said on stderr");
 }
 
 #[test]
-fn a_monitor_run_falls_back_on_a_deferral_and_forwards_a_signal() {
+fn a_monitor_run_passes_a_former_deferral_exit_on_and_forwards_a_signal() {
     if !have_node() {
         return;
     }
-    // a deferral: Node runs in the launcher's place (no stdin involved)
+    // a former deferral exit is the engine's own: no Node runs in the launcher's place
     let t = TempDir::new("launch-monitor");
     let eng = script(&t.0, "eng.sh", "#!/bin/sh\nexit 75\n");
     let o = launch(&t, Some(&eng), false, &node_echo(&t.0), &["devswarm", "wake-watch"], &["--auto"], "");
-    assert_eq!((o.code, o.stdout.as_str()), (0, "NODE[--auto]"));
+    assert_eq!((o.code, o.stdout.as_str()), (75, ""));
     // a running engine gets SIGTERM and the launcher exits with its code, without running Node
     let t = TempDir::new("launch-signal");
     let marker = t.0.join("got-term");
@@ -187,7 +190,7 @@ fn the_test_only_engine_override_is_ignored_without_the_test_flag() {
     cmd.arg(plugin().join("scripts/ah-run.sh")).args(["--stdin", "statusline", "--"]).arg(node_echo(&t.0));
     cmd.env_clear().env("PATH", bare_path()).env("HOME", &home).env("AH_ENGINE_BIN", &eng);
     let o = finish(cmd, "z");
-    assert_eq!(o.stdout, "NODE[]z", "a stray AH_ENGINE_BIN must not replace the engine");
+    assert_eq!((o.code, o.stdout.as_str()), (0, ""), "a stray AH_ENGINE_BIN must not replace the engine (and no Node runs: the status line stays silent)");
 }
 
 // ---- the installer's command and the migration -------------------------------------------------------------------------------
