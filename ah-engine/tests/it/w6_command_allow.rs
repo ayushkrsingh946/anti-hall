@@ -156,17 +156,22 @@ fn single_small_state_changing_commands_are_allowed_and_the_real_cases_still_blo
         no("gcloud run deploy svc", Some("floods"));
     }
 
-    // #263: the owner's own config.toml changes the two lists with no shipped-file edit (a user list replaces the shipped one).
-    // An added allow lets another binary through; an added block wins over a shipped allow; block wins over allow on the same entry.
+    // #263: the owner's config.toml adds to / removes from the shipped lists (effective = shipped - remove + add), no shipped-file edit.
     let cfg = dir.join("state").join("config.toml");
     std::fs::create_dir_all(cfg.parent().unwrap()).unwrap();
-    std::fs::write(&cfg, "[command]\nremote_allow = [\"gh pr comment\", \"kubectl apply\", \"gh issue create\"]\nremote_block = [\"gh pr comment\", \"gh issue create --repo\"]\n").unwrap();
+    // add: another binary's allow, and a block that overrides a shipped allow (block wins)
+    std::fs::write(&cfg, "[command]\nremote_allow_add = [\"kubectl apply\"]\nremote_block_add = [\"gh pr comment\"]\n").unwrap();
     allowed("kubectl apply -f x.yaml");
-    allowed("gh issue create --title x --body y");
     blocked("gh pr comment 5 --body hi");
-    // a removed shipped default falls back to the default rule: gh pr create is no longer allowed
-    std::fs::write(&cfg, "[command]\nremote_allow = [\"gh issue create\"]\n").unwrap();
+    allowed("gh issue create --title x --body y"); // the shipped allows stay
+    // remove: a shipped allow falls back to the default rule; a shipped block stops blocking (default rule: gh release view is a read)
+    std::fs::write(&cfg, "[command]\nremote_allow_remove = [\"gh pr create\"]\nremote_block_remove = [\"gh secret\"]\n").unwrap();
     blocked(r#"gh pr create --title x --body y"#);
     allowed("gh issue create --title x --body y");
+    allowed("gh secret list");
+    // both together
+    std::fs::write(&cfg, "[command]\nremote_allow_add = [\"gh pr create\"]\nremote_allow_remove = [\"gh pr create\", \"gh issue create\"]\n").unwrap();
+    allowed("gh pr create --title x --body y"); // removed then added back
+    blocked("gh issue create --title x --body y");
     ah_engine::discard::harmless(std::fs::remove_dir_all(&dir));
 }

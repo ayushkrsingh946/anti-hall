@@ -336,7 +336,10 @@ function cmdSet(k) { return new Set(ah.cfg(k)); }
 function remoteEntries(k) {
   if (S && S.remote && S.remote[k]) return S.remote[k];
   var list;
-  try { list = ah.cfgLive(k); } catch (_) { list = ah.cfg(k); } // the owner's layers (config.toml) over the shipped list, read per call
+  var live = function (key) { try { return ah.cfgLive(key); } catch (_) { return ah.cfg(key); } }; // the owner's layers (config.toml), read per call
+  var keys = ['command.remote_allow_add', 'command.remote_allow_remove', 'command.remote_block_add', 'command.remote_block_remove'].filter(function (x) { return x.indexOf(k) === 0; });
+  var drop = live(keys[1]);
+  list = live(k).filter(function (x) { return drop.indexOf(x) < 0; }).concat(live(keys[0])); // shipped - remove + add
   var out = list.map(function (line) {
     var parts = String(line).trim().split(/\s+/).filter(Boolean), e = { bin: (parts[0] || '').toLowerCase(), words: [], opts: [] };
     for (var i = 1; i < parts.length; i++) {

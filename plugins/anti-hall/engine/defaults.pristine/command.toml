@@ -236,12 +236,28 @@ doc = "gh group and subcommand pairs that are heavy (command-guard.js GH_MUTATIN
 value = { pr = ["merge", "close", "edit", "create", "review"], issue = ["create", "close", "delete", "edit"], release = ["create", "delete", "edit", "upload"], repo = ["delete", "edit"], secret = ["set", "delete"], workflow = ["run"] }
 
 [command.remote_allow]
-doc = "Remote commands that run in the main thread whatever their body or output (GH #263). Each entry is a command prefix: the binary and its leading subcommand words, global flags such as -R/--repo skipped, optionally followed by an option and its value (`gh api -X POST`). Works for any binary. Block wins over allow; a command in neither list keeps the default rule (reads pass, mutations block). Add or remove a line in your own config.toml (`[command]` table) to change it; a user list replaces this one."
+doc = "Remote commands that run in the main thread whatever their body or output (GH #263). Each entry is a command prefix: the binary and its leading subcommand words, global flags such as -R/--repo skipped, optionally followed by an option and its value (`gh api -X POST`). Works for any binary. Block wins over allow; a command in neither list keeps the default rule (reads pass, mutations block). Change it in your own config.toml (`[command]` table) with remote_allow_add and remote_allow_remove."
 value = ["gh issue create", "gh issue comment", "gh issue edit", "gh issue close", "gh issue reopen", "gh label create", "gh label edit", "gh pr create", "gh pr comment", "gh pr edit"]
 
 [command.remote_block]
 doc = "Remote commands always blocked in the main thread, named in the block text as irreversible or sensitive (msg_remote_block_why). Same entry format as command.remote_allow; wins over it."
 value = ["gh pr merge", "gh release", "gh repo edit", "gh repo delete", "gh secret", "gh api -X DELETE", "gh api -X PUT", "gh api -X PATCH", "gh api -X POST", "gh api --method DELETE", "gh api --method PUT", "gh api --method PATCH", "gh api --method POST"]
+
+[command.remote_allow_add]
+doc = "Entries the owner adds to command.remote_allow in config.toml; the effective list is the shipped one minus remote_allow_remove plus these."
+value = []
+
+[command.remote_allow_remove]
+doc = "Entries the owner removes from the shipped command.remote_allow in config.toml, e.g. to stop allowing or blocking one."
+value = []
+
+[command.remote_block_add]
+doc = "Entries the owner adds to command.remote_block in config.toml; the effective list is the shipped one minus remote_block_remove plus these."
+value = []
+
+[command.remote_block_remove]
+doc = "Entries the owner removes from the shipped command.remote_block in config.toml, e.g. to stop allowing or blocking one."
+value = []
 
 [command.msg_remote_block_why]
 doc = "Why a command on command.remote_block is blocked in the main thread."

@@ -265,13 +265,17 @@ Two plain lists in the engine config decide which remote commands (any binary: `
 
 Ask the user first: **this project or the whole machine?** The lists live in the engine's `config.toml` in the engine state directory (`ah-engine config --json` shows the effective value of every key and which file set it), which is machine-wide (user level); there is no per-project layer for these keys, so say so if they ask for project scope. Do not edit the plugin's `engine/defaults/` files.
 
-To add an entry, write the whole list in `config.toml`; a user list REPLACES the shipped one, so start from the shipped entries (copy them from `ah-engine config --json`), add the new line, and omit any shipped entry to remove it:
+Add and remove with four more lists in `config.toml`; the effective list is the shipped one, minus `*_remove`, plus `*_add`:
 
 ```toml
 [command]
-remote_allow = ["gh issue create", "gh pr create", "firebase hosting:channel:deploy"]
-remote_block = ["gh pr merge", "gh release", "gh secret"]
+remote_allow_add = ["firebase hosting:channel:deploy"]
+remote_allow_remove = ["gh pr create"]
+remote_block_add = ["kubectl delete"]
+remote_block_remove = ["gh secret"]
 ```
+
+(Setting `remote_allow` / `remote_block` themselves replaces the shipped list outright; prefer add/remove.)
 
 Check the result with `ah-engine config --json` and `ah-engine config validate <file>`.
 
