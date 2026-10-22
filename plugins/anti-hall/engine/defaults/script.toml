@@ -114,13 +114,13 @@ min = 1024
 unit = "bytes"
 
 [script.regex_entry_base_bytes]
-doc = "Fixed part of the estimated weight of one cached compiled regular expression."
+doc = "Fixed part of the ESTIMATED weight of one cached compiled regular expression. The estimate is only the fallback: an entry is weighed by the heap its build kept, measured by the counting allocator (diagnostics.check_mem), and by this estimate where that is off. Measured on 85 shipped programs: 1.25 MB kept against 3.8 MB estimated."
 value = 8192
 min = 0
 unit = "bytes"
 
 [script.regex_bytes_per_src_byte]
-doc = "Estimated compiled size per byte of a pattern's translated source, calibrated on the shipped patterns (about 250 on average; the `\\s`, `.` and `i`-flag expansions make it uneven)."
+doc = "Estimated compiled size per byte of a pattern's translated source, the fallback weight where the heap of a build is not measured (see script.regex_entry_base_bytes). Programs measure about 13 KB plus 17 bytes per source byte on average, but the `\\s`, `.` and `i`-flag expansions make them uneven (a 152-byte pattern kept 52 KB), so the estimate stays on the high side."
 value = 300
 min = 1
 unit = "bytes"

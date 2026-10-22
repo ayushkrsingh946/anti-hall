@@ -145,6 +145,11 @@ pub(super) fn regex_cache_len() -> usize {
     super::recache::usage().0
 }
 
+/// (programs compiled, estimated bytes, measured bytes, how many were measured) of the shared regex cache.
+pub(super) fn regex_totals() -> (u64, u64, u64, u64) {
+    super::recache::compiled_totals()
+}
+
 /// Run `f` on the compiled pattern for `flags` (shared cache, see [`super::recache`]).
 pub(super) fn with_re<R>(src: &str, flags: &str, f: impl FnOnce(&Regex) -> R) -> rquickjs::Result<R> {
     let re = super::recache::get(src, flags)?;
