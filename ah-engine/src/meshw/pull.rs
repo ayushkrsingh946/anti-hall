@@ -500,7 +500,7 @@ impl Plan {
             return Ok(self);
         }
         self.check_wal(inv)?;
-        let c = hivecontrol::call(&defaults::list("mesh_write.hc_message_count"), &inv.env, defaults::millis("mesh_write.hivecontrol_timeout_ms"));
+        let c = hivecontrol::call_in(&defaults::list("mesh_write.hc_message_count"), &inv.env, Some(&inv.cwd), defaults::millis("mesh_write.hivecontrol_timeout_ms"));
         self.peek = if c.ok { Peek::Count(parse_count(&c.raw)) } else { Peek::Failed };
         if let Peek::Count(n) = self.peek
             && !line_form
@@ -770,7 +770,8 @@ pub(crate) enum Fresh {
     /// The delivery log cannot be appended and fsynced right now: no read was made.
     Blocked,
     /// `message-count` failed (no binary, a timeout, a non-zero exit): nothing was read.
-    CountFailed,
+    /// The text is what the call said: its exit code and the first line it printed (see [`hivecontrol::failure_detail`]).
+    CountFailed(String),
     /// Nothing waits.
     Empty,
     /// `read-messages` ran. `entry` is the log entry that holds its raw bytes (`None`: empty stdout or a log write that failed).
@@ -784,15 +785,18 @@ pub(crate) fn capture_fresh(inv: &Inv, p: &Plan, worktree: &str, at: &dyn Fn(&st
     if wal::preflight(&p.wal).is_some() {
         return Fresh::Blocked;
     }
-    let c = hivecontrol::call(&defaults::list("mesh_write.hc_message_count"), &inv.env, defaults::millis("mesh_write.hivecontrol_timeout_ms"));
-    if !c.ok {
-        return Fresh::CountFailed;
+    // hivecontrol names the workspace by the directory it runs in, so the call stands in the workspace's own checkout (a daemon's
+    // working directory is no git repository: "Not in a git repository")
+    let full = hivecontrol::call_full(&defaults::list("mesh_write.hc_message_count"), &inv.env, Some(&inv.cwd), defaults::millis("mesh_write.hivecontrol_timeout_ms"));
+    if !full.call.ok {
+        return Fresh::CountFailed(hivecontrol::failure_detail(&full));
     }
+    let c = full.call;
     let native = parse_count(&c.raw);
     if native <= 0.0 {
         return Fresh::Empty;
     }
-    let r = hivecontrol::call(&defaults::list("mesh_write.hc_read_messages"), &inv.env, defaults::millis("mesh_write.pull_read_timeout_ms"));
+    let r = hivecontrol::call_in(&defaults::list("mesh_write.hc_read_messages"), &inv.env, Some(&inv.cwd), defaults::millis("mesh_write.pull_read_timeout_ms"));
     at("read:after");
     let (mut entry, mut wal_error) = (None, false);
     if !r.raw.is_empty() {
@@ -835,7 +839,7 @@ fn pull_locked(inv: &Inv, p: &Plan) -> Outcome {
         return Outcome::default();
     }
     // ONE bounded read-messages (finite timeout, never monitor)
-    let r = hivecontrol::call(&defaults::list("mesh_write.hc_read_messages"), &inv.env, defaults::millis("mesh_write.pull_read_timeout_ms"));
+    let r = hivecontrol::call_in(&defaults::list("mesh_write.hc_read_messages"), &inv.env, Some(&inv.cwd), defaults::millis("mesh_write.pull_read_timeout_ms"));
     // WAL the RAW bytes immediately, before the exit status is looked at and before any parse
     let mut entry: Option<String> = None;
     let mut wal_error = false;

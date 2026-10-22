@@ -1199,3 +1199,25 @@ value = "store-unpinned"
 [devswarm_recon.fold_unit_prefix]
 doc = "The label prefix of one candidate's fold unit (the candidate id follows); a registration reads it back to report a unit the applier handed back as pending."
 value = "fold:"
+
+[devswarm_recon.why_count_failed]
+doc = "The reason a sweep drain was handed back because the non-destructive native count failed. {detail} is what the call said (`failure_detail`), so the abandoned-decision log line explains itself; the line is rate-limited per reason by diagnostics.abandoned_log_interval_ms."
+value = "count-failed ({detail})"
+
+[devswarm_recon.failure_detail]
+doc = "How a failed hivecontrol call is described: {how} (the exit or signal) and {said} (the first line it printed, stderr before stdout)."
+value = "{how}: {said}"
+
+[devswarm_recon.failure_how_exit]
+doc = "The exit part of a failed hivecontrol call's description, with {code} the exit code."
+value = "exit {code}"
+
+[devswarm_recon.failure_how_signal]
+doc = "The signal part of a failed hivecontrol call's description, with {signal} the signal name."
+value = "killed by {signal}"
+
+[devswarm_recon.failure_detail_max_chars]
+doc = "Most characters of the first output line a failed hivecontrol call's description keeps (bounds the log line and the limiter key)."
+value = 160
+min = 20
+max = 1000
