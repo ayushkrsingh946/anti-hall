@@ -8,7 +8,7 @@
 // usage: node union_seed.js <home> <repoKey> '<spec json>'
 const path = require('path');
 const fs = require('fs');
-const plugin = path.join(__dirname, '..', '..', '..', 'plugins', 'anti-hall');
+const plugin = path.join(__dirname, '..', '..', '..', 'plugins', 'anti-hall-node');
 const store = require(path.join(plugin, 'companion', 'lib', 'devswarm-store.js'));
 const unread = require(path.join(plugin, 'companion', 'lib', 'devswarm-unread.js'));
 const [home, repoKey, specText] = process.argv.slice(2);

@@ -365,7 +365,19 @@ pub fn cap_verb(env: &Env, home: &Path, verb: &str, min_version: Option<&str>, n
     if !too_old && has_verb {
         return Cap::Ok;
     }
+    let (reason, line) = dormant_line(verb, min_version, note, version, too_old);
+    // Node records the dormant line in its cache unless the cache already holds exactly it
+    match c.get("dormantLog").and_then(|d| d.get(&name)) {
+        Some(OVal::Str(l)) if *l == line => Cap::Dormant(reason),
+        _ => Cap::Probe,
+    }
+}
+
+/// The reason a workspace verb is dormant and the line Node's `recordDormant` writes for it: `verb` with its `minVersion`, the note
+/// the line carries, the build's version and whether it is older than the minimum.
+pub fn dormant_line(verb: &str, min_version: Option<&str>, note: Option<&str>, version: Option<&str>, too_old: bool) -> (String, String) {
     let tpl = crate::meshw::extverbs::tpl;
+    let name = format!("{}{verb}", defaults::text("devswarm_cli.hc_cap_prefix"));
     let min = min_version.unwrap_or_default();
     let have = version.unwrap_or(defaults::text("devswarm_cli.hc_unknown_version"));
     let reason = if too_old {
@@ -377,9 +389,5 @@ pub fn cap_verb(env: &Env, home: &Path, verb: &str, min_version: Option<&str>, n
     let note_part = note.map_or(String::new(), |n| tpl("devswarm_cli.hc_line_note", &[("note", n)]));
     let because = if min.is_empty() { reason.clone() } else { tpl("devswarm_cli.hc_line_needs", &[("min", min), ("have", have)]) };
     let line = tpl("devswarm_cli.hc_line", &[("name", &name), ("note", &note_part), ("because", &because)]);
-    // Node records the dormant line in its cache unless the cache already holds exactly it
-    match c.get("dormantLog").and_then(|d| d.get(&name)) {
-        Some(OVal::Str(l)) if *l == line => Cap::Dormant(reason),
-        _ => Cap::Probe,
-    }
+    (reason, line)
 }

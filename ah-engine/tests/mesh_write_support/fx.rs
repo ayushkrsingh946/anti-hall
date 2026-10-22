@@ -19,6 +19,11 @@ pub fn plugin_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().join("plugins").join("anti-hall")
 }
 
+/// The Node runtime the parity tests compare against (the local backup of the Node plugin, not shipped).
+pub fn node_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().join("plugins").join("anti-hall-node")
+}
+
 /// A file of the support directory.
 pub fn support(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests").join("mesh_write_support").join(name)
