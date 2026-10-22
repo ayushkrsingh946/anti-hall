@@ -117,11 +117,13 @@ done
 BK=$E/deploys/$(cat "$E/deploys/latest")
 ok "good: replaced file kept in the backup" has "value = 1" "$BK/root1/defaults/a.toml"
 ok "good: hold released at the end" test "$(cat "$E/daemon.down.until")" -le "$(( $(date +%s) * 1000 ))"
-ok "good: keys were synced before the binary was swapped" test "$(grep -n ' sync defaults into root 2' "$BK/deploy.log" | head -n 1 | cut -d: -f1)" -lt "$(grep -n 'swap the binary' "$BK/deploy.log" | cut -d: -f1)"
-ok "good: the engine was stopped before the sync" test "$(grep -n ' stop the engine$' "$BK/deploy.log" | head -n 1 | cut -d: -f1)" -lt "$(grep -n ' sync defaults into root 1' "$BK/deploy.log" | head -n 1 | cut -d: -f1)"
+ok "good: keys were synced before the binary was swapped" test "$(grep -n ' stage defaults into root 2' "$BK/deploy.log" | head -n 1 | cut -d: -f1)" -lt "$(grep -n 'commit: rename' "$BK/deploy.log" | cut -d: -f1)"
+ok "good: the engine was stopped before the sync" test "$(grep -n ' stop the engine$' "$BK/deploy.log" | head -n 1 | cut -d: -f1)" -lt "$(grep -n ' stage defaults into root 1' "$BK/deploy.log" | head -n 1 | cut -d: -f1)"
 ok "good: probe verified" has "force-push probe blocked 2/2" "$BK/deploy.log"
 ok "good: defaults.total delta 0 verified" has "defaults.total delta 0" "$BK/deploy.log"
 ok "good: running daemon verified as the new binary" has "executes the new binary" "$BK/deploy.log"
+ok "good: staging (all roots + binary) precedes the one commit pass, which precedes the swap-done line" test "$(grep -n 'stage the binary' "$BK/deploy.log" | cut -d: -f1)" -lt "$(grep -n 'commit: rename' "$BK/deploy.log" | cut -d: -f1)" -a "$(grep -n 'commit: rename' "$BK/deploy.log" | cut -d: -f1)" -lt "$(grep -n 'swap done' "$BK/deploy.log" | cut -d: -f1)"
+ok "good: no staged temp file is left behind" test -z "$(find "$MKT" "$CACHE" "$E/bin" -name '*.deploy.*' -o -name '*.new.*' 2>/dev/null)"
 ok "good: stopped twice" test "$(grep -c "stop the engine" "$BK/deploy.log")" -eq 2
 ok "good: no defaults.error written" test ! -e "$E/defaults.error"
 
@@ -294,6 +296,21 @@ ok "node: the replaced node file is in the backup" has "node hook v1" "$BK/root1
 run --rollback --yes >"$W/rb.out" 2>&1
 ok "node: rollback restores the replaced node file" has "node hook v1" "$MKT/../anti-hall-node/hooks/g.js"
 ok "node: rollback moves the added node file aside" test ! -e "$CACHE/../anti-hall-node/hooks/g.js"
+
+# --- window: the OLD binary reading the NEW defaults ------------------------------------------------------------------------
+setup window
+run --check "$W/new/ah-engine" "$W/new/defaults" >"$W/check.out" 2>&1
+ok "window: an additive release misses no key in the window" has "old (live) binary on this root AFTER the sync: loads, misses no key" "$W/check.out"
+printf '[a.renamed]\nvalue = 2\n' >"$W/new/defaults/a.toml"
+mk_engine "$W/new/ah-engine" "a.renamed wire.ack"
+run --check "$W/new/ah-engine" "$W/new/defaults" --allow-drop >"$W/check.out" 2>&1; rc=$?
+ok "window: a renamed key is reported, not failed (informational)" test $rc -eq 0
+ok "window: names the old binary's missed key" has "defaults/a.toml \[a.old\]" "$W/check.out"
+ok "window: says it WILL log defaults_fallback" has "WINDOW: the old (live) binary" "$W/check.out"
+ok "window: the old binary's own refusal is quoted" has "refuses: ah-engine: defaults unavailable: missing_key" "$W/check.out"
+ok "window: summary line counts the keys per root" has "WINDOW SUMMARY: 4 key(s)" "$W/check.out"
+before=$(tree_sum)
+ok "window: --check changed nothing" test "$before" = "$(tree_sum)"
 
 for f in $(find "$T" -name daemon.run 2>/dev/null); do kill "$(cat "$f")" 2>/dev/null; done
 printf '\n%s passed, %s failed (scratch: %s)\n' "$PASS" "$FAIL" "$T"

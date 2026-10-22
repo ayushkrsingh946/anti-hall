@@ -22,6 +22,7 @@ mod ctxbudget;
 mod edit_guard;
 mod failure_nudge;
 mod fx;
+mod fx_bad_status;
 mod fx_dispatch_tier;
 mod fx_lifecycle;
 mod fx_task_guard;
@@ -169,6 +170,16 @@ fn task_guard_matches_node() {
     let Some(hooks) = hooks_dir() else { return };
     let (scenarios, _shared, must) = fx_task_guard::corpus();
     fx::require(&fx_task_guard::opts(must), &hooks, scenarios, 250);
+}
+
+#[test]
+fn task_guards_match_node_on_every_bad_task_status() {
+    let _s = serial();
+    let Some(hooks) = hooks_dir() else { return };
+    let (scenarios, _keep) = fx_bad_status::task_guard();
+    fx::require(&fx_bad_status::opts_task_guard(), &hooks, scenarios, 80);
+    let (scenarios, _keep) = fx_bad_status::tasklist_guard();
+    fx::require(&fx_bad_status::opts_tasklist_guard(), &hooks, scenarios, 80);
 }
 
 #[test]

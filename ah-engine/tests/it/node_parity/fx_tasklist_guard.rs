@@ -1042,7 +1042,7 @@ pub(crate) fn corpus() -> (Vec<Scenario>, Scratch) {
 
 /// The acknowledgement hint names the time it was written (`Date.now()`), and a session start without a transcript time is
 /// the time of the run.
-fn mask_ack_time(s: &str) -> String {
+pub(crate) fn mask_ack_time(s: &str) -> String {
     static RE: std::sync::LazyLock<regex::Regex> =
         std::sync::LazyLock::new(|| regex::Regex::new(r#"(tasklist-guard:[0-9a-f]{16}\\": )\d+"#).expect("ack pattern"));
     static STARTED: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {

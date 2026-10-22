@@ -6,7 +6,7 @@
 use super::backfill::backfill;
 use super::parse::{Facts, Line, NON_STRING_ID, collect_tool_uses, is_not_found, parse_line};
 use super::tail::{lines_of, read_tail};
-use super::{Task, TaskMap, Unknown, norm_priority, number_of_digits, priority_field, truthy_status};
+use super::{Task, TaskMap, Unknown, norm_priority, number_of_digits, priority_field, is_non_string_status, kept_status};
 use crate::checks::guardkit::jsre;
 use crate::checks::guardkit::text::js_trim;
 use crate::checks::taskkit::jsval::{R, Unsure, first_truthy, get, scalar_string, truthy};
@@ -235,7 +235,7 @@ fn scan_lines(lines: &[&str], truncated: bool, path: &str, window: u64, wide: u6
                             let id = scalar_string(first_truthy(&[get(todo, "id"), get(todo, "content"), Some(&size_v)]).unwrap_or(&size_v))?;
                             let id_v = Value::String(id.clone());
                             let content = scalar_string(first_truthy(&[get(todo, "content"), get(todo, "activeForm"), Some(&id_v)]).unwrap_or(&id_v))?;
-                            tasks.set(&id, task(&id, content, Some(truthy_status(get(todo, "status"))?.unwrap_or_else(|| "pending".into())), None, None));
+                            tasks.set(&id, task(&id, content, Some(kept_status(get(todo, "status"))?.unwrap_or_else(|| "pending".into())), None, None));
                         }
                     }
                 }
@@ -252,7 +252,7 @@ fn scan_lines(lines: &[&str], truncated: bool, path: &str, window: u64, wide: u6
                     let content = scalar_string(
                         first_truthy(&[get(inp, "subject"), get(inp, "title"), get(inp, "content"), get(inp, "description"), Some(&tid_v)]).unwrap_or(&tid_v),
                     )?;
-                    let status = truthy_status(get(inp, "status"))?.unwrap_or_else(|| "pending".into());
+                    let status = kept_status(get(inp, "status"))?.unwrap_or_else(|| "pending".into());
                     let rec = (content, status, norm_priority(priority_field(inp))?);
                     match prov.iter_mut().find(|(k, _)| k == tid) {
                         Some(slot) => slot.1 = rec,
@@ -271,7 +271,7 @@ fn scan_lines(lines: &[&str], truncated: bool, path: &str, window: u64, wide: u6
                         let has_pri =
                             get(inp, "priority").is_some() || get(inp, "metadata").filter(|m| !m.is_null()).and_then(|m| get(m, "priority")).is_some();
                         let priority = if has_pri { norm_priority(priority_field(inp))? } else { existing.priority.clone() };
-                        let status = match truthy_status(get(inp, "status"))? {
+                        let status = match kept_status(get(inp, "status"))? {
                             Some(st) => Some(st),
                             None => existing.status.clone(),
                         };
@@ -337,6 +337,10 @@ fn scan_lines(lines: &[&str], truncated: bool, path: &str, window: u64, wide: u6
     let mut facts = Facts { tasks, window_reset, first_created };
     if truncated {
         backfill(&mut facts, path, window)?;
+    }
+    // a task that ends the pass with a non-string status: Node's `isOpenTask` lowercases it and throws
+    if facts.tasks.values().any(|t| is_non_string_status(t.status.as_deref())) {
+        return Err(Unsure);
     }
     for t in facts.tasks.values() {
         if !t.is_open() {

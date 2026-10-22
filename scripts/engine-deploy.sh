@@ -153,6 +153,21 @@ tree_files() {
     grep -v -e '^engine/defaults/' -e '^engine/defaults\.pristine/' -e '\.bak' -e '\.deploy\.' -e '/\.DS_Store$' -e '^\.DS_Store$'
 }
 
+# put_file SRC DIR NAME: put SRC at DIR/NAME through a sibling temp file (same volume, so the rename is atomic). With PEND set the
+# rename is deferred: the temp is only staged and listed in PEND (commit_pending renames them all in one fast pass).
+PEND=
+put_file() {
+  cp -p "$1" "$2/.$3.deploy.$$" || return 1
+  if [ -n "$PEND" ]; then printf '%s\t%s\n' "$2/.$3.deploy.$$" "$2/$3" >>"$PEND"
+  else mv "$2/.$3.deploy.$$" "$2/$3" || return 1; fi
+}
+
+# commit_pending: rename every staged temp into place, in the order staged (defaults first, then the tree); nothing is copied here
+commit_pending() {
+  [ -n "$PEND" ] && [ -s "$PEND" ] || return 0
+  while IFS="$(printf '\t')" read -r _t _d; do mv "$_t" "$_d" || return 1; done <"$PEND"
+}
+
 # apply_tree SRC DST BACKUP MANIFEST: copy each tree file SRC/rel to DST/rel. A replaced file goes to BACKUP/rel first; the new one is
 # renamed into place. Nothing is removed. Prints the number of files changed to $SCRATCH/tree.n
 apply_tree() {
@@ -170,7 +185,7 @@ apply_tree() {
     fi
     mkdir -p "$d" || return 1
     [ -n "${4:-}" ] && printf 'F\t%s\t%s\t%s\t%s\n' "$d" "$b" "$had" "$bk" >>"$4"
-    cp -p "$f" "$d/.$b.deploy.$$" && mv "$d/.$b.deploy.$$" "$t" || return 1
+    put_file "$f" "$d" "$b" || return 1
     _n=$((_n + 1))
   done <"$SCRATCH/tree.list"
   echo "$_n" >"$SCRATCH/tree.n"
@@ -240,7 +255,7 @@ apply_dir() {
       had=1; bk=$3/$b
     fi
     [ -n "${4:-}" ] && printf 'F\t%s\t%s\t%s\t%s\n' "$2" "$b" "$had" "$bk" >>"$4"
-    cp -p "$f" "$2/.$b.deploy.$$" && mv "$2/.$b.deploy.$$" "$2/$b" || return 1
+    put_file "$f" "$2" "$b" || return 1
   done
 }
 
@@ -250,8 +265,23 @@ eng_scratch() {
   ( HOME=$SCRATCH/home AH_ENGINE_DIR=$SCRATCH/home/st AH_ENGINE_PLUGIN_ROOT=$_r; export HOME AH_ENGINE_DIR AH_ENGINE_PLUGIN_ROOT; lim "$_b" "$@" 2>&1 )
 }
 
+# old_misses ROOT SIM: the keys ROOT's defaults carry (what the running binary reads) that SIM's defaults lack, as "file key"
+old_misses() {
+  for d in defaults defaults.pristine; do
+    for f in "$1/engine/$d"/*; do
+      [ -f "$f" ] || continue
+      b=${f##*/}
+      case $b in *.bak*) continue ;; esac
+      keys_of "$f" | cut -f1 >"$SCRATCH/om.old"
+      if [ -f "$2/engine/$d/$b" ]; then keys_of "$2/engine/$d/$b" | cut -f1 >"$SCRATCH/om.new"; else : >"$SCRATCH/om.new"; fi
+      comm -23 "$SCRATCH/om.old" "$SCRATCH/om.new" | sed "s|^|$d/$b |"
+    done
+  done
+}
+
 # --- check ------------------------------------------------------------------------------------------------------------
 ALLOW_DROP=0
+OLD_MISS=0
 do_check() {
   NEW=$1
   [ -f "$NEW" ] && [ -x "$NEW" ] || die "new binary missing or not executable: $NEW"
@@ -298,7 +328,19 @@ do_check() {
       case $le in ''|'"last_error":null') note "  new binary on this root AFTER the sync: loads, no config error" ;;
         *) problem "root $r after the sync: config reports $le" ;; esac
     else problem "root $r after the sync: the new binary REFUSES it (rc $rc: $(printf '%s' "$out" | head -n 1 | cut -c1-240))"; fi
+    # the window: until the binary is swapped (and for any old daemon or hook that still runs), the OLD binary reads the NEW defaults
+    if [ -x "$BIN" ] && [ "$newsha" != "$livesha" ]; then
+      out=$(eng_scratch "$BIN" "$sim" config validate "$SCRATCH/empty.toml"); rc=$?
+      old_misses "$r" "$sim" >"$SCRATCH/om.list"
+      if [ $rc -eq 0 ] && [ ! -s "$SCRATCH/om.list" ]; then note "  old (live) binary on this root AFTER the sync: loads, misses no key (no defaults_fallback in the window)"
+      else
+        n=$(wc -l <"$SCRATCH/om.list" | tr -d ' '); OLD_MISS=$((OLD_MISS + n))
+        note "  WINDOW: the old (live) binary on this root AFTER the sync: rc $rc$([ $rc -ne 0 ] && echo ", refuses: $(printf '%s' "$out" | head -n 1 | cut -c1-200)"); it will log defaults_fallback missing_key for $n key(s) while it runs on the new defaults:"
+        sed 's/^/      /' "$SCRATCH/om.list"
+      fi
+    fi
   done
+  [ "$OLD_MISS" -gt 0 ] && note "WINDOW SUMMARY: $OLD_MISS key(s) the old binary will miss between the sync and the swap; the maintenance hold keeps hooks and the daemon off for that time, so this is expected only if the hold covers it (informational, not a failure)"
   if [ "$PROBLEMS" -gt 0 ]; then note "CHECK FAILED: $PROBLEMS problem(s); nothing was changed"; return 1; fi
   note "CHECK OK: the new binary accepts every root once the new defaults are in (nothing was changed)"
   return 0
@@ -530,18 +572,27 @@ do_deploy() {
       fi
     done
   }
-  sync_all "sync defaults" "" "$MAN"
-
-  step "swap the binary"
+  # STAGE everything first (the live files are untouched, so an old binary run directly still reads the old defaults), then COMMIT
+  # with renames only, defaults and binary together: the window in which the old binary could see half-new defaults is milliseconds
+  PEND=$SCRATCH/pending.tsv; : >"$PEND"
+  sync_all "stage defaults" "" "$MAN"
+  step "stage the binary"
   mkdir -p "$ENGINE_DIR/bin" || fail_deploy "cannot create $ENGINE_DIR/bin"
   had=0
   if [ -e "$BIN" ]; then
     had=1
     if [ -e "$BIN.prev" ]; then cp -p "$BIN.prev" "$BK/ah-engine.prev.before" || fail_deploy "cannot back up the old .prev"; fi
-    cp -p "$BIN" "$BIN.prev.new.$$" && mv "$BIN.prev.new.$$" "$BIN.prev" || fail_deploy "cannot keep the old binary as .prev"
+    cp -p "$BIN" "$BIN.prev.new.$$" || fail_deploy "cannot keep the old binary as .prev"
   fi
   printf 'B\t%s\t%s\n' "$BIN" "$had" >>"$MAN"
-  cp -p "$NEW" "$BIN.new.$$" && chmod +x "$BIN.new.$$" && mv "$BIN.new.$$" "$BIN" || fail_deploy "cannot install the new binary at $BIN"
+  cp -p "$NEW" "$BIN.new.$$" && chmod +x "$BIN.new.$$" || fail_deploy "cannot stage the new binary at $BIN"
+
+  step "commit: rename the staged files and the binary into place"
+  commit_pending || fail_deploy "a staged file could not be renamed into place"
+  PEND=
+  [ "$had" = 1 ] && { mv "$BIN.prev.new.$$" "$BIN.prev" || fail_deploy "cannot keep the old binary as .prev"; }
+  mv "$BIN.new.$$" "$BIN" || fail_deploy "cannot install the new binary at $BIN"
+  step "swap done"
 
   integ=$(printf '%s\n' "$ROOTS" | head -n 1)/hooks/ah-engine-integrity.sh
   if [ -f "$integ" ]; then

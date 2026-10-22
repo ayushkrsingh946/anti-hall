@@ -388,6 +388,12 @@ value = 5000
 env = "AH_ENGINE_STALL_MS"
 unit = "ms"
 
+[daemon.start_stall_ms]
+doc = "How long a starting daemon may take from its start to the accept loop's first round (database open, spool drain, scheduler and wiring start) before the watchdog calls it stalled and restarts it. Longer than daemon.stall_ms because start-up work is not the accept loop and a loaded machine slows it; once the loop has run, daemon.stall_ms applies, and a loop that has returned (a clean drain) is never judged."
+value = 60000
+env = "AH_ENGINE_START_STALL_MS"
+unit = "ms"
+
 [daemon.watchdog_tick_ms]
 doc = "How often the watchdog thread wakes to look at heartbeats."
 value = 250
@@ -959,7 +965,7 @@ value = ["CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CONFIG_DIR", "DEVSWARM_REPO_ID", "DEV
 
 [request_env.presence_only]
 doc = "Environment variables whose PRESENCE the checks need but whose value they must never see (a secret): the client forwards the presence text when one is set and non-empty, nothing otherwise, and the value never leaves the client. These are the legacy API-key variables the session-start key notice looks for (credentials.js legacyKeyPresent)."
-value = ["AI_GATEWAY_API_KEY", "TYPESAFE_API_KEY", "ANTHROPIC_API_KEY"]
+value = ["ANTHROPIC_API_KEY"]
 
 [request_env.presence_text]
 doc = "The value a presence-only variable carries on the wire."
@@ -1082,6 +1088,10 @@ value = ".bak-"
 [defaults_load.msg_heal]
 doc = "Event-log detail (and `config heal` output) when missing settings were added to an edited defaults file from the pristine copy. Placeholders: {file}, {keys}, {backup} (the backup file, or empty when one already existed)."
 value = "defaults {file}: added missing {keys} from the pristine copy (backup {backup})"
+
+[defaults_load.msg_heal_held]
+doc = "Event-log detail when missing settings were not written because a deploy hold (the daemon-down marker) is active: a deploy is replacing the plugin files, and a heal from the binary being replaced would write into the half-synced defaults. Placeholders: {file}, {keys}."
+value = "defaults {file}: missing keys {keys}: not written during a deploy hold; the next load heals them once the hold ends"
 
 [defaults_load.msg_heal_skipped]
 doc = "Event-log detail when missing settings were not written because the plugin root is a version-controlled checkout. Placeholders: {file}, {keys}."

@@ -67,6 +67,16 @@ No analytics and nothing is reported to anyone; the `ah-engine` keeps local-only
 
 Everything else (logs, handovers, defect reports) stays in `~/.anti-hall/` and `<repo>/.anti-hall/`. `gh`, `codex` and `hivecontrol` run under your own accounts; the plugin does not spawn `gh` or `codex`.
 
+## What it runs, sends and fetches
+
+| | What happens |
+|---|---|
+| **Runs** | Hooks run on Claude Code tool events (one thin trigger per event, `hooks/ah-hook.sh`). They read the event, decide, and print a verdict or a note. No hook sends project content anywhere. |
+| **Fetches** | The `ah-engine` binary is downloaded once at install, only from this repository's GitHub releases. Its SHA-256 is pinned in `ah-engine.lock` and verified before the binary runs; a mismatch means it is not used and the Node fallback runs instead. The only other request is the optional update check (a GitHub tag-list request, no project data). |
+| **Sends** | Only if you turn on Jev (opt-in, off by default): review questions go to the one vendor whose API key you entered in the plugin options, and to no other. Nothing else is sent. No analytics, no telemetry upload; usage counters stay on your machine. |
+
+Details and every setting: [PRIVACY.md](https://github.com/talas9/anti-hall/blob/main/PRIVACY.md).
+
 ## Documentation
 
 Everything else (every guard and setting, all skills, legacy statusline cleanup, troubleshooting, the
