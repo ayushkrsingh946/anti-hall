@@ -73,6 +73,8 @@ pub(crate) struct Report {
     pub node_out: usize,
     pub node_files: usize,
     pub deferred_ids: Vec<String>,
+    /// Differences a lane's tolerance accepted (counted, never silent).
+    pub tolerated: usize,
     pub summary: String,
 }
 
@@ -99,12 +101,20 @@ fn sandbox_env(root: &Path, sc: &Sc, built: &Built) -> Env {
     env_merge(&env, &built.env)
 }
 
+/// A lane's tolerance: whether a scenario whose node and engine answers differ still agrees under the lane's documented contract
+/// (arguments: node answer, engine answer, node files, engine files).
+pub(crate) type Tolerance = fn(&Out, &Out, &BTreeMap<String, String>, &BTreeMap<String, String>) -> bool;
+
 pub(crate) fn run_lane(name: &str, check: &str, hook_file: &str, hooks: &Path, scenarios: &[Sc], mutate: bool) -> Report {
+    run_lane_tol(name, check, hook_file, hooks, scenarios, mutate, None)
+}
+
+pub(crate) fn run_lane_tol(name: &str, check: &str, hook_file: &str, hooks: &Path, scenarios: &[Sc], mutate: bool, tol: Option<Tolerance>) -> Report {
     let hook = hooks.join(hook_file);
     let scratch = Scratch::new(&format!("b78-{name}"));
     let tmp = scratch.path().to_path_buf();
     let only = std::env::var("AH_PARITY_ONLY").ok();
-    let mut rep = Report { n: 0, same: 0, deferred: 0, mismatch: 0, node_out: 0, node_files: 0, deferred_ids: Vec::new(), summary: String::new() };
+    let mut rep = Report { n: 0, same: 0, deferred: 0, mismatch: 0, node_out: 0, node_files: 0, deferred_ids: Vec::new(), tolerated: 0, summary: String::new() };
     let mut mism: Vec<String> = Vec::new();
     for sc in scenarios {
         if only.as_ref().is_some_and(|o| !sc.id.contains(o.as_str())) {
@@ -180,6 +190,8 @@ pub(crate) fn run_lane(name: &str, check: &str, hook_file: &str, hooks: &Path, s
         let (ns, es) = (strip(&n.snap), strip(&e.snap));
         if nr == er && ns == es {
             rep.same += 1;
+        } else if !mutate && tol.is_some_and(|t| t(&nr, &er, &ns, &es)) {
+            rep.tolerated += 1;
         } else {
             rep.mismatch += 1;
             if mism.len() < 500 {
@@ -205,8 +217,8 @@ pub(crate) fn run_lane(name: &str, check: &str, hook_file: &str, hooks: &Path, s
         wipe(&e.root);
     }
     let mut s = format!(
-        "{name}: scenarios={} same={} deferred={} MISMATCH={} (node printed output in {}, left files in {})\n",
-        rep.n, rep.same, rep.deferred, rep.mismatch, rep.node_out, rep.node_files
+        "{name}: scenarios={} same={} tolerated={} deferred={} MISMATCH={} (node printed output in {}, left files in {})\n",
+        rep.n, rep.same, rep.tolerated, rep.deferred, rep.mismatch, rep.node_out, rep.node_files
     );
     if rep.deferred > 0 {
         s.push_str(&format!("  deferred: {}\n", rep.deferred_ids.iter().take(12).cloned().collect::<Vec<_>>().join(" | ")));
@@ -288,11 +300,17 @@ pub(crate) fn require(name: &str, check: &str, hook_file: &str, hooks: &Path, sc
 /// `require`, and the listed scenarios must also be answered by the engine itself (a deferral to Node would pass `require`).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn require_native(name: &str, check: &str, hook_file: &str, hooks: &Path, scenarios: Vec<Sc>, min: usize, native: &[&str]) {
+    require_tol(name, check, hook_file, hooks, scenarios, min, native, None);
+}
+
+/// `require_native` with a lane tolerance for the differences its contract allows.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn require_tol(name: &str, check: &str, hook_file: &str, hooks: &Path, scenarios: Vec<Sc>, min: usize, native: &[&str], tol: Option<Tolerance>) {
     dump_lane(name, &scenarios);
     if std::env::var_os("AH_PARITY_DUMP_ONLY").is_some() {
         return;
     }
-    let rep = run_lane(name, check, hook_file, hooks, &scenarios, false);
+    let rep = run_lane_tol(name, check, hook_file, hooks, &scenarios, false, tol);
     println!("{}", rep.summary);
     if let Some(dir) = std::env::var_os("AH_PARITY_DUMP") {
         std::fs::write(Path::new(&dir).join(format!("b78-{name}.summary.txt")), &rep.summary).ok();

@@ -55,10 +55,12 @@ function cxReadQuota(home, now) {
   return { until: q.until, reason: typeof q.reason === 'string' ? q.reason : cxT('quota_default_reason') };
 }
 
-// The existing file for a merge: `Object.assign` would invoke the `__proto__` setter for such a key.
+// The existing file for a merge. Node merges with `Object.assign`, which runs the `__proto__` setter for such a key instead of copying
+// it, so the key is not in what Node writes back: it is dropped here too.
 function cxReadForWrite(home) {
   var raw = cxReadRaw(home);
-  return raw === null || Object.prototype.hasOwnProperty.call(raw, cxT('proto_key')) ? null : raw;
+  if (raw !== null) delete raw[cxT('proto_key')];
+  return raw;
 }
 
 // The UTF-8 size of a text, in bytes.
@@ -113,7 +115,7 @@ function cxParseWhen(s) {
   return null;
 }
 
-// `detectQuotaMessage(text)`: {reason, until} or null; 'unsure' when a date only V8 reads exactly is in it.
+// `detectQuotaMessage(text)`: {reason, until} or null; {reason, until: null, dateUnsure: true} when a date only V8 reads exactly is in it; 'unsure' when the reason itself cannot be cut the way Node cuts it.
 function cxDetect(t) {
   if (t === '' || cxCannotMatch(t)) return null;
   var m = new RegExp(cxT('quota_re'), 'i').exec(t);
@@ -123,13 +125,14 @@ function cxDetect(t) {
   var last = head.charCodeAt(head.length - 1);
   if (head.length === cxN('quota_reason_chars') && last >= 0xd800 && last <= 0xdbff) return 'unsure';
   var reason = head.replace(/\s+/g, ' ').trim(), until = null;
+  // a date only V8 reads exactly: the outage is still real, so the hit comes back with no date (the default cooldown) and says so
   var tm = new RegExp(cxT('try_again_re'), 'i').exec(from);
-  if (tm) { until = cxParseWhen(tm[1]); if (until === 'unsure') return 'unsure'; }
+  if (tm) { until = cxParseWhen(tm[1]); if (until === 'unsure') return { reason: reason, until: null, dateUnsure: true }; }
   if (until === null) {
     var um = new RegExp(cxT('until_re'), 'i').exec(from);
     if (um) {
       var d = ah.date.parse(um[1].trim());
-      if (d.unsure) return 'unsure';
+      if (d.unsure) return { reason: reason, until: null, dateUnsure: true };
       if (d.ms !== undefined) until = d.ms;
     }
   }

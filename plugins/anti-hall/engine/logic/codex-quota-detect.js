@@ -2,7 +2,7 @@
 // rate-limit exhaustion message, it records the outage ONCE in the shared availability file instead of every lane rediscovering it on its
 // next spawn, and says so. It fires only for an Agent whose subagent type names the Codex rescue seat, and scans the tool result
 // (tool_response / tool_output, whichever the harness populates) for the quota message. A result whose text only V8's key order can fix, or
-// a date only V8 reads exactly, records nothing (counted). This script builds on codex-availability.js (script.includes). Mirrors hooks/codex-quota-detect.js.
+// a date only V8 reads exactly, records the default cooldown (counted). This script builds on codex-availability.js (script.includes). Mirrors hooks/codex-quota-detect.js.
 // Keys and texts: codex_handover.toml (codex_handover.*).
 'use strict';
 
@@ -68,8 +68,9 @@ function decide(p) {
   var blob = cxBlob(p);
   if (blob === '') return 'allow';
   var hit = cxDetect(blob);
-  if (hit === 'unsure') { ah.unable('codex-quota-detect:date_unsure'); return 'allow'; } // a date only V8 reads exactly: no outage recorded
+  if (hit === 'unsure') { ah.unable('codex-quota-detect:reason_unsure'); return 'allow'; } // a reason cut through a surrogate pair: the text cannot match Node's
   if (hit === null) return 'allow';
+  if (hit.dateUnsure) ah.unable('codex-quota-detect:date_unsure'); // a date only V8 reads exactly: the outage is recorded with the default cooldown
   var home = cxHome();
   if (home === null) { ah.unable('codex-quota-detect:no_home'); return 'allow'; } // no usable home: no state to keep
   if (cxRecordQuota(home, hit.until, hit.reason, ah.clock.now()) === null) ah.unable('codex-quota-detect:record_unsure'); // the warning still goes out

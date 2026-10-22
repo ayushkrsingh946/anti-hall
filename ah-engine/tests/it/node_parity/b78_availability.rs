@@ -5,6 +5,7 @@ use super::jsjson::js_number;
 use super::lab::Lab;
 use super::support::*;
 use serde_json::{Value, json};
+use std::collections::BTreeMap;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
@@ -449,3 +450,30 @@ pub(crate) fn scenarios() -> Vec<Sc> {
     let _ = Value::Null;
     out
 }
+
+const AVAIL: &str = "home/.anti-hall/codex-availability.json";
+
+/// The lane's one documented difference (#243): a usage-limit message in a background job log whose retry date the engine does not
+/// read exactly is recorded with the default cooldown (from the log's age), where Node records the exact date. Only the recorded
+/// `until` and the date the advisory names may differ; Node's must be a real date and the engine's the default cooldown.
+fn default_cooldown_for_uncertain_date(n: &Out, e: &Out, ns: &BTreeMap<String, String>, es: &BTreeMap<String, String>) -> bool {
+    if n.code != e.code || n.err != e.err {
+        return false;
+    }
+    let (Some(nf), Some(ef)) = (ns.get(AVAIL), es.get(AVAIL)) else { return false };
+    let (Ok(mut nv), Ok(ev)) = (serde_json::from_str::<Value>(nf), serde_json::from_str::<Value>(ef)) else { return false };
+    if !nv["quota"]["until"].is_u64() || ev["quota"]["until"] != json!("<NOW+6H>") {
+        return false;
+    }
+    nv["quota"]["until"] = json!("<NOW+6H>");
+    let others = |m: &BTreeMap<String, String>| m.iter().filter(|(k, _)| k.as_str() != AVAIL).map(|(k, v)| (k.clone(), v.clone())).collect::<BTreeMap<_, _>>();
+    let undate = |s: &str| -> Option<String> {
+        let lead = "Codex unavailable until ";
+        let from = s.find(lead)? + lead.len();
+        let to = from + s[from..].find(" (")?;
+        Some(format!("{}<DATE>{}", &s[..from], &s[to..]))
+    };
+    nv == ev && others(ns) == others(es) && undate(&n.out).is_some() && undate(&n.out) == undate(&e.out)
+}
+
+pub(crate) const TOLERANCE: Option<Tolerance> = Some(default_cooldown_for_uncertain_date);
