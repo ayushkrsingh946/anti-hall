@@ -1965,3 +1965,19 @@ value = "reader-cursors-unreadable"
 [mesh_write.unread_reason_union]
 doc = "The reason a child's unread count is UNKNOWN when the union of inbox lines and store rows cannot be computed (reader-cursors.js unknownResult)."
 value = "union-threw"
+
+[mesh_write.heartbeat_callers_log]
+doc = "The file (under the DevSwarm directory) that records the process of every heartbeat sent without --session (instrumentation: which caller refreshes a row without naming its session)."
+value = "heartbeat-callers.log"
+
+[mesh_write.heartbeat_callers_cap]
+doc = "How many of the newest lines that file keeps."
+value = 200
+min = 1
+max = 100000
+
+[mesh_write.heartbeat_callers_argv]
+doc = "How many of the caller's leading arguments a line records."
+value = 4
+min = 1
+max = 64
