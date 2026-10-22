@@ -629,6 +629,24 @@ fn an_inbox_inside_the_workspaces_own_worktree_is_drained() {
     assert_eq!(engine_drain(&he2, &fx, &Hooks::none()), Err("path-outside-allowed-dirs".to_string()));
 }
 
+/// SkyCrew's Primary checkout has two registry rows on one worktree (its `primary-<hash>` label and the workspace's own id). The sweep's
+/// project fold leaves the anchored one, and the pull of the real workspace must not be held for it (no row is retired or deleted).
+#[test]
+fn a_row_the_fold_left_on_the_same_worktree_does_not_hold_the_pull() {
+    let Some((fx, w)) = world("s3dups") else { return };
+    let he = fx.root.join("dups-engine");
+    copy_tree(&fx.seed_home, &he);
+    seed_home(&he);
+    base(&w, &he, &[], &[]);
+    add_row(&he, &fx.repo_key, "primary-0badc0de", &fx.child.to_string_lossy(), "sess-x");
+    hc(&he, "count", "1");
+    hc(&he, "read", &msgs(&[("only", "2026-10-09T10:00:00.000Z")]));
+    let done = engine_drain(&he, &fx, &Hooks::none()).expect("the pull is not held for a row the fold left");
+    assert_eq!(done["imported"].as_i64(), Some(1), "{done}");
+    let rows = rusqlite::Connection::open(key_db(&he, &fx.repo_key)).unwrap().query_row("SELECT COUNT(*) FROM registry WHERE id IN ('child-1','primary-0badc0de')", [], |r| r.get::<_, i64>(0)).unwrap();
+    assert_eq!(rows, 2, "no registry row was retired");
+}
+
 #[test]
 fn another_pulls_lock_sends_the_workspace_to_node_before_anything_is_read() {
     let Some((fx, w)) = world("s3lock") else { return };

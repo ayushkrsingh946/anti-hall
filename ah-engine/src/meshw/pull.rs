@@ -199,6 +199,17 @@ fn foreign_open_batches(root: &Path, own: &Path, worktree: &str) -> bool {
 /// The first half of the plan: the ensure (what the descriptor, the registry and the summary become), decided without writing. The
 /// tick counts over [`Plan::ensured`], which is the descriptor Node's count reads after its own ensure.
 pub(crate) fn prepare(inv: &Inv, id: &str, desc: Option<&OVal>) -> R<Plan> {
+    prepare_with(inv, id, desc, false)
+}
+
+/// [`prepare`] for the reconcile sweep, which has already run the project-wide fold: another registry row on the workspace's worktree
+/// is then one the fold deliberately LEFT (its descriptor, a live reader or a heartbeat anchors it; nothing may retire it), so it does
+/// not stop the pull. `prepare` itself defers it, because `inbox pull` would run the fold there.
+pub(crate) fn prepare_swept(inv: &Inv, id: &str, desc: Option<&OVal>) -> R<Plan> {
+    prepare_with(inv, id, desc, true)
+}
+
+fn prepare_with(inv: &Inv, id: &str, desc: Option<&OVal>, rows_left_by_fold: bool) -> R<Plan> {
     if crate::meshw::heartbeat::is_primary_label(id) {
         return defer("primary-label");
     }
@@ -349,7 +360,7 @@ pub(crate) fn prepare(inv: &Inv, id: &str, desc: Option<&OVal>) -> R<Plan> {
     {
         return defer("registry-collision");
     }
-    if let Some(w) = desc_wt.as_deref() {
+    if let Some(w) = desc_wt.as_deref().filter(|_| !rows_left_by_fold) {
         let keep_mesh = ident::primary_workspace_id(w)?;
         if keep_mesh != id
             && let Some(keep_real) = ident::canonical_worktree_real_path(w)?
