@@ -262,6 +262,27 @@ pub fn get(name: &str) -> Option<&'static dyn Check> {
     registry().iter().copied().find(|c| c.name() == name)
 }
 
+/// The one hook event the dispatch table runs the check `name` under (on every host), if there is exactly one. The
+/// dispatcher takes the event from the hook row (`--event`), never from the payload, and a Node hook registered for one
+/// event does not read `hook_event_name` at all; so `ah-engine check` answers a payload that names no event as that row
+/// would, instead of under an invented event (a Stop gate run as PreToolUse lets the stop through where Node blocks).
+fn listed_event(name: &str) -> Option<String> {
+    use crate::dispatch::table;
+    let mut found: Option<&'static str> = None;
+    for host in table::hosts() {
+        for event in table::events(host) {
+            if table::entries(host, event).iter().any(|e| e.check.as_deref() == Some(name)) {
+                match found {
+                    None => found = Some(event),
+                    Some(f) if f == event => {}
+                    Some(_) => return None,
+                }
+            }
+        }
+    }
+    found.map(str::to_string)
+}
+
 /// `ah-engine check <name>`: run one check in-process on a hook payload from stdin and print what the Node guard
 /// would (exit 2 + stderr for a block, a stdout JSON line for an advisory, `AHFALLBACK` for a deferral). The
 /// parity harness drives this to compare a Rust check with its Node original without a daemon.
@@ -282,8 +303,9 @@ pub fn cli_main(name: &str) -> i32 {
         return 0;
     };
     let null = Value::Null;
+    let listed = listed_event(name);
     let subject = Subject {
-        event: p.get("hook_event_name").and_then(Value::as_str).unwrap_or("PreToolUse"),
+        event: p.get("hook_event_name").and_then(Value::as_str).or(listed.as_deref()).unwrap_or("PreToolUse"),
         tool: p.get("tool_name").and_then(Value::as_str),
         cwd: p.get("cwd").and_then(Value::as_str),
         tool_input: p.get("tool_input").unwrap_or(&null),
