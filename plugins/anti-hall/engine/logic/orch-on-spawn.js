@@ -63,7 +63,7 @@ function decide(p) {
   if (typeof p.tool_name === 'string' && ah.cfg('orch_on_spawn.spawn_tools').indexOf(p.tool_name) < 0) return 'allow';
   var sid = p.session_id;
   if (typeof sid !== 'string' || sid === '') return 'allow';
-  if (spawn.osHome() === null) { ah.unable('orch-on-spawn:no_home'); return 'allow'; } // no absolute HOME: no marker to read
+  if (spawn.osHome() === null) { ah.unable('orch-on-spawn:no_home', 'abandoned'); return 'allow'; } // no absolute HOME: no marker to read
   if (!ah.settings.bool('orch_state.setting') || ah.settings.skipped(ah.cfg('orch_state.skip_name'))) return 'allow';
   if (ah.settings.enum('orch_state.protocol_setting') === ah.cfg('orch_state.full_level') || spawn.subagentByPayload(p)) return 'allow';
   var sh = spawn.stateHome();

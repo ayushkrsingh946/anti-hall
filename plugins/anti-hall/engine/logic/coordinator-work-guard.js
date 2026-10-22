@@ -265,7 +265,7 @@ function cwMain(payload, post) {
   if (!cfg.tMs) return 'allow';
   var command = payload.tool_input && typeof payload.tool_input.command === 'string' ? payload.tool_input.command : '';
   var home = io.homeOf();
-  if (!path.isAbsolute(home)) { ah.unable('coordinator-work-guard:no_home'); return 'allow'; } // no absolute HOME: no window file to keep
+  if (!path.isAbsolute(home)) { ah.unable('coordinator-work-guard:no_home', 'abandoned'); return 'allow'; } // no absolute HOME: no window file to keep
   if (!S.pluginRoot) ah.unable('coordinator-work-guard:no_plugin_root'); // the window records no plugin version
   var now = ah.clock.now();
   var st = cwNormalize(cwReadJson(cwSessionRel(sid)));
@@ -302,7 +302,7 @@ function cwMain(payload, post) {
   if (cwUpdate(sid, function (s) {
     if (id) cwTakePre(s, id);
     crossing = cwStepPost(s, { now: now, work: work }, cfg).crossing;
-  }) === null) { ah.unable('coordinator-work-guard:lock_not_taken'); return 'allow'; } // the call is not counted
+  }) === null) { ah.unable('coordinator-work-guard:lock_not_taken', 'abandoned'); return 'allow'; } // the call is not counted
   var out = 'allow';
   if (crossing && cfg.nudgeAt > 0 && !skipped()) {
     cwBumpMetrics(function (m) { m.nudges++; });

@@ -102,7 +102,7 @@ pub(super) fn lift_deadline() {
 }
 
 /// `r`, or an exception when the request's client stopped waiting while it ran ([`crate::deadline::cut_due`]): a native scan cut
-/// short must not read as an answer, so the script call fails as a cut and its check defers to its Node hook.
+/// short must not read as an answer, so the script call fails as a cut and its check takes its failure policy.
 pub(super) fn unless_cut<T>(r: T) -> rquickjs::Result<T> {
     if crate::deadline::cut_due() {
         return Err(rquickjs::Error::new_from_js_message("scan", "cut", defaults::text("script.msg_scan_cut").to_string()));
@@ -1006,8 +1006,19 @@ pub fn install(c: &Ctx<'_>) -> rquickjs::Result<()> {
             Ok(())
         })?,
     )?;
-    // a case the script could not model exactly and decided natively instead of handing back (counted per site)
-    h.set("unable", Function::new(c.clone(), |site: String| crate::obs::counters::handback(crate::obs::counters::Handback::NativeUnable, &format!("{}{site}", defaults::text("script.unable_prefix"))))?)?;
+    // a case the script could not model exactly: counted per site as a stand-in (it went on with a stand-in value), or, with the second
+    // argument `script.unable_abandoned`, as abandoned (it dropped the decision)
+    h.set(
+        "unable",
+        Function::new(c.clone(), |site: String, kind: rquickjs::function::Opt<String>| {
+            let counter = if kind.0.as_deref() == Some(defaults::text("script.unable_abandoned")) {
+                crate::obs::counters::Handback::Abandoned
+            } else {
+                crate::obs::counters::Handback::StandIn
+            };
+            crate::obs::counters::handback(counter, &format!("{}{site}", defaults::text("script.unable_prefix")))
+        })?,
+    )?;
     // one advisory event for advisory kind `kind` (flagged, asked, confirmed, injected, suppressed, jev_error)
     h.set("advisory", Function::new(c.clone(), |kind: String, metric: String| crate::obs::counters::advisory(&kind, &metric))?)?;
     h.set("log", Function::new(c.clone(), |kind: String, text: String| crate::discard::note("script_log", &format!("{kind}: {text}")))?)?;

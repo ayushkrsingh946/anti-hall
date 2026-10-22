@@ -134,7 +134,7 @@ pub fn compiled_logic_checks_remaining() -> usize {
 
 /// Evaluate `check` for one request: the one place every dispatcher goes through. When the request's environment is
 /// incomplete (dropped over the cap, absent, or no usable `HOME`) the check is not evaluated at all and the answer is
-/// [`Verdict::Defer`], so Node, which sees the real environment, decides. Evaluating with no home and default switches
+/// the check's failure policy decides ([`crate::script::failed`]). Evaluating with no home and default switches
 /// would read a gate that is on as off and allow what Node blocks.
 pub fn run_env_guarded(check: &dyn Check, subject: &Subject<'_>, payload: &Value, opts: &Value, env: &RequestEnv) -> Option<Verdict> {
     // the bytes this check (or its script) allocates are measured here, the one place every caller (the dispatcher, the hook path,
@@ -148,10 +148,11 @@ pub fn run_env_guarded(check: &dyn Check, subject: &Subject<'_>, payload: &Value
 }
 
 fn run_env_unmeasured(check: &dyn Check, subject: &Subject<'_>, payload: &Value, opts: &Value, env: &RequestEnv) -> Option<Verdict> {
+    crate::script::set_session(payload.get("session_id").and_then(Value::as_str).unwrap_or_default());
     if env.is_incomplete() {
         return Some(crate::script::failed(check.name(), subject.event, crate::defaults::text("script.msg_env_incomplete")));
     }
-    // a settings file only JavaScript can parse (a number like 1e400, nesting past 128) is not "missing": defer to Node
+    // a settings file only JavaScript can parse (a number like 1e400, nesting past 128) is not "missing": the failure policy decides
     let home = env.get(crate::defaults::env_name("home")).or_else(|| env.get(crate::defaults::env_name("home_alt"))).unwrap_or_default();
     if guardkit::settings::unreadable_settings_file(home) {
         return Some(crate::script::failed(check.name(), subject.event, crate::defaults::text("script.msg_settings_unreadable")));
@@ -361,9 +362,10 @@ mod tests {
 
     /// Review P0 (D74): a settings file that exists but that serde cannot parse while JavaScript can (`1e400` is `Infinity`; nesting
     /// past 128) was read as missing, so an opt-in block mode was ignored and the engine allowed where Node blocks. Every check now
-    /// defers; a file both parsers reject is missing for both and changes nothing.
+    /// takes its failure policy (a blocking guard fails closed, naming the settings file; no Node hook is launched to defer to); a
+    /// file both parsers reject is missing for both and changes nothing.
     #[test]
-    fn a_settings_file_only_javascript_can_parse_defers_every_check() {
+    fn a_settings_file_only_javascript_can_parse_takes_the_failure_policy_of_every_check() {
         let home = std::env::temp_dir().join(format!("ah-badsettings-{}", std::process::id()));
         crate::discard::harmless(std::fs::remove_dir_all(&home)); // keep: cleanup that raced; an absent file is the goal state
         std::fs::create_dir_all(home.join(".anti-hall")).unwrap();
@@ -373,22 +375,23 @@ mod tests {
         let null = Value::Null;
         let subject = Subject { event: "PreToolUse", tool: Some("AskUserQuestion"), cwd: None, tool_input: &null, prompt: None };
         let run = || run_env_guarded(&scripted::ASK_GUARD, &subject, &payload, &Value::Null, &env);
+        let held = |v: Option<Verdict>| matches!(v, Some(Verdict::Block(m)) if m.contains(crate::defaults::text("script.msg_settings_unreadable")));
         let write = |text: &str| std::fs::write(home.join(".anti-hall/settings.json"), text).unwrap();
         // the baseline: a readable file with the block mode on is answered, not deferred
         write(r#"{"guards":{"noBlockingQuestions":"block"}}"#);
-        assert_ne!(run(), Some(Verdict::Defer), "a readable settings file is answered by the check");
+        assert!(!held(run()), "a readable settings file is answered by the check");
         // a number beyond f64 (JavaScript: Infinity)
         write(r#"{"guards":{"noBlockingQuestions":"block"},"x":1e400}"#);
-        assert_eq!(run(), Some(Verdict::Defer), "1e400");
+        assert!(held(run()), "1e400");
         // nesting past serde's recursion limit
         write(&format!(r#"{{"guards":{{"noBlockingQuestions":"block"}},"deep":{}1{}}}"#, "[".repeat(200), "]".repeat(200)));
-        assert_eq!(run(), Some(Verdict::Defer), "depth 200");
+        assert!(held(run()), "depth 200");
         // a lone surrogate escape
         write(r#"{"guards":{"noBlockingQuestions":"block"},"s":"\ud800"}"#);
-        assert_eq!(run(), Some(Verdict::Defer), "lone surrogate");
+        assert!(held(run()), "lone surrogate");
         // text both parsers reject is a missing file for both: the check answers (with the defaults)
         write("{oops");
-        assert_ne!(run(), Some(Verdict::Defer), "a syntax error is missing for Node too");
+        assert!(!held(run()), "a syntax error is missing for Node too");
         // review 3: the legacy Jev file (`jev.json`) is read below settings.json by Node's resolver, so it counts too
         write(r#"{"guards":{"noBlockingQuestions":"block"}}"#);
         let jev = home.join(".anti-hall/jev.json");
@@ -398,19 +401,19 @@ mod tests {
             ("jev surrogate", r#"{"enabled":true,"x":"\ud800"}"#.to_string()),
         ] {
             std::fs::write(&jev, body).unwrap();
-            assert_eq!(run(), Some(Verdict::Defer), "{name}");
+            assert!(held(run()), "{name}");
         }
         std::fs::write(&jev, r#"{"enabled":true}"#).unwrap();
-        assert_ne!(run(), Some(Verdict::Defer), "a readable jev.json is answered");
+        assert!(!held(run()), "a readable jev.json is answered");
         crate::discard::harmless(std::fs::remove_file(&jev)); // keep: cleanup that raced; an absent file is the goal state
         // the host's settings file and the skip file are read by the same chain
         write(r#"{"guards":{"noBlockingQuestions":"block"}}"#);
         std::fs::create_dir_all(home.join(".claude")).unwrap();
         std::fs::write(home.join(".claude/settings.json"), r#"{"pluginConfigs":{"a":{"n":1e999}}}"#).unwrap();
-        assert_eq!(run(), Some(Verdict::Defer), "~/.claude/settings.json");
+        assert!(held(run()), "~/.claude/settings.json");
         std::fs::write(home.join(".claude/settings.json"), "{}").unwrap();
         std::fs::write(home.join(".anti-hall/skip.json"), r#"{"ask-guard":1e999}"#).unwrap();
-        assert_eq!(run(), Some(Verdict::Defer), "skip.json");
+        assert!(held(run()), "skip.json");
         crate::discard::harmless(std::fs::remove_dir_all(&home)); // keep: cleanup that raced; an absent file is the goal state
     }
 

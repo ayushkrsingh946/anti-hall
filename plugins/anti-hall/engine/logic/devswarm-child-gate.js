@@ -575,6 +575,6 @@ function decide(p, opts, event) {
   if (event !== 'Stop') return 'allow'; // this gate answers Stop only
   var root = jx.isObj(opts) && typeof opts.plugin_root === 'string' ? opts.plugin_root : ah.env.get(ah.cfg('env.plugin_root'));
   var l = dwLaunchersNative(root, true);
-  if (l === null) { ah.unable('devswarm-child-gate:no_launchers'); return 'allow'; } // no usable home or plugin root: no launcher can be named
+  if (l === null) { ah.unable('devswarm-child-gate:no_launchers', 'abandoned'); return 'allow'; } // no usable home or plugin root: no launcher can be named
   return cgApply(cgGate(p, root, l));
 }

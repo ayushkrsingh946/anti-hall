@@ -100,7 +100,7 @@ function decide(p) {
   var payloadText = typeof p.last_assistant_message === 'string' && p.last_assistant_message.trim() !== '' ? p.last_assistant_message : null;
   var ev = ah.transcript.evidenceWalk(tpOpen, ah.cfgNum('claim_ledger.window_bytes'), payloadText);
   if (ev === null) return 'allow';
-  if (ev.unsure) { ah.unable('claim-ledger:transcript_unsure'); return 'allow'; } // a transcript JavaScript reads differently: no ledger entry
+  if (ev.unsure) { ah.unable('claim-ledger:transcript_unsure', 'abandoned'); return 'allow'; } // a transcript JavaScript reads differently: no ledger entry
   if (!ev.walked) return 'allow';
   var reply = ev.lastText, which = 'evidence', evidenceChars = ev.evidenceChars, tools = ev.toolsThisTurn, fromPayload = false;
   if (payloadText !== null) {

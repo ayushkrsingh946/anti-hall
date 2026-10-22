@@ -67,7 +67,7 @@ function idAdvisory(p, now) {
 
 function decide(p) {
   if (ah.env.get(ah.cfg('prompt_emit.judge_child_env')) === '1') return 'allow';
-  if (spawn.osHome() === null) { ah.unable('idle-agent-sweep:no_home'); return 'allow'; } // no absolute HOME: no dedupe state to keep
+  if (spawn.osHome() === null) { ah.unable('idle-agent-sweep:no_home', 'abandoned'); return 'allow'; } // no absolute HOME: no dedupe state to keep
   if (!ah.settings.bool('idle_sweep.sw_enabled') || p === null || typeof p !== 'object' || ah.settings.skipped(ah.cfg('idle_sweep.skip_name'))) return 'allow';
   var t = idAdvisory(p, idNow());
   if (t === '') return 'allow';

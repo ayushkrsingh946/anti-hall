@@ -108,7 +108,7 @@ pub fn set_cut_armed(on: bool) {
 
 /// True when the script call in progress may be cut and its request's client has stopped waiting: a native scan the call is
 /// running (a transcript window of many megabytes, which the interpreter cannot interrupt) stops early, and the call fails as
-/// a cut (its check defers to its Node hook).
+/// a cut (its check gets no answer and takes its failure policy).
 pub fn cut_due() -> bool {
     CUT_ARMED.with(|c| c.load(Ordering::Relaxed)) && !in_time()
 }
@@ -144,8 +144,8 @@ pub fn staged_mark() -> usize {
     STAGED.with(|s| s.borrow().len())
 }
 
-/// Drop the writes staged after `mark` (a check that deferred to its Node hook must not leave a stamp for a decision it never
-/// made: the Node hook that answers instead would find it).
+/// Drop the writes staged after `mark` (a check that gave no answer must not leave a stamp for a decision it never
+/// made: its failure policy answers instead and a later call would find the stamp).
 pub fn discard_staged_since(mark: usize) {
     let tail: Vec<Staged> = STAGED.with(|s| {
         let mut s = s.borrow_mut();
@@ -345,7 +345,7 @@ mod tests {
         crate::atomic::write_after_reply(&a, "a", style).unwrap();
         let mark = staged_mark();
         crate::atomic::write_after_reply(&b, "b", style).unwrap();
-        discard_staged_since(mark); // the second check deferred to its Node hook
+        discard_staged_since(mark); // the second check gave no answer
         settle_staged(true);
         end();
         assert_eq!(std::fs::read_to_string(&a).unwrap(), "a", "the answered check's state lands");

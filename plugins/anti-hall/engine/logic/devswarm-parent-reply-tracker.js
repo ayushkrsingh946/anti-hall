@@ -101,7 +101,7 @@ function rtApply(w) {
 
 function rtDecide(p) {
   var home = hookProc.home(p);
-  if (home === null) { ah.unable('devswarm-parent-reply-tracker:no_home'); return 'allow'; } // no home at all: no receipts or replies file
+  if (home === null) { ah.unable('devswarm-parent-reply-tracker:no_home', 'abandoned'); return 'allow'; } // no home at all: no receipts or replies file
   if (posix.normalize(home) !== home) { ah.unable('devswarm-parent-reply-tracker:home_form'); home = posix.normalize(home); }
   var tr = p.tool_response;
   var textOut = typeof tr === 'string' ? tr : (tr && typeof tr === 'object' && typeof tr.stdout === 'string' ? tr.stdout : null);
@@ -116,21 +116,21 @@ function rtDecide(p) {
   if (credited.length > 0) return rtApply(rtAppends(home, key, credited));
   if (typeof textOut !== 'string' || !textOut.trim()) return 'allow';
   var resp = rtParseSend(textOut);
-  if (!resp) { ah.unable('devswarm-parent-reply-tracker:no_send_line'); return 'allow'; } // Node only logs the parse drop to ~/.devswarm/parent-inbox.log
+  if (!resp) { ah.unable('devswarm-parent-reply-tracker:no_send_line', 'abandoned'); return 'allow'; } // Node only logs the parse drop to ~/.devswarm/parent-inbox.log
   if (resp.ok !== true || resp.type !== ah.cfg('devswarm_gates.rt_direct_type')) return 'allow';
   if (typeof resp.toId !== 'string' || !resp.toId || resp.sent === false) return 'allow';
   if (resp.needsReply === true && resp.answers !== true) {
     // a question send to a child with a pending question: Node logs the --answers hint to ~/.devswarm/parent-inbox.log
     var r = jx.read(home + '/' + ah.cfg('devswarm_role.pg_devswarm_dir') + '/' + ah.cfg('devswarm_role.pg_dir_summaries') + '/' + key + '.json');
-    if (r.big) { ah.unable('devswarm-parent-reply-tracker:summary_big'); return 'allow'; }
+    if (r.big) { ah.unable('devswarm-parent-reply-tracker:summary_big', 'abandoned'); return 'allow'; }
     if (r.text !== undefined && r.text.trim() !== '') {
       var j = jx.parse(r.text);
-      if (j.unsure) { ah.unable('devswarm-parent-reply-tracker:summary_unsure'); return 'allow'; }
+      if (j.unsure) { ah.unable('devswarm-parent-reply-tracker:summary_unsure', 'abandoned'); return 'allow'; }
       var s = j.invalid ? null : j.v, ws = s && typeof s === 'object' ? s.workspaces : null;
       if (ws && typeof ws === 'object' && Object.keys(ws).some(function (k) {
         var pq = ws[k] && Array.isArray(ws[k].pendingQuestions) ? ws[k].pendingQuestions : null;
         return pq !== null && pq.some(function (q) { return q && String(q.from) === resp.toId; });
-      })) { ah.unable('devswarm-parent-reply-tracker:question_hint'); return 'allow'; } // Node only logs the --answers hint
+      })) { ah.unable('devswarm-parent-reply-tracker:question_hint', 'abandoned'); return 'allow'; } // Node only logs the --answers hint
     }
     return 'allow';
   }

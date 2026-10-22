@@ -81,7 +81,7 @@ function decide(p) {
   var cwd = p && typeof p.cwd === 'string' ? p.cwd : '';
   if (!cwd) return 'allow';
   var home = spawn.osHome();
-  if (home === null) { ah.unable('progress-prune:no_home'); return 'allow'; } // no absolute HOME: no state to keep
+  if (home === null) { ah.unable('progress-prune:no_home', 'abandoned'); return 'allow'; } // no absolute HOME: no state to keep
   if (!ah.path.isAbsolute(cwd)) { ah.unable('progress-prune:relative_cwd'); cwd = hookProc.cwd(p); } // resolved against the stand-in directory
   var ctx = ho.context(cwd);
   if (ctx.unsure) { ah.unable('progress-prune:context_unsure'); ctx = { unsure: false, toplevel: null, root: null }; } // a checkout the host cannot classify is read as the directory itself

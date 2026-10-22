@@ -538,7 +538,7 @@ doc = "Migration report kind of a Node switch (opcli.migration_switches)."
 value = "switch"
 
 [opcli.migration_why_twin]
-doc = "Migration reason: the check has a Node twin (it is not in script.engine_only_checks), so a script failure defers to Node."
+doc = "Migration reason: the check is not classified in script.engine_only_checks, so a script failure has no declared policy."
 value = "node_twin"
 
 [opcli.migration_why_defer]
