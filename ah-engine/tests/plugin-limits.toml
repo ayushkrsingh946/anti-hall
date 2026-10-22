@@ -1,0 +1,7 @@
+# Claude plugin directory limits for plugins/anti-hall (claude.com/docs/plugins/pre-submission-checklist).
+# Past a hard limit the listing is held for human review. Soft limits warn first.
+# Images and fonts are exempt from the size limits.
+files_soft = 470
+files_hard = 512
+file_kib_soft = 250
+file_kib_hard = 256
