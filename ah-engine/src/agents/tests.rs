@@ -474,12 +474,13 @@ fn a_workspace_without_a_live_wake_watch_is_told_the_exact_arm_command_in_its_se
     let rows = outbox(&h);
     assert_eq!(rows.len(), 1, "{rows:?}");
     assert_eq!((rows[0]["workspace"].as_str(), rows[0]["to_parent"].as_bool()), (Some("ws1"), Some(false)));
-    assert!(rows[0]["text"].as_str().unwrap().contains("node /plug/companion/lib/devswarm-wake-watch.js"), "{rows:?}");
+    assert!(rows[0]["text"].as_str().unwrap().contains("AH_ENGINE_PLUGIN_ROOT=\"/plug\"") && !rows[0]["text"].as_str().unwrap().contains("node "), "{rows:?}");
+    assert!(rows[0]["text"].as_str().unwrap().contains("devswarm wake-watch --auto"), "{rows:?}");
     // root cause of a Primary never being told (2026-10-22): the mesh outbox has no reader, so the workspace's own session queue is the
     // delivery that reaches it; it is a session, and its hook delivers the queue
     let q = queue(&h, "sessW");
     assert_eq!(q.len(), 1, "{q:?}");
-    assert!(q[0]["text"].as_str().unwrap().contains("node /plug/companion/lib/devswarm-wake-watch.js"), "{q:?}");
+    assert!(q[0]["text"].as_str().unwrap().contains("devswarm wake-watch --auto") && !q[0]["text"].as_str().unwrap().contains("node "), "{q:?}");
 }
 
 #[test]
@@ -1050,7 +1051,7 @@ fn a_live_process_is_running_or_waiting_whatever_its_transcript_says_and_a_dead_
 }
 
 fn teammate(h: &Path, n: u64) {
-    idle_subagent(h, n, 30);
+    idle_subagent(h, n, 20);
     std::fs::write(
         h.join(".claude/projects/p/parent/subagents/agent-w1.meta.json"),
         r#"{"agentType":"gauge","description":"gauge worker","name":"gauger","taskKind":"in_process_teammate","teamName":"team-7"}"#,
@@ -1125,4 +1126,68 @@ fn a_codex_rollout_is_a_codex_agent_running_while_it_is_written() {
     let (live, quiet) = (agent(&st, "01a16132-aaaa"), agent(&st, "01a16132-bbbb"));
     assert_eq!((live.kind.as_str(), state::of(live), live.cwd.as_str(), live.source.as_str()), ("codex", "running", "/cx", "codex"));
     assert_eq!((quiet.kind.as_str(), state::of(quiet)), ("codex", "waiting"));
+}
+
+#[test]
+fn headless_one_shot_runs_are_not_agents_and_are_not_counted() {
+    let h = home("headless");
+    let n = now0();
+    let line = |ts: u64| json!({"type": "user", "timestamp": iso(ts), "cwd": "/w", "entrypoint": "sdk-cli", "message": {"role": "user", "content": "judge"}}).to_string();
+    write(&sess(&h, "judge1"), &[json!({"type": "queue-operation", "timestamp": iso(n)}).to_string(), line(n - MIN), asst(n - MIN, "j1", 5, 5, json!([{"type": "text", "text": "{}"}]), Some("end_turn"))]);
+    write(&h.join(".claude/projects/-x-double-shot-latte/judge2.jsonl"), &[prompt(n - MIN, "/w")]);
+    write(&sess(&h, "real1"), &[prompt(n - MIN, "/w"), asst(n - MIN, "m1", 5, 5, json!([{"type": "text", "text": "ok"}]), None)]);
+    let mut st = State::default();
+    ticks(&h, &mut st, &[n, n + MIN]);
+    assert_eq!(st.agents.keys().collect::<Vec<_>>(), vec!["real1"], "only the interactive session is an agent");
+    let doc = status::document(&env(&h, n + MIN), &st, &sources::Listing::default());
+    assert_eq!((doc["summary"]["headless_skipped"].as_u64(), doc["agents"].as_array().unwrap().len()), (Some(2), 1));
+}
+
+#[test]
+fn the_list_is_live_agents_plus_a_short_recently_finished_window_and_the_summary_counts_live_ones() {
+    let h = home("window");
+    let n = now0();
+    write(&sess(&h, "parent"), &[prompt(n - 3 * 3_600_000, "/w"), asst(n - 2 * 3_600_000, "p1", 5, 5, json!([{"type": "text", "text": "x"}]), Some("end_turn"))]);
+    register(&h, std::process::id(), "parent", "busy", n);
+    let dir = h.join(".claude/projects/p/parent/subagents");
+    for (id, ago) in [("old", 2 * 3_600_000), ("fresh", 5 * MIN)] {
+        write(&dir.join(format!("agent-{id}.jsonl")), &[prompt(n - ago - MIN, "/w"), asst(n - ago, "s1", 5, 5, json!([{"type": "text", "text": "x"}]), Some("end_turn"))]);
+        std::fs::write(dir.join(format!("agent-{id}.meta.json")), r#"{"finished":true}"#).unwrap();
+    }
+    let mut st = State::default();
+    ticks(&h, &mut st, &[n, n + MIN]);
+    let doc = status::document(&env(&h, n + MIN), &st, &sources::Listing::default());
+    let ids: Vec<&str> = doc["agents"].as_array().unwrap().iter().map(|r| r["agent"].as_str().unwrap()).collect();
+    assert!(ids.contains(&"parent") && ids.contains(&"fresh") && !ids.contains(&"old"), "{ids:?}");
+    let s = &doc["summary"];
+    assert_eq!((s["sessions_live"].as_u64(), s["subagents_live"].as_u64(), s["done_hidden"].as_u64()), (Some(1), Some(0), Some(1)), "{s}");
+}
+
+#[test]
+fn the_wake_watch_finds_its_session_from_the_process_tree_when_no_variable_is_set() {
+    let h = home("wake-tree");
+    let n = now0();
+    assert_eq!(wake::session_from_tree(&env(&h, n), std::process::id()), None, "no registry, no session");
+    // the registered process is this one: a watcher started under it (here: itself) resolves the session
+    register(&h, std::process::id(), "sess-tree", "busy", n);
+    assert_eq!(wake::session_from_tree(&env(&h, n), std::process::id()).as_deref(), Some("sess-tree"));
+    // a registered ancestor is found by walking up
+    let parent = crate::procid::parent(std::process::id()).unwrap();
+    std::fs::remove_dir_all(h.join(".claude/sessions")).unwrap();
+    register(&h, parent, "sess-up", "busy", n);
+    assert_eq!(wake::session_from_tree(&env(&h, n), std::process::id()).as_deref(), Some("sess-up"));
+}
+
+#[test]
+fn a_primary_is_not_told_to_arm_the_devswarm_watcher_it_declines_while_idle() {
+    let h = home("primary-ws");
+    let n = now0();
+    devswarm(&h, n, None);
+    std::fs::rename(h.join(".anti-hall/devswarm/workspaces/ws1.json"), h.join(".anti-hall/devswarm/workspaces/primary-1.json")).unwrap();
+    std::fs::write(h.join(".anti-hall/devswarm/workspaces/primary-1.json"), r#"{"id":"primary-1","sessionId":"sessW","worktreePath":"/wt/x"}"#).unwrap();
+    let mut st = State::default();
+    ticks(&h, &mut st, &[n, n + MIN, n + 2 * MIN]);
+    let a = agent(&st, "sessW");
+    assert!(a.ws.as_ref().is_some_and(|w| w.armed.is_none()), "a Primary's DevSwarm watcher state is not judged");
+    assert!(outbox(&h).is_empty() && queue(&h, "sessW").iter().all(|r| !r["text"].as_str().unwrap().contains("wake-watch --auto")), "nobody is told to arm it");
 }

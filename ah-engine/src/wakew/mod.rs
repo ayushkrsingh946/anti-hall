@@ -169,6 +169,16 @@ fn defer_exit() -> i32 {
     defaults::num("ops.defer_exit") as i32
 }
 
+/// A deferral that says why (stderr, and stdout too when the model armed it by hand): nothing else is printed or written.
+fn defer_why(why: &str, auto: bool) -> Start {
+    let line = defaults::render("wake_watch.diag_deferred", &[("why", &defaults::text(why))]);
+    diag(&line);
+    if !auto {
+        emit(line.trim_end());
+    }
+    Start::Exit(defer_exit())
+}
+
 /// What a startup step may do: carry on, or end the run with an exit code (a deferral is exit 75, nothing written).
 enum Start {
     Go(Box<Armed>),
@@ -194,14 +204,14 @@ fn start(p: &Proc, auto: bool) -> Start {
         }
     };
     if crate::checks::guardkit::settings::unreadable_settings_file(&p.st.home) {
-        return Start::Exit(defer_exit());
+        return defer_why("wake_watch.why_settings", auto);
     }
     if p.switched_off("wake_watch.set_enabled") {
         refuse_quietly(reason("wake_watch.reason_disabled"));
         return Start::Exit(0);
     }
     match who::gate(p) {
-        Err(_) => return Start::Exit(defer_exit()),
+        Err(_) => return defer_why("wake_watch.why_gate", auto),
         Ok(false) => {
             diag(text("wake_watch.diag_not_devswarm"));
             refuse_quietly(reason("wake_watch.reason_not_devswarm"));
@@ -210,7 +220,7 @@ fn start(p: &Proc, auto: bool) -> Start {
         Ok(true) => {}
     }
     let id = match who::resolve_identity(p) {
-        Err(_) => return Start::Exit(defer_exit()),
+        Err(_) => return defer_why("wake_watch.why_identity", auto),
         Ok(Some(i)) => i,
         Ok(None) => {
             diag(&defaults::render("wake_watch.diag_no_identity", &[("cwd", &p.cwd)]));
@@ -221,13 +231,17 @@ fn start(p: &Proc, auto: bool) -> Start {
     // an idle Primary: Node prints its one line and records the metric; nothing is written before this decision
     if id.primary {
         match arch::idle_skip(p) {
-            Err(_) => return Start::Exit(defer_exit()),
-            Ok(arch::IdleSkip::Applies) => return Start::Exit(defer_exit()),
+            Err(_) => return defer_why("wake_watch.why_idle_check", auto),
+            // Node's own outcome: one line (it wakes the session), exit 0, nothing armed and nothing written
+            Ok(arch::IdleSkip::Applies) => {
+                emit(text("wake_watch.line_idle_skip"));
+                return Start::Exit(0);
+            }
             Ok(arch::IdleSkip::NotApplicable) => {}
         }
     }
     let hashes = if id.primary { who::primary_hashes(&p.cwd) } else { who::child_hashes(&p.cwd, &id.id) };
-    let Ok(hashes) = hashes else { return Start::Exit(defer_exit()) };
+    let Ok(hashes) = hashes else { return defer_why("wake_watch.why_repo", auto) };
     let root = devswarm_root(&p.home);
     let inbox = id
         .descriptor
