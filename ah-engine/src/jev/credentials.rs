@@ -37,8 +37,6 @@ impl fmt::Debug for Key {
 pub enum KeySource {
     /// A plugin option.
     PluginOption,
-    /// A legacy environment variable (opt-in).
-    LegacyEnv,
     /// A legacy key file (opt-in).
     LegacyFile,
 }
