@@ -36,7 +36,6 @@ The DevSwarm role, gate and wake guards.
 - `devswarm.planTracking` = true: The setting devswarm.planTracking (on by default): the child is shown its step plan each turn
 - `devswarm.inboxReadGuard` = true: Where the on/off switch is read from (devswarm.inboxReadGuard, default on; it has no environment variable)
 - `devswarm.heldPartitions` = "": Where the owner's held workspace ids are read from: devswarm.heldPartitions (a comma-separated list) through the engine's settings layer...
-- `devswarm.stepStallMin` = 30: Where the quiet-child window is read from: devswarm.stepStallMin (minutes) through the engine's settings layer (the environment...
 - `devswarm.strayWarnMax` = 2: Where the most straying warnings per signal and step are read from: devswarm.strayWarnMax (0 turns warnings off) through the engine's...
 - `devswarm.commsGuard` = true: The switch devswarm.commsGuard (on by default); off makes the guard a no-op
 - `devswarm.parentGateBusyFreshMin` = 5: Setting devswarm.parentGateBusyFreshMin: minutes a child's transcript counts as fresh for the busy test
@@ -55,11 +54,7 @@ The DevSwarm role, gate and wake guards.
 - `devswarm.childGate` = true: Where the devswarm-child-gate on/off switch is read from (devswarm.childGate, default on; no environment variable)
 - `devswarm.parentReplyTracker` = true: Where the devswarm-parent-reply-tracker on/off switch is read from (devswarm.parentReplyTracker, default on; no environment variable)
 - `devswarm.receiptWindowMs` = 300000: The setting devswarm.receiptWindowMs: how recent a send receipt must be to credit a reply this turn
-- `devswarm.monitorNoOkFailMin` = 10: Where devswarm.monitorNoOkFailMin is read from (minutes without a successful monitor poll before the daemon reads FAILING)
 - `devswarm.sendMultiRecipient` = true: Where devswarm.sendMultiRecipient is read from (send accepts several recipients when it is not false)
-- `devswarm.spawnCreateTimeoutMs` = 180000: Timeout of `workspace create` in ms
-- `devswarm.spawnStrictFlagValues` = true: Whether spawn refuses a create option with no value or an option-shaped value
-- `devswarm.monitorTimeoutSec` = 30: The -t of every monitor call: it long-polls at most this long, then exits (an empty exit is a quiet poll, not an error)
 - `devswarm.wakeWatch` = true: The setting devswarm.wakeWatch: off refuses to arm (the cron wake fallback is unaffected)
 - `devswarm.wakeWatchIdleSkip` = true: The setting devswarm.wakeWatchIdleSkip: a Primary with no live child workspace need not arm (Node prints its one idle line)
 - `devswarm.wakeWatchPollMs` = 2000: The setting devswarm.wakeWatchPollMs: the tick of the watcher in milliseconds (lock heartbeat, parent check, stale-build check, reads)

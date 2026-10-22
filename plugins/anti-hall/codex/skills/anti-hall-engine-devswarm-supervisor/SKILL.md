@@ -11,6 +11,9 @@ The DevSwarm supervisor sweep: auto-archive, pokes, app sync, retention, reconci
 
 - `devswarm.archivedChildStop` = true: The setting devswarm.archivedChildStop (on by default): an archived child workspace is told to save a handover and stop, and its...
 - `devswarm.supervisorMode` = "auto": Where devswarm.supervisorMode is read from: environment variable, settings.json, then the plugin option; `values` are the accepted words...
+- `devswarm.stepStallMin` = 30: Where the quiet-child window is read from: devswarm.stepStallMin (minutes) through the engine's settings layer (the environment...
+- `devswarm.monitorNoOkFailMin` = 10: Where devswarm.monitorNoOkFailMin is read from (minutes without a successful monitor poll before the daemon reads FAILING)
+- `devswarm.spawnCreateTimeoutMs` = 180000: Timeout of `workspace create` in ms
 - `devswarm.autoArchive.eventDebounceMs` = 2000: How long a workspace stays in the dirty set after its last edge before the event path looks at it (a burst of edges is one look)
 - `devswarm.autoArchive.eventTrigger` = true: Whether a state change (a PR, lifecycle or activity edge) archives the finished workspace within seconds instead of waiting for the next...
 - `devswarm.autoArchive.idleMin` = 30: Minutes of inactivity before a finished workspace is archived
@@ -40,8 +43,15 @@ The DevSwarm supervisor sweep: auto-archive, pokes, app sync, retention, reconci
 - `devswarm.retention.keepPerPartition` = 200: The newest messages of each partition that are never tombstoned (by age or by size)
 - `devswarm.retention.maxStoreMB` = 100: Store size limit in MB: above it the oldest eligible bodies are tombstoned whatever their age; 0 = no limit
 - `devswarm.supervisorSweepBudgetMs` = 20000: Time budget for one deferred stage of the sweep tail (one stage per tick)
-- `devswarm.sweepTailMode` = "node": Who decides the sweep tail (archived registry rows, twin descriptors; the reconcile port): node (the default; Node's scheduled functions...
-- `devswarm.dormantMs` = 1800000: How long a workspace whose session transcript resolves may stay silent before the roster calls it dormant (Node: devswarm.dormantMs, a...
+- `devswarm.sweepTailMode` = "engine": Whether the engine decides the sweep tail (archived registry rows, twin descriptors, the deferred post-update stages and the...
+- `devswarm.burnCacheReadPct` = 10: How much a cached-input read counts toward the burn, in percent of a fresh input token
+- `devswarm.burnTokensWarn` = 2000000: Weighted tokens a child may spend since its last step progress before the burn signal (0 turns it off)
+- `devswarm.dormantMs` = 1800000: How long a workspace whose session transcript resolves may stay silent before the stray signals treat it as dormant
+- `devswarm.supervisorBlockerLabelReaskSec` = 21600: Seconds a blocker label decision is not asked or logged again while its input (workspace, kind, time) is unchanged
+- `devswarm.spawnStrictFlagValues` = true: Whether spawn refuses a create option with no value or an option-shaped value
+- `devswarm.monitorTimeoutSec` = 30: The -t of every monitor call: it long-polls at most this long, then exits (an empty exit is a quiet poll, not an error)
 - `devswarm.activeFloorPct` = 50: Least percent of a project's previous active-workspace snapshot a new one must hold, or the previous one is kept (0 turns the floor off)
+- `devswarm.pausedProbeMax` = 8: Most `workspace info` probes of the start-up sampling per sweep
+- `devswarm.startupSampling` = true: Whether the reconcile sweep probes `workspace info` of stale or not-draining workspaces and logs a non-null start-up field or a terminal...
 
 _Generated from the engine registry by `ah-engine docs --format skill`; do not edit by hand._

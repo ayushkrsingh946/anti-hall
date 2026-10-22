@@ -64,6 +64,15 @@ fn runs(scratch: &Path) -> Vec<(&'static str, Vec<String>)> {
         ("coordinator-work-baseline", vec![transcript.display().to_string(), "--json".into()]),
         ("dispatch-report", s(&["--json"])),
         ("finding-dedup", vec!["--file".into(), findings.display().to_string()]),
+        ("diag", s(&["cpu"])),
+        ("diag", s(&["mem"])),
+        ("diag", s(&["threads"])),
+        ("diag", s(&["hooks"])),
+        ("diag", s(&["mesh"])),
+        ("diag", s(&["jev"])),
+        ("diag", s(&["fs"])),
+        ("diag", s(&["locks"])),
+        ("diag", s(&["trace"])),
     ]
 }
 
