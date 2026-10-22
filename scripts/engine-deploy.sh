@@ -242,8 +242,23 @@ eng_scratch() {
   ( HOME=$SCRATCH/home AH_ENGINE_DIR=$SCRATCH/home/st AH_ENGINE_PLUGIN_ROOT=$_r; export HOME AH_ENGINE_DIR AH_ENGINE_PLUGIN_ROOT; lim "$_b" "$@" 2>&1 )
 }
 
+# old_misses ROOT SIM: the keys ROOT's defaults carry (what the running binary reads) that SIM's defaults lack, as "file key"
+old_misses() {
+  for d in defaults defaults.pristine; do
+    for f in "$1/engine/$d"/*; do
+      [ -f "$f" ] || continue
+      b=${f##*/}
+      case $b in *.bak*) continue ;; esac
+      keys_of "$f" | cut -f1 >"$SCRATCH/om.old"
+      if [ -f "$2/engine/$d/$b" ]; then keys_of "$2/engine/$d/$b" | cut -f1 >"$SCRATCH/om.new"; else : >"$SCRATCH/om.new"; fi
+      comm -23 "$SCRATCH/om.old" "$SCRATCH/om.new" | sed "s|^|$d/$b |"
+    done
+  done
+}
+
 # --- check ------------------------------------------------------------------------------------------------------------
 ALLOW_DROP=0
+OLD_MISS=0
 do_check() {
   NEW=$1
   [ -f "$NEW" ] && [ -x "$NEW" ] || die "new binary missing or not executable: $NEW"
@@ -286,7 +301,19 @@ do_check() {
       case $le in ''|'"last_error":null') note "  new binary on this root AFTER the sync: loads, no config error" ;;
         *) problem "root $r after the sync: config reports $le" ;; esac
     else problem "root $r after the sync: the new binary REFUSES it (rc $rc: $(printf '%s' "$out" | head -n 1 | cut -c1-240))"; fi
+    # the window: until the binary is swapped (and for any old daemon or hook that still runs), the OLD binary reads the NEW defaults
+    if [ -x "$BIN" ] && [ "$newsha" != "$livesha" ]; then
+      out=$(eng_scratch "$BIN" "$sim" config validate "$SCRATCH/empty.toml"); rc=$?
+      old_misses "$r" "$sim" >"$SCRATCH/om.list"
+      if [ $rc -eq 0 ] && [ ! -s "$SCRATCH/om.list" ]; then note "  old (live) binary on this root AFTER the sync: loads, misses no key (no defaults_fallback in the window)"
+      else
+        n=$(wc -l <"$SCRATCH/om.list" | tr -d ' '); OLD_MISS=$((OLD_MISS + n))
+        note "  WINDOW: the old (live) binary on this root AFTER the sync: rc $rc$([ $rc -ne 0 ] && echo ", refuses: $(printf '%s' "$out" | head -n 1 | cut -c1-200)"); it will log defaults_fallback missing_key for $n key(s) while it runs on the new defaults:"
+        sed 's/^/      /' "$SCRATCH/om.list"
+      fi
+    fi
   done
+  [ "$OLD_MISS" -gt 0 ] && note "WINDOW SUMMARY: $OLD_MISS key(s) the old binary will miss between the sync and the swap; the maintenance hold keeps hooks and the daemon off for that time, so this is expected only if the hold covers it (informational, not a failure)"
   if [ "$PROBLEMS" -gt 0 ]; then note "CHECK FAILED: $PROBLEMS problem(s); nothing was changed"; return 1; fi
   note "CHECK OK: the new binary accepts every root once the new defaults are in (nothing was changed)"
   return 0

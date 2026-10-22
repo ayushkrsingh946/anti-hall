@@ -28,6 +28,8 @@ pub struct Config {
     pub stuck: Duration,
     /// An accept loop silent for longer than this trips a drain and exit.
     pub stall: Duration,
+    /// How long the daemon may take from its start to the accept loop's first round before the watchdog calls it stalled.
+    pub start_stall: Duration,
     /// How often the watchdog thread wakes to look at heartbeats.
     pub watchdog_tick: Duration,
     /// `nice` increment for the daemon process.
@@ -71,6 +73,7 @@ impl Config {
             rss_check: millis("daemon.rss_check_ms"),
             stuck: millis("daemon.stuck_ms"),
             stall: millis("daemon.stall_ms"),
+            start_stall: millis("daemon.start_stall_ms"),
             watchdog_tick: millis("daemon.watchdog_tick_ms"),
             nice: num("daemon.nice") as i32,
             session_rps: num("daemon.session_rps") as f64,
