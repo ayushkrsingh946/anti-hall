@@ -6,14 +6,17 @@
 // written (after the reply is delivered) and the Stop is blocked, unless the host already registered a newer plugin version than
 // the one running (stop-version-gate: nothing said, nothing written) or this exact set of agents was acked for the session
 // (stop-ack: state written, nothing said). Every Stop is decided here: a relative HOME, transcript or output path resolves against the stand-in
-// directory (hookProc); an input the interpreter cannot read as V8 does (a transcript line, a heartbeat, the state or ack file over the
-// read cap or too deep to parse) says nothing about what it could not read and is counted and logged (silent_nudge.unsure_log_kind). Keys and texts: agent_controls.toml (silent_nudge.*, agent_scan.*).
+// directory (hookProc); an input the interpreter cannot read as V8 does is counted and logged (silent_nudge.unsure_log_kind) and read
+// the way that never says less than Node: the state or ack file over the read cap or too deep to parse is read as no state and no ack
+// (every silent agent counts as not yet nudged and not acked), a heartbeat file too deep to parse is no heartbeat (one whose text is
+// not a JSON object Node skips too), and a transcript tail the scan cannot read exactly adds no transcript agents while the heartbeats
+// are still judged. Keys and texts: agent_controls.toml (silent_nudge.*, agent_scan.*).
 'use strict';
 
 function snNum(v) { return typeof v === 'number' && isFinite(v); }
 
-// Log and count (native_unable) an input this script cannot read exactly as Node does. Returns true: the caller says nothing about
-// what it could not read and writes nothing for it.
+// Log and count (native_unable) an input this script cannot read exactly as Node does. Returns true; the caller reads the input the
+// way that never says less than Node (see the header).
 function snUnsure(why) {
   ah.unable('silent-agent-nudge:' + why);
   ah.log(ah.cfg('silent_nudge.unsure_log_kind'), why);
@@ -40,7 +43,7 @@ function snCandidates(p, home, now, threshold, session) {
   if (transcript) {
     transcript = hookProc.open(p, transcript); // Node reads a relative path from its own directory, the payload's cwd
     var scan = ah.transcript.agentScan(transcript, ah.cfgNum('silent_nudge.scan_bytes'));
-    if (scan !== null && scan.unsure) { snUnsure('transcript'); return null; }
+    if (scan !== null && scan.unsure) { snUnsure('transcript'); scan = null; } // no transcript agents; the heartbeats are still judged
     if (scan !== null) {
       var terminal = {};
       scan.terminal.forEach(function (id) { terminal[id] = true; });
@@ -88,7 +91,7 @@ function snCandidates(p, home, now, threshold, session) {
     var txt = ah.fs.readText(home + '/' + ah.cfg('silent_nudge.agents_dir') + '/' + f);
     if (txt === null) continue;
     var r = jx.parse(txt);
-    if (r.unsure) { snUnsure('heartbeat'); return null; }
+    if (r.unsure) { snUnsure('heartbeat'); continue; } // too deep for the interpreter: read as no heartbeat
     if (r.invalid || !jx.isObj(r.v)) continue;
     var d = r.v;
     if (typeof d.id !== 'string' || !d.id || typeof d.status !== 'string') continue;
@@ -105,15 +108,16 @@ function snCandidates(p, home, now, threshold, session) {
   return out;
 }
 
-// {nudged: {key: snapshot}, ever: {key: time}} of the state file (an array member: JavaScript reads its indices as keys); null when
-// the file cannot be read as Node reads it and unsure_quiet says nothing for this Stop (off: snUnsure throws the defer).
+// {nudged: {key: snapshot}, ever: {key: time}} of the state file (an array member: JavaScript reads its indices as keys). A file the
+// interpreter cannot read as Node reads it (over the read cap, too deep to parse) is read as no state: every silent agent counts as
+// not yet nudged, so the answer never says less than Node's, and the rewritten state replaces it.
 function snState(path) {
   var empty = { nudged: {}, ever: {} };
   var f = jx.read(path);
-  if (f.big) { snUnsure('state_big'); return null; }
+  if (f.big) { snUnsure('state_big'); return empty; }
   if (f.text === undefined) return empty;
   var r = jx.parse(f.text);
-  if (r.unsure) { snUnsure('state_parse'); return null; }
+  if (r.unsure) { snUnsure('state_parse'); return empty; }
   if (r.invalid || !jx.isObj(r.v)) return empty;
   var out = {};
   var keys = ['nudged', 'ever'];
@@ -156,7 +160,7 @@ function snStuckAdvisory(p) {
   var session = typeof p.session_id === 'string' ? p.session_id : '';
   var minutes = Math.max(1, ah.settings.num('procwatch.stuck_minutes'));
   var now = ah.clock.now();
-  // a transcript or heartbeat this scan cannot read exactly is no warning, whatever silent_nudge.unsure_quiet says (no Node twin to defer to)
+  // a transcript tail this scan cannot read exactly adds no agents and a heartbeat it cannot parse is none (no Node twin to defer to)
   var cands = snCandidates(p, home, now, minutes * 60000, session, false);
   if (cands === null || cands.length === 0) return 'allow';
   var rel = ah.cfg('paths.base_dir') + '/' + ah.cfg('paths.state_dir') + '/' + ah.cfg('procwatch.stuck_state_file');
@@ -248,10 +252,11 @@ function snDecide(p, opts) {
   var acked = false;
   if (session && ah.settings.bool('silent_nudge.ack_setting')) {
     var a = jx.read(snAckPath(home, session));
-    if (a.big) { snUnsure('ack_big'); return 'allow'; }
-    if (a.text !== undefined) {
+    // an ack file the interpreter cannot read as Node reads it is no ack: the nudge is said (never less than Node)
+    if (a.big) snUnsure('ack_big');
+    else if (a.text !== undefined) {
       var ar = jx.parse(a.text);
-      if (ar.unsure) { snUnsure('ack_parse'); return 'allow'; }
+      if (ar.unsure) snUnsure('ack_parse');
       acked = !ar.invalid && !ar.unsure && jx.isObj(ar.v) && snNum(ar.v[ackKey]) && ar.v[ackKey] > 0;
     }
   }

@@ -141,7 +141,7 @@ doc = "Fragments of a JSON parser error that mean the text is JSON to JavaScript
 value = ["recursion limit", "out of range"]
 
 [agent_scan.re_surrogate_escape]
-doc = "Rust regex source of an escape for a UTF-16 surrogate half: JavaScript reads a lone one, serde does not, so text that holds one and fails to parse defers to the Node hook."
+doc = "Rust regex source of an escape for a UTF-16 surrogate half: JavaScript reads a lone one, serde does not, so text that holds one and fails to parse is read the way JSON.parse reads it (the lone half held as U+FFFD), and is a scan the engine cannot make only when that reading fails too."
 value = '\\u[dD][89a-fA-F][0-9a-fA-F]{2}'
 
 [agent_scan.re_notification_block]
@@ -514,7 +514,7 @@ doc = "Rust regex source of the control characters turned into spaces in a name 
 value = '[\x00-\x1f\x7f-\u{9f}]'
 
 [silent_nudge.unsure_log_kind]
-doc = "Engine log kind of a silent-agent-nudge decision taken without Node's exact reading: transcript, heartbeat, state_big, state_parse, ack_big, ack_parse (silent_nudge.unsure_quiet decides: defer to the Node twin, or nothing said), relative_home (a defer to the Node twin: the directory is the hook process's), no_plugin_root (a defer to the Node twin, which judges the stale-build gate against its own install directory; only while the gate is on), plugin_versions (the stale-build gate passes: no newer build is known)."
+doc = "Engine log kind of a silent-agent-nudge decision taken without Node's exact reading: transcript (no transcript agents, the heartbeats are still judged), heartbeat (that file is no heartbeat), state_big, state_parse (read as no state), ack_big, ack_parse (read as no ack), relative_home (a defer to the Node twin: the directory is the hook process's), no_plugin_root (a defer to the Node twin, which judges the stale-build gate against its own install directory; only while the gate is on), plugin_versions (the stale-build gate passes: no newer build is known)."
 value = "silent_nudge_unsure"
 
 [silent_nudge.home_fallback_env]

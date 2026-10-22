@@ -245,15 +245,19 @@ fn in_list(key: &str, name: &str) -> bool {
 }
 
 /// `JSON.parse`, with the two outcomes a caller needs: not JSON (JavaScript throws too), or JSON that only JavaScript
-/// reads (a lone surrogate escape, nesting past serde's limit, a number past f64 range). Text that holds a surrogate escape
-/// and that serde rejects is never called garbage: JavaScript may read it.
+/// reads (nesting past serde's limit, a number past f64 range). Text that holds a surrogate escape and that serde rejects is
+/// never called garbage: JavaScript may read it. A line whose only difference is a lone surrogate escape is read as JavaScript
+/// reads it, the surrogate held as U+FFFD (one UTF-16 unit, as the lone surrogate is; see
+/// [`parse_as_js`](crate::checks::guardkit::jsdiff::parse_as_js)), so one such line in a tail is not a scan the engine cannot make.
 pub fn parse_json(s: &str) -> Res<Option<Value>> {
     match serde_json::from_str::<Value>(s) {
         Ok(v) => Ok(Some(v)),
         Err(e) => {
             let m = e.to_string();
-            if defaults::list("agent_scan.json_unsupported").iter().any(|k| m.contains(k)) || pats().surrogate.is_match(s) {
+            if defaults::list("agent_scan.json_unsupported").iter().any(|k| m.contains(k)) {
                 Err(Unsupported)
+            } else if pats().surrogate.is_match(s) {
+                crate::checks::guardkit::jsdiff::parse_as_js(s).map(Some).ok_or(Unsupported)
             } else {
                 Ok(None)
             }
