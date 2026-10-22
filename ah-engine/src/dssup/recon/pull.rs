@@ -90,6 +90,17 @@ fn inside_state_dir(home: &Path, p: &str) -> Option<String> {
     None
 }
 
+/// Whether `p` lies inside the DevSwarm state directory or inside the workspace's own worktree `wt` (both compared canonically, so a
+/// `..` or a symlink cannot leave them).
+fn own_path(home: &Path, wt: &str, p: &str) -> bool {
+    let canon = |x: &Path| -> Option<std::path::PathBuf> {
+        // the file may not exist yet: canonicalize its parent
+        std::fs::canonicalize(x).ok().or_else(|| Some(std::fs::canonicalize(x.parent()?).ok()?.join(x.file_name()?)))
+    };
+    let Some(path) = canon(Path::new(p)) else { return false };
+    [devswarm_root(home), std::path::PathBuf::from(wt)].iter().filter_map(|r| canon(r)).any(|r| path.starts_with(r))
+}
+
 fn rel_of(home: &Path, p: &Path) -> Option<String> {
     inside_state_dir(home, &p.to_string_lossy())
 }
@@ -104,16 +115,18 @@ pub fn stage(ctx: &Ctx, id: &str, cwd: &str, at: &dyn Fn(&str)) -> Stage {
         Ok(p) => p,
         Err(d) => return Stage::Node(d.0),
     };
-    // a mirror can stand in only for paths inside the state directory
+    // the descriptor's inbox and cursor stand where the workspace keeps them: inside the DevSwarm state directory, or inside the
+    // workspace's own worktree (a child's `.devswarm-temp`); any other path is not drained
     let ensured = plan.ensured().clone();
     let field = |k: &str| match ensured.get(defaults::text(k)) {
         Some(OVal::Str(t)) => Some(t.clone()),
         _ => None,
     };
     let (Some(inbox), Some(cursor)) = (field("mesh_write.field_inbox_path"), field("mesh_write.field_cursor_path")) else { return node("descriptor-paths") };
-    let (Some(inbox_rel), Some(cursor_rel)) = (inside_state_dir(ctx.home, &inbox), inside_state_dir(ctx.home, &cursor)) else {
-        return node("path-outside-state-dir");
-    };
+    let wt_path = cwd.to_string();
+    if !(own_path(ctx.home, &wt_path, &inbox) && own_path(ctx.home, &wt_path, &cursor)) {
+        return node("path-outside-allowed-dirs");
+    }
     let Some(wal_rel) = rel_of(ctx.home, plan.wal_path()) else { return node("path-outside-state-dir") };
     let Some(lock) = nodelock::acquire_stale_unless_live(&plan.lock_file().to_string_lossy(), pull::lock_params()) else { return node("pull-lock-held") };
     let held = Some(lock);
@@ -128,7 +141,7 @@ pub fn stage(ctx: &Ctx, id: &str, cwd: &str, at: &dyn Fn(&str)) -> Stage {
     }
     let worktree = field("mesh_write.field_worktree_path").unwrap_or_else(|| cwd.to_string());
     let result = |native: f64, imported: usize, duplicate: usize| json!({"ok": true, "imported": imported, "duplicate": duplicate, "nativeCount": native as i64, "locked": true, "lost": 0});
-    let (outcome, files) = (pull::capture_fresh(&inv, &plan, &worktree, at), vec![descriptor_rel(id), wal_rel, inbox_rel, cursor_rel]);
+    let (outcome, files) = (pull::capture_fresh(&inv, &plan, &worktree, at), [descriptor_rel(id), wal_rel].into_iter().chain([&inbox, &cursor].into_iter().filter_map(|p| rel_of(ctx.home, Path::new(p)))).collect::<Vec<_>>());
     let ready = |held: Option<nodelock::Held>, result: Value| Stage::Ready(Box::new(Staged { id: id.to_string(), cwd: cwd.to_string(), result, held, files }));
     match outcome {
         pull::Fresh::Blocked => {
