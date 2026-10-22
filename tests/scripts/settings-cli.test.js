@@ -10,7 +10,7 @@ const { execFileSync } = require('node:child_process');
 
 const { makeHome } = require('../helpers/fixtures.js');
 
-const CLI = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'scripts', 'settings.js');
+const CLI = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'scripts', 'settings.js');
 
 function run(args, home) {
   try {
@@ -118,7 +118,7 @@ test('the CLI never touches the real machine HOME (isolated HOME leaves no ~/.an
 });
 
 test('get: every /config-exposed key set via CLAUDE_PLUGIN_OPTION_<KEY> reports source /config', () => {
-  const SCHEMA = require('../../plugins/anti-hall/hooks/lib/settings-schema.js');
+  const SCHEMA = require('../../plugins/anti-hall-node/hooks/lib/settings-schema.js');
   const home = makeHome();
   try {
     const base = {};
@@ -201,7 +201,7 @@ test('CLAUDE_PLUGIN_OPTION_<KEY> (/config) wins over the schema default for a je
     // -- see settings.js settingsMigrationStamped()'s own doc comment). No
     // jev.json here at all, so there is no legacy value to forward-migrate;
     // /config is free to answer above the schema default.
-    const migrations = require('../../plugins/anti-hall/companion/lib/migrations.js');
+    const migrations = require('../../plugins/anti-hall-node/companion/lib/migrations.js');
     migrations.runSettingsMigration(home.home);
 
     const out = execFileSync(process.execPath, [CLI, 'get', 'jevIntegrations.claimLedger'], {
@@ -248,7 +248,7 @@ test('show --section jev --json: effective mode for EVERY integration id, with i
     h.writeState('jev.json', { enabled: true, integrations: { modelRouting: 'on', newRequest: 'off' } });
     const out = runClean(['show', '--section', 'jev', '--json'], h.home);
     const rows = out.jevEffectiveIntegrations;
-    const schema = require('../../plugins/anti-hall/hooks/lib/settings-schema.js');
+    const schema = require('../../plugins/anti-hall-node/hooks/lib/settings-schema.js');
     const ids = schema.SECTIONS.find((s) => s.key === 'jevIntegrations').settings.map((s) => s.key);
     assert.deepStrictEqual(rows.map((r) => r.id), ids);
     const by = Object.fromEntries(rows.map((r) => [r.id, r]));

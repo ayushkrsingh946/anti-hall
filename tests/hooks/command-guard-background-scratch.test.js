@@ -190,7 +190,7 @@ test('timeout-wrapped anti-hall devswarm.js read verbs pass; heavy stays blocked
   const ok = [
     'timeout 30 node ~/.anti-hall/bin/devswarm.js roster 2>&1 | head -40',
     'timeout -k 5 30 node ~/.anti-hall/bin/devswarm.js inbox tick | tail -3',
-    'timeout 30 node plugins/anti-hall/scripts/devswarm.js mesh read',
+    'timeout 30 node plugins/anti-hall-node/scripts/devswarm.js mesh read',
   ];
   assert.deepStrictEqual(ok.filter((c) => run(c, { bg: false }).status === 2), []);
   const bad = [
@@ -206,7 +206,7 @@ test('timeout-wrapped anti-hall devswarm.js read verbs pass; heavy stays blocked
 // `timeout` followed by many `-k\t-!\t` pairs (24 pairs took ~0.4 s, each
 // extra pair doubling it). The classifier must stay linear on that shape.
 test('timeout prefix regex does not backtrack exponentially (CodeQL js/redos)', () => {
-  const { isHeavyCommand } = require('../../plugins/anti-hall/hooks/command-guard.js');
+  const { isHeavyCommand } = require('../../plugins/anti-hall-node/hooks/command-guard.js');
   const evil = 'timeout\t' + '-k\t-!\t'.repeat(40) + '!';
   const t0 = Date.now();
   isHeavyCommand(evil);

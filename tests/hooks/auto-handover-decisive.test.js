@@ -14,9 +14,9 @@ const os = require('node:os');
 const path = require('node:path');
 const { testHook } = require('../helpers/spawn-hook.js');
 const { makeHome } = require('../helpers/fixtures.js');
-const settings = require('../../plugins/anti-hall/hooks/lib/settings.js');
-const { sessionTag, writeLatch } = require('../../plugins/anti-hall/hooks/lib/auto-handover-state.js');
-const freshness = require('../../plugins/anti-hall/hooks/lib/handover-freshness.js');
+const settings = require('../../plugins/anti-hall-node/hooks/lib/settings.js');
+const { sessionTag, writeLatch } = require('../../plugins/anti-hall-node/hooks/lib/auto-handover-state.js');
+const freshness = require('../../plugins/anti-hall-node/hooks/lib/handover-freshness.js');
 
 const HOOK = 'auto-handover-pause-nag.js';
 const SID = 'dec-s1';
@@ -249,7 +249,7 @@ test('handover-freshness.isTaskComplete: "done" Next action -> true', () => {
 // --- settings default ---
 
 test('resolveEffective(): decisivePrompt defaults to true', () => {
-  const { resolveEffective } = require('../../plugins/anti-hall/hooks/lib/auto-handover-config.js');
+  const { resolveEffective } = require('../../plugins/anti-hall-node/hooks/lib/auto-handover-config.js');
   const h = makeHome();
   try {
     const r = resolveEffective({ home: h.home, env: {} });
@@ -304,7 +304,7 @@ test('decisive (review P1): a Bash `cp` after the handover -> ⚠️ refresh', (
 test('decisive (review P1): MISSING transcript -> freshness unknown -> 📝 neutral line, never 🟢', () => {
   const s = setup();
   try {
-    const store = require('../../plugins/anti-hall/hooks/lib/context-pct-store.js');
+    const store = require('../../plugins/anti-hall-node/hooks/lib/context-pct-store.js');
     store.write(s.h.home, store.tagFromSessionId(SID), { pct: 90, usedTokens: 180000, maxTokens: 200000 });
     const tag = sessionTag({ session_id: SID });
     writeLatch(s.h.home, tag, firedLatch());

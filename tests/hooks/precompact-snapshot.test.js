@@ -12,7 +12,7 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { testHookRaw } = require('../helpers/spawn-hook.js');
 const { makeHome } = require('../helpers/fixtures.js');
-const find = require('../../plugins/anti-hall/hooks/lib/handover-find.js');
+const find = require('../../plugins/anti-hall-node/hooks/lib/handover-find.js');
 
 const HOOK = 'precompact-snapshot.js';
 

@@ -38,7 +38,7 @@ function homeWith(mode) {
 }
 function run(h, pl, env) { return testHook(HOOK, pl, { home: h.home, env: env || {} }); }
 
-const ADVISE = require('../../plugins/anti-hall/hooks/lib/block-message.js').message({
+const ADVISE = require('../../plugins/anti-hall-node/hooks/lib/block-message.js').message({
   kind: 'tip', guard: 'ask-guard', what: 'do not hold work on a question.',
   instead: "take the recommended option, say which you took, and continue; list anything destructive or irreversible as a non-blocking 'needs your OK' line.",
 });

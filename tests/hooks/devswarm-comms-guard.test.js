@@ -324,7 +324,7 @@ test('ALLOW: non-SendMessage tool_name -> inert no-op even in DevSwarm context',
 // running the SAME payload through the mutant and observing the wrong result.
 
 const os = require('node:os');
-const HOOK_SRC_PATH = path.join(path.dirname(require.resolve('../helpers/spawn-hook.js')), '..', '..', 'plugins', 'anti-hall', 'hooks', 'devswarm-comms-guard.js');
+const HOOK_SRC_PATH = path.join(path.dirname(require.resolve('../helpers/spawn-hook.js')), '..', '..', 'plugins', 'anti-hall-node', 'hooks', 'devswarm-comms-guard.js');
 const HOOK_DIR = path.dirname(HOOK_SRC_PATH);
 
 // buildMutant(anchor, replacement) -> absolute path to a mutated copy of the

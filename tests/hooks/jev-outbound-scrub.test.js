@@ -11,7 +11,7 @@ const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { makeHome } = require('../helpers/fixtures.js');
 
-const HOOKS = path.resolve(__dirname, '../../plugins/anti-hall/hooks');
+const HOOKS = path.resolve(__dirname, '../../plugins/anti-hall-node/hooks');
 const LIB = require.resolve(HOOKS + '/lib/jev-assist.js');
 const CLIENT_LIB = require.resolve(HOOKS + '/lib/jev-client.js');
 const WORKER = HOOKS + '/lib/jev-triage-worker.js';

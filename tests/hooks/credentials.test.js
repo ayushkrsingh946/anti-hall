@@ -11,7 +11,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { makeHome } = require('../helpers/fixtures.js');
 
-const cred = require('../../plugins/anti-hall/hooks/lib/credentials.js');
+const cred = require('../../plugins/anti-hall-node/hooks/lib/credentials.js');
 
 function keyFileIn(h, content) {
   const p = path.join(h.home, '.config', 'vercel', 'ai-gateway-key');
@@ -92,14 +92,14 @@ test('an env var (or /config plugin option env) can NOT enable either opt-in', (
     assert.deepStrictEqual(cred.resolveKey('jev', { home: h.home, env, keyFile, transport: 'vercel' }), { key: null, source: null });
     assert.deepStrictEqual(cred.resolveKey('anthropic', { home: h.home, env }), { key: null, source: null });
     // the settings layer itself: homeOnly keys ignore every non-file tier
-    const settings = require('../../plugins/anti-hall/hooks/lib/settings.js');
+    const settings = require('../../plugins/anti-hall-node/hooks/lib/settings.js');
     assert.strictEqual(settings.get('jev', 'allowLegacyKeyRead', undefined, { home: h.home, env }), false);
     assert.strictEqual(settings.get('guards', 'allowAnthropicEnvKey', undefined, { home: h.home, env }), false);
   } finally { h.cleanup(); }
 });
 
 test('the opt-ins are schema homeOnly + locked(on) with no env name, and are not plugin options', () => {
-  const schema = require('../../plugins/anti-hall/hooks/lib/settings-schema.js');
+  const schema = require('../../plugins/anti-hall-node/hooks/lib/settings-schema.js');
   const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', 'plugins', 'anti-hall', '.claude-plugin', 'plugin.json'), 'utf8'));
   for (const [sec, key] of [['jev', 'allowLegacyKeyRead'], ['guards', 'allowAnthropicEnvKey']]) {
     const e = schema.findSetting(sec, key);
@@ -154,7 +154,7 @@ test('doctor: surfaces the legacy-key notice (jev enabled, opt-in off), never th
     fs.writeFileSync(path.join(doctorHome, '.anti-hall', 'jev.json'), JSON.stringify({ enabled: true }));
     const env = Object.assign({}, process.env, { HOME: doctorHome, USERPROFILE: doctorHome, ANTIHALL_INGEST_DRY_RUN: '1', ANTHROPIC_API_KEY: 'sk-ant-doctor-secret' });
     for (const k of Object.keys(env)) if (k.startsWith('CLAUDE_PLUGIN_OPTION_')) delete env[k];
-    const doctor = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'hooks', 'doctor.js');
+    const doctor = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'hooks', 'doctor.js');
     const r = spawnSync(process.execPath, [doctor], { env, encoding: 'utf8', timeout: 60000 });
     const out = (r.stdout || '') + (r.stderr || '');
     assert.match(out, /re-enter your key in the plugin's options screen \(anti-hall -> anthropic_api_key\)/);
@@ -244,7 +244,7 @@ test('jevDecide path: a rejected key file yields no-key plus ONE stderr line wit
     h.writeState('jev.json', { enabled: true });
     h.writeState('settings.json', { jev: { allowLegacyKeyRead: true } });
     keyFileIn(h, 'multi\nline-secret\n');
-    const lib = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'hooks', 'lib', 'jev-client.js');
+    const lib = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'hooks', 'lib', 'jev-client.js');
     const code = "const c=require(" + JSON.stringify(lib) + ");(async()=>{const q={type:'noul',instructions:'q',criteria:{true:'a',false:'b'}};"
       + "const r=await c.jevDecide({question:q,state:'s'});await c.jevDecide({question:q,state:'s2'});console.log(JSON.stringify(r.reason));})();";
     const e = Object.assign({}, process.env, { HOME: h.home, ANTIHALL_INGEST_DRY_RUN: '1' });
@@ -263,8 +263,8 @@ test('jevDecide path: a rejected key file yields no-key plus ONE stderr line wit
 
 test('homeOnly: source()/get()/reset() ignore env, plugin option and legacy even on a synthetic entry that declares them', () => {
   const h = makeHome();
-  const schema = require('../../plugins/anti-hall/hooks/lib/settings-schema.js');
-  const settings = require('../../plugins/anti-hall/hooks/lib/settings.js');
+  const schema = require('../../plugins/anti-hall-node/hooks/lib/settings-schema.js');
+  const settings = require('../../plugins/anti-hall-node/hooks/lib/settings.js');
   const synthetic = {
     section: 'synth', key: 'flag', type: 'boolean', default: false, homeOnly: true,
     locked: true, safetyDirection: 'on', safetyNote: 'synthetic',

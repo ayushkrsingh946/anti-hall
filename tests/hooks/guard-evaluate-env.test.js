@@ -13,7 +13,7 @@ const path = require('node:path');
 const { makeHome, assistantMessage } = require('../helpers/fixtures.js');
 
 const ROOT = path.join(__dirname, '..', '..');
-const HOOKS = path.join(ROOT, 'plugins', 'anti-hall', 'hooks');
+const HOOKS = path.join(ROOT, 'plugins', 'anti-hall-node', 'hooks');
 const guard = (f) => require(path.join(HOOKS, f)).evaluate;
 
 const pre = (command, extra) => Object.assign({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command }, session_id: 's1', cwd: ROOT }, extra || {});

@@ -11,8 +11,8 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { makeHome } = require('../helpers/fixtures.js');
 
-const HOOK = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'hooks', 'jev-review-reminder.js');
-const FINDING_DEDUP = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'scripts', 'finding-dedup.js');
+const HOOK = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'hooks', 'jev-review-reminder.js');
+const FINDING_DEDUP = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'scripts', 'finding-dedup.js');
 const SECRET = 'sk-' + 'ant-session-notice-secret';
 
 function runNode(script, home, { env, input } = {}) {
@@ -86,7 +86,7 @@ test('jev-report (a non-hook process) prints the one-line reason instead of sile
   try {
     fs.mkdirSync(path.join(home, '.anti-hall'), { recursive: true });
     fs.writeFileSync(path.join(home, '.anti-hall', 'settings.json'), JSON.stringify({ jev: { enabled: true } }));
-    const r = runNode(path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'scripts', 'jev-report.js'), home, { input: '' });
+    const r = runNode(path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'scripts', 'jev-report.js'), home, { input: '' });
     assert.match(r.stdout, /credit balance(?: \(vercel\))?: n\/a — no Jev key visible to this process/);
     assert.match(r.stdout, /only visible to hooks/);
   } finally { fs.rmSync(home, { recursive: true, force: true }); }

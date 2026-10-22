@@ -13,7 +13,7 @@ const path = require('node:path');
 const { makeHome } = require('../helpers/fixtures.js');
 const { testHook, bashPayload } = require('../helpers/spawn-hook.js');
 
-const SKIP_GUARD = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'hooks', 'skip-guard.js');
+const SKIP_GUARD = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'hooks', 'skip-guard.js');
 
 // Evaluate isSkipped(name) with the home dir pointed at a fake home holding
 // skipObj. os.homedir() reads $HOME on POSIX but USERPROFILE on Windows, so we

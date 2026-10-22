@@ -293,26 +293,26 @@ test('jev: postHandoverGate, promoted to shadow, is consulted — a decision row
 });
 
 test('jev: postHandoverGate defaults to off (schema + getMode)', () => {
-  const schema = require('../../plugins/anti-hall/hooks/lib/settings-schema.js');
+  const schema = require('../../plugins/anti-hall-node/hooks/lib/settings-schema.js');
   const e = schema.findSetting('jevIntegrations', 'postHandoverGate');
   assert.ok(e, 'schema row missing');
   assert.strictEqual(e.default, 'off');
   assert.deepStrictEqual(e.values, ['on', 'shadow', 'off']);
   const h = makeHome();
   try {
-    const { getMode } = require('../../plugins/anti-hall/hooks/lib/jev-assist.js');
+    const { getMode } = require('../../plugins/anti-hall-node/hooks/lib/jev-assist.js');
     assert.strictEqual(getMode('postHandoverGate', { enabled: true }, h.home), 'off');
   } finally { h.cleanup(); }
 });
 
 test('settings: gateNewWork / gateBudgetPct schema, defaults, validation and resolveEffective', () => {
-  const schema = require('../../plugins/anti-hall/hooks/lib/settings-schema.js');
+  const schema = require('../../plugins/anti-hall-node/hooks/lib/settings-schema.js');
   const g = schema.findSetting('autoHandover', 'gateNewWork');
   const b = schema.findSetting('autoHandover', 'gateBudgetPct');
   assert.deepStrictEqual([g.type, g.default], ['boolean', true]);
   assert.deepStrictEqual([b.type, b.default, b.min, b.max], ['number', 5, 1, 50]);
-  const settings = require('../../plugins/anti-hall/hooks/lib/settings.js');
-  const cfg = require('../../plugins/anti-hall/hooks/lib/auto-handover-config.js');
+  const settings = require('../../plugins/anti-hall-node/hooks/lib/settings.js');
+  const cfg = require('../../plugins/anti-hall-node/hooks/lib/auto-handover-config.js');
   const h = makeHome();
   try {
     let eff = cfg.resolveEffective({ home: h.home, env: {} });
@@ -345,7 +345,7 @@ test('settings: gateNewWork / gateBudgetPct schema, defaults, validation and res
 // ---------------------------------------------------------------------------
 
 test('sessionHandover(): bounded to THIS session only -- never readdirs another session\'s directory, on a repo with many other sessions/dates', () => {
-  const gate = require('../../plugins/anti-hall/hooks/lib/auto-handover-gate.js');
+  const gate = require('../../plugins/anti-hall-node/hooks/lib/auto-handover-gate.js');
   const h = makeHome();
   const cwd = path.join(h.home, 'proj2');
   fs.mkdirSync(cwd, { recursive: true });

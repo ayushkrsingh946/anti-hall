@@ -30,7 +30,7 @@ function defaultHome() {
 }
 
 // Hooks live in plugins/anti-hall/hooks, resolved absolutely from this file.
-const HOOKS_DIR = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'hooks');
+const HOOKS_DIR = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'hooks');
 
 // isolatedEnv(home) — build the env object that points a child hook at a fake
 // HOME, cross-platform. Node's os.homedir() does NOT read $HOME on Windows: it

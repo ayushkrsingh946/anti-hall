@@ -12,7 +12,7 @@ const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');
 
-const INBOX = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'hooks', 'devswarm-parent-inbox.js');
+const INBOX = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'hooks', 'devswarm-parent-inbox.js');
 const hook = require(INBOX);
 
 // displayStatus is module-private; drive it through the module's export when

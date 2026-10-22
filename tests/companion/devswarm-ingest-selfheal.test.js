@@ -30,10 +30,10 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const ingest = require('../../plugins/anti-hall/companion/devswarm-ingest.js');
-const storeLib = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
-const ingestHealth = require('../../plugins/anti-hall/companion/lib/ingest-health.js');
-const repokey = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
+const ingest = require('../../plugins/anti-hall-node/companion/devswarm-ingest.js');
+const storeLib = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
+const ingestHealth = require('../../plugins/anti-hall-node/companion/lib/ingest-health.js');
+const repokey = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
 const { testHook } = require('../helpers/spawn-hook.js');
 const { makeHome } = require('../helpers/fixtures.js');
 

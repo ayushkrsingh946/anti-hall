@@ -20,9 +20,9 @@ const os = require('node:os');
 const path = require('node:path');
 
 const REPO_ROOT = path.join(__dirname, '..', '..');
-const REPAIR_JS = path.join(REPO_ROOT, 'plugins', 'anti-hall', 'hooks', 'lib', 'doctor-repair.js');
+const REPAIR_JS = path.join(REPO_ROOT, 'plugins', 'anti-hall-node', 'hooks', 'lib', 'doctor-repair.js');
 const repair = require(REPAIR_JS);
-const LIVENESS = path.join(REPO_ROOT, 'plugins', 'anti-hall', 'companion', 'lib', 'liveness.js');
+const LIVENESS = path.join(REPO_ROOT, 'plugins', 'anti-hall-node', 'companion', 'lib', 'liveness.js');
 const liveness = require(LIVENESS);
 
 const UUID = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
@@ -98,7 +98,7 @@ test('checkEscalatedWhileAlive: no descriptors at all -> silent (null), never th
 });
 
 test('doctor.js wires checkEscalatedWhileAlive into a report-only, warn-labeled section', () => {
-  const DOCTOR_JS = path.join(REPO_ROOT, 'plugins', 'anti-hall', 'hooks', 'doctor.js');
+  const DOCTOR_JS = path.join(REPO_ROOT, 'plugins', 'anti-hall-node', 'hooks', 'doctor.js');
   const src = fs.readFileSync(DOCTOR_JS, 'utf8');
   assert.match(src, /checkEscalatedWhileAlive/);
   assert.match(src, /escalated while session alive/);

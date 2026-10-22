@@ -7,7 +7,7 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { harvestMarkers } = require('../../plugins/anti-hall/scripts/harvest-debt.js');
+const { harvestMarkers } = require('../../plugins/anti-hall-node/scripts/harvest-debt.js');
 
 // gitTime injectors
 const NO_GIT     = () => null;                              // git unavailable

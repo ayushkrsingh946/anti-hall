@@ -12,8 +12,8 @@ const path = require('node:path');
 
 const { makeHome } = require('../helpers/fixtures.js');
 
-const M = require('../../plugins/anti-hall/companion/lib/devswarm-gate-state.js');
-const migrateState = require('../../plugins/anti-hall/scripts/migrate-state.js');
+const M = require('../../plugins/anti-hall-node/companion/lib/devswarm-gate-state.js');
+const migrateState = require('../../plugins/anti-hall-node/scripts/migrate-state.js');
 
 test('stateFileFor: sanitizes an unsafe session id to a safe filename', () => {
   const home = '/home/x';

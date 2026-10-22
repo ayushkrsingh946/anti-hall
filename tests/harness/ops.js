@@ -12,10 +12,10 @@ const path = require('node:path');
 const cp = require('node:child_process');
 
 const REPO_ROOT = path.join(__dirname, '..', '..');
-const cli = require(path.join(REPO_ROOT, 'plugins', 'anti-hall', 'scripts', 'devswarm.js'));
-const storeLib = require(path.join(REPO_ROOT, 'plugins', 'anti-hall', 'companion', 'lib', 'devswarm-store.js'));
-const repokey = require(path.join(REPO_ROOT, 'plugins', 'anti-hall', 'companion', 'lib', 'devswarm-repokey.js'));
-const cursorLib = require(path.join(REPO_ROOT, 'plugins', 'anti-hall', 'companion', 'lib', 'devswarm-inbox-cursor.js'));
+const cli = require(path.join(REPO_ROOT, 'plugins', 'anti-hall-node', 'scripts', 'devswarm.js'));
+const storeLib = require(path.join(REPO_ROOT, 'plugins', 'anti-hall-node', 'companion', 'lib', 'devswarm-store.js'));
+const repokey = require(path.join(REPO_ROOT, 'plugins', 'anti-hall-node', 'companion', 'lib', 'devswarm-repokey.js'));
+const cursorLib = require(path.join(REPO_ROOT, 'plugins', 'anti-hall-node', 'companion', 'lib', 'devswarm-inbox-cursor.js'));
 
 // makeMeshFixture() -> a real, committed git repo + one worktree per reader id,
 // all under a fresh tmp dir. Returns { repoDir, home, readers: {id -> worktreeDir},

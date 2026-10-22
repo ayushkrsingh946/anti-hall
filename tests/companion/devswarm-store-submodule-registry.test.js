@@ -13,7 +13,7 @@ const os = require('node:os');
 const path = require('node:path');
 const cp = require('node:child_process');
 
-const store = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
+const store = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
 
 const GIT_OK = (() => { try { return cp.spawnSync('git', ['--version']).status === 0; } catch (_) { return false; } })();
 

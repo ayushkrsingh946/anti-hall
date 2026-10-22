@@ -1,6 +1,6 @@
 'use strict';
 // Item H (fleet wave): three independent, small robustness fixes bundled
-// together in plugins/anti-hall/scripts/devswarm.js:
+// together in plugins/anti-hall-node/scripts/devswarm.js:
 //
 //   1. readRetiredRedirect(home, id) joined caller-controlled `id` straight
 //      into a filesystem path with no validation — a traversal id (e.g.

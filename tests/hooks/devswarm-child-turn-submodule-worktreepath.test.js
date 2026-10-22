@@ -23,7 +23,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { testHook } = require('../helpers/spawn-hook.js');
-const targetSession = require('../../plugins/anti-hall/companion/lib/target-session.js');
+const targetSession = require('../../plugins/anti-hall-node/companion/lib/target-session.js');
 
 const HOOK = 'devswarm-child-turn.js';
 

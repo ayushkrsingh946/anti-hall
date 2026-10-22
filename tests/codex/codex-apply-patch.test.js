@@ -9,7 +9,7 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const path = require('node:path');
 
-const lib = require('../../plugins/anti-hall/hooks/lib/codex-apply-patch.js');
+const lib = require('../../plugins/anti-hall-node/hooks/lib/codex-apply-patch.js');
 const { parseApplyPatch, patchTargetPaths, isCodexApplyPatch } = lib;
 
 test('captured payload: Add File with a space in the path', () => {

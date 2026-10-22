@@ -13,7 +13,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync, spawn } = require('node:child_process');
 
-const MODULE_PATH = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'lib', 'devswarm-wake-watch.js');
+const MODULE_PATH = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'lib', 'devswarm-wake-watch.js');
 const wakeWatch = require(MODULE_PATH);
 const {
   tick, normalizeState, formatArmLine, formatWakeLine, formatDualWakeLine, formatErrorLine,
@@ -25,9 +25,9 @@ const {
   lockPathFor, POLL_ENV_VAR, DEFAULT_POLL_MS,
 } = wakeWatch;
 
-const STORE_MODULE_PATH = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'lib', 'devswarm-store.js');
+const STORE_MODULE_PATH = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'lib', 'devswarm-store.js');
 const storeMod = require(STORE_MODULE_PATH);
-const repokeyMod = require(path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'lib', 'devswarm-repokey.js'));
+const repokeyMod = require(path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'lib', 'devswarm-repokey.js'));
 const REPO_ROOT = path.join(__dirname, '..', '..');
 
 function tmpHome() {

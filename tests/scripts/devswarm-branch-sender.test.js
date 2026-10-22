@@ -7,9 +7,9 @@ require('../helpers/isolate-home.js');
 const { test } = require('node:test');
 const assert = require('node:assert');
 const ops = require('../harness/ops.js');
-const storeLib = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
-const ingest = require('../../plugins/anti-hall/companion/devswarm-ingest.js');
-const { resolveBranchSender, branchOfDoneBody, fallbackSender } = require('../../plugins/anti-hall/companion/lib/devswarm-branch-sender.js');
+const storeLib = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
+const ingest = require('../../plugins/anti-hall-node/companion/devswarm-ingest.js');
+const { resolveBranchSender, branchOfDoneBody, fallbackSender } = require('../../plugins/anti-hall-node/companion/lib/devswarm-branch-sender.js');
 
 const T0 = 1_700_000_000_000;
 let HAS_SQLITE = true;

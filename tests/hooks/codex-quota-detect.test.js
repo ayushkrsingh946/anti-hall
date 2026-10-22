@@ -12,7 +12,7 @@ const { testHook } = require('../helpers/spawn-hook.js');
 const { makeHome } = require('../helpers/fixtures.js');
 
 const HOOK = 'codex-quota-detect.js';
-const quota = require('../../plugins/anti-hall/hooks/lib/codex-quota.js');
+const quota = require('../../plugins/anti-hall-node/hooks/lib/codex-quota.js');
 
 // A future `until` relative to the wall clock: the spawned hook takes no
 // injectable `now`, and recordQuota replaces a past `until` with now +

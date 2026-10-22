@@ -182,7 +182,7 @@ for (const cmd of SCRIPT_CHECK_BLOCK) {
 }
 
 // F1: the script form must never flip a safety switch or trust an allowlist.
-const PLUGIN_SETTINGS_JS = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'scripts', 'settings.js');
+const PLUGIN_SETTINGS_JS = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'scripts', 'settings.js');
 const F1_BLOCK = [
   'node ' + PLUGIN_SETTINGS_JS + ' set safety.editGuard false --confirmed --check | tail -5',
   'node ' + PLUGIN_SETTINGS_JS + ' trust-edit-allow . --confirmed --dry-run | tail',
@@ -316,7 +316,7 @@ function writeAllow(repo, patterns) {
   fs.writeFileSync(path.join(repo, '.anti-hall', 'command-allow.json'), JSON.stringify({ patterns }));
 }
 
-const allowLib = require('../../plugins/anti-hall/hooks/lib/command-allow.js');
+const allowLib = require('../../plugins/anti-hall-node/hooks/lib/command-allow.js');
 function trustAllow(home, repo) {
   const f = allowLib.readAllowFile(repo);
   allowLib.recordTrust(home, repo, f.hash);
@@ -366,8 +366,8 @@ test('project-allow: control — a plain literal argument still matches', () => 
 
 // ---- #3 allowlist: `^.*$` and friends are not anchored rules ----------------
 
-const { validatePattern } = require('../../plugins/anti-hall/hooks/lib/command-allow.js');
-const DOCTOR_JS = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'hooks', 'doctor.js');
+const { validatePattern } = require('../../plugins/anti-hall-node/hooks/lib/command-allow.js');
+const DOCTOR_JS = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'hooks', 'doctor.js');
 
 function runDoctor(cwd, home) {
   // A bare `HOME: undefined` here does NOT isolate anything — os.homedir()
@@ -423,7 +423,7 @@ test('doctor: reports an ignored wildcard pattern with its reason', () => {
 
 // ---- #4 trust: a working-tree allowlist cannot self-authorize ---------------
 
-const SETTINGS_JS = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'scripts', 'settings.js');
+const SETTINGS_JS = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'scripts', 'settings.js');
 const TRUSTED_ARG = 'npm run deploy -- prod';
 
 function settingsCli(args, home, cwd) {

@@ -26,8 +26,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const cli = require('../../plugins/anti-hall/scripts/devswarm.js');
-const recovery = require('../../plugins/anti-hall/companion/lib/recovery.js');
+const cli = require('../../plugins/anti-hall-node/scripts/devswarm.js');
+const recovery = require('../../plugins/anti-hall-node/companion/lib/recovery.js');
 
 function tmpHome() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'anti-hall-d11a-wml-'));

@@ -83,14 +83,14 @@ const BLOCK = [
   // matrix (owner-approved 2026-09-26), run against a fixture repo instead
   // of this file's ambient-cwd runCoord().
   'git pull origin main',
-  'node plugins/anti-hall/scripts/settings.js set devswarm.enabled true --confirmed',
+  'node plugins/anti-hall-node/scripts/settings.js set devswarm.enabled true --confirmed',
   'sqlite3 /tmp/x.db "delete from t"',
   'sqlite3 -readwrite /tmp/x.db "delete from t"',
   'npm test',
-  'node plugins/anti-hall/hooks/doctor.js --repair',
-  'node plugins/anti-hall/hooks/doctor.js --fix',
-  'node plugins/anti-hall/scripts/jev-report.js label abc123 tp',
-  'node plugins/anti-hall/scripts/jev-report.js prune-audit --days 30',
+  'node plugins/anti-hall-node/hooks/doctor.js --repair',
+  'node plugins/anti-hall-node/hooks/doctor.js --fix',
+  'node plugins/anti-hall-node/scripts/jev-report.js label abc123 tp',
+  'node plugins/anti-hall-node/scripts/jev-report.js prune-audit --days 30',
   'gcloud compute instances delete foo',
   // 0.113 P1: a read verb only counts as the LAST command-path word; a
   // separated flag value (or any later token) posing as the verb is refused.
@@ -134,7 +134,7 @@ const BLOCK = [
   'sqlite3 -readonly /tmp/x.db "ATTACH DATABASE \'/tmp/x.db\' AS y"',
   // P2 fp: the doctor.js exemption must exclude --reclaim-ingest-lock too
   // (forces a stale-lock takeover — a mutating action, not diagnostics).
-  'node plugins/anti-hall/hooks/doctor.js --reclaim-ingest-lock',
+  'node plugins/anti-hall-node/hooks/doctor.js --reclaim-ingest-lock',
   // rc-v0.108.4.3 adversarial review — confirmed bypasses:
   // (1) P1: a sqlite3 `-readonly` invocation with a heredoc BODY still runs
   // arbitrary dot-commands (`.shell rm -rf /`) — the body is inert DATA to
@@ -185,9 +185,9 @@ const BLOCK = [
   // or read). `backfill` writes history records and stays gated. `rule`
   // (maintainer ruling) and `archive` (rotation sweep — moves files) mutate
   // more than an append and must stay gated.
-  'node plugins/anti-hall/scripts/defect.js rule abc123 --status fixed',
-  'node plugins/anti-hall/scripts/defect.js archive',
-  'node plugins/anti-hall/scripts/defect.js backfill --repo .',
+  'node plugins/anti-hall-node/scripts/defect.js rule abc123 --status fixed',
+  'node plugins/anti-hall-node/scripts/defect.js archive',
+  'node plugins/anti-hall-node/scripts/defect.js backfill --repo .',
   'npm run build -- node scripts/defect.js similar foo',
   // review P2: the defect.js exemption is anchored to the START of a
   // segment — a heavy command merely carrying it as trailing args must
@@ -199,10 +199,10 @@ const BLOCK = [
   // phase.js, agent-watchdog.js, devswarm.js) — only defect.js was anchored
   // by bcd0d69; a heavy command merely carrying one of these scripts as
   // trailing args after `--` must not be exempted either.
-  'npm run build -- node plugins/anti-hall/scripts/jev-setup.js status',
-  'npm run build -- node plugins/anti-hall/scripts/settings.js show',
-  'npm run build -- node plugins/anti-hall/scripts/jev-report.js',
-  'npm run build -- node plugins/anti-hall/hooks/doctor.js',
+  'npm run build -- node plugins/anti-hall-node/scripts/jev-setup.js status',
+  'npm run build -- node plugins/anti-hall-node/scripts/settings.js show',
+  'npm run build -- node plugins/anti-hall-node/scripts/jev-report.js',
+  'npm run build -- node plugins/anti-hall-node/hooks/doctor.js',
   'npm run build -- node statusline/phase.js clear',
   'npm run build -- node hooks/agent-watchdog.js',
   'npm run build -- node scripts/devswarm.js roster',
@@ -280,15 +280,15 @@ const ALLOW = [
   'node statusline/phase.js advance',
   'node hooks/agent-watchdog.js 1200000',
   // ... and the documented absolute form (path.join(pluginRoot, ...)).
-  'node /Users/x/plugins/anti-hall/statusline/phase.js clear',
-  'node /Users/x/plugins/anti-hall/hooks/agent-watchdog.js',
+  'node /Users/x/plugins/anti-hall-node/statusline/phase.js clear',
+  'node /Users/x/plugins/anti-hall-node/hooks/agent-watchdog.js',
   // Windows-separator form must resolve identically (OS-agnostic).
   'node C:\\proj\\plugins\\anti-hall\\statusline\\phase.js agents 4',
   // DevSwarm CLI wrapper (scripts/devswarm.js) — the catch-22 carve-out (PLAN.md
   // Phase 2). Relative, absolute, and Windows-separator forms all resolve.
   'node scripts/devswarm.js workspaces list',
   'node scripts/devswarm.js gate w --set done',
-  'node /Users/x/plugins/anti-hall/scripts/devswarm.js migrate',
+  'node /Users/x/plugins/anti-hall-node/scripts/devswarm.js migrate',
   'node C:\\proj\\plugins\\anti-hall\\scripts\\devswarm.js register w',
   // Child-side reception drain (v0.54.2) — bounded, guard-safe pull. It IS the
   // devswarm.js wrapper, so the same anchored LIGHT_EXCEPTION allows it inline in
@@ -349,11 +349,11 @@ const ALLOW = [
   // f0958b13-adjacent: read-only allowlist additions (0.108.4). Every
   // verbatim example from the field report must ALLOW in coordinator context.
   'node <plugin>/scripts/jev-setup.js status | head -30'.replace('<plugin>', 'plugins/anti-hall'),
-  'node plugins/anti-hall/scripts/settings.js show',
-  'node plugins/anti-hall/scripts/settings.js get devswarm.enabled',
-  'node plugins/anti-hall/scripts/devswarm.js inbox tick',
-  'node plugins/anti-hall/scripts/devswarm.js roster',
-  'node plugins/anti-hall/scripts/devswarm.js inbox peek-primary',
+  'node plugins/anti-hall-node/scripts/settings.js show',
+  'node plugins/anti-hall-node/scripts/settings.js get devswarm.enabled',
+  'node plugins/anti-hall-node/scripts/devswarm.js inbox tick',
+  'node plugins/anti-hall-node/scripts/devswarm.js roster',
+  'node plugins/anti-hall-node/scripts/devswarm.js inbox peek-primary',
   'sqlite3 -readonly /tmp/x.db "select count(*) from t"',
   'gcloud run services describe foo --project=p --region=r --format=value(status.url)',
   'git ls-remote origin main; git fetch -q origin main; git merge-base --is-ancestor abc def; git diff --name-only abc def',
@@ -368,9 +368,9 @@ const ALLOW = [
   'gh pr list',
   'kubectl get pods',
   'gcloud logging read "severity>=ERROR" --limit=5',
-  'node plugins/anti-hall/hooks/doctor.js',
-  'node plugins/anti-hall/scripts/jev-report.js --weekly',
-  'node plugins/anti-hall/scripts/jev-report.js --days 7 --json',
+  'node plugins/anti-hall-node/hooks/doctor.js',
+  'node plugins/anti-hall-node/scripts/jev-report.js --weekly',
+  'node plugins/anti-hall-node/scripts/jev-report.js --days 7 --json',
   // rc-v0.108.4.3 adversarial review fixes must not over-block legitimate
   // read-only usage of the same tools.
   'git -C dir fetch origin main',
@@ -388,13 +388,13 @@ const ALLOW = [
   // defect.js report/list/show: append-only (report) or read-only (list/show)
   // anti-hall CLI subcommands — same narrow, anchored carve-out discipline as
   // the jev-setup.js/settings.js/jev-report.js exemptions above.
-  'node plugins/anti-hall/scripts/defect.js report --class x --sev p2 --sym test',
-  'node plugins/anti-hall/scripts/defect.js list --open',
-  'node plugins/anti-hall/scripts/defect.js list --json',
-  'node plugins/anti-hall/scripts/defect.js show abc123',
-  'node plugins/anti-hall/scripts/defect.js show abc123 --json',
-  'node plugins/anti-hall/scripts/defect.js recurring --top 10 --json',
-  'node plugins/anti-hall/scripts/defect.js similar gate blocks archived --component hooks/devswarm-parent-gate',
+  'node plugins/anti-hall-node/scripts/defect.js report --class x --sev p2 --sym test',
+  'node plugins/anti-hall-node/scripts/defect.js list --open',
+  'node plugins/anti-hall-node/scripts/defect.js list --json',
+  'node plugins/anti-hall-node/scripts/defect.js show abc123',
+  'node plugins/anti-hall-node/scripts/defect.js show abc123 --json',
+  'node plugins/anti-hall-node/scripts/defect.js recurring --top 10 --json',
+  'node plugins/anti-hall-node/scripts/defect.js similar gate blocks archived --component hooks/devswarm-parent-gate',
   'cd /repo && node scripts/defect.js list --open',
   'FOO=1 node scripts/defect.js list',
   // ---------------------------------------------------------------------
@@ -464,7 +464,7 @@ for (const cmd of ALLOW) {
 test('DIRECTIVE-TEXT ALLOW: every hook-emitted CLI/WATCHER directive command is allowed', () => {
   const h = makeHome();
   try {
-    const stableLauncher = require('../../plugins/anti-hall/hooks/lib/stable-launcher.js');
+    const stableLauncher = require('../../plugins/anti-hall-node/hooks/lib/stable-launcher.js');
     const rawCli = '/plugin/root/scripts/devswarm.js'; // never used: launcher install succeeds
     const rawWatcher = '/plugin/root/companion/lib/devswarm-wake-watch.js';
     const { cli: CLI, watcher: WATCHER } = stableLauncher.installLaunchers({

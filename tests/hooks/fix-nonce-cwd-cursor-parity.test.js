@@ -44,13 +44,13 @@ const path = require('node:path');
 const cp = require('node:child_process');
 const { testHookRaw } = require('../helpers/spawn-hook.js');
 const { makeHome } = require('../helpers/fixtures.js');
-const installIngest = require('../../plugins/anti-hall/companion/install-devswarm-ingest.js');
-const repokey = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
-const meshStore = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
-const inboxCursor = require('../../plugins/anti-hall/companion/lib/devswarm-inbox-cursor.js');
-const devswarmCli = require('../../plugins/anti-hall/scripts/devswarm.js');
+const installIngest = require('../../plugins/anti-hall-node/companion/install-devswarm-ingest.js');
+const repokey = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
+const meshStore = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
+const inboxCursor = require('../../plugins/anti-hall-node/companion/lib/devswarm-inbox-cursor.js');
+const devswarmCli = require('../../plugins/anti-hall-node/scripts/devswarm.js');
 
-const HOOK = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'hooks', 'devswarm-parent-gate.js');
+const HOOK = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'hooks', 'devswarm-parent-gate.js');
 const PRIMARY_ENV = { DEVSWARM_REPO_ID: 'repo-1' };
 
 const REPO_CWD = process.cwd();

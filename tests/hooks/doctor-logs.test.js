@@ -17,8 +17,8 @@ const path = require('node:path');
 const cp = require('node:child_process');
 
 const REPO_ROOT = path.join(__dirname, '..', '..');
-const DOCTOR_JS = path.join(REPO_ROOT, 'plugins', 'anti-hall', 'hooks', 'doctor.js');
-const LOG_JS = path.join(REPO_ROOT, 'plugins', 'anti-hall', 'companion', 'lib', 'anti-hall-log.js');
+const DOCTOR_JS = path.join(REPO_ROOT, 'plugins', 'anti-hall-node', 'hooks', 'doctor.js');
+const LOG_JS = path.join(REPO_ROOT, 'plugins', 'anti-hall-node', 'companion', 'lib', 'anti-hall-log.js');
 const logMod = require(LOG_JS);
 
 function mkTmp(tag) { return fs.mkdtempSync(path.join(os.tmpdir(), 'antihall-doctor-logs-' + tag + '-')); }

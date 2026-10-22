@@ -18,9 +18,9 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 
 const MODULE_PATH = process.env.MODULE_UNDER_TEST
-  || path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'scripts', 'devswarm.js');
-const STORE_PATH = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'lib', 'devswarm-store.js');
-const REPOKEY_PATH = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'lib', 'devswarm-repokey.js');
+  || path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'scripts', 'devswarm.js');
+const STORE_PATH = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'lib', 'devswarm-store.js');
+const REPOKEY_PATH = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'lib', 'devswarm-repokey.js');
 
 function git(args, cwd) { return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim(); }
 

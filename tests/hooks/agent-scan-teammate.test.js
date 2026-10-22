@@ -10,7 +10,7 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { scanTranscript, runningAgents, runningAgentsOrNull } = require('../../plugins/anti-hall/hooks/lib/agent-scan.js');
+const { scanTranscript, runningAgents, runningAgentsOrNull } = require('../../plugins/anti-hall-node/hooks/lib/agent-scan.js');
 const { T, ms, spawn, send, idle, stop, lines, inboxResult, idleBlock, tid } = require('../helpers/teammate-fixtures.js');
 
 const NAME = 'rel-worker';

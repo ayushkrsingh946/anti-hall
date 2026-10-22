@@ -17,8 +17,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const cli = require('../../plugins/anti-hall/scripts/devswarm.js');
-const stableLauncherLib = require('../../plugins/anti-hall/hooks/lib/stable-launcher.js');
+const cli = require('../../plugins/anti-hall-node/scripts/devswarm.js');
+const stableLauncherLib = require('../../plugins/anti-hall-node/hooks/lib/stable-launcher.js');
 
 const ctx = (env) => ({ home: '/tmp/anti-hall-wake-directive-cli-unused', backend: 'journal', env: env || {} });
 

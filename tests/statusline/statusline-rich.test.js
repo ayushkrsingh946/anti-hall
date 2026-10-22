@@ -13,7 +13,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { runSL, makeStatusHome, makeProjectDir } = require('./helper.js');
 
-const rich = require(path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'statusline', 'statusline-rich.js'));
+const rich = require(path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'statusline', 'statusline-rich.js'));
 
 // --- safeLabel (pure, exported) --------------------------------------------
 

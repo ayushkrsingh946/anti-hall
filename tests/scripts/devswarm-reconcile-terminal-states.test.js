@@ -23,11 +23,11 @@ const LOG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'antihall-terminal-log-'))
 process.env.ANTI_HALL_LOG_DIR = LOG_DIR;
 process.on('exit', () => { try { fs.rmSync(LOG_DIR, { recursive: true, force: true }); } catch (_) {} });
 
-const cli = require('../../plugins/anti-hall/scripts/devswarm.js');
-const sup = require('../../plugins/anti-hall/companion/devswarm-supervisor.js');
-const ru = require('../../plugins/anti-hall/companion/lib/devswarm-repo-unknown.js');
-const storeLib = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
-const repokey = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
+const cli = require('../../plugins/anti-hall-node/scripts/devswarm.js');
+const sup = require('../../plugins/anti-hall-node/companion/devswarm-supervisor.js');
+const ru = require('../../plugins/anti-hall-node/companion/lib/devswarm-repo-unknown.js');
+const storeLib = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
+const repokey = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
 
 const NOT_FOUND = 'hivecontrol workspace message-count exited 1: \u001b[31mError: Repository not found. Make sure to pass the git root path.\u001b[0m';
 

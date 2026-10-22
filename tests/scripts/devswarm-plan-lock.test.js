@@ -99,7 +99,7 @@ test('race: a second process writing the plan inside a heartbeat --step read-mod
 test('ratchet: production code writes plan files only through planLib.updatePlan', () => {
   const r = cp.spawnSync('git', ['-C', REPO, 'grep', '-n', 'savePlan', '--', 'plugins/anti-hall'], { encoding: 'utf8' });
   const hits = String(r.stdout || '').split('\n').filter(Boolean)
-    .filter((l) => !l.startsWith('plugins/anti-hall/companion/lib/devswarm-plan.js:'));
+    .filter((l) => !l.startsWith('plugins/anti-hall-node/companion/lib/devswarm-plan.js:'));
   assert.deepStrictEqual(hits, [], 'unlocked plan writes outside devswarm-plan.js');
 });
 

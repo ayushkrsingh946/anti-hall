@@ -11,8 +11,8 @@ const path = require('node:path');
 const { testHook } = require('../helpers/spawn-hook.js');
 const { makeHome } = require('../helpers/fixtures.js');
 
-const { backfillSubjects } = require('../../plugins/anti-hall/hooks/lib/task-subject-backfill.js');
-const { unseenTask } = require('../../plugins/anti-hall/hooks/lib/task-state.js');
+const { backfillSubjects } = require('../../plugins/anti-hall-node/hooks/lib/task-subject-backfill.js');
+const { unseenTask } = require('../../plugins/anti-hall-node/hooks/lib/task-state.js');
 
 const asst = (content, extra) => Object.assign({ type: 'assistant', message: { role: 'assistant', content } }, extra || {});
 function create(n, subject, toolId, extra) {
@@ -283,7 +283,7 @@ test('UNKNOWN NOTE: the tracker line says it too, once', () => {
 });
 
 test('RULE: a KNOWN open status stays open (listed) when the scan stops before the create; it is only excluded from idle-neglect and counted unknown', () => {
-  const { openOf, unknownOf, classifyOpen } = require('../../plugins/anti-hall/hooks/lib/task-state.js');
+  const { openOf, unknownOf, classifyOpen } = require('../../plugins/anti-hall-node/hooks/lib/task-state.js');
   const h = makeHome();
   try {
     const mk = (status, tool) => [
@@ -382,7 +382,7 @@ test('PARALLEL creates of ONE assistant message numbered in reverse are not a re
 });
 
 test('PARALLEL creates of ONE assistant message numbered in reverse are not a restart (in-window parsers)', () => {
-  const { reconstructTasks } = require('../../plugins/anti-hall/hooks/lib/task-state.js');
+  const { reconstructTasks } = require('../../plugins/anti-hall-node/hooks/lib/task-state.js');
   const a = reconstructTasks({ data: parallelCreates(1).map((m) => JSON.stringify(m)).join('\n'), truncated: false });
   assert.strictEqual(a.windowReset, false);
   assert.strictEqual(a.taskMap.size, 2);
@@ -396,7 +396,7 @@ test('PARALLEL creates of ONE assistant message numbered in reverse are not a re
 });
 
 test('task-state: an update for an unseen id is status-UNKNOWN (not pending, not open); the in-window create fills it', () => {
-  const { reconstructTasks } = require('../../plugins/anti-hall/hooks/lib/task-state.js');
+  const { reconstructTasks } = require('../../plugins/anti-hall-node/hooks/lib/task-state.js');
   const L = (arr) => arr.map((m) => JSON.stringify(m)).join('\n');
   const a = reconstructTasks({ data: L([upd('9', { description: 'd' }, 'toolu_u')]), truncated: false });
   assert.strictEqual(a.taskMap.get('9').status, undefined);

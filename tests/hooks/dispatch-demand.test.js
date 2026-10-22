@@ -258,7 +258,7 @@ test('METRICS: demand shown -> next turn with an Agent spawn scores followed; ID
     m = JSON.parse(fs.readFileSync(mpath, 'utf8'));
     assert.strictEqual(m.idleNeglectBlocks, 1, JSON.stringify(m));
     // The report surfaces the three metrics.
-    const rep = require('../../plugins/anti-hall/scripts/dispatch-report.js').build(h.home).dispatchDemand;
+    const rep = require('../../plugins/anti-hall-node/scripts/dispatch-report.js').build(h.home).dispatchDemand;
     assert.deepStrictEqual(
       [rep.demandsShown, rep.demandsFollowed, rep.complianceRate, rep.idleNeglectBlocks], [1, 1, 1, 1]);
   } finally { h.cleanup(); }
@@ -385,7 +385,7 @@ test('L34: agent launched in-window and pending is counted regardless of plugin 
 });
 
 test('L34: transcript unreadable by the scan -> evaluate() reports unknown, never fires', () => {
-  const DD = require('../../plugins/anti-hall/hooks/lib/dispatch-demand.js');
+  const DD = require('../../plugins/anti-hall-node/hooks/lib/dispatch-demand.js');
   const res = DD.evaluate({ actionable: [{ id: '1', content: 'a' }], knownIds: ['1'], running: null, cap: 14 });
   assert.strictEqual(res.fire, false);
   assert.strictEqual(res.unknown, true);
@@ -502,7 +502,7 @@ test('PROVEN-ONLY probes: still blocks when the claim is proven', () => {
 });
 
 test('evaluate(): proven is fire && dispatch > unmapped', () => {
-  const DD = require('../../plugins/anti-hall/hooks/lib/dispatch-demand.js');
+  const DD = require('../../plugins/anti-hall-node/hooks/lib/dispatch-demand.js');
   const act = [{ id: '2', content: 'b' }];
   const one = DD.evaluate({ actionable: act, knownIds: ['1', '2'], inProgressIds: ['1'], running: [{ description: 'x' }], cap: 8 });
   assert.strictEqual(one.fire, true);
@@ -576,7 +576,7 @@ test('PROVEN COVER: an agent launched before the task existed (an unrelated revi
 });
 
 test('evaluate(): proven discounts stale and pre-task unmapped agents; unknown times keep them', () => {
-  const DD = require('../../plugins/anti-hall/hooks/lib/dispatch-demand.js');
+  const DD = require('../../plugins/anti-hall-node/hooks/lib/dispatch-demand.js');
   const now = Date.parse('2026-10-04T12:00:00Z');
   const base = { knownIds: ['1'], inProgressIds: [], cap: 8, nowMs: now, agentMaxAgeMs: 30 * 60 * 1000 };
   const task = (sinceMs) => [{ id: '1', content: 'a', sinceMs }];

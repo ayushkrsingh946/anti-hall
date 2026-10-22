@@ -12,7 +12,7 @@ const http = require('node:http');
 const { execFileSync } = require('node:child_process');
 const { makeHome } = require('../helpers/fixtures.js');
 
-const SCRIPT = require.resolve('../../plugins/anti-hall/scripts/jev-setup.js');
+const SCRIPT = require.resolve('../../plugins/anti-hall-node/scripts/jev-setup.js');
 const setupLib = require(SCRIPT);
 
 // enableLegacy(home) — the opt-in lives ONLY in the home settings file.
@@ -180,7 +180,7 @@ test('mode: writes the NEW canonical settings.json key (jevIntegrations.<id>), n
   const { home } = makeHome();
   const r = run(['mode', 'modelRouting', 'on'], { home });
   assert.strictEqual(r.code, 0);
-  const settings = require('../../plugins/anti-hall/hooks/lib/settings.js');
+  const settings = require('../../plugins/anti-hall-node/hooks/lib/settings.js');
   assert.strictEqual(settings.get('jevIntegrations', 'modelRouting', undefined, { home }), 'on');
   assert.strictEqual(settings.source('jevIntegrations', 'modelRouting', { home }), 'file');
   const store = settings.load({ home });

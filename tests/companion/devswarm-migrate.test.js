@@ -1,5 +1,5 @@
 'use strict';
-// proves: plugins/anti-hall/companion/devswarm-migrate.js#* — same-id copy: every migration below asserts the rows land in the SAME partition id they came from (per-partition listMessages / messageCount checks).
+// proves: plugins/anti-hall-node/companion/devswarm-migrate.js#* — same-id copy: every migration below asserts the rows land in the SAME partition id they came from (per-partition listMessages / messageCount checks).
 // devswarm-migrate — AUTOMATIC-BUT-SAFE migration of on-disk state into the
 // store. Idempotence, non-destructiveness, count-verification, and the
 // single-consumer lock refusal, all against a forced journal backend.
@@ -11,8 +11,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const migrate = require('../../plugins/anti-hall/companion/devswarm-migrate.js');
-const storeLib = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
+const migrate = require('../../plugins/anti-hall-node/companion/devswarm-migrate.js');
+const storeLib = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
 
 function tmpHome() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'anti-hall-migrate-'));
@@ -227,7 +227,7 @@ test('migrateOne verifies coverage even when the store ALSO holds a native-drain
   try {
     // A native-drained row already sits in this workspace's store (unrelated to
     // the legacy inbox — e.g. live mesh traffic since the last migration).
-    const s0 = require('../../plugins/anti-hall/companion/lib/devswarm-store.js')
+    const s0 = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js')
       .openStore({ home, workspaceId: 'a', backend: 'journal' });
     try { s0.appendMessage({ workspaceId: 'a', body: 'native-only', hash: 'native:1' }); } finally { s0.close(); }
 

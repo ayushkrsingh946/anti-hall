@@ -69,7 +69,7 @@ function payload(command, { agentId, cwd } = {}) {
 // (~/.anti-hall/trusted-command-allow.json). These tests exercise the matching
 // rules, so a present config is trusted in the fixture home; the trust gate
 // itself is covered in command-guard-security.test.js.
-const allowLib = require('../../plugins/anti-hall/hooks/lib/command-allow.js');
+const allowLib = require('../../plugins/anti-hall-node/hooks/lib/command-allow.js');
 function trustIfPresent(home, cwd) {
   const top = cwd && allowLib.repoToplevel(cwd);
   if (!top) return;

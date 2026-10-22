@@ -25,11 +25,11 @@ const os = require('node:os');
 const path = require('node:path');
 const cp = require('node:child_process');
 
-const DEVSWARM_PATH = path.join(__dirname, '../../plugins/anti-hall/scripts/devswarm.js');
+const DEVSWARM_PATH = path.join(__dirname, '../../plugins/anti-hall-node/scripts/devswarm.js');
 const cli = require(DEVSWARM_PATH);
-const storeLib = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
-const repokey = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
-const livenessLib = require('../../plugins/anti-hall/companion/lib/liveness.js');
+const storeLib = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
+const repokey = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
+const livenessLib = require('../../plugins/anti-hall-node/companion/lib/liveness.js');
 const mutantKit = require('./lib/devswarm-mutant-kit.js');
 
 function tmpHome() {
@@ -310,7 +310,7 @@ test('item 6: the round-trip path -> name -> parse is stable for every writable 
 });
 
 test('item 6: doctor-repair deletes a watermark whose sibling has no registry row and no partition', () => {
-  const doctorRepair = require('../../plugins/anti-hall/hooks/lib/doctor-repair.js');
+  const doctorRepair = require('../../plugins/anti-hall-node/hooks/lib/doctor-repair.js');
   const home = tmpHome();
   const repo = makeGitRepo('f3');
   try {
@@ -340,7 +340,7 @@ test('item 6: doctor-repair deletes a watermark whose sibling has no registry ro
 test('MUTATION (item 6): a sweep keyed on age instead of existence would delete a LIVE sibling watermark', () => {
   // The sweep must be existence-based. An age-based one would drop a watermark
   // that is still load-bearing, re-delivering that sibling's whole backlog.
-  const doctorRepair = require('../../plugins/anti-hall/hooks/lib/doctor-repair.js');
+  const doctorRepair = require('../../plugins/anti-hall-node/hooks/lib/doctor-repair.js');
   const home = tmpHome();
   const repo = makeGitRepo('f3m');
   try {

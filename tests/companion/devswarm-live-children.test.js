@@ -8,7 +8,7 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const path = require('node:path');
 
-const MODULE_PATH = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'lib', 'devswarm-live-children.js');
+const MODULE_PATH = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'lib', 'devswarm-live-children.js');
 const { hasLiveChild } = require(MODULE_PATH);
 
 const SELF_CWD = '/repo/self';

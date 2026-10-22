@@ -13,7 +13,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const ROOT = process.env.ANTIHALL_TEST_PLUGIN_ROOT || path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
+const ROOT = process.env.ANTIHALL_TEST_PLUGIN_ROOT || path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
 
 function install(outFile) {
   const storeLib = require(path.join(ROOT, 'companion', 'lib', 'devswarm-store.js'));

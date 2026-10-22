@@ -14,8 +14,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { testHook } = require('../helpers/spawn-hook.js');
 const { makeHome } = require('../helpers/fixtures.js');
-const repokey = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
-const planLib = require('../../plugins/anti-hall/companion/lib/devswarm-plan.js');
+const repokey = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
+const planLib = require('../../plugins/anti-hall-node/companion/lib/devswarm-plan.js');
 
 const REPO_CWD = process.cwd();
 const REPO_KEY = repokey.repoKeyForWorktree(REPO_CWD);

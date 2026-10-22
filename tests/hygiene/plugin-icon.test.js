@@ -86,7 +86,7 @@ test('no hook/script/companion/monitor/statusline file names the Codex manifest'
 });
 
 test('the Codex-manifest-name check bites on a file that names it', () => {
-  const files = ['plugins/anti-hall/hooks/x.js', 'plugins/anti-hall/skills/y.md'];
+  const files = ['plugins/anti-hall-node/hooks/x.js', 'plugins/anti-hall/skills/y.md'];
   const read = () => `// reads ${CODEX_MANIFEST_NAME}`;
-  assert.deepStrictEqual(filesNamingCodexManifest(files, read), ['plugins/anti-hall/hooks/x.js']);
+  assert.deepStrictEqual(filesNamingCodexManifest(files, read), ['plugins/anti-hall-node/hooks/x.js']);
 });

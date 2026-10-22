@@ -33,11 +33,11 @@ const path = require('node:path');
 const cp = require('node:child_process');
 
 const REPO_ROOT = path.join(__dirname, '..', '..');
-const DEVSWARM_JS = path.join(REPO_ROOT, 'plugins', 'anti-hall', 'scripts', 'devswarm.js');
-const LOG_JS = path.join(REPO_ROOT, 'plugins', 'anti-hall', 'companion', 'lib', 'anti-hall-log.js');
+const DEVSWARM_JS = path.join(REPO_ROOT, 'plugins', 'anti-hall-node', 'scripts', 'devswarm.js');
+const LOG_JS = path.join(REPO_ROOT, 'plugins', 'anti-hall-node', 'companion', 'lib', 'anti-hall-log.js');
 
 const cli = require(DEVSWARM_JS);
-const repokey = require(path.join(REPO_ROOT, 'plugins', 'anti-hall', 'companion', 'lib', 'devswarm-repokey.js'));
+const repokey = require(path.join(REPO_ROOT, 'plugins', 'anti-hall-node', 'companion', 'lib', 'devswarm-repokey.js'));
 
 function mkTmp(tag) { return fs.mkdtempSync(path.join(os.tmpdir(), 'antihall-logger-e2e-' + tag + '-')); }
 function rm(p) { try { fs.rmSync(p, { recursive: true, force: true }); } catch (_) {} }

@@ -13,7 +13,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 
-const MODULE_PATH = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'hooks', 'lib', 'stable-launcher.js');
+const MODULE_PATH = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'hooks', 'lib', 'stable-launcher.js');
 const stableLauncher = require(MODULE_PATH);
 
 function tmpHome() {

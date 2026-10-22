@@ -244,7 +244,7 @@ test('checkDaemonsRunning: RUNNING daemon whose script has drifted from the curr
     const wt = path.join(home, 'wt-drift');
     fs.mkdirSync(wt, { recursive: true });
     const mpDir = path.join(home, 'mp');
-    const stableDir = path.join(mpDir, 'plugins', 'anti-hall', 'companion');
+    const stableDir = path.join(mpDir, 'plugins', 'anti-hall-node', 'companion');
     fs.mkdirSync(stableDir, { recursive: true });
     fs.writeFileSync(path.join(stableDir, 'devswarm-ingest.js'), '// fixture stable script\n');
     const driftedScript = path.join(home, 'old-cache-dir', 'devswarm-ingest.js'); // never resolved to; just a distinct path
@@ -278,7 +278,7 @@ test('checkDaemonsRunning: script matches the current stable marketplace path ->
     const wt = path.join(home, 'wt-nodrift');
     fs.mkdirSync(wt, { recursive: true });
     const mpDir = path.join(home, 'mp');
-    const stableDir = path.join(mpDir, 'plugins', 'anti-hall', 'companion');
+    const stableDir = path.join(mpDir, 'plugins', 'anti-hall-node', 'companion');
     fs.mkdirSync(stableDir, { recursive: true });
     const stableScript = path.join(stableDir, 'devswarm-ingest.js');
     fs.writeFileSync(stableScript, '// fixture stable script\n');

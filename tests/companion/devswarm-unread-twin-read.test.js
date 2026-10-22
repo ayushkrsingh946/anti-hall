@@ -8,7 +8,7 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { unionUnread } = require('../../plugins/anti-hall/companion/lib/devswarm-unread.js');
+const { unionUnread } = require('../../plugins/anti-hall-node/companion/lib/devswarm-unread.js');
 
 function fixture(lines, cursor) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ah-twin-'));

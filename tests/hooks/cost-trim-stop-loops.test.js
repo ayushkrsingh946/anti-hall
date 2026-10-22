@@ -11,8 +11,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { testHook } = require('../helpers/spawn-hook.js');
 const { makeHome } = require('../helpers/fixtures.js');
-const SP = require('../../plugins/anti-hall/hooks/lib/stop-policy.js');
-const EV = require('../../plugins/anti-hall/hooks/lib/task-tool-evidence.js');
+const SP = require('../../plugins/anti-hall-node/hooks/lib/stop-policy.js');
+const EV = require('../../plugins/anti-hall-node/hooks/lib/task-tool-evidence.js');
 
 const TL = 'tasklist-guard.js';
 const TG = 'task-guard.js';

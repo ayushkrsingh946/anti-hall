@@ -17,7 +17,7 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const { makeHome } = require('../helpers/fixtures.js');
 
-const { pruneStale } = require('../../plugins/anti-hall/hooks/lib/state-prune.js');
+const { pruneStale } = require('../../plugins/anti-hall-node/hooks/lib/state-prune.js');
 
 const DAY = 24 * 60 * 60 * 1000;
 

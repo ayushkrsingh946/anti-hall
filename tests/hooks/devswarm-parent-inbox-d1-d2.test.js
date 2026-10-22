@@ -1,7 +1,7 @@
 'use strict';
 // D1 (archived workspaces consuming table slots) + D2 (broadcast feed inflates
 // the injection / repeats verbatim every turn) — see the fix's own header
-// comments in plugins/anti-hall/hooks/devswarm-parent-inbox.js
+// comments in plugins/anti-hall-node/hooks/devswarm-parent-inbox.js
 // (rosterHideArchived/rosterMaxRows for D1; truncateBroadcastBody/
 // visibleBroadcastRows/broadcastSeenPath for D2) for the full defect writeup.
 //
@@ -16,13 +16,13 @@ const path = require('node:path');
 const cp = require('node:child_process');
 const { testHook } = require('../helpers/spawn-hook.js');
 const { makeHome } = require('../helpers/fixtures.js');
-const installIngest = require('../../plugins/anti-hall/companion/install-devswarm-ingest.js');
-const repokey = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
+const installIngest = require('../../plugins/anti-hall-node/companion/install-devswarm-ingest.js');
+const repokey = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
 
 const HOOK = 'devswarm-parent-inbox.js';
 const PRIMARY_ENV = { DEVSWARM_REPO_ID: 'repo-1' };
 
-const hookMod = require('../../plugins/anti-hall/hooks/devswarm-parent-inbox.js');
+const hookMod = require('../../plugins/anti-hall-node/hooks/devswarm-parent-inbox.js');
 const {
   rosterHideArchived, rosterMaxRows, buildWorkspaceTable,
   truncateBroadcastBody, broadcastMaxAgeMs, broadcastKey,

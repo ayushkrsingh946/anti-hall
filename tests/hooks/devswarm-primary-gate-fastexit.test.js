@@ -12,7 +12,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
-const HOOKS = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'hooks');
+const HOOKS = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'hooks');
 const GATE = require(path.join(HOOKS, 'lib', 'devswarm-primary-gate.js'));
 const lazyNode = require(path.join(HOOKS, 'lib', 'lazy-node.js'));
 const HEAVY = path.join('companion', 'lib', 'liveness.js'); // loaded at module scope by every hook below

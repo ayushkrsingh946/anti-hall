@@ -17,7 +17,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { testHook } = require('../helpers/spawn-hook.js');
 const { makeHome } = require('../helpers/fixtures.js');
-const migrations = require('../../plugins/anti-hall/companion/lib/migrations.js');
+const migrations = require('../../plugins/anti-hall-node/companion/lib/migrations.js');
 
 const HOOK = 'repair-on-reload.js';
 const PLUGIN_JSON = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', '.claude-plugin', 'plugin.json');

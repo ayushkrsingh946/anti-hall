@@ -35,8 +35,8 @@ const os = require('node:os');
 const path = require('node:path');
 const cp = require('node:child_process');
 
-const cli = require('../../plugins/anti-hall/scripts/devswarm.js');
-const storeLib = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
+const cli = require('../../plugins/anti-hall-node/scripts/devswarm.js');
+const storeLib = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
 
 function tmpHome() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'anti-hall-xrepo-'));
@@ -109,7 +109,7 @@ test('e586afdaa968: `inbox count` from a FOREIGN cwd reports the store side as U
     assert.equal(foreign.storeUnavailableDetail.reason, 'project-context-mismatch');
     assert.equal(
       foreign.storeUnavailableDetail.registeredRepoKey,
-      require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js').repoKeyForWorktree(repoB),
+      require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js').repoKeyForWorktree(repoB),
       'must name the workspace\'s OWN registered project key');
     assert.equal(foreign.unreadStoreUnknown, true);
   } finally { rm(home); rm(repoA); rm(repoB); }
@@ -127,7 +127,7 @@ test('e586afdaa968: the REGISTERED repoKey stays the authority when the workspac
   const home = tmpHome();
   const repoA = makeGitRepo('A');
   const repoB = makeGitRepo('B');
-  const repoKeyA = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js').repoKeyForWorktree(repoA);
+  const repoKeyA = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js').repoKeyForWorktree(repoA);
   try {
     const reg = registerIn(home, repoB, repoB, 'child-vanished');
     assert.ok(reg.descriptor.repoKey, 'precondition: register persists the workspace\'s repoKey');
@@ -156,7 +156,7 @@ test('e586afdaa968: a read from a foreign cwd must not RE-HOME another project\'
   const repoA = makeGitRepo('A');
   const repoB = makeGitRepo('B');
   const nonGit = fs.mkdtempSync(path.join(os.tmpdir(), 'anti-hall-xrepo-nongit-'));
-  const repoKeyA = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js').repoKeyForWorktree(repoA);
+  const repoKeyA = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js').repoKeyForWorktree(repoA);
   try {
     // register from a NON-git cwd (-> stranded in the legacy per-id hash
     // bucket: ownerKey === hashFromWorkspaceId(id)) while the worktree itself
@@ -213,8 +213,8 @@ test('e586afdaa968 PRECEDENCE: a RESOLVABLE worktree beats a persisted repoKey t
   const home = tmpHome();
   const repoA = makeGitRepo('A');
   const repoB = makeGitRepo('B');
-  const keyA = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js').repoKeyForWorktree(repoA);
-  const keyB = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js').repoKeyForWorktree(repoB);
+  const keyA = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js').repoKeyForWorktree(repoA);
+  const keyB = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js').repoKeyForWorktree(repoB);
   try {
     registerIn(home, repoB, repoB, 'liar');
     const dp = path.join(home, '.anti-hall', 'devswarm', 'workspaces', 'liar.json');
@@ -236,7 +236,7 @@ test('e586afdaa968 PRECEDENCE: a RESOLVABLE worktree beats a persisted repoKey t
 // (null), which is what keeps the sanctioned re-home heal alive and keeps every
 // caller fail-open for the legacy no-project mode.
 test('e586afdaa968: the legacy per-id hash bucket is never reported as a registered PROJECT', () => {
-  const repokeyLib = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
+  const repokeyLib = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
   const hashKey = storeLib.hashFromWorkspaceId('legacy-id');
   assert.equal(repokeyLib.registeredRepoKey({ ownerKey: hashKey }, 'legacy-id'), null);
   assert.equal(repokeyLib.registeredRepoKey({ repoKey: hashKey }, 'legacy-id'), null);
@@ -277,7 +277,7 @@ test('e586afdaa968 P0: `gate` on a FOREIGN workspace refuses WITHOUT re-homing i
   const repoA = makeGitRepo('A');
   const repoB = makeGitRepo('B');
   const nonGit = fs.mkdtempSync(path.join(os.tmpdir(), 'anti-hall-xrepo-ng-gate-'));
-  const keyA = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js').repoKeyForWorktree(repoA);
+  const keyA = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js').repoKeyForWorktree(repoA);
   try {
     const hashKey = strandedInB(home, nonGit, repoB, 'gate-foreign');
     const r = cli.run(['gate', 'gate-foreign', '--set', 'merged'], ctx(home, { cwd: repoA })).result;
@@ -301,7 +301,7 @@ test('e586afdaa968 P0: `ensure` cannot STEAL a foreign workspace', () => {
   const repoA = makeGitRepo('A');
   const repoB = makeGitRepo('B');
   const nonGit = fs.mkdtempSync(path.join(os.tmpdir(), 'anti-hall-xrepo-ng-ens-'));
-  const keyA = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js').repoKeyForWorktree(repoA);
+  const keyA = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js').repoKeyForWorktree(repoA);
   try {
     const hashKey = strandedInB(home, nonGit, repoB, 'ensure-foreign');
     const r = cli.run(['ensure', 'ensure-foreign', '--worktree', repoB, '--session', 's2'], ctx(home, { cwd: repoA })).result;
@@ -321,7 +321,7 @@ test('e586afdaa968 P0: `archive` cannot re-home AND retire a foreign workspace',
   const repoA = makeGitRepo('A');
   const repoB = makeGitRepo('B');
   const nonGit = fs.mkdtempSync(path.join(os.tmpdir(), 'anti-hall-xrepo-ng-arc-'));
-  const keyA = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js').repoKeyForWorktree(repoA);
+  const keyA = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js').repoKeyForWorktree(repoA);
   const descPath = path.join(home, '.anti-hall', 'devswarm', 'workspaces', 'archive-foreign.json');
   try {
     const hashKey = strandedInB(home, nonGit, repoB, 'archive-foreign');
@@ -377,7 +377,7 @@ test('e586afdaa968 P0: `inbox ack` on a FOREIGN workspace never advances its NDJ
 test('e586afdaa968: a MOVED repo gets an honest, named refusal — never a silent zero', () => {
   const home = tmpHome();
   const proj = makeGitRepo('proj');
-  const repokeyLib = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
+  const repokeyLib = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
   const oldKey = repokeyLib.repoKeyForWorktree(proj);
   const moved = proj + '-v2';
   try {

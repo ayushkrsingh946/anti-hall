@@ -10,13 +10,13 @@ const path = require('node:path');
 const assert = require('node:assert');
 
 const REPO_ROOT = path.join(__dirname, '..', '..');
-const storeLib = require(path.join(REPO_ROOT, 'plugins', 'anti-hall', 'companion', 'lib', 'devswarm-store.js'));
-const cursorLib = require(path.join(REPO_ROOT, 'plugins', 'anti-hall', 'companion', 'lib', 'devswarm-inbox-cursor.js'));
-const readerCursors = require(path.join(REPO_ROOT, 'plugins', 'anti-hall', 'companion', 'lib', 'reader-cursors.js'));
-const rowStateLib = require(path.join(REPO_ROOT, 'plugins', 'anti-hall', 'companion', 'lib', 'row-state.js'));
-const cliLib = require(path.join(REPO_ROOT, 'plugins', 'anti-hall', 'scripts', 'devswarm.js'));
-const archivedCacheLib = require(path.join(REPO_ROOT, 'plugins', 'anti-hall', 'companion', 'lib', 'devswarm-archived-cache.js'));
-const livenessSelect = require(path.join(REPO_ROOT, 'plugins', 'anti-hall', 'companion', 'lib', 'devswarm-liveness-select.js'));
+const storeLib = require(path.join(REPO_ROOT, 'plugins', 'anti-hall-node', 'companion', 'lib', 'devswarm-store.js'));
+const cursorLib = require(path.join(REPO_ROOT, 'plugins', 'anti-hall-node', 'companion', 'lib', 'devswarm-inbox-cursor.js'));
+const readerCursors = require(path.join(REPO_ROOT, 'plugins', 'anti-hall-node', 'companion', 'lib', 'reader-cursors.js'));
+const rowStateLib = require(path.join(REPO_ROOT, 'plugins', 'anti-hall-node', 'companion', 'lib', 'row-state.js'));
+const cliLib = require(path.join(REPO_ROOT, 'plugins', 'anti-hall-node', 'scripts', 'devswarm.js'));
+const archivedCacheLib = require(path.join(REPO_ROOT, 'plugins', 'anti-hall-node', 'companion', 'lib', 'devswarm-archived-cache.js'));
+const livenessSelect = require(path.join(REPO_ROOT, 'plugins', 'anti-hall-node', 'companion', 'lib', 'devswarm-liveness-select.js'));
 
 function deepEqualDiff(a, b) {
   try { assert.deepStrictEqual(a, b); return null; }

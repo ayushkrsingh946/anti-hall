@@ -15,10 +15,10 @@ const path = require('node:path');
 const cp = require('node:child_process');
 const { testHookRaw } = require('../helpers/spawn-hook.js');
 const { makeHome } = require('../helpers/fixtures.js');
-const repokey = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
-const meshStore = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
+const repokey = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
+const meshStore = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
 
-const HOOK = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'hooks', 'devswarm-parent-gate.js');
+const HOOK = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'hooks', 'devswarm-parent-gate.js');
 const REPO_CWD = process.cwd();
 const REPO_KEY = repokey.repoKeyForWorktree(REPO_CWD);
 const ENV = { DEVSWARM_REPO_ID: 'repo-1', ANTIHALL_DEVSWARM_STORE_BACKEND: 'journal' };

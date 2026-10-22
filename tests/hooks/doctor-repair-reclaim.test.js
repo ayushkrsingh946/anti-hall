@@ -33,12 +33,12 @@ const path = require('node:path');
 const cp = require('node:child_process');
 
 const REPO_ROOT = path.join(__dirname, '..', '..');
-const REPAIR_JS = path.join(REPO_ROOT, 'plugins', 'anti-hall', 'hooks', 'lib', 'doctor-repair.js');
-const INGEST_JS = path.join(REPO_ROOT, 'plugins', 'anti-hall', 'companion', 'devswarm-ingest.js');
+const REPAIR_JS = path.join(REPO_ROOT, 'plugins', 'anti-hall-node', 'hooks', 'lib', 'doctor-repair.js');
+const INGEST_JS = path.join(REPO_ROOT, 'plugins', 'anti-hall-node', 'companion', 'devswarm-ingest.js');
 
 const repair = require(REPAIR_JS);
 const ingest = require(INGEST_JS);
-const repokey = require(path.join(REPO_ROOT, 'plugins', 'anti-hall', 'companion', 'lib', 'devswarm-repokey.js'));
+const repokey = require(path.join(REPO_ROOT, 'plugins', 'anti-hall-node', 'companion', 'lib', 'devswarm-repokey.js'));
 
 function mkTmp(tag) { return fs.mkdtempSync(path.join(os.tmpdir(), 'antihall-reclaim-' + tag + '-')); }
 function rm(p) { try { fs.rmSync(p, { recursive: true, force: true }); } catch (_) {} }
@@ -550,7 +550,7 @@ test('checkMemguardReaperRisk: module has no detectReaperGuard/reaperWarningLine
 // 5. Black-box: doctor.js --reclaim-ingest-lock and the memguard-reaper
 // section, spawned as a real subprocess against an isolated HOME.
 // ---------------------------------------------------------------------------
-const DOCTOR_JS = path.join(REPO_ROOT, 'plugins', 'anti-hall', 'hooks', 'doctor.js');
+const DOCTOR_JS = path.join(REPO_ROOT, 'plugins', 'anti-hall-node', 'hooks', 'doctor.js');
 // timeout: generous on purpose. spawnSync's timeout kills the child (SIGTERM) and
 // yields status=null on expiry — that is a legitimately-slow subprocess under
 // contention, NOT a wrong exit code, and asserting strictEqual(r.code, 0) against a

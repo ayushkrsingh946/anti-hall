@@ -16,7 +16,7 @@ const { makeHome } = require('../helpers/fixtures.js');
 
 const HOOK = 'devswarm-child-role.js';
 // Claude Code's documented per-hook additionalContext cap (see
-// plugins/anti-hall/hooks/verify-first-full.js header comment). Assert well
+// plugins/anti-hall-node/hooks/verify-first-full.js header comment). Assert well
 // under it, not just under it, so there is real headroom for future growth.
 const INJECTION_CAP = 10000;
 // The payload embeds absolute CLI paths under the plugin root (devswarm.js,

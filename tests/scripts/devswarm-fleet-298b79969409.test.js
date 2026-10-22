@@ -106,7 +106,7 @@ test('roster and diagnose agree on the phantom twin row: diagnose says not-live,
 
 // E fix regression: a native hivecontrol child (no registry row / mesh
 // descriptor at all — cmdRoster's nativeChildren fold calls rosterHints with
-// sessionId:null BY CONSTRUCTION, see plugins/anti-hall/scripts/devswarm.js
+// sessionId:null BY CONSTRUCTION, see plugins/anti-hall-node/scripts/devswarm.js
 // ~:10700) must NEVER read `phantom` — that hint means "this registry row
 // looks alive but computeRowLive disagrees", which is meaningless for a row
 // with no registry entry to disagree about. Exercises rosterHints directly

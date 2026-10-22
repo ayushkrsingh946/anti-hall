@@ -12,7 +12,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const source = require('./lib/devswarm-source.js');
 
-const SCRIPTS = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'scripts');
+const SCRIPTS = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'scripts');
 const DISPATCHER = path.join(SCRIPTS, 'devswarm.js');
 const CORE_PATH = path.join(SCRIPTS, 'devswarm-lib', 'core.js');
 const SNAPSHOT = path.join(__dirname, '..', 'fixtures', 'devswarm-split', 'exports.snapshot.json');

@@ -9,9 +9,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const { makeHome } = require('../helpers/fixtures.js');
-const M = require('../../plugins/anti-hall/companion/lib/migrations.js');
-const settings = require('../../plugins/anti-hall/hooks/lib/settings.js');
-const SCHEMA = require('../../plugins/anti-hall/hooks/lib/settings-schema.js');
+const M = require('../../plugins/anti-hall-node/companion/lib/migrations.js');
+const settings = require('../../plugins/anti-hall-node/hooks/lib/settings.js');
+const SCHEMA = require('../../plugins/anti-hall-node/hooks/lib/settings-schema.js');
 const manifest = require('../../plugins/anti-hall/.claude-plugin/plugin.json');
 
 function claudeSettings(home) { return path.join(home, '.claude', 'settings.json'); }

@@ -5,7 +5,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');
-const { readOnlyGitEnv } = require('../../plugins/anti-hall/hooks/lib/git-env.js');
+const { readOnlyGitEnv } = require('../../plugins/anti-hall-node/hooks/lib/git-env.js');
 
 const ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
 

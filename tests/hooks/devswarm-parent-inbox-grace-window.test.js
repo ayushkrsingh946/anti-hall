@@ -39,11 +39,11 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const M = require('../../plugins/anti-hall/hooks/devswarm-parent-inbox.js');
+const M = require('../../plugins/anti-hall-node/hooks/devswarm-parent-inbox.js');
 const { makeHome } = require('../helpers/fixtures.js');
 const { testHook } = require('../helpers/spawn-hook.js');
-const installIngest = require('../../plugins/anti-hall/companion/install-devswarm-ingest.js');
-const repokey = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
+const installIngest = require('../../plugins/anti-hall-node/companion/install-devswarm-ingest.js');
+const repokey = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
 
 // --- pure unit tests: unreadIsGraced / resolveInboxGraceMs -----------------
 

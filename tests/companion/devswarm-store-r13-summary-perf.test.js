@@ -26,7 +26,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const store = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
+const store = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
 
 const rm = (p) => { try { fs.rmSync(p, { recursive: true, force: true }); } catch (_) {} };
 

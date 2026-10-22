@@ -134,7 +134,7 @@ for (const [name, build, opts] of edgeCases()) {
       const raw = build(h);
       const res = testHookRaw('verify-first-orch.js', raw, { home: h.home, env: opts.env, args: opts.noFlag ? [] : T.FLAG, expectJson: true });
       const c = T.ctxOf(res);
-      const isCodex = require('../../plugins/anti-hall/hooks/lib/auto-handover-text.js').detectPlatform(JSON.parse(raw)) === 'codex';
+      const isCodex = require('../../plugins/anti-hall-node/hooks/lib/auto-handover-text.js').detectPlatform(JSON.parse(raw)) === 'codex';
       assert.strictEqual(c, isCodex ? CORE.ORCH_FULL_CODEX : CORE.ORCH_FULL, 'ORCH_FULL inline');
       assert.strictEqual(T.markerOf(h), null, 'no marker');
     } finally { h.cleanup(); }

@@ -15,7 +15,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const M = require(path.join(
-  __dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'devswarm-recover.js',
+  __dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'devswarm-recover.js',
 ));
 
 const UUID = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
@@ -94,7 +94,7 @@ test('run: an ambiguous target -> the REAL recover() abstains end to end (never 
   try {
     writeDescriptor(home, 'w3');
     const { recover } = require(path.join(
-      __dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'lib', 'recovery.js',
+      __dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'lib', 'recovery.js',
     ));
     const r = M.run(['w3'], {
       home,
@@ -130,7 +130,7 @@ test('end-to-end: a lone INTERACTIVE claude session is confirmed + killed (its g
     writeDescriptor(home, 'w4', { worktreePath, inboxPath, cursorPath });
 
     const { projectDirFor, verifyTarget } = require(path.join(
-      __dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'lib', 'target-session.js',
+      __dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'lib', 'target-session.js',
     ));
     const projectDir = projectDirFor(worktreePath, home);
     fs.mkdirSync(projectDir, { recursive: true });
@@ -175,7 +175,7 @@ test('end-to-end: an AMBIGUOUS target (2 candidates) -> abstain, never a kill, e
     writeDescriptor(home, 'w5', { worktreePath, inboxPath, cursorPath });
 
     const { projectDirFor } = require(path.join(
-      __dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'lib', 'target-session.js',
+      __dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'lib', 'target-session.js',
     ));
     const projectDir = projectDirFor(worktreePath, home);
     fs.mkdirSync(projectDir, { recursive: true });

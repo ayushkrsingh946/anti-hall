@@ -27,8 +27,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const cli = require('../../plugins/anti-hall/scripts/devswarm.js');
-const storeLib = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
+const cli = require('../../plugins/anti-hall-node/scripts/devswarm.js');
+const storeLib = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
 
 const BACKEND = 'journal';
 const BUCKET = 'foldarchdltest-abcdef';

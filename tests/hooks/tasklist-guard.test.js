@@ -1548,7 +1548,7 @@ test('NORMAL MODE regression: identical signal with permission_mode absent/"defa
 test('SIGNATURE-ACK: acking the exact hash signature silences it even when re-derived fresh', () => {
   const h = makeHome();
   try {
-    const stopAck = require('../../plugins/anti-hall/hooks/lib/stop-ack.js');
+    const stopAck = require('../../plugins/anti-hall-node/hooks/lib/stop-ack.js');
     const tp = h.writeTranscript(edits(4));
     const p = stopPayload(tp, h.home);
 
@@ -1573,7 +1573,7 @@ test('SIGNATURE-ACK: acking the exact hash signature silences it even when re-de
 test('SETTING OFF: guards.stopAck=false ignores an existing ack and blocks again', () => {
   const h = makeHome();
   try {
-    const stopAck = require('../../plugins/anti-hall/hooks/lib/stop-ack.js');
+    const stopAck = require('../../plugins/anti-hall-node/hooks/lib/stop-ack.js');
     const tp = h.writeTranscript(edits(4));
     const p = stopPayload(tp, h.home);
     const r1 = testHook(HOOK, p, { home: h.home });

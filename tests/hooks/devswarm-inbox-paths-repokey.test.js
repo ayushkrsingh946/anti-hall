@@ -15,7 +15,7 @@ const { makeHome } = require('../helpers/fixtures.js');
 const {
   classifyDevswarmPath,
   isStoreDenyTarget,
-} = require('../../plugins/anti-hall/hooks/lib/devswarm-inbox-paths.js');
+} = require('../../plugins/anti-hall-node/hooks/lib/devswarm-inbox-paths.js');
 
 const HOOK = 'command-guard.js';
 const DEVSWARM_COORD = { CLAUDE_CODE_ENTRYPOINT: 'cli', DEVSWARM_REPO_ID: 'repo-x' };

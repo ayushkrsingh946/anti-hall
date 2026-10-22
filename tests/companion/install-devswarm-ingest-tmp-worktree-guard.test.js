@@ -23,8 +23,8 @@ const path = require('node:path');
 const cp = require('node:child_process');
 
 const REPO_ROOT = path.join(__dirname, '..', '..');
-const INGEST_MOD_PATH = path.join(REPO_ROOT, 'plugins', 'anti-hall', 'companion', 'install-devswarm-ingest.js');
-const REPAIR_MOD_PATH = path.join(REPO_ROOT, 'plugins', 'anti-hall', 'hooks', 'lib', 'doctor-repair.js');
+const INGEST_MOD_PATH = path.join(REPO_ROOT, 'plugins', 'anti-hall-node', 'companion', 'install-devswarm-ingest.js');
+const REPAIR_MOD_PATH = path.join(REPO_ROOT, 'plugins', 'anti-hall-node', 'hooks', 'lib', 'doctor-repair.js');
 
 // The installer reads ANTIHALL_INGEST_DRY_RUN ONCE at load (EXPLICIT_DRYRUN),
 // and an explicit dry-run short-circuits applyTmpWorktreeGuard before the tmp
@@ -186,7 +186,7 @@ test('(c) runRepairs: an OTHER repo\'s tmp-rooted ingest unit is reported (\'fai
     const label = ingest.LABEL + '.' + hash;
     const plistPath = path.join(home, 'Library', 'LaunchAgents', label + '.plist');
     const plist = ingest.buildPlist({
-      exec: process.execPath, script: path.join(REPO_ROOT, 'plugins', 'anti-hall', 'companion', 'devswarm-ingest.js'),
+      exec: process.execPath, script: path.join(REPO_ROOT, 'plugins', 'anti-hall-node', 'companion', 'devswarm-ingest.js'),
       log: path.join(home, 'l.log'), workdir: scratchWt, label,
     });
     fs.writeFileSync(plistPath, plist);

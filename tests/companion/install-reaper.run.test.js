@@ -22,7 +22,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const { spawnSync } = require('node:child_process');
 
-const COMPANION = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'companion');
+const COMPANION = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion');
 const INSTALL = path.join(COMPANION, 'install-reaper.js');
 const m = require(INSTALL);
 

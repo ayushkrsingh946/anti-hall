@@ -28,9 +28,9 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const cli = require('../../plugins/anti-hall/scripts/devswarm.js');
-const supervisor = require('../../plugins/anti-hall/companion/devswarm-supervisor.js');
-const cacheLib = require('../../plugins/anti-hall/companion/lib/devswarm-archived-cache.js');
+const cli = require('../../plugins/anti-hall-node/scripts/devswarm.js');
+const supervisor = require('../../plugins/anti-hall-node/companion/devswarm-supervisor.js');
+const cacheLib = require('../../plugins/anti-hall-node/companion/lib/devswarm-archived-cache.js');
 
 // The measured record shape, verbatim — including the fields the probe ignores,
 // so a future narrowing of the parser is caught here.
@@ -324,7 +324,7 @@ test('D12b(d): a signal-killed probe carries `signal` (not just a null status) t
 // JSON line via the `reconcile` field).
 // ---------------------------------------------------------------------------
 
-const alog = require('../../plugins/anti-hall/companion/lib/anti-hall-log.js');
+const alog = require('../../plugins/anti-hall-node/companion/lib/anti-hall-log.js');
 
 function withLogDir(fn) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ah-log-'));

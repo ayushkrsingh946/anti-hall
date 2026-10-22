@@ -12,8 +12,8 @@ const childProcess = require('node:child_process');
 const { makeHome } = require('../helpers/fixtures.js');
 
 const ROOT = path.join(__dirname, '..', '..');
-const HOOK = path.join(ROOT, 'plugins', 'anti-hall', 'hooks', 'coordinator-work-guard.js');
-const lib = require(path.join(ROOT, 'plugins', 'anti-hall', 'hooks', 'lib', 'coordinator-work.js'));
+const HOOK = path.join(ROOT, 'plugins', 'anti-hall-node', 'hooks', 'coordinator-work-guard.js');
+const lib = require(path.join(ROOT, 'plugins', 'anti-hall-node', 'hooks', 'lib', 'coordinator-work.js'));
 
 const L = '/home/u/.anti-hall/bin/devswarm.js';
 const PULL = 'node ' + L + ' inbox ' + 'pu' + 'll';

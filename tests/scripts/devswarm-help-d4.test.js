@@ -24,7 +24,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const cli = require('../../plugins/anti-hall/scripts/devswarm.js');
+const cli = require('../../plugins/anti-hall-node/scripts/devswarm.js');
 
 function tmpHome() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'anti-hall-help-'));

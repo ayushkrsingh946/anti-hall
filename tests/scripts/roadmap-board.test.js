@@ -54,10 +54,10 @@ test('touched: event runs touch only their item; schedule and plain dispatch rec
 test('prRules: docs drift only for a PR to main with user-facing code and no docs change', () => {
   const f = (...n) => n.map((filename) => ({ filename, additions: 1, deletions: 0 }));
   const r = (files, baseRef) => L.prRules({ title: 'feat: x', body: '', files, headRef: 'dev', sameRepo: true, baseRef }, cfg);
-  assert.equal(r(f('plugins/anti-hall/hooks/guard.js'), 'main').docs_drift, true);
-  assert.equal(r(f('plugins/anti-hall/hooks/guard.js'), 'dev').docs_drift, false);
-  assert.equal(r(f('plugins/anti-hall/hooks/guard.js', 'CHANGELOG.md'), 'main').docs_drift, false);
-  assert.equal(r(f('plugins/anti-hall/skills/x/SKILL.md', 'plugins/anti-hall/hooks/a.js'), 'main').docs_drift, false);
+  assert.equal(r(f('plugins/anti-hall-node/hooks/guard.js'), 'main').docs_drift, true);
+  assert.equal(r(f('plugins/anti-hall-node/hooks/guard.js'), 'dev').docs_drift, false);
+  assert.equal(r(f('plugins/anti-hall-node/hooks/guard.js', 'CHANGELOG.md'), 'main').docs_drift, false);
+  assert.equal(r(f('plugins/anti-hall/skills/x/SKILL.md', 'plugins/anti-hall-node/hooks/a.js'), 'main').docs_drift, false);
   assert.equal(r(f('tests/a.test.js'), 'main').docs_drift, false);
 });
 
@@ -81,7 +81,7 @@ test('release docs review: rules-only drift opens one issue; an existing open on
     },
   });
   const act = async (_d, fn) => fn();
-  const state = { item: { tag: 'v1.2.3', url: 'https://github.com/talas9/anti-hall/releases/tag/v1.2.3' }, prev: 'v1.2.2', drift: { rule: true, user: ['plugins/anti-hall/hooks/a.js'], user_count: 1, docs_count: 0 } };
+  const state = { item: { tag: 'v1.2.3', url: 'https://github.com/talas9/anti-hall/releases/tag/v1.2.3' }, prev: 'v1.2.2', drift: { rule: true, user: ['plugins/anti-hall-node/hooks/a.js'], user_count: 1, docs_count: 0 } };
   const noModel = { provider: 'none', reason: 'AI_PROVIDER=none', data: null };
   const repo = { owner: 'talas9', repo: 'anti-hall' };
   assert.deepEqual(await REL.docsReview({ github: gh(null), repo, cfg, state, model: noModel, act }), { issue: 50 });

@@ -185,12 +185,12 @@ test('peer / cross-session records never clear a hedge; a plain typed prompt doe
 test('lib/quote-mask.js gives identical output to speculation-guard.js maskQuotedText on 20 samples', () => {
   const fs = require('node:fs');
   const path = require('node:path');
-  const src = fs.readFileSync(path.join(__dirname, '../../plugins/anti-hall/hooks/speculation-guard.js'), 'utf8');
+  const src = fs.readFileSync(path.join(__dirname, '../../plugins/anti-hall-node/hooks/speculation-guard.js'), 'utf8');
   const a = src.indexOf('function blank(s)');
   const bMarker = src.indexOf('function maskQuotedText');
   const end = src.indexOf('\n}\n', bMarker) + 3;
   const specMask = require('node:vm').compileFunction(src.slice(a, end) + '\nreturn maskQuotedText;')();
-  const { maskQuotedText } = require('../../plugins/anti-hall/hooks/lib/quote-mask.js');
+  const { maskQuotedText } = require('../../plugins/anti-hall-node/hooks/lib/quote-mask.js');
   const samples = [
     'plain text', 'say "first-pass" here', 'odd " quote', '`code` and more', '```\nfenced\n```\nafter',
     '> quoted line\nown words', '> quoted — own hedge', '> only quote', '```\nonly fence\n```', 'unclosed ``` fence\nx',

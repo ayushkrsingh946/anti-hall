@@ -114,7 +114,7 @@ test('ALLOW: 3 doc/.md edits are NOT substantial code', () => {
 // (companion/lib/identity.js resolveContext) is excluded, when payload.cwd
 // resolves to a real worktree.
 // ---------------------------------------------------------------------------
-const { ownScratchpadDirs } = require('../../plugins/anti-hall/hooks/lib/scratchpad.js');
+const { ownScratchpadDirs } = require('../../plugins/anti-hall-node/hooks/lib/scratchpad.js');
 
 // writeTranscriptAt(tp, messages) -> writes a JSONL transcript at an EXACT
 // path (unlike fixtures.writeTranscript, which always uses <home>/transcript.jsonl),
@@ -315,7 +315,7 @@ test('FAIL-OPEN: malformed JSON -> no block', () => {
 test('ALLOW: 3 code edits, no Codex review, but Codex is usage-limited (live quota record)', () => {
   const h = makeHome();
   try {
-    require('../../plugins/anti-hall/hooks/lib/codex-quota.js').recordQuota({
+    require('../../plugins/anti-hall-node/hooks/lib/codex-quota.js').recordQuota({
       until: Date.now() + 3600e3, reason: 'usage limit', home: h.home,
     });
     const tp = h.writeTranscript([toolUseMessage([edit('/x/a.ts'), edit('/x/b.ts'), edit('/x/c.py')])]);

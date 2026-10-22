@@ -38,10 +38,10 @@ const os = require('node:os');
 const path = require('node:path');
 const cp = require('node:child_process');
 
-const REPAIR = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'hooks', 'lib', 'doctor-repair.js');
-const INGEST = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'devswarm-ingest.js');
-const HEALTH = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'lib', 'ingest-health.js');
-const REPOKEY = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'lib', 'devswarm-repokey.js');
+const REPAIR = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'hooks', 'lib', 'doctor-repair.js');
+const INGEST = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'devswarm-ingest.js');
+const HEALTH = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'lib', 'ingest-health.js');
+const REPOKEY = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'lib', 'devswarm-repokey.js');
 
 const repair = require(REPAIR);
 const ingest = require(INGEST);
@@ -175,7 +175,7 @@ test('projectDaemonHealthy: alive + heartbeating + same incarnation, but monitor
 // ---------------------------------------------------------------------------
 
 function writeLegacyUnit(home, platform, workdir, script) {
-  const installer = require(path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'install-devswarm-ingest.js'));
+  const installer = require(path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'install-devswarm-ingest.js'));
   if (platform === 'darwin') {
     const dir = path.join(home, 'Library', 'LaunchAgents');
     fs.mkdirSync(dir, { recursive: true });

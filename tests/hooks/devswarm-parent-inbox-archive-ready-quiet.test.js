@@ -23,10 +23,10 @@ const path = require('node:path');
 const cp = require('node:child_process');
 const { testHook } = require('../helpers/spawn-hook.js');
 const { makeHome } = require('../helpers/fixtures.js');
-const installIngest = require('../../plugins/anti-hall/companion/install-devswarm-ingest.js');
-const repokey = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
-const { sessionsDirFor } = require('../../plugins/anti-hall/companion/lib/liveness.js');
-const { ignoreFilePath } = require('../../plugins/anti-hall/companion/lib/devswarm-ignore.js');
+const installIngest = require('../../plugins/anti-hall-node/companion/install-devswarm-ingest.js');
+const repokey = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
+const { sessionsDirFor } = require('../../plugins/anti-hall-node/companion/lib/liveness.js');
+const { ignoreFilePath } = require('../../plugins/anti-hall-node/companion/lib/devswarm-ignore.js');
 
 const HOOK = 'devswarm-parent-inbox.js';
 const PRIMARY_ENV = { DEVSWARM_REPO_ID: 'repo-1' };

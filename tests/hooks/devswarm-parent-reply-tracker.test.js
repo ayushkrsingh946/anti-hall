@@ -21,9 +21,9 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const { testHookRaw, postToolUseBashPayload } = require('../helpers/spawn-hook.js');
 const { makeHome } = require('../helpers/fixtures.js');
-const { readReplyState } = require('../../plugins/anti-hall/companion/lib/devswarm-reply-state.js');
-const repokey = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
-const store = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
+const { readReplyState } = require('../../plugins/anti-hall-node/companion/lib/devswarm-reply-state.js');
+const repokey = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
+const store = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -242,7 +242,7 @@ test('a genuine send split across multiple lines (variable-then-invocation shell
   const h = makeHome();
   try {
     const command = [
-      'CLI="$HOME/.claude/plugins/anti-hall/scripts/devswarm.js"',
+      'CLI="$HOME/.claude/plugins/anti-hall-node/scripts/devswarm.js"',
       'node "$CLI" send --to child-1 --question --message "do X"',
     ].join('\n');
     const payload = postToolUseBashPayload(command, { stdout: sendResponse(), sessionId: 'sess-multiline' });

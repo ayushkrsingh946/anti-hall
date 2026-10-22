@@ -1,5 +1,5 @@
 'use strict';
-// proves: plugins/anti-hall/scripts/devswarm.js#appendIntoPartition — busy/gone/ok outcomes, retry, and the archived-forward race below.
+// proves: plugins/anti-hall-node/scripts/devswarm.js#appendIntoPartition — busy/gone/ok outcomes, retry, and the archived-forward race below.
 // appendIntoPartition — THE one door for moving rows into another partition
 // (fold forward, archived forward). Review round 4:
 //   P0  forwardArchivedOrphanUnread appended into the survivor with no lock and

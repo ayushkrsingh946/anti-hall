@@ -62,10 +62,10 @@ const os = require('node:os');
 const path = require('node:path');
 const cp = require('node:child_process');
 
-const cli = require('../../plugins/anti-hall/scripts/devswarm.js');
-const storeLib = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
-const repokey = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
-const wakeLib = require('../../plugins/anti-hall/hooks/lib/devswarm-wake.js');
+const cli = require('../../plugins/anti-hall-node/scripts/devswarm.js');
+const storeLib = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
+const repokey = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
+const wakeLib = require('../../plugins/anti-hall-node/hooks/lib/devswarm-wake.js');
 
 function tmpHome() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'anti-hall-count-read-mesh-union-'));

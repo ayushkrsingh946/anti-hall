@@ -65,7 +65,7 @@ function mdViolations(files) {
 }
 
 test('every hook / CLI instruction naming read-primary also names the ack step', () => {
-  const files = tracked('plugins/anti-hall/hooks/', '.js').concat(devswarmSource.sourceFiles().map((f) => path.relative(REPO, f)));
+  const files = tracked('plugins/anti-hall-node/hooks/', '.js').concat(devswarmSource.sourceFiles().map((f) => path.relative(REPO, f)));
   const v = jsViolations(files);
   assert.deepStrictEqual(v, [], 'read-primary without its ack step:\n' + v.join('\n'));
 });

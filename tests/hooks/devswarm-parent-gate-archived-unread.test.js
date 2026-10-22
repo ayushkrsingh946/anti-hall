@@ -20,7 +20,7 @@ const path = require('node:path');
 const cp = require('node:child_process');
 const { testHookRaw } = require('../helpers/spawn-hook.js');
 const { makeHome } = require('../helpers/fixtures.js');
-const liveness = require('../../plugins/anti-hall/companion/lib/liveness.js');
+const liveness = require('../../plugins/anti-hall-node/companion/lib/liveness.js');
 
 const HOOK = 'devswarm-parent-gate.js';
 const PRIMARY_ENV = { DEVSWARM_REPO_ID: 'repo-1' };

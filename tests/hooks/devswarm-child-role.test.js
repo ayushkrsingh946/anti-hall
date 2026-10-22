@@ -12,7 +12,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { testHook, testHookRaw } = require('../helpers/spawn-hook.js');
 const { makeHome } = require('../helpers/fixtures.js');
-const { WAKE_CRON_DEFAULT } = require('../../plugins/anti-hall/hooks/lib/devswarm-wake.js');
+const { WAKE_CRON_DEFAULT } = require('../../plugins/anti-hall-node/hooks/lib/devswarm-wake.js');
 
 const HOOK = 'devswarm-child-role.js';
 // Stable substring surviving the v0.58 hook-text sweep (the OLD marker,

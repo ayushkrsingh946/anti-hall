@@ -21,10 +21,10 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const M = require(path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'devswarm-supervisor.js'));
-const { primaryWorkspaceId } = require(path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'install-devswarm-ingest.js'));
-const dsd = require(path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'lib', 'doctor-devswarm.js'));
-const { livenessPathFor } = require(path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'lib', 'liveness.js'));
+const M = require(path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'devswarm-supervisor.js'));
+const { primaryWorkspaceId } = require(path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'install-devswarm-ingest.js'));
+const dsd = require(path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'lib', 'doctor-devswarm.js'));
+const { livenessPathFor } = require(path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'lib', 'liveness.js'));
 
 const UUID = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
 

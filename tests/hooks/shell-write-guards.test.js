@@ -16,8 +16,8 @@ const childProcess = require('node:child_process');
 const { testHook } = require('../helpers/spawn-hook.js');
 const { makeHome } = require('../helpers/fixtures.js');
 
-const sw = require('../../plugins/anti-hall/hooks/lib/shell-writes.js');
-const { classifyBashWork } = require('../../plugins/anti-hall/hooks/command-guard.js');
+const sw = require('../../plugins/anti-hall-node/hooks/lib/shell-writes.js');
+const { classifyBashWork } = require('../../plugins/anti-hall-node/hooks/command-guard.js');
 
 const FAKE_PY = 'import os\nprint(os.getcwdz())\n';
 const REAL_PY = 'import os\nprint(os.getcwd())\n';

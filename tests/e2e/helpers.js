@@ -20,7 +20,7 @@ const path = require('node:path');
 const { after } = require('node:test');
 
 const REPO_ROOT = path.join(__dirname, '..', '..');
-const CLI = path.join(REPO_ROOT, 'plugins', 'anti-hall', 'scripts', 'devswarm.js');
+const CLI = path.join(REPO_ROOT, 'plugins', 'anti-hall-node', 'scripts', 'devswarm.js');
 
 // Safety-net sweep: track every makeHome() dir and remove anything still
 // standing when the test file finishes, in case a caller's finally-block

@@ -31,9 +31,9 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const ingest = require('../../plugins/anti-hall/companion/devswarm-ingest.js');
-const installer = require('../../plugins/anti-hall/companion/install-devswarm-ingest.js');
-const repokey = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
+const ingest = require('../../plugins/anti-hall-node/companion/devswarm-ingest.js');
+const installer = require('../../plugins/anti-hall-node/companion/install-devswarm-ingest.js');
+const repokey = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
 
 function tmpHome() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'anti-hall-hc-'));

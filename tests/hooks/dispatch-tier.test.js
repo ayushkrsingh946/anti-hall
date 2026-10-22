@@ -15,12 +15,12 @@ const path = require('node:path');
 const { testHook } = require('../helpers/spawn-hook.js');
 const { makeHome } = require('../helpers/fixtures.js');
 const { buildIdentityFixtures } = require('../helpers/git-fixtures.js');
-const dispatchTier = require('../../plugins/anti-hall/hooks/lib/dispatch-tier.js');
+const dispatchTier = require('../../plugins/anti-hall-node/hooks/lib/dispatch-tier.js');
 
 const TRACKER = 'task-tracker.js';
 const HOOK = 'dispatch-tier.js';
 const NO_DEDUPE = { ANTIHALL_EMIT_DEDUPE: '0' };
-const JEV = require('../../plugins/anti-hall/hooks/lib/jev-assist.js');
+const JEV = require('../../plugins/anti-hall-node/hooks/lib/jev-assist.js');
 
 const iso = (minsAgo) => new Date(Date.now() - minsAgo * 60 * 1000).toISOString();
 function taskCreate(tu, subject, ts) {

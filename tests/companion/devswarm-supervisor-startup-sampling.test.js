@@ -14,7 +14,7 @@ const path = require('node:path');
 const LOG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'antihall-startupsamp-sweep-log-'));
 process.env.ANTI_HALL_LOG_DIR = LOG_DIR;
 
-const M = require(path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'devswarm-supervisor.js'));
+const M = require(path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'devswarm-supervisor.js'));
 
 function makeHome() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'antihall-startupsamp-sweep-'));

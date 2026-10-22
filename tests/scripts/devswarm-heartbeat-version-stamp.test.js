@@ -16,7 +16,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const DEVSWARM_PATH = path.join(__dirname, '../../plugins/anti-hall/scripts/devswarm.js');
+const DEVSWARM_PATH = path.join(__dirname, '../../plugins/anti-hall-node/scripts/devswarm.js');
 const cli = require(DEVSWARM_PATH);
 const PLUGIN_ROOT = path.join(__dirname, '../../plugins/anti-hall');
 const REAL_VERSION = JSON.parse(fs.readFileSync(path.join(PLUGIN_ROOT, '.claude-plugin', 'plugin.json'), 'utf8')).version;

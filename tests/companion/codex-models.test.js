@@ -29,7 +29,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const { resolveCodexModel } = require('../../plugins/anti-hall/companion/lib/codex-models.js');
+const { resolveCodexModel } = require('../../plugins/anti-hall-node/companion/lib/codex-models.js');
 
 function mkCache(models) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-models-'));

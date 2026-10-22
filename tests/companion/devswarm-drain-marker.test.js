@@ -9,7 +9,7 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
 const { makeHome } = require('../helpers/fixtures.js');
-const drainMarker = require('../../plugins/anti-hall/companion/lib/devswarm-drain-marker.js');
+const drainMarker = require('../../plugins/anti-hall-node/companion/lib/devswarm-drain-marker.js');
 
 const ID = 'primary-abc123';
 

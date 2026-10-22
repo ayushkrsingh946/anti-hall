@@ -7,7 +7,7 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert');
-const { scanTranscript } = require('../../plugins/anti-hall/hooks/lib/agent-scan.js');
+const { scanTranscript } = require('../../plugins/anti-hall-node/hooks/lib/agent-scan.js');
 
 const ID = 'bbbb111122223333c';
 const T = (min) => new Date(Date.UTC(2026, 9, 3, 12, min, 0)).toISOString();

@@ -17,9 +17,9 @@ const os = require('node:os');
 const path = require('node:path');
 const cp = require('node:child_process');
 
-const cli = require('../../plugins/anti-hall/scripts/devswarm.js');
+const cli = require('../../plugins/anti-hall-node/scripts/devswarm.js');
 
-const CLI_PATH = require.resolve('../../plugins/anti-hall/scripts/devswarm.js');
+const CLI_PATH = require.resolve('../../plugins/anti-hall-node/scripts/devswarm.js');
 
 function tmpHome() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'anti-hall-inbox-tick-quiet-'));

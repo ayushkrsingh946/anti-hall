@@ -22,11 +22,11 @@ const os = require('node:os');
 const path = require('node:path');
 const cp = require('node:child_process');
 
-const ingest = require('../../plugins/anti-hall/companion/devswarm-ingest.js');
-const storeLib = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
-const installIngest = require('../../plugins/anti-hall/companion/install-devswarm-ingest.js');
-const repokey = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
-const cli = require('../../plugins/anti-hall/scripts/devswarm.js');
+const ingest = require('../../plugins/anti-hall-node/companion/devswarm-ingest.js');
+const storeLib = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
+const installIngest = require('../../plugins/anti-hall-node/companion/install-devswarm-ingest.js');
+const repokey = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
+const cli = require('../../plugins/anti-hall-node/scripts/devswarm.js');
 
 function tmpHome() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'anti-hall-ingest-mesh-'));

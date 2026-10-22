@@ -91,7 +91,7 @@ test('compact-declaration-guard: Codex rollout shape (Bash) -> stderr carries th
 // ------------------------------------------------------------ lib/emit-block
 test('emitBlock: stdout JSON, identical stderr reason, exit 2', () => {
   const { spawnSync } = require('node:child_process');
-  const lib = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'hooks', 'lib', 'emit-block.js');
+  const lib = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'hooks', 'lib', 'emit-block.js');
   const r = spawnSync(process.execPath, ['-e', `require(${JSON.stringify(lib)}).emitBlock('no: because')`], { encoding: 'utf8' });
   assert.strictEqual(r.status, 2);
   assert.deepStrictEqual(JSON.parse(r.stdout), { decision: 'block', reason: 'no: because' });

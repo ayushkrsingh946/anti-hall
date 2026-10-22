@@ -13,7 +13,7 @@ const os = require('node:os');
 const path = require('node:path');
 const cp = require('node:child_process');
 
-const LOCK_JS = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'lib', 'lock.js');
+const LOCK_JS = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'lib', 'lock.js');
 const L = require(LOCK_JS);
 
 function tmp() {

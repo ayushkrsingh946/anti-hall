@@ -17,7 +17,7 @@ const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
 
-const repokey = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
+const repokey = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
 const { gitCommonDirNoSpawn, repoKeyForWorktreeFast, sanitizeRepoName, resolveWorktreeNoSpawn } = repokey;
 
 function mkTmp(prefix) {
