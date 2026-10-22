@@ -128,7 +128,10 @@ fn scripted_checks_stay_inside_the_latency_budget() {
     let mut over = Vec::new();
     let mut seq = 0;
     let mut measured = 0;
-    for c in ah_engine::checks::registry().iter().filter(|c| c.scripted()) {
+    // AH_LATENCY_ONLY=<check>: measure that check only; AH_LATENCY_PASSES=<n>: passes over its corpus (default 20), for a profiler to attach
+    let only = std::env::var("AH_LATENCY_ONLY").ok();
+    let passes = std::env::var("AH_LATENCY_PASSES").ok().and_then(|v| v.parse::<usize>().ok()).unwrap_or(20);
+    for c in ah_engine::checks::registry().iter().filter(|c| c.scripted() && only.as_deref().is_none_or(|o| o == c.name())) {
         let text = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("tests/golden/{}.jsonl", c.name()))).ok();
         let Some(text) = text else { continue }; // a check whose parity is the Node runner's (no golden corpus)
         let laid: Vec<Laid> = text
@@ -144,14 +147,16 @@ fn scripted_checks_stay_inside_the_latency_budget() {
         let _ = ah_engine::script::run_forced(c.name(), &first.payload, &first.opts, &first.event, &first.env);
         let cold = t0.elapsed().as_micros();
         let mut us: Vec<u128> = Vec::new();
+        let mut by_case: Vec<(u128, usize)> = Vec::new(); // (microseconds, corpus line) of every call, for AH_LATENCY_TOP
         // twenty passes over the corpus, or as many as fit in the time cap (a corpus whose calls wait on a child process or sleep,
         // such as the MCP reaper's grace period, is measured on fewer passes: one pass is always taken)
         let started = std::time::Instant::now();
-        for _ in 0..20 {
-            for l in &laid {
+        for _ in 0..passes {
+            for (i, l) in laid.iter().enumerate() {
                 let t = std::time::Instant::now();
                 let _ = ah_engine::script::run_forced(c.name(), &l.payload, &l.opts, &l.event, &l.env);
                 us.push(t.elapsed().as_micros());
+                by_case.push((*us.last().unwrap_or(&0), i));
             }
             if started.elapsed() > std::time::Duration::from_secs(10) {
                 break;
@@ -161,6 +166,23 @@ fn scripted_checks_stay_inside_the_latency_budget() {
         // ~390,000 there, and a Python probe that lists the temp dir took tens of seconds)
         for l in &laid {
             ah_engine::discard::harmless(std::fs::remove_dir_all(&l.home)); // keep: cleanup of a scratch directory
+        }
+        // AH_LATENCY_TOP=<n>: the n slowest calls of each check, with the golden case they ran (the profile of a p95 miss)
+        if let Some(n) = std::env::var("AH_LATENCY_TOP").ok().and_then(|v| v.parse::<usize>().ok()) {
+            let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
+            by_case.sort_unstable_by(|a, b| b.0.cmp(&a.0));
+            let mut seen = std::collections::BTreeMap::<usize, (u128, usize)>::new();
+            for (t, i) in &by_case {
+                let e = seen.entry(*i).or_insert((0, 0));
+                e.0 += t;
+                e.1 += 1;
+            }
+            let mut mean: Vec<(usize, u128)> = seen.into_iter().map(|(i, (t, k))| (i, t / k as u128)).collect();
+            mean.sort_unstable_by(|a, b| b.1.cmp(&a.1));
+            for (i, t) in mean.iter().take(n) {
+                let v: Value = serde_json::from_str(lines[*i]).unwrap_or(Value::Null);
+                println!("  SLOW {:<24} case {i:>4} mean={t:>6}us n={} payload={}", c.name(), v.get("n").unwrap_or(&Value::Null), v.get("payload").map(|p| p.to_string().chars().take(160).collect::<String>()).unwrap_or_default());
+            }
         }
         us.sort_unstable();
         let (p50, p95, p99) = (us[us.len() / 2], us[us.len() * 95 / 100], us[us.len() * 99 / 100]);

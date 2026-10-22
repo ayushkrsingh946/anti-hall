@@ -4,7 +4,7 @@
 //! A review is due for a shadow integration when it has been in shadow for `jev.reviewAfterDays`, has logged at least
 //! `jev.reviewMinDecisions` decisions, is not snoozed and was not reviewed within the last `jev.reviewAfterDays`. Every number,
 //! name and text is in `operator_cli.toml`.
-use super::{Ctx, SetupError, base_dir, jev_json_path, key, parse_json, read_object, resolve_settings, write_json_atomic};
+use super::{Ctx, SetupError, base_dir, jev_json_path, key, parse_json, read_object, resolve_settings, write_json_atomic_if_changed};
 use crate::checks::jsport::date::{self, Parsed};
 use crate::checks::jsport::json::{J, stringify};
 use crate::checks::jsport::num::to_js_string;
@@ -138,7 +138,9 @@ impl State {
         }
     }
 
-    /// Best effort, as in Node: a failure is said on stderr and the verb goes on.
+    /// Best effort, as in Node: a failure is said on stderr and the verb goes on. A state that serialises to the bytes already on
+    /// disk is not written again: the SessionStart check calls this on every start, and an atomic write is a full disk sync
+    /// (the write was the whole cost of that check, measured 2026-10-22: ~5 ms of a ~5 ms p95), for a file that would not change.
     fn write(&self) {
         let result = (|| -> Result<(), SetupError> {
             if let Some(dir) = self.path.parent() {
@@ -148,7 +150,7 @@ impl State {
             if let Some(a) = &self.array_integrations {
                 set(&mut top, k("integrations"), a.clone());
             }
-            write_json_atomic(&self.path, J::Obj(top))
+            write_json_atomic_if_changed(&self.path, J::Obj(top))
         })();
         if let Err(e) = result {
             warn(&defaults::render("opcli.review_write_failed", &[("error", &e)]));
@@ -512,4 +514,49 @@ pub(super) fn cmd_snooze(cx: &mut Ctx, positional: &[String], days: Option<&str>
     }
     state.write();
     out(&defaults::render("opcli.snooze_ok", &[("id", id), ("until", &stamp)]))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::MetadataExt;
+
+    fn home(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("ah-review-{tag}-{}", std::process::id()));
+        crate::discard::harmless(std::fs::remove_dir_all(&d)); // keep: a scratch dir that may not exist yet
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    /// #247: the SessionStart check recomputes the review state on every start; with nothing changed it must not rewrite (and fully
+    /// sync) the state file. An atomic write replaces the file, so an unchanged inode is an untouched file.
+    #[test]
+    fn an_unchanged_review_state_is_not_written_again() {
+        let h = home("same");
+        // Jev on (the integrations then have a mode, shadow by default): only then is there a review state to keep
+        std::fs::create_dir_all(base_dir(&h)).unwrap();
+        std::fs::write(base_dir(&h).join("settings.json"), r#"{"jev":{"enabled":true}}"#).unwrap();
+        let env = crate::jev::settings::Env::from_pairs([("HOME", h.to_string_lossy().to_string())]);
+        let first = hook_review_due(&h, &env, 7.0, 30.0).unwrap();
+        let state = base_dir(&h).join(defaults::text("opcli.review_state_file"));
+        let before = std::fs::metadata(&state).unwrap_or_else(|e| panic!("the first call writes the state ({first:?}): {e}"));
+        let bytes = std::fs::read(&state).unwrap();
+        for _ in 0..3 {
+            hook_review_due(&h, &env, 7.0, 30.0).unwrap();
+        }
+        let after = std::fs::metadata(&state).unwrap();
+        assert_eq!((before.ino(), before.mtime_nsec()), (after.ino(), after.mtime_nsec()), "the state file was rewritten with the same content");
+        assert_eq!(bytes, std::fs::read(&state).unwrap());
+    }
+
+    #[test]
+    fn a_changed_review_state_is_still_written() {
+        let h = home("changed");
+        let state = base_dir(&h).join(defaults::text("opcli.review_state_file"));
+        std::fs::create_dir_all(state.parent().unwrap()).unwrap();
+        write_json_atomic_if_changed(&state, J::Obj(vec![("a".into(), J::Bool(true))])).unwrap();
+        let first = std::fs::read(&state).unwrap();
+        write_json_atomic_if_changed(&state, J::Obj(vec![("a".into(), J::Bool(false))])).unwrap();
+        assert_ne!(first, std::fs::read(&state).unwrap());
+    }
 }

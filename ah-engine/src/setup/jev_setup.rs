@@ -222,6 +222,17 @@ fn write_json_atomic(file: &Path, value: J) -> Result<(), SetupError> {
     crate::atomic::write(file, body).map_err(|e| SetupError::Io { what: what("setup.what_write", &file.display()), source: e })
 }
 
+/// [`write_json_atomic`], except that a file which already holds exactly the bytes to write is left alone (no temporary file, no
+/// disk sync, same inode and modification time).
+fn write_json_atomic_if_changed(file: &Path, value: J) -> Result<(), SetupError> {
+    let mut body = pretty(&normalised(value));
+    body.push('\n');
+    if std::fs::read(file).is_ok_and(|on_disk| on_disk == body.as_bytes()) {
+        return Ok(());
+    }
+    crate::atomic::write(file, body).map_err(|e| SetupError::Io { what: what("setup.what_write", &file.display()), source: e })
+}
+
 /// `writeJevJsonMerged`: read-modify-write of the legacy `jev.json`, atomic, keeping every field the mutator leaves.
 fn write_jev_json(home: &Path, mutate: impl FnOnce(&mut Vec<(String, J)>)) -> Result<(), SetupError> {
     let path = jev_json_path(home);
