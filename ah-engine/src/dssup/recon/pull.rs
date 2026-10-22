@@ -148,9 +148,9 @@ pub fn stage(ctx: &Ctx, id: &str, cwd: &str, at: &dyn Fn(&str)) -> Stage {
             release(held);
             node("wal-blocked")
         }
-        pull::Fresh::CountFailed => {
+        pull::Fresh::CountFailed(detail) => {
             release(held);
-            node("count-failed")
+            Stage::Node(defaults::render("devswarm_recon.why_count_failed", &[("detail", &detail)]))
         }
         pull::Fresh::Empty => ready(held, result(0.0, 0, 0)),
         pull::Fresh::Read { native, ok, entry, wal_error, raw } => {
