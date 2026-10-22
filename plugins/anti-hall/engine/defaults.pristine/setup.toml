@@ -567,7 +567,7 @@ value = "Jev key file rejected ({why}): it must be a regular file under ~/.confi
 
 [setup.msg_migration_notice]
 doc = "A legacy Jev key exists on the machine but is not read."
-value = "a legacy Jev key file/env var exists but anti-hall no longer reads credentials from this machine: re-enter your key in the plugin's options screen (anti-hall -> jev_api_key), or enable jev.allowLegacyKeyRead to keep using the existing key."
+value = "a legacy Jev key file exists but anti-hall no longer reads credentials from this machine: re-enter your key in the plugin's options screen (anti-hall -> jev_api_key), or enable jev.allowLegacyKeyRead to keep using the existing key."
 
 [setup.diag_generic_bound]
 doc = "Why a present vendor-less key was not used. Placeholders: bound, vendor, option."

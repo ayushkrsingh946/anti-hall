@@ -728,7 +728,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `request_env.line_prefix` | `E ` |  |  | Prefix of the request line that carries the forwarded environment as one JSON object. |
 | `request_env.max_bytes` | `65536` |  | bytes | Largest forwarded environment (sum of names and values); a client whose allowed variables exceed it forwards none of them and the request is marked incomplete, so every check defers to the Node guard (a missing or empty HOME marks it incomplete too). |
 | `request_env.peer_pid_key` | `AH_ENGINE_REQUEST_PEER_PID` |  |  | The name under which a daemon request's sender pid (its socket peer; 0 when the socket did not say) reaches the checks. Not on the allowlist, so no client can set it; host functions that walk the process ancestry (the DevSwarm reader nonce) start there. Absent in a one-shot `ah-engine check`, which starts at itself. |
-| `request_env.presence_only` | `AI_GATEWAY_API_KEY, TYPESAFE_API_KEY, ANTHROPIC_API_KEY` |  |  | Environment variables whose PRESENCE the checks need but whose value they must never see (a secret): the client forwards the presence text when one is set and non-empty, nothing otherwise, and the value never leaves the client. These are the legacy API-key variables the session-start key notice looks for (credentials.js legacyKeyPresent). |
+| `request_env.presence_only` | `ANTHROPIC_API_KEY` |  |  | Environment variables whose PRESENCE the checks need but whose value they must never see (a secret): the client forwards the presence text when one is set and non-empty, nothing otherwise, and the value never leaves the client. These are the legacy API-key variables the session-start key notice looks for (credentials.js legacyKeyPresent). |
 | `request_env.presence_text` | `1` |  |  | The value a presence-only variable carries on the wire. |
 
 ### engine.toml / rollback
@@ -2041,8 +2041,6 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `env.jev_key_generic` | `CLAUDE_PLUGIN_OPTION_JEV_API_KEY` |  |  | The legacy vendor-less key option, used only for the vendor it is bound to (Node: CLAUDE_PLUGIN_OPTION_JEV_API_KEY). |
 | `env.jev_key_typesafe` | `CLAUDE_PLUGIN_OPTION_JEV_TYPESAFE_API_KEY` |  |  | The key stored in the plugin's options screen for the TypeSafe vendor; it is only ever sent to TypeSafe (Node: CLAUDE_PLUGIN_OPTION_JEV_TYPESAFE_API_KEY). |
 | `env.jev_key_vercel` | `CLAUDE_PLUGIN_OPTION_JEV_VERCEL_API_KEY` |  |  | The key stored in the plugin's options screen for the Vercel vendor; it is only ever sent to Vercel (Node: CLAUDE_PLUGIN_OPTION_JEV_VERCEL_API_KEY). |
-| `env.jev_legacy_key_typesafe` | `TYPESAFE_API_KEY` |  |  | Legacy TypeSafe key variable, read only when the jev.allowLegacyKeyRead setting is on (Node: TYPESAFE_API_KEY). |
-| `env.jev_legacy_key_vercel` | `AI_GATEWAY_API_KEY` |  |  | Legacy Vercel key variable, read only when the jev.allowLegacyKeyRead setting is on (Node: AI_GATEWAY_API_KEY). |
 | `env.jev_option_prefix` | `CLAUDE_PLUGIN_OPTION_` |  |  | Prefix Claude Code gives the plugin options it exports to hook processes; the option name in upper case is appended. |
 | `env.jev_test_endpoint` | `ANTIHALL_JEV_TEST_ENDPOINT` |  |  | Test-only endpoint override for the primary transport; honoured only for a loopback host, so a key can never be sent elsewhere (Node: ANTIHALL_JEV_TEST_ENDPOINT). |
 | `env.jev_test_endpoint_typesafe` | `ANTIHALL_JEV_TEST_ENDPOINT_TYPESAFE` |  |  | Test-only endpoint override for the TypeSafe transport, loopback only (Node: ANTIHALL_JEV_TEST_ENDPOINT_TYPESAFE). |
@@ -5367,7 +5365,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `setup.msg_generic_bound` | `generic key (jev_api_key / jev.keyFile) bound to: {vendor} (change only with ...` |  |  | A status line naming the vendor the generic key is bound to. Placeholder: vendor. |
 | `setup.msg_git_reader_panicked` | `warning: reading git's answer failed; the file has no last-commit time` |  |  | The thread that reads git's answer ended abnormally, so the file has no last-commit time. |
 | `setup.msg_lock_not_released` | `warning: the settings lock had changed hands and was left in place` |  |  | The settings lock was not ours any more when it was released, and was left alone. |
-| `setup.msg_migration_notice` | `a legacy Jev key file/env var exists but anti-hall no longer reads credential...` |  |  | A legacy Jev key exists on the machine but is not read. |
+| `setup.msg_migration_notice` | `a legacy Jev key file exists but anti-hall no longer reads credentials from t...` |  |  | A legacy Jev key exists on the machine but is not read. |
 | `setup.msg_mode_usage` | `mode: usage is `mode <integration> on\|shadow\|off`` |  |  | Why `mode` refused: a missing integration or a mode that is not on, shadow or off. |
 | `setup.msg_must_be_one_of` | `must be one of: {values}` |  |  | Why a settings write was refused: the value is not an allowed word. Placeholder: values. |
 | `setup.msg_no_home` | `the home directory is not set` |  |  | Printed by the helper commands when the home directory variable is not set, because their files live under it. |
