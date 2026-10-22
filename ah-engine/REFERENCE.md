@@ -4288,7 +4288,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `roles.guard_name` | `engine-role-guard` |  |  | The guard id the role guard answers to in skip.json and in its messages. |
 | `roles.line_max` | `140` |  |  | Longest one-line description of a verb or guard in a skill, in characters (longer ones are cut at a word with an ellipsis; the generated reference has the full text). |
 | `roles.main_skill` | `3 entries` |  |  | The main skill: its name, its description (when to load it) and its intro line. |
-| `roles.matrix` | `53 entries` |  |  | Per engine verb: its feature area (`group`, a key of roles.groups), the roles that may run it (`roles`), the roles limited to acting on themselves (`self_only`: a --id or --workspace naming another workspace is refused) and the arguments that make a run owner-level (`owner_args`: with one of them only the roles in `owner_roles` may run it). Every implemented command has a row; a test fails otherwise. Owner-level work (settings changes, restore, stop, go-live and rollback, reaper kill, update, DevSwarm archive, delete, recover and merge) is main (and the Codex main seat) only. |
+| `roles.matrix` | `54 entries` |  |  | Per engine verb: its feature area (`group`, a key of roles.groups), the roles that may run it (`roles`), the roles limited to acting on themselves (`self_only`: a --id or --workspace naming another workspace is refused) and the arguments that make a run owner-level (`owner_args`: with one of them only the roles in `owner_roles` may run it). Every implemented command has a row; a test fails otherwise. Owner-level work (settings changes, restore, stop, go-live and rollback, reaper kill, update, DevSwarm archive, delete, recover and merge) is main (and the Codex main seat) only. |
 | `roles.msg_none` | `none` |  |  | The verb list in the note when the role may run none. |
 | `roles.msg_note` | `anti-hall engine: you are {what} (role: {role}). Engine verbs you may run: {v...` |  |  | The role note injected at SessionStart / SubagentStart. Placeholders: {role}, {what}, {verbs}, {more}, {skill}. |
 | `roles.msg_note_more` | ` (+{n} more, see the guide)` |  |  | Added to the note when the verb list was shortened. Placeholder: {n}. |
@@ -8629,6 +8629,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_cli.msg_reap_applied` | `unread rows were archived + verified under {dir} and each partition retired b...` |  |  | The note of a pass that acted; {dir} is the directory the archives go to. |
 | `devswarm_cli.msg_reap_automation` | `refusing to --apply with ANTIHALL_DEVSWARM_AUTOMATION=1 set: retiring a parti...` |  |  | The refusal of --apply in an automated context. |
 | `devswarm_cli.msg_reap_bad_max` | `--max must be a positive integer (got {got})` |  |  | The refusal of a bad --max; {got} is the value as JSON. |
+| `devswarm_cli.msg_reap_dry_run` | `DRY RUN — nothing was changed. To act, re-run with `--apply --max N` (N = the...` |  |  | The note of a listing that found candidates; {dir} is the directory the archives would go to. |
 | `devswarm_cli.msg_reap_max_required` | `--apply requires --max N (the maximum number of partitions this pass may reti...` |  |  | The refusal of --apply without --max. |
 | `devswarm_cli.msg_reap_no_project` | `reap-orphans must run inside a git worktree (the mesh store is per-project)` |  |  | The refusal outside a git worktree. |
 | `devswarm_cli.msg_reap_non_interactive` | `refusing to --apply from a non-interactive stdin (cron/pipeline/subagent shap...` |  |  | The refusal of --apply from a non-interactive shell. |
@@ -8730,17 +8731,25 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_cli.ready_v_block` | `block` |  |  | The verdict with a proven risk. |
 | `devswarm_cli.ready_v_ok` | `ok` |  |  | The verdict with no reason. |
 | `devswarm_cli.ready_v_review` | `review` |  |  | The verdict with only unproven reasons. |
+| `devswarm_cli.reap_archive_suffix` | `.ndjson` |  |  | The suffix of a partition's archive file under the reap directory. |
 | `devswarm_cli.reap_automation_env` | `ANTIHALL_DEVSWARM_AUTOMATION` |  |  | The environment variable a supervisor, cron or hook context sets; reap-orphans --apply refuses while it is set. |
 | `devswarm_cli.reap_automation_value` | `1` |  |  | The value of that variable that marks an automated context. |
 | `devswarm_cli.reap_dir` | `reaped` |  |  | The directory (under the DevSwarm root) where a reap archives the unread rows of a retired partition. |
 | `devswarm_cli.reap_idle_ms` | `900000` |  |  | How recent a worktree's last commit must be for reap-stale to spare the workspace (liveness.js DEFAULT_IDLE_MS, 15 minutes). |
+| `devswarm_cli.reap_log_gate` | `lockstep` |  |  | The `gate` a reap writes into the cursor journal. |
 | `devswarm_cli.reap_mode_apply` | `apply` |  |  | The `mode` of a reap-orphans pass that acted. |
 | `devswarm_cli.reap_mode_dry_run` | `dry-run` |  |  | The `mode` of a reap-orphans listing. |
 | `devswarm_cli.reap_reason_automation` | `automation-refused` |  |  | The `reason` of the refusal of --apply in an automated context. |
 | `devswarm_cli.reap_reason_bad_max` | `bad-max` |  |  | The `reason` of the refusal of a --max that is no positive integer. |
+| `devswarm_cli.reap_reason_error` | `error` |  |  | The `reason` of a partition whose reap failed with an error (the text goes in `error`). |
 | `devswarm_cli.reap_reason_max_required` | `max-required` |  |  | The `reason` of the refusal of --apply without --max. |
 | `devswarm_cli.reap_reason_no_project` | `no-project` |  |  | The `reason` of the refusal outside a git worktree. |
+| `devswarm_cli.reap_reason_no_unread` | `no-unread-rows` |  |  | The `reason` of a candidate that no longer holds an unread row. |
 | `devswarm_cli.reap_reason_non_interactive` | `non-interactive-refused` |  |  | The `reason` of the refusal of --apply from a non-interactive shell. |
+| `devswarm_cli.reap_reason_unparseable` | `archive-verify-unparseable` |  |  | The `reason` of a partition whose archive read back with a line that is not JSON (nothing is retired). |
+| `devswarm_cli.reap_reason_unread` | `unread-with-no-live-reader` |  |  | The `reason` every reap-orphans candidate carries. |
+| `devswarm_cli.reap_reason_verify_failed` | `archive-verify-failed` |  |  | The `reason` of a partition whose archive did not read back with the rows written (nothing is retired). |
+| `devswarm_cli.reap_row_keys` | `14 items` |  |  | The fields of an archived message row, in the order the store's listMessages returns them. |
 | `devswarm_cli.reap_skip_activity` | `recent-activity` |  |  | The reason reap-stale spares a workspace with a recent commit. |
 | `devswarm_cli.reap_skip_heartbeat` | `fresh-heartbeat` |  |  | The reason reap-stale spares a workspace with a fresh heartbeat. |
 | `devswarm_cli.reap_stale_states` | `stale, escalated` |  |  | The persisted verdict statuses that nominate a workspace for reaping. |
@@ -11036,6 +11045,7 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `jev_verdicts` | counter | decisions | id, verdict | What each Jev decision did, by integration and verdict: added or changed (an on-mode outcome moved), would-change (a shadow call that would have moved it), none (Jev agreed with the baseline) or no-answer (it failed or was skipped). |
 | `mesh_descriptor_read_skipped` | counter | reads | site, reason | Reads of a file named by a descriptor that were skipped because it is no regular file (a FIFO, socket or device) or is over the read cap, by site and reason. |
 | `mesh_own_sends_excluded` | counter | counts |  | Counts that left out unread rows the recipient's own identity family sent (an own send is not inbound mail). |
+| `mesh_pull_ts_fallback` | counter | batches |  | Pulled batches holding a message whose time is a form Date.parse accepts but the engine does not reproduce: its store row carries the import time instead (the message and its hash are intact). |
 | `mesh_ref_resolved` | counter | references | outcome | How a workspace reference given to a verb (send --to, archive, nudge, gate, ...) resolved, by outcome: exact, mesh, prefix, ambiguous, none. |
 | `mesh_sender_fallback` | counter | messages | where | Messages whose sender came from a fallback instead of the message's own branch, by where: ingest (a child's queue: the Primary), read (the NDJSON line's own sender, or the Primary for a NULL store row). |
 | `mesh_summary_owner_fallback` | counter | rows |  | Roster/summary rows counted from the shared floor because the workspace's partition has no live reader row (the base is the least-advanced live reader otherwise). |
