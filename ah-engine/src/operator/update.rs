@@ -664,6 +664,9 @@ fn heal_lines(st: &J, lines: &mut Vec<String>) {
     }
 }
 
+/// The human text, last line the JSON status: the per-stage detail (the reconcile rows are many) and the changelog first, then the
+/// head with the installed/latest/updated/action lines, then the JSON line. A caller that keeps only the tail (`| tail`) still
+/// gets the outcome and the action.
 fn render_human(rx: &Rx, status: &J, changelog: &str) -> String {
     let action = status.get("action").map(js_string).unwrap_or_default();
     let failed = rx.failed.is_match(&action);
@@ -682,12 +685,7 @@ fn render_human(rx: &Rx, status: &J, changelog: &str) -> String {
     } else {
         (t("update_human.icon_ok"), t("update_human.state_ok").to_string())
     };
-    let mut lines: Vec<String> = vec![defaults::render("update_human.head", &[("icon", &icon), ("state", &state)])];
-    lines.push(defaults::render("update_human.installed", &[("value", &shown("installed", t("update_human.unknown")))]));
-    lines.push(defaults::render("update_human.latest", &[("value", &shown("latest", t("update_human.unknown")))]));
-    let synced = if truthy(status.get("cacheSynced")) { t("update_human.cache_synced") } else { "" };
-    lines.push(defaults::render("update_human.updated", &[("value", &updated), ("synced", &synced)]));
-    lines.push(defaults::render("update_human.action", &[("value", &action)]));
+    let mut lines: Vec<String> = Vec::new();
     for row in defaults::raw("update_human.stage_lines").as_array().unwrap_or(&[]) {
         let Some(st) = status.get(row.str_field("key")).filter(|s| truthy(Some(s)) && truthy(s.get("attempted"))) else { continue };
         lines.push(format!("{}{}", row.str_field("prefix"), js_member(st, "detail")));
@@ -701,7 +699,15 @@ fn render_human(rx: &Rx, status: &J, changelog: &str) -> String {
         lines.push(String::new());
         lines.push(t("update_human.changelog_head").into());
         lines.push(changelog.to_string());
+        lines.push(String::new());
     }
+    lines.push(defaults::render("update_human.head", &[("icon", &icon), ("state", &state)]));
+    lines.push(defaults::render("update_human.installed", &[("value", &shown("installed", t("update_human.unknown")))]));
+    lines.push(defaults::render("update_human.latest", &[("value", &shown("latest", t("update_human.unknown")))]));
+    let synced = if truthy(status.get("cacheSynced")) { t("update_human.cache_synced") } else { "" };
+    lines.push(defaults::render("update_human.updated", &[("value", &updated), ("synced", &synced)]));
+    lines.push(defaults::render("update_human.action", &[("value", &action)]));
+    lines.push(stringify(status));
     lines.join("\n")
 }
 
@@ -731,7 +737,7 @@ fn go(p: &Parsed) -> Result<i32, String> {
     }
     if is_check {
         let status = run_check(&rx, &paths);
-        out(&format!("{}\n{}\n", stringify(&status), render_human(&rx, &status, "")))?;
+        out(&format!("{}\n", render_human(&rx, &status, "")))?;
         return Ok(0);
     }
     let core = run_core(&rx, &env, &home, &paths, post_pull_only);
@@ -740,7 +746,7 @@ fn go(p: &Parsed) -> Result<i32, String> {
         out(&format!("{}\n", stringify(&obj(vec![("status", status)]))))?;
         return Ok(0);
     }
-    out(&format!("{}\n{}\n", stringify(&status), render_human(&rx, &status, &core.changelog)))?;
+    out(&format!("{}\n", render_human(&rx, &status, &core.changelog)))?;
     Ok(i32::from(core.stop))
 }
 
@@ -769,4 +775,26 @@ mod tests {
         assert_eq!(version_from_installed_json(&rx, &r, &s).as_deref(), Some("0.300.2"), "none enabled -> the pin");
         std::fs::remove_dir_all(&dir).ok();
     }
+
+    /// SkyCrew 2026-10-22: ~70 reconcile rows printed AFTER the summary and the changelog, so `| tail` lost the outcome and the action.
+    /// The tail is the outcome: details, changelog, then the head and action, then the JSON status line last.
+    #[test]
+    fn the_outcome_and_the_action_print_after_the_stage_rows_and_the_json_is_last() {
+        let rx = Rx::new().unwrap();
+        let rows: Vec<String> = (0..70).map(|i| format!(r#"{{"id":"ws{i}","imported":0,"duplicate":0}}"#)).collect();
+        let raw = format!(
+            r#"{{"installed":"0.1.0","latest":"0.2.0","updated":true,"cacheSynced":true,"action":"reload now","reconcile":{{"attempted":true,"detail":"70 workspaces","results":[{}]}}}}"#,
+            rows.join(",")
+        );
+        let status = json::parse(&raw, 64).ok().unwrap();
+        let text = render_human(&rx, &status, "## 0.2.0\n- a thing");
+        let lines: Vec<&str> = text.lines().collect();
+        let at = |needle: &str| lines.iter().position(|l| l.contains(needle)).unwrap_or_else(|| panic!("no line with {needle:?}"));
+        assert!(at("ws69") < at("## 0.2.0"), "the reconcile rows come before the changelog");
+        assert!(at("## 0.2.0") < at("anti-hall · update"), "the changelog comes before the summary");
+        assert!(at("anti-hall · update") < at("reload now"), "the head precedes the action");
+        assert_eq!(lines.last().copied(), Some(stringify(&status).as_str()), "the JSON status line is last");
+        assert!(lines.len() - 1 - at("reload now") <= 1, "nothing but the JSON line follows the action");
+    }
 }
+
