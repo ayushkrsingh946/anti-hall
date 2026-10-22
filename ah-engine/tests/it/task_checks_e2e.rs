@@ -398,6 +398,32 @@ fn tasklist_guard_answers_a_quiet_stop_with_its_file_effects_and_answers_a_block
     assert!(out.contains("\"decision\":\"block\""), "the engine's answer is the block: {out}");
 }
 
+/// #242: a repository nested inside another one (not a submodule) is its own project: Node keeps the progress ledger in it and blocks three
+/// untracked edits there. The cheap root resolver leaves the nested case to the full one; an unclassified root must never read as
+/// "the progress file is fresh".
+#[test]
+fn tasklist_guard_blocks_in_a_repository_nested_inside_another_one() {
+    let w = World::new("tasklist-guard-nested");
+    let git = |dir: &std::path::Path| {
+        std::fs::create_dir_all(dir).unwrap();
+        let o = Command::new("git").arg("-C").arg(dir).args(["init", "-q", "-b", "main"]).output().unwrap();
+        assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    };
+    ah_engine::discard::harmless(std::fs::remove_dir_all(w.path("proj/.git"))); // the fixture's placeholder
+    git(&w.path("proj"));
+    git(&w.path("proj/inner"));
+    let cwd = std::fs::canonicalize(w.path("proj/inner")).unwrap();
+    let edit = |n: u32| serde_json::json!({"type": "assistant", "timestamp": "2026-10-06T08:00:00.000Z", "message": {"id": format!("m{n}"), "role": "assistant", "content": [{"type": "tool_use", "id": format!("t{n}"), "name": "Edit", "input": {"file_path": format!("/p/f{n}.js")}}]}});
+    // tasks are tracked (all done), so only a stale progress file can block: that is judged in the nested repository's own ledger
+    std::fs::write(w.path("t.jsonl"), format!("{}{}\n{}\n{}\n", task_lines("completed"), edit(1), edit(2), edit(3))).unwrap();
+    let payload = serde_json::json!({"hook_event_name": "Stop", "session_id": "s1", "cwd": cwd, "transcript_path": w.path("t.jsonl")}).to_string();
+    let (code, out) = stop_run(&w, "tasklist-guard", &payload);
+    assert_eq!(code, 0);
+    assert!(out.contains("\"decision\":\"block\""), "three edits and no fresh progress file in a nested repository still block: {out}");
+    assert!(w.path("proj/inner/.anti-hall/progress").is_dir(), "the progress ledger is the nested repository's own");
+    assert!(!w.path("proj/.anti-hall/progress").exists(), "the outer repository's ledger is not used");
+}
+
 /// A transcript bigger than the tasklist guard's window is read by the host (`ah.transcript.toolUseScan`): the tool uses inside the
 /// window count exactly as they do when the whole transcript fits, and the ones before it are out of sight.
 #[test]

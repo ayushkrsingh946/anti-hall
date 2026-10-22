@@ -40,6 +40,17 @@ function tlIndex(root, date, sid, kind) {
   try { ah.state.op(root, 'append', rel, '- ' + date + sep + sid + sep + '[' + kind + '](../' + date + '/' + sid + '.md)\n'); } catch (e) { /* every failure stops quietly */ }
 }
 
+// `sessionProjectRoot(cwd)` for a checkout the cheap resolver cannot classify (nested in another repository, a submodule, a work tree set
+// by core.worktree): the outermost superproject work tree, else the checkout itself; the home itself is never a project. null when the
+// full resolver cannot answer exactly either.
+function tlSessionRoot(cwd, home) {
+  if (cwd.charAt(0) !== '/') return null;
+  var c = ah.repo.context(cwd, true);
+  if (c.unsure) return null;
+  var top = typeof c.root === 'string' && c.root !== '' ? c.root : null, realHome = ah.fs.realpath(home);
+  return top !== null && top !== (realHome === null ? home : realHome) ? top : cwd;
+}
+
 function tlFresh(ts, lastWork, freshMs, now) {
   if (!isFinite(ts) || ts <= 0) return false;
   if (lastWork > 0) return lastWork <= ts + tlN('fresh_grace_ms');
@@ -560,7 +571,11 @@ function decide(p, opts) {
   var progressSegs = tlT('progress_dir').concat([date, sid + '.md']), historySegs = tlT('history_dir').concat([date, sid + '.md']);
   var cwd = typeof p.cwd === 'string' && p.cwd ? p.cwd : null;
   var root = null;
-  if (cwd !== null) { root = ah.project.root(cwd); if (root === null) ah.unable('tasklist-guard:no_project_root'); } // no project root: no progress or history ledgers
+  if (cwd !== null) {
+    root = ah.project.root(cwd);
+    if (root === null) root = tlSessionRoot(cwd, home); // a checkout inside another one: the full resolver decides, as Node's sessionProjectRoot does
+    if (root === null) ah.unable('tasklist-guard:no_project_root'); // still no project root: no progress or history ledgers
+  }
   var progressAbs = root !== null ? tlJoin(root, progressSegs) : null, historyAbs = root !== null ? tlJoin(root, historySegs) : null;
   var codexPlat = typeof p.turn_id === 'string' && p.turn_id !== '' || new RegExp(ah.cfg('taskkit.codex_rollout')).test(transcript) || new RegExp(ah.cfg('taskkit.codex_dir')).test(transcript);
   var cx = { tmp: wd.tmpdir(), cwd: cwd !== null && cwd.charAt(0) === '/' ? cwd : null };
