@@ -93,7 +93,8 @@ pub(crate) fn adopt_legacy_marker(home: &Path, hash: &str, read_only: bool) -> b
         return true;
     }
     let tmp = dir.join(format!("{marker_name}.{}.{}{}", std::process::id(), crate::health::now_ms(), defaults::text("mesh_write.tmp_suffix")));
-    std::fs::write(&tmp, sqlite).and_then(|()| std::fs::rename(&tmp, dir.join(marker_name))).is_ok()
+    let style = crate::atomic::Style { leave_temp_on_rename_failure: true, ..crate::atomic::Style::default() }; // Node leaves the temp file after a failed rename
+    crate::atomic::stage(&tmp, sqlite, style).and_then(|()| crate::atomic::replace(&tmp, dir.join(marker_name), style)).is_ok()
 }
 
 /// `openStore({ home, hash, readOnly })`.

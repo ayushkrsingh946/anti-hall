@@ -144,8 +144,9 @@ fn write_marker(dir: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)?;
     let marker = dir.join(defaults::text("mesh.backend_marker"));
     let tmp = dir.join(format!("{}.{}.{}{}", defaults::text("mesh.backend_marker"), std::process::id(), common::now_ms(), defaults::text("mesh_write.tmp_suffix")));
-    std::fs::write(&tmp, defaults::text("mesh.backend_sqlite"))?;
-    std::fs::rename(&tmp, marker)
+    let style = crate::atomic::Style { leave_temp_on_rename_failure: true, ..crate::atomic::Style::default() }; // Node leaves the temp file after a failed rename
+    crate::atomic::stage(&tmp, defaults::text("mesh.backend_sqlite"), style)?;
+    crate::atomic::replace(&tmp, marker, style)
 }
 
 fn plan(inv: &Inv, id: &str, session: &str) -> R<Plan> {
