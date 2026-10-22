@@ -143,7 +143,8 @@ fn a_witness_tick_runs_nothing_and_writes_nothing() {
     let (st, rec) = (settings(&f, &[]), Rec::default());
     let before = walk(&f.home);
     let out = tick::run(&ctx(&f, &st, true), Owner::Witness, &rec);
-    assert_eq!(out["reason"], "witness");
+    // the off switch (the diagnostic word of `devswarm_sup.mode`): the tick says it is off, counted as disabled
+    assert_eq!(out["reason"], "off");
     assert_eq!(rec.n(), 0);
     assert_eq!(walk(&f.home), before, "no file was created or changed");
 }
@@ -211,23 +212,12 @@ fn a_tick_runs_the_duties_in_nodes_order_with_the_poke_owner_and_the_shared_lock
     let out = tick::run(&ctx(&f, &st, true), Owner::Engine, &rec);
     let names: Vec<&str> = out["duties"].as_array().unwrap().iter().map(|d| d["duty"].as_str().unwrap()).collect();
     assert_eq!(names, ["log_rotate", "verdicts", "reconcile", "deferred", "app_sync", "retention", "housekeeping"]);
+    // every duty is native: the only process the tick starts is git (the liveness sweep asks it for the worktree's last commit)
     let calls = rec.calls.lock().unwrap();
-    // the liveness sweep, the deferred stage's tick (nothing deferred), app sync (no app database in the fixture), retention and
-    // housekeeping are native (the sweep asks git for the worktree's last commit); reconcile is Node's function
-    let node: Vec<&RunSpec> = calls.iter().filter(|c| c.bin.as_deref() == Some("node")).collect();
-    assert_eq!(node.len(), 1, "{calls:?}");
-    assert!(calls.iter().filter(|c| c.bin.as_deref() != Some("node")).all(|c| c.bin.as_deref() == Some("git")));
-    for c in node.iter() {
-        assert_eq!(c.args[0], "-e");
-        assert_eq!(c.args[2], f.root.to_string_lossy());
-        assert_eq!(c.args[3], f.home.to_string_lossy());
-        assert!(c.timeout_ms > 0 && c.timeout_ms <= 900_000);
-    }
-    assert!(node[0].args[1].contains("reconcileSweepIfDue"));
-    assert!(calls.iter().all(|c| c.args.len() < 2 || !c.args[1].contains("housekeepingSweepIfDue")), "housekeeping is native: no worker for it");
+    assert!(calls.iter().all(|c| c.bin.as_deref() == Some("git")), "no Node is launched: {calls:?}");
     drop(calls);
     assert!(!dev(&f).join("locks/sweep.lock").exists(), "the lock is released");
-    // a workspace with a step plan is one Node has tail work for: the sweep is then told who pokes
+    // a workspace with a step plan changes nothing about that, whoever owns the poke
     put(
         &dev(&f).join("plans/ws-1.json"),
         &json!({"v": 1, "key": "ws-1", "id": "ws-1", "created_at": 1, "steps": [{"n": 1, "text": "a", "status": "doing", "ts": 1, "started_at": 1}]}),
@@ -235,9 +225,9 @@ fn a_tick_runs_the_duties_in_nodes_order_with_the_poke_owner_and_the_shared_lock
     let (rec_e, rec_n) = (Rec::default(), Rec::default());
     tick::run(&ctx(&f, &st, true), Owner::Engine, &rec_e);
     tick::run(&ctx(&f, &st, false), Owner::Engine, &rec_n);
-    let sweep_owner = |r: &Rec| r.calls.lock().unwrap().iter().find(|c| c.args.get(1).is_some_and(|a| a.contains("sweepOnce"))).map(|c| c.args[4].clone());
-    assert_eq!(sweep_owner(&rec_e).as_deref(), Some("engine"), "the tail sweep is told the engine pokes");
-    assert_eq!(sweep_owner(&rec_n).as_deref(), Some("node"), "Node's poke step runs only when the engine does not own it");
+    for r in [&rec_e, &rec_n] {
+        assert!(r.calls.lock().unwrap().iter().all(|c| c.bin.as_deref() != Some("node")), "no Node sweep is started");
+    }
     assert!(f.home.join(".anti-hall/logs/devswarm-supervisor-engine.ndjson").exists(), "the engine's own tick log");
 }
 
@@ -330,7 +320,7 @@ fn cooldown_duties_follow_nodes_state_files_and_switches() {
         let out = tick::run_duty(d, &ctx(&f, &st, true), &rec);
         assert_eq!((out["outcome"].as_str(), out["reason"].as_str()), (Some("skipped"), Some("cooldown")), "{d}");
     }
-    assert_eq!(rec.n(), 1, "only the first reconcile started a worker");
+    assert_eq!(rec.n(), 0, "reconcile is native: no worker is started");
     // past the setting's seconds: due again
     put(&dev(&f).join("reconcile-sweep-state.json"), &json!({"lastRunAt": now() - 1_000_000}));
     assert_eq!(tick::run_duty("reconcile", &ctx(&f, &st, true), &rec)["outcome"], "ran");
@@ -340,7 +330,8 @@ fn cooldown_duties_follow_nodes_state_files_and_switches() {
     let n = rec.n();
     for d in ["reconcile", "housekeeping"] {
         let out = tick::run_duty(d, &ctx(&f, &st, true), &rec);
-        assert_eq!((out["outcome"].as_str(), out["reason"].as_str()), (Some("skipped"), Some("disabled")), "{d}");
+        // a duty switched off names its outcome (`disabled`: counted, nothing done), it is not a silent skip
+        assert_eq!((out["outcome"].as_str(), out["reason"].as_str()), (Some("disabled"), Some("disabled")), "{d}");
     }
     assert_eq!(rec.n(), n);
     // the cool-down seconds setting is floored at 300 like Node's
@@ -435,8 +426,8 @@ fn a_missing_node_fails_the_duty_and_not_the_tick() {
     let d = out["duties"].as_array().unwrap();
     assert_eq!(d[0]["outcome"], "ran", "the native duty does not need Node");
     for x in &d[1..] {
-        let native = ["housekeeping", "verdicts", "deferred", "app_sync", "retention"].contains(&x["duty"].as_str().unwrap());
-        assert_eq!(x["outcome"] == "ran", native, "{x}: a native duty runs without Node, the others fail alone");
+        let native = ["housekeeping", "verdicts", "deferred", "app_sync", "retention", "reconcile"].contains(&x["duty"].as_str().unwrap());
+        assert_eq!(x["outcome"] == "ran", native, "{x}: every duty is native and runs without Node");
     }
 }
 
@@ -675,7 +666,7 @@ fn the_status_verb_reports_owner_guard_and_gates() {
     assert_eq!(v["duties"].as_array().unwrap().len(), 7);
     put(&dev(&f).join("housekeeping-sweep-state.json"), &json!({"lastRunAt": now()}));
     let v = ah_engine::dssup::cli::status(&f.home, &st, Owner::Witness, now());
-    assert_eq!(v["mode"], "witness");
+    assert_eq!(v["mode"], "off");
     let hk = v["duties"].as_array().unwrap().iter().find(|d| d["duty"] == "housekeeping").unwrap();
     assert_eq!(hk["notDue"], "cooldown");
 }
@@ -875,37 +866,6 @@ fn native_housekeeping_is_off_with_the_switches_and_where_the_directories_are_ab
     c.now = at;
     let out = tick::run_duty("housekeeping", &c, &Rec::default());
     assert_eq!((out["outcome"].as_str(), out["detail"]["results"]["reapedLogs"].clone()), (Some("ran"), json!([])));
-}
-
-#[test]
-fn the_witness_runs_nodes_sweep_on_a_scratch_mirror_and_logs_agreement() {
-    if !have_node() {
-        return;
-    }
-    let at = now();
-    let f = fx("witness-hk", true);
-    seed_housekeeping(&f, at);
-    let st = settings(&f, &[("ANTIHALL_DEVSWARM_SUP_WITNESS", "on")]);
-    let mut c = ctx(&f, &st, true);
-    c.now = at;
-    let sys = System::configured();
-    let out = tick::run(&c, Owner::Engine, &sys);
-    let hk = out["duties"].as_array().unwrap().iter().find(|d| d["duty"] == "housekeeping").unwrap();
-    assert_eq!(hk["witness"]["match"], true, "{out}");
-    let log = std::fs::read_to_string(f.home.join(".anti-hall/logs/devswarm-sup-witness.ndjson")).unwrap();
-    let lines: Vec<Value> = log.lines().map(|l| serde_json::from_str(l).unwrap()).collect();
-    let h = lines.iter().find(|l| l["duty"] == "housekeeping").unwrap();
-    assert_eq!(h["match"], true);
-    assert_eq!(h["detail"], json!({"onlyEngine": [], "onlyNode": []}));
-    assert!(h["engine"].as_array().unwrap().len() >= 5, "the five old files the engine removed");
-    assert!(lines.iter().any(|l| l["duty"] == "log_rotate" && l["match"] == true), "log rotation is witnessed too");
-    // the scratch mirror is gone, and the witness never ran Node against the live home
-    assert_eq!(std::fs::read_dir(f.home.join(".anti-hall/witness")).map(|d| d.count()).unwrap_or(0), 0);
-    // sampled: a second tick inside the interval does not run the witness again
-    let before = log.lines().count();
-    put(&dev(&f).join("housekeeping-sweep-state.json"), &json!({"lastRunAt": 0}));
-    tick::run(&c, Owner::Engine, &sys);
-    assert_eq!(std::fs::read_to_string(f.home.join(".anti-hall/logs/devswarm-sup-witness.ndjson")).unwrap().lines().count(), before);
 }
 
 /// A recording runner that answers a `git log -1` call with a fixed commit time.
