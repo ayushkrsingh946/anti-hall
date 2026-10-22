@@ -203,7 +203,7 @@ pub fn run(args: &[String]) -> i32 {
     let statusline = p.command == "statusline";
     // the wake watcher runs for a whole session, once per session: it reads the cache too, keeping one key at a time
     // in memory instead of the parsed 2 MB of every file (about 40 MB resident for as long as the session lives)
-    let wake_watch = p.command == "devswarm" && p.rest.first().is_some_and(|v| v == "wake-watch");
+    let wake_watch = (p.command == "devswarm" || p.command == "agents") && p.rest.first().is_some_and(|v| v == "wake-watch");
     if hook || statusline || wake_watch || ["version", "status", "ping", "ctl", "stop"].contains(&p.command.as_str()) {
         defaults::use_cache();
     }

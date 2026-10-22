@@ -12,7 +12,7 @@ Subagent, task-list, delegation and routing guards.
 | Verb | What it does | Roles |
 |---|---|---|
 | `ah-engine agent_tick` | `` The scheduled agent tracker tick (the `agent_tick` job): one tracker tick, the same as `agents tick`; prints its counts with --json | main, codex |
-| `ah-engine agents` | `<status\|tick> [--json]` The agent tracker (feature 21): `status` lists every tracked agent (main sessions, subagents and background tasks, DevSwarm workspaces)... | main, codex, workspace, subagent (owner args: tick) |
+| `ah-engine agents` | `<status\|tick\|wake-watch> [--json]` The agent tracker (feature 21): `status` lists every tracked agent (main sessions, subagents and background tasks, DevSwarm workspaces)... | main, codex, workspace, subagent (owner args: tick) |
 
 ## Guards
 
@@ -74,5 +74,6 @@ Subagent, task-list, delegation and routing guards.
 - `agents.ownerNotify` = false: Where the owner-notification switch is read from (agents.ownerNotify, default off): on, routes that name the owner channel append a...
 - `agents.reminders` = true: Where the reminder switch is read from (agents.reminders, default on): off, signals are still raised and recorded but nothing is queued...
 - `agents.tracker` = true: Where the tracker's on/off switch is read from (agents.tracker, default on): off, a tick does nothing
+- `agents.wakeWatch` = true: Where the off switch of the session wake-watch is read from (agents.wakeWatch, default on): off, `agents wake-watch` arms nothing (the...
 
 _Generated from the engine registry by `ah-engine docs --format skill`; do not edit by hand._

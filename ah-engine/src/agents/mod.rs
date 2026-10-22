@@ -21,6 +21,7 @@ mod signals;
 mod sinks;
 mod sources;
 mod status;
+mod wake;
 #[cfg(test)]
 mod tests;
 
@@ -147,6 +148,9 @@ pub struct Pending {
     pub label: String,
     /// `commit`, `test` or empty.
     pub class: String,
+    /// A background shell command: its result names the task whose end the session is told of.
+    #[serde(default)]
+    pub bg: bool,
 }
 
 /// A raised signal on one agent.
@@ -264,6 +268,15 @@ pub struct Agent {
     pub armed_until: u64,
     /// The last time a wake path was armed (0 = never in the window).
     pub armed_at: u64,
+    /// A task is open (a declared step not yet completed): set when a step is declared, cleared when the task list or an update completes it.
+    #[serde(default)]
+    pub open: bool,
+    /// Background shell tasks it started and has not seen end: task id, when it started.
+    #[serde(default)]
+    pub bg_ids: BTreeMap<String, u64>,
+    /// Background shell tasks that ended and are not yet reported: task id, when it ended.
+    #[serde(default)]
+    pub exited: Vec<(String, u64)>,
     /// DevSwarm facts, when it is a workspace.
     pub ws: Option<Ws>,
     /// Heartbeat file facts.
