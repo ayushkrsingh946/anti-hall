@@ -145,7 +145,7 @@ impl Fx {
             std::fs::remove_dir_all(&dir).unwrap();
         }
         std::fs::create_dir_all(&dir).unwrap();
-        let cfg = Cfg::shipped().in_dir(&dir.join("state"));
+        let cfg = Cfg::shipped().in_dir(&dir.join("state")).with("github_rt.ready_auto_merge", json!(true));
         Fx { dir, cfg }
     }
 
@@ -828,7 +828,7 @@ fn becomes_ready_on(name: &str, branch: &str, workspace: bool) -> (Fx, Stub) {
         git(&r, &["checkout", "-q", "-b", branch]);
     }
     let db = app_db(&fx, workspace.then_some((branch, r.as_path())));
-    fx.cfg = Cfg::shipped().in_dir(&fx.dir.join("state")).with("github_rt.ready_app_db", json!(db.to_str().unwrap()));
+    fx.cfg = Cfg::shipped().in_dir(&fx.dir.join("state")).with("github_rt.ready_auto_merge", json!(true)).with("github_rt.ready_app_db", json!(db.to_str().unwrap()));
     let s = Stub::new();
     open_pr(&s);
     fx.tick(&s, T0 + 1000);
@@ -1057,12 +1057,12 @@ fn only_a_workspace_pull_request_is_auto_merged() {
     // the same branch name on a workspace that lives in another directory is not this pull request's workspace
     let (fx, s) = becomes_ready_on("scope-elsewhere", "feat/child-work", false);
     let db = app_db(&fx, Some(("feat/child-work", Path::new("/somewhere/else"))));
-    let cfg = Cfg::shipped().in_dir(&fx.dir.join("state")).with("github_rt.ready_app_db", json!(db.to_str().unwrap()));
+    let cfg = Cfg::shipped().in_dir(&fx.dir.join("state")).with("github_rt.ready_auto_merge", json!(true)).with("github_rt.ready_app_db", json!(db.to_str().unwrap()));
     poll::tick(&cfg, &s, T0 + 100_000, false);
     assert!(s.merges.borrow().is_empty());
     // scope all: any ready pull request
     let (fx, s) = becomes_ready_on("scope-all", "dev", false);
-    let cfg = Cfg::shipped().in_dir(&fx.dir.join("state")).with("github_rt.ready_auto_merge_scope", json!("all"));
+    let cfg = Cfg::shipped().in_dir(&fx.dir.join("state")).with("github_rt.ready_auto_merge", json!(true)).with("github_rt.ready_auto_merge_scope", json!("all"));
     poll::tick(&cfg, &s, T0 + 100_000, false);
     assert_eq!(s.merges.borrow().len(), 1);
     // a draft is never ready, in any scope
@@ -1106,4 +1106,9 @@ fn a_root_git_cannot_read_is_looked_at_again_on_the_done_cadence_not_at_every_ti
     assert_eq!(repo.next_poll_ms, T0 + 1000 + done, "retry time is the done cadence");
     assert!(!tick_needed(&fx.cfg, T0 + 2000), "the 20 s tick does not run git on it again");
     assert!(tick_needed(&fx.cfg, T0 + 1000 + done + 1));
+}
+
+#[test]
+fn auto_merge_is_off_by_default() {
+    assert!(!Cfg::shipped().flag("github_rt.ready_auto_merge"), "owner rule: no auto-merge unless switched on");
 }
