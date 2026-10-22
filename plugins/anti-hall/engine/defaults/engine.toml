@@ -771,6 +771,34 @@ value = ["crashloop", "crashloop_reset", "reset"]
 doc = "Event kinds that count toward the crash-loop threshold."
 value = ["crash", "panic", "start_fail", "watchdog", "rss"]
 
+[health.start_kind]
+doc = "The event-log kind the daemon writes when it starts. A defaults fallback logged before the latest one is answered by that start (the daemon reloads every defaults file then), so it no longer marks the engine degraded."
+value = "start"
+
+[health.resolved_by_start_kinds]
+doc = "Event kinds from `health.degraded_kinds` that a daemon start resolves: one logged before the latest `health.start_kind` event does not count toward degraded."
+value = ["defaults_fallback", "defaults_heal_skipped"]
+
+[health.group_restart]
+doc = "Group name of a self-restart in a degraded reason."
+value = "restart"
+
+[health.group_defaults]
+doc = "Group name of a defaults fallback in a degraded reason."
+value = "defaults"
+
+[health.group_crashloop]
+doc = "Group name of the crash-loop breaker in a degraded reason."
+value = "crashloop"
+
+[health.group_breaker]
+doc = "Group name of the client breaker in a degraded reason."
+value = "breaker"
+
+[health.group_fail_open]
+doc = "Group name of an unhealthy fail-open window in a degraded reason."
+value = "fail_open"
+
 [health.system_restart_slack_ms]
 doc = "How much later than a dead daemon's last sign of life (its newest breadcrumb, or its start) the operating system must have booted for the unclean stop to be reported as a `system_restart` (the machine stopped under it) instead of a `crash`. A margin against clock steps."
 value = 0
