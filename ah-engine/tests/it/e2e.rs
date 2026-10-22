@@ -37,9 +37,9 @@ impl Env {
         let o = ch.wait_with_output().unwrap();
         // A guard event that cannot be answered because the daemon is unavailable now fails open for this call.
         let code = o.status.code().unwrap_or(-1);
-        // the one notice a guard event without a Node fallback may print while the daemon is not yet up
+        // the one notice (#229) a call passed through while the daemon is not yet up may print, once per session
         let err = String::from_utf8_lossy(&o.stderr);
-        assert!(err.is_empty() || err.contains("could not answer this guard event"), "client wrote to stderr: {err}");
+        assert!(err.is_empty() || (err.contains("did not answer this") && err.contains("went through unchecked")), "client wrote to stderr: {err}");
         (String::from_utf8_lossy(&o.stdout).trim().to_string(), code)
     }
     fn ctl(&self, verb: &str) -> Option<String> {
