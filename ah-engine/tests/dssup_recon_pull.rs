@@ -304,7 +304,7 @@ fn world(tag: &str) -> Option<(Fx, W)> {
 
 /// Node's own drain of `id`: the spawn `reconcile` makes (`inbox pull <id>` in the worktree), clock pinned. Returns its parsed answer.
 fn node_pull(home: &Path, cwd: &Path, now: i64) -> Value {
-    let cli = plugin_root().join("scripts").join("devswarm.js");
+    let cli = node_root().join("scripts").join("devswarm.js");
     let mut env = base_env(home, &home.join("state"), &[("ANTIHALL_RECONCILE_SWEEP", "1")]);
     env.retain(|(k, _)| k != "AH_ENGINE_NOSPAWN");
     let mut c = Command::new("node");

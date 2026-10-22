@@ -375,7 +375,7 @@ pub(super) fn plan_group(cx: &Cx, sim: &mut Sim, survivor: &str, cands: &[RegRow
             };
             let mut all = vec![guard];
             all.extend(ops);
-            units.push(Unit { label: format!("fold:{id}"), lock: lock_candidates.then(|| id.clone()), ops: all });
+            units.push(Unit { label: format!("{}{id}", defaults::text("devswarm_recon.fold_unit_prefix")), lock: lock_candidates.then(|| id.clone()), ops: all });
         }
     }
     Ok((units, out))
@@ -600,7 +600,7 @@ pub fn plan_fold(ctx: &Ctx, repo_key: &str) -> R<FoldPlan> {
                     ));
                     g.expect.push(Some(go.as_json()));
                     for u in gu {
-                        let id = u.label.trim_start_matches("fold:").to_string();
+                        let id = u.label.trim_start_matches(defaults::text("devswarm_recon.fold_unit_prefix")).to_string();
                         let retired = go.retired.contains(&id);
                         g.tags.push(Tag::Fold { id, retired });
                         g.units.push(u);

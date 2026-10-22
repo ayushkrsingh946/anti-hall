@@ -985,7 +985,7 @@ fn summary_and_plan_heartbeats_match_node_byte_for_byte_and_defer_without_writin
 
 /// A Node process that takes the plan's lock the way `updatePlan` does and holds it.
 fn hold_plan_lock(home: &Path, lock: &Path, hold_ms: u64) -> std::process::Child {
-    let lock_js = plugin_root().join("companion/lib/lock.js");
+    let lock_js = node_root().join("companion/lib/lock.js");
     let code = format!(
         "const l=require({:?});const h=l.acquire({:?},{{waitMs:0,stealDead:true,staleMs:30000,liveStaleMs:30000}});if(!h){{console.log('FAILED');process.exit(3)}}console.log('ready');setTimeout(()=>process.exit(0),{hold_ms});",
         lock_js.to_string_lossy(),

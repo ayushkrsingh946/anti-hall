@@ -1179,3 +1179,7 @@ value = "recon:legacy-store"
 [devswarm_recon.reason_store_unpinned]
 doc = "The reason code of a store with no backend marker (or one naming neither backend): the engine does not open it as it cannot tell which backend it is on. The update's store stages pin a store that holds a database; until then the item is held and tried again."
 value = "store-unpinned"
+
+[devswarm_recon.fold_unit_prefix]
+doc = "The label prefix of one candidate's fold unit (the candidate id follows); a registration reads it back to report a unit the applier handed back as pending."
+value = "fold:"
