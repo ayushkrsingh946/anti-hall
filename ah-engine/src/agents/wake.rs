@@ -20,7 +20,25 @@ fn setting_num(key: &str) -> u64 {
 
 /// The session this watcher belongs to: the first of the configured variables that is set.
 fn session(env: &Env) -> Option<String> {
-    defaults::list("agent_tracker.wake_session_env").into_iter().filter_map(|v| env.settings.env.get(v).cloned()).find(|s| !s.trim().is_empty())
+    defaults::list("agent_tracker.wake_session_env")
+        .into_iter()
+        .filter_map(|v| env.settings.env.get(v).cloned())
+        .find(|s| !s.trim().is_empty())
+        .or_else(|| session_from_tree(env, std::process::id()))
+}
+
+/// A Monitor's shell carries no session variable: walk up from `start` (at most `wake_walk_depth` parents) to the process the host
+/// registered for a session and take its session id.
+pub(crate) fn session_from_tree(env: &Env, start: u32) -> Option<String> {
+    let sessions = super::live::registry(env)?;
+    let mut pid = start;
+    for _ in 0..=defaults::num("agent_tracker.wake_walk_depth") {
+        if let Some(s) = sessions.iter().find(|s| s.pid == pid) {
+            return Some(s.id.clone());
+        }
+        pid = crate::procid::parent(pid).filter(|p| *p > 1)?;
+    }
+    None
 }
 
 fn parent_gone(start: i32) -> bool {

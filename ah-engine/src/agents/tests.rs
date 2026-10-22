@@ -1161,3 +1161,18 @@ fn the_list_is_live_agents_plus_a_short_recently_finished_window_and_the_summary
     let s = &doc["summary"];
     assert_eq!((s["sessions_live"].as_u64(), s["subagents_live"].as_u64(), s["done_hidden"].as_u64()), (Some(1), Some(0), Some(1)), "{s}");
 }
+
+#[test]
+fn the_wake_watch_finds_its_session_from_the_process_tree_when_no_variable_is_set() {
+    let h = home("wake-tree");
+    let n = now0();
+    assert_eq!(wake::session_from_tree(&env(&h, n), std::process::id()), None, "no registry, no session");
+    // the registered process is this one: a watcher started under it (here: itself) resolves the session
+    register(&h, std::process::id(), "sess-tree", "busy", n);
+    assert_eq!(wake::session_from_tree(&env(&h, n), std::process::id()).as_deref(), Some("sess-tree"));
+    // a registered ancestor is found by walking up
+    let parent = crate::procid::parent(std::process::id()).unwrap();
+    std::fs::remove_dir_all(h.join(".claude/sessions")).unwrap();
+    register(&h, parent, "sess-up", "busy", n);
+    assert_eq!(wake::session_from_tree(&env(&h, n), std::process::id()).as_deref(), Some("sess-up"));
+}

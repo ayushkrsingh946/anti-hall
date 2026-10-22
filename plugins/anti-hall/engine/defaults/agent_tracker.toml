@@ -46,6 +46,10 @@ value = "--auto"
 doc = "The variables that name the session the wake-watch belongs to, in order; the first non-empty one is the key of its wake feed."
 value = ["CLAUDE_CODE_SESSION_ID", "CLAUDE_SESSION_ID", "ANTIHALL_SESSION_ID"]
 
+[agent_tracker.wake_walk_depth]
+doc = "When no session variable is set (a Monitor's shell has none), how many parent processes the wake-watch walks up to find the process the host registered for a session."
+value = 8
+
 [agent_tracker.wake_poll_ms]
 doc = "How often the wake-watch looks at its session's wake feed (a size check of one file), in milliseconds. A quiet session costs no tokens."
 value = 1000
