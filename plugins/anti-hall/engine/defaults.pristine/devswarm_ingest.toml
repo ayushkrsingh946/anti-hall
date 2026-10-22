@@ -247,11 +247,29 @@ max = 600000
 unit = "ms"
 
 [devswarm_ingest.stop_poll_ms]
-doc = "How often a waiting drain checks whether it must stop."
+doc = "How often the manager checks whether a worker it asked to stop has finished (the joins of a lowered cap and of a shutdown). The naps of an ingest thread that only waits are devswarm_ingest.idle_poll_ms."
 value = 200
 min = 10
 max = 10000
 unit = "ms"
+
+[devswarm_ingest.worker_idle_wait_ms]
+doc = "How long an idle drain worker blocks on the job queue before it looks at its own stop flag again. A job, a stop message or the queue closing wakes it at once; but a stop message goes to whichever idle worker takes it first, so the worker that was told to retire (a lowered cap) can only learn it by this timeout. Longer means fewer idle wake-ups and a slower retirement."
+value = 1000
+min = 100
+max = 600000
+unit = "ms"
+
+[devswarm_ingest.idle_poll_ms]
+doc = "How often an ingest thread that is only waiting (the manager between two discoveries, a drain between two monitor calls, a drain waiting for a Node holder's lock) looks at its stop flag: its sleep is split into naps this long. Every nap is a wake-up of an otherwise idle thread, so a shorter value costs idle CPU for every project; it is also the longest a waiting drain takes to notice a stop. A drain that is working checks the flag between steps (devswarm_ingest.stop_poll_ms is the poll of the stop-side joins)."
+value = 1000
+min = 10
+max = 10000
+unit = "ms"
+
+[devswarm_ingest.worker_thread_name]
+doc = "The name of a drain worker thread (what `status --threads` and a stack sample call it)."
+value = "ah-ingest-worker"
 
 [devswarm_ingest.beat_every_ms]
 doc = "While the drain waits, how often it re-stamps its lock and heartbeat (consumers judge a daemon dead after 3 minutes)."

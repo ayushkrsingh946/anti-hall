@@ -83,6 +83,24 @@ value = 10
 min = 1
 max = 1000
 
+[devswarm_act.poll_fast_ms]
+doc = "How long a call is checked every devswarm_act.poll_ms; a call that runs longer is a long poll and is checked every devswarm_act.poll_slow_ms."
+value = 500
+min = 0
+max = 60000
+unit = "ms"
+
+[devswarm_act.poll_slow_ms]
+doc = "How often the runner checks a call that has run longer than devswarm_act.poll_fast_ms. The longest a finished long poll waits to be noticed; a hundred checks a second per running drain was most of an idle daemon's wake-ups."
+value = 250
+min = 1
+max = 10000
+unit = "ms"
+
+[devswarm_act.pipe_thread_name]
+doc = "The name of the thread that reads one output pipe of a DevSwarm CLI call (what `status --threads` and a stack sample call it)."
+value = "ah-hc-pipe"
+
 [devswarm_act.verbs]
 doc = "The hivecontrol verbs the engine may spawn, as `verb:minVersion` (empty version = any). Anything else is refused before a process starts (Node: capabilities.js default-deny registry)."
 value = ["archive:2.5.3", "delete:2.5.3", "create:", "update-title:", "check-merge:", "merge-into-source:"]
