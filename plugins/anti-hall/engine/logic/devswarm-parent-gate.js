@@ -250,11 +250,13 @@ function pgQuestions(home, own, descriptors, selfKey, fx) {
   var add = function (r) { if (r && r.id !== null && r.id !== undefined && !has(byId, String(r.id))) byId[String(r.id)] = { id: r.id, worktreePath: r.worktreePath || null, sessionId: r.sessionId || null }; };
   regRows.forEach(add);
   descRows.forEach(add);
+  var heldAskers = pgHeldIds();
   var live = blocking.filter(function (q) {
     if (!q || q.from === null || q.from === undefined) return true;
     var from = String(q.from);
     var row = has(byId, from) ? byId[from] : null;
     if (row === null) return !own.archivedKnown;
+    if (heldAskers.indexOf(from) >= 0) return false; // an owner-held asker's question never blocks
     var wt = piStrField(row.worktreePath), sid = piStrField(row.sessionId);
     var mk = JSON.parse(ahHost.piMarker(from, wt, sid));
     if (mk.unsure) { ah.unable('devswarm-parent-gate:marker_unsure'); mk = { archived: false }; } // an unreadable marker leaves the asker live (the stricter reading)
@@ -522,7 +524,7 @@ function pgGate(p, root, l) {
     entries.push(oe);
   }
   var now = ah.clock.now();
-  if (ah.settings.touched('devswarm_role.pg_set_held')) ah.unable('devswarm-parent-gate:held_partitions'); // the owner's held partitions are not applied here
+  var held = pgHeldIds(); // the owner's held partitions (devswarm.heldPartitions): exempt from the gate
   var ignore = pgIgnoreIds(home), keyMemo = Object.create(null), readyMemo = Object.create(null), goneMemo = Object.create(null);
   keyMemo[cwd] = selfKey;
   if (derived !== null) readyMemo[selfKey] = pgSummaryWs(derived);
@@ -609,6 +611,7 @@ function pgGate(p, root, l) {
     }
     e.ignored = pgExists(pgDir(home) + '/' + ah.cfg('devswarm_role.pg_dir_archive_ignore') + '/' + d.id + '.json');
     if (d.session !== '') e.live = ah.mesh.sessionAlive(d.session); // unknown: taken as alive
+    e.held = !isOwn && held.indexOf(d.id) >= 0;
     if (e.archived || e.appArchived || e.ignored) e.stateSkipped = true; // only a member of the Primary's own family could still need it (checked there)
     else if (d.id !== '' && d.session !== '' && d.worktree !== '') {
       var fresh_ms = pgSetNum('devswarm_role.pg_set_busy_fresh') * pgMin();
@@ -825,6 +828,13 @@ function pgGate(p, root, l) {
   var skip = text.render(ah.cfg('devswarm_role.pg_skip_cmd'), { cli: pgShQuote(ah.path.resolveAbs(cli)), guard: ah.cfg('devswarm_role.gate_guard') });
   fx.out = JSON.stringify({ decision: ah.cfg('devswarm_role.pg_decision_block'), reason: pgFrame(base + (parked !== null ? ah.cfg('devswarm_role.pg_parked_joiner') + parked : '') + wake, skip) }) + '\n';
   return fx;
+}
+
+// `heldPartitionIdsFrom(env)`: the ids of `devswarm.heldPartitions` (comma separated, trimmed, empty parts dropped).
+function pgHeldIds() {
+  var v = ah.settings.str('devswarm_role.pg_set_held');
+  if (typeof v !== 'string') return [];
+  return v.split(',').map(function (x) { return x.trim(); }).filter(function (x) { return x !== ''; });
 }
 
 // `hasFreshHeartbeat(id, home)`: the workspace's heartbeat (its `ts`, else the file's mtime) is positive, not in the future and within the

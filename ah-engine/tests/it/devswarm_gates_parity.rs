@@ -807,6 +807,25 @@ fn pg_cases() -> Vec<PgCase> {
             .seed(PG_CHILD, r#"{"id":"c-1","worktreePath":"{wt2}","sessionId":"sess-c1","inboxPath":"{home}/in.ndjson","cursorPath":"{home}/cur.json"}"#)
             .seed("in.ndjson", "{\"message\":\"  [Primary poke] wake\"}\n{\"message\":\"real\"}\n")
             .seed("cur.json", "0"),
+        // #230: a partition the owner holds (devswarm.heldPartitions) never blocks the gate, mail and all; the Primary's own id cannot be held
+        child("held-child-with-unread-is-clean", &[A])
+            .env("ANTIHALL_DEVSWARM_HELD_PARTITIONS", "c-1")
+            .seed(PG_CHILD, PG_INBOX_DESC)
+            .seed("in.ndjson", "{\"message\":\"hi\",\"ts\":1}\n")
+            .seed("cur.json", "0")
+            .expect("!decision"),
+        child("held-list-with-spaces-and-another-id-still-holds", &[A])
+            .env("ANTIHALL_DEVSWARM_HELD_PARTITIONS", " other , c-1 ,, ")
+            .seed(PG_CHILD, PG_INBOX_DESC)
+            .seed("in.ndjson", "{\"message\":\"hi\",\"ts\":1}\n")
+            .seed("cur.json", "0")
+            .expect("!decision"),
+        child("another-held-id-does-not-hold-this-child", &[A])
+            .env("ANTIHALL_DEVSWARM_HELD_PARTITIONS", "c-2")
+            .seed(PG_CHILD, PG_INBOX_DESC)
+            .seed("in.ndjson", "{\"message\":\"hi\",\"ts\":1}\n")
+            .seed("cur.json", "0")
+            .expect("c-1"),
         // #228: a stale/escalated liveness verdict that is corroborated (pending) blocks even with an empty mailbox; uncorroborated or
         // suppressed (a fresh heartbeat) it does not
         child("liveness-escalated-pending-blocks-cap-escalate-quiet", &[A, A, A, A, A])
@@ -963,7 +982,7 @@ fn pg_cases() -> Vec<PgCase> {
         child("child-archived-marker-other-worktree-blocks", &[A]).seed(".anti-hall/devswarm/archived/c-1.json", r#"{"id":"c-1","worktreePath":"/elsewhere"}"#),
         child("child-nag-ignored-is-clean", &[A]).seed(".anti-hall/devswarm/ignore.json", r#"{"ids":["c-1"]}"#),
         child("child-archive-ignored-is-clean", &[A]).seed(".anti-hall/devswarm/archive-ignore/c-1.json", "{}"),
-        child("child-held-defers", &[D]).env("ANTIHALL_DEVSWARM_HELD_PARTITIONS", "c-1"),
+        child("child-held-is-clean", &[A]).env("ANTIHALL_DEVSWARM_HELD_PARTITIONS", "c-1"),
         child("child-cap-setting-defers", &[D]).env("ANTIHALL_DEVSWARM_PARENT_GATE_CAP", "4"),
         child("child-cap-in-settings-file-defers", &[D]).seed(".anti-hall/settings.json", r#"{"devswarm":{"parentGateCap":5}}"#),
         child("child-live-session-record-blocks", &[A]).seed(".claude/sessions/4242.json", r#"{"pid":4242,"sessionId":"sess-c1"}"#),
@@ -1160,7 +1179,7 @@ fn pg_cases() -> Vec<PgCase> {
             .own()
             .seed(PG_SUMMARY, &pg_sum(r#"[{"from":"c-7","ts":{five}}]"#, PG_ROW_C7, Some("[]")))
             .seed(".anti-hall/devswarm/archived/c-7.json", r#"{"id":"c-7"}"#),
-        pg("own-question-asker-held-defers", &[D])
+        pg("own-question-asker-held", &[A])
             .own()
             .env("ANTIHALL_DEVSWARM_HELD_PARTITIONS", "c-7")
             .seed(PG_SUMMARY, &pg_sum(r#"[{"from":"c-7","ts":{five}}]"#, PG_ROW_C7, Some("[]"))),
