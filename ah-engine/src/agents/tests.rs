@@ -1191,3 +1191,119 @@ fn a_primary_is_not_told_to_arm_the_devswarm_watcher_it_declines_while_idle() {
     assert!(a.ws.as_ref().is_some_and(|w| w.armed.is_none()), "a Primary's DevSwarm watcher state is not judged");
     assert!(outbox(&h).is_empty() && queue(&h, "sessW").iter().all(|r| !r["text"].as_str().unwrap().contains("wake-watch --auto")), "nobody is told to arm it");
 }
+
+// ---- teammates the host no longer lists (#15) -----------------------------------------------------------------
+
+/// The host's team roster (`<home>/.claude/teams/<team>/config.json`): the lead plus the members that are still alive.
+fn roster(h: &Path, team: &str, members: &[&str]) {
+    let m: Vec<Value> = std::iter::once("team-lead").chain(members.iter().copied()).map(|n| json!({"name": n, "agentId": format!("{n}@{team}")})).collect();
+    let p = h.join(".claude/teams").join(team).join("config.json");
+    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    std::fs::write(p, json!({"name": team, "members": m}).to_string()).unwrap();
+}
+
+/// A teammate transcript `agent-<id>` of session `parent` with its meta file; `lines` is its transcript.
+fn mate(h: &Path, id: &str, name: &str, team: &str, lines: &[String]) {
+    let dir = h.join(".claude/projects/p/parent/subagents");
+    write(&dir.join(format!("agent-{id}.jsonl")), lines);
+    let meta = json!({"agentType": name, "name": name, "taskKind": "in_process_teammate", "teamName": team});
+    std::fs::write(dir.join(format!("agent-{id}.meta.json")), meta.to_string()).unwrap();
+}
+
+/// The shapes of the real session (2026-10-22): the lead spawned the teammates ~45 min ago, stopped some by name with `TaskStop`
+/// (answered with the task's own id), and kept working; its transcript then grew far past the scan window (`agent_scan.tail_bytes`),
+/// so neither the spawn nor the stop is in the window any more. Stopped teammates write no closing line.
+#[test]
+fn a_stopped_teammate_stays_done_after_the_stop_left_the_scan_window() {
+    let h = home("rosterstop");
+    let n = now0();
+    let spawn = |ts: u64, tuid: &str, name: &str, aid: &str| {
+        json!({"type": "user", "timestamp": iso(ts), "toolUseResult": {"status": "teammate_spawned", "name": name, "agent_id": aid},
+               "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": tuid, "content": "Spawned successfully."}]}})
+        .to_string()
+    };
+    let mut parent = vec![prompt(n - 80 * MIN, "/w")];
+    for (i, (name, aid)) in [("gone", "agone-1"), ("quiet", "aquiet-2")].iter().enumerate() {
+        parent.push(tool(n - 70 * MIN + i as u64, "p0", 5, &format!("toolu_a{i}"), "Agent", json!({"name": name})));
+        parent.push(spawn(n - 70 * MIN + 1000 + i as u64, &format!("toolu_a{i}"), name, aid));
+    }
+    parent.push(tool(n - 50 * MIN, "p3", 5, "toolu_s1", "TaskStop", json!({"task_id": "gone"})));
+    parent.push(result(n - 50 * MIN + 1000, "toolu_s1", "{\"message\":\"Successfully stopped task: tdrz6qcoo (x)\",\"task_id\":\"tdrz6qcoo\"}", false));
+    // the lead goes on for several MiB: the stop is now far outside the window of the default scan
+    let filler = "x".repeat(1000);
+    for i in 0..3500u64 {
+        parent.push(json!({"type": "system", "timestamp": iso(n - 49 * MIN + i), "content": filler}).to_string());
+    }
+    write(&sess(&h, "parent"), &parent);
+    let silent = |tail: Option<&str>| vec![prompt(n - 70 * MIN, "/w"), asst(n - 46 * MIN, "s1", 5, 5, json!([{"type": "text", "text": "working"}]), tail)];
+    mate(&h, "agone-1", "gone", "team-r", &silent(None));
+    mate(&h, "aquiet-2", "quiet", "team-r", &silent(None));
+    // an idle teammate that is alive and mid-task, and a subagent that finished its turn
+    mate(&h, "aidle-3", "idle", "team-r", &silent(Some("end_turn")));
+    roster(&h, "team-r", &["quiet", "idle"]);
+    write(
+        &h.join(".claude/projects/p/parent/subagents/agent-sub9.jsonl"),
+        &[prompt(n - 70 * MIN, "/w"), asst(n - 46 * MIN, "s9", 5, 5, json!([{"type": "text", "text": "done"}]), Some("end_turn"))],
+    );
+    let mut st = State::default();
+    ticks(&h, &mut st, &[n, n + MIN, n + 5 * MIN]);
+    assert_eq!(signals::state_of(agent(&st, "agone-1")), "done", "stopped by name, no longer on the roster");
+    assert!(!agent(&st, "agone-1").flags.contains_key("hung"), "a stopped teammate is never reported hung");
+    assert_eq!(signals::state_of(agent(&st, "aquiet-2")), "running", "alive on the roster, silent: still running");
+    assert!(agent(&st, "aquiet-2").flags.contains_key("hung"), "an alive teammate that is truly silent still alerts");
+    assert!(!agent(&st, "aidle-3").finished, "an idle teammate on the roster is not finished");
+    assert_eq!(signals::state_of(agent(&st, "sub9")), "done", "a subagent that ended its turn");
+}
+
+/// Prevention: every way the host says an agent has ended must end an agent whose own transcript still reads "running and silent".
+/// A liveness source that is added later and ignores these fails here.
+#[test]
+fn every_end_signal_ends_a_silent_running_agent() {
+    let n = now0();
+    let silent = vec![prompt(n - 70 * MIN, "/w"), asst(n - 46 * MIN, "s1", 5, 5, json!([{"type": "text", "text": "working"}]), None)];
+    // (case, how the host records the end)
+    for case in ["meta_finished", "off_roster", "stop_in_window", "rejoined_name", "not_rediscovered"] {
+        let h = home(&format!("endsig-{case}"));
+        write(&sess(&h, "parent"), &[prompt(n - 80 * MIN, "/w")]);
+        let dir = h.join(".claude/projects/p/parent/subagents");
+        write(&dir.join("agent-ax-1.jsonl"), &silent);
+        let mut meta = json!({"agentType": "ax", "name": "ax", "taskKind": "in_process_teammate", "teamName": "team-e"});
+        match case {
+            "meta_finished" => {
+                meta["finished"] = json!(true);
+                roster(&h, "team-e", &["ax"]);
+            }
+            "off_roster" | "not_rediscovered" => roster(&h, "team-e", if case == "off_roster" { &[] } else { &["ax"] }),
+            // the same name was spawned again later: the roster lists it, joined after this agent started
+            "rejoined_name" => {
+                roster(&h, "team-e", &["ax"]);
+                let p = h.join(".claude/teams/team-e/config.json");
+                let mut v: Value = serde_json::from_str(&std::fs::read_to_string(&p).unwrap()).unwrap();
+                v["members"][1]["joinedAt"] = json!(n + 60 * MIN);
+                std::fs::write(p, v.to_string()).unwrap();
+            }
+            _ => {
+                roster(&h, "team-e", &["ax"]);
+                let p = sess(&h, "parent");
+                append(&p, &[
+                    json!({"type": "user", "timestamp": iso(n - 60 * MIN), "toolUseResult": {"status": "teammate_spawned", "name": "ax", "agent_id": "ax-1"},
+                           "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_a", "content": "Spawned successfully."}]}}).to_string(),
+                    tool(n - 50 * MIN, "p3", 5, "toolu_s", "TaskStop", json!({"task_id": "ax"})),
+                    result(n - 50 * MIN + 1000, "toolu_s", "{\"message\":\"Successfully stopped task: t1 (x)\",\"task_id\":\"t1\"}", false),
+                ]);
+            }
+        }
+        std::fs::write(dir.join("agent-ax-1.meta.json"), meta.to_string()).unwrap();
+        let mut st = State::default();
+        if case == "not_rediscovered" {
+            // followed first, then left out of the tick (the cap) while the host drops it from the roster
+            ticks(&h, &mut st, &[n]);
+            assert_eq!(signals::state_of(agent(&st, "ax-1")), "running");
+            roster(&h, "team-e", &[]);
+            let moved = h.join("moved.jsonl");
+            std::fs::rename(dir.join("agent-ax-1.jsonl"), moved).unwrap();
+        }
+        ticks(&h, &mut st, &[n, n + MIN, n + 5 * MIN]);
+        assert_eq!(signals::state_of(agent(&st, "ax-1")), "done", "end signal {case} must end the agent");
+    }
+}
