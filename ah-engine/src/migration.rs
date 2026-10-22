@@ -125,7 +125,8 @@ fn stage_status(row: &V) -> (Option<&'static str>, Vec<String>) {
     if !row.str_field("fn").is_empty() {
         return (Some(node()), vec![format!("{}:{}", word("opcli.migration_why_fn"), row.str_field("fn"))]);
     }
-    if !row.str_field("native").is_empty() {
+    // `recon` marks a reconcile-family stage run by the engine's own port (`dssup::recon`): native, like a `native` row
+    if !row.str_field("native").is_empty() || !row.str_field("recon").is_empty() {
         let fallback = row.str_field("fallback");
         if !fallback.is_empty() {
             return (Some(partial()), vec![format!("{}:{fallback}", word("opcli.migration_why_fallback"))]);
@@ -268,8 +269,10 @@ mod tests {
         assert_eq!(verb_status("version", word("opcli.migration_cmd_implemented")).0, Some(native()));
         static FN_ROW: [(&str, V); 1] = [("fn", V::Str("nodeFn"))];
         static NATIVE_ROW: [(&str, V); 1] = [("native", V::Str("x"))];
+        static RECON_ROW: [(&str, V); 1] = [("recon", V::Str("fold"))];
         assert_eq!(stage_status(&V::Table(&FN_ROW)).0, Some(node()));
         assert_eq!(stage_status(&V::Table(&NATIVE_ROW)).0, Some(native()));
+        assert_eq!(stage_status(&V::Table(&RECON_ROW)).0, Some(native()));
         assert!(has_defer(&strip_comments("function decide(){ if (x) return 'defer'; }")));
         assert!(!has_defer(&strip_comments("// return 'defer'\n/* return \"defer\" */ return 'allow';")));
     }

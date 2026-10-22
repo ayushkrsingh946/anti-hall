@@ -110,7 +110,7 @@ Every flag in a command's arguments, with the commands that take it. A flag shar
 | `--list` | `devswarm` | List instead of acting (`devswarm notice --list`). |
 | `--max` | `devswarm` | Upper bound on how many items one run may act on (`devswarm reap-orphans`). |
 | `--memory` | `status` | Add the per-subsystem memory breakdown to the output (`status`). |
-| `--migration` | `status` | undocumented |
+| `--migration` | `status` | Print the migration report: every hook check, supervisor duty, post-update stage, command and Node switch as native, partial or node (`status`; add `--json` for the machine form). |
 | `--migrations-only` | `doctor` | With `--repair` or `--fix`, run only the migration pass and print its report as JSON (`doctor`). |
 | `--mistake` | `telemetry` | Record a mistake signal the engine cannot see itself: `--mistake <feature> <action> <target> <kind> [detail]` (`telemetry actions`). |
 | `--no-restart` | `engine-update` | Install without restarting the daemon; the next hook call starts the new one (`engine-update`). |

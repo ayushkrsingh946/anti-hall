@@ -149,6 +149,10 @@ value = "--max"
 doc = "Add the per-subsystem memory breakdown to the output (`status`)."
 value = "--memory"
 
+[flag.migration]
+doc = "Print the migration report: every hook check, supervisor duty, post-update stage, command and Node switch as native, partial or node (`status`; add `--json` for the machine form)."
+value = "--migration"
+
 [flag.migrations-only]
 doc = "With `--repair` or `--fix`, run only the migration pass and print its report as JSON (`doctor`)."
 value = "--migrations-only"
