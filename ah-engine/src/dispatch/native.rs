@@ -378,13 +378,13 @@ mod tests {
         assert!(deferred.is_empty(), "these checks must answer natively, not defer: {deferred:?}");
     }
 
-    /// The other side of the fix: where a check cannot prove Node is silent it still defers (D74). A relative payload cwd
-    /// resolves against the Node hook's own working directory, which the daemon cannot know: git-guard defers.
+    /// A relative payload cwd resolves against the Node hook's own working directory, which no longer exists: git-guard answers
+    /// natively (quiet for a command that blocks nothing, as Node is) and never defers to a hook that cannot run.
     #[test]
-    fn a_check_that_cannot_prove_silence_still_defers() {
+    fn a_relative_cwd_is_answered_natively_not_deferred() {
         let p = json!({"session_id": "s", "cwd": "sub", "hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "git status"}});
         let got = evaluate(&meta(), &p, &|| false, &|_, _, _| {});
-        assert_eq!(got.iter().find(|(id, _)| id == "git-guard").unwrap().1, Answer::Defer);
+        assert_eq!(got.iter().find(|(id, _)| id == "git-guard").unwrap().1, Answer::Decided(HookResult::quiet("git-guard"), Vec::new()));
     }
 
     /// Review P1: an incomplete request environment (dropped over the cap, absent, no HOME) must not be evaluated: with
