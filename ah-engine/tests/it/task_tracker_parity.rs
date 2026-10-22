@@ -276,13 +276,23 @@ fn drive(name: &str, cases: Vec<Case>) -> (usize, usize, usize) {
             )
         };
         if case.defer {
-            assert_eq!(String::from_utf8_lossy(&eng[0].1), FALLBACK, "{}", ctx("the first step must defer"));
-            assert_eq!(
-                snapshot(&he, now).keys().filter(|k| *k != "t.jsonl").collect::<Vec<_>>(),
-                seeded.keys().collect::<Vec<_>>(),
-                "{}",
-                ctx("a deferral leaves the home as seeded")
-            );
+            // The old engine handed these inputs to the Node hook. It now answers them itself: the advisory text may be dropped (the
+            // Primary dispatch-tier block needs a working directory the request does not carry) but where Node blocks the engine must.
+            if String::from_utf8_lossy(&eng[0].1) == FALLBACK {
+                assert_eq!(
+                    snapshot(&he, now).keys().filter(|k| *k != "t.jsonl").collect::<Vec<_>>(),
+                    seeded.keys().collect::<Vec<_>>(),
+                    "{}",
+                    ctx("a deferral leaves the home as seeded")
+                );
+            } else {
+                for (i, (n, e)) in node.iter().zip(&eng).enumerate() {
+                    let (nt, et) = (String::from_utf8_lossy(&n.1), String::from_utf8_lossy(&e.1));
+                    if let Err(w) = crate::common::not_weaker_than_node((n.0, &nt), (e.0, &et)) {
+                        panic!("{}", ctx(&format!("step {i}: {w}")));
+                    }
+                }
+            }
             deferred += 1;
         } else {
             for (i, (n, e)) in node.iter().zip(&eng).enumerate() {

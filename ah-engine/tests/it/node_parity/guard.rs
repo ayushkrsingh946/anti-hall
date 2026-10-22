@@ -142,6 +142,9 @@ pub struct Opts {
     pub fallback_real: bool,
     pub fallback_argv: Vec<(&'static str, Vec<&'static str>)>,
     pub strict_defer_prefix: Option<&'static str>,
+    /// Scenario ids (prefixes) the old engine handed back to Node and that it now answers itself: the answer may differ from Node's
+    /// (advisory text, a path only the hook process can resolve), but where Node blocks the engine must block.
+    pub native_prefixes: &'static [&'static str],
     /// Self-test of the harness: Node's answers are altered before they are compared, so every compared step must mismatch.
     pub mutate: bool,
     /// The tools the hook shells out to: their versions are part of its Node golden's fingerprint.
@@ -172,6 +175,7 @@ impl Opts {
             fallback_real: false,
             fallback_argv: Vec::new(),
             strict_defer_prefix: None,
+            native_prefixes: &[],
             mutate: false,
             node_tools: vec![Tool::Node, Tool::Git],
             replay_mask: None,
@@ -602,9 +606,13 @@ fn run_guard_with(o: &Opts, hooks: &Path, scenarios: &[Scenario], golden: &Golde
                 }
                 let input = step.raw.clone().unwrap_or_else(|| serde_json::to_string(&payload_e).unwrap());
                 let replayed = golden.mode() == NodeMode::Replay && !golden.is_volatile(&format!("{}#{si}", list_keys[li]));
-                let same = |e: &Out, n: &Out| match o.replay_mask.filter(|_| replayed) {
-                    Some(m) => e.code == n.code && m(&e.out) == m(&n.out) && m(&e.err) == m(&n.err),
-                    None => e == n,
+                let native = o.native_prefixes.iter().any(|p| sc.id.starts_with(p));
+                let same = |e: &Out, n: &Out| {
+                    (native && crate::common::not_weaker_than_node((n.code.parse().unwrap_or(-1), &n.out), (e.code.parse().unwrap_or(-1), &e.out)).is_ok())
+                        || match o.replay_mask.filter(|_| replayed) {
+                            Some(m) => e.code == n.code && m(&e.out) == m(&n.out) && m(&e.err) == m(&n.err),
+                            None => e == n,
+                        }
                 };
                 let mut results: Vec<(&str, R)> = Vec::new();
                 if matches!(o.mode, Mode::Oneshot | Mode::Both) && si == 0 {
