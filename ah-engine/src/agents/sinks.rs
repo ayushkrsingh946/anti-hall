@@ -150,7 +150,7 @@ pub(crate) fn compact(env: &Env) {
 }
 
 fn compact_dir(env: &Env, dir: &PathBuf) {
-    let Ok(rd) = std::fs::read_dir(&dir) else { return };
+    let Ok(rd) = std::fs::read_dir(dir) else { return };
     for e in rd.flatten() {
         let p = e.path();
         if !p.to_string_lossy().ends_with(pth("queue_ext")) {
