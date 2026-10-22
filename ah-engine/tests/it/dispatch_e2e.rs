@@ -20,20 +20,6 @@ struct Env {
     dir: PathBuf,
 }
 
-struct HealthyErrDaemon {
-    alive: Arc<AtomicBool>,
-    thread: Option<std::thread::JoinHandle<()>>,
-}
-
-impl Drop for HealthyErrDaemon {
-    fn drop(&mut self) {
-        self.alive.store(false, Ordering::Release);
-        if let Some(thread) = self.thread.take() {
-            let _join_result = thread.join();
-        }
-    }
-}
-
 impl Env {
     fn new(name: &str) -> Env {
         let dir = std::env::temp_dir().join(format!("ahd-e2e-{name}-{}", std::process::id()));
@@ -197,39 +183,6 @@ impl Env {
         names
     }
 
-    fn fake_node(&self, body: &str) -> PathBuf {
-        let bin = self.dir.join("bin");
-        std::fs::create_dir_all(&bin).unwrap();
-        let node = bin.join("node");
-        std::fs::write(&node, format!("#!/bin/sh\n{body}\n")).unwrap();
-        std::fs::set_permissions(&node, std::fs::Permissions::from_mode(0o700)).unwrap();
-        bin
-    }
-
-    fn start_healthy_err_daemon(&self) -> HealthyErrDaemon {
-        std::fs::create_dir_all(self.state()).unwrap();
-        let sock = ah_engine::paths::socket_in(&self.state());
-        ah_engine::discard::harmless(std::fs::remove_file(&sock));
-        let listener = std::os::unix::net::UnixListener::bind(&sock).unwrap();
-        listener.set_nonblocking(true).unwrap();
-        let alive = Arc::new(AtomicBool::new(true));
-        let thread_alive = Arc::clone(&alive);
-        let thread = std::thread::spawn(move || {
-            while thread_alive.load(Ordering::Acquire) {
-                match listener.accept() {
-                    Ok((mut stream, _)) => {
-                        let mut body = Vec::new();
-                        ah_engine::discard::harmless(stream.read_to_end(&mut body));
-                        ah_engine::discard::harmless(stream.write_all(&ah_engine::frame::encode(ah_engine::frame::Kind::Err, "healthy defer")));
-                    }
-                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => std::thread::sleep(Duration::from_millis(10)),
-                    Err(_) => break,
-                }
-            }
-        });
-        HealthyErrDaemon { alive, thread: Some(thread) }
-    }
-
     fn stop(&self) {
         let st = self.state();
         common::reap(&st, || {
@@ -288,30 +241,8 @@ fn pretool_payload_len(len: usize) -> String {
     p
 }
 
-fn pretool_payload_with_padding(len: usize, tool: &str, tool_input: serde_json::Value) -> String {
-    let prefix = format!(r#"{{"session_id":"e2e","cwd":".","hook_event_name":"PreToolUse","tool_name":"{tool}","tool_input":{tool_input},"padding":""#);
-    let suffix = r#""}"#;
-    assert!(len >= prefix.len() + suffix.len());
-    let mut p = String::with_capacity(len);
-    p.push_str(&prefix);
-    p.extend(std::iter::repeat_n('x', len - prefix.len() - suffix.len()));
-    p.push_str(suffix);
-    p
-}
-
 fn stop_payload_len(len: usize) -> String {
     let prefix = r#"{"session_id":"e2e","cwd":".","hook_event_name":"Stop","stop_hook_active":true,"transcript_path":""#;
-    let suffix = r#""}"#;
-    assert!(len >= prefix.len() + suffix.len());
-    let mut p = String::with_capacity(len);
-    p.push_str(prefix);
-    p.extend(std::iter::repeat_n('x', len - prefix.len() - suffix.len()));
-    p.push_str(suffix);
-    p
-}
-
-fn stop_payload_with_padding(len: usize) -> String {
-    let prefix = r#"{"session_id":"e2e","cwd":".","hook_event_name":"Stop","stop_hook_active":true,"padding":""#;
     let suffix = r#""}"#;
     assert!(len >= prefix.len() + suffix.len());
     let mut p = String::with_capacity(len);
@@ -358,45 +289,17 @@ fn event_map(e: &Env, event: &str, first: &str, rest: &str) -> PathBuf {
     map
 }
 
-/// A map giving `command` to the entry `id` and `true` to every other entry.
-fn event_map_for(e: &Env, event: &str, id: &str, command: &str) -> PathBuf {
-    let ids: Vec<String> = ah_engine::dispatch::table::entries("claude", event).into_iter().map(|x| x.id).collect();
-    let m: serde_json::Map<String, serde_json::Value> = ids.iter().map(|i| (i.clone(), if i == id { command } else { "true" }.into())).collect();
-    let map = e.dir.join(format!("{event}-map.json"));
-    let mut events = serde_json::Map::new();
-    events.insert(event.to_string(), serde_json::Value::Object(m));
-    std::fs::write(&map, serde_json::Value::Object(events).to_string()).unwrap();
-    map
-}
-
-fn assert_no_stop_counters(e: &Env) {
-    let dir = e.state().join(ah_engine::defaults::text("dispatch.stop_state_dir"));
-    let count = std::fs::read_dir(&dir).into_iter().flatten().flatten().count();
-    assert_eq!(count, 0, "genuine Stop blocks must not write stop-counter files in {}", dir.display());
-}
-
 const CTX_MERGE_GATE: &str = r#"printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"from merge-gate"}}\n'"#;
-const CTX_API_GUARD: &str = r#"printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"from api-guard"}}\n'"#;
 
 fn wait_for_daemon_native_block(e: &Env, args: &[&str], payload: &str, extra: &[(&str, &str)]) {
     for _ in 0..50 {
         let (code, _, err) = e.run_with(args, false, payload, true, extra);
-        if code == 2 && !err.contains("NODE-RAN") {
+        if code == 2 && !err.contains("could not run the guards") {
             return;
         }
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
     panic!("control: the warm daemon did not answer the guard natively");
-}
-
-#[test]
-fn several_advisories_merge_in_hooks_json_order() {
-    let e = Env::new("merge");
-    let map = e.map(&[("api-guard", CTX_API_GUARD), ("merge-gate", CTX_MERGE_GATE)]);
-    let args = ["hook", "--event", "PreToolUse", "--fallback-map", map.to_str().unwrap()];
-    let (code, out, err) = e.run(&args, true, &node_only_bash(&e), true);
-    assert_eq!((code, err.as_str()), (0, ""));
-    assert_eq!(out, "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"additionalContext\":\"from merge-gate\\n\\nfrom api-guard\"}}\n");
 }
 
 #[test]
@@ -486,96 +389,28 @@ fn an_event_no_entry_matches_says_nothing_and_starts_no_daemon() {
     assert!(!e.state().join("failure.json").exists(), "nothing matched, so the daemon was not woken");
 }
 
-/// D74: a guard event whose Node hooks cannot run blocks (exit 2) with the fail-closed message; it is never a silent allow.
+/// D74: a guard event the dispatcher cannot decide blocks (exit 2) with the fail-closed message; it is never a silent allow.
+/// There is no Node hook to run, so the faults left are the dispatcher's own: an unreadable fallback map and a usage error are
+/// install faults, and the configured `infra` failure mode (closed) answers them.
 #[test]
-fn a_guard_event_that_cannot_run_its_node_hooks_fails_closed() {
+fn a_guard_event_the_dispatcher_cannot_decide_fails_closed() {
     let e = Env::new("closed");
-    // no plugin root: the table's Node commands name ${CLAUDE_PLUGIN_ROOT}, so they cannot run
-    let (code, out, err) = e.run(&["hook", "--event", "PreToolUse"], true, &node_only_bash(&e), false);
-    assert_eq!((code, out.as_str()), (2, ""), "{err}");
-    assert!(err.contains("could not run the guards for PreToolUse") && err.contains("no runnable Node command"), "{err}");
     // a broken fallback map, plugin root set
     let bad = e.dir.join("bad-map.json");
     std::fs::write(&bad, "not json").unwrap();
     let args = ["hook", "--event", "PreToolUse", "--fallback-map", bad.to_str().unwrap()];
-    // review finding 16: an unreadable map and a usage error are install faults, not verdicts: the Node hooks decide (75)
-    let defer = ah_engine::defaults::num("dispatch.defer_exit") as i32;
     let (code, out, err) = e.run(&args, true, &bash("ls", &e.dir), true);
-    assert_eq!((code, out.as_str()), (defer, ""), "{err}");
-    assert!(err.contains("cannot read the fallback map") && err.contains("the Node hooks decide"), "{err}");
+    assert_eq!((code, out.as_str()), (2, ""), "{err}");
+    assert!(err.contains("could not run the guards for PreToolUse") && err.contains("cannot read the fallback map"), "{err}");
     // a usage error on a guard event does not exit 64 (a non-blocking error the host reads as an allow)
-    let (code, _, err) = e.run(&["hook", "--event", "PreToolUse", "--host", "nope"], true, &bash("ls", &e.dir), true);
-    assert_eq!(code, defer, "{err}");
+    let (code, out, err) = e.run(&["hook", "--event", "PreToolUse", "--host", "nope"], true, &bash("ls", &e.dir), true);
+    assert_eq!((code, out.as_str()), (2, ""), "{err}");
+    assert!(err.contains("could not run the guards for PreToolUse") && err.contains("unknown host nope"), "{err}");
     let log = std::fs::read_to_string(e.state().join("ah-engine.log")).unwrap_or_default();
-    assert_eq!(log.matches("dispatch_defer").count(), 3, "{log}");
-}
-
-#[test]
-fn a_guard_event_with_a_missing_node_script_fails_closed_before_spawning_node() {
-    let e = Env::new("missing-script-guard");
-    let mark = e.dir.join("fake-node-ran");
-    let body = format!(r#": > {}; echo MODULE_NOT_FOUND >&2; exit 1"#, mark.display());
-    let bin = e.fake_node(&body);
-    let empty_root = e.dir.join("empty-plugin");
-    std::fs::create_dir_all(&empty_root).unwrap();
-    let (code, out, err) = e.run_with(
-        &["hook", "--event", "PreToolUse"],
-        true,
-        &node_only_bash(&e),
-        false,
-        &[("CLAUDE_PLUGIN_ROOT", empty_root.to_str().unwrap()), ("PATH", bin.to_str().unwrap())],
-    );
-
-    assert_eq!((code, out.as_str()), (2, ""), "{err}");
-    assert!(err.contains("could not run the guards for PreToolUse") && err.contains("no runnable Node command"), "{err}");
-    assert!(!mark.exists(), "missing script should be classified before spawning node");
-}
-
-#[test]
-fn a_non_guard_event_with_missing_node_scripts_skips_and_logs_without_spawning_node() {
-    // SessionEnd: its only hook (the MCP reaper) sweeps natively now (L10b: no Node companion needed) but defers when the home is not an absolute path (HOME below), so the missing script is skipped and logged there
-    let e = Env::new("missing-script-nonguard");
-    let mark = e.dir.join("fake-node-ran");
-    let body = format!(r#": > {}; echo MODULE_NOT_FOUND >&2; exit 1"#, mark.display());
-    let bin = e.fake_node(&body);
-    let empty_root = e.dir.join("empty-plugin");
-    std::fs::create_dir_all(&empty_root).unwrap();
-    let p = serde_json::json!({"session_id": "e2e", "cwd": e.dir, "hook_event_name": "SessionEnd", "reason": "other"}).to_string();
-    let (code, out, err) = e.run_with(
-        &["hook", "--event", "SessionEnd"],
-        true,
-        &p,
-        false,
-        &[("CLAUDE_PLUGIN_ROOT", empty_root.to_str().unwrap()), ("PATH", bin.to_str().unwrap()), ("HOME", "relative-home")],
-    );
-
-    assert_eq!((code, out.as_str()), (0, ""), "{err}");
-    assert!(err.contains("skipped SessionEnd Node hook") && err.contains("no runnable Node command"), "{err}");
-    assert!(!mark.exists(), "missing scripts should be skipped before spawning node");
-    let log = std::fs::read_to_string(e.state().join(ah_engine::health::log_name())).unwrap();
-    assert!(log.contains("dispatch_defer") && log.contains("skipped"), "{log}");
-}
-
-#[test]
-fn a_guard_node_module_resolution_exit_one_is_unrunnable_but_own_exit_one_is_not() {
-    let e = Env::new("module-resolution");
-    // a Bash write with a relative cwd is one the engine's command-guard script leaves to the Node hook, so the stand-in runs
-    let script = e.dir.join("hook.js");
-    std::fs::write(&script, "// exists for preflight").unwrap();
-    let bin = e.fake_node("echo MODULE_NOT_FOUND fake >&2; exit 1");
-    let cmd = format!("node \"{}\"", script.display());
-    let map = pretool_map(&e, &[("command-guard", &cmd)], "true");
-    let args = ["hook", "--event", "PreToolUse", "--fallback-map", map.to_str().unwrap()];
-    let (code, out, err) =
-        e.run_with(&args, true, &bash("echo x > a.py", Path::new(".")), true, &[("PATH", bin.to_str().unwrap()), ("CLAUDE_CODE_ENTRYPOINT", "cli")]);
-    assert_eq!((code, out.as_str()), (2, ""), "{err}");
-    assert!(err.contains("could not run the guards for PreToolUse"), "{err}");
-
-    let bin = e.fake_node("echo OWN_REASON >&2; exit 1");
-    let (code, out, err) =
-        e.run_with(&args, true, &bash("echo x > a.py", Path::new(".")), true, &[("PATH", bin.to_str().unwrap()), ("CLAUDE_CODE_ENTRYPOINT", "cli")]);
-    assert_eq!((code, out.as_str()), (1, ""), "{err}");
-    assert_eq!(err, "OWN_REASON\n");
+    assert_eq!(log.matches("dispatch_no_node_closed").count(), 2, "{log}");
+    // no plugin root: the built-in checks do not need one, so a benign call is answered (and allowed) natively
+    let (code, out, err) = e.run(&["hook", "--event", "PreToolUse"], true, &bash("ls", &e.dir), false);
+    assert_eq!((code, out.as_str(), err.as_str()), (0, "", ""));
 }
 
 #[test]
@@ -590,45 +425,32 @@ fn unparsable_spawn_payload_blocks_only_when_node_cannot_run_model_routing() {
     }
 }
 
-/// A payload JS parses but serde_json rejects (a lone surrogate escape) is deferred to Node, never hard-blocked: the
-/// engine must not be a worse guard than Node. Only a missing Node command blocks.
+/// A payload JS parses but serde_json rejects (a lone surrogate escape) used to be left to Node. With no Node hook to leave it
+/// to, a guard event cannot be decided and follows its configured infra failure mode: closed (stricter than Node, which allowed
+/// it). Recorded in the open notes for the owner.
 #[test]
-fn a_payload_only_js_can_parse_is_deferred_to_node_not_blocked() {
+fn a_payload_only_js_can_parse_fails_closed_on_a_guard_event() {
     let e = Env::new("mr-surrogate");
-    let mut m: serde_json::Map<String, serde_json::Value> =
-        ah_engine::dispatch::table::entries("claude", "PreToolUse").into_iter().map(|x| (x.id, "true".into())).collect();
-    let node_ok = e.dir.join("node-ok-map.json");
-    std::fs::write(&node_ok, serde_json::json!({ "PreToolUse": m.clone() }).to_string()).unwrap();
-    m.insert("model-routing-guard".into(), r#"printf '{"decision":"block","reason":"node decided"}\n'; exit 2"#.into());
-    m.insert("model-routing-guard#2".into(), r#"printf '{"decision":"block","reason":"node decided"}\n'; exit 2"#.into());
-    let node_blocks = e.dir.join("node-blocks-map.json");
-    std::fs::write(&node_blocks, serde_json::json!({ "PreToolUse": m }).to_string()).unwrap();
     let agent = r#"{"hook_event_name":"PreToolUse","tool_name":"Agent","session_id":"s","cwd":"/tmp","tool_input":{"model":"sonnet","subagent_type":"general-purpose","prompt":"implement the parser \ud83d"}}"#;
     let bash_p = r#"{"hook_event_name":"PreToolUse","tool_name":"Bash","session_id":"s","cwd":"/tmp","tool_input":{"command":"echo hi \ud83d"}}"#;
     for (tool, payload) in [("Agent", agent), ("Bash", bash_p)] {
-        let args = ["hook", "--event", "PreToolUse", "--tool", tool, "--fallback-map", node_ok.to_str().unwrap()];
+        let args = ["hook", "--event", "PreToolUse", "--tool", tool];
         let (code, out, err) = e.run(&args, true, payload, true);
-        assert_eq!(code, 0, "{tool}: Node allows this payload, so must the dispatcher: {out:?} {err:?}");
-        assert!(!err.contains("could not parse"), "{tool}: {err}");
+        assert_eq!((code, out.as_str()), (2, ""), "{tool}: {err:?}");
+        assert!(err.contains("could not run the guards for PreToolUse"), "{tool}: {err}");
     }
-    // and Node's own decision on such a payload is what the host gets
-    let args = ["hook", "--event", "PreToolUse", "--tool", "Agent", "--fallback-map", node_blocks.to_str().unwrap()];
-    let (code, out, _) = e.run(&args, true, agent, true);
-    assert_eq!(code, 2, "{out}");
-    assert!(out.contains("node decided"), "{out}");
 }
 
-/// D74 keeps the Node hooks as the decider for a payload serde_json cannot read, but the fallback must be on record: one
-/// `dispatch_defer` health line (the fallback counter) per call, and the Node hook still runs.
+/// A payload serde_json cannot read on a guard event cannot be decided: it follows the infra failure mode (closed) and the
+/// fallback is on record, one `dispatch_defer` health line (the fallback counter) per call.
 #[test]
-fn an_unreadable_payload_is_logged_as_a_fallback_and_node_still_runs() {
+fn an_unreadable_payload_on_a_guard_event_fails_closed_and_is_logged() {
     let e = Env::new("unparsed-logged");
-    let map = e.map(&[("git-guard", "echo NODE-RAN >&2")]);
-    let args = ["hook", "--event", "PreToolUse", "--tool", "Bash", "--fallback-map", map.to_str().unwrap()];
+    let args = ["hook", "--event", "PreToolUse", "--tool", "Bash"];
     for (label, payload) in [("not JSON", "{bad"), ("empty", "")] {
         let (code, out, err) = e.run(&args, true, payload, true);
-        assert_eq!(code, 0, "{label}: {out:?} {err:?}");
-        assert!(err.contains("NODE-RAN"), "{label}: the Node hook still runs: {err}");
+        assert_eq!((code, out.as_str()), (2, ""), "{label}: {err:?}");
+        assert!(err.contains("could not run the guards for PreToolUse"), "{label}: {err}");
     }
     let log = std::fs::read_to_string(e.state().join(ah_engine::health::log_name())).unwrap_or_default();
     let lines: Vec<&str> = log.lines().filter(|l| l.contains("dispatch_defer") && l.contains("not readable as JSON")).collect();
@@ -649,133 +471,18 @@ fn an_event_that_is_not_a_guard_runs_what_it_can() {
     assert_eq!(e.run(&["hook", "--event", "SessionStart", "--host", "nope"], true, &p, true).0, 64);
 }
 
-/// Outputs one hook output cannot join are delivered one after another, not dropped.
+/// A path that used to hand the event to Node answers by itself: a guard event follows its failure mode (an unreadable map:
+/// `infra`, closed), never exit 75.
 #[test]
-fn a_conflict_delivers_every_output_in_order() {
-    let e = Env::new("conflict");
-    let map = e.map(&[("merge-gate", CTX_MERGE_GATE), ("api-guard", "echo plain text; echo warn >&2")]);
-    let args = ["hook", "--event", "PreToolUse", "--fallback-map", map.to_str().unwrap()];
-    let (code, out, err) = e.run(&args, true, &node_only_bash(&e), true);
-    assert_eq!(code, 0);
-    // the JSON keeps stdout (the host reads stdout as one object or as text); the plain text goes to stderr after the warning
-    assert_eq!(out, format!("{}\n", r#"{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"from merge-gate"}}"#));
-    assert_eq!(err, "warn\nplain text\n");
-    let log = std::fs::read_to_string(e.state().join("ah-engine.log")).unwrap_or_default();
-    assert_eq!(log.matches("dispatch_conflict").count(), 1, "{log}");
-}
-
-/// Three hooks of 4000 characters each fit the host's cap one by one but not joined. On a guard event the dispatcher still
-/// delivers every decision (exit 75 would lose an `ask` or `defer`): the join goes out as one object and the over-cap join is
-/// logged.
-#[test]
-fn a_join_over_the_host_cap_on_a_guard_event_keeps_the_decision() {
-    let e = Env::new("overcap");
-    let big = |n: &str, extra: &str| {
-        format!(
-            r#"printf '{{"hookSpecificOutput":{{"hookEventName":"PreToolUse"{extra},"additionalContext":"%s"}}}}\n' "$(head -c 4000 /dev/zero | tr '\0' {n})""#
-        )
-    };
-    let (a, b, c) = (big("a", ""), big("b", ""), big("c", r#","permissionDecision":"ask","permissionDecisionReason":"sure?""#));
-    // command-guard leaves a payload without an absolute cwd to Node, so its map entry runs (merge-gate and api-guard defer on the
-    // relative transcript path and the non-ASCII write)
-    let map = e.map(&[("command-guard", a.as_str()), ("merge-gate", b.as_str()), ("api-guard", c.as_str())]);
-    let args = ["hook", "--event", "PreToolUse", "--fallback-map", map.to_str().unwrap()];
-    let main_thread = [("CLAUDE_CODE_ENTRYPOINT", "cli")];
-    let relative_cwd = {
-        let mut v: serde_json::Value = serde_json::from_str(&node_only_bash(&e)).unwrap();
-        v["cwd"] = ".".into();
-        v.to_string()
-    };
-    let (code, out, err) = e.run_with(&args, true, &relative_cwd, true, &main_thread);
-    assert_eq!((code, err.as_str()), (0, ""));
-    let v: serde_json::Value = serde_json::from_str(out.trim()).expect("one JSON object");
-    assert_eq!(v["hookSpecificOutput"]["permissionDecision"], "ask", "the decision survives the join");
-    assert_eq!(v["hookSpecificOutput"]["additionalContext"].as_str().map(|c| c.chars().count()), Some(3 * 4000 + 2 * 2));
-    let log = std::fs::read_to_string(e.state().join("ah-engine.log")).unwrap_or_default();
-    assert_eq!(log.matches("dispatch_context_over_cap").count(), 1, "{log}");
-    // two of them fit joined: delivered as one, nothing logged
-    let map = e.map(&[("command-guard", a.as_str()), ("merge-gate", b.as_str())]);
-    let args = ["hook", "--event", "PreToolUse", "--fallback-map", map.to_str().unwrap()];
-    assert_eq!(e.run_with(&args, true, &relative_cwd, true, &main_thread).0, 0);
-}
-
-/// A SessionStart whose joined context is over the host's cap is spilled natively: whole contexts that fit stay inline, the
-/// rest is in a private file named by a pointer line, and no Node hook is handed the event (no exit 75).
-#[test]
-fn a_join_over_the_host_cap_on_another_event_is_spilled_to_a_file() {
-    let (e, p, map) = overcap_session("overcap-spill");
-    let args = ["hook", "--event", "SessionStart", "--fallback-map", map.to_str().unwrap()];
-    let (code, out, err) = e.run(&args, true, &p, true);
-    assert_eq!((code, err.as_str()), (0, ""), "{out}");
-    let v: serde_json::Value = serde_json::from_str(out.trim()).expect("one JSON object");
-    let ctx = v["hookSpecificOutput"]["additionalContext"].as_str().unwrap();
-    assert!(ctx.chars().count() <= 10000, "{}", ctx.chars().count());
-    assert!(ctx.starts_with(&format!("{}\n\n{}", "a".repeat(4000), "b".repeat(4000))), "the contexts that fit stay whole and in order");
-    let path = ctx.rsplit_once("Read it with the Read tool: ").unwrap().1.trim_end_matches(']');
-    assert!(path.starts_with(e.state().to_str().unwrap()), "{path}");
-    assert_eq!(std::fs::read_to_string(path).unwrap(), "c".repeat(4000), "nothing cut: the rest is in the file");
-    let log = std::fs::read_to_string(e.state().join("ah-engine.log")).unwrap_or_default();
-    assert_eq!(log.matches("dispatch_context_spilled").count(), 1, "{log}");
-}
-
-/// With the spill off the previous answer stands (Node still exists): the event is handed back with `dispatch.defer_exit`;
-/// with no Node (`dispatch.defer_to_node` 0) the join is delivered for the host to spill.
-#[test]
-fn with_the_spill_off_an_over_cap_join_is_handed_back_or_delivered() {
-    let (e, p, map) = overcap_session("overcap-off");
-    let args = ["hook", "--event", "SessionStart", "--fallback-map", map.to_str().unwrap()];
-    let (code, out, err) = e.run_with(&args, true, &p, true, &[("AH_ENGINE_SPILL_OVER_CAP", "0")]);
-    assert_eq!((code, out.as_str()), (75, ""), "{err}");
-    assert!(err.contains("over the 10000"), "{err}");
-    let (code, out, _) = e.run_with(&args, true, &p, true, &[("AH_ENGINE_SPILL_OVER_CAP", "0"), ("AH_ENGINE_DEFER_TO_NODE", "0")]);
-    assert_eq!(code, 0);
-    let v: serde_json::Value = serde_json::from_str(out.trim()).unwrap();
-    assert_eq!(v["hookSpecificOutput"]["additionalContext"].as_str().map(|c| c.chars().count()), Some(3 * 4000 + 2 * 2));
-}
-
-/// With no Node (`dispatch.defer_to_node` 0) a path that used to hand the event to Node answers by itself: a guard event
-/// follows its failure mode (an unreadable map: `infra`, closed).
-#[test]
-fn without_node_an_infra_fault_follows_the_failure_mode_instead_of_exit_75() {
+fn an_infra_fault_follows_the_failure_mode_and_never_exits_75() {
     let e = Env::new("no-node-infra");
-    let no_node = [("AH_ENGINE_DEFER_TO_NODE", "0")];
     let missing = e.dir.join("missing-map.json");
     let args = ["hook", "--event", "PreToolUse", "--fallback-map", missing.to_str().unwrap()];
     let (code, out, err) = e.run_with(&args, true, &node_only_bash(&e), true, &[]);
-    assert_eq!((code, out.as_str()), (75, ""), "Node still exists: it decides: {err}");
-    let (code, out, err) = e.run_with(&args, true, &node_only_bash(&e), true, &no_node);
-    assert_eq!((code, out.as_str()), (2, ""), "no Node, infra is closed: {err}");
+    assert_eq!((code, out.as_str()), (2, ""), "infra is closed: {err}");
     assert!(err.contains("blocked rather than allowed"), "{err}");
     let log = std::fs::read_to_string(e.state().join("ah-engine.log")).unwrap_or_default();
     assert!(log.contains("dispatch_no_node_closed"), "{log}");
-}
-
-fn overcap_session(name: &str) -> (Env, String, PathBuf) {
-    let e = Env::new(name);
-    let big = |n: &str| {
-        format!(r#"printf '{{"hookSpecificOutput":{{"hookEventName":"SessionStart","additionalContext":"%s"}}}}\n' "$(head -c 4000 /dev/zero | tr '\0' {n})""#)
-    };
-    let ids: Vec<String> = ah_engine::dispatch::table::entries("claude", "SessionStart").into_iter().map(|x| x.id).collect();
-    let m: serde_json::Map<String, serde_json::Value> =
-        ids.iter().enumerate().map(|(i, id)| (id.clone(), if i < 3 { big(["a", "b", "c"][i]) } else { "true".to_string() }.into())).collect();
-    let map = e.dir.join("map.json");
-    std::fs::write(&map, serde_json::json!({ "SessionStart": m }).to_string()).unwrap();
-    let p = serde_json::json!({"session_id": "e2e", "hook_event_name": "SessionStart", "source": "startup"}).to_string();
-    (e, p, map)
-}
-
-#[test]
-fn sessionstart_over_stdin_cap_reaches_node_hook_without_truncation() {
-    let e = Env::new("stdin-full");
-    let map = session_map(&e, "wc -c", "true");
-    let args = ["hook", "--event", "SessionStart", "--fallback-map", map.to_str().unwrap()];
-    let max = ah_engine::defaults::num("client.max_stdin") as usize;
-    let payload = session_payload_len(max + 4097);
-    let (code, out, err) = e.run(&args, true, &payload, true);
-    assert_eq!(code, 0, "{err}");
-    assert_eq!(out.trim().parse::<usize>().unwrap(), payload.len());
-    assert_eq!(payload.len(), 8_392_705);
-    assert!(e.dispatch_temp_files().is_empty(), "temp payload files left behind: {:?}", e.dispatch_temp_files());
 }
 
 #[test]
@@ -790,33 +497,6 @@ fn dispatcher_stdin_temp_file_is_removed_after_hook_timeout() {
 }
 
 #[test]
-fn over_cap_pretooluse_exit0_runs_node_with_the_full_stdin() {
-    let e = Env::new("stdin-pretool-allow");
-    let mark = e.dir.join("bytes");
-    let map = event_map(&e, "PreToolUse", r#"wc -c > "$AH_TEST_MARK""#, "true");
-    let args = ["hook", "--event", "PreToolUse", "--fallback-map", map.to_str().unwrap()];
-    let payload = pretool_payload_len(ah_engine::defaults::num("client.max_stdin") as usize + 4097);
-    let (code, out, err) = e.run_with(&args, true, &payload, true, &[("AH_TEST_MARK", mark.to_str().unwrap())]);
-    assert_eq!((code, out.as_str(), err.as_str()), (0, "", ""));
-    assert_eq!(std::fs::read_to_string(&mark).unwrap().trim().parse::<usize>().unwrap(), payload.len());
-    assert!(e.dispatch_temp_files().is_empty(), "temp payload files left behind: {:?}", e.dispatch_temp_files());
-}
-
-#[test]
-fn over_cap_pretooluse_exit2_preserves_node_output() {
-    let e = Env::new("stdin-pretool-block");
-    let mark = e.dir.join("ran");
-    let map = event_map(&e, "PreToolUse", r#"touch "$AH_TEST_MARK"; echo NODEBLOCK >&2; exit 2"#, "true");
-    let args = ["hook", "--event", "PreToolUse", "--fallback-map", map.to_str().unwrap()];
-    let payload = pretool_payload_len(ah_engine::defaults::num("client.max_stdin") as usize + 4097);
-    let (code, out, err) = e.run_with(&args, true, &payload, true, &[("AH_TEST_MARK", mark.to_str().unwrap())]);
-    assert_eq!((code, out.as_str()), (2, ""));
-    assert!(err.contains("NODEBLOCK"), "{err:?}");
-    assert!(mark.exists(), "the Node hook did not run");
-    assert!(e.dispatch_temp_files().is_empty(), "temp payload files left behind: {:?}", e.dispatch_temp_files());
-}
-
-#[test]
 fn over_cap_guard_with_unrunnable_node_hooks_fails_closed() {
     let e = Env::new("stdin-pretool-unrunnable");
     let payload = pretool_payload_len(ah_engine::defaults::num("client.max_stdin") as usize + 4097);
@@ -827,143 +507,26 @@ fn over_cap_guard_with_unrunnable_node_hooks_fails_closed() {
 }
 
 #[test]
-fn over_cap_stop_active_runs_node_and_unrunnable_failures_are_capped() {
+fn over_cap_stop_active_fails_closed_up_to_the_cap_then_lets_the_agent_go() {
     let e = Env::new("stdin-stop-active");
-    let mark = e.dir.join("bytes");
-    let map = event_map(&e, "Stop", r#"wc -c > "$AH_TEST_MARK""#, "true");
-    let args = ["hook", "--event", "Stop", "--fallback-map", map.to_str().unwrap()];
+    // a Stop payload over the stdin cap cannot be sent to the engine, so its hooks cannot run: the engine's own fail-closed block is
+    // bounded by the stop-loop cap (the agent is held `dispatch.stop_block_cap` times, then let go), never an endless loop
     let payload = stop_payload_len(ah_engine::defaults::num("client.max_stdin") as usize + 4097);
-    let (code, out, err) = e.run_with(&args, true, &payload, true, &[("AH_TEST_MARK", mark.to_str().unwrap())]);
-    assert_eq!((code, out.as_str(), err.as_str()), (0, "", ""));
-    assert_eq!(std::fs::read_to_string(&mark).unwrap().trim().parse::<usize>().unwrap(), payload.len());
-
-    // a hook the OS will not start is an infrastructure fault (review finding 2): every Stop hands over to the Node hooks
-    // (dispatch.defer_exit), never a block, so there is no loop for the cap to bound
-    let broken = event_map(&e, "Stop", "a\0b", "a\0b");
-    let args = ["hook", "--event", "Stop", "--fallback-map", broken.to_str().unwrap()];
     let cap = ah_engine::defaults::num("dispatch.stop_block_cap") as usize;
-    let codes: Vec<i32> = (0..cap + 2).map(|_| e.run(&args, true, &payload, true).0).collect();
-    assert_eq!(codes, vec![ah_engine::defaults::num("dispatch.defer_exit") as i32; cap + 2], "a Stop whose Node hooks cannot start defers");
-
-    // review P1-1: once another Node hook has run, exit 75 would make the wrapper run it a second time; the Stop fails closed
-    // (bounded by the stop-loop cap) and every hook that could start ran exactly once per call
-    let ran = e.dir.join("ran-once");
-    let mixed = event_map(&e, "Stop", "a\0b", &format!("echo x >> '{}'", ran.display()));
-    let args = ["hook", "--event", "Stop", "--fallback-map", mixed.to_str().unwrap()];
-    let (code, out, err) = e.run(&args, true, &payload, true);
-    assert_ne!(code, ah_engine::defaults::num("dispatch.defer_exit") as i32, "a partial run must not be handed back for a rerun: {out} {err}");
-    assert_eq!(code, 2, "fails closed: {err}");
-    let entries = ah_engine::dispatch::table::entries("claude", "Stop").len();
-    assert_eq!(std::fs::read_to_string(&ran).unwrap().lines().count(), entries - 1, "each startable hook ran once");
+    let codes: Vec<i32> = (0..cap + 2).map(|_| e.run(&["hook", "--event", "Stop"], true, &payload, true).0).collect();
+    let want: Vec<i32> = (0..cap + 2).map(|i| if i < cap { 2 } else { 0 }).collect();
+    assert_eq!(codes, want, "an over-cap Stop is held up to the cap, then let go");
     assert!(e.dispatch_temp_files().is_empty(), "temp payload files left behind: {:?}", e.dispatch_temp_files());
 }
 
 #[test]
-fn stop_active_genuine_node_blocks_have_in_cap_and_over_cap_parity_without_counters() {
-    let e = Env::new("stdin-stop-genuine-parity");
-    let map = event_map(&e, "Stop", "echo NODEBLOCK >&2; exit 2", "true");
-    let args = ["hook", "--event", "Stop", "--fallback-map", map.to_str().unwrap()];
-    let max = ah_engine::defaults::num("client.max_stdin") as usize;
-    let in_cap = stop_payload_with_padding(max - 1024);
-    let over_cap = stop_payload_with_padding(max + 4097);
-
-    let run_results = |payload: &str| -> Vec<(i32, String)> {
-        (0..4)
-            .map(|_| {
-                // checks down (no daemon, none started): every Stop entry has a built-in check by now, so the mapped Node block
-                // only runs when the checks cannot answer
-                let (code, out, err) = e.run_with(&args, false, payload, true, &[("AH_ENGINE_NOSPAWN", "1")]);
-                assert_eq!(out, "");
-                (code, err)
-            })
-            .collect()
-    };
-    let in_results = run_results(&in_cap);
-    let over_results = run_results(&over_cap);
-    let in_codes: Vec<i32> = in_results.iter().map(|(code, _)| *code).collect();
-    let over_codes: Vec<i32> = over_results.iter().map(|(code, _)| *code).collect();
-
-    assert_eq!(in_codes, [2, 2, 2, 2], "in-cap genuine Stop blocks pass through");
-    assert_eq!(over_codes, in_codes, "same semantic Stop payload must behave the same across the stdin cap");
-    for (code, err) in in_results.iter().chain(over_results.iter()) {
-        assert_eq!(*code, 2);
-        assert!(err.contains("NODEBLOCK"), "genuine Node block stderr must pass through: {err:?}");
-    }
-    assert_no_stop_counters(&e);
-}
-
-fn tool_last_pretool_payload(len: usize, tool: &str, decoy: &str) -> String {
-    let prefix = format!(
-        r#"{{"session_id":"e2e","cwd":".","hook_event_name":"PreToolUse","tool_input":{{"command":"true","nested":{{"tool_name":"{decoy}"}},"prompt":"\"tool_name\":\"{decoy}\""}},"padding":""#
-    );
-    let suffix = format!(r#"","tool_name":"{tool}"}}"#);
-    assert!(len >= prefix.len() + suffix.len());
-    let mut p = String::with_capacity(len);
-    p.push_str(&prefix);
-    p.extend(std::iter::repeat_n('x', len - prefix.len() - suffix.len()));
-    p.push_str(&suffix);
-    p
-}
-
-fn assert_over_cap_bash_payload_does_not_run_agent_only_guard(e: &Env, payload: &str, extra_args: &[&str], ctx: &str) {
-    let map = pretool_map(e, &[("model-routing-guard", "echo AGENT BLOCK >&2; exit 2")], "true");
-    let mut args = vec!["hook", "--event", "PreToolUse", "--fallback-map", map.to_str().unwrap()];
-    args.extend_from_slice(extra_args);
-    let (code, out, err) = e.run(&args, true, payload, true);
-    assert_eq!((code, out.as_str(), err.as_str()), (0, "", ""), "{ctx}: Agent-only guard was selected");
-}
-
-fn assert_over_cap_scan_failure_selects_all(e: &Env, payload: &str, ctx: &str) {
-    let map = pretool_map(e, &[("model-routing-guard", "echo AGENT BLOCK >&2; exit 2")], "true");
-    let args = ["hook", "--event", "PreToolUse", "--fallback-map", map.to_str().unwrap()];
-    let (code, out, err) = e.run(&args, true, payload, true);
-    assert_eq!((code, out.as_str()), (2, ""), "{ctx}: scan failure must select all entries");
-    assert!(err.contains("AGENT BLOCK"), "{ctx}: Agent-only guard did not run: {err}");
-}
-
-#[test]
-fn over_cap_pretooluse_derives_top_level_tool_name_when_tool_flag_is_omitted() {
-    let e = Env::new("stdin-tool-scan");
-    let max = ah_engine::defaults::num("client.max_stdin") as usize;
-    let nested_decoy = pretool_payload_with_padding(max + 4097, "Bash", serde_json::json!({"command": "true", "tool_name": "Agent"}));
-    let prompt_decoy =
-        pretool_payload_with_padding(max + 4097, "Bash", serde_json::json!({"command": "true", "prompt": "literal \"tool_name\":\"Agent\" text"}));
-    let escaped_quote_decoy = pretool_payload_with_padding(max + 4097, "Bash", serde_json::json!({"command": "printf '\\\"tool_name\\\":\\\"Agent\\\"'"}));
-    let tool_last = tool_last_pretool_payload(8 * 1024 * 1024 + 256, "Bash", "Agent");
-
-    for (ctx, payload) in [
-        ("nested tool_name decoy", nested_decoy),
-        ("prompt text tool_name decoy", prompt_decoy),
-        ("escaped quote decoy", escaped_quote_decoy),
-        ("tool_name last after stdin cap", tool_last),
-    ] {
-        assert!(payload.len() > max, "{ctx} payload must exercise the over-cap path");
-        assert_over_cap_bash_payload_does_not_run_agent_only_guard(&e, &payload, &[], ctx);
-    }
-}
-
-#[test]
-fn over_cap_pretooluse_scan_failure_selects_all_entries() {
-    let e = Env::new("stdin-tool-scan-fallback");
-    let max = ah_engine::defaults::num("client.max_stdin") as usize;
-    let duplicate = format!(
-        r#"{{"session_id":"e2e","cwd":".","hook_event_name":"PreToolUse","tool_name":"Bash","padding":"{}","tool_name":"Agent","tool_input":{{"command":"true"}}}}"#,
-        "x".repeat(max + 1)
-    );
-    let non_string = format!(
-        r#"{{"session_id":"e2e","cwd":".","hook_event_name":"PreToolUse","tool_name":123,"padding":"{}","tool_input":{{"command":"true"}}}}"#,
-        "x".repeat(max + 1)
-    );
-
-    assert_over_cap_scan_failure_selects_all(&e, &duplicate, "duplicate differing top-level tool_name");
-    assert_over_cap_scan_failure_selects_all(&e, &non_string, "non-string top-level tool_name");
-}
-
-#[test]
-fn explicit_tool_flag_wins_over_over_cap_payload_tool_name() {
-    let e = Env::new("stdin-tool-explicit");
-    let payload = tool_last_pretool_payload(ah_engine::defaults::num("client.max_stdin") as usize + 4097, "Agent", "Bash");
-    assert_over_cap_bash_payload_does_not_run_agent_only_guard(&e, &payload, &["--tool", "Bash"], "explicit --tool Bash");
+fn over_cap_guard_payload_is_closed_not_allowed_even_with_the_plugin_root_set() {
+    let e = Env::new("stdin-pretool-closed");
+    let payload = pretool_payload_len(ah_engine::defaults::num("client.max_stdin") as usize + 4097);
+    let (code, out, err) = e.run(&["hook", "--event", "PreToolUse"], true, &payload, true);
+    assert_eq!((code, out.as_str()), (2, ""), "{err:?}");
+    assert!(err.contains("could not run the guards for PreToolUse"), "{err:?}");
+    assert!(e.dispatch_temp_files().is_empty(), "temp payload files left behind: {:?}", e.dispatch_temp_files());
 }
 
 #[test]
@@ -971,32 +534,16 @@ fn small_payloads_do_not_need_a_usable_spool_dir() {
     let e = Env::new("stdin-small-state-file");
     let state_file = e.dir.join("not-a-state-dir");
     std::fs::write(&state_file, "not a dir").unwrap();
-
-    let mark = e.dir.join("pretool-ran");
-    let map = e.map(&[("command-guard", r#"wc -c > "$AH_TEST_MARK""#)]);
-    let args = ["hook", "--event", "PreToolUse", "--fallback-map", map.to_str().unwrap()];
-    // a payload without an absolute cwd is one the engine's command-guard script leaves to the Node hook, so the fallback runs
-    let payload = bash("echo x > a.py", Path::new("."));
-    let (code, out, err) = e.run_with(
-        &args,
-        true,
-        &payload,
-        true,
-        &[("AH_ENGINE_DIR", state_file.to_str().unwrap()), ("AH_TEST_MARK", mark.to_str().unwrap()), ("CLAUDE_CODE_ENTRYPOINT", "cli")],
-    );
+    // a payload under the cap never touches the spool: the unusable state dir only sends the event log to stderr
+    let payload = bash("ls", &e.dir);
+    let (code, out, err) = e.run_with(&["hook", "--event", "PreToolUse"], true, &payload, true, &[("AH_ENGINE_DIR", state_file.to_str().unwrap())]);
     assert_eq!((code, out.as_str()), (0, ""));
     assert!(only_event_lines(&err), "{err:?}");
-    assert_eq!(std::fs::read_to_string(&mark).unwrap().trim().parse::<usize>().unwrap(), payload.len());
-
-    let mark = e.dir.join("session-ran");
-    let map = session_map(&e, r#"wc -c > "$AH_TEST_MARK""#, "true");
-    let args = ["hook", "--event", "SessionStart", "--fallback-map", map.to_str().unwrap()];
     let payload = serde_json::json!({"session_id": "e2e", "hook_event_name": "SessionStart", "source": "startup"}).to_string();
-    let (code, out, err) =
-        e.run_with(&args, true, &payload, true, &[("AH_ENGINE_DIR", state_file.to_str().unwrap()), ("AH_TEST_MARK", mark.to_str().unwrap())]);
-    assert_eq!((code, out.as_str()), (0, ""));
-    assert!(only_event_lines(&err), "{err:?}");
-    assert_eq!(std::fs::read_to_string(&mark).unwrap().trim().parse::<usize>().unwrap(), payload.len());
+    let (code, _, err) = e.run_with(&["hook", "--event", "SessionStart"], true, &payload, true, &[("AH_ENGINE_DIR", state_file.to_str().unwrap())]);
+    assert_eq!(code, 0, "{err:?}");
+    // the entries without a built-in check are skipped with a note (no hook command exists); nothing mentions a spool
+    assert!(!err.contains("spool") && err.lines().all(|l| l.starts_with("anti-hall: skipped SessionStart") || l.split('\t').count() == 4), "{err:?}");
 }
 
 /// Stderr holds nothing but event-log lines (`ts<TAB>kind<TAB>code<TAB>detail`): with the state dir unusable, the log
@@ -1025,92 +572,49 @@ fn over_cap_payload_with_uncreatable_spool_dir_follows_event_fail_mode() {
 }
 
 fn assert_over_cap_spool_failure_modes(e: &Env, state: &Path, ctx: &str) {
-    let mark = e.dir.join("pretool-ran");
-    let map = e.map(&[("command-guard", r#"touch "$AH_TEST_MARK""#)]);
-    let args = ["hook", "--event", "PreToolUse", "--fallback-map", map.to_str().unwrap()];
+    // review finding 3: a payload that cannot be spooled is an infrastructure fault. Nothing can read it back, so the event follows
+    // its configured infra failure mode: a guard event is closed (exit 2), any other event skips its hooks with a loud line.
     let payload = pretool_payload_len(ah_engine::defaults::num("client.max_stdin") as usize + 4097);
-    // review finding 3: a payload that cannot be spooled is an infrastructure fault: the wrapper, which holds the payload,
-    // runs the Node hooks (dispatch.defer_exit) for guard and non-guard events alike, never a block and never a skip
-    let defer = ah_engine::defaults::num("dispatch.defer_exit") as i32;
-    let (code, out, err) = e.run_with(&args, true, &payload, true, &[("AH_ENGINE_DIR", state.to_str().unwrap()), ("AH_TEST_MARK", mark.to_str().unwrap())]);
-    assert_eq!((code, out.as_str()), (defer, ""), "{ctx}: {err:?}");
-    assert!(err.contains("the Node hooks decide") && err.contains("payload"), "{ctx}: {err:?}");
-    assert!(!mark.exists(), "{ctx}: Node must not run without the full payload");
+    let (code, out, err) = e.run_with(&["hook", "--event", "PreToolUse"], true, &payload, true, &[("AH_ENGINE_DIR", state.to_str().unwrap())]);
+    assert_eq!((code, out.as_str()), (2, ""), "{ctx}: {err:?}");
+    assert!(err.contains("could not run the guards for PreToolUse") && err.contains("payload"), "{ctx}: {err:?}");
 
-    let mark = e.dir.join("session-ran");
-    let map = session_map(e, r#"touch "$AH_TEST_MARK""#, "true");
-    let args = ["hook", "--event", "SessionStart", "--fallback-map", map.to_str().unwrap()];
     let payload = session_payload_len(ah_engine::defaults::num("client.max_stdin") as usize + 4097);
-    let (code, out, err) = e.run_with(&args, true, &payload, true, &[("AH_ENGINE_DIR", state.to_str().unwrap()), ("AH_TEST_MARK", mark.to_str().unwrap())]);
-    assert_eq!((code, out.as_str()), (defer, ""), "{ctx}: {err:?}");
-    assert!(err.contains("the Node hooks decide") && err.contains("dispatch_spool_unavailable"), "{ctx}: {err:?}");
-    assert!(!mark.exists(), "{ctx}: Node must not run without the full payload");
+    let (code, out, err) = e.run_with(&["hook", "--event", "SessionStart"], true, &payload, true, &[("AH_ENGINE_DIR", state.to_str().unwrap())]);
+    assert_eq!((code, out.as_str()), (0, ""), "{ctx}: {err:?}");
+    assert!(err.contains("dispatch_spool_unavailable"), "{ctx}: {err:?}");
 }
 
 #[test]
 fn over_cap_guard_payload_fails_closed_when_anonymous_spool_write_fails() {
     let e = Env::new("stdin-spool-write-guard");
-    let mark = e.dir.join("pretool-ran");
-    let map = e.map(&[("command-guard", r#"touch "$AH_TEST_MARK""#)]);
-    let args = ["hook", "--event", "PreToolUse", "--fallback-map", map.to_str().unwrap()];
     let payload = pretool_payload_len(ah_engine::defaults::num("client.max_stdin") as usize + 4097);
-    let (code, out, err) = e.run_with_file_size_limit(&args, true, &payload, true, &[("AH_TEST_MARK", mark.to_str().unwrap())], 1024 * 1024);
+    let (code, out, err) = e.run_with_file_size_limit(&["hook", "--event", "PreToolUse"], true, &payload, true, &[], 1024 * 1024);
 
-    assert_eq!((code, out.as_str()), (ah_engine::defaults::num("dispatch.defer_exit") as i32, ""), "{err:?}");
-    assert!(err.contains("the Node hooks decide") && err.contains("spooled"), "{err:?}");
-    assert!(!mark.exists(), "Node must not run after the anonymous payload spool write fails");
+    assert_eq!((code, out.as_str()), (2, ""), "{err:?}");
+    assert!(err.contains("could not run the guards for PreToolUse") && err.contains("spooled"), "{err:?}");
     assert!(e.dispatch_temp_files().is_empty(), "temp payload files left behind: {:?}", e.dispatch_temp_files());
 }
 
 #[test]
 fn over_cap_non_guard_payload_reports_when_anonymous_spool_write_fails() {
     let e = Env::new("stdin-spool-write-session");
-    let mark = e.dir.join("session-ran");
-    let map = session_map(&e, r#"touch "$AH_TEST_MARK""#, "true");
-    let args = ["hook", "--event", "SessionStart", "--fallback-map", map.to_str().unwrap()];
     let payload = session_payload_len(ah_engine::defaults::num("client.max_stdin") as usize + 4097);
-    let (code, out, err) = e.run_with_file_size_limit(&args, true, &payload, true, &[("AH_TEST_MARK", mark.to_str().unwrap())], 1024 * 1024);
+    let (code, out, err) = e.run_with_file_size_limit(&["hook", "--event", "SessionStart"], true, &payload, true, &[], 1024 * 1024);
 
-    assert_eq!((code, out.as_str()), (ah_engine::defaults::num("dispatch.defer_exit") as i32, ""), "{err:?}");
-    assert!(err.contains("the Node hooks decide") && err.contains("spooled"), "{err:?}");
+    // a SessionStart cannot block: its hooks are skipped with a loud line, never a block
+    assert_eq!((code, out.as_str()), (0, ""), "{err:?}");
+    assert!(err.contains("spooled"), "{err:?}");
     let log = std::fs::read_to_string(e.state().join(ah_engine::health::log_name())).unwrap();
     assert!(log.contains("dispatch_spool_unavailable"), "{log}");
-    assert!(!mark.exists(), "Node must not run after the anonymous payload spool write fails");
     assert!(e.dispatch_temp_files().is_empty(), "temp payload files left behind: {:?}", e.dispatch_temp_files());
-}
-
-/// Waits until the file holds a whole pid: the shell creates it (empty) a moment before `echo $$` fills it, so existence is
-/// not enough (a read in between parsed an empty string under load).
-fn wait_for_pid(path: &Path, within: Duration) {
-    let start = Instant::now();
-    while start.elapsed() < within {
-        if std::fs::read_to_string(path).is_ok_and(|s| s.trim().parse::<i32>().is_ok()) {
-            return;
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    panic!("timed out waiting for a pid in {}", path.display());
-}
-
-fn kill_hook_group(pid_file: &Path) {
-    if let Ok(pid) = std::fs::read_to_string(pid_file).map(|s| s.trim().parse::<i32>().unwrap()) {
-        // SAFETY: `kill` and `killpg` take plain integers and have no memory-safety preconditions; a dead pid just fails with ESRCH.
-        unsafe {
-            libc::killpg(pid, libc::SIGKILL);
-            libc::kill(pid, libc::SIGKILL);
-        }
-    }
 }
 
 fn killed_dispatcher_leaves_no_spool_file(signal: i32, tag: &str) {
     let e = Env::new(tag);
-    let hook_pid = e.dir.join("hook.pid");
-    let cmd = format!(r#"echo $$ > {}; exec sleep 30"#, hook_pid.display());
-    let map = session_map(&e, &cmd, "true");
-    let args = ["hook", "--event", "SessionStart", "--fallback-map", map.to_str().unwrap()];
     let payload = session_payload_len(ah_engine::defaults::num("client.max_stdin") as usize + 4097);
     let mut c = Command::new(env!("CARGO_BIN_EXE_ah-engine"));
-    c.args(args)
+    c.args(["hook", "--event", "SessionStart"])
         .env_clear()
         .env("PATH", std::env::var("PATH").unwrap_or_default())
         .env("HOME", e.dir.join("home"))
@@ -1124,15 +628,28 @@ fn killed_dispatcher_leaves_no_spool_file(signal: i32, tag: &str) {
         .stderr(Stdio::piped());
     let mut child = c.spawn().unwrap();
     let mut stdin = child.stdin.take().unwrap();
-    let writer = std::thread::spawn(move || stdin.write_all(payload.as_bytes()));
-    wait_for_pid(&hook_pid, Duration::from_secs(10));
-    // SAFETY: `kill` and `killpg` take plain integers and have no memory-safety preconditions; a dead pid just fails with ESRCH.
+    // the dispatcher spools everything past the cap and keeps reading until stdin closes: send more than the cap, hold the pipe open
+    // so the dispatcher sits in its read with the spool file open, then kill it there
+    let writer = std::thread::spawn(move || {
+        let sent = stdin.write_all(payload.as_bytes());
+        std::thread::sleep(Duration::from_millis(1500)); // the pipe stays open while the signal arrives
+        drop(stdin);
+        sent
+    });
+    let spooled = Instant::now();
+    while spooled.elapsed() < Duration::from_secs(10) && !std::fs::read_to_string(e.state().join(ah_engine::health::log_name())).is_ok_and(|l| l.contains("dispatch_stdin_spooled")) {
+        // the spool exists once the dispatcher has read past the cap; the log line is written after the read ends, so the wait is bounded
+        if writer.is_finished() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    // SAFETY: `kill` takes plain integers and has no memory-safety preconditions; a dead pid just fails with ESRCH.
     unsafe {
         libc::kill(child.id() as libc::pid_t, signal);
     }
     ah_engine::discard::harmless(child.wait());
     ah_engine::discard::harmless(writer.join());
-    kill_hook_group(&hook_pid);
     assert!(e.dispatch_temp_files().is_empty(), "{tag}: temp payload files left behind: {:?}", e.dispatch_temp_names());
 }
 
@@ -1176,44 +693,27 @@ fn startup_sweep_removes_only_stale_dispatch_stdin_files() {
 }
 
 #[test]
-fn over_cap_payload_feeder_handles_slow_reader() {
-    let e = Env::new("stdin-slow-reader");
-    let mark = e.dir.join("ran");
-    let map = session_map(&e, r#"(dd bs=65536 count=1 2>/dev/null; sleep 1; cat) | wc -c > "$AH_TEST_MARK""#, "true");
-    let args = ["hook", "--event", "SessionStart", "--fallback-map", map.to_str().unwrap()];
-    let payload = session_payload_len(ah_engine::defaults::num("client.max_stdin") as usize + 4097);
-    let (code, out, err) = e.run_with(&args, true, &payload, true, &[("AH_TEST_MARK", mark.to_str().unwrap())]);
-    assert_eq!((code, out.as_str(), err.as_str()), (0, "", ""));
-    assert_eq!(std::fs::read_to_string(&mark).unwrap().trim().parse::<usize>().unwrap(), payload.len());
-    assert!(e.dispatch_temp_files().is_empty(), "temp payload files left behind: {:?}", e.dispatch_temp_files());
-}
-
-#[test]
 fn dispatcher_stdin_cap_boundaries_are_exact() {
     let e = Env::new("stdin-boundaries");
-    // This test pins the stdin cap, not the event budget. A payload at the cap costs every in-process check about 130 ms (debug
-    // build: the payload goes through the plugin scripts), 19 checks about 2.5 s, which is past SessionStart's shipped
-    // `hooks.event_budget_ms` (2400 ms). The spent budget then starts no further Node command, and the mapped `wc -c` never runs.
-    // That is the budget doing its job (the launcher cuts the call at its own limit anyway); the project config lifts it here.
-    std::fs::create_dir_all(e.dir.join(".anti-hall")).unwrap();
-    std::fs::write(e.dir.join(".anti-hall/engine.toml"), "[events.SessionStart]\nbudget_ms = 600000\n").unwrap();
-    let map = session_map(&e, "wc -c", "true");
-    let args = ["hook", "--event", "SessionStart", "--fallback-map", map.to_str().unwrap()];
     let max = ah_engine::defaults::num("client.max_stdin") as usize;
+    let spooled = |e: &Env| std::fs::read_to_string(e.state().join(ah_engine::health::log_name())).unwrap_or_default().matches("dispatch_stdin_spooled").count();
+    // a SessionStart cannot block: at the cap it is read whole in memory, one byte more goes to the spool and is said so
+    let args = ["hook", "--event", "SessionStart"];
+    let (code, _, err) = e.run(&args, true, &session_payload_len(max), true);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(spooled(&e), 0, "a payload of exactly the cap stays in memory");
+    let (code, _, err) = e.run(&args, true, &session_payload_len(max + 1), true);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(spooled(&e), 1, "one byte more is over the cap");
+    assert!(e.dispatch_temp_files().is_empty(), "temp payload files left behind: {:?}", e.dispatch_temp_files());
+    // a guard event at the cap is read whole but is too big for the checks to decide (their request limit is far below the stdin
+    // cap), and one byte more is spooled: both follow the infra failure mode (closed, stricter than Node, which ran its hooks)
+    let args = ["hook", "--event", "PreToolUse"];
     for len in [max, max + 1] {
-        let payload = session_payload_len(len);
-        let (code, out, err) = e.run(&args, true, &payload, true);
-        assert_eq!(code, 0, "{len}: {err}");
-        assert_eq!(out.trim().parse::<usize>().unwrap(), len);
+        let (code, out, err) = e.run(&args, true, &pretool_payload_len(len), true);
+        assert_eq!((code, out.as_str()), (2, ""), "{len}: {err}");
+        assert!(err.contains("could not run the guards for PreToolUse"), "{len}: {err}");
     }
-
-    let map = e.map(&[]);
-    let args = ["hook", "--event", "PreToolUse", "--fallback-map", map.to_str().unwrap()];
-    assert_eq!(e.run(&args, true, &pretool_payload_len(max), true).0, 0);
-    let map = event_map(&e, "PreToolUse", "true", "true");
-    let args = ["hook", "--event", "PreToolUse", "--fallback-map", map.to_str().unwrap()];
-    let (code, out, err) = e.run(&args, true, &pretool_payload_len(max + 1), true);
-    assert_eq!((code, out.as_str(), err.as_str()), (0, "", ""));
 }
 
 #[test]
@@ -1255,66 +755,19 @@ fn two_clients_with_different_environments_get_answers_for_their_own() {
     assert_eq!(guarded_again, guarded, "the switch of one client does not stick to the daemon");
 }
 
-#[test]
-fn a_finished_hooks_genuine_block_survives_a_check_whose_node_command_cannot_run() {
-    let e = Env::new("deferred-block");
-    // A healthy daemon can explicitly defer built-in checks to the Node fallback; a genuine Node block must then be
-    // handed back, not replaced by generic fail-open/fail-closed behavior.
-    let ids: Vec<String> = ah_engine::dispatch::table::entries("claude", "Stop").into_iter().map(|x| x.id).collect();
-    assert!(ids.iter().any(|i| i == "task-guard") && ids.iter().any(|i| i == "compact-advice-guard"), "{ids:?}");
-    let m: serde_json::Map<String, serde_json::Value> = ids
-        .iter()
-        .map(|id| {
-            (
-                id.to_string(),
-                if id == "task-guard" {
-                    "echo sibling-blocks >&2; exit 2"
-                } else if id == "compact-advice-guard" {
-                    ""
-                } else {
-                    "true"
-                }
-                .into(),
-            )
-        })
-        .collect();
-    let map = e.dir.join("stop-map.json");
-    std::fs::write(&map, serde_json::json!({ "Stop": m }).to_string()).unwrap();
-    let args = ["hook", "--event", "Stop", "--fallback-map", map.to_str().unwrap()];
-    let stop = serde_json::json!({"session_id": "e2e", "cwd": e.dir, "hook_event_name": "Stop"}).to_string();
-    let _daemon = e.start_healthy_err_daemon();
-    let (code, out, err) = e.run_with(&args, false, &stop, true, &[]);
-    assert_eq!(code, 2, "{out:?} {err:?}");
-    assert!(err.contains("sibling-blocks"), "the finished hook's own block text: {err:?}");
-}
-
-/// The wrapper (`ah-hook.sh`) in front of the real engine must treat a payload serde_json rejects exactly as the
-/// Node-only path does: a payload JS parses (a lone surrogate escape) or cannot parse (`{bad`) is decided by the Node
-/// hooks (allow stays allow, a block is returned verbatim), never hard-blocked by the engine. Invalid UTF-8 is the one
-/// documented stricter case (D74): the engine fails closed on a guard event even where Node, which decodes it lossily,
-/// would allow.
+/// The wrapper (`ah-hook.sh`) in front of the real engine and a payload serde_json rejects (a lone surrogate escape, `{bad`,
+/// invalid UTF-8): the engine cannot decide a guard event it cannot read, and no Node hook exists to leave it to, so it fails
+/// closed (stricter than Node, which allowed the first two). With the engine absent the wrapper passes the call through (C9).
 #[test]
 fn wrapper_and_engine_agree_on_unparsable_guard_payloads() {
     let e = Env::new("wrapper-unparsable");
     let hooks = Path::new(env!("CARGO_MANIFEST_DIR")).join("../plugins/anti-hall/hooks");
     let wrapper = hooks.join("ah-hook.sh");
-    let shipped: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(hooks.join("ah-fallback.map.json")).unwrap()).unwrap();
-    let ids: Vec<String> = shipped["PreToolUse"].as_object().unwrap().keys().cloned().collect();
-    let node = |name: &str, cmd: &str| -> (PathBuf, PathBuf) {
-        let m: serde_json::Map<String, serde_json::Value> = ids.iter().map(|id| (id.clone(), cmd.into())).collect();
-        let map = e.dir.join(format!("{name}.map.json"));
-        std::fs::write(&map, serde_json::json!({ "PreToolUse": m }).to_string()).unwrap();
-        let list = e.dir.join(format!("{name}.list"));
-        std::fs::write(&list, format!("@PreToolUse\t10\n*\t10\t{cmd}\n")).unwrap();
-        (map, list)
-    };
-    let allow = node("allow", "true");
-    let block = node("block", "echo node-blocked >&2; exit 2");
     let surrogate = br#"{"hook_event_name":"PreToolUse","tool_name":"Bash","session_id":"s","cwd":"/tmp","tool_input":{"command":"echo hi \ud83d"}}"#.to_vec();
     let invalid_utf8 =
         b"{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"Bash\",\"session_id\":\"s\",\"cwd\":\"/tmp\",\"tool_input\":{\"command\":\"echo \xffhi\"}}"
             .to_vec();
-    let run = |engine: &str, (map, list): &(PathBuf, PathBuf), payload: &[u8]| -> (i32, String) {
+    let run = |engine: &str, payload: &[u8]| -> (i32, String) {
         let mut c = Command::new("sh");
         c.arg(&wrapper)
             .args(["PreToolUse", "--tool-from-payload"])
@@ -1324,8 +777,6 @@ fn wrapper_and_engine_agree_on_unparsable_guard_payloads() {
             .env("AH_ENGINE_DIR", e.state())
             .env("AH_WRAPPER_TEST", "1")
             .env("AH_ENGINE_BIN", engine)
-            .env("AH_FALLBACK_MAP", map)
-            .env("AH_FALLBACK_LIST", list)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -1335,27 +786,16 @@ fn wrapper_and_engine_agree_on_unparsable_guard_payloads() {
         (o.status.code().unwrap(), String::from_utf8_lossy(&o.stderr).to_string())
     };
     let engine = env!("CARGO_BIN_EXE_ah-engine");
-    let warm_map = pretool_map(&e, &[("ship-it-guard", NODE_SHIPIT)], "true");
-    let warm_args = ["hook", "--event", "PreToolUse", "--fallback-map", warm_map.to_str().unwrap()];
-    let warm_payload = shipit_edit(&e);
-    let warm_env = [("ANTIHALL_SHIPIT_GATE", "1")];
-    wait_for_daemon_native_block(&e, &warm_args, &warm_payload, &warm_env);
     for (name, payload) in [("lone surrogate", surrogate), ("not JSON", b"{bad".to_vec())] {
-        for (label, nodes, want) in [("allow", &allow, 0), ("block", &block, 2)] {
-            let with_engine = run(engine, nodes, &payload);
-            let node_only = run("/nonexistent/ah-engine", nodes, &payload);
-            assert_eq!(with_engine.0, want, "{name}, Node {label}, engine in front: {}", with_engine.1);
-            assert_eq!(node_only.0, 0, "{name}, Node {label}, absent engine fails open without Node hand-over: {}", node_only.1);
-            if want == 2 {
-                assert!(with_engine.1.contains("node-blocked"), "{name}: the Node block text is returned verbatim: {}", with_engine.1);
-            }
-        }
+        let with_engine = run(engine, &payload);
+        let no_engine = run("/nonexistent/ah-engine", &payload);
+        assert_eq!(with_engine.0, 2, "{name}, engine in front: it cannot read the payload, so the guard event is closed: {}", with_engine.1);
+        assert!(with_engine.1.contains("could not run the guards for PreToolUse"), "{name}: {}", with_engine.1);
+        assert_eq!(no_engine.0, 0, "{name}, absent engine passes the call through: {}", no_engine.1);
     }
-    for (label, nodes) in [("allow", &allow), ("block", &block)] {
-        let (code, err) = run(engine, nodes, &invalid_utf8);
-        assert_eq!(code, 2, "invalid UTF-8, Node {label}: the engine fails closed (D74), stricter than Node: {err}");
-        assert!(err.contains("not valid UTF-8"), "{err}");
-    }
+    let (code, err) = run(engine, &invalid_utf8);
+    assert_eq!(code, 2, "invalid UTF-8: the engine fails closed (D74), stricter than Node: {err}");
+    assert!(err.contains("not valid UTF-8"), "{err}");
 }
 
 const NODE_SHIPIT: &str = "echo NODE-RAN >&2; exit 2";
@@ -1377,17 +817,17 @@ fn assert_env_incomplete_defers(name: &str, in_process: bool) {
     let broken = |env: &Env| env.run_with(&args, in_process, &p, true, &[("ANTIHALL_SHIPIT_GATE", "1"), ("ANTIHALL_PAD", pad.as_str())]);
     if in_process {
         let (code, _, err) = e.run_with(&args, true, &p, true, &gate);
-        assert!(code == 2 && !err.contains("NODE-RAN"), "control: with a whole environment the engine answers itself: {code} {err:?}");
+        assert!(code == 2 && !err.contains("could not run the guards"), "control: with a whole environment the engine answers itself: {code} {err:?}");
         let (code, _, err) = broken(&e);
         e.stop();
-        assert_eq!((code, err.contains("NODE-RAN")), (2, true), "an incomplete environment defers to Node: {err:?}");
+        assert_eq!((code, err.contains("could not run the guards")), (2, true), "an incomplete environment cannot be checked: closed: {err:?}");
         return;
     }
     // warm the daemon: the first call goes through Node, later ones are answered by the daemon
     let mut native = false;
     for _ in 0..50 {
         let (code, _, err) = e.run_with(&args, false, &p, true, &gate);
-        if code == 2 && !err.contains("NODE-RAN") {
+        if code == 2 && !err.contains("could not run the guards") {
             native = true;
             break;
         }
@@ -1396,7 +836,7 @@ fn assert_env_incomplete_defers(name: &str, in_process: bool) {
     assert!(native, "control: the warm daemon answers the gated Edit natively");
     let (code, _, err) = broken(&e);
     e.stop();
-    assert_eq!((code, err.contains("NODE-RAN")), (2, true), "daemon: an incomplete environment defers to Node: {err:?}");
+    assert_eq!((code, err.contains("could not run the guards")), (2, true), "daemon: an incomplete environment cannot be checked: closed: {err:?}");
 }
 
 #[test]
@@ -1419,13 +859,13 @@ fn an_empty_home_defers_the_env_reading_checks_in_process_and_through_the_daemon
         if in_process {
             let extra = [("ANTIHALL_SHIPIT_GATE", "1"), ("HOME", "")];
             let (code, _, err) = e.run_with(&args, true, &p, true, &extra);
-            assert_eq!((code, err.contains("NODE-RAN")), (2, true), "an empty HOME defers to Node in-process: {err:?}");
+            assert_eq!((code, err.contains("could not run the guards")), (2, true), "an empty HOME cannot be checked in-process: closed: {err:?}");
         } else {
             let gate = [("ANTIHALL_SHIPIT_GATE", "1")];
             wait_for_daemon_native_block(&e, &args, &p, &gate);
             let extra = [("ANTIHALL_SHIPIT_GATE", "1"), ("HOME", "")];
             let (code, _, err) = e.run_with(&args, false, &p, true, &extra);
-            assert_eq!((code, err.contains("NODE-RAN")), (2, true), "an empty HOME with a healthy daemon defers to Node: {err:?}");
+            assert_eq!((code, err.contains("could not run the guards")), (2, true), "an empty HOME with a healthy daemon cannot be checked: closed: {err:?}");
         }
         e.stop();
     }
@@ -1488,10 +928,6 @@ fn ups_payload(session: &str) -> String {
     serde_json::json!({"session_id": session, "hook_event_name": "UserPromptSubmit", "prompt": "hi"}).to_string()
 }
 
-fn short_reminder() -> &'static str {
-    ah_engine::defaults::text("inject_gate.task_short")
-}
-
 /// The additionalContext a UserPromptSubmit dispatch handed the host (empty when it said nothing).
 fn context_of(out: &str) -> String {
     serde_json::from_str::<serde_json::Value>(out.trim())
@@ -1513,51 +949,35 @@ fn warm(e: &Env, args: &[&str], extra: &[(&str, &str)]) {
     panic!("the daemon never came up");
 }
 
+/// A UserPromptSubmit payload with a transcript the check can measure growth against.
+fn ups_payload_tr(session: &str, transcript: &Path) -> String {
+    serde_json::json!({"session_id": session, "hook_event_name": "UserPromptSubmit", "prompt": "hi", "cwd": "/tmp", "transcript_path": transcript}).to_string()
+}
+
 #[test]
-fn the_gate_cuts_a_repeated_reminder_through_the_daemon_and_off_it_is_the_node_output_byte_for_byte() {
+fn a_repeated_task_reminder_is_cut_through_the_daemon_and_a_new_session_starts_whole() {
     let e = Env::new("inject-gate");
-    // task-tracker's Node command is replaced by a stand-in that prints the short reminder every turn
-    let say = format!(r#"printf '{{"hookSpecificOutput":{{"hookEventName":"UserPromptSubmit","additionalContext":"{}"}}}}\n'"#, short_reminder());
-    // the engine answers the real task-tracker natively; a session that could be a DevSwarm Primary is handed to Node, which is
-    // what lets the stand-in take its place
-    let ids: Vec<String> = ah_engine::dispatch::table::entries("claude", "UserPromptSubmit").into_iter().map(|x| x.id).collect();
-    let m: serde_json::Map<String, serde_json::Value> =
-        ids.iter().map(|id| (id.clone(), if id == "task-tracker" { say.as_str() } else { "true" }.into())).collect();
-    let map = e.dir.join("UserPromptSubmit-map.json");
-    std::fs::write(&map, serde_json::json!({ "UserPromptSubmit": m }).to_string()).unwrap();
-    let args = ["hook", "--event", "UserPromptSubmit", "--fallback-map", map.to_str().unwrap()];
-    let on = [("ANTIHALL_INJECT_GATE_TASK_EVERY", "3"), ("DEVSWARM_REPO_ID", "r")];
-    // the Primary's own prompt hook (it says its override reminder once per session) is switched off, so the stand-in is the only voice
-    std::fs::create_dir_all(e.dir.join("home/.anti-hall")).unwrap();
-    std::fs::write(e.dir.join("home/.anti-hall/settings.json"), r#"{"devswarm":{"parentInbox":false}}"#).unwrap();
+    // The task tracker is native and rations its own reminder (the Node text the gate used to cut no longer exists): the first turn
+    // of a session carries the directive, the turns after it say nothing while nothing changed, and a new session starts whole again.
+    let tr = e.dir.join("tr.jsonl");
+    std::fs::write(&tr, format!("{}\n", serde_json::json!({"type": "user", "message": {"role": "user", "content": "hello"}}))).unwrap();
+    let args = ["hook", "--event", "UserPromptSubmit"];
+    let on = [("ANTIHALL_INJECT_GATE_TASK_EVERY", "3")];
     warm(&e, &args, &on);
-    let seen: Vec<String> = (0..5).map(|_| context_of(&e.run_with(&args, false, &ups_payload("sess-on"), true, &on).1)).collect();
-    // turn 1 is the first injection of the session; 2 and 3 are suppressed; 4 is the keepalive; 5 suppressed again
-    let short = short_reminder();
-    assert!(seen[0].contains(short) && seen[3].contains(short), "{seen:?}");
-    assert!(!seen[1].contains(short) && !seen[2].contains(short) && !seen[4].contains(short), "{seen:?}");
-    // a new session starts whole again
-    assert!(context_of(&e.run_with(&args, false, &ups_payload("sess-new"), true, &on).1).contains(short));
-    // a SessionStart dispatch (compaction) clears the session: the next prompt is whole again
-    let start = serde_json::json!({"session_id": "sess-on", "cwd": "/tmp", "hook_event_name": "SessionStart", "source": "compact"}).to_string();
-    let start_map = session_map(&e, "true", "true");
-    let _ = e.run_with(&["hook", "--event", "SessionStart", "--fallback-map", start_map.to_str().unwrap()], false, &start, true, &on);
-    assert!(context_of(&e.run_with(&args, false, &ups_payload("sess-on"), true, &on).1).contains(short), "re-injected after compaction");
-    // what it measured: the daemon counts the dropped bytes, and the memory is reported
-    let metrics = e.run(&["metrics", "--json"], false, "", true).1;
-    let status = e.run(&["status", "--json"], false, "", true).1;
-    let report = e.run(&["ctl", "gate"], false, "", true).1;
-    assert!(metrics.contains("inject_suppressed_bytes") && metrics.contains("inject_gate_bytes"), "{metrics}");
-    assert!(status.contains("inject_gate"), "{status}");
-    assert!(report.contains("sess-on") && report.contains("suppressed_bytes"), "{report}");
-    // switched off, every turn is the hook's own output, byte for byte
-    let off = [("ANTIHALL_INJECT_GATE", "0"), ("DEVSWARM_REPO_ID", "r")];
-    let node_bytes = e.run_with(&args, true, &ups_payload("sess-off"), true, &off).1;
-    for _ in 0..4 {
-        assert_eq!(e.run_with(&args, false, &ups_payload("sess-off"), true, &off).1, node_bytes);
-    }
-    assert!(context_of(&node_bytes).contains(short));
+    let marker = ah_engine::defaults::text("inject_gate.task_long_prefix");
+    let seen: Vec<String> = (0..5).map(|_| context_of(&e.run_with(&args, false, &ups_payload_tr("sess-on", &tr), true, &on).1)).collect();
     e.stop();
+    assert!(seen[0].contains(marker), "the first turn of the session carries the directive: {seen:?}");
+    assert!(seen[1..].iter().all(|c| !c.contains("task-tracker")), "the turns after it repeat nothing: {seen:?}");
+    // a new session starts whole again
+    let e = Env::new("inject-gate-new");
+    let tr = e.dir.join("tr.jsonl");
+    std::fs::write(&tr, format!("{}\n", serde_json::json!({"type": "user", "message": {"role": "user", "content": "hello"}}))).unwrap();
+    warm(&e, &args, &on);
+    let first = context_of(&e.run_with(&args, false, &ups_payload_tr("sess-a", &tr), true, &on).1);
+    let other = context_of(&e.run_with(&args, false, &ups_payload_tr("sess-b", &tr), true, &on).1);
+    e.stop();
+    assert!(first.contains(marker) && other.contains(marker), "{first:?} {other:?}");
 }
 
 /// Copy `from` into `to`, recursively.
@@ -1582,10 +1002,11 @@ fn drop_table(text: &str, name: &str) -> String {
 }
 
 /// Review P1 #1: an event whose table row is gone (and whose fallback list is not there for the load check to compare
-/// against) is handed to the Node hooks with `dispatch.defer_exit` and no done mark, never answered with the neutral no-op
-/// the wrapper would not give. A thin trigger the fallback list marks empty stays the neutral no-op.
+/// against) is never answered with the neutral no-op: with no Node to hand it to, the guard event follows its configured
+/// failure mode (the Stop block is bounded by the stop-loop cap). A thin trigger the fallback list marks empty stays the neutral
+/// no-op.
 #[test]
-fn a_missing_table_row_defers_to_node_instead_of_allowing() {
+fn a_missing_table_row_is_closed_instead_of_allowing() {
     let e = Env::new("norow");
     let plugin = e.dir.join("plugin");
     let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../plugins/anti-hall");
@@ -1599,8 +1020,8 @@ fn a_missing_table_row_defers_to_node_instead_of_allowing() {
     let root = plugin.to_string_lossy().to_string();
     let env = [("AH_ENGINE_PLUGIN_ROOT", root.as_str()), ("AH_ENGINE_DONE_FILE", done.to_str().unwrap()), ("AH_ENGINE_NOSPAWN", "1")];
     let (code, out, err) = e.run_with(&["hook", "--event", "Stop", "--host", "claude"], true, "{}", false, &env);
-    assert_eq!(code, 75, "a lost Stop row must defer to Node, not allow: out={out} err={err}");
-    assert!(!done.exists(), "a deferral must not mark the dispatch done (the wrapper would skip its Node fallback)");
+    assert_eq!(code, 2, "a lost Stop row must not allow: out={out} err={err}");
+    assert!(err.contains("no well-formed row for claude Stop"), "{err}");
     // with the plugin's fallback lists present, an event they mark as a thin trigger is the neutral no-op, as in the wrapper
     copy_tree(&src.join("hooks"), &plugin.join("hooks"));
     std::fs::write(&dispatch, &text).unwrap();
@@ -1611,91 +1032,30 @@ fn a_missing_table_row_defers_to_node_instead_of_allowing() {
 
 // ---- several blocks in one dispatch: every block reason reaches the host, in table order --------------------------------------
 
-/// A map for `event` that gives the listed entries their commands and every other entry `true` (says nothing).
-fn ids_map(e: &Env, event: &str, outs: &[(&str, &str)]) -> PathBuf {
-    let ids: Vec<String> = ah_engine::dispatch::table::entries("claude", event).into_iter().map(|x| x.id).collect();
-    for (id, _) in outs {
-        assert!(ids.iter().any(|i| i == id), "{event} has no entry {id}: {ids:?}");
-    }
-    let m: serde_json::Map<String, serde_json::Value> =
-        ids.iter().map(|id| (id.clone(), outs.iter().find(|(k, _)| k == id).map_or("true".to_string(), |(_, c)| c.to_string()).into())).collect();
-    let map = e.dir.join(format!("{event}-ids-map.json"));
-    let mut events = serde_json::Map::new();
-    events.insert(event.to_string(), serde_json::Value::Object(m));
-    std::fs::write(&map, serde_json::Value::Object(events).to_string()).unwrap();
-    map
-}
-
 #[test]
-fn a_built_in_block_and_a_deferred_node_block_both_reach_the_host() {
+fn two_built_in_blocks_both_reach_the_host_in_table_order() {
     let e = Env::new("two-blocks-pre");
-    // git-guard's built-in check blocks the force push in process; merge-gate defers to its Node hook (node_only_bash), which
-    // blocks too: the host, running both hooks, would show both reasons
-    let map = e.map(&[("merge-gate", "printf 'node merge-gate says' ; echo MERGE-GATE-REASON >&2; exit 2")]);
-    let args = ["hook", "--event", "PreToolUse", "--fallback-map", map.to_str().unwrap()];
-    let mut p: serde_json::Value = serde_json::from_str(&node_only_bash(&e)).unwrap();
-    p["tool_input"]["command"] = "git push --force origin main && gh pr merge 1 # a.py".into();
-    let (code, out, err) = e.run(&args, true, &p.to_string(), true);
+    // git-guard's check and command-guard's check both block the force push in the main thread: the host, running both hooks,
+    // would show both reasons, git-guard's first (table order)
+    let p = bash(&["git push", "--force origin main"].join(" "), &e.dir);
+    let (code, out, err) = e.run_with(&["hook", "--event", "PreToolUse"], true, &p, true, &[("CLAUDE_CODE_ENTRYPOINT", "cli")]);
     assert_eq!(code, 2, "{out:?} {err:?}");
-    let (git_at, node_at) = (err.find("force push"), err.find("MERGE-GATE-REASON"));
-    assert!(git_at.is_some() && node_at.is_some() && git_at < node_at, "both reasons, in table order: {err:?}");
-    assert_eq!(out, "node merge-gate says\n", "the plain stdout of an exit 2 stays on stdout, where the host leaves it");
+    let (git_at, command_at) = (err.find("git-guard: force push"), err.find("command-guard: state-changing remote command"));
+    assert!(git_at.is_some() && command_at.is_some() && git_at < command_at, "both reasons, in table order: {err:?}");
 }
 
 #[test]
-fn deferred_stop_blocks_keep_every_reason_and_message() {
-    let e = Env::new("two-blocks-stop");
-    // healthy daemon says the built-in checks defer, so the Node fallback hooks still decide
-    let map = ids_map(
-        &e,
-        "Stop",
-        &[
-            ("task-guard", r#"printf '{"decision":"block","reason":"TASK-REASON","systemMessage":"task msg"}\n'"#),
-            ("speculation-guard", "printf 'spec plain out'; echo SPEC-REASON >&2; exit 2"),
-            ("codex-nudge", "echo advisory plain text"),
-        ],
-    );
-    let args = ["hook", "--event", "Stop", "--fallback-map", map.to_str().unwrap()];
-    let stop = serde_json::json!({"session_id": "e2e", "cwd": e.dir, "hook_event_name": "Stop"}).to_string();
-    let _daemon = e.start_healthy_err_daemon();
-    let (code, out, err) = e.run_with(&args, false, &stop, true, &[]);
-    assert_eq!(code, 2, "{out:?} {err:?}");
-    let v: serde_json::Value = serde_json::from_str(out.trim()).unwrap_or_else(|_| panic!("one JSON object: {out:?}"));
-    let joiner = ah_engine::defaults::text("dispatch.reason_joiner");
-    assert_eq!(v["decision"], "block");
-    assert_eq!(v["reason"], format!("TASK-REASON{joiner}SPEC-REASON"), "{out:?}");
-    // codex-nudge's plain note rides in the system message (user-facing); stdout stays one object
-    assert_eq!(v["systemMessage"], "task msg\nadvisory plain text");
-    // exit 2: stderr is the reason the model reads, so it carries every reason and no note
-    assert_eq!(err, format!("TASK-REASON{joiner}SPEC-REASON\n"));
-    assert_no_stop_counters(&e);
-}
-
-#[test]
-fn two_exit_two_blocks_on_an_advisory_event_keep_both_stderr_texts() {
-    let e = Env::new("two-blocks-post");
-    let map = ids_map(&e, "PostToolUse", &[("merge-side-pick:post", "echo FIRST >&2; exit 2"), ("output-verify-guard", "echo SECOND >&2; exit 2")]);
-    let args = ["hook", "--event", "PostToolUse", "--fallback-map", map.to_str().unwrap()];
-    let p = serde_json::json!({"session_id": "e2e", "cwd": e.dir, "hook_event_name": "PostToolUse", "tool_name": "Bash", "tool_input": {"command": "ls"}, "tool_response": {"stdout": ""}}).to_string();
-    let _daemon = e.start_healthy_err_daemon();
-    let (code, out, err) = e.run_with(&args, false, &p, true, &[]);
-    let joiner = ah_engine::defaults::text("dispatch.reason_joiner");
-    assert_eq!((code, out.as_str(), err), (2, "", format!("FIRST{joiner}SECOND\n")));
-}
-
-#[test]
-fn a_reminder_the_gate_cuts_is_no_output_not_an_empty_context() {
+fn a_reminder_that_is_cut_is_no_output_not_an_empty_context() {
     let e = Env::new("inject-gate-empty");
-    let say = format!(r#"printf '{{"hookSpecificOutput":{{"hookEventName":"UserPromptSubmit","additionalContext":"{}"}}}}\n'"#, short_reminder());
-    // the task-tracker is a native check that defers to its Node command here (DevSwarm is active), so map that command by id
-    let map = event_map_for(&e, "UserPromptSubmit", "task-tracker", &say);
-    let args = ["hook", "--event", "UserPromptSubmit", "--fallback-map", map.to_str().unwrap()];
+    let tr = e.dir.join("tr.jsonl");
+    std::fs::write(&tr, format!("{}\n", serde_json::json!({"type": "user", "message": {"role": "user", "content": "hello"}}))).unwrap();
+    let args = ["hook", "--event", "UserPromptSubmit"];
     let on = [("ANTIHALL_INJECT_GATE_TASK_EVERY", "3")];
     warm(&e, &args, &on);
-    let first = e.run_with(&args, false, &ups_payload("sess-empty"), true, &on);
-    let second = e.run_with(&args, false, &ups_payload("sess-empty"), true, &on);
+    let first = e.run_with(&args, false, &ups_payload_tr("sess-empty", &tr), true, &on);
+    let second = e.run_with(&args, false, &ups_payload_tr("sess-empty", &tr), true, &on);
     e.stop();
-    assert!(context_of(&first.1).contains(short_reminder()), "{first:?}");
+    assert!(context_of(&first.1).contains("task-tracker"), "{first:?}");
     assert_eq!(second, (0, String::new(), String::new()), "a suppressed reminder prints nothing, not an empty additionalContext");
 }
 
@@ -1904,13 +1264,14 @@ fn a_reply_that_never_comes_fails_open_without_node_and_counts_in_the_slow_strea
     let d = scripted_daemon(&e, vec![NEVER, NEVER]);
     let t = Instant::now();
     let (code, out, err) = slow_call(&e, &map, &[WINDOW, ("AH_ENGINE_SLOW_DOWN_N", "2")]);
-    assert_eq!((code, out.as_str(), err.as_str()), (0, "", ""), "no reply in the window: fail open");
+    assert_eq!((code, out.as_str()), (0, ""), "no reply in the window: fail open");
+    assert!(err.contains("went through unchecked"), "the session is told once (#229): {err:?}");
     assert!(t.elapsed() < common::scaled(Duration::from_millis(7000)), "bounded by the window, not the daemon: {:?} {}", t.elapsed(), engine_log(&e));
     assert!(!marker.exists(), "the Node hook must not run for a call the daemon may have processed");
     assert!(engine_log(&e).contains("client_slow"), "{}", engine_log(&e));
     assert!(!e.state().join("daemon.down.until").exists(), "one slow call must not mark the daemon down");
     let (code, _, err) = slow_call(&e, &map, &[WINDOW, ("AH_ENGINE_SLOW_DOWN_N", "2")]);
-    assert_eq!((code, err.as_str()), (0, ""));
+    assert_eq!((code, err.as_str()), (0, ""), "the same session is not told twice");
     assert!(!marker.exists());
     assert!(e.state().join("daemon.down.until").exists(), "two slow calls in a row mark the daemon down: {}", engine_log(&e));
     assert_eq!(d.seen(), 2);

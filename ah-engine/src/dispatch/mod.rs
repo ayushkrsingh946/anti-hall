@@ -981,6 +981,36 @@ fn on_panic(event: &str, guard: bool) -> Outcome {
 mod tests {
     use super::*;
 
+    /// The over-cap tool-name scan (a payload past the stdin cap is spooled and its top-level `tool_name` found structurally, so the
+    /// right entries are selected): only the top-level key counts, wherever it sits, whatever text elsewhere looks like one.
+    fn scanned(json: &str) -> Result<Option<String>, ()> {
+        scan_tool_name(&mut json.as_bytes())
+    }
+
+    #[test]
+    fn the_scan_finds_the_top_level_tool_name_and_ignores_decoys() {
+        let pad = "x".repeat(70_000);
+        let decoys = [
+            format!(r#"{{"session_id":"e","tool_name":"Bash","tool_input":{{"command":"true","tool_name":"Agent"}},"padding":"{pad}"}}"#),
+            format!(r#"{{"tool_name":"Bash","tool_input":{{"command":"true","prompt":"literal \"tool_name\":\"Agent\" text"}},"padding":"{pad}"}}"#),
+            format!(r#"{{"tool_name":"Bash","tool_input":{{"command":"printf '\\\"tool_name\\\":\\\"Agent\\\"'"}},"padding":"{pad}"}}"#),
+            format!(r#"{{"tool_input":{{"command":"true","nested":{{"tool_name":"Agent"}}}},"padding":"{pad}","tool_name":"Bash"}}"#),
+        ];
+        for d in decoys {
+            assert_eq!(scanned(&d), Ok(Some("Bash".to_string())), "{}", &d[..60]);
+        }
+    }
+
+    #[test]
+    fn a_scan_that_cannot_settle_on_one_tool_name_selects_nothing() {
+        // two differing top-level keys and a non-string value leave the tool unknown, so every entry of the event is selected
+        let duplicate = r#"{"tool_name":"Bash","padding":"x","tool_name":"Agent","tool_input":{"command":"true"}}"#;
+        let non_string = r#"{"tool_name":123,"padding":"x","tool_input":{"command":"true"}}"#;
+        for (what, payload) in [("duplicate differing", duplicate), ("non-string", non_string)] {
+            assert!(!matches!(scanned(payload), Ok(Some(_))), "{what}: no tool name may be picked ({:?})", scanned(payload));
+        }
+    }
+
     #[test]
     fn a_panic_in_a_guard_event_follows_the_panic_failure_mode_and_never_locks_the_user_out() {
         // review P1 #2: a panic went to fail_closed (exit 2), locking the user out of tools on a bug of the engine's own
