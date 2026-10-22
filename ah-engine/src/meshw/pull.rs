@@ -596,8 +596,9 @@ fn batch_lines(p: &Plan, batch: &import::Batch, seen: &mut std::collections::Has
     };
     // the registered workspace checked out under a message's branch is its sender (a child's queue keeps the Primary's id)
     let registry = if batch.messages.is_empty() { Vec::new() } else { import::registry_pairs(p.store.reader()) };
+    let scope = import::hash_scope(p.store.reader(), &p.id);
     for m in &batch.messages {
-        let h = import::message_hash(&p.id, m);
+        let h = import::message_hash(&scope, m);
         if seen.contains(&h) {
             duplicate += 1;
             continue;
@@ -656,7 +657,7 @@ fn ingest_raw(inv: &Inv, p: &Plan, raw: &str, at: &dyn Fn(&str)) -> Result<Inges
     // the store parity feed: best effort, as in Node (`try { ... } catch (_) {}`). A message whose time is a form `Date.parse`
     // accepts but the port does not reproduce is stored at the import time (`import::rows`' fallback); its body and hash are the
     // message's own, so the row is never lost or doubled and the batch closes like any other.
-    let fallbacks = import::rows(&p.id, &batch, inv.now).iter().filter(|r| r.ts_fallback).count();
+    let fallbacks = import::rows(&p.id, &import::hash_scope(p.store.reader(), &p.id), &batch, inv.now).iter().filter(|r| r.ts_fallback).count();
     if fallbacks > 0 {
         crate::metrics::bump("mesh_pull_ts_fallback", &[]);
     }
