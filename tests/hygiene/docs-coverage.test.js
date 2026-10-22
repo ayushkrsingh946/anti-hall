@@ -64,7 +64,7 @@ const mentionsVerb = (text, verb) => new RegExp('`(?:[^`\\n]*[ /])?' + verb.repl
 // that load them (doctor.js's own self-test ids excluded).
 function jevIntegrationIds() {
   const ids = new Set();
-  const dirs = [path.join(PLUGIN, 'hooks'), path.join(NODE_PLUGIN, 'hooks', 'lib')];
+  const dirs = [path.join(NODE_PLUGIN, 'hooks'), path.join(NODE_PLUGIN, 'hooks', 'lib')];
   for (const d of dirs) {
     for (const f of fs.readdirSync(d)) {
       if (!f.endsWith('.js') || f === 'doctor.js') continue;
