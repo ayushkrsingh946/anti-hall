@@ -520,6 +520,8 @@ and histograms are snapshotted into `hot.db`, and the same snapshot is rolled up
 from the last snapshot, so counts survive a restart; after a crash they lose at most what came after the last snapshot.
 Gauges are live readings and are not kept. `ah-engine metrics --rollup minute --since 3600` lists the stored rollups.
 
+`mesh_pull_ts_fallback` counts pulled DevSwarm batches holding a message whose time is a form `Date.parse` accepts but the engine does not reproduce: the store row then carries the import time (the message and its hash are intact) and the batch closes in the same tick.
+
 
 Ack protocol and phase telemetry (GitHub #199, #201; defaults file `wire.toml`). A hook client that finds the daemon's announcement
 (`wire.caps_file`) opts a request in by adding its body length to the head line's version suffix (`V <ver>-w1.<n>`; a daemon that predates
