@@ -7,7 +7,7 @@
 //! found", a TodoWrite) and drop a single id the harness reports as not found.
 use super::{
     Since, Task, TaskMap, Unknown, Variant, blocked_by_after_update, create_blocked_on, has_blocked_on_update, has_priority_update, norm_blocked_by,
-    norm_owner, norm_priority, number_of_digits, priority_field, truthy_status,
+    norm_owner, norm_priority, number_of_digits, priority_field, is_non_string_status, kept_status, status_text,
 };
 use crate::checks::guardkit::jsre;
 use crate::checks::guardkit::text::js_trim;
@@ -302,7 +302,7 @@ pub fn reconstruct(lines: &[&str], variant: Variant) -> R<Facts> {
                                     id: id.clone(),
                                     content,
                                     description: String::new(),
-                                    status: Some(truthy_status(get(todo, "status"))?.unwrap_or_else(|| "pending".to_string())),
+                                    status: Some(kept_status(get(todo, "status"))?.unwrap_or_else(|| "pending".to_string())),
                                     owner: norm_owner(get(todo, "owner")),
                                     blocked_by: norm_blocked_by(get(todo, "blockedBy"))?,
                                     blocked_on: if guard { todo_blocked_on(todo) } else { None },
@@ -337,7 +337,7 @@ pub fn reconstruct(lines: &[&str], variant: Variant) -> R<Facts> {
                             Some(Value::String(s)) if variant == Variant::State => s.clone(),
                             _ => String::new(),
                         },
-                        status: truthy_status(get(inp, "status"))?.unwrap_or_else(|| "pending".to_string()),
+                        status: kept_status(get(inp, "status"))?.unwrap_or_else(|| "pending".to_string()),
                         owner: norm_owner(get(inp, "owner")),
                         blocked_by: norm_blocked_by(get(inp, "blockedBy"))?,
                         blocked_on: create_blocked_on(inp),
@@ -353,7 +353,7 @@ pub fn reconstruct(lines: &[&str], variant: Variant) -> R<Facts> {
                     let inp = inp0;
                     let Some(id) = update_id(inp)? else { continue };
                     let ex = tasks.get(&id).cloned().unwrap_or_else(|| Task::unseen(&id));
-                    let status = match truthy_status(get(inp, "status"))? {
+                    let status = match kept_status(get(inp, "status"))? {
                         Some(s) => Some(s),
                         None => ex.status.clone(),
                     };
@@ -382,11 +382,8 @@ pub fn reconstruct(lines: &[&str], variant: Variant) -> R<Facts> {
                         subject_updated: subject.is_some() || ex.subject_updated,
                         unknown: gaps_after_update(ex.unknown, inp),
                         block_unknown: false,
-                        // `String(inp.status || '')` against the pending / in-progress pattern; a truthy non-string status was refused above
-                        since: match get(inp, "status").and_then(Value::as_str) {
-                            Some(s) if guard && res().since_status.is_match(s) => since,
-                            _ => ex.since,
-                        },
+                        // `String(inp.status || '')` against the pending / in-progress pattern
+                        since: if guard && res().since_status.is_match(&status_text(get(inp, "status"))?) { since } else { ex.since },
                     };
                     tasks.set(&id, upd);
                 }
@@ -395,6 +392,10 @@ pub fn reconstruct(lines: &[&str], variant: Variant) -> R<Facts> {
         }
     }
     resolve_provisional(&mut tasks, &prov, &result_ids, variant);
+    // a task that ends the scan with a non-string status: the Node code lowercases it and throws
+    if tasks.values().any(|t| is_non_string_status(t.status.as_deref())) {
+        return Err(Unsure);
+    }
     Ok(Facts { tasks, window_reset, first_created })
 }
 

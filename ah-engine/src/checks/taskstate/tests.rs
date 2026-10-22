@@ -97,6 +97,21 @@ fn a_non_string_truthy_status_is_not_understood() {
     assert!(reconstruct(&[line.as_str()], Variant::Guard).is_err());
 }
 
+/// `inp.status || 'pending'` keeps a number as it is and Node only throws where it lowercases the status of a task still in the
+/// final map: a record a later create replaces (here a numbering restart drops it) is read, not turned into "no tasks" (#248).
+#[test]
+fn a_non_string_status_a_later_create_replaces_is_read() {
+    let tu = |m: &str, id: &str, input: Value| json!({"type": "assistant", "message": {"id": m, "content": [{"type": "tool_use", "id": id, "name": "TaskCreate", "input": input}]}});
+    let res = |id: &str| json!({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": id, "content": "Task #1 created successfully: x"}]}});
+    let lines = [tu("m1", "t1", json!({"subject": "x", "status": 7})), res("t1"), tu("m2", "t2", json!({"subject": "x"})), res("t2")];
+    check("nonStringStatusReplaced", &lines, &[("1", Some("pending"), "x", false, "", "", "<undef>")]);
+    // the same record left in the map is still not understood: Node's `.toLowerCase()` on it throws
+    let kept = [tu("m1", "t1", json!({"subject": "x", "status": 7})), res("t1")];
+    let text = lines_of(&kept);
+    let refs: Vec<&str> = text.iter().map(String::as_str).collect();
+    assert!(reconstruct(&refs, Variant::Guard).is_err());
+}
+
 #[test]
 fn the_session_key_and_hash_follow_node() {
     // Expected values computed with Node: String(x).replace(/[^A-Za-z0-9_.-]/g, '_') and sha1(x).hex
