@@ -6255,6 +6255,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_rt.line_file` | `devswarm-line.json` |  |  | The compact snapshot copy the statusline segment reads (engine state directory). Written atomically by the daemon after each reconcile. |
 | `devswarm_rt.line_order` | `working, stuck, ci, done_open, unknown` |  |  | The order of the parts in the segment: working, stuck, ci (waiting on CI), done_open (done but the workspace is still open), unknown (no source, or stale). |
 | `devswarm_rt.line_parts` | `5 entries` |  |  | The text of each part; `{n}` is the count. A part with count 0 is left out. |
+| `devswarm_rt.line_refresh_ms` | `45000` |  | ms | The longest the statusline copy of the workspace state is left as it is when a reconcile finds nothing the line shows has changed. Keep it well under devswarm_rt.set_line_stale_ms (a copy older than that shows `?`). |
 | `devswarm_rt.line_stale_text` | `ws ?` |  |  | The whole segment when the snapshot copy is older than the stale limit or the app database was unreadable. |
 | `devswarm_rt.liveness_ok` | `alive` |  |  | The status Node's liveness file carries for a healthy workspace; any other status counts as stuck in the shadow comparison. |
 | `devswarm_rt.mode` | `on` |  |  | off \| observe \| on. `on` (default, owner 2026-10-08: the engine is live, Node is a non-acting witness) keeps the workspace state and serves it to consumers; `observe` keeps and logs the state but consumers must not act on it; `off` is inert, like DevSwarm being absent. |
@@ -7736,11 +7737,14 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_act.outcome_words` | `ok, refused, failed` |  |  | The telemetry outcome words in this order: ok, refused, failed. |
 | `devswarm_act.output_cap_bytes` | `1048576` |  |  | Most bytes of stdout kept from one call (the rest is read and dropped so the child never blocks on a full pipe). |
 | `devswarm_act.owner_kinds` | `archive, create, merge, delete` |  |  | The actions an owner request (a command, a skill or a mesh request) may start. `delete` additionally needs the approved plan (devswarm_act.plan_*). |
+| `devswarm_act.pipe_thread_name` | `ah-hc-pipe` |  |  | The name of the thread that reads one output pipe of a DevSwarm CLI call (what `status --threads` and a stack sample call it). |
 | `devswarm_act.plan_mode_words` | `on, dry-run, off` |  |  | The auto-archive mode words in this order: on, dry-run, off. |
 | `devswarm_act.plan_nonce_len` | `16` |  |  | Length of a plan nonce in hex digits (Node: 16). |
 | `devswarm_act.plan_ttl_ms` | `900000` |  |  | How long a delete plan stays valid (Node: lifecycle.js PLAN_TTL_MS, 15 min). |
 | `devswarm_act.plans_dir` | `dsact-plans` |  |  | Directory (under the state directory) of stored delete plans, one file per nonce. |
+| `devswarm_act.poll_fast_ms` | `500` |  | ms | How long a call is checked every devswarm_act.poll_ms; a call that runs longer is a long poll and is checked every devswarm_act.poll_slow_ms. |
 | `devswarm_act.poll_ms` | `10` |  |  | How often the runner checks whether its child has exited while waiting for the timeout. |
+| `devswarm_act.poll_slow_ms` | `250` |  | ms | How often the runner checks a call that has run longer than devswarm_act.poll_fast_ms. The longest a finished long poll waits to be noticed; a hundred checks a second per running drain was most of an idle daemon's wake-ups. |
 | `devswarm_act.probe_timeout_ms` | `8000` |  |  | Bound of the `--version` capability probe (Node: devswarm-capabilities.js HELP_TIMEOUT_MS). |
 | `devswarm_act.prune_kind` | `prune-delete` |  |  | The `action` word of a delete in the prune log. |
 | `devswarm_act.prune_log` | `.anti-hall/logs/devswarm-prune.ndjson` |  |  | Node's prune NDJSON log, relative to the home directory (one line per delete, same fields). |
@@ -9109,6 +9113,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_ingest.hb_prefix` | `ingest-` |  |  | The start of a drain's heartbeat file name (followed by the repo key and .json). Node's file. |
 | `devswarm_ingest.hc_cache` | `hivecontrol-path.json` |  |  | The path cache the installer writes, relative to the DevSwarm state directory. |
 | `devswarm_ingest.hc_cache_key` | `hivecontrol` |  |  | The key of the path cache that holds the executable. |
+| `devswarm_ingest.idle_poll_ms` | `1000` |  | ms | How often an ingest thread that is only waiting (the manager between two discoveries, a drain between two monitor calls, a drain waiting for a Node holder's lock) looks at its stop flag: its sleep is split into naps this long. Every nap is a wake-up of an otherwise idle thread, so a shorter value costs idle CPU for every project; it is also the longest a waiting drain takes to notice a stop. A drain that is working checks the flag between steps (devswarm_ingest.stop_poll_ms is the poll of the stop-side joins). |
 | `devswarm_ingest.interval_sec` | `30` |  | s | The -i of every monitor call, and the least time between two calls after a successful one (Node: DEFAULT_MONITOR_INTERVAL_SEC was 3). Each call is a Node process of the DevSwarm CLI whose CPU (about 70 ms) is its start-up, not its polling, so the pause is what bounds the cost: 30 s halves the calls per minute, and a native message waits at most this long longer (the native queue is the discouraged channel; the mesh is not affected). |
 | `devswarm_ingest.js_object_text` | `[object Object]` |  |  | What JavaScript's String() makes of an object. |
 | `devswarm_ingest.json_suffix` | `.json` |  |  | The suffix of a JSON file. |
@@ -9196,13 +9201,15 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `devswarm_ingest.src_path` | `path` |  |  | The heartbeat's word for a bare executable name left to the OS to resolve. |
 | `devswarm_ingest.status_scratch` | `ah-ingest-status-` |  |  | The start of the temporary directory the read-only status verb uses so it remembers nothing. |
 | `devswarm_ingest.stderr_tail_chars` | `2048` |  |  | Most characters of a failed monitor call's stderr kept in the error. |
-| `devswarm_ingest.stop_poll_ms` | `200` |  | ms | How often a waiting drain checks whether it must stop. |
+| `devswarm_ingest.stop_poll_ms` | `200` |  | ms | How often the manager checks whether a worker it asked to stop has finished (the joins of a lowered cap and of a shutdown). The naps of an ingest thread that only waits are devswarm_ingest.idle_poll_ms. |
 | `devswarm_ingest.transient_cap_ms` | `300000` |  | ms | The longest backoff after a transient failure. |
 | `devswarm_ingest.wal_kind` | `monitor` |  |  | The WAL kind of the monitor reader (the file is `<kind>-<repo key>.ndjson`). |
 | `devswarm_ingest.wal_prefix_spill` | `spill ` |  |  | The text before the reason when the spill directory cannot be written. |
 | `devswarm_ingest.wal_prefix_wal` | `WAL ` |  |  | The text before the reason when the WAL itself cannot be written. |
 | `devswarm_ingest.wal_rotate_bytes` | `1048576` |  |  | A WAL at least this big with nothing pending is renamed into the archive. |
 | `devswarm_ingest.wal_suffix` | `.ndjson` |  |  | The suffix of a WAL file. |
+| `devswarm_ingest.worker_idle_wait_ms` | `1000` |  | ms | How long an idle drain worker blocks on the job queue before it looks at its own stop flag again. A job, a stop message or the queue closing wakes it at once; but a stop message goes to whichever idle worker takes it first, so the worker that was told to retire (a lowered cap) can only learn it by this timeout. Longer means fewer idle wake-ups and a slower retirement. |
+| `devswarm_ingest.worker_thread_name` | `ah-ingest-worker` |  |  | The name of a drain worker thread (what `status --threads` and a stack sample call it). |
 
 ### devswarm_recon.toml / devswarm_recon
 
