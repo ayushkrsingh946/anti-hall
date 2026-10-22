@@ -477,11 +477,6 @@ impl Plan {
         if foreign_open_batches(&root, &self.wal, &worktree) {
             return defer("wal-foreign");
         }
-        for p in &self.pending {
-            if import::rows(&self.id, &import::parse_batch(&p.raw), inv.now).iter().any(|r| r.ts_fallback) {
-                return defer("wal-replay-date");
-            }
-        }
         Ok(())
     }
 
@@ -564,8 +559,6 @@ pub(crate) struct Ingested {
     pub imported: usize,
     pub duplicate: usize,
     pub parsed: usize,
-    /// The store feed was left to Node (a date form the engine does not reproduce).
-    pub store_left: bool,
 }
 
 /// The hashes the inbox already holds (`collectExistingHashes`): the embedded content hash of each line; a torn line is skipped.
@@ -640,11 +633,6 @@ pub(crate) fn preview(p: &Plan, raws: &[&str]) -> (usize, usize, usize) {
     last
 }
 
-/// Whether the store feed of this raw batch would be left to Node (a date form the engine does not reproduce).
-pub(crate) fn store_feed_left(inv: &Inv, p: &Plan, raw: &str) -> bool {
-    import::rows(&p.id, &import::parse_batch(raw), inv.now).iter().any(|r| r.ts_fallback)
-}
-
 /// `ingestRaw(raw)`: parse one raw native batch, append the new rows to the durable inbox (idempotent by the embedded content
 /// hash) and fsync it, then the best-effort store feed. `Err` when the durable append fails (the WAL entry then stays pending).
 fn ingest_raw(inv: &Inv, p: &Plan, raw: &str, at: &dyn Fn(&str)) -> Result<Ingested, String> {
@@ -665,16 +653,19 @@ fn ingest_raw(inv: &Inv, p: &Plan, raw: &str, at: &dyn Fn(&str)) -> Result<Inges
         std::fs::File::open(&p.inbox).and_then(|f| f.sync_all()).map_err(|e| e.to_string())?;
     }
     at("inbox:after");
-    // the store parity feed: best effort, as in Node (`try { ... } catch (_) {}`)
-    let mut store_left = false;
-    if import::rows(&p.id, &batch, inv.now).iter().any(|r| r.ts_fallback) {
-        store_left = true;
-    } else if import::ingest_payload(&p.store, &inv.home, &p.id, raw, inv.now).is_ok()
+    // the store parity feed: best effort, as in Node (`try { ... } catch (_) {}`). A message whose time is a form `Date.parse`
+    // accepts but the port does not reproduce is stored at the import time (`import::rows`' fallback); its body and hash are the
+    // message's own, so the row is never lost or doubled and the batch closes like any other.
+    let fallbacks = import::rows(&p.id, &batch, inv.now).iter().filter(|r| r.ts_fallback).count();
+    if fallbacks > 0 {
+        crate::metrics::bump("mesh_pull_ts_fallback", &[]);
+    }
+    if import::ingest_payload(&p.store, &inv.home, &p.id, raw, inv.now).is_ok()
         && let Some(why) = summary::derive_after_write(&p.store, inv, &p.repo_key)
     {
         crate::meshw::log_summary_failure(defaults::text("mesh_write.verb_inbox"), &why);
     }
-    Ok(Ingested { imported, duplicate, parsed: batch.messages.len(), store_left })
+    Ok(Ingested { imported, duplicate, parsed: batch.messages.len() })
 }
 
 /// The ensure's writes (cache, descriptor, pre-created files, registry row, declared reader, summary), the caller holding the
@@ -730,14 +721,11 @@ pub(crate) fn lock_params() -> nodelock::Params {
 }
 
 /// REPLAY FIRST: every batch a previous pull captured but never closed is ingested (inbox, store) and closed before any new
-/// destructive read. A batch whose store feed is left to Node stays pending. `Err` when an ingest or a close failed: the rest
+/// destructive read. `Err` when an ingest or a close failed: the rest
 /// stays pending and nothing further is read.
 pub(crate) fn replay_pending(inv: &Inv, p: &Plan, at: &dyn Fn(&str)) -> Result<(), ()> {
     for entry in &p.pending {
         let Ok(r) = ingest_raw(inv, p, &entry.raw, at) else { return Err(()) };
-        if r.store_left {
-            continue;
-        }
         let raw_t = js_trim(&entry.raw);
         let empty = r.parsed == 0 && !raw_t.is_empty() && raw_t != defaults::text("mesh_write.empty_array");
         at("close:before");
@@ -854,7 +842,7 @@ fn pull_locked(inv: &Inv, p: &Plan) -> Outcome {
     };
     let recovered = (got.imported + got.duplicate) as f64;
     let shortfall = recovered < native;
-    if !wal_error && !got.store_left {
+    if !wal_error {
         // a close that fails leaves the batch pending: the next pull replays it idempotently. An empty read has no entry id and
         // Node closes it as `null` all the same.
         let (kind, extra) = if shortfall {

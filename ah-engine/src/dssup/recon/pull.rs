@@ -148,8 +148,6 @@ pub fn stage(ctx: &Ctx, id: &str, cwd: &str, at: &dyn Fn(&str)) -> Stage {
                 Some("wal-write-failed")
             } else if entry.is_none() {
                 Some("empty-read")
-            } else if pull::store_feed_left(&inv, &plan, &raw) {
-                Some("fresh-date")
             } else {
                 None
             };
