@@ -958,8 +958,6 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `command.gh_api_mutating_methods` | `POST, PATCH, PUT, DELETE` |  |  | gh api methods that are heavy (command-guard.js GH_API_MUTATING_METHODS). |
 | `command.gh_gql_bool_flags` | `--paginate, --slurp, --silent, -i, --include, --verbose` |  |  | gh api graphql options without a value (command-guard.js GH_GQL_BOOL_FLAGS). |
 | `command.gh_gql_value_flags` | `8 items` |  |  | gh api graphql options that take a value (command-guard.js GH_GQL_VALUE_FLAGS). |
-| `command.gh_irreversible_subcommands` | `4 entries` |  |  | gh group and subcommand pairs blocked in the main thread for a stated reason (msg_gh_irreversible_why) rather than for output flooding; "*" matches every subcommand of the group. A gh api write (-X/--method POST\|PUT\|PATCH\|DELETE, a -f/-F field or --input body, graphql) is blocked for the same reason. |
-| `command.gh_light_writes` | `3 entries` |  |  | gh group and subcommand pairs allowed in the main thread whatever their body, title or flags (GH #263): filing and tending issues, labels and pull requests prints a line and floods nothing. Matched on the exact gh command path, after any global flag such as -R owner/repo. The pairs in command.gh_irreversible_subcommands and a gh api write are never light. |
 | `command.gh_mutating_subcommands` | `6 entries` |  |  | gh group and subcommand pairs that are heavy (command-guard.js GH_MUTATING_SUBCOMMANDS, plus `workflow run`). |
 | `command.gh_oneliner_deny_re` | `[\n\r`]\|\$\(\|<<\|<\(\|>\(` |  |  | JavaScript regex source: a command holding a newline, a backtick, a command or process substitution or a heredoc is not a plain one-liner (command-guard.js isOneLineCommand). |
 | `command.gh_oneliner_max_chars` | `600` |  | chars | The longest whole command that counts as one short line for the gh one-liner exemption (command-guard.js GH_ONELINER_MAX_CHARS). |
@@ -1015,7 +1013,6 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `command.msg_edit_who_orch` | `orchestrator` |  |  | Who is blocked when DevSwarm is active. |
 | `command.msg_edit_why` | `Raw edits never happen in the main thread; the coordinator synthesizes a summ...` |  |  | Why a Bash write is blocked. |
 | `command.msg_edit_why_orch` | `Raw edits in the main thread flood it; a worker returns a tight summary instead.` |  |  | Why a Bash write is blocked while DevSwarm is active. |
-| `command.msg_gh_irreversible_why` | `It cannot be undone or it publishes: a merge, a release, a repository setting...` |  |  | Why an irreversible gh command (merge, release, repo settings, secrets, a gh api write) is blocked in the main thread. |
 | `command.msg_heavy_allowed` | `piped to tail/head/wc/grep -c: `node --test <1-2 files>`, `python3 -m pytest ...` |  |  | What stays allowed inline (first part). |
 | `command.msg_heavy_allowed_claude` | `; or a read-only scratchpad script (executable, absolute path, no VAR= prefix...` |  |  | End of the allowed text on Claude (the scratchpad script path). |
 | `command.msg_heavy_allowed_codex` | `.` |  |  | End of the allowed text on Codex. |
@@ -1039,6 +1036,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `command.msg_rawread_inbox_what` | `a shell read of the raw DevSwarm inbox file is blocked.` |  |  | Heading of the raw inbox read block. |
 | `command.msg_rawread_inbox_why` | `It does not drain the queue, but bypasses the durable cursor, so messages get...` |  |  | Why a raw inbox read is blocked. |
 | `command.msg_rawread_override` | `set DISABLE_ANTIHALL_DEVSWARM=1 to disable this guard entirely` |  |  | The override of the raw read block. |
+| `command.msg_remote_block_why` | `It is irreversible or sensitive: a merge, a release, a repository setting, a ...` |  |  | Why a command on command.remote_block is blocked in the main thread. |
 | `command.msg_send_guard` | `devswarm-mesh-only` |  |  | The message id of the native-send block. |
 | `command.msg_send_instead` | ``node scripts/devswarm.js send --to-primary --message-file <path>` (or `--to ...` |  |  | What to do instead of a native send. |
 | `command.msg_send_override` | `set DISABLE_ANTIHALL_DEVSWARM=1 to disable this guard entirely` |  |  | The override of the native-send block. |
@@ -1067,6 +1065,8 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `command.port_max` | `65535` |  |  | Largest TCP port a URL may carry. |
 | `command.python_script_ext` | `(?i)\.py$` |  |  | Script file extension of the other interpreters for the flagged-interpreter test (command-guard.js isFlaggedInterpreterScript). |
 | `command.realpath_max_links` | `40` |  |  | How many symbolic links one real-path walk follows before it gives up (the walk of fs.realpathSync, which keeps every component's spelling). |
+| `command.remote_allow` | `10 items` |  |  | Remote commands that run in the main thread whatever their body or output (GH #263). Each entry is a command prefix: the binary and its leading subcommand words, global flags such as -R/--repo skipped, optionally followed by an option and its value (`gh api -X POST`). Works for any binary. Block wins over allow; a command in neither list keeps the default rule (reads pass, mutations block). Add or remove a line in your own config.toml (`[command]` table) to change it; a user list replaces this one. |
+| `command.remote_block` | `9 items` |  |  | Remote commands always blocked in the main thread, named in the block text as irreversible or sensitive (msg_remote_block_why). Same entry format as command.remote_allow; wins over it. |
 | `command.scratch_clone_sync_subs` | `pull, fetch` |  |  | git subcommands that are light in the main thread when run in a git checkout outside the session's own tree (git -C <abs\|~ dir> or one leading cd <abs\|~ dir>), chained with && or ; only to light segments and at most one final \| tail/head -N, on one plain line (command-guard.js isAllowedScratchCloneSync, SCRATCH_CLONE_SYNC_SUBS). A sync prints a few lines; the output-flood rule is for unbounded runners and builds. Empty turns the exemption off. |
 | `command.scratch_leaf` | `scratchpad` |  |  | Name of the scratchpad directory of a session. |
 | `command.scratch_uid_prefix` | `claude-` |  |  | Prefix of the per-user directory under a tmp root that holds session scratchpads. |

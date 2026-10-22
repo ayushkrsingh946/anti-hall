@@ -332,7 +332,21 @@ function require(n) {
 // tables
 
 function cmdSet(k) { return new Set(ah.cfg(k)); }
-function ghTable(k) { var o = {}; Object.keys(ah.cfg(k)).forEach(function (g) { o[g] = new Set(ah.cfg(k)[g]); }); return o; }
+// remoteEntries(key) -> the parsed entries of a command.remote_* list: { bin, words, opts: [[option, value]] }
+function remoteEntries(k) {
+  if (S && S.remote && S.remote[k]) return S.remote[k];
+  var list;
+  try { list = ah.cfgLive(k); } catch (_) { list = ah.cfg(k); } // the owner's layers (config.toml) over the shipped list, read per call
+  var out = list.map(function (line) {
+    var parts = String(line).trim().split(/\s+/).filter(Boolean), e = { bin: (parts[0] || '').toLowerCase(), words: [], opts: [] };
+    for (var i = 1; i < parts.length; i++) {
+      if (parts[i].charAt(0) === '-') { e.opts.push([parts[i].toLowerCase(), (parts[i + 1] || '').toLowerCase()]); i++; } else e.words.push(parts[i].toLowerCase());
+    }
+    return e;
+  }).filter(function (e) { return e.bin; });
+  if (S) { S.remote = S.remote || {}; S.remote[k] = out; }
+  return out;
+}
 function cmdRe(src, flags) {
   var f = flags || '';
   if (src.slice(0, 4) === '(?i)') { src = src.slice(4); f += 'i'; }
@@ -384,7 +398,7 @@ function cmdBuildTables() {
   Object.keys(ah.cfg('command.gh_mutating_subcommands')).forEach(function (g) { t.ghMutating[g] = new Set(ah.cfg('command.gh_mutating_subcommands')[g]); });
   t.ghOneliner = {};
   Object.keys(ah.cfg('command.gh_oneliner_subcommands')).forEach(function (g) { t.ghOneliner[g] = new Set(ah.cfg('command.gh_oneliner_subcommands')[g]); });
-  t.ghLight = ghTable('command.gh_light_writes'); t.ghIrreversible = ghTable('command.gh_irreversible_subcommands'); t.ghOnelinerMax = ah.cfgNum('command.gh_oneliner_max_chars');
+  t.ghOnelinerMax = ah.cfgNum('command.gh_oneliner_max_chars');
   t.ghOnelinerRe = new RegExp(ah.cfg('command.gh_oneliner_deny_re'));
   t.scratchSyncSubs = cmdSet('command.scratch_clone_sync_subs');
   t.ghApiMethods = cmdSet('command.gh_api_mutating_methods'); t.ghGqlValue = cmdSet('command.gh_gql_value_flags'); t.ghGqlBool = cmdSet('command.gh_gql_bool_flags');
@@ -2394,34 +2408,33 @@ function isReadOnlyGhGraphql(tokens, ghIdx) {
   return queries === 1;
 }
 
-// ghCommandPath(tokens, ghIdx) -> [group, sub], the first two words after `gh` that are not global flags (-R/--repo
-// take a value, so `gh -R o/r issue create` is still issue/create).
-function ghCommandPath(tokens, ghIdx) {
+// remoteWords(tokens, binIdx) -> the leading subcommand words after the binary, lowercased, global flags skipped (-R/--repo
+// take a value, so `gh -R o/r issue create` is still issue create).
+function remoteWords(tokens, binIdx) {
   const words = [];
-  for (let i = ghIdx + 1; i < tokens.length && words.length < 2; i++) {
+  for (let i = binIdx + 1; i < tokens.length; i++) {
     const t = tokens[i];
     if (t === '-R' || t === '--repo') { i++; continue; }
     if (t.startsWith('-')) continue;
     words.push(t.toLowerCase());
   }
-  return [words[0] || '', words[1] || ''];
+  return words;
 }
 
-function ghIrreversiblePair(group, sub) {
-  const set = T.ghIrreversible[group];
-  return !!set && (set.has('*') || set.has(sub));
-}
-
-// isIrreversibleGhSegment(segment) -> true for a gh command blocked for a stated reason (merge, release, repo settings, secrets, a
-// gh api write), not for output flooding. Used to word the block reason and to keep these out of the light writes.
-function isIrreversibleGhSegment(segment) {
-  if (effectiveVerb(segment) !== 'gh') return false;
+// remoteMatch(segment, entries) -> true when the segment starts (after global flags) with an entry's binary and subcommand words
+// and carries each of its options with the value (`-X POST`, `-X=POST`, `-XPOST`).
+function remoteMatch(segment, key) {
+  const entries = remoteEntries(key);
+  if (!entries.length) return false;
+  const verb = effectiveVerb(segment);
+  const hit = entries.filter((e) => e.bin === verb);
+  if (!hit.length) return false;
   const tokens = tokenizeQuoted(segment);
-  const ghIdx = tokens.findIndex((t) => basename(t).toLowerCase() === 'gh');
-  if (ghIdx === -1) return false;
-  const path = ghCommandPath(tokens, ghIdx);
-  if (ghIrreversiblePair(path[0], path[1])) return true;
-  return path[0] === 'api' && isHeavyGhSegment(segment, segment, true);
+  const binIdx = tokens.findIndex((t) => basename(t).toLowerCase() === verb);
+  if (binIdx === -1) return false;
+  const words = remoteWords(tokens, binIdx);
+  const low = tokens.slice(binIdx + 1).map((t) => t.toLowerCase());
+  return hit.some((e) => e.words.every((w, i) => words[i] === w) && e.opts.every((o) => low.some((t, i) => (t === o[0] && low[i + 1] === o[1]) || t === o[0] + '=' + o[1] || t === o[0] + o[1])));
 }
 
 // isHeavyGhSegment(segment) -> true iff this is a `gh` invocation of a
@@ -2438,11 +2451,10 @@ function isHeavyGhSegment(segment, command, strict) {
   const tokens = tokenizeQuoted(segment);
   const ghIdx = tokens.findIndex((t) => basename(t).toLowerCase() === 'gh');
   if (ghIdx === -1) return false;
-  const path = ghCommandPath(tokens, ghIdx);
-  const group = path[0];
-  const sub = path[1];
+  const path = remoteWords(tokens, ghIdx);
+  const group = path[0] || '';
+  const sub = path[1] || '';
   if (group === 'workflow' && sub === 'run') return true;
-  if (!strict && !ghIrreversiblePair(group, sub) && T.ghLight[group] && T.ghLight[group].has(sub)) return false;
   const oneLine = !strict && typeof command === 'string' && command.length <= T.ghOnelinerMax && !T.ghOnelinerRe.test(command);
   if (oneLine && T.ghOneliner[group] && T.ghOneliner[group].has(sub)) return false;
   if (T.ghMutating[group] && T.ghMutating[group].has(sub)) return true;
@@ -2514,6 +2526,8 @@ function isChildGitSyncChain(command) {
 function isHeavySegment(segment, command) {
   segment = segment.replace(T.controlPrefix, '');
   const unwrapped = segment.replace(T.timeoutPrefix, '');
+  if (remoteMatch(segment, 'command.remote_block')) return true;
+  if (remoteMatch(segment, 'command.remote_allow')) return false;
   for (const re of lightList()) {
     if (re.test(segment) || re.test(unwrapped)) return false;
   }
@@ -2665,7 +2679,8 @@ function classifyHeavy(command, depth) {
   const d = typeof depth === 'number' ? depth : 0;
   for (const seg of splitSegments(command)) {
     if (isHeavySegment(seg, command)) {
-      if (isHeavyGhSegment(seg) || isGitPushSegment(seg) || isGitPullFetchSegment(seg)) return { kind: 'remote', label: ah.cfg('command.msg_heavy_remote'), risk: isIrreversibleGhSegment(seg) };
+      if (remoteMatch(seg, 'command.remote_block')) return { kind: 'remote', label: ah.cfg('command.msg_heavy_remote'), risk: true };
+      if (isHeavyGhSegment(seg) || isGitPushSegment(seg) || isGitPullFetchSegment(seg)) return { kind: 'remote', label: ah.cfg('command.msg_heavy_remote'), risk: remoteMatch(seg, 'command.remote_block') };
       const verb = effectiveVerb(seg);
       if (verb && T.heavyVerbs.has(verb)) return { kind: 'verb', label: verb };
       return { kind: 'category', label: ah.cfg('command.heavy_pattern_label') };
@@ -5027,7 +5042,7 @@ function mainFlow(payload) {
   const reason = bm.blockMessage({
     guard: ah.cfg('command.guard_name'),
     what: heavyWhat,
-    why: ah.cfg(cls && cls.risk ? 'command.msg_gh_irreversible_why' : 'command.msg_heavy_why'),
+    why: ah.cfg(cls && cls.risk ? 'command.msg_remote_block_why' : 'command.msg_heavy_why'),
     instead: (devswarmPrimary && tierText
       ? text.render(ah.cfg('command.msg_heavy_instead_tier'), { delegate: delegateTo, sub: SUB })
       : delegateTo + '.') + cdJoinHint,

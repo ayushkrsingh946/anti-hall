@@ -233,19 +233,19 @@ value = ["firebase", "gcloud", "aws", "az", "kubectl", "helm", "terraform", "pul
 
 [command.gh_mutating_subcommands]
 doc = "gh group and subcommand pairs that are heavy (command-guard.js GH_MUTATING_SUBCOMMANDS, plus `workflow run`)."
-value = { pr = ["merge", "close", "review"], issue = ["delete"], release = ["create", "delete", "edit", "upload"], repo = ["delete", "edit"], secret = ["set", "delete"], workflow = ["run"] }
+value = { pr = ["merge", "close", "edit", "create", "review"], issue = ["create", "close", "delete", "edit"], release = ["create", "delete", "edit", "upload"], repo = ["delete", "edit"], secret = ["set", "delete"], workflow = ["run"] }
 
-[command.gh_light_writes]
-doc = "gh group and subcommand pairs allowed in the main thread whatever their body, title or flags (GH #263): filing and tending issues, labels and pull requests prints a line and floods nothing. Matched on the exact gh command path, after any global flag such as -R owner/repo. The pairs in command.gh_irreversible_subcommands and a gh api write are never light."
-value = { issue = ["create", "comment", "edit", "close", "reopen"], label = ["create", "edit"], pr = ["create", "comment", "edit"] }
+[command.remote_allow]
+doc = "Remote commands that run in the main thread whatever their body or output (GH #263). Each entry is a command prefix: the binary and its leading subcommand words, global flags such as -R/--repo skipped, optionally followed by an option and its value (`gh api -X POST`). Works for any binary. Block wins over allow; a command in neither list keeps the default rule (reads pass, mutations block). Add or remove a line in your own config.toml (`[command]` table) to change it; a user list replaces this one."
+value = ["gh issue create", "gh issue comment", "gh issue edit", "gh issue close", "gh issue reopen", "gh label create", "gh label edit", "gh pr create", "gh pr comment", "gh pr edit"]
 
-[command.gh_irreversible_subcommands]
-doc = "gh group and subcommand pairs blocked in the main thread for a stated reason (msg_gh_irreversible_why) rather than for output flooding; \"*\" matches every subcommand of the group. A gh api write (-X/--method POST|PUT|PATCH|DELETE, a -f/-F field or --input body, graphql) is blocked for the same reason."
-value = { pr = ["merge"], release = ["*"], repo = ["edit", "delete"], secret = ["*"] }
+[command.remote_block]
+doc = "Remote commands always blocked in the main thread, named in the block text as irreversible or sensitive (msg_remote_block_why). Same entry format as command.remote_allow; wins over it."
+value = ["gh pr merge", "gh release", "gh repo edit", "gh repo delete", "gh secret", "gh api -X DELETE", "gh api -X PUT", "gh api -X PATCH", "gh api -X POST", "gh api --method DELETE", "gh api --method PUT", "gh api --method PATCH", "gh api --method POST"]
 
-[command.msg_gh_irreversible_why]
-doc = "Why an irreversible gh command (merge, release, repo settings, secrets, a gh api write) is blocked in the main thread."
-value = "It cannot be undone or it publishes: a merge, a release, a repository setting, a secret or a raw gh api write. Hand it to a worker, or ask the owner."
+[command.msg_remote_block_why]
+doc = "Why a command on command.remote_block is blocked in the main thread."
+value = "It is irreversible or sensitive: a merge, a release, a repository setting, a secret or a raw gh api write. Hand it to a worker, or ask the owner."
 
 [command.gh_oneliner_subcommands]
 doc = "gh group and subcommand pairs that are light when the whole command is one short plain line (command-guard.js GH_ONELINER_SUBCOMMANDS): they print a line or two and flood nothing, so a subagent for them is noise."

@@ -130,7 +130,7 @@ fn single_small_state_changing_commands_are_allowed_and_the_real_cases_still_blo
         ] {
             ok(c);
         }
-        let reason = Some("cannot be undone");
+        let reason = Some("irreversible or sensitive");
         for c in [
             "gh pr merge 5 --squash",
             "gh -R o/r pr merge 5",
@@ -144,7 +144,6 @@ fn single_small_state_changing_commands_are_allowed_and_the_real_cases_still_blo
             "gh api --method PUT repos/o/r/x",
             "gh api -X PATCH repos/o/r/x",
             "gh api -X DELETE repos/o/r/x",
-            "gh api repos/o/r/issues -f title=x",
             "ls && gh pr merge 5",
             "gh issue create --title x --body y && gh pr merge 5",
         ] {
@@ -156,5 +155,18 @@ fn single_small_state_changing_commands_are_allowed_and_the_real_cases_still_blo
         no("kubectl apply -f x.yaml", Some("floods"));
         no("gcloud run deploy svc", Some("floods"));
     }
+
+    // #263: the owner's own config.toml changes the two lists with no shipped-file edit (a user list replaces the shipped one).
+    // An added allow lets another binary through; an added block wins over a shipped allow; block wins over allow on the same entry.
+    let cfg = dir.join("state").join("config.toml");
+    std::fs::create_dir_all(cfg.parent().unwrap()).unwrap();
+    std::fs::write(&cfg, "[command]\nremote_allow = [\"gh pr comment\", \"kubectl apply\", \"gh issue create\"]\nremote_block = [\"gh pr comment\", \"gh issue create --repo\"]\n").unwrap();
+    allowed("kubectl apply -f x.yaml");
+    allowed("gh issue create --title x --body y");
+    blocked("gh pr comment 5 --body hi");
+    // a removed shipped default falls back to the default rule: gh pr create is no longer allowed
+    std::fs::write(&cfg, "[command]\nremote_allow = [\"gh issue create\"]\n").unwrap();
+    blocked(r#"gh pr create --title x --body y"#);
+    allowed("gh issue create --title x --body y");
     ah_engine::discard::harmless(std::fs::remove_dir_all(&dir));
 }
