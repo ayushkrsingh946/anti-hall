@@ -19,7 +19,7 @@ this page is how it does it.
 ## The core: one engine, one thin trigger
 
 `ah-engine` is a small program that stays running in the background, one per user. Each
-hook event in the plugin's `hooks.json` is one thin trigger, `hooks/ah-hook.sh <Event>`,
+hook event in the plugin's `hooks.json` is one thin trigger, the Rust client `ah-hook <Event>`,
 that hands the event to the engine. The engine decides which checks apply to that event
 and answers from memory.
 
@@ -27,7 +27,7 @@ and answers from memory.
 Claude Code / Codex
    │  hook event, JSON payload
    ▼
-thin trigger    hooks/ah-hook.sh <Event>      (one per event)
+thin trigger    ah-hook <Event>               (one per event, Rust)
    ▼
 engine client ──socket──▶ ah-engine (one resident process per user)
                               │ reads at run time, from the plugin:
