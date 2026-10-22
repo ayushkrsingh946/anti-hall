@@ -253,6 +253,24 @@ value = "advisory"
 doc = "Name (in the state directory) of the shared counter journal: processes that are not the daemon (hook calls, one-shot commands, post-update stages) append their hand-back and accounting counts here, and `status` folds them in. Never created by a read-only command."
 value = "obs-counters.log"
 
+[diagnostics.abandoned_log_interval_ms]
+doc = "Per site, the least time between two event-log lines for an abandoned decision (every one is still counted; the line names the site, the reason and the key inputs, and says how many were counted since the last line). 0 logs every one."
+value = 60000
+min = 0
+
+[diagnostics.abandoned_log_keys_max]
+doc = "How many (site, reason) pairs the abandoned-decision log limiter remembers before it forgets them all (bounds its memory; a forgotten pair logs once more)."
+value = 256
+min = 1
+
+[diagnostics.abandoned_no_reason]
+doc = "The reason shown in the event-log line of an abandoned decision whose site gave none (the site name still says where)."
+value = "the site gave no reason"
+
+[diagnostics.msg_abandoned]
+doc = "The event-log line for an abandoned decision. {site} is the counted site, {why} the reason with its key inputs, {n} how many were counted at the site since the last line."
+value = "abandoned at {site} (x{n}): {why}"
+
 [diagnostics.counters_max_bytes]
 doc = "Size at which the counter journal is folded into one line per counter (atomically, under the journal lock), so it never grows without bound."
 value = 262144

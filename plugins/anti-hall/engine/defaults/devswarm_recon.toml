@@ -638,6 +638,22 @@ unit = "ms"
 doc = "The fields of a reconcile row any one of which makes the row count as fine for the project's ok: it drained, or it was refused for a reason that is no failure (another pull holds the lock, hivecontrol is absent, the worktree is gone or not a git root, it was skipped, the native app timed out)."
 value = ["ok", "locked", "hivecontrolMissing", "worktreeMissing", "notGitRoot", "skipped", "nativeTimeout"]
 
+[devswarm_recon.pull_skip_reasons]
+doc = "The reasons a workspace's pull is SKIPPED by construction, not held: the workspace has no native hivecontrol queue to read (`primary-label`: a Primary checkout's own label, which no DevSwarm workspace answers to), so there is nothing to abandon. Any other reason is a held decision, counted and logged."
+value = ["primary-label"]
+
+[devswarm_recon.msg_skip_no_queue]
+doc = "Why a reconcile row was skipped: the workspace has no native queue to pull (a Primary checkout's label)."
+value = "skipped: a Primary checkout has no native queue to pull"
+
+[devswarm_recon.job_pull_skip]
+doc = "The label of the witness-log line for a workspace whose pull was skipped by construction (the line names the workspace and why)."
+value = "pull-skip"
+
+[devswarm_recon.msg_pull_held_why]
+doc = "The reason logged for a held pull. {id} is the workspace, {why} the engine's reason for not draining it."
+value = "workspace {id} not drained: {why}"
+
 [devswarm_recon.job_handback]
 doc = "The label of the witness-log line for a workspace the engine did not drain itself (the line names the workspace and why)."
 value = "pull-handback"
