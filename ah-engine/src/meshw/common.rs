@@ -304,6 +304,59 @@ pub fn read_aliases(home: &Path) -> Vec<(String, String)> {
     out
 }
 
+/// The sender alias of a child caller (`senderIdentityDetailed` -> `writeAlias(home, label, child, worktree)`): the worktree label the
+/// child's registered id replaces, written to the alias map when it does not already say so. Best effort (Node: `catch (_) {}`); a
+/// caller that is not a child needs none. `cwd` names the worktree recorded with the alias.
+pub fn ensure_alias(inv: &Inv, who: &ident::Caller, cwd: &str) {
+    if who.kind != defaults::text("mesh_write.kind_child") {
+        return;
+    }
+    let Some(label) = who.mesh_id.as_deref() else { return };
+    if read_aliases(&inv.home).into_iter().any(|(k, v)| k == label && v == who.identity) {
+        return;
+    }
+    let worktree = ident::resolve_caller_worktree(cwd).ok().flatten();
+    write_alias(inv, label, &who.identity, worktree.as_deref());
+}
+
+/// `writeAlias(home, label, to, worktree)`: `{version: 1, aliases: {label: {to, worktree, at}}}`, pretty-printed with a final newline,
+/// through a temp file and a rename. `false` when nothing was written (an unsafe or equal pair, the same alias on file, an error).
+pub fn write_alias(inv: &Inv, label: &str, to: &str, worktree: Option<&str>) -> bool {
+    use crate::meshw::idlock::is_safe_id;
+    if !is_safe_id(label) || !is_safe_id(to) || label == to {
+        return false;
+    }
+    let file = devswarm_root(&inv.home).join(defaults::text("mesh_write.alias_file"));
+    let key = defaults::text("mesh_write.alias_key");
+    // absent or corrupt: start fresh (corrupt content is replaced, never merged)
+    let mut aliases: Vec<(String, OVal)> = match read_json(&file).and_then(|j| j.get(key).cloned()) {
+        Some(OVal::Obj(a)) => a,
+        _ => Vec::new(),
+    };
+    if let Some((_, cur)) = aliases.iter().find(|(k, _)| k == label)
+        && matches!(cur.get("to"), Some(OVal::Str(t)) if t == to)
+    {
+        return false;
+    }
+    let now = if defaults::env_var("mesh_now").is_some() { inv.now } else { now_ms() };
+    let entry = OVal::Obj(vec![
+        ("to".into(), OVal::Str(to.to_string())),
+        ("worktree".into(), worktree.map_or(OVal::Null, |w| OVal::Str(w.to_string()))),
+        ("at".into(), OVal::Num(now as f64)),
+    ]);
+    match aliases.iter_mut().find(|(k, _)| k == label) {
+        Some(slot) => slot.1 = entry,
+        None => aliases.push((label.to_string(), entry)),
+    }
+    let doc = OVal::Obj(vec![("version".into(), OVal::Num(1.0)), (key.to_string(), OVal::Obj(aliases))]);
+    if let Some(d) = file.parent()
+        && std::fs::create_dir_all(d).is_err()
+    {
+        return false;
+    }
+    crate::atomic::write(&file, format!("{}\n", doc.stringify_pretty())).is_ok()
+}
+
 /// Write the send receipt (`writeSendReceipt`): `<devswarm>/send-receipts/<UTC day>/<hash>.json`, tmp then rename.
 pub fn write_send_receipt(home: &Path, ts: i64, hash: &str, entry: &OVal) {
     let day = utc_day(ts);

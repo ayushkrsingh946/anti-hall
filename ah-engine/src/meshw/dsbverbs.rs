@@ -83,13 +83,8 @@ pub fn merge(inv: &Inv, a: &Args) -> R<Answer> {
             let st = common::open_store(inv, &repo_key)?;
             let rows = ident::rows_of(&st.reader().roster().map_err(|e| ident::Defer(format!("registry:{e}")))?);
             let who = ident::sender_identity_detailed(&inv.env, &inv.cwd, &rows, &inv.home)?;
-            if who.kind == text("mesh_write.kind_child") {
-                // writeAlias(...) is a no-op only when the alias already says so
-                let label = who.mesh_id.clone().unwrap_or_default();
-                if !common::read_aliases(&inv.home).into_iter().any(|(k, v)| k == label && v == who.identity) {
-                    return defer("sender-alias");
-                }
-            }
+            // writeAlias(...): a no-op when the alias already says so
+            common::ensure_alias(inv, &who, &inv.cwd);
             crate::meshw::summary::check(&st, inv, None)?;
             Some(Broadcast { repo_key, store: st, from: who.identity })
         }

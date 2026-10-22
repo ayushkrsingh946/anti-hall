@@ -459,7 +459,7 @@ fn merge_cases(fx: &Fx) -> Vec<Lc> {
         m("a-project-without-a-store", &["merge"], "other", false).check(ok_check).merge(ok_merge),
         m("a-build-without-the-merge-verb", &["merge"], "child", false).verbs("list info create").check(ok_check).merge(ok_merge),
         m("a-build-without-the-check-verb", &["merge"], "child", false).verbs("list info create merge-into-source").check(ok_check).merge(ok_merge),
-        m("a-sender-label-nobody-aliased", &["merge"], "child", false).check(ok_check).merge(ok_merge).setup(|h| {
+        m("a-sender-label-nobody-aliased-writes-the-alias", &["merge"], "child", true).check(ok_check).merge(ok_merge).setup(|h| {
             ah_engine::discard::harmless(fs::remove_file(h.join(".anti-hall/devswarm/sender-aliases.json"))); // keep: absent is the wanted state
         }),
     ]
@@ -473,7 +473,7 @@ fn merge_matches_node() {
     }
     let fx = fixture("dsbmerge");
     let cases = merge_cases(&fx);
-    check(&fx, &cases, &[], 14, 4);
+    check(&fx, &cases, &[], 16, 3);
 }
 
 // ---- reconcile-registry -------------------------------------------------------------------------------------------------

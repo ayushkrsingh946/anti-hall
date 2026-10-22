@@ -556,14 +556,8 @@ pub(crate) fn cmd_send_mode(inv: &Inv, a: &Args, plan: bool) -> R<Obj> {
     let st = common::open_store(inv, &repo_key)?;
     let rows = ident::rows_of(&st.reader().roster().map_err(|e| Defer(format!("registry:{e}")))?);
     let from_d = ident::sender_identity_detailed(&inv.env, &cwd, &rows, home)?;
-    if from_d.kind == defaults::text("mesh_write.kind_child") {
-        // writeAlias(home, meshId, child, worktree): a no-op only when the alias already says so
-        let label = from_d.mesh_id.clone().unwrap_or_default();
-        let have = common::read_aliases(home).into_iter().any(|(k, v)| k == label && v == from_d.identity);
-        if !have {
-            return defer("sender-alias");
-        }
-    }
+    // writeAlias(home, meshId, child, worktree): a no-op when the alias already says so
+    common::ensure_alias(inv, &from_d, &cwd);
     let from = from_d.identity.clone();
     if let Some(ff) = a.one(defaults::text("mesh_write.flag_from"))
         && ff != from
