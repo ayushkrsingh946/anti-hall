@@ -623,12 +623,15 @@ pub enum Healed {
         /// The backup taken first, if this was the file's first heal.
         backup: Option<PathBuf>,
     },
-    /// Not written: the plugin root is a version-controlled checkout and the heal was automatic.
+    /// Not written: the heal was automatic and the plugin root is a version-controlled checkout, or a deploy hold (the daemon-down
+    /// marker) is active, when a deploy is replacing the very files a heal would write.
     Skipped {
         /// The file, relative to the defaults directory.
         file: String,
         /// The settings it lacks.
         keys: Vec<String>,
+        /// Skipped because a deploy hold is active (not because of a checkout).
+        held: bool,
     },
     /// Not written.
     Failed {
@@ -726,13 +729,19 @@ fn has_backup(path: &Path) -> bool {
 /// Heal every file of `report.missing` under `root`. An automatic heal (`force` false) never writes into a
 /// version-controlled checkout ([`in_checkout`]); `ah-engine config heal` passes `force`.
 pub fn heal(root: &Path, report: &Report, force: bool) -> Vec<Healed> {
-    let skip = !force && in_checkout(root);
+    heal_with(root, report, force, !force && crate::client::daemon_down_marked())
+}
+
+/// [`heal`] with the deploy-hold reading given: an automatic heal never writes into a plugin root while a hold is active (a deploy is
+/// syncing the root; a heal from the binary that is being replaced would write into the half-synced files).
+pub fn heal_with(root: &Path, report: &Report, force: bool, held: bool) -> Vec<Healed> {
+    let skip = !force && (held || in_checkout(root));
     report
         .missing
         .iter()
         .map(|(file, keys)| {
             if skip {
-                return Healed::Skipped { file: file.clone(), keys: keys.clone() };
+                return Healed::Skipped { file: file.clone(), keys: keys.clone(), held };
             }
             match heal_file(root, file, keys) {
                 Ok(Some((keys, backup))) => Healed::Added { file: file.clone(), keys, backup },
@@ -755,9 +764,11 @@ pub fn heal_line(h: &Healed) -> (&'static str, &'static str, String) {
                 &[("file", file), ("keys", &keys.join(", ")), ("backup", &backup.as_ref().map(|b| b.display().to_string()).unwrap_or_default())],
             ),
         ),
-        Healed::Skipped { file, keys } => {
-            ("defaults_heal_skipped", "missing_key", super::render("defaults_load.msg_heal_skipped", &[("file", file), ("keys", &keys.join(", "))]))
-        }
+        Healed::Skipped { file, keys, held } => (
+            "defaults_heal_skipped",
+            "missing_key",
+            super::render(if *held { "defaults_load.msg_heal_held" } else { "defaults_load.msg_heal_skipped" }, &[("file", file), ("keys", &keys.join(", "))]),
+        ),
         Healed::Failed { file, keys, err } => {
             ("defaults_heal_failed", "io", super::render("defaults_load.msg_heal_failed", &[("file", file), ("keys", &keys.join(", ")), ("err", err)]))
         }
@@ -1268,6 +1279,22 @@ mod tests {
         let backups =
             std::fs::read_dir(p.parent().unwrap()).unwrap().flatten().filter(|e| e.file_name().to_string_lossy().starts_with("engine.toml.bak-")).count();
         assert_eq!(backups, 1);
+        crate::discard::harmless(std::fs::remove_dir_all(&root));
+    }
+
+    #[test]
+    fn an_automatic_heal_never_writes_while_a_deploy_hold_is_active_and_says_so() {
+        let root = plugin_with_pristine("healhold");
+        let p = root.join(bootstrap::DEFAULTS_DIR).join("engine.toml");
+        replace_table(&root, "engine.toml", "daemon.queue", "");
+        let before = std::fs::read_to_string(&p).unwrap();
+        let d = load_from(&root, None, None).unwrap();
+        let done = heal_with(&root, &d.report, false, true);
+        assert!(matches!(&done[..], [Healed::Skipped { held: true, .. }]), "{done:?}");
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), before, "nothing is written under the hold");
+        assert!(heal_line(&done[0]).2.contains("deploy hold"), "the log line names the hold: {}", heal_line(&done[0]).2);
+        let forced = heal_with(&root, &d.report, true, true);
+        assert!(matches!(&forced[..], [Healed::Added { .. }]), "the explicit command still heals: {forced:?}");
         crate::discard::harmless(std::fs::remove_dir_all(&root));
     }
 
