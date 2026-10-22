@@ -170,7 +170,7 @@ fn scripted_checks_stay_inside_the_latency_budget() {
         // AH_LATENCY_TOP=<n>: the n slowest calls of each check, with the golden case they ran (the profile of a p95 miss)
         if let Some(n) = std::env::var("AH_LATENCY_TOP").ok().and_then(|v| v.parse::<usize>().ok()) {
             let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
-            by_case.sort_unstable_by(|a, b| b.0.cmp(&a.0));
+            by_case.sort_unstable_by_key(|a| std::cmp::Reverse(a.0));
             let mut seen = std::collections::BTreeMap::<usize, (u128, usize)>::new();
             for (t, i) in &by_case {
                 let e = seen.entry(*i).or_insert((0, 0));
@@ -178,7 +178,7 @@ fn scripted_checks_stay_inside_the_latency_budget() {
                 e.1 += 1;
             }
             let mut mean: Vec<(usize, u128)> = seen.into_iter().map(|(i, (t, k))| (i, t / k as u128)).collect();
-            mean.sort_unstable_by(|a, b| b.1.cmp(&a.1));
+            mean.sort_unstable_by_key(|a| std::cmp::Reverse(a.1));
             for (i, t) in mean.iter().take(n) {
                 let v: Value = serde_json::from_str(lines[*i]).unwrap_or(Value::Null);
                 println!("  SLOW {:<24} case {i:>4} mean={t:>6}us n={} payload={}", c.name(), v.get("n").unwrap_or(&Value::Null), v.get("payload").map(|p| p.to_string().chars().take(160).collect::<String>()).unwrap_or_default());

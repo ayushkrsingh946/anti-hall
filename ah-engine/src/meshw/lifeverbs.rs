@@ -1067,14 +1067,15 @@ fn candidates_of(store: &crate::meshw::store::MeshStore, sum: &OVal) -> Vec<Cand
             continue;
         }
         let mut last: Option<f64> = None;
-        let _ = store.reader().for_each_message(id, 0, |m| {
+        // keep: a partition that cannot be read to the end reports the newest ts seen so far (Node's listMessages reads what the store gives)
+        crate::discard::harmless(store.reader().for_each_message(id, 0, |m| {
             if let Some(t) = m["ts"].as_f64().filter(|t| t.is_finite())
                 && last.is_none_or(|l| t > l)
             {
                 last = Some(t);
             }
             true
-        });
+        }));
         out.push(Candidate { id: id.clone(), unread: num(e.get("unread")), message_count: num(e.get("messageCount")), last_ts: last });
     }
     out

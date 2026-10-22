@@ -218,18 +218,21 @@ fn without_archived_only_table(out: &str) -> (String, bool) {
 /// `ghost_label`: the answer holds a `(primary-<short id>)` label (masked in the comparison); the content hashes of the table and
 /// nudge entries are hashes of that text, so they are left out too.
 fn without_table_state(mut tree: BTreeMap<String, String>, drop_entry: bool, ghost_label: bool) -> BTreeMap<String, String> {
+    let entry = regex::Regex::new(r#",?"parent-inbox-table":\{(?:[^{}]|\{TS\})*\}"#).unwrap();
+    let entry_hash = regex::Regex::new(r#"("parent-inbox-table":\{)"hash":"(?:[0-9a-f]|\{TS\})*","#).unwrap();
+    let any_hash = regex::Regex::new(r#""(?:hash|ch)":"(?:[0-9a-f]|\{TS\})*",?"#).unwrap();
     for (k, body) in tree.iter_mut() {
         if !k.contains("emit-dedupe/") {
             continue;
         }
         // (the clock readings are masked to `{TS}`, so the file is no longer JSON: cut the entry's text)
         *body = if drop_entry {
-            regex::Regex::new(r#",?"parent-inbox-table":\{(?:[^{}]|\{TS\})*\}"#).unwrap().replace_all(body, "").into_owned()
+            entry.replace_all(body, "").into_owned()
         } else {
-            regex::Regex::new(r#"("parent-inbox-table":\{)"hash":"(?:[0-9a-f]|\{TS\})*","#).unwrap().replace_all(body, "$1").into_owned()
+            entry_hash.replace_all(body, "$1").into_owned()
         };
         if ghost_label {
-            *body = regex::Regex::new(r#""(?:hash|ch)":"(?:[0-9a-f]|\{TS\})*",?"#).unwrap().replace_all(body, "").into_owned();
+            *body = any_hash.replace_all(body, "").into_owned();
         }
     }
     tree

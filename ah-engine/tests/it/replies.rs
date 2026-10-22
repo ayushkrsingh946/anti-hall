@@ -272,7 +272,6 @@ pub fn run_case(hook: &str, check: &str, case: &Case, t: &mut Tally) {
             Some(r) => (r.replace("$T", &tstr).replace("$H", &nh.to_string_lossy()), r.replace("$T", &tstr).replace("$H", &eh.to_string_lossy())),
             None => (subst(&step.payload, &tstr, &nh.to_string_lossy()).to_string(), subst(&step.payload, &tstr, &eh.to_string_lossy()).to_string()),
         };
-        let before = tree(&eh);
         let e = run_engine(check, &eh, case, &input_e);
         let deferred = e.1.trim() == "AHFALLBACK";
         match step.expect {
