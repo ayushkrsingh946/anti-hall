@@ -385,6 +385,12 @@ pub fn regen_defers_local(check: &str) {
         let mut c = c;
         if c["expect"]["v"] == "defer" {
             let l = lay(&c);
+            if check == "task-tracker" {
+                // the corpus's dispatch cap was recorded on a 16-core machine (see `golden_report`): pin it the same way here
+                let dir = format!("{}/.anti-hall", l.home);
+                std::fs::create_dir_all(&dir).unwrap();
+                std::fs::write(format!("{dir}/settings.json"), r#"{"guards":{"maxParallelDispatch":14}}"#).unwrap();
+            }
             let got = run_case(check, &l, repeat_of(&c)).unwrap();
             c["expect"] = verdict_json(&got, &l);
             if c.get("watch").is_some() {

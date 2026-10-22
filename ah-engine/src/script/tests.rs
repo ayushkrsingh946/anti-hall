@@ -423,10 +423,10 @@ fn api_guard_script_matches_the_compiled_port() {
 #[test]
 fn orch_on_spawn_script_matches_the_compiled_port() {
     let kinds = golden::assert_script_matches("orch-on-spawn");
-    // a pending marker is answered (it wins the claim and sends the rules); only the retry slot and an unusable home defer
+    // every case is answered here (the Node fallback is gone, #248): a pending marker wins the claim and sends the rules
     assert!(
-        kinds.get("allow").copied().unwrap_or(0) > 20 && kinds.get("advisory").copied().unwrap_or(0) > 20 && kinds.get("defer").copied().unwrap_or(0) >= 1,
-        "allow, advisory and the remaining deferrals: {kinds:?}"
+        kinds.get("allow").copied().unwrap_or(0) > 20 && kinds.get("advisory").copied().unwrap_or(0) > 20 && !kinds.contains_key("defer"),
+        "allow and advisory, no deferral: {kinds:?}"
     );
 }
 
@@ -451,9 +451,10 @@ fn fable_availability_script_matches_the_compiled_port() {
 #[test]
 fn edit_guard_script_matches_the_compiled_port() {
     let kinds = golden::assert_script_matches("edit-guard");
-    for k in ["allow", "defer", "exact"] {
+    for k in ["allow", "exact"] {
         assert!(kinds.get(k).copied().unwrap_or(0) > 20, "a corpus that exercises {k}: {kinds:?}");
     }
+    assert!(!kinds.contains_key("defer"), "no deferral: {kinds:?}");
 }
 
 #[test]
@@ -470,11 +471,14 @@ fn a_config_nested_past_the_compiled_readers_limit_is_decided_as_node_decides_it
 
 #[test]
 fn a_config_over_the_read_cap_defers_instead_of_being_read_truncated() {
+    // A config over the interpreter's read cap is never read truncated: the check decides natively, as Node does with the whole file
+    // (nothing about Fable in it), so the state is written with `available: null` and the check stays silent (the Node fallback is gone, #248).
     let h = write_home("fa-big");
     let cap = defaults::num("script.read_max_bytes") as usize;
     std::fs::write(format!("{h}/.claude.json"), format!("{{\"pad\":\"{}\"}}", "x".repeat(cap))).unwrap();
-    assert_eq!(run_forced("fable-availability", &json!({}), &env(&h)), Some(Some(Verdict::Defer)));
-    assert!(!std::path::Path::new(&format!("{h}/.anti-hall/fable-availability.json")).exists(), "nothing written before the deferral");
+    assert_eq!(run_forced("fable-availability", &json!({}), &env(&h)), Some(Some(Verdict::Allow)));
+    let state = std::fs::read_to_string(format!("{h}/.anti-hall/fable-availability.json")).unwrap();
+    assert!(state.starts_with("{\"available\":null,\"checkedAt\":") && state.ends_with(",\"source\":\"unknown\"}"), "{state}");
 }
 
 #[test]
@@ -490,6 +494,7 @@ fn ship_it_guard_script_matches_the_compiled_port() {
 pub(super) fn golden_report(check: &str, limit: usize) {
     golden::regen_defers_local(check);
     let cases = golden::load(check);
+    let limit = if std::env::var("AH_GOLDEN_ALL").is_ok() { usize::MAX } else { limit };
     let (mut bad, mut shown) = (0usize, 0usize);
     for c in &cases {
         let l = golden::lay(c);
@@ -590,14 +595,20 @@ fn command_script_matches_the_compiled_port() {
     golden_report("command", 12);
 }
 
-// `command.max_classify_len` (DECISIONS.md, deliberate differences): Node judges a longer command in parts (a head/tail scan) the
-// script does not reproduce, so the script defers it before parsing it. The gate used to sit behind the edit prefilter, which is
-// false for such a command: a big heredoc write was allowed where Node blocks it, and a big heavy command was parsed whole (about
-// 4.5 us of interpreter time per character in release), deferring only when the time limit happened to cut it.
+// `command.max_classify_len`: Node judges a longer command in parts (a head/tail scan). The script decides it natively the same way
+// (the Node fallback is gone, #248): the edit gate scans the head and tail, and a big heredoc write or a big heavy command is blocked
+// where Node blocks it, without parsing the whole command (about 4.5 us of interpreter time per character in release).
 #[test]
 fn a_command_over_the_classify_cap_defers_before_it_is_parsed() {
     let h = home("cmd-cap");
-    let e = env(&h);
+    // a main-thread session of a DevSwarm checkout: the context in which Node's edit and heavy-command gates block
+    let e = RequestEnv::from_pairs([
+        ("HOME", h.as_str()),
+        ("CLAUDE_CODE_ENTRYPOINT", "cli"),
+        ("DEVSWARM_REPO_ID", "r1"),
+        ("DEVSWARM_SOURCE_BRANCH", "feat"),
+        ("ANTIHALL_INGEST_DRY_RUN", "1"),
+    ]);
     let proj = format!("{h}/proj");
     std::fs::create_dir_all(format!("{proj}/.git/refs/heads")).unwrap();
     std::fs::create_dir_all(format!("{proj}/src")).unwrap();
@@ -608,9 +619,13 @@ fn a_command_over_the_classify_cap_defers_before_it_is_parsed() {
     assert!(run_forced("command", &bash("ls".into()), &e).is_some());
     for (what, p) in [("heredoc write", bash(format!("cat > {proj}/src/x.rs <<'EOF'\n{body}\nEOF"))), ("heavy", bash(format!("echo {body} && npm test")))] {
         let cpu = crate::limits::thread_cpu_us();
-        assert_eq!(run_forced("command", &p, &e), Some(Some(Verdict::Defer)), "{what}: a command over the cap is Node's to judge");
+        // Node (command-guard.js, same payload and environment) blocks both with exit 2; the script decides them natively, the same way
+        match run_forced("command", &p, &e) {
+            Some(Some(Verdict::Exact(x))) => assert_eq!(x.code, 2, "{what}: a command over the cap is blocked as Node blocks it"),
+            other => panic!("{what}: a command over the cap is blocked as Node blocks it, got {other:?}"),
+        }
         let used_ms = crate::limits::thread_cpu_us().saturating_sub(cpu) / 1000;
-        assert!(used_ms < defaults::num("script.time_limit_ms"), "{what}: deferred after {used_ms} ms of cpu, so it was parsed first");
+        assert!(used_ms < defaults::num("script.time_limit_ms"), "{what}: decided after {used_ms} ms of cpu, so it was parsed whole");
     }
     crate::discard::harmless(std::fs::remove_dir_all(&h)); // keep: cleanup
 }
@@ -825,19 +840,20 @@ mod swarm {
         let t = transcript(&h, json!({"subagent_type": "general-purpose"}));
         let log = format!("{h}/.anti-hall/swarm-spawns.log");
         let no_cwd = json!({"tool_name": "Agent", "tool_input": {}, "transcript_path": t});
-        assert_eq!(call(&h, &no_cwd, T0, Some(8.0 * GB), 16.0 * GB), Some(Some(Verdict::Defer)), "no cwd: Node would use the hook's own directory");
+        assert_eq!(call(&h, &no_cwd, T0, Some(8.0 * GB), 16.0 * GB), Some(Some(Verdict::Allow)), "no cwd: Node would use the hook's own directory");
         let rel = json!({"tool_name": "Agent", "tool_input": {}, "transcript_path": "t.jsonl", "cwd": h});
-        assert_eq!(call(&h, &rel, T0 + 1, Some(8.0 * GB), 16.0 * GB), Some(Some(Verdict::Defer)), "a relative transcript path");
+        assert_eq!(call(&h, &rel, T0 + 1, Some(8.0 * GB), 16.0 * GB), Some(Some(Verdict::Allow)), "a relative transcript path");
         let odd = json!({"tool_name": "Agent", "tool_input": {}, "transcript_path": t, "cwd": format!("{h}/../x")});
-        assert_eq!(call(&h, &odd, T0 + 2, Some(8.0 * GB), 16.0 * GB), Some(Some(Verdict::Defer)), "a cwd that is not in normal form");
-        assert!(!std::path::Path::new(&log).exists(), "a deferral must not record the spawn");
+        assert_eq!(call(&h, &odd, T0 + 2, Some(8.0 * GB), 16.0 * GB), Some(Some(Verdict::Allow)), "a cwd that is not in normal form");
+        // Node answers these too (an allowed spawn is recorded, so the log holds the three)
+        assert_eq!(std::fs::read_to_string(&log).unwrap().lines().count(), 3, "each allowed spawn is recorded");
     }
 
     #[test]
     fn the_log_is_read_like_parse_int_and_a_huge_entry_defers() {
         let h = swarm_home("sw-huge");
         std::fs::write(format!("{h}/.anti-hall/swarm-spawns.log"), "99999999999999999999\n").unwrap();
-        assert_eq!(call(&h, &spawn(), T0, Some(8.0 * GB), 16.0 * GB), Some(Some(Verdict::Defer)));
+        assert_eq!(call(&h, &spawn(), T0, Some(8.0 * GB), 16.0 * GB), Some(Some(Verdict::Allow)));
         // a log with junk lines, a CR and a sign: only the positive finite numbers count
         let h2 = swarm_home("sw-parse");
         std::fs::write(format!("{h2}/.anti-hall/swarm-spawns.log"), format!("abc\r\n{}\n-5\n+{}abc\n0x10\n\n", T0 - 10, T0 - 20)).unwrap();
@@ -1238,13 +1254,13 @@ fn compact_declaration_guard_script_matches_the_compiled_port() {
 #[test]
 fn devswarm_parent_inbox_script_matches_the_compiled_port() {
     let kinds = golden::assert_script_matches("devswarm-parent-inbox");
-    assert!(kinds.get("allow").copied().unwrap_or(0) > 100 && kinds.get("defer").copied().unwrap_or(0) > 50, "both answers: {kinds:?}");
+    assert!(kinds.get("allow").copied().unwrap_or(0) > 100 && !kinds.contains_key("defer"), "both answers: {kinds:?}");
 }
 
 #[test]
 fn devswarm_child_turn_script_matches_the_compiled_port() {
     let kinds = golden::assert_script_matches("devswarm-child-turn");
-    assert!(kinds.get("allow").copied().unwrap_or(0) > 100 && kinds.get("defer").copied().unwrap_or(0) > 50, "both answers: {kinds:?}");
+    assert!(kinds.get("allow").copied().unwrap_or(0) > 100 && !kinds.contains_key("defer"), "both answers: {kinds:?}");
 }
 
 // ---- task-lifecycle-log, the session gates, merge-side-pick, scan-throttle and merge-gate (D88 batch 6) ----
@@ -1252,31 +1268,31 @@ fn devswarm_child_turn_script_matches_the_compiled_port() {
 #[test]
 fn task_lifecycle_log_script_matches_the_compiled_port() {
     let kinds = golden::assert_script_matches("task-lifecycle-log");
-    assert!(kinds.get("allow").copied().unwrap_or(0) > 40 && kinds.get("defer").copied().unwrap_or(0) >= 1, "both answers: {kinds:?}");
+    assert!(kinds.get("allow").copied().unwrap_or(0) > 40 && !kinds.contains_key("defer"), "both answers: {kinds:?}");
 }
 
 #[test]
 fn jev_weekly_scorecard_script_matches_the_compiled_port() {
     let kinds = golden::assert_script_matches("jev-weekly-scorecard");
-    assert!(kinds.get("allow").copied().unwrap_or(0) > 40 && kinds.get("defer").copied().unwrap_or(0) >= 3, "both answers: {kinds:?}");
+    assert!(kinds.get("allow").copied().unwrap_or(0) > 40 && !kinds.contains_key("defer"), "both answers: {kinds:?}");
 }
 
 #[test]
 fn jev_review_reminder_script_matches_the_compiled_port() {
     let kinds = golden::assert_script_matches("jev-review-reminder");
-    // the Jev-on path is answered here now: only a payload no script can read still defers
+    // every payload is answered here (the Node fallback is gone, #248)
     for k in ["advisory", "allow"] {
         assert!(kinds.get(k).copied().unwrap_or(0) >= 10, "a corpus that exercises {k}: {kinds:?}");
     }
-    assert!(kinds.get("defer").copied().unwrap_or(0) >= 1, "a corpus that exercises defer: {kinds:?}");
+    assert!(!kinds.contains_key("defer"), "no deferral: {kinds:?}");
 }
 
 #[test]
 fn repair_on_reload_script_matches_the_compiled_port() {
     let kinds = golden::assert_script_matches("repair-on-reload");
-    // L06: a due repair is asked of the refresh job (allow); only the undecidable shapes (no home, no plugin root, a version
-    // that is not a plain three-part one) still defer
-    assert!(kinds.get("allow").copied().unwrap_or(0) > 40 && kinds.get("defer").copied().unwrap_or(0) > 5, "both answers: {kinds:?}");
+    // L06: a due repair is asked of the refresh job (allow); the undecidable shapes (no home, no plugin root, a version that is not a
+    // plain three-part one) are answered natively too (#248)
+    assert!(kinds.get("allow").copied().unwrap_or(0) > 40 && !kinds.contains_key("defer"), "both answers: {kinds:?}");
 }
 
 #[test]
@@ -1544,7 +1560,9 @@ fn interpreter_memory_stays_in_a_band_over_many_calls() {
                 if round == 0 {
                     first_answers.push(v);
                 } else {
-                    assert_eq!(first_answers[i], v, "{name} answered differently in round {round}");
+                    // a reminder that fires once per change (jev-review-reminder, #247) is an advisory the first time and silent after it
+                    let once = first_answers[i].contains("Advisory") && v.contains("Allow");
+                    assert!(first_answers[i] == v || once, "{name} answered differently in round {round}: {} then {v}", first_answers[i]);
                 }
             }
             let (_, bytes, ..) = super::pool_usage().expect("ran scripts");
@@ -1717,8 +1735,8 @@ fn no_script_hands_a_case_back_to_node() {
     assert!(seen > 50, "the scan reached the scripts ({seen})");
 }
 
-/// A DevSwarm child whose message store the host cannot read exactly (a forced backend it does not read) is told its mailbox could
-/// not be counted, instead of being passed in silence; with the store simply absent the same child hears nothing.
+/// A DevSwarm child whose message store the host cannot read exactly (a forced backend it does not read) is answered natively, like
+/// Node does (silence); with the store simply absent the same child hears nothing.
 #[test]
 fn a_child_mailbox_the_host_cannot_count_gets_the_drain_nudge_with_an_unknown_count() {
     let case = |forced: bool| {
@@ -1740,10 +1758,9 @@ fn a_child_mailbox_the_host_cannot_count_gets_the_drain_nudge_with_an_unknown_co
         let got = golden::run_case("devswarm-child-drain", &l, 1).expect("a shipped script");
         golden::verdict_json(&got, &l)
     };
-    let unknown = run(true);
-    assert_eq!(unknown["v"], "exact", "{unknown}");
-    let out = unknown["out"].as_str().unwrap_or_default();
-    assert!(out.contains("could not be read here"), "{out}");
+    // Node's hook says nothing in either case (checked on this payload), and the native answer no longer hands the case back or adds a
+    // nudge of its own (#248): both are allowed.
+    assert_eq!(run(true)["v"], "allow", "a store the host cannot count is not passed with a nudge Node never gave");
     assert_eq!(run(false)["v"], "allow", "an absent store is a count of zero, not an unknown one");
 }
 
