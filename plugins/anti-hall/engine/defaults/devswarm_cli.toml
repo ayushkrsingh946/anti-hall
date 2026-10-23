@@ -1685,6 +1685,14 @@ value = "hivecontrol-active.json"
 doc = "The shape of a worktree label (`primary-<8 hex>`): only such a row can fold into its canonical row (devswarm-sender-alias.js rosterFoldTarget)."
 value = '^primary-[0-9a-f]{8}$'
 
+[devswarm_cli.msg_read_arg_ambiguous]
+doc = "The error of a read verb whose id argument names several registry rows. Placeholders: {verb}, {id} (quoted), {candidates} (JSON list)."
+value = "inbox {verb} {id} is ambiguous between candidate rows {candidates} — address one by its exact registry id"
+
+[devswarm_cli.reason_ambiguous_target]
+doc = "The reason of a read verb refused for an ambiguous id argument."
+value = "ambiguous-target"
+
 [devswarm_cli.rr_dir_retired]
 doc = "The directory of fold tombstones under the DevSwarm root (retired/<id>.json)."
 value = "retired"

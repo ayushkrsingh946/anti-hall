@@ -127,13 +127,27 @@ fn label_without_reader(row: &Row, readers: usize) -> bool {
     row.id.starts_with(defaults::text("mesh_write.primary_prefix")) && readers == 0 && (session.is_empty() || session.starts_with(defaults::text("mesh_write.synthetic_session_prefix")))
 }
 
-/// Whether `arg` (not itself a registry row) resolves, as a `send --to` address would, to a DIFFERENT row, or is ambiguous: the cases
-/// of `resolveReadArgToId` that change which id a read verb reads.
-pub(crate) fn names_another_row(inv: &Inv, reader: &crate::mesh::MeshReader, rows: &[Row], arg: &str) -> R<bool> {
+/// What `resolveReadArgToId` made of a read verb's id argument.
+pub(crate) enum ReadArg {
+    /// The argument itself (a registry row, or nothing resolves it).
+    Same,
+    /// A registry row's id the argument named (a mesh label or prefix).
+    To(String),
+    /// Several rows: the candidate ids.
+    Ambiguous(Vec<String>),
+}
+
+/// `resolveReadArgToId(ctx, home, arg)` over the project's registry rows: an exact row wins; else the address resolves as `send --to`
+/// does (without the stale-twin reroute).
+pub(crate) fn resolve_read_arg(inv: &Inv, reader: &crate::mesh::MeshReader, rows: &[Row], arg: &str) -> R<ReadArg> {
+    if rows.iter().any(|r| r.id == arg) {
+        return Ok(ReadArg::Same);
+    }
     Ok(match resolve_send_target(inv, Some(reader), rows, arg)? {
-        Resolved::Unregistered => false,
-        Resolved::Row(t) => t.id != arg,
-        Resolved::Rerouted(..) | Resolved::AmbiguousPrefix(_) => true,
+        Resolved::Unregistered => ReadArg::Same,
+        Resolved::Row(t) if t.id == arg => ReadArg::Same,
+        Resolved::Row(t) | Resolved::Rerouted(t, ..) => ReadArg::To(t.id),
+        Resolved::AmbiguousPrefix(ids) => ReadArg::Ambiguous(ids),
     })
 }
 

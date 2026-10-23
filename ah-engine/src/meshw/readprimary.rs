@@ -534,25 +534,17 @@ fn unowned_refusal(inv: &Inv, a: &Args, id: &str) -> R<Option<Answer>> {
     if text_requested(&a.raw) {
         return Ok(None);
     }
-    let root = devswarm_root(&inv.home);
-    if std::fs::symlink_metadata(root.join(defaults::text("devswarm_cli.rr_dir_retired")).join(format!("{id}{}", defaults::text("mesh_write.json_suffix")))).is_ok() {
-        return defer("retired-redirect");
-    }
     let Some(repo_key) = ident::resolve_context(&inv.cwd, true)?.repo_key else { return defer("no-project") };
     let reader = tick::open_reader_creating(inv, &repo_key)?;
     let rows = ident::rows_of(&reader.roster().map_err(|e| ident::Defer(format!("registry:{e}")))?);
     if rows.iter().any(|r| r.id == id) {
         return Ok(None); // registered without a descriptor: the read below decides
     }
-    // resolveReadArgToId: a mesh label or prefix that names a registered row is that row
-    if crate::meshw::send::names_another_row(inv, &reader, &rows, id)? {
-        return defer("read-arg-resolved");
-    }
     let caller = ident::caller_identity_detailed(&inv.env, &inv.cwd)?;
     let own_entry = resolve_mesh_target(inv, Some(&reader), &rows, Some(caller.identity.as_str()))?;
     let owns = caller.identity == id || own_entry.as_ref().is_some_and(|e| e.id == id) || ident::declared_self_id(&inv.env, &inv.cwd, &rows)?.as_deref() == Some(id);
     if owns {
-        return defer("unregistered-own-id");
+        return Ok(None); // the caller's own id, not registered yet: an empty partition, read by the plan below
     }
     let has_messages = reader.message_count(id).map_err(|e| ident::Defer(format!("store-read:{e}")))? > 0;
     let cause = if !has_messages {
@@ -588,6 +580,71 @@ fn unowned_refusal(inv: &Inv, a: &Args, id: &str) -> R<Option<Answer>> {
     crate::meshw::clog::refusal(inv, defaults::text("devswarm_cli.window_op_read_primary"), Some(&repo_key), Some(id), &msg, Some(cause));
     crate::meshw::mark_committed();
     Ok(Some(Answer { code: 2, stdout: format!("{}\n", o.done().stringify()), effect: Effect::None }))
+}
+
+/// Where a `read-primary <id>` really reads (`cmdInbox`'s id resolution and `cmdInboxMessagesInner`'s retired-redirect hop).
+enum Settled {
+    /// Read `id`; `redirected_from` is the folded id the caller addressed, `resolved_from` the label or prefix it resolved from.
+    Go { id: String, redirected_from: Option<String>, resolved_from: Option<String> },
+    /// Node's refusal (ambiguous address).
+    Refuse(Answer),
+}
+
+/// `retiredTo` of `retired/<id>.json`: the survivor a fold-retired id was merged into.
+fn read_retired_redirect(inv: &Inv, id: &str) -> Option<String> {
+    if !is_safe_id(id) {
+        return None;
+    }
+    let p = devswarm_root(&inv.home).join(defaults::text("devswarm_cli.rr_dir_retired")).join(format!("{id}{}", defaults::text("mesh_write.json_suffix")));
+    let j = OVal::parse(&String::from_utf8_lossy(&std::fs::read(p).ok()?))?;
+    match j.get(defaults::text("devswarm_cli.rr_field_retired_to")) {
+        Some(OVal::Str(t)) if !t.is_empty() => Some(t.clone()),
+        Some(OVal::Num(x)) => Some(to_js_string(*x)),
+        _ => None,
+    }
+}
+
+fn settle_target(inv: &Inv, a: &Args, id: &str) -> R<Settled> {
+    let same = || Settled::Go { id: id.to_string(), redirected_from: None, resolved_from: None };
+    if a.is_help() || a.positionals.len() != 3 || ident::read_descriptor(&inv.home, id).is_some() {
+        return Ok(same());
+    }
+    let Some(repo_key) = ident::resolve_context(&inv.cwd, true)?.repo_key else { return Ok(same()) };
+    let reader = tick::open_reader_creating(inv, &repo_key)?;
+    let rows = ident::rows_of(&reader.roster().map_err(|e| ident::Defer(format!("registry:{e}")))?);
+    if let Some(to) = read_retired_redirect(inv, id) {
+        // a redirect is a hint, never proof the id stayed dead: a live registry row of the id reads as itself
+        if to == id || rows.iter().any(|r| r.id == id) {
+            return Ok(same());
+        }
+        if !is_safe_id(&to) || text_requested(&a.raw) {
+            return defer("redirect-shape");
+        }
+        return Ok(Settled::Go { id: to, redirected_from: Some(id.to_string()), resolved_from: None });
+    }
+    match crate::meshw::send::resolve_read_arg(inv, &reader, &rows, id)? {
+        crate::meshw::send::ReadArg::Same => Ok(same()),
+        crate::meshw::send::ReadArg::To(to) => {
+            if !is_safe_id(&to) || text_requested(&a.raw) {
+                return defer("resolved-shape");
+            }
+            Ok(Settled::Go { id: to, redirected_from: None, resolved_from: Some(id.to_string()) })
+        }
+        crate::meshw::send::ReadArg::Ambiguous(ids) => {
+            let list = OVal::Arr(ids.iter().map(|x| s(x)).collect());
+            let msg = fill_once(
+                defaults::text("devswarm_cli.msg_read_arg_ambiguous"),
+                &[("verb", defaults::text("mesh_write.action_read_primary").to_string()), ("id", format!("\"{id}\"")), ("candidates", list.stringify())],
+            );
+            let reason = defaults::text("devswarm_cli.reason_ambiguous_target");
+            let mut o = Obj::default();
+            o.put("ok", OVal::Bool(false)).put("id", s(id)).put("reason", s(reason)).put("error", s(&msg)).put("candidates", list);
+            crate::meshw::clog::ready(inv)?;
+            crate::meshw::clog::refusal(inv, defaults::text("devswarm_cli.window_op_read_primary"), Some(&repo_key), Some(id), &msg, Some(reason));
+            crate::meshw::mark_committed();
+            Ok(Settled::Refuse(Answer { code: 2, stdout: format!("{}\n", o.done().stringify()), effect: Effect::None }))
+        }
+    }
 }
 
 /// What the first pass found out about a promotion the row needs (made after that pass has settled every deferral).
@@ -627,18 +684,34 @@ pub fn run(inv: &Inv, a: &Args) -> R<Answer> {
     {
         return Ok(refused);
     }
+    let mut redirect = Redirect::default();
+    let mut shifted: Option<Args> = None;
+    if let Some(id) = a.positionals.get(2).map(String::as_str).filter(|i| is_safe_id(i)) {
+        match settle_target(inv, a, id)? {
+            Settled::Refuse(ans) => return Ok(ans),
+            Settled::Go { id: eff, redirected_from, resolved_from } => {
+                if eff != id {
+                    let mut b = a.clone();
+                    b.positionals[2] = eff;
+                    shifted = Some(b);
+                }
+                redirect = Redirect { redirected_from, resolved_from };
+            }
+        }
+    }
+    let a = shifted.as_ref().unwrap_or(a);
     if let Some(id) = a.positionals.get(2).map(String::as_str).filter(|i| is_safe_id(i))
         && let Some(refused) = unowned_refusal(inv, a, id)?
     {
         return Ok(refused);
     }
-    let mut first = plan(inv, a, None)?;
+    let mut first = plan(inv, a, None, &redirect)?;
     let planned = match first.promo.take() {
         None => first,
         Some(pc) => {
             let classic = promote(inv, a, &pc.desc, pc.desc_sid.as_deref(), pc.registry_sid.as_deref(), &pc.marker, &pc.repo_key)?;
             // the writes are made: from here a deferral is a committed failure, never a second run in Node
-            plan(inv, a, classic)?
+            plan(inv, a, classic, &redirect)?
         }
     };
     // ---- the receipt: the only write of an unpromoted read ----
@@ -667,7 +740,14 @@ pub fn run(inv: &Inv, a: &Args) -> R<Answer> {
 }
 
 /// The read itself (see [`run`]). `promoted` is `Some(classic)` on the pass that follows a promotion.
-fn plan(inv: &Inv, a: &Args, promoted: Option<bool>) -> R<Planned> {
+/// The hops a read took to its id, reported on the result.
+#[derive(Default)]
+struct Redirect {
+    redirected_from: Option<String>,
+    resolved_from: Option<String>,
+}
+
+fn plan(inv: &Inv, a: &Args, promoted: Option<bool>, hops: &Redirect) -> R<Planned> {
     if a.is_help() {
         return defer("help");
     }
@@ -691,7 +771,9 @@ fn plan(inv: &Inv, a: &Args, promoted: Option<bool>) -> R<Planned> {
         Some(_) => return defer("json-value"),
     };
     // ---- reads: everything that can defer happens before the receipt is written ----
-    let Some(desc) = ident::read_descriptor(&inv.home, id) else { return defer("no-descriptor") };
+    // an id with no descriptor reads as Node's `desc = null`: no NDJSON inbox, no session, no registered project (a descriptor with none of
+    // those is the same read), so the store is the only side
+    let desc = ident::read_descriptor(&inv.home, id).unwrap_or_else(|| OVal::Obj(vec![(defaults::text("mesh_write.field_id").to_string(), s(id))]));
     if !matches!(desc.get(defaults::text("mesh_write.field_id")), Some(OVal::Str(d)) if d == id) {
         return defer("descriptor-id");
     }
@@ -860,6 +942,9 @@ fn plan(inv: &Inv, a: &Args, promoted: Option<bool>) -> R<Planned> {
         .put("meshGroupUnresolved", OVal::Bool(false))
         .put("meshGroupError", OVal::Null)
         .put("totalsPartial", OVal::Bool(false));
+    if let Some(from) = &hops.redirected_from {
+        out.put("redirected", OVal::Bool(true)).put("redirectedFrom", s(from));
+    }
     if promoted == Some(true) {
         let mut p = Obj::default();
         p.put("promoted", OVal::Bool(true));
@@ -878,6 +963,9 @@ fn plan(inv: &Inv, a: &Args, promoted: Option<bool>) -> R<Planned> {
             )),
         )
         .put("ackHint", s(defaults::text("mesh_write.ack_hint")));
+    if let Some(from) = &hops.resolved_from {
+        out.put("resolvedFrom", s(from));
+    }
     let text = (format_text && !json_flag).then(|| text_lines(&rows));
     let result = out.done();
     let record_val = receipt_record(&rid, id, reader.as_deref(), inv.now, ops, hashes);
