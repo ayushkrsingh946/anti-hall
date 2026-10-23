@@ -292,7 +292,7 @@ pub fn inv_from_process(stdin: Option<String>) -> Option<Inv> {
 /// the visible error code `mesh_write.exit_unable` (nothing was done; never the 75 of a deferral).
 fn unable(site: &str, detail: &str) -> i32 {
     crate::obs::counters::handback_why(crate::obs::counters::Handback::Abandoned, site, detail);
-    eprintln!("{}", defaults::render("mesh_write.msg_unable", &[("site", &site)]));
+    eprintln!("{}", defaults::render("mesh_write.msg_unable", &[("site", &site), ("detail", &detail)]));
     defaults::num("mesh_write.exit_unable") as i32
 }
 
