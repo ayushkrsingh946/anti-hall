@@ -168,3 +168,40 @@ fn a_live_sibling_is_read_but_never_acked_by_the_caller() {
     assert_eq!(floor, 0.0, "{rows:?}");
     assert!(fx.home.join(".anti-hall/devswarm/cursors").read_dir().unwrap().flatten().any(|e| e.file_name().to_string_lossy().contains(".seen-")), "the watermark file");
 }
+
+#[test]
+fn a_tick_of_a_twin_counts_both_partitions_without_exit_69() {
+    let fx = Fx::new("tick");
+    let (label, key) = fx.twins();
+    // a third row with an NDJSON inbox, as a ticking child has, and a live watcher on it
+    let (inbox, cursor) = (fx.home.join("tick-w.ndjson"), fx.home.join("tick-w.cursor"));
+    fs::write(&inbox, "").unwrap();
+    fs::write(&cursor, "0").unwrap();
+    let (code, v) = fx.run(&[
+        "register",
+        "tick-w",
+        "--worktree",
+        fx.repo.to_str().unwrap(),
+        "--session",
+        "s-tick",
+        "--inbox",
+        inbox.to_str().unwrap(),
+        "--cursor",
+        cursor.to_str().unwrap(),
+    ]);
+    assert_eq!(code, 0, "{v}");
+    {
+        let st = fx.store(&key);
+        st.append_mesh_row(&row("tick-w", 1_000, "h-w1", "to tick-w", "peer-a")).unwrap();
+        st.append_mesh_row(&row(&label, 2_000, "h-l1", "to label", "peer-b")).unwrap();
+        st.append_mesh_row(&row("child-x", 3_000, "h-c1", "to child", "peer-c")).unwrap();
+    }
+    let locks = fx.home.join(".anti-hall/devswarm/locks");
+    fs::create_dir_all(&locks).unwrap();
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as i64;
+    fs::write(locks.join("wake-watch-tick-w.lock"), format!(r#"{{"pid":{},"ts":{now}}}"#, std::process::id())).unwrap();
+    let (code, v) = fx.run(&["inbox", "tick", "tick-w"]);
+    assert_eq!(code, 0, "{v}");
+    assert_eq!(v["unreadTotal"], Value::from(3), "{v}");
+    assert_eq!(v["meshPartitionIds"].as_array().unwrap().len(), 3, "{v}");
+}

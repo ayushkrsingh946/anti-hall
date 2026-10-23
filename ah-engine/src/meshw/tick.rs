@@ -22,6 +22,7 @@
 // - the three records a tick writes are best effort in Node (each in its own try/catch): a failed write is not an error
 // - an unreadable optional file is the same as an absent one (Node's try/catch around readFileSync)
 // - text that does not parse is the absent value (Node's JSON.parse catch parity)
+use serde_json::Value;
 use crate::checks::guardkit::ojson::OVal;
 use crate::checks::guardkit::text::js_number_of_str;
 use crate::defaults;
@@ -31,7 +32,7 @@ use crate::meshw::common::{Inv, Obj, n, s};
 use crate::meshw::heartbeat::{anchor_refresh_possible, id_mismatch_possible, running_version};
 use crate::meshw::ident::{self, R, defer};
 use crate::meshw::idlock::{devswarm_root, is_safe_id};
-use crate::meshw::send::{Answer, Effect, mesh_candidates, rehome_is_noop};
+use crate::meshw::send::{Answer, Effect, rehome_is_noop};
 use crate::meshw::union;
 use std::path::{Path, PathBuf};
 
@@ -195,26 +196,6 @@ pub(crate) fn open_partition(inv: &Inv, id: &str, desc: &OVal) -> R<Opened> {
     Ok(Opened { repo_key, reader, rows })
 }
 
-/// `resolveMeshPartitionIds`: a second registry row of the same worktree widens the read to a mesh group, which Node folds.
-pub(crate) fn single_partition(rows: &[ident::Row], desc: &OVal, id: &str) -> R<()> {
-    let own_wt = rows.iter().find(|r| r.id == id).and_then(|r| r.worktree_path.clone());
-    let wt = match own_wt {
-        Some(w) if !w.is_empty() => Some(w),
-        _ => union::path_field(desc, defaults::text("mesh_write.field_worktree_path"))?,
-    };
-    if let Some(wt) = wt
-        && let Some(mesh) = ident::canonical_mesh_id(&wt)?
-    {
-        let mut ids: Vec<String> = mesh_candidates(rows, Some(mesh.as_str()))?.into_iter().map(|r| r.id).collect();
-        ids.sort();
-        ids.dedup();
-        if ids.len() > 1 && ids.iter().any(|x| x == id) {
-            return defer("mesh-group");
-        }
-    }
-    Ok(())
-}
-
 /// `positions()`: the floor rows, then this reader's own rows when it is a declared reader: `(store base, nd base)`.
 pub(crate) fn read_bases(inv: &Inv, reader: &MeshReader, id: &str, cursor_file: Option<&str>) -> R<(f64, f64)> {
     let me = crate::meshw::cursors::reader_key(reader_nonce_cached(&inv.home).as_deref());
@@ -252,6 +233,12 @@ pub(crate) struct Counted {
     pub store_cursor: f64,
     /// `total` (only a known count reports a merged total).
     pub total: Option<usize>,
+    /// `meshPartitionIds`: the partitions the count covered (just the workspace without a mesh group).
+    pub mesh_ids: Vec<String>,
+    /// `meshGapWithheldCount`: sibling rows held back behind a row the fold could not place.
+    pub gap_withheld: usize,
+    /// `truncatedCount`: unread rows over the read limit (counted, not listed).
+    pub truncated: usize,
 }
 
 /// `count` for a single, registered partition. An unknown count (the inbox or its cursor file does not read) is the store
@@ -263,7 +250,11 @@ fn count_mail(inv: &Inv, id: &str, desc: &OVal, line_form: bool) -> R<Counted> {
     let Some(inbox) = union::path_field(desc, defaults::text("mesh_write.field_inbox_path"))? else { return defer("no-inbox-path") };
     let Some(cursor_file) = union::path_field(desc, defaults::text("mesh_write.field_cursor_path"))? else { return defer("no-cursor-path") };
     let o = open_partition(inv, id, desc)?;
-    single_partition(&o.rows, desc, id)?;
+    let group = crate::meshw::meshgroup::resolve(
+        &o.rows,
+        id,
+        crate::meshw::meshgroup::worktree_of(&o.rows, id, union::path_field(desc, defaults::text("mesh_write.field_worktree_path"))?.as_deref()).as_deref(),
+    )?;
     // known: the inbox and its cursor file both read (otherwise Node prints a warning and the count is unknown)
     let known = union::non_empty_lines(&inbox)?.is_some() && union::cursor_position(&cursor_file)?.is_some();
     if !known && !line_form {
@@ -278,15 +269,53 @@ fn count_mail(inv: &Inv, id: &str, desc: &OVal, line_form: bool) -> R<Counted> {
     let input = union::UnionIn { inbox: inbox_in, cursor_file: cursor_in, id, store: Some(&o.reader), store_base, nd_base, now: inv.now };
     let total = if known { Some(union::merged_total(&input)?) } else { None };
     let nd_cursor = if nd_base.is_finite() && nd_base > 0.0 { nd_base.floor() } else { 0.0 };
+    // ---- the sibling partitions of the mesh group (`cmdInbox`'s count widening) ----
+    let (mut added_unread, mut added_total, mut gap_withheld) = (0usize, 0.0f64, 0usize);
+    let mut sibling_rows = 0usize;
+    if group.active {
+        let mut parts: Vec<Vec<Value>> = Vec::new();
+        for pid in group.ids.iter().filter(|p| p.as_str() != id) {
+            let base = crate::meshw::meshgroup::base_cursor(inv, &o.reader, pid)?;
+            // a sibling the caller may not ack keeps the watermark the caller left, so its rows are not counted twice
+            let cursor = if crate::meshw::meshgroup::ack_gate(inv, &o.rows, id, pid)? { base.max(crate::meshw::meshgroup::seen_cursor(inv, id, pid)) } else { base };
+            let total = o.reader.message_count(pid).map_err(|e| ident::Defer(format!("store-read:{e}")))?;
+            let mut rows: Vec<Value> = Vec::new();
+            o.reader
+                .for_each_message(pid, if cursor.is_finite() && cursor > 0.0 { cursor.floor() as u64 } else { 0 }, |m| {
+                    rows.push(m);
+                    true
+                })
+                .map_err(|e| ident::Defer(format!("store-read:{e}")))?;
+            added_total += total as f64;
+            parts.push(rows);
+        }
+        let mut dedup = crate::meshw::meshgroup::Dedup::seed(&o.reader, id, store_base)?;
+        for r in &u.store_only_unread {
+            dedup.note_shown(r);
+        }
+        for rows in parts {
+            let folded = dedup.fold(inv, rows);
+            gap_withheld += folded.gap_withheld;
+            sibling_rows += folded.delivered.len();
+        }
+        added_unread = sibling_rows;
+    }
+    // the read limit: the workspace's own rows are kept first, then the siblings', up to the limit
+    let limit = defaults::num("mesh_write.inbox_read_limit") as usize;
+    let pre_cap = u.store_only_unread.len() + sibling_rows;
+    let (store_unread, truncated) = if pre_cap > limit { (limit, pre_cap - limit) } else { (pre_cap, 0) };
     Ok(Counted {
         repo_key: o.repo_key,
         known,
-        unread: c.unread,
+        unread: c.unread + added_unread,
         nd_unread: u.nd_unread_lines.len(),
-        store_unread: u.store_only_unread.len(),
+        store_unread,
         nd_cursor,
         store_cursor: store_base,
-        total,
+        total: total.map(|t| t + added_total as usize),
+        mesh_ids: group.ids,
+        gap_withheld,
+        truncated,
     })
 }
 
@@ -355,10 +384,10 @@ fn write_staged(dst: &Path, text: &str, now: i64) -> std::io::Result<()> {
 }
 
 /// Effect 1: the wake-tick marker.
-fn write_marker(inv: &Inv, id: &str, unread: usize, known: bool, seq: f64) {
+fn write_marker(inv: &Inv, id: &str, unread: usize, known: bool, seq: f64, gap: bool) {
     let dir = devswarm_root(&inv.home).join(defaults::text("mesh_write.dir_wake_tick"));
     let mut m = Obj::default();
-    m.put("ts", n(inv.now as f64)).put("unreadTotal", n(unread as f64)).put("meshGapWithheld", OVal::Bool(false)).put("known", OVal::Bool(known));
+    m.put("ts", n(inv.now as f64)).put("unreadTotal", n(unread as f64)).put("meshGapWithheld", OVal::Bool(gap)).put("known", OVal::Bool(known));
     if seq != 0.0 {
         m.put("seq", n(seq));
     }
@@ -435,9 +464,6 @@ fn write_cron_found_mail(inv: &Inv, id: &str, unread: usize) {
 /// The JSON form of a tick: `count`'s result with `action` renamed in place, then `idMismatch` and `watcherArmed`.
 fn count_json(inv: &Inv, id: &str, c: &Counted) -> R<String> {
     let Some(total) = c.total else { return defer("unknown-count-json") };
-    if c.store_unread > defaults::num("mesh_write.inbox_read_limit") as usize {
-        return defer("read-cap");
-    }
     let mut o = Obj::default();
     o.put("ok", OVal::Bool(true))
         .put("action", s(defaults::text("mesh_write.verb_tick")))
@@ -445,7 +471,7 @@ fn count_json(inv: &Inv, id: &str, c: &Counted) -> R<String> {
         .put("repoKey", s(&c.repo_key))
         .put("storePath", OVal::Str(union::store_dir(&inv.home, &c.repo_key).to_string_lossy().into_owned()))
         .put("cwd", s(&inv.cwd))
-        .put("meshPartitionIds", OVal::Arr(vec![s(id)]))
+        .put("meshPartitionIds", OVal::Arr(c.mesh_ids.iter().map(|x| s(x)).collect()))
         .put("unreadTotal", n(c.unread as f64))
         .put("unreadNdjson", n(c.nd_unread as f64))
         .put("unreadStore", n(c.store_unread as f64))
@@ -457,8 +483,19 @@ fn count_json(inv: &Inv, id: &str, c: &Counted) -> R<String> {
         .put("storeUnavailableReason", OVal::Null)
         .put("meshGroupUnresolved", OVal::Bool(false))
         .put("meshGroupError", OVal::Null)
-        .put("totalsPartial", OVal::Bool(false))
-        .put("unread", n(c.unread as f64))
+        .put("totalsPartial", OVal::Bool(false));
+    if c.gap_withheld > 0 {
+        o.put("meshGapWithheld", OVal::Bool(true)).put("meshGapWithheldCount", n(c.gap_withheld as f64));
+    }
+    if c.truncated > 0 {
+        let limit = defaults::num("mesh_write.inbox_read_limit");
+        let (count, lim) = (c.truncated.to_string(), limit.to_string());
+        o.put("truncated", OVal::Bool(true)).put("truncatedCount", n(c.truncated as f64)).put("limit", n(limit as f64)).put(
+            "truncatedHint",
+            OVal::Str(crate::checks::devswarm_role::text::fill_once(defaults::text("mesh_write.truncated_hint"), &[("count", &count), ("limit", &lim)])),
+        );
+    }
+    o.put("unread", n(c.unread as f64))
         .put("cursor", n(c.nd_cursor))
         .put("storeCursor", n(c.store_cursor))
         .put("storeUnread", n(c.store_unread as f64))
@@ -529,7 +566,7 @@ pub fn run(inv: &Inv, a: &Args) -> R<Answer> {
     let unread = counted.unread;
     // a pull refused because its delivery log is unwritable: mail may be waiting that this count cannot see, so it is UNKNOWN
     let known = counted.known && !wal_blocked;
-    write_marker(inv, id, unread, known, seq);
+    write_marker(inv, id, unread, known, seq, counted.gap_withheld > 0);
     write_heartbeat(inv, id, &beat);
     if unread > 0 && lock_file.exists() {
         write_cron_found_mail(inv, id, unread);
