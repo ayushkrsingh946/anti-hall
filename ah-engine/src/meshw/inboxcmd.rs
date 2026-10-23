@@ -30,6 +30,16 @@ fn plain_id<'a>(a: &'a Args, allowed: &[&str]) -> R<&'a str> {
     Ok(id)
 }
 
+/// `inboxWindowRejection` for `inbox <sub> <id>`: `--since` / `--tail` on a verb that acks or reports on a contiguous prefix is
+/// refused (printed, exit 2) before anything is read.
+fn window(inv: &Inv, a: &Args, sub: &str) -> R<Option<Answer>> {
+    if a.is_help() || a.positionals.len() != 3 {
+        return Ok(None);
+    }
+    let Some(id) = a.positionals.get(2).map(String::as_str).filter(|i| is_safe_id(i)) else { return Ok(None) };
+    crate::meshw::readprimary::window_refusal(inv, a, id, sub)
+}
+
 /// Node's `emitKnownWarning` for an `inbox` verb whose count is not known.
 fn warn_unknown(verb: &str, id: &str) {
     eprintln!(
@@ -46,6 +56,9 @@ fn warn_unknown(verb: &str, id: &str) {
 
 /// `inbox count <id>`: the unread count of a single registered partition, read only.
 pub fn run_count(inv: &Inv, a: &Args) -> R<Answer> {
+    if let Some(refused) = window(inv, a, defaults::text("mesh_write.verb_count"))? {
+        return Ok(refused);
+    }
     let id = plain_id(a, &[])?;
     let Some(desc) = ident::read_descriptor(&inv.home, id) else { return defer("no-descriptor") };
     let counted = tick::count_mail(inv, id, &desc, true, true)?;
@@ -58,6 +71,9 @@ pub fn run_count(inv: &Inv, a: &Args) -> R<Answer> {
 
 /// `inbox read <id>`: the unread rows of both channels, read only (nothing is acked, and the result says so).
 pub fn run_read(inv: &Inv, a: &Args) -> R<Answer> {
+    if let Some(refused) = window(inv, a, defaults::text("mesh_write.verb_read"))? {
+        return Ok(refused);
+    }
     let id = plain_id(a, &[])?;
     let Some(desc) = ident::read_descriptor(&inv.home, id) else { return defer("no-descriptor") };
     let c = tick::count_mail(inv, id, &desc, true, true)?;
@@ -107,6 +123,9 @@ pub fn run_read(inv: &Inv, a: &Args) -> R<Answer> {
 /// a DIFFERENT registered row is refused, which is Node's). Every refusal and every move the engine does not apply is decided
 /// before the first write.
 pub fn run_ack(inv: &Inv, a: &Args) -> R<Answer> {
+    if let Some(refused) = window(inv, a, defaults::text("mesh_write.verb_ack"))? {
+        return Ok(refused);
+    }
     let id = plain_id(a, &[defaults::text("mesh_write.flag_ack_as_owner")])?;
     if a.flags.get(defaults::text("mesh_write.flag_ack_as_owner")).is_some_and(|v| v.iter().any(|x| *x != crate::meshw::args::FlagVal::True)) {
         return defer("ack-as-owner-value");
@@ -233,6 +252,16 @@ pub fn run_ack(inv: &Inv, a: &Args) -> R<Answer> {
 /// `inbox pull <id>`: drain the native queue of a workspace into its durable inbox (the pull a `--child` tick runs first), and
 /// say what was imported. A pull that did not succeed prints its result and exits 2, and is logged like Node's `logVerbOutcome`.
 pub fn run_pull(inv: &Inv, a: &Args) -> R<Answer> {
+    if let Some(mut refused) = window(inv, a, defaults::text("mesh_write.verb_pull"))? {
+        // `pull` is the one inbox verb wrapped in `withSelfHeal`: the refusal carries the heal's fields too
+        if let Some(mut o) = OVal::parse(refused.stdout.trim_end()) {
+            for (k, v) in common::self_heal(inv)? {
+                o.set(&k, v);
+            }
+            refused.stdout = format!("{}\n", o.stringify());
+        }
+        return Ok(refused);
+    }
     let id = plain_id(a, &[])?;
     crate::meshw::clog::ready(inv)?;
     let found = ident::read_descriptor(&inv.home, id);

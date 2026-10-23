@@ -231,6 +231,11 @@ fn canon_tree(home: &Path, before: &[String]) -> BTreeMap<String, Vec<u8>> {
                 key = key.replace(r.as_str(), "<RID>");
                 val = val.replace(r.as_str(), "<RID>");
             }
+            if key.ends_with("/logs/devswarm.jsonl") {
+                // the central log's entries carry the wall clock and the writer's pid
+                val = mask_digits(&mask_digits(&val, "\"pid\":"), "\"pid\":");
+                val = regex_ts(&val);
+            }
             if key.contains("/cursor-log/") {
                 val = mask_digits(&mask_digits(&val, "\"ts\":"), "\"pid\":");
             }
@@ -416,11 +421,21 @@ fn cases(fx: &Fx) -> Vec<Case> {
     let mut other_row = base("ack-by-another-registered-row", cmd("ack", "child-1", &[]), ack(floors("child-1", 0, 0), d_inbox.clone()), inbox(text3.clone()), false, vec![]);
     other_row.cwd = "main";
     v.push(other_row);
+    // ---- the window flags: refused before anything is read ----
+    for (name, verb, flags) in [
+        ("window-count-since", "count", vec!["--since", "1"]),
+        ("window-read-tail", "read", vec!["--tail", "2"]),
+        ("window-ack-since-and-tail", "ack", vec!["--since", "1", "--tail", "1"]),
+        ("window-pull-tail", "pull", vec!["--tail", "1"]),
+        ("window-peek-since", "peek-primary", vec!["--since", "2"]),
+    ] {
+        v.push(base(name, cmd(verb, "child-1", &flags), ack(floors("child-1", 0, 0), d_inbox.clone()), inbox(text3.clone()), true, vec!["window-flags-unsupported-on-acking-verb"]));
+    }
     // ---- count: deferred ----
     v.push(base("count-no-descriptor", cmd("count", "ghost", &[]), ack(floors("child-1", 0, 0), d_inbox.clone()), inbox(text3.clone()), false, vec![]));
     v.push(base("read-no-descriptor", cmd("read", "ghost", &[]), ack(floors("child-1", 0, 0), d_inbox.clone()), inbox(text3.clone()), false, vec![]));
     v.push(base("read-limit-flag", cmd("read", "child-1", &["--limit", "1"]), ack(floors("child-1", 0, 0), d_inbox.clone()), inbox(text3.clone()), false, vec![]));
-    v.push(base("count-window-flag", cmd("count", "child-1", &["--since", "1"]), ack(floors("child-1", 0, 0), d_inbox.clone()), inbox(text3.clone()), false, vec![]));
+
     v
 }
 
@@ -482,7 +497,7 @@ fn inbox_count_read_peek_and_ack_match_node_byte_for_byte_and_defer_without_writ
         return;
     }
     let fx = fixture("ic");
-    let list = cases(&fx).into_iter().filter(|c| matches!(c.argv.get(1).map(String::as_str), Some("count" | "read" | "peek-primary" | "ack"))).collect();
+    let list = cases(&fx).into_iter().filter(|c| matches!(c.argv.get(1).map(String::as_str), Some("count" | "read" | "peek-primary" | "ack" | "pull"))).collect();
     run_case_list("count+read+peek+ack", list, &fx);
 }
 
@@ -516,4 +531,19 @@ fn ack_primary_applies_the_ndjson_op_of_a_receipt_like_node() {
         assert_eq!(canon_out(&he, &ae.stdout, std::slice::from_ref(&rid_e)), canon_out(&hn, &an.stdout, std::slice::from_ref(&rid_n)), "{}: ack output differs", c.name);
         assert_same_homes(c.name, &hn, &he, &[], &[], &fx.repo_key, "after ack-primary");
     }
+}
+
+/// The quoted `"ts":"..."` of a central-log entry replaced.
+fn regex_ts(t: &str) -> String {
+    let mut out = String::new();
+    let mut rest = t;
+    while let Some(i) = rest.find("\"ts\":\"") {
+        out.push_str(&rest[..i + 6]);
+        let tail = &rest[i + 6..];
+        let end = tail[1..].find('"').map_or(tail.len(), |e| e + 2);
+        out.push_str("\"T\"");
+        rest = &tail[end..];
+    }
+    out.push_str(rest);
+    out
 }

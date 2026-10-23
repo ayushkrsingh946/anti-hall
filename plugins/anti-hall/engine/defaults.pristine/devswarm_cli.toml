@@ -3506,3 +3506,15 @@ max = 40
 [devswarm_cli.reg_retire_fields]
 doc = "The fields a registration adds when it folded other registry rows of the same worktree into its id: the retired ids, the forwarded message count, the rows left (descriptor-backed), the rows not done this pass."
 value = ["retiredDuplicates", "forwardedMessages", "leftDuplicates", "pendingDuplicates"]
+
+[devswarm_cli.window_verb_prefix]
+doc = "What a refused window flag's verb name starts with (the verb is `inbox <sub>`)."
+value = "inbox "
+
+[devswarm_cli.window_op_prefix]
+doc = "What the central-log operation of a refused window flag starts with (the operation is `inbox-<sub>`)."
+value = "inbox-"
+
+[devswarm_cli.window_logged_subs]
+doc = "The inbox subverbs whose refusals the dispatcher writes to the central log (`logVerbOutcome`); the others print the refusal and log nothing."
+value = ["pull", "messages", "read-primary", "peek-primary", "ack-primary", "drain-primary-legacy"]
