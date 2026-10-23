@@ -209,8 +209,17 @@ fn finish(m: Msg, legacy_from: &dyn Fn(&str) -> Option<String>) -> R<(OVal, f64)
     if orig.is_some() {
         o.put("forwarded", OVal::Bool(true));
     } else if body.as_deref().is_some_and(|b| b.starts_with(defaults::text("mesh_write.forward_prefix"))) {
-        // a legacy forward: Node derives the original's hash from the stripped body
-        return defer("forwarded-row");
+        // a legacy forward (no origHash): Node reconstructs the original's hash from the carried fields and the stripped body
+        let scalar = |k: &str| match get(&o, k) {
+            Some(OVal::Str(t)) => Value::String(t),
+            Some(OVal::Num(x)) => serde_json::Number::from_f64(x).map_or(Value::Null, Value::Number),
+            Some(OVal::Bool(b)) => Value::Bool(b),
+            _ => Value::Null,
+        };
+        let row = serde_json::json!({"body": scalar("body"), "sender": scalar("sender"), "urgency": scalar("urgency"), "ts": scalar("ts"), "needsReply": scalar("needsReply")});
+        if let Some(h) = meshgroup::forwarded_orig_hash_of(&row) {
+            o.put("forwarded", OVal::Bool(true)).put("origHash", OVal::Str(h));
+        }
     }
     if let Some(nonce) = text_of(get(&o, "instanceNonce")).filter(|t| !t.is_empty()) {
         let short = cursors::short_nonce(&nonce);

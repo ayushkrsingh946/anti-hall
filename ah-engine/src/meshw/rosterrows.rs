@@ -149,9 +149,9 @@ fn same_path(a: &str, b: &str) -> bool {
     ident::realpath(a).unwrap_or_else(|| a.to_string()) == ident::realpath(b).unwrap_or_else(|| b.to_string())
 }
 
-/// `isArchivedWorkspace(home, id, worktreePath)`: anti-hall's own archive marker. A marker a newer occupant of the id has
-/// superseded is logged by Node, which the engine does not do, so that case is Node's.
-fn marker_archived(e: &Eng, id: &str, wt: Option<&str>) -> R<bool> {
+/// `isArchivedWorkspace(home, id, worktreePath, { sessionId })`: anti-hall's own archive marker. A marker a newer occupant of the id
+/// has superseded (the row's session, else the live descriptor's, differs from the marker's) is not archived; Node only logs it.
+fn marker_archived(e: &Eng, id: &str, wt: Option<&str>, session: Option<&str>) -> R<bool> {
     if !is_safe_id(id) {
         return Ok(false);
     }
@@ -170,15 +170,14 @@ fn marker_archived(e: &Eng, id: &str, wt: Option<&str>) -> R<bool> {
         }
     }
     let Some(marker_sid) = real_sid(desc.get(key("mesh_write.field_session_id")))? else { return Ok(true) };
-    let live = read_obj(&file_in(e, "mesh_write.dir_workspaces", id));
-    let live_sid = match &live {
-        Some(d @ (OVal::Obj(_) | OVal::Arr(_))) => real_sid(d.get(key("mesh_write.field_session_id")))?,
-        _ => None,
+    let live_sid = match session.filter(|s| !s.is_empty()) {
+        Some(s) => Some(s.to_string()),
+        None => match &read_obj(&file_in(e, "mesh_write.dir_workspaces", id)) {
+            Some(d @ (OVal::Obj(_) | OVal::Arr(_))) => real_sid(d.get(key("mesh_write.field_session_id")))?,
+            _ => None,
+        },
     };
-    if live_sid.is_some_and(|l| l != marker_sid) {
-        return defer("marker-superseded");
-    }
-    Ok(true)
+    Ok(!live_sid.is_some_and(|l| l != marker_sid))
 }
 
 /// `isUnderDevswarmReposRoot(p)`.
@@ -210,8 +209,8 @@ fn app_archived(e: &Eng, id: &str, wt: Option<&str>) -> R<bool> {
     }
 }
 
-fn archived(e: &Eng, id: &str, wt: Option<&str>) -> R<bool> {
-    Ok(marker_archived(e, id, wt)? || app_archived(e, id, wt)?)
+fn archived(e: &Eng, id: &str, wt: Option<&str>, session: Option<&str>) -> R<bool> {
+    Ok(marker_archived(e, id, wt, session)? || app_archived(e, id, wt)?)
 }
 
 fn fresh_beat(e: &Eng, id: &str) -> bool {
@@ -314,7 +313,7 @@ pub(crate) fn sibling_partition_live(inv: &Inv, now: f64, id: &str, wt: Option<&
 /// target-selection gate of `resolveMeshTarget`: a descriptor that merely exists proves nothing. A case only Node decides is a deferral.
 pub(crate) fn routing_live_strict(inv: &Inv, now: f64, id: &str, wt: Option<&str>, session: Option<&str>) -> R<bool> {
     let e = Eng { inv, now, repo_key: "", dormant: std::cell::OnceCell::new() };
-    if archived(&e, id, wt)? {
+    if archived(&e, id, wt, session)? {
         return Ok(false);
     }
     sibling_partition_live(inv, now, id, wt, session)
@@ -371,7 +370,7 @@ fn hints(e: &Eng, id: &str, wt: Option<&str>, session: Option<&str>) -> R<Vec<St
     if let Some(d) = idle_days(e, id) {
         h.push(tpl("devswarm_cli.rr_hint_idle", &[("days", &to_js_string(d))]));
     }
-    if archived(e, id, wt)? {
+    if archived(e, id, wt, session)? {
         h.push(key("devswarm_cli.rr_hint_archived").to_string());
         if fresh_beat(e, id) {
             h.push(key("devswarm_cli.rr_hint_live_in_archived").to_string());
@@ -1020,7 +1019,7 @@ impl<'a> Verdicts<'a> {
 
     /// `rowEligibility(...).archived`: anti-hall's archive marker or the app's verdict.
     pub(crate) fn archived(&self, id: &str, wt: Option<&str>) -> R<bool> {
-        archived(&self.0, id, wt)
+        archived(&self.0, id, wt, None)
     }
 
     /// `computeRowLive` / `isSiblingPartitionLive` of a row (`session` already empty-to-none).

@@ -14,7 +14,7 @@
 use crate::defaults;
 use crate::mesh::MeshReader;
 use crate::meshw::common::Inv;
-use crate::meshw::ident::{self, R, Row, defer};
+use crate::meshw::ident::{self, R, Row};
 use crate::meshw::send::mesh_candidates;
 use crate::meshw::store::mesh_message_hash;
 use crate::meshw::{summary, tick};
@@ -80,6 +80,31 @@ pub fn remove_seen_cursor(inv: &Inv, caller: &str, sibling: &str) -> bool {
     seen_path(inv, caller, sibling).is_some_and(|p| std::fs::remove_file(p).is_ok())
 }
 
+/// `appSessionOnWorktree(home, env, sessionId, worktree)`: the DevSwarm app database maps a Claude session to the worktree it
+/// runs in. `Some(true)` the session runs in `worktree`, `Some(false)` in another one; either only when the session's own
+/// transcript records that cwd. Anything unproven is `None` (no opinion).
+fn app_session_on_worktree(inv: &Inv, session: &str, worktree: &str) -> R<Option<bool>> {
+    use crate::dssup::appsync::snap;
+    if session.is_empty() || worktree.is_empty() {
+        return Ok(None);
+    }
+    let Some(file) = ident::app_db_path(&inv.home, &inv.env) else { return Ok(None) };
+    let Some(sn) = snap::read(&file)? else { return Ok(None) };
+    let Some(own) = sn.workspaces.iter().find(|w| w.terminals.iter().any(|t| t.session_id.as_deref() == Some(session))) else { return Ok(None) };
+    let Some(own_wt) = own.worktree_path.as_deref().filter(|w| !w.is_empty()) else { return Ok(None) };
+    let canon = |p: &str| -> R<String> { Ok(ident::canonical_worktree_real_path(p)?.unwrap_or_else(|| p.to_string())) };
+    let (a, b) = (canon(own_wt)?, canon(worktree)?);
+    let same = a == b;
+    // Claude files the transcript under the cwd as launched: the app's own spelling, then the caller's (same) / the canonical one
+    let spellings = [own.worktree_path_raw.clone(), same.then(|| worktree.to_string()), Some(if same { b } else { a })];
+    for p in spellings.into_iter().flatten().filter(|p| !p.is_empty()) {
+        if snap::transcript_cwd_matches(&inv.home, session, &p)? == Some(true) {
+            return Ok(Some(same));
+        }
+    }
+    Ok(None)
+}
+
 /// `siblingAckGate(store, callerId, partId, home, now, { cwd, env })`: true when the sibling `part_id` is live (or cannot be shown
 /// dead, or is another checkout's), so the caller must not move its cursor. False: the caller may ack it.
 pub fn ack_gate(inv: &Inv, rows: &[Row], caller_id: &str, part_id: &str) -> R<bool> {
@@ -91,10 +116,15 @@ pub fn ack_gate(inv: &Inv, rows: &[Row], caller_id: &str, part_id: &str) -> R<bo
         let anchor_row = rows.iter().find(|r| r.id == anchor_id);
         let anchor_sid = anchor_row.and_then(|r| r.session_id.clone()).unwrap_or_default();
         let caller_sid = inv.env.get(defaults::text("mesh_write.env_session_id")).cloned().unwrap_or_default();
-        let ours = anchor_sid.is_empty() || (!caller_sid.is_empty() && anchor_sid == caller_sid);
-        if !ours && !caller_sid.is_empty() && anchor_row.is_some() {
-            // the app's own record of which worktree the session runs in decides; the engine does not read it here
-            return defer("seat-app-session");
+        let mut ours = anchor_sid.is_empty() || (!caller_sid.is_empty() && anchor_sid == caller_sid);
+        if !ours && !caller_sid.is_empty() && let Some(anchor_row) = anchor_row {
+            // the app's own record of which worktree the session runs in decides when it is corroborated by the transcript;
+            // else the anchor is ours when the caller's session is provably alive and the anchor's recorded one is not
+            let wt = anchor_row.worktree_path.as_deref().filter(|w| !w.is_empty()).unwrap_or(&inv.cwd);
+            ours = match app_session_on_worktree(inv, &caller_sid, wt)? {
+                Some(verdict) => verdict,
+                None => crate::dssup::liveness::session_alive(&inv.home, &caller_sid)? && !crate::dssup::liveness::session_alive(&inv.home, &anchor_sid)?,
+            };
         }
         let mut names = vec![self_id, anchor_id];
         names.sort();

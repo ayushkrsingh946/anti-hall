@@ -153,6 +153,10 @@ value = "--max"
 doc = "Add the per-subsystem memory breakdown to the output (`status`)."
 value = "--memory"
 
+[flag.message]
+doc = "The body of a mesh message (`mesh send`)."
+value = "--message"
+
 [flag.migration]
 doc = "Print the migration report: every hook check, supervisor duty, post-update stage, command and Node switch as native, partial or node (`status`; add `--json` for the machine form)."
 value = "--migration"

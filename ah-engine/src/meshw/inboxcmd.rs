@@ -11,7 +11,6 @@ use crate::meshw::common::{self, Inv, Obj, n, s};
 use crate::meshw::ident::{R, defer};
 use crate::meshw::idlock::is_safe_id;
 use crate::meshw::send::{Answer, Effect, resolve_mesh_target, retired_redirect_exists};
-use crate::meshw::idlock::devswarm_root;
 use crate::meshw::{cursors, ident};
 use crate::meshw::{tick, union};
 
@@ -27,7 +26,10 @@ enum Found {
 fn locate(inv: &Inv, sub: &str, raw: &str, ack_as_owner: bool) -> R<Found> {
     let has_inbox = |d: &OVal| union::path_field(d, defaults::text("mesh_write.field_inbox_path")).map(|p| p.is_some());
     if let Some(desc) = ident::read_descriptor(&inv.home, raw) {
-        return if has_inbox(&desc)? { Ok(Found::Go { id: raw.to_string(), desc, resolved_from: None, redirected_from: None }) } else { defer("descriptor-without-inbox") };
+        // a descriptor with no inbox path is no inbox: Node goes on to the redirect / label / refusal steps below
+        if has_inbox(&desc)? {
+            return Ok(Found::Go { id: raw.to_string(), desc, resolved_from: None, redirected_from: None });
+        }
     }
     let action = format!("{}{sub}", defaults::text("mesh_write.act_inbox_prefix"));
     let id = match crate::meshw::actverbs::resolve_target_id(inv, raw, &action)? {
@@ -35,17 +37,25 @@ fn locate(inv: &Inv, sub: &str, raw: &str, ack_as_owner: bool) -> R<Found> {
         Err(refused) => return Ok(Found::Out(refused)),
     };
     if let Some(desc) = ident::read_descriptor(&inv.home, &id) {
-        return if has_inbox(&desc)? { Ok(Found::Go { id, desc, resolved_from: None, redirected_from: None }) } else { defer("descriptor-without-inbox") };
+        if has_inbox(&desc)? {
+            return Ok(Found::Go { id, desc, resolved_from: None, redirected_from: None });
+        }
     }
     let Some(repo_key) = ident::resolve_context(&inv.cwd, true)?.repo_key else { return defer("no-project") };
     let Some(reader) = tick::open_reader(inv, &repo_key)? else { return defer("no-store") };
     let rows = ident::rows_of(&reader.roster().map_err(|e| ident::Defer(format!("registry:{e}")))?);
-    if retired_redirect_exists(inv, &id) {
-        // a fold-retired id: its mail is its survivor's, unless the id was registered again since
-        let Some(survivor) = crate::meshw::readprimary::read_retired_redirect(inv, &id) else { return defer("retired-redirect") };
-        let re_registered = rows.iter().any(|r| r.id == id);
-        let survivor_desc = ident::read_descriptor(&inv.home, &survivor);
-        let Some(survivor_desc) = survivor_desc.filter(|d| survivor != id && !re_registered && has_inbox(d).unwrap_or(false)) else { return defer("retired-redirect") };
+    // a fold-retired id: its mail is its survivor's, unless the id was registered again since or the survivor has no inbox
+    // (then Node leaves the redirect alone and goes on to the label / refusal steps)
+    let retired = if retired_redirect_exists(inv, &id) {
+        crate::meshw::readprimary::read_retired_redirect(inv, &id).and_then(|survivor| {
+            let re_registered = rows.iter().any(|r| r.id == id);
+            let d = ident::read_descriptor(&inv.home, &survivor)?;
+            (survivor != id && !re_registered && has_inbox(&d).unwrap_or(false)).then_some((survivor, d))
+        })
+    } else {
+        None
+    };
+    if let Some((survivor, survivor_desc)) = retired {
         if sub == defaults::text("mesh_write.verb_ack") {
             let q = |t: &str| OVal::Str(t.to_string()).stringify();
             if ack_as_owner && crate::meshw::actverbs::has_fresh_heartbeat(inv, &survivor) {
@@ -110,12 +120,7 @@ fn locate(inv: &Inv, sub: &str, raw: &str, ack_as_owner: bool) -> R<Found> {
                     return Ok(Found::Go { id: target.id, desc, resolved_from: Some(id), redirected_from: None });
                 }
             }
-            return defer("resolved-without-inbox");
-        }
-        // a prefix of a registry id or a descriptor name is Node's to resolve
-        let names = std::fs::read_dir(devswarm_root(&inv.home).join(defaults::text("mesh_write.dir_workspaces"))).map(|d| d.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect::<Vec<_>>()).unwrap_or_default();
-        if rows.iter().any(|r| r.id.starts_with(&id)) || names.iter().any(|n| n.starts_with(&id)) {
-            return defer("prefix-resolution");
+            // a label whose row has no inbox: Node reports the literal id's refusal below
         }
     }
     let has_messages = reader.message_count(&id).map_err(|e| ident::Defer(format!("store-read:{e}")))? > 0;
