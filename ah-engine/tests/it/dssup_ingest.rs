@@ -67,7 +67,7 @@ fn ix(tag: &str) -> Ix {
     let project = Project::resolve(main.to_str().unwrap()).unwrap();
     // the store, written by Node's own code, with the Primary registered the way `register-primary` does
     node(
-        "const S=require(process.argv[1]+'/companion/lib/devswarm-store.js');const s=S.openStore({home:process.argv[2],hash:process.argv[3]});s.upsertRegistry({id:process.argv[4],worktreePath:process.argv[5],sessionId:'sess-primary',inboxPath:'/x/inbox',cursorPath:'/x/cursor',nudgeCommand:['hivecontrol','nudge']});s.close();console.log(1)",
+        "const S=require(process.argv[1]+'/../anti-hall-node/companion/lib/devswarm-store.js');const s=S.openStore({home:process.argv[2],hash:process.argv[3]});s.upsertRegistry({id:process.argv[4],worktreePath:process.argv[5],sessionId:'sess-primary',inboxPath:'/x/inbox',cursorPath:'/x/cursor',nudgeCommand:['hivecontrol','nudge']});s.close();console.log(1)",
         &[home.to_str().unwrap(), &project.repo_key, &project.workspace_id, main.to_str().unwrap()],
     );
     let (stub, queue, log) = (root.join("hivecontrol"), root.join("queue"), root.join("calls.log"));
@@ -181,7 +181,7 @@ fn the_batch_parser_the_hash_and_the_rows_are_nodes() {
         .collect();
     let input = serde_json::to_string(&cases).unwrap();
     let theirs = node(
-        "const I=require(process.argv[1]+'/companion/devswarm-ingest.js');const cases=JSON.parse(process.argv[2]);const ws=process.argv[3];const now=Number(process.argv[4]);console.log(JSON.stringify(cases.map((raw)=>{const p=(function(){let t=raw.trim();if(t==='')return{messages:[],recognized:true};let v;try{v=JSON.parse(t)}catch(e){return{messages:[],recognized:false}}return null})();const msgs=I.normalizeMonitorPayload(raw);const rows=msgs.map((m)=>{const t=Date.parse(m.createdAt);return{hash:I.messageHash(ws,m),ts:Number.isFinite(t)?t:now,body:m.message!=null?String(m.message):I.stableJson(m)}});const lossy=msgs.length===0&&I.rawIsSubstantive(raw)&&!(function(){try{const t=raw.trim();if(t==='')return true;const v=JSON.parse(t);if(Array.isArray(v))return true;if(v&&typeof v==='object'){if(Array.isArray(v.messages)||Array.isArray(v.data))return true;if('message' in v||'fromBranch' in v||'toBranch' in v)return true}return false}catch(e){return false}})();return{total:msgs.length,lossy,rows}})))",
+        "const I=require(process.argv[1]+'/../anti-hall-node/companion/devswarm-ingest.js');const cases=JSON.parse(process.argv[2]);const ws=process.argv[3];const now=Number(process.argv[4]);console.log(JSON.stringify(cases.map((raw)=>{const p=(function(){let t=raw.trim();if(t==='')return{messages:[],recognized:true};let v;try{v=JSON.parse(t)}catch(e){return{messages:[],recognized:false}}return null})();const msgs=I.normalizeMonitorPayload(raw);const rows=msgs.map((m)=>{const t=Date.parse(m.createdAt);return{hash:I.messageHash(ws,m),ts:Number.isFinite(t)?t:now,body:m.message!=null?String(m.message):I.stableJson(m)}});const lossy=msgs.length===0&&I.rawIsSubstantive(raw)&&!(function(){try{const t=raw.trim();if(t==='')return true;const v=JSON.parse(t);if(Array.isArray(v))return true;if(v&&typeof v==='object'){if(Array.isArray(v.messages)||Array.isArray(v.data))return true;if('message' in v||'fromBranch' in v||'toBranch' in v)return true}return false}catch(e){return false}})();return{total:msgs.length,lossy,rows}})))",
         &[&input, ws, &fixed_now.to_string()],
     );
     let theirs = theirs.as_array().unwrap();
@@ -219,13 +219,13 @@ fn the_wal_is_nodes_format_and_each_side_reads_the_others() {
     let e3 = wal::append_batch(&file, "third", 1003, Some("/wt/main"), None).unwrap();
     wal::close_batch(&file, &e3, "quarantine", "\"reason\":\"unparseable\"", 1004).unwrap();
     let args = [home.to_str().unwrap()];
-    let js = "process.env.HOME=process.argv[2];const W=require(process.argv[1]+'/companion/lib/devswarm-read-wal.js');const fs=require('fs');const f=W.walPath(process.argv[2],'monitor','proj-abc123');console.log(JSON.stringify({path:f,open:W.pending(fs,f).map((b)=>({e:b.e,raw:b.raw,ts:b.ts,worktree:b.worktree}))}))";
+    let js = "process.env.HOME=process.argv[2];const W=require(process.argv[1]+'/../anti-hall-node/companion/lib/devswarm-read-wal.js');const fs=require('fs');const f=W.walPath(process.argv[2],'monitor','proj-abc123');console.log(JSON.stringify({path:f,open:W.pending(fs,f).map((b)=>({e:b.e,raw:b.raw,ts:b.ts,worktree:b.worktree}))}))";
     let seen = node(js, &args);
     assert_eq!(seen["path"], file.to_string_lossy().as_ref());
     assert_eq!(seen["open"], json!([{"e": e1, "raw": raw, "ts": 1000, "worktree": "/wt/main"}]), "Node sees exactly the open batch");
     // Node writes (append + close), the engine reads
     let wrote = node(
-        "process.env.HOME=process.argv[2];const W=require(process.argv[1]+'/companion/lib/devswarm-read-wal.js');const fs=require('fs');const f=W.walPath(process.argv[2],'monitor','proj-abc123');const a=W.appendBatch(fs,f,'from node \"x\"\\n',2000,{worktree:'/wt/other'});const b=W.appendBatch(fs,f,'closed by node',2001,{});W.closeBatch(fs,f,b,{t:'done',inserted:1,duplicate:0},2002);console.log(JSON.stringify({a}))",
+        "process.env.HOME=process.argv[2];const W=require(process.argv[1]+'/../anti-hall-node/companion/lib/devswarm-read-wal.js');const fs=require('fs');const f=W.walPath(process.argv[2],'monitor','proj-abc123');const a=W.appendBatch(fs,f,'from node \"x\"\\n',2000,{worktree:'/wt/other'});const b=W.appendBatch(fs,f,'closed by node',2001,{});W.closeBatch(fs,f,b,{t:'done',inserted:1,duplicate:0},2002);console.log(JSON.stringify({a}))",
         &args,
     );
     let open = wal::pending(&file).unwrap();
@@ -306,7 +306,7 @@ fn the_breaker_ladders_are_nodes() {
     }
     ah_engine::defaults::init().unwrap();
     let theirs = node(
-        "const I=require(process.argv[1]+'/companion/devswarm-ingest.js');const t=[],p=[];for(let n=1;n<=40;n++){t.push(I.transientBackoffMs(n,2000));p.push(I.permanentBackoffMs(n,2000))}console.log(JSON.stringify({t,p}))",
+        "const I=require(process.argv[1]+'/../anti-hall-node/companion/devswarm-ingest.js');const t=[],p=[];for(let n=1;n<=40;n++){t.push(I.transientBackoffMs(n,2000));p.push(I.permanentBackoffMs(n,2000))}console.log(JSON.stringify({t,p}))",
         &[],
     );
     let mut b = Breaker::new(2000);
@@ -359,7 +359,7 @@ fn the_drain_imports_a_batch_loss_free_and_idempotently_and_matches_nodes_rows()
     assert!(got.iter().all(|r| r.0 == x.project.workspace_id && r.2.starts_with("native:")));
     // the same rows Node's ingestPayload writes for the same batch
     let theirs = node(
-        "const fs=require('fs');process.env.HOME=process.argv[2];const I=require(process.argv[1]+'/companion/devswarm-ingest.js');const S=require(process.argv[1]+'/companion/lib/devswarm-store.js');const s=S.openStore({home:process.argv[2],hash:'scratch-key',workspaceId:process.argv[3],backend:'sqlite'});s.upsertRegistry({id:process.argv[3],worktreePath:'/w',sessionId:'x',inboxPath:null,cursorPath:null,nudgeCommand:null});I.ingestPayload(s,process.argv[4],{workspaceId:process.argv[3],home:process.argv[2],now:1});const out=s.listMessages(process.argv[3]).map((m)=>({ts:m.ts,hash:m.hash,body:m.body}));console.log(JSON.stringify(out))",
+        "const fs=require('fs');process.env.HOME=process.argv[2];const I=require(process.argv[1]+'/../anti-hall-node/companion/devswarm-ingest.js');const S=require(process.argv[1]+'/../anti-hall-node/companion/lib/devswarm-store.js');const s=S.openStore({home:process.argv[2],hash:'scratch-key',workspaceId:process.argv[3],backend:'sqlite'});s.upsertRegistry({id:process.argv[3],worktreePath:'/w',sessionId:'x',inboxPath:null,cursorPath:null,nudgeCommand:null});I.ingestPayload(s,process.argv[4],{workspaceId:process.argv[3],home:process.argv[2],now:1});const out=s.listMessages(process.argv[3]).map((m)=>({ts:m.ts,hash:m.hash,body:m.body}));console.log(JSON.stringify(out))",
         &[x.state.to_str().unwrap(), &x.project.workspace_id, a],
     );
     let mine: Vec<Value> = got.iter().map(|r| json!({"ts": r.1, "hash": r.2, "body": r.3})).collect();
@@ -409,7 +409,7 @@ fn the_heartbeat_and_the_lock_have_nodes_shape() {
     let hb: Value = serde_json::from_str(&text).unwrap();
     // the keys, in Node's order (writeIngestHeartbeat)
     let node_keys = node(
-        "const fs=require('fs');const I=require(process.argv[1]+'/companion/devswarm-ingest.js');const h=process.argv[2];I.writeIngestHeartbeat(h,'k',{workspaceId:'w',workingDir:'/d',now:1,hivecontrolBin:'b',hivecontrolSource:'env'});console.log(JSON.stringify(Object.keys(JSON.parse(fs.readFileSync(I.ingestHeartbeatPath(h,'k'),'utf8')))))",
+        "const fs=require('fs');const I=require(process.argv[1]+'/../anti-hall-node/companion/devswarm-ingest.js');const h=process.argv[2];I.writeIngestHeartbeat(h,'k',{workspaceId:'w',workingDir:'/d',now:1,hivecontrolBin:'b',hivecontrolSource:'env'});console.log(JSON.stringify(Object.keys(JSON.parse(fs.readFileSync(I.ingestHeartbeatPath(h,'k'),'utf8')))))",
         &[x.state.to_str().unwrap()],
     );
     let mine: Vec<&str> = {
@@ -431,7 +431,7 @@ fn the_heartbeat_and_the_lock_have_nodes_shape() {
     assert_eq!(rec["pid"], std::process::id());
     assert!(rec["token"].is_string() && rec["host"].is_string() && rec["ts"].is_number());
     let got = node(
-        "process.env.HOME=process.argv[2];const I=require(process.argv[1]+'/companion/devswarm-ingest.js');const r=I.acquireIngestLock(process.argv[2],{},process.argv[3]);console.log(JSON.stringify({got:!!r}));if(r)r()",
+        "process.env.HOME=process.argv[2];const I=require(process.argv[1]+'/../anti-hall-node/companion/devswarm-ingest.js');const r=I.acquireIngestLock(process.argv[2],{},process.argv[3]);console.log(JSON.stringify({got:!!r}));if(r)r()",
         &[x.home.to_str().unwrap(), x.main.to_str().unwrap()],
     );
     assert_eq!(got["got"], false, "a Node daemon cannot start while the engine drains");
@@ -448,7 +448,7 @@ fn a_live_node_holder_is_never_displaced_and_a_dead_one_is() {
     let sys = System::configured();
     // Node's own daemon lock, taken by a live process (a child that sleeps)
     let mut holder = Command::new("node")
-        .args(["-e", "process.env.HOME=process.argv[2];const I=require(process.argv[1]+'/companion/devswarm-ingest.js');const r=I.acquireIngestLock(process.argv[2],{},process.argv[3]);console.log(r?'held':'refused');setTimeout(()=>{},60000)"])
+        .args(["-e", "process.env.HOME=process.argv[2];const I=require(process.argv[1]+'/../anti-hall-node/companion/devswarm-ingest.js');const r=I.acquireIngestLock(process.argv[2],{},process.argv[3]);console.log(r?'held':'refused');setTimeout(()=>{},60000)"])
         .arg(plugin())
         .arg(&x.home)
         .arg(&x.main)

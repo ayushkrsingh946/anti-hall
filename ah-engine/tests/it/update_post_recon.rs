@@ -158,7 +158,7 @@ fn mark(c: &Case, home: &Path) {
 
 /// Node's stage function on the world, as `runUpdate` calls it (the store hashes smallest first, the version).
 fn node_answer(w: &World, o: &Opt, c: &Case) -> Value {
-    let snippet = r#"const os=require("os");const u=require(process.argv[1]+"/skills/update/scripts/update.js");const d=require(process.argv[1]+"/companion/lib/devswarm-store.js");const o={version:process.argv[3]};o.paths=u.resolvePaths(process.env,os.homedir());o.hashes=u.orderStoreHashesBySize(d,os.homedir(),d.listStoreHashes(os.homedir())||[],undefined);console.log(JSON.stringify(u[process.argv[2]](o)))"#;
+    let snippet = r#"const os=require("os");const u=require(process.argv[1]+"/skills/update/scripts/update.js");const d=require(process.argv[1]+"/../anti-hall-node/companion/lib/devswarm-store.js");const o={version:process.argv[3]};o.paths=u.resolvePaths(process.env,os.homedir());o.hashes=u.orderStoreHashesBySize(d,os.homedir(),d.listStoreHashes(os.homedir())||[],undefined);console.log(JSON.stringify(u[process.argv[2]](o)))"#;
     let mut cmd = Command::new("node");
     cmd.arg("-e").arg(snippet).arg(w.mp.join("plugins/anti-hall")).arg(c.func).arg(VERSION).current_dir(cwd_of(c, w));
     envs(&mut cmd, w, o);

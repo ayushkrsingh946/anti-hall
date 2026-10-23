@@ -18,7 +18,7 @@ fn node(script: &str, args: &[&str]) -> String {
 #[test]
 fn the_switches_match_the_node_settings_schema() {
     let script = r#"
-const s = require(process.argv[1] + '/hooks/lib/settings-schema.js');
+const s = require(process.argv[1]+'/../anti-hall-node/hooks/lib/settings-schema.js');
 const keys = ['injectGate','injectGateLimit','injectGateLimitEvery','injectGateTask','injectGateTaskEvery','injectGateComms','injectGateCommsEvery','injectGateSwarm','injectGateSwarmEvery'];
 console.log(JSON.stringify(keys.map((k) => { const e = s.findSetting('context', k); return { key: k, type: e.type, env: e.env || '', default: e.default, min: e.min === undefined ? null : e.min }; })));
 "#;
@@ -84,7 +84,7 @@ fn the_comms_and_swarm_markers_are_in_the_hooks_that_print_them() {
     assert!(src("devswarm-parent-inbox.js").contains(markers[1]), "the title instruction");
     // the shared-tree advisory is built by block-message with the guard name "shared-tree"
     let built = node(
-        "console.log(require(process.argv[1] + '/hooks/lib/block-message.js').message({kind:'warn',guard:'shared-tree',what:'x'}))",
+        "console.log(require(process.argv[1]+'/../anti-hall-node/hooks/lib/block-message.js').message({kind:'warn',guard:'shared-tree',what:'x'}))",
         &[plugin().to_str().unwrap()],
     );
     assert!(built.contains(ah_engine::defaults::text("inject_gate.swarm_marker")), "{built:?}");

@@ -129,8 +129,8 @@ fn node_sweep(w: &World, cands: &[Ws]) -> Value {
 const fs = require('fs'); const path = require('path');
 const P = process.env.PLUGIN, W = process.env.WORLD, HEAD = process.env.HEAD, NOW = Number(process.env.NOW);
 const sc = JSON.parse(process.env.SCENARIO);
-const lc = require(P + '/companion/lib/devswarm-lifecycle.js');
-const pull = require(P + '/companion/lib/devswarm-pull.js');
+const lc = require(P + '/../anti-hall-node/companion/lib/devswarm-lifecycle.js');
+const pull = require(P + '/../anti-hall-node/companion/lib/devswarm-pull.js');
 const flaw = (wt) => (sc.find((c) => wt === path.join(W, 'wt', c.id)) || {}).flaw;
 const builders = [{ id: 'primary-b', repositoryId: 'r', branchName: 'main', worktreePath: path.join(W, 'wt/primary'), builderType: 'primary', isActive: 1, isHidden: 0, label: 'P' }]
   .concat(sc.map((c) => ({ id: c.id, repositoryId: 'r', branchName: 'b/' + c.id, worktreePath: path.join(W, 'wt', c.id), builderType: c.flaw === 'primary' ? 'primary' : 'standard', isActive: 1, isHidden: 0, lastSelectedAt: null, label: 'L' })));

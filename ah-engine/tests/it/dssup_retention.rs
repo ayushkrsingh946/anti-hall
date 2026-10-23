@@ -795,7 +795,7 @@ fn the_cap_plan_equals_nodes_for_random_archives_and_an_evicted_file_must_still_
         let s = ah_engine::dssup::retention::read_settings(&ctx);
         let mine = ah_engine::dssup::retention::cap::plan(&home, &s);
         let o = Command::new("node")
-            .args(["-e", "const R=require(process.argv[1]+'/companion/lib/devswarm-retention.js');process.stdout.write(JSON.stringify(R.enforceArchiveCap({home:process.argv[2],settings:JSON.parse(process.argv[3]),dryRun:true})))"])
+            .args(["-e", "const R=require(process.argv[1]+'/../anti-hall-node/companion/lib/devswarm-retention.js');process.stdout.write(JSON.stringify(R.enforceArchiveCap({home:process.argv[2],settings:JSON.parse(process.argv[3]),dryRun:true})))"])
             .arg(&root)
             .arg(&home)
             .arg(serde_json::json!({"archiveMaxMB": s.archive_max_mb, "days": s.days}).to_string())

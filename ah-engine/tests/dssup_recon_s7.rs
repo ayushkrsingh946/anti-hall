@@ -789,7 +789,7 @@ fn a_sigkill_between_the_hard_link_and_the_unlink_leaves_the_twin_in_both_places
                 assert_eq!(f.ino(&act), f.ino(&arch), "{point}: both names are one file");
             }
             // Node's next pass finishes it
-            let code = "process.env.HOME=process.argv[2];const F=require(process.argv[1]+'/scripts/devswarm-lib/fold.js');const fs=require('fs');const d=JSON.parse(fs.readFileSync(process.argv[2]+'/.anti-hall/devswarm/archived/A.json','utf8'));F.retireIdentityFamilyDescriptors(process.argv[2],'A',d,{})";
+            let code = "process.env.HOME=process.argv[2];const F=require(process.argv[1]+'/../anti-hall-node/scripts/devswarm-lib/fold.js');const fs=require('fs');const d=JSON.parse(fs.readFileSync(process.argv[2]+'/.anti-hall/devswarm/archived/A.json','utf8'));F.retireIdentityFamilyDescriptors(process.argv[2],'A',d,{})";
             let n = Command::new("node")
                 .args(["-e", code, f.root.to_str().unwrap(), f.home.to_str().unwrap()])
                 .env("ANTI_HALL_LOG_DIR", f.home.join("logs"))

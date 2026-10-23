@@ -45,7 +45,7 @@ fn tree(home: &Path) -> BTreeMap<String, String> {
 
 fn node_tick(home: &Path) -> Value {
     let root = ah_engine::defaults::root().unwrap();
-    let code = "process.env.HOME=process.argv[2];process.env.ANTIHALL_CALLER=\"supervisor\";const S=require(process.argv[1]+\"/companion/devswarm-supervisor.js\");console.log(JSON.stringify(S.deferredSweepIfDue({home:process.argv[2]})))";
+    let code = "process.env.HOME=process.argv[2];process.env.ANTIHALL_CALLER=\"supervisor\";const S=require(process.argv[1]+\"/../anti-hall-node/companion/devswarm-supervisor.js\");console.log(JSON.stringify(S.deferredSweepIfDue({home:process.argv[2]})))";
     let o = Command::new("node").args(["-e", code, root.to_str().unwrap(), home.to_str().unwrap()]).output().unwrap();
     assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
     serde_json::from_str(String::from_utf8_lossy(&o.stdout).lines().last().unwrap()).unwrap()

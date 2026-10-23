@@ -157,7 +157,7 @@ fn the_confirm_gate_picks_nodes_target_on_every_process_table() {
         let fx = json!({"ps": c.ps, "cwd": c.cwd.iter().map(|(p, d)| (p.to_string(), d)).collect::<HashMap<_, _>>(), "transcripts": c.transcripts,
                         "selfPid": c.self_pid, "worktree": c.worktree, "session": c.session, "allowInteractive": c.allow_interactive, "home": "/home/x"});
         let theirs = node(
-            "const T=require(process.argv[1]+'/companion/lib/target-session.js');const fx=JSON.parse(process.argv[2]);const runners={ps:()=>fx.ps,cwdOf:(p)=>(fx.cwd[p]===undefined?null:fx.cwd[p]),transcriptExists:(d,u)=>fx.transcripts.includes(u)};console.log(JSON.stringify(T.findTarget({worktreePath:fx.worktree,sessionId:fx.session,home:fx.home,runners,selfPid:fx.selfPid,allowInteractive:fx.allowInteractive})))",
+            "const T=require(process.argv[1]+'/../anti-hall-node/companion/lib/target-session.js');const fx=JSON.parse(process.argv[2]);const runners={ps:()=>fx.ps,cwdOf:(p)=>(fx.cwd[p]===undefined?null:fx.cwd[p]),transcriptExists:(d,u)=>fx.transcripts.includes(u)};console.log(JSON.stringify(T.findTarget({worktreePath:fx.worktree,sessionId:fx.session,home:fx.home,runners,selfPid:fx.selfPid,allowInteractive:fx.allowInteractive})))",
             &[&fx.to_string()],
         );
         let mine = kill::find_target(&fake_of(&c), home, c.worktree, c.session, c.allow_interactive).to_json(c.worktree);
@@ -207,7 +207,7 @@ fn the_unread_backlog_is_the_inbox_after_the_cursor_as_nodes_is() {
     for (inbox, cursor) in cases {
         let (i, c) = (inbox.map(|x| d.join(x).to_string_lossy().into_owned()), cursor.as_ref().map(|x| d.join(x).to_string_lossy().into_owned()));
         let theirs = node(
-            "const L=require(process.argv[1]+'/companion/lib/liveness.js');const a=process.argv.slice(2);const r=L.unreadBacklog(a[0]==='-'?null:a[0],a[1]==='-'?null:a[1]);console.log(JSON.stringify(r.lines))",
+            "const L=require(process.argv[1]+'/../anti-hall-node/companion/lib/liveness.js');const a=process.argv.slice(2);const r=L.unreadBacklog(a[0]==='-'?null:a[0],a[1]==='-'?null:a[1]);console.log(JSON.stringify(r.lines))",
             &[i.as_deref().unwrap_or("-"), c.as_deref().unwrap_or("-")],
         );
         assert_eq!(json!(kill::unread_backlog(i.as_deref(), c.as_deref())), theirs, "{inbox:?} {cursor:?}");
@@ -294,7 +294,7 @@ fn recover_does_what_nodes_recover_does_scenario_by_scenario() {
         let spec =
             json!({"desc": desc, "target": target, "now": now, "survives": sc.survives, "reconfirm": sc.reconfirm, "printed": sc.printed, "locked": sc.locked});
         let theirs = node(
-            "const R=require(process.argv[1]+'/companion/lib/recovery.js');const sp=JSON.parse(process.argv[3]);process.env.HOME=process.argv[2];const sig=[];let rc=0;const io={platform:'linux',selfPid:7,kill:(p,s)=>{sig.push(['pid',p,s]);return s===0?sp.survives:true},killGroup:(p,s)=>{sig.push(['group',p,s]);return true},sleep:()=>{},reconfirm:()=>{const v=sp.reconfirm[rc++];return v===undefined?true:v},spawnResume:(a)=>({output:sp.printed,uuid:a.uuid,cwd:a.cwd,prompt:a.prompt})};if(sp.locked)io.lock=()=>null;const ret=R.recover({descriptor:sp.desc,target:sp.target,home:process.argv[2],now:sp.now,maxRecoveries:3,graceMs:5000,allowInteractive:true,io});console.log(JSON.stringify({ret,sig}))",
+            "const R=require(process.argv[1]+'/../anti-hall-node/companion/lib/recovery.js');const sp=JSON.parse(process.argv[3]);process.env.HOME=process.argv[2];const sig=[];let rc=0;const io={platform:'linux',selfPid:7,kill:(p,s)=>{sig.push(['pid',p,s]);return s===0?sp.survives:true},killGroup:(p,s)=>{sig.push(['group',p,s]);return true},sleep:()=>{},reconfirm:()=>{const v=sp.reconfirm[rc++];return v===undefined?true:v},spawnResume:(a)=>({output:sp.printed,uuid:a.uuid,cwd:a.cwd,prompt:a.prompt})};if(sp.locked)io.lock=()=>null;const ret=R.recover({descriptor:sp.desc,target:sp.target,home:process.argv[2],now:sp.now,maxRecoveries:3,graceMs:5000,allowInteractive:true,io});console.log(JSON.stringify({ret,sig}))",
             &[hn.to_str().unwrap(), &spec.to_string()],
         );
         // ---- the engine, same machine: the process table the reconfirm reads is scripted to give the same answers

@@ -291,7 +291,7 @@ fn the_sweep_lock_is_nodes_file_held_during_the_duties_and_a_live_holder_skips_t
     if have_node() {
         let got = node_eval(
             &f.home,
-            "process.env.HOME=process.argv[2];const S=require(process.argv[1]+\"/companion/devswarm-supervisor.js\");const r=S.acquireSweepLock(process.argv[2],{});console.log(JSON.stringify({got:!!r}));if(r)r()",
+            "process.env.HOME=process.argv[2];const S=require(process.argv[1]+\"/../anti-hall-node/companion/devswarm-supervisor.js\");const r=S.acquireSweepLock(process.argv[2],{});console.log(JSON.stringify({got:!!r}));if(r)r()",
         );
         assert_eq!(got["got"], false, "a Node sweep sees the engine's lock and exits");
     }
@@ -299,7 +299,7 @@ fn the_sweep_lock_is_nodes_file_held_during_the_duties_and_a_live_holder_skips_t
     if have_node() {
         let got = node_eval(
             &f.home,
-            "process.env.HOME=process.argv[2];const S=require(process.argv[1]+\"/companion/devswarm-supervisor.js\");const r=S.acquireSweepLock(process.argv[2],{});console.log(JSON.stringify({got:!!r}));if(r)r()",
+            "process.env.HOME=process.argv[2];const S=require(process.argv[1]+\"/../anti-hall-node/companion/devswarm-supervisor.js\");const r=S.acquireSweepLock(process.argv[2],{});console.log(JSON.stringify({got:!!r}));if(r)r()",
         );
         assert_eq!(got["got"], true, "released: Node takes it");
     }
@@ -352,7 +352,7 @@ fn the_gate_agrees_with_nodes_own_answer_on_the_same_state() {
     put(&dev(&f).join("reconcile-sweep-state.json"), &json!({"lastRunAt": now() - 60_000}));
     let node = node_eval(
         &f.home,
-        "process.env.HOME=process.argv[2];const S=require(process.argv[1]+\"/companion/devswarm-supervisor.js\");console.log(JSON.stringify({h:S.housekeepingSweepIfDue({home:process.argv[2]}).reason,r:S.reconcileSweepIfDue({home:process.argv[2]}).reason}))",
+        "process.env.HOME=process.argv[2];const S=require(process.argv[1]+\"/../anti-hall-node/companion/devswarm-supervisor.js\");console.log(JSON.stringify({h:S.housekeepingSweepIfDue({home:process.argv[2]}).reason,r:S.reconcileSweepIfDue({home:process.argv[2]}).reason}))",
     );
     assert_eq!(node, json!({"h": "cooldown", "r": "cooldown"}));
     assert_eq!(tick::run_duty("housekeeping", &ctx(&f, &st, true), &rec)["reason"], "cooldown");
@@ -361,7 +361,7 @@ fn the_gate_agrees_with_nodes_own_answer_on_the_same_state() {
     put(&dev(&f).join("housekeeping-sweep-state.json"), &json!({"lastRunAt": now() - 4_000_000}));
     let node = node_eval(
         &f.home,
-        "process.env.HOME=process.argv[2];const S=require(process.argv[1]+\"/companion/devswarm-supervisor.js\");const fs=require(\"fs\");const p=process.argv[2]+\"/.anti-hall/devswarm/housekeeping-sweep-state.json\";const before=fs.readFileSync(p,\"utf8\");const r=S.housekeepingSweepIfDue({home:process.argv[2]});fs.writeFileSync(p,before);console.log(JSON.stringify({h:r.ran}))",
+        "process.env.HOME=process.argv[2];const S=require(process.argv[1]+\"/../anti-hall-node/companion/devswarm-supervisor.js\");const fs=require(\"fs\");const p=process.argv[2]+\"/.anti-hall/devswarm/housekeeping-sweep-state.json\";const before=fs.readFileSync(p,\"utf8\");const r=S.housekeepingSweepIfDue({home:process.argv[2]});fs.writeFileSync(p,before);console.log(JSON.stringify({h:r.ran}))",
     );
     assert_eq!(node["h"], true, "Node also finds it due");
     assert_eq!(tick::run_duty("housekeeping", &ctx(&f, &st, true), &rec)["outcome"], "ran");
@@ -451,7 +451,7 @@ fn log_rotation_is_nodes_rotation() {
     let eng = tick::log_rotate(&ctx(&a, &st, true));
     let node = node_eval(
         &b.home,
-        "process.env.HOME=process.argv[2];const S=require(process.argv[1]+\"/companion/devswarm-supervisor.js\");console.log(JSON.stringify(S.rotateSupervisorLogIfNeeded({home:process.argv[2]})))",
+        "process.env.HOME=process.argv[2];const S=require(process.argv[1]+\"/../anti-hall-node/companion/devswarm-supervisor.js\");console.log(JSON.stringify(S.rotateSupervisorLogIfNeeded({home:process.argv[2]})))",
     );
     assert_eq!(eng["supervisor"]["rotated"], node["rotated"]);
     assert_eq!(eng["supervisor"]["size"], node["size"]);
@@ -466,7 +466,7 @@ fn log_rotation_is_nodes_rotation() {
     let eng = tick::log_rotate(&ctx(&c, &st, true));
     let node = node_eval(
         &c.home,
-        "process.env.HOME=process.argv[2];const S=require(process.argv[1]+\"/companion/devswarm-supervisor.js\");console.log(JSON.stringify(S.rotateSupervisorLogIfNeeded({home:process.argv[2]})))",
+        "process.env.HOME=process.argv[2];const S=require(process.argv[1]+\"/../anti-hall-node/companion/devswarm-supervisor.js\");console.log(JSON.stringify(S.rotateSupervisorLogIfNeeded({home:process.argv[2]})))",
     );
     assert_eq!(eng["supervisor"], node);
     // the engine's own tick log rotates by the same rule
@@ -496,7 +496,7 @@ fn norm_ts(s: &str) -> String {
     out
 }
 
-const NODE_NUDGE: &str = "process.env.HOME=process.argv[2];const R=require(process.argv[1]+\"/companion/lib/recovery.js\");const d={id:\"ws-1\",worktreePath:\"/nonexistent/wt\",sessionId:\"s\",nudgeCommand:[\"x\"],escalateCommand:[\"y\"]};const v=JSON.parse(process.argv[3]);const r=R.pokeOrEscalate(d,v,{home:process.argv[2],now:Number(process.argv[4]),nudgeMaxAttempts:2,nudgeCooldownMs:0},{nudge(){},escalate(){},openParentStore(){throw new Error(\"no store\")}});console.log(JSON.stringify(r))";
+const NODE_NUDGE: &str = "process.env.HOME=process.argv[2];const R=require(process.argv[1]+\"/../anti-hall-node/companion/lib/recovery.js\");const d={id:\"ws-1\",worktreePath:\"/nonexistent/wt\",sessionId:\"s\",nudgeCommand:[\"x\"],escalateCommand:[\"y\"]};const v=JSON.parse(process.argv[3]);const r=R.pokeOrEscalate(d,v,{home:process.argv[2],now:Number(process.argv[4]),nudgeMaxAttempts:2,nudgeCooldownMs:0},{nudge(){},escalate(){},openParentStore(){throw new Error(\"no store\")}});console.log(JSON.stringify(r))";
 
 fn node_nudge(home: &Path, verdict: &Value, now: i64) -> Value {
     let root = ah_engine::defaults::root().unwrap();
@@ -725,7 +725,7 @@ fn node_housekeeping(home: &Path, at: i64) -> Value {
     node_eval(
         home,
         &format!(
-            "process.env.HOME=process.argv[2];const S=require(process.argv[1]+\"/companion/devswarm-supervisor.js\");const r=S.housekeepingSweepIfDue({{home:process.argv[2],now:{at}}});console.log(JSON.stringify(r))"
+            "process.env.HOME=process.argv[2];const S=require(process.argv[1]+\"/../anti-hall-node/companion/devswarm-supervisor.js\");const r=S.housekeepingSweepIfDue({{home:process.argv[2],now:{at}}});console.log(JSON.stringify(r))"
         ),
     )
 }

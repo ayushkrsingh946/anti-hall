@@ -246,7 +246,7 @@ fn the_snapshot_tool_backs_up_and_anonymises_with_nodes_own_hashes() {
     assert!(rows[0].0.starts_with("[forwarded from archived abc] anon-"), "prefix kept: {}", rows[0].0);
     assert!(!rows[0].0.contains("secret") && !rows[1].0.contains("secret"));
     // the hash is Node's messageHash of the anonymised body (re-derived here by Node itself)
-    let code = "const i=require(process.argv[1]+'/companion/devswarm-ingest.js');console.log(i.messageHash('w1',{message:process.argv[2],createdAt:'6'}))";
+    let code = "const i=require(process.argv[1]+'/../anti-hall-node/companion/devswarm-ingest.js');console.log(i.messageHash('w1',{message:process.argv[2],createdAt:'6'}))";
     let want = Command::new("node").args(["-e", code, src.root.to_str().unwrap(), &rows[1].0]).output().unwrap();
     assert_eq!(rows[1].1, String::from_utf8_lossy(&want.stdout).trim());
 }
@@ -1126,7 +1126,7 @@ fn a_sigkill_at_every_op_boundary_leaves_a_state_nodes_next_sweep_converges_from
         let path = rows[0].row.worktree_path.clone().unwrap();
         assert!(path == "/old/path" || path.ends_with("/p"), "{point}: row is old or new: {path}");
         // Node's own next sweep converges to the uninterrupted result
-        let code = "process.env.HOME=process.argv[2];const F=require(process.argv[1]+'/scripts/devswarm-lib/fold.js');F.healRegistry(process.argv[2],process.argv[3],{})";
+        let code = "process.env.HOME=process.argv[2];const F=require(process.argv[1]+'/../anti-hall-node/scripts/devswarm-lib/fold.js');F.healRegistry(process.argv[2],process.argv[3],{})";
         let n = Command::new("node")
             .args(["-e", code, f.root.to_str().unwrap(), f.home.to_str().unwrap(), &k])
             .env("ANTI_HALL_LOG_DIR", f.home.join("logs"))
@@ -1208,7 +1208,7 @@ fn s5_a_sigkill_at_every_adoption_and_summary_boundary_loses_nothing_and_nodes_n
             assert!(OVal::parse(&s).is_some(), "{point}: summary parses");
         }
         // Node's own next pass converges to the uninterrupted result
-        let code = "process.env.HOME=process.argv[2];const R=require(process.argv[1]+'/scripts/devswarm-lib/repair.js');R.healOrphanPartitions(process.argv[2],{repoKey:process.argv[3]})";
+        let code = "process.env.HOME=process.argv[2];const R=require(process.argv[1]+'/../anti-hall-node/scripts/devswarm-lib/repair.js');R.healOrphanPartitions(process.argv[2],{repoKey:process.argv[3]})";
         let n = Command::new("node")
             .args(["-e", code, f.root.to_str().unwrap(), f.home.to_str().unwrap(), &k])
             .env("ANTI_HALL_LOG_DIR", f.home.join("logs"))
@@ -1664,7 +1664,7 @@ fn canon(f: &Fix, needles: &[String]) -> std::collections::BTreeMap<String, Stri
 
 /// Node's whole `foldMeshDuplicates` on a home, with the clock pinned.
 fn node_whole_fold(f: &Fix, key: &str) -> Value {
-    let code = "const NOW=Number(process.argv[4]);Date.now=()=>NOW;process.env.HOME=process.argv[2];process.env.USERPROFILE=process.argv[2];process.env.ANTI_HALL_LOG_DIR=process.argv[2]+'/.anti-hall/logs';const F=require(process.argv[1]+'/scripts/devswarm-lib/fold.js');console.log(JSON.stringify(F.foldMeshDuplicates(process.argv[2],{repoKey:process.argv[3]})))";
+    let code = "const NOW=Number(process.argv[4]);Date.now=()=>NOW;process.env.HOME=process.argv[2];process.env.USERPROFILE=process.argv[2];process.env.ANTI_HALL_LOG_DIR=process.argv[2]+'/.anti-hall/logs';const F=require(process.argv[1]+'/../anti-hall-node/scripts/devswarm-lib/fold.js');console.log(JSON.stringify(F.foldMeshDuplicates(process.argv[2],{repoKey:process.argv[3]})))";
     let o = Command::new("node").args(["-e", code, f.root.to_str().unwrap(), f.home.to_str().unwrap(), key, &NOW.to_string()]).output().unwrap();
     assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
     serde_json::from_str(String::from_utf8_lossy(&o.stdout).lines().last().unwrap()).unwrap()

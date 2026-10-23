@@ -388,7 +388,7 @@ fn home_for(f: &Fam, name: &str, registered: &str) -> PathBuf {
     std::fs::create_dir_all(&ws).unwrap();
     std::fs::write(ws.join(format!("{CHILD}.json")), serde_json::json!({"id": CHILD, "worktreePath": f.child_wt, "sessionId": "s-1"}).to_string()).unwrap();
     node_js(
-        "const S=require(process.argv[1]+'/companion/lib/devswarm-store.js');const s=S.openStore({home:process.argv[2],hash:process.argv[3]});s.upsertRegistry({id:process.argv[4],worktreePath:process.argv[5],sessionId:'sess-p',inboxPath:null,cursorPath:null,nudgeCommand:null});s.close();console.log(1)",
+        "const S=require(process.argv[1]+'/../anti-hall-node/companion/lib/devswarm-store.js');const s=S.openStore({home:process.argv[2],hash:process.argv[3]});s.upsertRegistry({id:process.argv[4],worktreePath:process.argv[5],sessionId:'sess-p',inboxPath:null,cursorPath:null,nudgeCommand:null});s.close();console.log(1)",
         &[home.to_str().unwrap(), &f.key, registered, f.main.to_str().unwrap()],
     );
     home
@@ -396,7 +396,7 @@ fn home_for(f: &Fam, name: &str, registered: &str) -> PathBuf {
 
 fn register(f: &Fam, home: &Path, id: &str) {
     node_js(
-        "const S=require(process.argv[1]+'/companion/lib/devswarm-store.js');const s=S.openStore({home:process.argv[2],hash:process.argv[3]});s.upsertRegistry({id:process.argv[4],worktreePath:process.argv[5],sessionId:'sess-p',inboxPath:null,cursorPath:null,nudgeCommand:null});s.close();console.log(1)",
+        "const S=require(process.argv[1]+'/../anti-hall-node/companion/lib/devswarm-store.js');const s=S.openStore({home:process.argv[2],hash:process.argv[3]});s.upsertRegistry({id:process.argv[4],worktreePath:process.argv[5],sessionId:'sess-p',inboxPath:null,cursorPath:null,nudgeCommand:null});s.close();console.log(1)",
         &[home.to_str().unwrap(), &f.key, id, f.main.to_str().unwrap()],
     );
 }
@@ -404,14 +404,14 @@ fn register(f: &Fam, home: &Path, id: &str) {
 /// The parent partition's rows and the parked notices, as Node reads them.
 fn dump(f: &Fam, home: &Path) -> Value {
     node_js(
-        "const fs=require('fs'),path=require('path');const h=process.argv[2];process.env.HOME=h;const S=require(process.argv[1]+'/companion/lib/devswarm-store.js');const s=S.openStore({home:h,hash:process.argv[3]});const msgs=s.listMessages(process.argv[4]);s.close();const dir=path.join(h,'.anti-hall/devswarm/escalation-pending');const parked={};try{for(const n of fs.readdirSync(dir).sort())parked[n]=fs.readFileSync(path.join(dir,n),'utf8')}catch(_){}console.log(JSON.stringify({msgs,parked}))",
+        "const fs=require('fs'),path=require('path');const h=process.argv[2];process.env.HOME=h;const S=require(process.argv[1]+'/../anti-hall-node/companion/lib/devswarm-store.js');const s=S.openStore({home:h,hash:process.argv[3]});const msgs=s.listMessages(process.argv[4]);s.close();const dir=path.join(h,'.anti-hall/devswarm/escalation-pending');const parked={};try{for(const n of fs.readdirSync(dir).sort())parked[n]=fs.readFileSync(path.join(dir,n),'utf8')}catch(_){}console.log(JSON.stringify({msgs,parked}))",
         &[home.to_str().unwrap(), &f.key, &f.parent],
     )
 }
 
 fn node_notify(f: &Fam, home: &Path, since: i64, now: i64) {
     node_js(
-        "const h=process.argv[2];process.env.HOME=h;const R=require(process.argv[1]+'/companion/lib/recovery.js');R.notifyParentEscalation({id:process.argv[3],worktreePath:process.argv[4],sessionId:'s-1'},{staleSince:Number(process.argv[5])},{home:h,now:Number(process.argv[6])});console.log(1)",
+        "const h=process.argv[2];process.env.HOME=h;const R=require(process.argv[1]+'/../anti-hall-node/companion/lib/recovery.js');R.notifyParentEscalation({id:process.argv[3],worktreePath:process.argv[4],sessionId:'s-1'},{staleSince:Number(process.argv[5])},{home:h,now:Number(process.argv[6])});console.log(1)",
         &[home.to_str().unwrap(), CHILD, f.child_wt.to_str().unwrap(), &since.to_string(), &now.to_string()],
     );
 }
@@ -456,7 +456,7 @@ fn the_escalation_notice_is_nodes_delivered_parked_and_drained() {
     register(&f, &he, &f.parent);
     let later = now + 60_000;
     node_js(
-        "const h=process.argv[2];process.env.HOME=h;const R=require(process.argv[1]+'/companion/lib/recovery.js');console.log(JSON.stringify(R.drainEscalationIntents(h,{now:Number(process.argv[3])})))",
+        "const h=process.argv[2];process.env.HOME=h;const R=require(process.argv[1]+'/../anti-hall-node/companion/lib/recovery.js');console.log(JSON.stringify(R.drainEscalationIntents(h,{now:Number(process.argv[3])})))",
         &[hn.to_str().unwrap(), &later.to_string()],
     );
     let dr = ah_engine::dssup::verdict::drain_notices(&he, &env_of(&he), later);

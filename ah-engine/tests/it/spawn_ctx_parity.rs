@@ -1381,7 +1381,7 @@ fn devswarm_child_turn_without_a_checkout_matches_node() {
 #[test]
 fn the_switch_tables_match_the_node_settings_schema() {
     let script = r#"
-const s = require(process.argv[1] + '/hooks/lib/settings-schema.js');
+const s = require(process.argv[1]+'/../anti-hall-node/hooks/lib/settings-schema.js');
 const pj = require(process.argv[1] + '/.claude-plugin/plugin.json');
 const rows = [['devswarm','inboxReadGuard'],['devswarm','supervisorMode'],['context','verifyFirstOrchestration'],['context','protocolLevel'],['context','orchFullOn'],['context','codexOrchFullOn']];
 const out = rows.map(([a,b]) => { const e = s.findSetting(a,b); return { section: a, key: b, type: e.type, env: e.env || '', aliases: e.envAliases || [], option: e.pluginOption || '', default: e.default, values: e.values || null, legacy: !!e.legacy, homeOnly: !!e.homeOnly, headline: !!e.headline }; });
@@ -1426,7 +1426,7 @@ console.log(JSON.stringify({ rows: out, manifestSupervisorDefault: sup }));
 fn the_inbox_skip_name_is_a_destructive_guard_in_node_too() {
     let o = Command::new("node")
         .arg("-e")
-        .arg("console.log(JSON.stringify([...require(process.argv[1]+'/hooks/skip-guard.js').DESTRUCTIVE]))")
+        .arg("console.log(JSON.stringify([...require(process.argv[1]+'/../anti-hall-node/hooks/skip-guard.js').DESTRUCTIVE]))")
         .arg(plugin())
         .output()
         .unwrap();
