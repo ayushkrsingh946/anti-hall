@@ -511,7 +511,7 @@ fn instance_counts(st: &MeshStore, now: f64) -> R<HashMap<String, f64>> {
             }
             true
         })
-        .map_err(|_| ident::Defer("messages".into()))?;
+        .or_else(|e| ident::unavailable("mesh_write.what_messages", &e))?;
     let mut out = HashMap::new();
     for (id, spans) in by_sender {
         if spans.len() <= 1 {
@@ -1443,7 +1443,7 @@ impl<'a> Verdicts<'a> {
 }
 
 #[cfg(test)]
-mod native_tests {
+mod tests {
     use super::*;
     use crate::meshw::args;
     use std::os::unix::fs::PermissionsExt;

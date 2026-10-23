@@ -1857,7 +1857,7 @@ doc = "Stands for the text of a prompt block whose text is a number, true or an 
 value = "-"
 
 [devswarm_cli.rr_tr_defer_errors]
-doc = "Parser error texts for a transcript line JavaScript would still read (a lone surrogate escape, a number out of range, nesting past the parser limit): the roster is then answered by Node."
+doc = "Parser error texts for a transcript line JavaScript would still read (a lone surrogate escape, a number out of range, nesting past the parser limit): the line is read after a repair that changes only that part (see `rr_tr_lone_surrogate`, `rr_tr_big_number`, `rr_tr_max_depth`)."
 value = ["hex escape", "out of range", "recursion limit"]
 
 [devswarm_cli.rr_tr_expecting]
@@ -1865,7 +1865,7 @@ doc = "What the transcript parser names as the thing it reads, in its own error 
 value = "a transcript value"
 
 [devswarm_cli.rr_tr_iso_pattern]
-doc = "The form of an entry time the roster is sure JavaScript's Date.parse reads: an ISO stamp in UTC (day 1..28 so every month is valid). An entry time of another form is left to Node unless another entry has one of this form."
+doc = "The form of an entry time the roster is sure JavaScript's Date.parse reads: an ISO stamp in UTC (day 1..28 so every month is valid). An entry time of another form is read by the `Date.parse` rules."
 value = '^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|1\d|2[0-8])T([01]\d|2[0-3]):[0-5]\d:[0-5]\d(\.\d{1,9})?Z$'
 
 [devswarm_cli.rr_app_live_message]
@@ -3705,3 +3705,20 @@ value = "store-fallback"
 [devswarm_cli.rr_dir_token_usage]
 doc = "Directory under the DevSwarm state directory of the supervisor's per-plan token usage files (devswarm-token-usage.js statePath)."
 value = "token-usage"
+
+[devswarm_cli.rr_tr_max_depth]
+doc = "How deeply nested a transcript line may be and still be read (JavaScript's JSON.parse has no such limit; no real transcript line nests anywhere near this). A deeper line is skipped, counted and logged."
+value = 1000
+min = 16
+
+[devswarm_cli.rr_tr_big_number]
+doc = "What a number past the range of a double becomes in a transcript line (JavaScript reads it as Infinity; only its being non-zero is ever looked at)."
+value = "1e308"
+
+[devswarm_cli.rr_tr_lone_surrogate]
+doc = "What a lone surrogate escape in a transcript line becomes (JavaScript keeps the lone surrogate; text here cannot)."
+value = "\\ufffd"
+
+[devswarm_cli.rr_tr_metric_skipped]
+doc = "Counter bumped when a transcript line is skipped because it could not be read."
+value = "mesh_roster_transcript_line_skipped"

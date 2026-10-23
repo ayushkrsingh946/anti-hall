@@ -51,6 +51,21 @@ pub fn refuse<T>(body: &str) -> Result<T, Defer> {
     Err(Defer(format!("{}{body}", defaults::text("mesh_write.refusal_prefix"))))
 }
 
+/// The verb's own refusal for a store, registry or table that cannot be opened, read or written (Node throws there too): exit 2,
+/// reason `store-unavailable`, `what` the `mesh_write.what_*` key naming the thing and `detail` the error's own text.
+pub fn unavailable<T>(what_key: &str, detail: &dyn std::fmt::Display) -> Result<T, Defer> {
+    let mut body = common_obj();
+    body.push(("ok".to_string(), OVal::Bool(false)));
+    body.push(("reason".to_string(), OVal::Str(defaults::text("mesh_write.reason_store_unavailable").to_string())));
+    let what = defaults::text(what_key);
+    body.push(("error".to_string(), OVal::Str(defaults::render("mesh_write.msg_store_unavailable", &[("what", &what), ("detail", detail)]))));
+    refuse(&OVal::Obj(body).stringify())
+}
+
+fn common_obj() -> Vec<(String, OVal)> {
+    Vec::new()
+}
+
 /// The JSON body of a refusal carried by [`refuse`]; `None` for any other deferral.
 pub fn refusal_body(d: &Defer) -> Option<&str> {
     d.0.strip_prefix(defaults::text("mesh_write.refusal_prefix"))
@@ -1129,5 +1144,15 @@ mod tests {
         assert_eq!(read_bounded(&hard).unwrap(), None);
         assert_eq!(read_or_skip(&hard, "test"), None);
         crate::discard::harmless(std::fs::remove_dir_all(dir)); // keep: cleanup of a scratch directory
+    }
+
+    /// A store that cannot be opened or written is the verb's own refusal (exit 2, `store-unavailable`), not a hand-over.
+    #[test]
+    fn an_unavailable_store_is_a_worded_refusal() {
+        let err = unavailable::<()>("mesh_write.what_store", &"disk full").unwrap_err();
+        let body = refusal_body(&err).unwrap();
+        assert!(body.contains("store-unavailable") && body.contains("the mesh store is unavailable (disk full)"), "{body}");
+        assert_eq!(js_to_string(&OVal::Arr(vec![OVal::Num(1.0), OVal::Null, OVal::Str("a".into())])), "1,,a");
+        assert_eq!(js_to_string(&OVal::Obj(vec![])), "[object Object]");
     }
 }
