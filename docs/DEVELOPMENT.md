@@ -265,6 +265,7 @@ Inside the session, `/reload-plugins` picks up edits. To use the marketplace bui
 
 **Codex.** The installer writes hook files; preview first, then install into a project or globally:
 
+<!-- doc-check: skip (needs an installed engine under the real home) -->
 ```sh
 ~/.anti-hall/ah-engine/bin/ah-engine install-codex --dry-run
 ```
