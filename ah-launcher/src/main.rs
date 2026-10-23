@@ -17,6 +17,7 @@ mod builtin;
 mod cfg;
 mod cli;
 mod gate;
+mod integrity;
 mod launcher;
 mod limits;
 mod proc;

@@ -55,7 +55,7 @@ doc = "Set to 0 or 1 to turn the first-run download of the sha256-pinned engine 
 value = "AH_ENGINE_BOOTSTRAP"
 
 [env.install_lock_token]
-doc = "Set by an installer (ah-update.sh) for the integrity script: the token of the install lock it already holds, so recording the expected sha256 runs under the caller's hold instead of waiting on it."
+doc = "Set by an installer (ah-update.sh) for the integrity check: the token of the install lock it already holds, so recording the expected sha256 runs under the caller's hold instead of waiting on it."
 value = "AH_ENGINE_INSTALL_LOCK_TOKEN"
 
 [env.release_base]
@@ -158,7 +158,7 @@ doc = "Marker holding the time until which respawning is stopped after a crash l
 value = "crashloop.until"
 
 [files.healthy_binary]
-doc = "Holds the sha256 of the engine binary that last stayed up for daemon.healthy_after_s. The integrity script promotes that binary to the known-good copy; a binary with no entry here has never proven itself."
+doc = "Holds the sha256 of the engine binary that last stayed up for daemon.healthy_after_s. The integrity check promotes that binary to the known-good copy; a binary with no entry here has never proven itself."
 value = "healthy.binary"
 
 [files.crashloop_bin]
@@ -166,19 +166,19 @@ doc = "Holds the size, modification time and sha256 of the binary the crash-loop
 value = "crashloop.bin"
 
 [files.rollback_request]
-doc = "Written when the crash-loop rule trips on a binary with no healthy history: asks the integrity script to restore the known-good binary. Holds the sha256 of the binary to replace."
+doc = "Written when the crash-loop rule trips on a binary with no healthy history: asks the integrity check to restore the known-good binary. Holds the sha256 of the binary to replace."
 value = "rollback.request"
 
 [files.rollback_last]
-doc = "One line the integrity script writes when it rolls the engine binary back (time, reason, which binary was set aside). Shown by status and doctor."
+doc = "One line the integrity check writes when it rolls the engine binary back (time, reason, which binary was set aside). Shown by status and doctor."
 value = "rollback.last"
 
 [files.wrapper_fail_log]
-doc = "Epoch seconds, one per line, of the hook wrapper's engine failures (timeout, signal death, no answer). The integrity script counts them against rollback.fail_n."
+doc = "Epoch seconds, one per line, of the hook wrapper's engine failures (timeout, signal death, no answer). The integrity check counts them against rollback.fail_n."
 value = "wrapper.fails"
 
 [files.integrity_log]
-doc = "Log of the integrity script (checks, promotions, roll-backs), inside the state directory."
+doc = "Log of the integrity check (checks, promotions, roll-backs), inside the state directory."
 value = "integrity.log"
 
 
@@ -1105,8 +1105,8 @@ value = "defaults {file}: could not add missing {keys}: {err}"
 doc = "Printed by `config heal` when no edited defaults file lacks a setting of the pristine copy."
 value = "nothing to heal: the edited defaults have every setting of the pristine copy"
 
-# ---- binary integrity and roll-back (hooks/ah-engine-integrity.sh) ---------------------------------------------------------
-# The script is POSIX sh and reads these keys itself (awk over this file, like the hook wrapper), so a broken binary cannot stop it.
+# ---- binary integrity and roll-back (`ah-hook integrity`, ah-launcher/src/integrity.rs) ---------------------------------------------------------
+# The thin client (ah-hook) reads these keys itself, so a broken engine binary cannot stop it.
 
 [rollback.hash_chunk]
 doc = "Bytes read at a time when the engine hashes its own binary (sha256)."
@@ -1122,13 +1122,9 @@ value = " "
 doc = "Line terminator of the crash-loop binary record."
 value = "\n"
 
-[rollback.script]
-doc = "The integrity script, relative to the plugin root. verbs: record, accept, check, fail, status."
-value = "hooks/ah-engine-integrity.sh"
-
-[rollback.shell]
-doc = "The shell that runs the integrity script."
-value = "sh"
+[rollback.client]
+doc = "File name, in the binary directory (rollback.bin_dir) of the state directory, of the thin client (`ah-hook`) that runs the integrity verbs. The engine starts it with launcher.cli_integrity_verb and `check` after a crash-loop trip."
+value = "ah-hook"
 
 [rollback.on_mismatch]
 doc = "1 = a binary whose sha256 differs from the one the installer recorded (swapped by hand) and that has never run healthy is rolled back to the known-good binary at the next check. 0 = never roll back on a mismatch alone (a local build you are developing). `accept` records the installed binary as the expected one."
@@ -1178,7 +1174,7 @@ doc = "A binary set aside by a roll-back is renamed bin/ah-engine.rolledback-<UT
 value = ".rolledback-"
 
 [rollback.install_lock]
-doc = "Directory (inside the state directory) of the ONE lock every writer of the engine binary shares: the integrity script's check and roll-back, the bootstrap's and ah-update's install and roll-back, and the recording of the expected sha256. Taken and given back through the integrity script's lock and unlock verbs."
+doc = "Directory (inside the state directory) of the ONE lock every writer of the engine binary shares: the integrity check and roll-back, the bootstrap's and ah-update's install and roll-back, and the recording of the expected sha256. Taken and given back through `ah-hook integrity lock` and `unlock`."
 value = "install.lock"
 
 [rollback.lock_wait_s]
@@ -1193,11 +1189,42 @@ value = 2
 env = "AH_ENGINE_INSTALL_LOCK_HOOK_WAIT_S"
 unit = "s"
 
+[rollback.lock_poll_ms]
+doc = "How often a process waiting for the install lock looks at it again."
+value = 1000
+min = 10
+unit = "ms"
+
 [rollback.lock_stale_s]
 doc = "An install lock held longer than this is broken (one whose holder process is gone is broken at once). Longer than the slowest install: ah-update's go_live_timeout_s."
 value = 900
 env = "AH_ENGINE_INSTALL_LOCK_STALE_S"
 unit = "s"
+
+[rollback.lock_owner_file]
+doc = "Name of the file inside the install-lock directory that holds the owner token (\"<pid> <epoch>\" of the holder). Created only with a hard link and taken away only with a rename, so one taker wins."
+value = "owner"
+
+[rollback.log_max_bytes]
+doc = "The integrity log (files.integrity_log) is cut back to its last rollback.log_keep_lines lines once it is larger than this."
+value = 65536
+min = 1024
+unit = "bytes"
+
+[rollback.log_keep_lines]
+doc = "Lines the integrity log keeps when it is cut back."
+value = 200
+min = 1
+
+[rollback.fail_log_max_lines]
+doc = "The wrapper failure log (files.wrapper_fail_log) is cut back to its last rollback.fail_log_keep_lines lines once it has more lines than this."
+value = 200
+min = 1
+
+[rollback.fail_log_keep_lines]
+doc = "Lines the wrapper failure log keeps when it is cut back."
+value = 50
+min = 1
 
 [crash.closed_pipe_prefix]
 doc = "Start of the panic message Rust prints when a write to stdout or stderr fails; with `crash.closed_pipe_marker` it recognises a closed pipe (`ah-engine docs | head`), which is the reader leaving and not an engine crash."
@@ -1408,6 +1435,10 @@ value = "AH_LAUNCHER_STATS"
 doc = "Test-only: environment variable that replaces the engine binary (honoured only when the test flag is set)."
 value = "AH_ENGINE_BIN"
 
+[launcher.knob_integrity_park]
+doc = "Test-only: environment variable naming a path prefix; the integrity verbs stop at their race points (`validated`, `before_break`, `after_break`) while the file <prefix>.<point> exists, and create <prefix>.<point>.parked when they arrive. Honoured only when the test flag is set. It makes the install-lock interleavings deterministic."
+value = "AH_INTEGRITY_PARK"
+
 [launcher.knob_fallback_list]
 doc = "Test-only: environment variable that replaces the fallback list file."
 value = "AH_FALLBACK_LIST"
@@ -1460,9 +1491,9 @@ value = "ah-fallback.list"
 doc = "File name, inside the plugin's hooks directory, of the Codex fallback list."
 value = "ah-fallback.codex.list"
 
-[launcher.script_integrity]
-doc = "Integrity script in the plugin's hooks directory (failure counting and rollback)."
-value = "ah-engine-integrity.sh"
+[launcher.cli_integrity_verb]
+doc = "The ah-hook command-line verb that runs the binary integrity check and roll-back (`ah-hook integrity record|accept|check|fail|status|lock|unlock`); the launcher starts itself with it in the background."
+value = "integrity"
 
 [launcher.script_bootstrap]
 doc = "Bootstrap script in the plugin's hooks directory (installs the engine binary)."

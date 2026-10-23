@@ -676,11 +676,12 @@ else
   engine=$(command -v ah-engine 2>/dev/null || true)
 fi
 
-# The integrity script (ah-engine-integrity.sh) counts engine failures and rolls a damaged, never-healthy binary back to the known-good
+# The thin client's integrity verbs (`ah-hook integrity`) count engine failures and rolls a damaged, never-healthy binary back to the known-good
 # one. Detached and silent: it never delays the hook. Only for the installed engine, never for an AH_ENGINE_BIN test double.
 integrity_run() {
-  [ -z "${AH_ENGINE_BIN:-}" ] && [ -f "$dir/ah-engine-integrity.sh" ] || return 0
-  { sh "$dir/ah-engine-integrity.sh" "$1" </dev/null >/dev/null 2>&1 & } 2>/dev/null
+  ir_client=${AH_ENGINE_DIR:-"$HOME/.anti-hall/ah-engine"}/bin/ah-hook
+  [ -z "${AH_ENGINE_BIN:-}" ] && [ -x "$ir_client" ] || return 0
+  { "$ir_client" --plugin-root "$dir/.." integrity "$1" </dev/null >/dev/null 2>&1 & } 2>/dev/null
   return 0
 }
 

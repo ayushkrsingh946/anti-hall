@@ -144,7 +144,20 @@ impl L {
         if self.knob("launcher.knob_engine_bin").is_some() {
             return; // never for a test double
         }
-        self.detached(&self.key("launcher.script_integrity"), &[verb]);
+        // this very binary, in the background: `fail` and `check` may wait for the install lock, and the hook must not
+        let Ok(me) = std::env::current_exe() else { return };
+        let mut cmd = Command::new(me);
+        if let Some(r) = &self.plugin_root {
+            cmd.arg("--plugin-root").arg(r);
+        }
+        let _ = cmd
+            .arg(self.key("launcher.cli_integrity_verb"))
+            .arg(verb)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .process_group(0)
+            .spawn();
     }
 
     fn detached(&self, script_name: &str, args: &[&str]) {
@@ -849,6 +862,9 @@ pub fn run() -> i32 {
                 say(&s.text("msg.launcher_no_doctor"));
             }
             return 1;
+        }
+        Some(first) if first == s.text("launcher.cli_integrity_verb") => {
+            return crate::integrity::run(&s, &state_dir, &args[1..]);
         }
         Some(first) if cli::is_verb(&s, first) => {
             return cli::exec_engine(&s, &args, home.as_ref(), cfg_root.as_deref().or(root.as_deref()));

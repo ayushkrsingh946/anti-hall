@@ -48,7 +48,7 @@ value = "daemon died {n} times in {secs} s"
 
 [msg.log_rollback_request]
 doc = "Log detail when the crash-loop rule asks for a roll-back. Placeholder: {sha}."
-value = "binary {sha} never ran healthy; asked the integrity script to restore the known-good binary"
+value = "binary {sha} never ran healthy; asked the integrity check to restore the known-good binary"
 
 [msg.log_crashloop_rollback]
 doc = "Log detail added when a crash-loop trip also requested a roll-back."
@@ -794,6 +794,14 @@ value = "anti-hall: cannot run the Node fallback wrapper: {err}; the engine answ
 [msg.launcher_no_doctor]
 doc = "Printed by --doctor when the doctor script is missing."
 value = "anti-hall: ah-doctor.sh is missing next to ah-hook.sh; reinstall the plugin"
+
+[msg.launcher_integrity_usage]
+doc = "Printed by `ah-hook integrity` for a verb it does not know."
+value = "usage: ah-hook integrity record|accept|check|fail|status|lock TOKEN|unlock TOKEN"
+
+[msg.launcher_integrity_status]
+doc = "Printed by `ah-hook integrity status`. Placeholders: {binary}, {installed}, {expected}, {healthy}, {good}, {last} (the sha256s are empty when not known)."
+value = "binary    {binary}\ninstalled {installed}\nexpected  {expected}\nhealthy   {healthy}\ngood      {good}\nlast      {last}\n"
 
 [msg.launcher_doctor_failed]
 doc = "Printed by --doctor when the doctor script cannot be started; {err} is the reason."

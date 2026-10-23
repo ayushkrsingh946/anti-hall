@@ -93,6 +93,7 @@ pub const STRS: &[(&str, &str)] = &[
     ("launcher.run_spool_file", "payload"),
     ("launcher.stats_env", "AH_LAUNCHER_STATS"),
     ("launcher.knob_engine_bin", "AH_ENGINE_BIN"),
+    ("launcher.knob_integrity_park", "AH_INTEGRITY_PARK"),
     ("launcher.knob_fallback_list", "AH_FALLBACK_LIST"),
     ("launcher.knob_timeout_s", "AH_HOOK_TIMEOUT_S"),
     ("launcher.knob_timeout_ms", "AH_HOOK_TIMEOUT_MS"),
@@ -103,7 +104,7 @@ pub const STRS: &[(&str, &str)] = &[
     ("launcher.in_process_env", "AH_ENGINE_DISPATCH_IN_PROCESS"),
     ("launcher.fallback_list_claude", "ah-fallback.list"),
     ("launcher.fallback_list_codex", "ah-fallback.codex.list"),
-    ("launcher.script_integrity", "ah-engine-integrity.sh"),
+    ("launcher.cli_integrity_verb", "integrity"),
     ("launcher.script_bootstrap", "ah-engine-bootstrap.sh"),
     ("launcher.script_hook", "ah-hook.sh"),
     ("launcher.script_doctor", "ah-doctor.sh"),
@@ -173,6 +174,14 @@ pub const STRS: &[(&str, &str)] = &[
     (
         "msg.launcher_config_invalid",
         "defaults file unusable, built-in values used: {file}",
+    ),
+    (
+        "msg.launcher_integrity_usage",
+        "usage: ah-hook integrity record|accept|check|fail|status|lock TOKEN|unlock TOKEN",
+    ),
+    (
+        "msg.launcher_integrity_status",
+        "binary    {binary}\ninstalled {installed}\nexpected  {expected}\nhealthy   {healthy}\ngood      {good}\nlast      {last}\n",
     ),
     ("msg.launcher_selftest_ok", "ok {check}"),
     (

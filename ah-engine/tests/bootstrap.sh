@@ -206,18 +206,25 @@ t_version_check_gets_the_plugin_root() {
   [ -x "$(engine)" ] && logf | grep -q 'ok: installed ah-engine 9.8.6'
 }
 
-# The install lock is shared with the integrity script and ah-update: while another holder keeps it, the bootstrap installs nothing
+# The install lock is shared with the integrity check and ah-update: while another holder keeps it, the bootstrap installs nothing
 # and records no failed attempt (no rate limit); once it is free the install runs under it, records the expected sha256 and frees it.
 t_shared_install_lock() {
   newhome ilock; write_lock "$tmp/lock" "$ver" "$triple" "$good"
-  st=$HOME/.anti-hall/ah-engine; integ=$repo/plugins/anti-hall/hooks/ah-engine-integrity.sh
-  mkdir -p "$st"
+  st=$HOME/.anti-hall/ah-engine
+  # the thin client (built: ah-launcher/target/{release,debug}/ah-hook, or AH_HOOK_BIN) sits in the state's bin/ like the installed one
+  hookbin=${AH_HOOK_BIN:-}
+  for c in "$repo/ah-launcher/target/release/ah-hook" "$repo/ah-launcher/target/debug/ah-hook"; do
+    [ -n "$hookbin" ] || { [ -x "$c" ] && hookbin=$c; }
+  done
+  [ -x "$hookbin" ] || { echo "no ah-hook binary: build ah-launcher or set AH_HOOK_BIN" >&2; return 1; }
+  mkdir -p "$st/bin"; cp "$hookbin" "$st/bin/ah-hook"; chmod 755 "$st/bin/ah-hook"
+  integ="$st/bin/ah-hook --plugin-root $repo/plugins/anti-hall integrity"
   sleep 60 & h=$!; tok="$h $(date +%s)"
-  AH_ENGINE_DIR=$st sh "$integ" lock "$tok" || { kill "$h"; return 1; }
+  AH_ENGINE_DIR=$st $integ lock "$tok" || { kill "$h"; return 1; }
   AH_ENGINE_INSTALL_LOCK_WAIT_S=1 run || { kill "$h"; return 1; }
   held_ok=1
   { [ ! -e "$(engine)" ] && [ ! -f "$st/bootstrap.attempt" ] && logf | grep -q 'install lock is held'; } || held_ok=0
-  AH_ENGINE_DIR=$st sh "$integ" unlock "$tok"; kill "$h" 2>/dev/null; wait "$h" 2>/dev/null
+  AH_ENGINE_DIR=$st $integ unlock "$tok"; kill "$h" 2>/dev/null; wait "$h" 2>/dev/null
   [ "$held_ok" -eq 1 ] || return 1
   run || return 1
   [ -x "$(engine)" ] && [ "$(sed -n 1p "$st/bin/ah-engine.expected")" = "$(sha_of "$(engine)")" ] && [ ! -e "$st/install.lock" ]

@@ -1268,9 +1268,9 @@ judgement calls do.
   binary that did so is copied to `bin/ah-engine.good`. The installers (bootstrap, `ah-update.sh`) record the sha256 they
   installed as the expected one. When the installed binary differs from the expected sha256, has never run healthy and is
   failing (a crash-loop trip, or `rollback.fail_n` hook-wrapper failures in `rollback.fail_window_s`),
-  `hooks/ah-engine-integrity.sh` renames it to `bin/ah-engine.rolledback-<UTC time>-<sha8>` (never deleted) and restores the
+  the thin client (`ah-hook integrity`) renames it to `bin/ah-engine.rolledback-<UTC time>-<sha8>` (never deleted) and restores the
   known-good copy. A binary that ran healthy, or that matches the expected sha256, is never touched. `rollback.on_mismatch = 0`
-  turns it off. `sh hooks/ah-engine-integrity.sh status` shows what is known.
+  turns it off. `ah-hook integrity status` shows what is known.
 - **Resource caps.** Bounded worker pool and queue (overflow answers busy, which means fallback), a per-request CPU budget,
   an RSS cap that restarts the daemon cleanly, `nice`, and per-session and per-project rate limits.
 - **Security.** The socket is mode 0600 in a private 0700 directory the daemon owner-checks; the peer's uid is checked;
@@ -1689,7 +1689,7 @@ An offline build from the vendored source tarball published with each release us
 
 Copy your build to `~/.anti-hall/ah-engine/bin/ah-engine`. The wrapper uses the binary at that path, and the bootstrap never
 overwrites a binary it did not install (it checks the marker `bootstrap.installed` and the recorded binary sha256), so a local
-build stays until you delete it. Run `sh <plugin>/hooks/ah-engine-integrity.sh accept` after copying it: that records it as the
+build stays until you delete it. Run `ah-hook integrity accept` after copying it: that records it as the
 expected binary and vouches for it, so a crash-looping build you are developing is never swapped for the known-good one. A binary-path override exists for the test suite only and is ignored otherwise.
 
 ## Verifying release artifacts

@@ -172,9 +172,9 @@ fn every_key_the_source_reads_is_shipped_and_every_shipped_key_is_read() {
             || k == "files.unreachable_notice" // the wrapper's and the launcher's once-per-session stamp of the engine-unreachable notice
             || k == "msg.engine_unreachable_notice" // that notice's text (read by hooks/ah-hook.sh and by the launcher)
             || k == "msg.run_engine_missing" // the text the thin client (`ah-hook <verb>`) prints when no engine can run its command
-            || k.starts_with("rollback.") // the integrity script (`hooks/ah-engine-integrity.sh`) reads its names and thresholds itself; the engine reads only script and shell
-            || k == "files.integrity_log" // written by that script
-            || k == "files.wrapper_fail_log" // written by that script, from the hook wrapper's failure reports
+            || k.starts_with("rollback.") // the thin client (`ah-hook integrity`, ah-launcher) reads its names and thresholds itself; the engine reads only the client name
+            || k == "files.integrity_log" // written by the thin client (`ah-hook integrity`)
+            || k == "files.wrapper_fail_log" // written by the thin client, from its failure reports
             || k.starts_with("dispatch.hooks_") // the dispatch table, read by host and event (dispatch::table::key)
             || k == "script.p95_budget_by_check" // read by tests/script_latency.rs, the go/no-go gate of the scripted checks
             || k.starts_with("procwatch.mode_") // each orphan class names its mode setting by key (procwatch.classes mode_key)
