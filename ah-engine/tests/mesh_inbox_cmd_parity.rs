@@ -388,7 +388,7 @@ fn cases(fx: &Fx) -> Vec<Case> {
     v.push(from_main);
     // ---- peek-primary: deferred ----
     v.push(base("peek-text-format", cmd("peek-primary", "child-1", &["--format", "text"]), ack(floors("child-1", 0, 0), d_store.clone()), nothing(), false, vec![]));
-    v.push(base("peek-no-descriptor", cmd("peek-primary", "ghost", &[]), ack(floors("child-1", 0, 0), d_store.clone()), nothing(), false, vec![]));
+    v.push(base("peek-no-descriptor", cmd("peek-primary", "ghost", &[]), ack(floors("child-1", 0, 0), d_store.clone()), nothing(), true, vec!["unregistered-workspace"]));
     // ---- ack: native ----
     let pid = i64::from(std::process::id());
     let session = json!({"sessions": [{"pid": pid, "startedAt": OLD}]});
@@ -462,6 +462,27 @@ fn cases(fx: &Fx) -> Vec<Case> {
             vec!["no-inbox-path"],
         ));
     }
+    // ---- a mesh group: the workspace and a twin row on the same worktree ----
+    let twin = {
+        let wt = wt.clone();
+        move |h: &Path| json!({"rows": floors("child-1", 0, 0), "descriptors": d_inbox_fn(h, &wt), "registry": [{"id": "child-1b", "worktreePath": wt.to_string_lossy(), "sessionId": "child-1b"}]})
+    };
+    let twin_mail = |n: usize| -> Spec {
+        let text = text3.clone();
+        Box::new(move |_| {
+            let mesh: Vec<Value> = (0..n).map(|i| json!({"to": "child-1b", "from": "child-1", "ts": 1_790_000_100_000_i64 + i as i64, "hash": format!("mesh:twin{i}"), "message": format!("for the twin {i}")})).collect();
+            json!({"files": [{"rel": "inbox/child-1.ndjson", "text": text.clone()}, {"rel": "cursors-nd/child-1.txt", "text": "0"}], "mesh": mesh})
+        })
+    };
+    for verb in ["count", "read", "ack"] {
+        let name: &'static str = Box::leak(format!("{verb}-mesh-group-with-twin-mail").into_boxed_str());
+        // (the group's mesh label resolves to the twin here, so an ack is the owner override's)
+        let own: &[&str] = if verb == "ack" { &["--ack-as-owner"] } else { &[] };
+        v.push(base(name, cmd(verb, "child-1", own), Box::new(twin.clone()), twin_mail(3), true, vec!["child-1b"]));
+        let lim: &'static str = Box::leak(format!("{verb}-mesh-group-limit-3").into_boxed_str());
+        v.push(base(lim, cmd(verb, "child-1", &[own, &["--limit", "3"]].concat()), Box::new(twin.clone()), twin_mail(3), true, vec!["child-1b"]));
+    }
+    v.push(base("count-mesh-group-nothing-for-the-twin", cmd("count", "child-1", &[]), Box::new(twin.clone()), twin_mail(0), true, vec!["child-1b"]));
     // ---- count: deferred ----
     v.push(base("count-no-descriptor", cmd("count", "ghost", &[]), ack(floors("child-1", 0, 0), d_inbox.clone()), inbox(text3.clone()), true, vec!["unregistered-workspace"]));
     v.push(base("read-no-descriptor", cmd("read", "ghost", &[]), ack(floors("child-1", 0, 0), d_inbox.clone()), inbox(text3.clone()), true, vec!["unregistered-workspace"]));
@@ -541,7 +562,7 @@ fn ack_primary_applies_the_ndjson_op_of_a_receipt_like_node() {
     }
     let fx = fixture("ican");
     let nonode = no_node_path(&fx.root);
-    let list: Vec<Case> = cases(&fx).into_iter().filter(|c| c.name.starts_with("ack-") && c.native && c.name != "ack-as-owner-flag" && c.name != "ack-unknown-no-inbox-files").collect();
+    let list: Vec<Case> = cases(&fx).into_iter().filter(|c| ["ack-3-ndjson-and-store-unread", "ack-partly-read", "ack-all-read", "ack-empty-inbox-store-rows", "ack-declared-reader"].contains(&c.name)).collect();
     assert!(list.len() >= 4, "{}", list.len());
     for (i, c) in list.iter().enumerate() {
         let now = NOW + i as i64 * 7_919;

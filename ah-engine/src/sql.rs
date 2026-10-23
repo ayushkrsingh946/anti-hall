@@ -476,6 +476,10 @@ pub const RT_BC_ALL: &str = "SELECT value FROM broadcast_cursors";
 pub const RT_BC_ONE: &str = "SELECT value FROM broadcast_cursors WHERE workspace_id = ?1";
 /// The registry rows (id and NDJSON inbox path).
 pub const RT_REGISTRY: &str = "SELECT id, inbox_path FROM registry ORDER BY id ASC";
+/// A message row's hash and whether its body is a tombstone (retention restore).
+pub const RT_RESTORE_GET: &str = "SELECT hash, body IS NULL AS tomb FROM messages WHERE id = ?1;";
+/// Puts an archived body back into a tombstoned row (retention restore).
+pub const RT_RESTORE_SET: &str = "UPDATE messages SET body = ?1 WHERE id = ?2 AND body IS NULL;";
 /// A partition's reader cursor rows.
 pub const RT_READER_ROWS: &str = "SELECT ns, reader, value, retired_line FROM reader_cursors WHERE partition = ?1";
 /// A partition's store-namespace reader rows (the in-transaction bound).

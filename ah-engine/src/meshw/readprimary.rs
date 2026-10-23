@@ -34,7 +34,7 @@ use crate::meshw::ident::{self, R, defer};
 use crate::meshw::idlock::{devswarm_root, is_safe_id};
 use crate::meshw::send::{Answer, Effect, resolve_mesh_target};
 use crate::meshw::store::RegistryRow;
-use crate::meshw::{cursors, tick, union};
+use crate::meshw::{cursors, meshgroup, tick, union};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
@@ -103,6 +103,9 @@ struct Msg {
     hash: Option<String>,
     /// Sent by the reader's own identity family: counted out of the unread and left out of the list (the ack still walks it).
     own: bool,
+    /// Where the row came from (`own`, `ndjson`, or `sibling:<partition>`) and its position in that source (the cap's bookkeeping).
+    src: String,
+    src_idx: usize,
 }
 
 /// A row of the store partition, in `listMessages`' key order (`origin` first in a union read).
@@ -135,6 +138,8 @@ fn store_msg(r: &Value, origin: bool) -> Msg {
         hash: r["hash"].as_str().map(str::to_string),
         fields: o,
         own: false,
+        src: "own".to_string(),
+        src_idx: 0,
     }
 }
 
@@ -187,7 +192,7 @@ fn ndjson_msg(line: &str) -> R<Msg> {
         .put("body", OVal::Str(body))
         .put("sender", common::s_or_null(sender.as_deref()))
         .put("status", status);
-    Ok(Msg { sort_ts: ts.unwrap_or(f64::INFINITY), index: None, hash, fields: o, own: false })
+    Ok(Msg { sort_ts: ts.unwrap_or(f64::INFINITY), index: None, hash, fields: o, own: false, src: "ndjson".to_string(), src_idx: 0 })
 }
 
 /// The per-row additions of the read, in Node's order: the forward marker, the instance digest, `from`/`text`/`kind`,
@@ -535,6 +540,265 @@ pub(crate) fn window_refusal(inv: &Inv, a: &Args, id: &str, sub: &str) -> R<Opti
     Ok(Some(Answer { code: 2, stdout: format!("{stdout}\n"), effect: Effect::None }))
 }
 
+/// `read-primary` of an id that has no descriptor, by a caller that does not own it: Node's `unregistered-workspace` (or the caller-
+/// shaped) refusal, exit 2, logged. `None` when this is not that case (the id has a descriptor, a flag or a shape the port does not
+/// answer): the read goes on and defers what it cannot do. A case that needs a redirect, a resolved other id or the empty partition of
+/// the caller's own id is Node's.
+fn unowned_refusal(inv: &Inv, a: &Args, id: &str) -> R<Option<Answer>> {
+    if a.is_help() || a.positionals.len() != 3 || ident::read_descriptor(&inv.home, id).is_some() || a.has(defaults::text("mesh_write.flag_ack_as_owner")) {
+        return Ok(None);
+    }
+    if text_requested(&a.raw) {
+        return Ok(None);
+    }
+    let Some(repo_key) = ident::resolve_context(&inv.cwd, true)?.repo_key else { return defer("no-project") };
+    let reader = tick::open_reader_creating(inv, &repo_key)?;
+    let rows = ident::rows_of(&reader.roster().map_err(|e| ident::Defer(format!("registry:{e}")))?);
+    if rows.iter().any(|r| r.id == id) {
+        return Ok(None); // registered without a descriptor: the read below decides
+    }
+    let caller = ident::caller_identity_detailed(&inv.env, &inv.cwd)?;
+    let own_entry = resolve_mesh_target(inv, Some(&reader), &rows, Some(caller.identity.as_str()))?;
+    let owns = caller.identity == id || own_entry.as_ref().is_some_and(|e| e.id == id) || ident::declared_self_id(&inv.env, &inv.cwd, &rows)?.as_deref() == Some(id);
+    if owns {
+        return Ok(None); // the caller's own id, not registered yet: an empty partition, read by the plan below
+    }
+    let has_messages = reader.message_count(id).map_err(|e| ident::Defer(format!("store-read:{e}")))? > 0;
+    let cause = if !has_messages {
+        defaults::text("devswarm_cli.cause_unregistered_workspace")
+    } else if caller.kind == defaults::text("mesh_write.kind_unresolvable") {
+        defaults::text("devswarm_cli.cause_unresolvable_caller")
+    } else if own_entry.is_none() {
+        defaults::text("devswarm_cli.cause_caller_not_registered")
+    } else {
+        defaults::text("devswarm_cli.cause_ownership_mismatch")
+    };
+    let verb = defaults::text("mesh_write.action_read_primary");
+    let msg = fill_once(defaults::text("devswarm_cli.msg_read_primary_refused"), &[("verb", verb.to_string()), ("cause", cause.to_string()), ("id", format!("\"{id}\"")), ("rid", id.to_string())]);
+    let store_path = union::store_dir(&inv.home, &repo_key);
+    let mut o = Obj::default();
+    o.put("ok", OVal::Bool(false))
+        .put("reason", s(cause))
+        .put("error", s(&msg))
+        .put("id", s(id))
+        .put("callerIdentity", s(&caller.identity))
+        .put("identity", Obj(vec![("id".into(), s(&caller.identity)), ("kind".into(), s(&caller.kind))]).done())
+        .put("repoKey", s(&repo_key))
+        .put("storePath", OVal::Str(store_path.to_string_lossy().into_owned()))
+        .put("cwd", s(&inv.cwd))
+        .put("meshPartitionIds", OVal::Arr(vec![s(id)]))
+        .put("known", OVal::Bool(false))
+        .put("storeUnavailable", OVal::Bool(false))
+        .put("storeUnavailableReason", OVal::Null)
+        .put("meshGroupUnresolved", OVal::Bool(false))
+        .put("meshGroupError", OVal::Null)
+        .put("totalsPartial", OVal::Bool(true));
+    crate::meshw::clog::ready(inv)?;
+    crate::meshw::clog::refusal(inv, defaults::text("devswarm_cli.window_op_read_primary"), Some(&repo_key), Some(id), &msg, Some(cause));
+    crate::meshw::mark_committed();
+    Ok(Some(Answer { code: 2, stdout: format!("{}\n", o.done().stringify()), effect: Effect::None }))
+}
+
+/// `peek-primary` of an id nothing knows (no descriptor, no registry row, no messages): the existence guard of the non-acking read
+/// refuses it, exit 2, logged. (An acking read has no such guard: it opens the caller's own empty partition.) `None` when the id is
+/// known in any way or the shape is one the port does not answer.
+fn peek_refusal(inv: &Inv, a: &Args, id: &str) -> R<Option<Answer>> {
+    if a.is_help() || a.positionals.len() != 3 || ident::read_descriptor(&inv.home, id).is_some() {
+        return Ok(None);
+    }
+    let Some(repo_key) = ident::resolve_context(&inv.cwd, true)?.repo_key else { return defer("no-project") };
+    let reader = tick::open_reader_creating(inv, &repo_key)?;
+    let rows = ident::rows_of(&reader.roster().map_err(|e| ident::Defer(format!("registry:{e}")))?);
+    if rows.iter().any(|r| r.id == id || r.id.starts_with(id)) || reader.message_count(id).map_err(|e| ident::Defer(format!("store-read:{e}")))? > 0 {
+        return Ok(None);
+    }
+    let cause = defaults::text("mesh_write.reason_unregistered");
+    let msg = defaults::render("mesh_write.msg_unregistered", &[("id", &OVal::Str(id.to_string()).stringify())]);
+    let mut o = Obj::default();
+    o.put("repoKey", s(&repo_key))
+        .put("storePath", OVal::Null)
+        .put("cwd", s(&inv.cwd))
+        .put("meshPartitionIds", OVal::Arr(vec![s(id)]))
+        .put("known", OVal::Bool(false))
+        .put("storeUnavailable", OVal::Bool(false))
+        .put("storeUnavailableReason", OVal::Null)
+        .put("meshGroupUnresolved", OVal::Bool(false))
+        .put("meshGroupError", OVal::Null)
+        .put("totalsPartial", OVal::Bool(true))
+        .put("reason", s(cause))
+        .put("ok", OVal::Bool(false))
+        .put("id", s(id))
+        .put("error", s(&msg));
+    crate::meshw::clog::ready(inv)?;
+    crate::meshw::clog::refusal(inv, &format!("{}{}", defaults::text("devswarm_cli.window_op_prefix"), defaults::text("mesh_write.verb_peek_primary")), Some(&repo_key), Some(id), &msg, Some(cause));
+    crate::meshw::mark_committed();
+    Ok(Some(Answer { code: 2, stdout: format!("{}\n", o.done().stringify()), effect: Effect::None }))
+}
+
+/// What the sibling partitions of a mesh group added to a read.
+#[derive(Default)]
+struct Siblings {
+    parts: Vec<SiblingPart>,
+    /// `messageCount` of every sibling, added to the total.
+    added_total: f64,
+    /// Rows delivered from siblings.
+    added_unread: usize,
+    /// Delivered sibling rows the reader's own family sent (dropped from the list, so out of the unread too).
+    own_dropped: usize,
+    gap_withheld: usize,
+    never_read_withheld: usize,
+    never_read_ids: Vec<String>,
+}
+
+/// One sibling partition as the ack needs it.
+struct SiblingPart {
+    id: String,
+    cursor: f64,
+    since: f64,
+    delivered_count: usize,
+    consumed_through: Vec<f64>,
+    consumed_count: f64,
+}
+
+/// The row a [`Msg`] prints, as plain JSON (for the duplicate check).
+fn msg_value(m: &Msg) -> Value {
+    serde_json::from_str(&Obj(m.fields.0.clone()).done().stringify()).unwrap_or(Value::Null)
+}
+
+/// The unread rows of the sibling partitions of the group (`cmdInboxMessagesInner`'s mesh widening for an acking read): each from its
+/// read position (the further of its base and the watermark the caller left), at most the never-read cap per partition, rows already
+/// delivered elsewhere in the group left out, the rest merged into `msgs` by time.
+fn read_siblings(inv: &Inv, o: &tick::Opened, group: &meshgroup::Group, id: &str, store_base: f64, msgs: &mut Vec<Msg>) -> R<Siblings> {
+    let floor_pos = |x: f64| if x.is_finite() && x > 0.0 { x.floor() } else { 0.0 };
+    let family = tick::family_of(id, &o.rows);
+    let cap = defaults::num("mesh_write.never_read_sibling_cap") as usize;
+    let mut out = Siblings::default();
+    let mut fetched: Vec<(SiblingPart, Vec<Value>)> = Vec::new();
+    for pid in group.ids.iter().filter(|p| p.as_str() != id) {
+        let cursor = meshgroup::base_cursor(inv, &o.reader, pid)?;
+        let since = cursor.max(meshgroup::seen_cursor(inv, id, pid));
+        let total = o.reader.message_count(pid).map_err(|e| ident::Defer(format!("store-read:{e}")))?;
+        let mut rows: Vec<Value> = Vec::new();
+        o.reader
+            .for_each_message(pid, floor_pos(since) as u64, |m| {
+                rows.push(m);
+                true
+            })
+            .map_err(|e| ident::Defer(format!("store-read:{e}")))?;
+        if rows.len() > cap {
+            out.never_read_withheld += rows.len() - cap;
+            out.never_read_ids.push(pid.clone());
+            rows.truncate(cap); // a structural prefix: the ack advances exactly this far
+        }
+        out.added_total += total as f64;
+        fetched.push((SiblingPart { id: pid.clone(), cursor, since, delivered_count: 0, consumed_through: Vec::new(), consumed_count: 0.0 }, rows));
+    }
+    if fetched.is_empty() {
+        return Ok(out);
+    }
+    let mut dedup = meshgroup::Dedup::seed(&o.reader, id, store_base)?;
+    for m in msgs.iter() {
+        dedup.note_shown(&msg_value(m));
+    }
+    let mut added: Vec<Msg> = Vec::new();
+    for (mut part, rows) in fetched {
+        let folded = dedup.fold(inv, rows);
+        out.gap_withheld += folded.gap_withheld;
+        part.delivered_count = folded.delivered.len();
+        part.consumed_through = folded.consumed_through.clone();
+        part.consumed_count = folded.consumed_count;
+        for (row, pos) in folded.delivered.iter().zip(&folded.delivered_idx) {
+            let base = store_msg(row, false);
+            let mut fields = Obj::default();
+            fields.put("partitionId", s(&part.id));
+            for (k, v) in &base.fields.0 {
+                fields.put(k, v.clone());
+            }
+            let mut m = Msg { fields, ..base };
+            m.own = row["sender"].as_str().is_some_and(|f| family.contains(f));
+            m.src = format!("sibling:{}", part.id);
+            m.src_idx = *pos;
+            if m.own {
+                out.own_dropped += 1;
+            }
+            added.push(m);
+        }
+        out.parts.push(part);
+    }
+    out.added_unread = added.len();
+    if !added.is_empty() {
+        msgs.extend(added);
+        // Array#sort is stable and a non-finite `ts` sorts last
+        msgs.sort_by(|x, y| if x.sort_ts == y.sort_ts { std::cmp::Ordering::Equal } else { x.sort_ts.partial_cmp(&y.sort_ts).unwrap_or(std::cmp::Ordering::Equal) });
+    }
+    Ok(out)
+}
+
+/// Where a `read-primary <id>` really reads (`cmdInbox`'s id resolution and `cmdInboxMessagesInner`'s retired-redirect hop).
+enum Settled {
+    /// Read `id`; `redirected_from` is the folded id the caller addressed, `resolved_from` the label or prefix it resolved from.
+    Go { id: String, redirected_from: Option<String>, resolved_from: Option<String> },
+    /// Node's refusal (ambiguous address).
+    Refuse(Answer),
+}
+
+/// `retiredTo` of `retired/<id>.json`: the survivor a fold-retired id was merged into.
+fn read_retired_redirect(inv: &Inv, id: &str) -> Option<String> {
+    if !is_safe_id(id) {
+        return None;
+    }
+    let p = devswarm_root(&inv.home).join(defaults::text("devswarm_cli.rr_dir_retired")).join(format!("{id}{}", defaults::text("mesh_write.json_suffix")));
+    let j = OVal::parse(&String::from_utf8_lossy(&std::fs::read(p).ok()?))?;
+    match j.get(defaults::text("devswarm_cli.rr_field_retired_to")) {
+        Some(OVal::Str(t)) if !t.is_empty() => Some(t.clone()),
+        Some(OVal::Num(x)) => Some(to_js_string(*x)),
+        _ => None,
+    }
+}
+
+fn settle_target(inv: &Inv, a: &Args, id: &str) -> R<Settled> {
+    let same = || Settled::Go { id: id.to_string(), redirected_from: None, resolved_from: None };
+    if a.is_help() || a.positionals.len() != 3 || ident::read_descriptor(&inv.home, id).is_some() {
+        return Ok(same());
+    }
+    let Some(repo_key) = ident::resolve_context(&inv.cwd, true)?.repo_key else { return Ok(same()) };
+    let reader = tick::open_reader_creating(inv, &repo_key)?;
+    let rows = ident::rows_of(&reader.roster().map_err(|e| ident::Defer(format!("registry:{e}")))?);
+    if let Some(to) = read_retired_redirect(inv, id) {
+        // a redirect is a hint, never proof the id stayed dead: a live registry row of the id reads as itself
+        if to == id || rows.iter().any(|r| r.id == id) {
+            return Ok(same());
+        }
+        if !is_safe_id(&to) {
+            return defer("redirect-shape");
+        }
+        return Ok(Settled::Go { id: to, redirected_from: Some(id.to_string()), resolved_from: None });
+    }
+    match crate::meshw::send::resolve_read_arg(inv, &reader, &rows, id)? {
+        crate::meshw::send::ReadArg::Same => Ok(same()),
+        crate::meshw::send::ReadArg::To(to) => {
+            if !is_safe_id(&to) {
+                return defer("resolved-shape");
+            }
+            Ok(Settled::Go { id: to, redirected_from: None, resolved_from: Some(id.to_string()) })
+        }
+        crate::meshw::send::ReadArg::Ambiguous(ids) => {
+            let list = OVal::Arr(ids.iter().map(|x| s(x)).collect());
+            let msg = fill_once(
+                defaults::text("devswarm_cli.msg_read_arg_ambiguous"),
+                &[("verb", defaults::text("mesh_write.action_read_primary").to_string()), ("id", format!("\"{id}\"")), ("candidates", list.stringify())],
+            );
+            let reason = defaults::text("devswarm_cli.reason_ambiguous_target");
+            let mut o = Obj::default();
+            o.put("ok", OVal::Bool(false)).put("id", s(id)).put("reason", s(reason)).put("error", s(&msg)).put("candidates", list);
+            crate::meshw::clog::ready(inv)?;
+            crate::meshw::clog::refusal(inv, defaults::text("devswarm_cli.window_op_read_primary"), Some(&repo_key), Some(id), &msg, Some(reason));
+            crate::meshw::mark_committed();
+            Ok(Settled::Refuse(Answer { code: 2, stdout: format!("{}\n", o.done().stringify()), effect: Effect::None }))
+        }
+    }
+}
+
 /// What the first pass found out about a promotion the row needs (made after that pass has settled every deferral).
 struct PromoCtx {
     desc: OVal,
@@ -581,13 +845,42 @@ fn run_mode(inv: &Inv, a: &Args, peek: bool) -> R<Answer> {
     {
         return Ok(refused);
     }
-    let mut first = plan(inv, a, None, peek)?;
+    let mut redirect = Redirect::default();
+    let mut shifted: Option<Args> = None;
+    if let Some(id) = a.positionals.get(2).map(String::as_str).filter(|i| is_safe_id(i)) {
+        match settle_target(inv, a, id)? {
+            Settled::Refuse(ans) => return Ok(ans),
+            Settled::Go { id: eff, redirected_from, resolved_from } => {
+                if eff != id {
+                    let mut b = a.clone();
+                    b.positionals[2] = eff;
+                    shifted = Some(b);
+                }
+                redirect = Redirect { redirected_from, resolved_from };
+            }
+        }
+    }
+    let a = shifted.as_ref().unwrap_or(a);
+    // (a peek acks nothing, so it has no ownership gate; its existence guard refuses an id nothing knows)
+    if peek
+        && let Some(id) = a.positionals.get(2).map(String::as_str).filter(|i| is_safe_id(i))
+        && let Some(refused) = peek_refusal(inv, a, id)?
+    {
+        return Ok(refused);
+    }
+    if !peek
+        && let Some(id) = a.positionals.get(2).map(String::as_str).filter(|i| is_safe_id(i))
+        && let Some(refused) = unowned_refusal(inv, a, id)?
+    {
+        return Ok(refused);
+    }
+    let mut first = plan(inv, a, None, &redirect, peek)?;
     let planned = match first.promo.take() {
         None => first,
         Some(pc) => {
             let classic = promote(inv, a, &pc.desc, pc.desc_sid.as_deref(), pc.registry_sid.as_deref(), &pc.marker, &pc.repo_key)?;
             // the writes are made: from here a deferral is a committed failure, never a second run in Node
-            plan(inv, a, classic, peek)?
+            plan(inv, a, classic, &redirect, peek)?
         }
     };
     if peek {
@@ -621,7 +914,14 @@ fn run_mode(inv: &Inv, a: &Args, peek: bool) -> R<Answer> {
 }
 
 /// The read itself (see [`run`]). `promoted` is `Some(classic)` on the pass that follows a promotion.
-fn plan(inv: &Inv, a: &Args, promoted: Option<bool>, peek: bool) -> R<Planned> {
+/// The hops a read took to its id, reported on the result.
+#[derive(Default)]
+struct Redirect {
+    redirected_from: Option<String>,
+    resolved_from: Option<String>,
+}
+
+fn plan(inv: &Inv, a: &Args, promoted: Option<bool>, hops: &Redirect, peek: bool) -> R<Planned> {
     if a.is_help() {
         return defer("help");
     }
@@ -647,7 +947,9 @@ fn plan(inv: &Inv, a: &Args, promoted: Option<bool>, peek: bool) -> R<Planned> {
         Some(_) => return defer("json-value"),
     };
     // ---- reads: everything that can defer happens before the receipt is written ----
-    let Some(desc) = ident::read_descriptor(&inv.home, id) else { return defer("no-descriptor") };
+    // an id with no descriptor reads as Node's `desc = null`: no NDJSON inbox, no session, no registered project (a descriptor with none of
+    // those is the same read), so the store is the only side
+    let desc = ident::read_descriptor(&inv.home, id).unwrap_or_else(|| OVal::Obj(vec![(defaults::text("mesh_write.field_id").to_string(), s(id))]));
     if !matches!(desc.get(defaults::text("mesh_write.field_id")), Some(OVal::Str(d)) if d == id) {
         return defer("descriptor-id");
     }
@@ -670,7 +972,7 @@ fn plan(inv: &Inv, a: &Args, promoted: Option<bool>, peek: bool) -> R<Planned> {
         marker: marker.clone(),
         repo_key: o.repo_key.clone(),
     });
-    tick::single_partition(&o.rows, &desc, id)?;
+    let group = meshgroup::resolve(&o.rows, id, meshgroup::worktree_of(&o.rows, id, union::path_field(&desc, defaults::text("mesh_write.field_worktree_path"))?.as_deref()).as_deref())?;
     // the ownership gate of an acking read: the caller is the id, owns it by its registry row, or declared it
     // (a peek acks nothing, so it has no ownership gate: any caller may look)
     if !peek {
@@ -693,7 +995,7 @@ fn plan(inv: &Inv, a: &Args, promoted: Option<bool>, peek: bool) -> R<Planned> {
         .map_or(defaults::num("mesh_write.inbox_read_limit") as usize, |x| x.floor().max(1.0) as usize);
     let floor_pos = |x: f64| if x.is_finite() && x > 0.0 { x.floor() } else { 0.0 };
     let mut msgs: Vec<Msg> = Vec::new();
-    let (unread_count, total_out);
+    let (mut unread_count, mut total_out);
     let mut union_cursors: Option<(f64, f64)> = None;
     let mut nd_op_target: Option<f64> = None;
     if let Some(inbox) = &inbox {
@@ -708,14 +1010,16 @@ fn plan(inv: &Inv, a: &Args, promoted: Option<bool>, peek: bool) -> R<Planned> {
         let u = counted.union;
         let merged_total = union::merged_total(&input)?;
         let family = tick::family_of(id, &o.rows);
-        for line in &u.nd_unread_lines {
+        for (i, line) in u.nd_unread_lines.iter().enumerate() {
             let mut m = ndjson_msg(line)?;
             m.own = union::line_sender(line).is_some_and(|x| family.contains(&x));
+            m.src_idx = i;
             msgs.push(m);
         }
-        for r in &u.store_only_unread {
+        for (i, r) in u.store_only_unread.iter().enumerate() {
             let mut m = store_msg(r, true);
             m.own = r.get("sender").and_then(Value::as_str).is_some_and(|x| family.contains(x));
+            m.src_idx = i;
             msgs.push(m);
         }
         // Array#sort is stable and a non-finite `ts` sorts last (a pair of them compares equal)
@@ -735,6 +1039,7 @@ fn plan(inv: &Inv, a: &Args, promoted: Option<bool>, peek: bool) -> R<Planned> {
             .for_each_message(id, floor_pos(store_base) as u64, |m| {
                 let mut x = store_msg(&m, false);
                 x.own = m["sender"].as_str().is_some_and(|f| family.contains(f));
+                x.src_idx = msgs.len();
                 msgs.push(x);
                 true
             })
@@ -746,11 +1051,37 @@ fn plan(inv: &Inv, a: &Args, promoted: Option<bool>, peek: bool) -> R<Planned> {
         unread_count = ((total_store as f64 - store_base).max(0.0) - own_unread as f64).max(0.0);
         total_out = total_store as f64;
     }
+    // ---- the sibling partitions of the mesh group ----
+    let mut sibs = Siblings::default();
+    if group.active {
+        sibs = read_siblings(inv, &o, &group, id, store_base, &mut msgs)?;
+        total_out += sibs.added_total;
+        unread_count += sibs.added_unread as f64 - sibs.own_dropped as f64;
+    }
+    // the per-source cap: the OLDEST `limit` rows are delivered; the first withheld row of a source and everything after it in
+    // that source stay unread (so the ack never passes a withheld row)
+    let mut truncated_count = 0usize;
+    let mut withheld_by_src: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
     if msgs.len() > limit {
-        return defer("read-cap");
+        let mut min_idx: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        for m in msgs.iter().skip(limit) {
+            let e = min_idx.entry(m.src.clone()).or_insert(usize::MAX);
+            *e = (*e).min(m.src_idx);
+        }
+        let before = msgs.len();
+        let mut kept = Vec::with_capacity(limit);
+        for m in msgs {
+            if min_idx.get(&m.src).is_some_and(|&mi| m.src_idx >= mi) {
+                *withheld_by_src.entry(m.src.clone()).or_insert(0) += 1;
+            } else {
+                kept.push(m);
+            }
+        }
+        truncated_count = before - kept.len();
+        msgs = kept;
     }
     // the own-partition ack target: the highest store position actually delivered, never below the read base
-    let max_index = msgs.iter().filter_map(|m| m.index).fold(None, |acc: Option<f64>, i| Some(acc.map_or(i, |a| a.max(i))));
+    let max_index = msgs.iter().filter(|m| m.src == "own").filter_map(|m| m.index).fold(None, |acc: Option<f64>, i| Some(acc.map_or(i, |a| a.max(i))));
     let own_target = max_index.map_or(store_base, |m| store_base.max(m));
     let delivered = msgs.len();
     // #181: the unread list leaves out the mail the reader's own family sent, as its count does (the targets above already walked it)
@@ -782,10 +1113,16 @@ fn plan(inv: &Inv, a: &Args, promoted: Option<bool>, peek: bool) -> R<Planned> {
     }
     let cli = if peek { String::new() } else { launcher_path(&inv.home)? };
     let reader = cursors::reader_key(tick::reader_nonce_cached(&inv.home).as_deref());
-    let dir = devswarm_root(&inv.home).join(defaults::text("mesh_write.dir_read_receipts")).join(id);
-    if !peek {
-        nothing_to_prune(&dir, inv.now)?;
-    }
+    // a mesh group files its receipts under the lowest id of the group, so any alias of it finds them
+    let dir_id = if group.active {
+        let mut ids = group.ids.clone();
+        ids.sort();
+        ids.remove(0)
+    } else {
+        id.to_string()
+    };
+    let dir = devswarm_root(&inv.home).join(defaults::text("mesh_write.dir_read_receipts")).join(&dir_id);
+    nothing_to_prune(&dir, inv.now)?;
     // ---- the output (everything but the receipt id is known) ----
     let rid = if peek {
         String::new()
@@ -798,7 +1135,34 @@ fn plan(inv: &Inv, a: &Args, promoted: Option<bool>, peek: bool) -> R<Planned> {
         op.put("k", s(defaults::text("mesh_write.op_own"))).put("partition", s(id)).put("target", n(own_target)).put("delivered", n(delivered as f64));
         op.done()
     }];
+    let mut live_siblings_skipped: Vec<String> = Vec::new();
+    // siblings come before the NDJSON op, as in Node
+    for part in &sibs.parts {
+        let not_ackable = meshgroup::ack_gate(inv, &o.rows, id, &part.id)?;
+        if not_ackable {
+            live_siblings_skipped.push(part.id.clone());
+        }
+        let full = part.delivered_count as f64;
+        let delivered_here = full - withheld_by_src.get(&format!("sibling:{}", part.id)).copied().unwrap_or(0) as f64;
+        let physical = if delivered_here >= full {
+            part.consumed_count
+        } else if delivered_here <= 0.0 {
+            0.0
+        } else {
+            part.consumed_through.get(delivered_here as usize - 1).copied().unwrap_or(delivered_here)
+        };
+        let anchor = part.cursor.max(part.since);
+        let mut op = Obj::default();
+        op.put("k", s(defaults::text("mesh_write.op_sibling")))
+            .put("partition", s(&part.id))
+            .put("ackTarget", n(anchor + physical))
+            .put("seenTarget", n(part.since + physical))
+            .put("notAckable", OVal::Bool(not_ackable))
+            .put("delivered", n(full));
+        ops.push(op.done());
+    }
     if let (Some(target), Some(inbox), Some(cf)) = (nd_op_target, &inbox, &cursor_file) {
+        let target = target - withheld_by_src.get("ndjson").copied().unwrap_or(0) as f64;
         let mut op = Obj::default();
         op.put("k", s(defaults::text("mesh_write.op_nd"))).put("partition", s(id)).put("target", n(target)).put("cursorPath", s(cf)).put("inboxPath", s(inbox));
         ops.push(op.done());
@@ -811,7 +1175,7 @@ fn plan(inv: &Inv, a: &Args, promoted: Option<bool>, peek: bool) -> R<Planned> {
         .put("repoKey", s(&o.repo_key))
         .put("storePath", OVal::Str(store_path.to_string_lossy().into_owned()))
         .put("cwd", s(&inv.cwd))
-        .put("meshPartitionIds", OVal::Arr(vec![s(id)]))
+        .put("meshPartitionIds", OVal::Arr(group.ids.iter().map(|x| s(x)).collect()))
         .put("unreadOnly", OVal::Bool(true))
         .put("unreadCount", n(unread_count))
         .put("cursor", n(store_base))
@@ -826,6 +1190,9 @@ fn plan(inv: &Inv, a: &Args, promoted: Option<bool>, peek: bool) -> R<Planned> {
         .put("meshGroupUnresolved", OVal::Bool(false))
         .put("meshGroupError", OVal::Null)
         .put("totalsPartial", OVal::Bool(false));
+    if let Some(from) = &hops.redirected_from {
+        out.put("redirected", OVal::Bool(true)).put("redirectedFrom", s(from));
+    }
     if promoted == Some(true) {
         let mut p = Obj::default();
         p.put("promoted", OVal::Bool(true));
@@ -858,6 +1225,41 @@ fn plan(inv: &Inv, a: &Args, promoted: Option<bool>, peek: bool) -> R<Planned> {
             )),
         )
         .put("ackHint", s(defaults::text("mesh_write.ack_hint")));
+    if !live_siblings_skipped.is_empty() {
+        out.put("liveSiblingsSkipped", OVal::Arr(live_siblings_skipped.iter().map(|x| s(x)).collect()));
+    }
+    if sibs.gap_withheld > 0 {
+        out.put("meshGapWithheld", OVal::Bool(true)).put("meshGapWithheldCount", n(sibs.gap_withheld as f64));
+    }
+    if sibs.never_read_withheld > 0 {
+        let mut names: Vec<String> = Vec::new();
+        for x in &sibs.never_read_ids {
+            if !names.contains(x) {
+                names.push(x.clone());
+            }
+        }
+        let reads = names.iter().map(|p| fill_once(defaults::text("mesh_write.mesh_never_read_read_cmd"), &[("pid", p.clone())])).collect::<Vec<_>>().join(defaults::text("mesh_write.mesh_never_read_read_sep"));
+        let cap = defaults::num("mesh_write.never_read_sibling_cap");
+        out.put("meshNeverReadCapped", OVal::Bool(true))
+            .put("meshNeverReadWithheldCount", n(sibs.never_read_withheld as f64))
+            .put("meshNeverReadCapLimit", n(cap as f64))
+            .put(
+                "neverReadCapHint",
+                OVal::Str(fill_once(
+                    defaults::text("mesh_write.mesh_never_read_hint"),
+                    &[("withheld", sibs.never_read_withheld.to_string()), ("n", names.len().to_string()), ("cap", cap.to_string()), ("reads", reads)],
+                )),
+            );
+    }
+    if truncated_count > 0 {
+        out.put("truncated", OVal::Bool(true)).put("truncatedCount", n(truncated_count as f64)).put("limit", n(limit as f64)).put(
+            "truncatedHint",
+            OVal::Str(fill_once(defaults::text("mesh_write.truncated_hint"), &[("count", truncated_count.to_string()), ("limit", limit.to_string())])),
+        );
+    }
+    if let Some(from) = &hops.resolved_from {
+        out.put("resolvedFrom", s(from));
+    }
     let text = (format_text && !json_flag).then(|| text_lines(&rows));
     let result = out.done();
     let record_val = receipt_record(&rid, id, reader.as_deref(), inv.now, ops, hashes);
@@ -871,7 +1273,7 @@ fn plan(inv: &Inv, a: &Args, promoted: Option<bool>, peek: bool) -> R<Planned> {
     };
     let file: PathBuf = dir.join(format!("{rid}{}", defaults::text("mesh_write.json_suffix")));
     let rel = format!(
-        "{}/{}/{}/{id}/{rid}{}",
+        "{}/{}/{}/{dir_id}/{rid}{}",
         defaults::text("mesh_write.dir_anti_hall"),
         defaults::text("mesh_write.dir_devswarm"),
         defaults::text("mesh_write.dir_read_receipts"),

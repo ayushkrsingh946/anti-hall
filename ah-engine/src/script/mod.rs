@@ -51,7 +51,7 @@ mod host_io;
 pub mod host_childturn;
 pub mod host_mesh;
 pub mod host_parentinbox;
-mod host_seat;
+pub(crate) mod host_seat;
 pub mod host_port;
 pub mod host_proc;
 pub mod host_spawn;

@@ -22,6 +22,7 @@
 // - the three records a tick writes are best effort in Node (each in its own try/catch): a failed write is not an error
 // - an unreadable optional file is the same as an absent one (Node's try/catch around readFileSync)
 // - text that does not parse is the absent value (Node's JSON.parse catch parity)
+use serde_json::Value;
 use crate::checks::guardkit::ojson::OVal;
 use crate::checks::guardkit::text::js_number_of_str;
 use crate::defaults;
@@ -31,7 +32,7 @@ use crate::meshw::common::{Inv, Obj, n, s};
 use crate::meshw::heartbeat::{anchor_refresh_possible, id_mismatch_possible, running_version};
 use crate::meshw::ident::{self, R, defer};
 use crate::meshw::idlock::{devswarm_root, is_safe_id};
-use crate::meshw::send::{Answer, Effect, mesh_candidates, rehome_is_noop};
+use crate::meshw::send::{Answer, Effect, rehome_is_noop};
 use crate::meshw::union;
 use std::path::{Path, PathBuf};
 
@@ -153,6 +154,16 @@ pub(crate) fn open_reader(inv: &Inv, repo_key: &str) -> R<Option<MeshReader>> {
     MeshReader::open(&db).map(Some).map_err(|e| ident::Defer(format!("store-open:{e}")))
 }
 
+/// [`open_reader`] for a verb whose Node counterpart opens (and so creates) the project's store: a project with no store yet gets a new
+/// sqlite one first. Sweeps that must not create stores use [`open_reader`].
+pub(crate) fn open_reader_creating(inv: &Inv, repo_key: &str) -> R<MeshReader> {
+    if let Some(r) = open_reader(inv, repo_key)? {
+        return Ok(r);
+    }
+    crate::meshw::common::open_store(inv, repo_key)?; // creates the directory, the marker and the database
+    open_reader(inv, repo_key)?.ok_or_else(|| ident::Defer("store-create".into()))
+}
+
 /// The reader nonce of this process, derived once (it walks the process table): the tick reads it and the background
 /// verifier is handed the same value.
 pub fn reader_nonce_cached(home: &Path) -> Option<String> {
@@ -185,26 +196,6 @@ pub(crate) fn open_partition(inv: &Inv, id: &str, desc: &OVal) -> R<Opened> {
     Ok(Opened { repo_key, reader, rows })
 }
 
-/// `resolveMeshPartitionIds`: a second registry row of the same worktree widens the read to a mesh group, which Node folds.
-pub(crate) fn single_partition(rows: &[ident::Row], desc: &OVal, id: &str) -> R<()> {
-    let own_wt = rows.iter().find(|r| r.id == id).and_then(|r| r.worktree_path.clone());
-    let wt = match own_wt {
-        Some(w) if !w.is_empty() => Some(w),
-        _ => union::path_field(desc, defaults::text("mesh_write.field_worktree_path"))?,
-    };
-    if let Some(wt) = wt
-        && let Some(mesh) = ident::canonical_mesh_id(&wt)?
-    {
-        let mut ids: Vec<String> = mesh_candidates(rows, Some(mesh.as_str()))?.into_iter().map(|r| r.id).collect();
-        ids.sort();
-        ids.dedup();
-        if ids.len() > 1 && ids.iter().any(|x| x == id) {
-            return defer("mesh-group");
-        }
-    }
-    Ok(())
-}
-
 /// `positions()`: the floor rows, then this reader's own rows when it is a declared reader: `(store base, nd base)`.
 pub(crate) fn read_bases(inv: &Inv, reader: &MeshReader, id: &str, cursor_file: Option<&str>) -> R<(f64, f64)> {
     let me = crate::meshw::cursors::reader_key(reader_nonce_cached(&inv.home).as_deref());
@@ -227,6 +218,22 @@ pub(crate) fn note_own_excluded(u: &union::Unread) {
 /// `Number.isFinite(x) && x > 0 ? Math.floor(x) : 0`.
 fn nd_base_floor(x: f64) -> f64 {
     if x.is_finite() && x > 0.0 { x.floor() } else { 0.0 }
+}
+
+/// One partition of the mesh group besides the workspace's own, as a read of the group sees it.
+#[derive(Debug, Clone)]
+pub(crate) struct Sibling {
+    pub id: String,
+    /// The store position its unread rows start at.
+    pub cursor: f64,
+    /// The rows the fold delivers (the ones past a gap are withheld).
+    pub delivered: Vec<Value>,
+    /// The physical rows the fold consumed, and the running count after each delivered row.
+    pub consumed_count: f64,
+    pub consumed_through: Vec<f64>,
+    /// How many delivered rows the per-call cap kept, and the physical rows an ack may advance past for them.
+    pub kept: usize,
+    pub physical: f64,
 }
 
 /// What `count` reports for a single partition that a tick uses.
@@ -253,18 +260,32 @@ pub(crate) struct Counted {
     pub store_rows: Vec<serde_json::Value>,
     /// Where an ack-all moves the NDJSON position: the base, the twin-read lines skipped and the unread lines after them.
     pub nd_target: f64,
+    /// `meshPartitionIds`: the partitions the count covered (just the workspace without a mesh group).
+    pub mesh_ids: Vec<String>,
+    /// `meshGapWithheldCount`: sibling rows held back behind a row the fold could not place.
+    pub gap_withheld: usize,
+    /// `truncatedCount`: unread rows over the read limit (counted, not listed).
+    pub truncated: usize,
+    /// The read limit this count was cut at (`--limit`, else the default).
+    pub limit: usize,
+    /// The mesh group's other partitions: what each contributes to a read and where an ack moves it.
+    pub siblings: Vec<Sibling>,
 }
 
 /// `count` for a single, registered partition. An unknown count (the inbox or its cursor file does not read) is the store
 /// alone, exactly as Node's union reports it; only the line form can print that, since its JSON carries more.
-pub(crate) fn count_mail(inv: &Inv, id: &str, desc: &OVal, line_form: bool, full: bool) -> R<Counted> {
+pub(crate) fn count_mail(inv: &Inv, id: &str, desc: &OVal, line_form: bool, full: bool, limit: usize) -> R<Counted> {
     if !matches!(desc.get(defaults::text("mesh_write.field_id")), Some(OVal::Str(d)) if d == id) {
         return defer("descriptor-id");
     }
     let Some(inbox) = union::path_field(desc, defaults::text("mesh_write.field_inbox_path"))? else { return defer("no-inbox-path") };
     let Some(cursor_file) = union::path_field(desc, defaults::text("mesh_write.field_cursor_path"))? else { return defer("no-cursor-path") };
     let o = open_partition(inv, id, desc)?;
-    single_partition(&o.rows, desc, id)?;
+    let group = crate::meshw::meshgroup::resolve(
+        &o.rows,
+        id,
+        crate::meshw::meshgroup::worktree_of(&o.rows, id, union::path_field(desc, defaults::text("mesh_write.field_worktree_path"))?.as_deref()).as_deref(),
+    )?;
     // known: the inbox and its cursor file both read (otherwise Node prints a warning and the count is unknown)
     let known = union::non_empty_lines(&inbox)?.is_some() && union::cursor_position(&cursor_file)?.is_some();
     if !known && !line_form {
@@ -293,15 +314,81 @@ pub(crate) fn count_mail(inv: &Inv, id: &str, desc: &OVal, line_form: bool, full
     } else {
         0.0
     };
+    // ---- the sibling partitions of the mesh group (`cmdInbox`'s count widening) ----
+    let (mut added_unread, mut added_total, mut gap_withheld) = (0usize, 0.0f64, 0usize);
+    let mut siblings: Vec<Sibling> = Vec::new();
+    if group.active {
+        let mut parts: Vec<(String, f64, Vec<Value>)> = Vec::new();
+        for pid in group.ids.iter().filter(|p| p.as_str() != id) {
+            let base = crate::meshw::meshgroup::base_cursor(inv, &o.reader, pid)?;
+            // a sibling the caller may not ack keeps the watermark the caller left, so its rows are not counted twice
+            let cursor = if crate::meshw::meshgroup::ack_gate(inv, &o.rows, id, pid)? { base.max(crate::meshw::meshgroup::seen_cursor(inv, id, pid)) } else { base };
+            let total = o.reader.message_count(pid).map_err(|e| ident::Defer(format!("store-read:{e}")))?;
+            let mut rows: Vec<Value> = Vec::new();
+            o.reader
+                .for_each_message(pid, if cursor.is_finite() && cursor > 0.0 { cursor.floor() as u64 } else { 0 }, |m| {
+                    rows.push(m);
+                    true
+                })
+                .map_err(|e| ident::Defer(format!("store-read:{e}")))?;
+            added_total += total as f64;
+            parts.push((pid.clone(), cursor, rows));
+        }
+        let mut dedup = crate::meshw::meshgroup::Dedup::seed(&o.reader, id, store_base)?;
+        for r in &u.store_only_unread {
+            dedup.note_shown(r);
+        }
+        for (pid, cursor, rows) in parts {
+            let folded = dedup.fold(inv, rows);
+            gap_withheld += folded.gap_withheld;
+            added_unread += folded.delivered.len();
+            siblings.push(Sibling { id: pid, cursor, delivered: folded.delivered, consumed_count: folded.consumed_count, consumed_through: folded.consumed_through, kept: 0, physical: 0.0 });
+        }
+    }
+    // the read limit: the workspace's own rows are kept first, then each sibling's, up to the limit
+    let mut u = u;
+    let own_total = u.store_only_unread.len();
+    let pre_cap = own_total + added_unread;
+    let (store_unread, truncated) = if pre_cap > limit { (limit, pre_cap - limit) } else { (pre_cap, 0) };
+    let mut remaining = limit;
+    let own_kept = own_total.min(remaining);
+    if truncated > 0 {
+        remaining -= own_kept;
+        u.store_only_unread.truncate(own_kept);
+    }
+    for sib in &mut siblings {
+        let rows = sib.delivered.len();
+        if truncated > 0 {
+            let keep = rows.min(remaining);
+            remaining -= keep;
+            sib.kept = keep;
+            // the physical rows to advance past for the `keep` delivered ones (the fold's own count when nothing was cut)
+            sib.physical = if keep >= rows && sib.consumed_count.is_finite() {
+                sib.consumed_count
+            } else if keep == 0 {
+                0.0
+            } else {
+                sib.consumed_through.get(keep - 1).copied().filter(|x| x.is_finite()).unwrap_or(keep as f64)
+            };
+        } else {
+            sib.kept = rows;
+            sib.physical = if sib.consumed_count.is_finite() { sib.consumed_count } else { rows as f64 };
+        }
+    }
     Ok(Counted {
         repo_key: o.repo_key,
         known,
-        unread: c.unread,
+        unread: c.unread + added_unread,
         nd_unread: u.nd_unread_lines.len(),
-        store_unread: u.store_only_unread.len(),
+        store_unread,
         nd_cursor,
         store_cursor: store_base,
-        total,
+        total: total.map(|t| t + added_total as usize),
+        mesh_ids: group.ids,
+        gap_withheld,
+        truncated,
+        limit,
+        siblings,
         nd_lines: u.nd_unread_lines,
         store_rows: u.store_only_unread,
         nd_target: if known { nd_target } else { nd_cursor },
@@ -373,10 +460,10 @@ fn write_staged(dst: &Path, text: &str, now: i64) -> std::io::Result<()> {
 }
 
 /// Effect 1: the wake-tick marker.
-fn write_marker(inv: &Inv, id: &str, unread: usize, known: bool, seq: f64) {
+fn write_marker(inv: &Inv, id: &str, unread: usize, known: bool, seq: f64, gap: bool) {
     let dir = devswarm_root(&inv.home).join(defaults::text("mesh_write.dir_wake_tick"));
     let mut m = Obj::default();
-    m.put("ts", n(inv.now as f64)).put("unreadTotal", n(unread as f64)).put("meshGapWithheld", OVal::Bool(false)).put("known", OVal::Bool(known));
+    m.put("ts", n(inv.now as f64)).put("unreadTotal", n(unread as f64)).put("meshGapWithheld", OVal::Bool(gap)).put("known", OVal::Bool(known));
     if seq != 0.0 {
         m.put("seq", n(seq));
     }
@@ -451,12 +538,8 @@ fn write_cron_found_mail(inv: &Inv, id: &str, unread: usize) {
 }
 
 /// The JSON form of a tick: `count`'s result with `action` renamed in place, then `idMismatch` and `watcherArmed`.
-pub(crate) fn count_json(inv: &Inv, id: &str, c: &Counted, action: &str, tick: bool, capped: Option<Option<&crate::meshw::inboxcmd::Truncation>>, resolved_from: Option<&str>) -> R<String> {
+pub(crate) fn count_json(inv: &Inv, id: &str, c: &Counted, action: &str, tick: bool, resolved_from: Option<&str>) -> R<String> {
     let Some(total) = c.total else { return defer("unknown-count-json") };
-    // a caller that applied the cap itself (`capped`) reports it; the tick has no way to say a count was cut
-    if capped.is_none() && c.store_unread > defaults::num("mesh_write.inbox_read_limit") as usize {
-        return defer("read-cap");
-    }
     let mut o = Obj::default();
     o.put("ok", OVal::Bool(true))
         .put("action", s(action))
@@ -467,7 +550,7 @@ pub(crate) fn count_json(inv: &Inv, id: &str, c: &Counted, action: &str, tick: b
     o.put("repoKey", s(&c.repo_key))
         .put("storePath", OVal::Str(union::store_dir(&inv.home, &c.repo_key).to_string_lossy().into_owned()))
         .put("cwd", s(&inv.cwd))
-        .put("meshPartitionIds", OVal::Arr(vec![s(id)]))
+        .put("meshPartitionIds", OVal::Arr(c.mesh_ids.iter().map(|x| s(x)).collect()))
         .put("unreadTotal", n(c.unread as f64))
         .put("unreadNdjson", n(c.nd_unread as f64))
         .put("unreadStore", n(c.store_unread as f64))
@@ -480,8 +563,16 @@ pub(crate) fn count_json(inv: &Inv, id: &str, c: &Counted, action: &str, tick: b
         .put("meshGroupUnresolved", OVal::Bool(false))
         .put("meshGroupError", OVal::Null)
         .put("totalsPartial", OVal::Bool(false));
-    if let Some(Some(t)) = capped {
-        t.put(&mut o, defaults::text("mesh_write.truncated_hint_read"));
+    if c.gap_withheld > 0 {
+        o.put("meshGapWithheld", OVal::Bool(true)).put("meshGapWithheldCount", n(c.gap_withheld as f64));
+    }
+    if c.truncated > 0 {
+        let limit = c.limit;
+        let (count, lim) = (c.truncated.to_string(), limit.to_string());
+        o.put("truncated", OVal::Bool(true)).put("truncatedCount", n(c.truncated as f64)).put("limit", n(limit as f64)).put(
+            "truncatedHint",
+            OVal::Str(crate::checks::devswarm_role::text::fill_once(defaults::text("mesh_write.truncated_hint"), &[("count", &count), ("limit", &lim)])),
+        );
     }
     o.put("unread", n(c.unread as f64))
         .put("cursor", n(c.nd_cursor))
@@ -522,7 +613,7 @@ pub fn run(inv: &Inv, a: &Args) -> R<Answer> {
     let Some(desc) = prepared.as_ref().map(|p| p.ensured().clone()).or(found) else { return defer("no-descriptor") };
     // a `--child` tick's pre-count only proves the count can be answered: the pull pre-creates the inbox and cursor files that
     // make it known, and the count that is printed is taken after it
-    let counted = count_mail(inv, id, &desc, form.line || form.child, false)?;
+    let counted = count_mail(inv, id, &desc, form.line || form.child, false, defaults::num("mesh_write.inbox_read_limit") as usize)?;
     wal_is_quiet(inv, prepared.as_ref().map(|p| p.wal_path()))?;
     let marker_file =
         devswarm_root(&inv.home).join(defaults::text("mesh_write.dir_wake_tick")).join(format!("{id}{}", defaults::text("mesh_write.json_suffix")));
@@ -545,7 +636,7 @@ pub fn run(inv: &Inv, a: &Args) -> R<Answer> {
             let out = crate::meshw::pull::execute(inv, p)?;
             // the count runs after the pull, over what the pull left (a failure here is a committed failure: exit 70)
             let after = ident::read_descriptor(&inv.home, id).unwrap_or(desc);
-            (count_mail(inv, id, &after, form.line, false)?, out.wal_blocked)
+            (count_mail(inv, id, &after, form.line, false, defaults::num("mesh_write.inbox_read_limit") as usize)?, out.wal_blocked)
         }
         None => {
             crate::meshw::mark_committed();
@@ -555,7 +646,7 @@ pub fn run(inv: &Inv, a: &Args) -> R<Answer> {
     let unread = counted.unread;
     // a pull refused because its delivery log is unwritable: mail may be waiting that this count cannot see, so it is UNKNOWN
     let known = counted.known && !wal_blocked;
-    write_marker(inv, id, unread, known, seq);
+    write_marker(inv, id, unread, known, seq, counted.gap_withheld > 0);
     write_heartbeat(inv, id, &beat);
     if unread > 0 && lock_file.exists() {
         write_cron_found_mail(inv, id, unread);
@@ -585,7 +676,7 @@ pub fn run(inv: &Inv, a: &Args) -> R<Answer> {
         if wal_blocked {
             return defer("wal-blocked-json");
         }
-        return Ok(Answer { code: 0, stdout: format!("{}\n", count_json(inv, id, &counted, defaults::text("mesh_write.verb_tick"), true, None, None)?), effect: Effect::None });
+        return Ok(Answer { code: 0, stdout: format!("{}\n", count_json(inv, id, &counted, defaults::text("mesh_write.verb_tick"), true, None)?), effect: Effect::None });
     }
     let line = defaults::render(
         "mesh_write.tick_line",

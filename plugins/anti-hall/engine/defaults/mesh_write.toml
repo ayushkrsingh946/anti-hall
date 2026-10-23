@@ -673,6 +673,14 @@ value = "verb={verb} argv=[{argv}] reason={reason}"
 doc = "How many leading positional words (the verb and subcommand, never a message body) an abandoned mesh call's log line names."
 value = 2
 
+[mesh_write.reroute_incoherent]
+doc = "Why a send was rerouted: the addressed row is live but its session runs in another checkout (`rerouteReason`)."
+value = "session-worktree-incoherent"
+
+[mesh_write.reroute_not_live]
+doc = "Why a send was rerouted: the addressed row is not live and a live row of the same session exists (`rerouteReason`)."
+value = "addressed-row-not-live"
+
 [mesh_write.msg_unable]
 doc = "stderr line when the engine cannot answer a mesh verb (an unported verb, a case it cannot do, no plugin context). Nothing was written; the exit code is mesh_write.exit_unable. Placeholders: {site}, where it gave up; {detail}, which call and why."
 value = "ah-engine mesh: ERROR: this verb or case cannot be done by the engine ({site}: {detail}); nothing was done. Run the verb by hand with the devswarm shim (~/.anti-hall/bin/devswarm.js), or report this site."
@@ -1020,6 +1028,60 @@ value = "repoKey"
 [mesh_write.op_own]
 doc = "The `k` of a read-receipt op that moves the caller's own partition cursor."
 value = "own"
+
+[mesh_write.gate_sibling]
+doc = "The journal `gate` of a cursor move of a sibling partition of the caller's mesh group."
+value = "sibling"
+
+[mesh_write.never_read_sibling_cap]
+doc = "How many rows of one sibling partition a read delivers at most (`NEVER_READ_SIBLING_CAP`); the rest are withheld and named in the answer."
+value = 200
+min = 1
+
+[mesh_write.consumed_hash_seed_cap]
+doc = "How many of the newest already-read rows of the caller's own partition seed the duplicate check of a mesh-group read (`CONSUMED_HASH_SEED_CAP`)."
+value = 2000
+min = 1
+
+[mesh_write.channel_sibling_seen]
+doc = "The `channel` of a cursor-write failure of the caller-scoped seen watermark of a sibling partition."
+value = "sibling-seen-watermark"
+
+[mesh_write.channel_sibling_store]
+doc = "The `channel` of a cursor-write failure of a sibling partition's store cursor."
+value = "sibling-store-cursor"
+
+[mesh_write.msg_seen_watermark_failed]
+doc = "The error of a seen watermark that could not be written."
+value = "could not write caller-scoped seen watermark"
+
+[mesh_write.log_op_sibling_dup]
+doc = "The central-log operation of a sibling row suppressed as a logical duplicate."
+value = "sibling-fold-logical-dup"
+
+[mesh_write.msg_sibling_dup]
+doc = "The central-log message of a sibling row suppressed as a logical duplicate."
+value = "suppressed a logically-duplicate sibling row (weak key match)"
+
+[mesh_write.reason_logical_dup]
+doc = "The log reason of a sibling row suppressed as a logical duplicate."
+value = "logical-dup"
+
+[mesh_write.mesh_never_read_hint]
+doc = "The hint of a read that withheld rows of sibling partitions over the cap. Placeholders: {withheld}, {n} (partitions), {cap}, {reads} (the commands)."
+value = "withheld {withheld} row(s) from {n} sibling partition(s) (cap {cap}); read them directly with: {reads}"
+
+[mesh_write.mesh_never_read_read_cmd]
+doc = "The command that reads one sibling partition directly. Placeholder: {pid}."
+value = "inbox messages {pid}"
+
+[mesh_write.mesh_never_read_read_sep]
+doc = "The separator of the direct-read commands in the never-read hint."
+value = " ; "
+
+[mesh_write.truncated_hint]
+doc = "The hint of a read that withheld rows over the limit. Placeholders: {count}, {limit}."
+value = "not all unread messages were returned ({count} withheld) — the read cursor was NOT advanced past withheld messages, so re-reading (optionally with a higher --limit than {limit}) returns them"
 
 [mesh_write.op_sibling]
 doc = "The `k` of a read-receipt op that moves a sibling partition's cursor (Node's)."
@@ -2101,10 +2163,6 @@ value = "inbox ack refused ({cause}): caller {caller} does not own workspace {id
 [mesh_write.verb_log_ack_to]
 doc = "The journal `verb` of an `inbox ack --to` NDJSON move."
 value = "inbox-ack-to"
-
-[mesh_write.truncated_hint_read]
-doc = "The `truncatedHint` of a count or read cut short by the per-call cap. Placeholders: {count} (rows withheld) and {limit}."
-value = "not all unread messages were returned ({count} withheld) — the read cursor was NOT advanced past withheld messages, so re-reading (optionally with a higher --limit than {limit}) returns them"
 
 [mesh_write.truncated_hint_ack]
 doc = "The `truncatedHint` of an ack cut short by the per-call cap. Placeholders: {count} (rows withheld) and {limit}."

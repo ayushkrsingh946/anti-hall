@@ -20,19 +20,25 @@ use crate::meshw::cursors::{self, LogRec, Procs};
 use crate::meshw::ident::{self, Defer, R, defer};
 use crate::meshw::idlock::{devswarm_root, is_safe_id};
 use crate::meshw::send::{Answer, Effect, mesh_candidates, rehome_is_noop, resolve_mesh_target};
+use crate::meshw::union;
 use std::path::{Path, PathBuf};
 
-/// A receipt op the engine applies: a move of the caller's own partition cursor, or of its NDJSON position.
+/// A receipt op the engine applies: a move of the caller's own partition cursor, or of a sibling partition of its mesh group.
 enum AckOp {
-    Own(OwnOp),
+    Own { partition: String, target: f64, delivered: Option<f64> },
+    /// `not_ackable` is decided again at ack time (`revalidate`): a sibling that is live must not have its cursor moved by this caller.
+    Sibling { partition: String, ack_target: f64, seen_target: f64, delivered: Option<f64>, not_ackable: bool },
+    /// A move of the caller's NDJSON position (`commitNdAck`).
     Nd(NdOp),
 }
 
-/// A move of the caller's own partition cursor.
-struct OwnOp {
-    partition: String,
-    target: f64,
-    delivered: Option<f64>,
+impl AckOp {
+    fn partition(&self) -> &str {
+        match self {
+            AckOp::Own { partition, .. } | AckOp::Sibling { partition, .. } => partition,
+            AckOp::Nd(o) => &o.partition,
+        }
+    }
 }
 
 /// A move of the caller's NDJSON position (`commitNdAck`): the target is held to the inbox's line count, and the descriptor's cursor
@@ -93,8 +99,7 @@ pub(crate) fn registered_repo_key(desc: &OVal, id: &str) -> R<Option<String>> {
     Ok(persisted.filter(|p| *p != crate::meshw::send::hash_from_workspace_id(id)))
 }
 
-/// The ops of a receipt: the `own` moves to apply. A `sibling` or `nd` op (a sibling partition's cursor, the NDJSON
-/// inbox) is Node's; so is an op whose fields the engine cannot read exactly like JavaScript does. An unknown kind is
+/// The ops of a receipt: the `own` and `sibling` moves to apply. An `nd` op (the NDJSON inbox) is Node's; so is an op whose fields the engine cannot read exactly like JavaScript does. An unknown kind is
 /// skipped, as Node skips it.
 fn own_ops(rec: &OVal, id: &str) -> R<Vec<AckOp>> {
     let Some(OVal::Arr(ops)) = rec.get("ops") else { return defer("receipt-ops") };
@@ -118,7 +123,27 @@ fn own_ops(rec: &OVal, id: &str) -> R<Vec<AckOp>> {
                     Some(OVal::Num(d)) if d.is_finite() => Some(*d),
                     _ => None,
                 };
-                out.push(AckOp::Own(OwnOp { partition, target, delivered }));
+                out.push(AckOp::Own { partition, target, delivered });
+            }
+            Some(OVal::Str(k)) if k == defaults::text("mesh_write.op_sibling") => {
+                let partition = match op.get("partition") {
+                    Some(OVal::Str(p)) if is_safe_id(p) => p.clone(),
+                    _ => return defer("receipt-partition"),
+                };
+                let ack_target = match op.get("ackTarget") {
+                    Some(OVal::Num(t)) if t.is_finite() => *t,
+                    _ => return defer("receipt-target"),
+                };
+                // `op.seenTarget > 0` is false for anything that is not a positive number
+                let seen_target = match op.get("seenTarget") {
+                    Some(OVal::Num(t)) if t.is_finite() => *t,
+                    _ => 0.0,
+                };
+                let delivered = match op.get("delivered") {
+                    Some(OVal::Num(d)) if d.is_finite() => Some(*d),
+                    _ => None,
+                };
+                out.push(AckOp::Sibling { partition, ack_target, seen_target, delivered, not_ackable: false });
             }
             Some(OVal::Str(k)) if k == defaults::text("mesh_write.op_nd") => {
                 let partition = match op.get("partition") {
@@ -142,7 +167,6 @@ fn own_ops(rec: &OVal, id: &str) -> R<Vec<AckOp>> {
                 let Some(cursor_path) = path("cursorPath")? else { return defer("receipt-nd-cursor") };
                 out.push(AckOp::Nd(NdOp { partition, target, cursor_path: Some(cursor_path), inbox_path: path("inboxPath")? }));
             }
-            Some(OVal::Str(k)) if k == defaults::text("mesh_write.op_sibling") => return defer("receipt-op-kind"),
             _ => {}
         }
     }
@@ -185,6 +209,8 @@ pub(crate) struct AckPlan {
     rec: OVal,
     found_dir: String,
     ops: Vec<AckOp>,
+    /// Partitions with no floor rows yet: `ackFor` imports their legacy cursor files first, inside the same move.
+    imports: Vec<String>,
     reader: Option<String>,
     repo_key: String,
 }
@@ -275,20 +301,35 @@ pub(crate) fn plan_ack(inv: &Inv, id: &str, rid: &str, ack_as_owner: bool, fresh
             return defer("not-owner");
         }
     }
-    let ops = own_ops(&rec, id)?;
-    for op in &ops {
-        let partition = match op {
-            AckOp::Own(o) => &o.partition,
-            AckOp::Nd(o) => &o.partition,
-        };
-        let rows = cursors::rows_of(&st, partition).map_err(|e| Defer(format!("cursor-rows:{e}")))?;
-        if cursors::needs_import(&rows) {
-            return defer("cursor-import");
+    let mut ops = own_ops(&rec, id)?;
+    let mut imports: Vec<String> = Vec::new();
+    for op in &mut ops {
+        // a sibling is re-judged now (`revalidate`): the receipt's verdict was the one at read time
+        if let AckOp::Sibling { partition, not_ackable, .. } = op {
+            *not_ackable = crate::meshw::meshgroup::ack_gate(inv, &rows, id, partition)?;
+            if *not_ackable {
+                continue;
+            }
+        }
+        let cur = cursors::rows_of(&st, op.partition()).map_err(|e| Defer(format!("cursor-rows:{e}")))?;
+        if cursors::needs_import(&cur) {
+            // the import itself must be one the engine can do exactly (a dry run says so); else the whole verb is Node's
+            let h = crate::migrate::readercur::Handle::Ro(
+                crate::mesh::MeshReader::open(&union::store_dir(home, &repo_key).join(defaults::text("mesh_write.store_file"))).map_err(|e| Defer(format!("store-open:{e}")))?,
+            );
+            let mut cx = crate::migrate::readercur::Cx::new(&home.to_string_lossy());
+            crate::migrate::readercur::import_legacy(&mut cx, &h, op.partition(), None, true).map_err(|e| Defer(format!("cursor-import:{e}")))?;
+            if cx.deferred {
+                return defer("cursor-import");
+            }
+            if !imports.iter().any(|p| p == op.partition()) {
+                imports.push(op.partition().to_string());
+            }
         }
     }
     // the summary refresh after the write must be one the engine can do (else Node runs the whole verb)
     crate::meshw::summary::check(&st, inv, None)?;
-    Ok(AckPlan { st, id: id.to_string(), rid: rid.to_string(), rec, found_dir, ops, reader, repo_key })
+    Ok(AckPlan { st, id: id.to_string(), rid: rid.to_string(), rec, found_dir, ops, imports, reader, repo_key })
 }
 
 /// `commitNdAck` for one `nd` op of a receipt: the NDJSON position moves to the target (never past the inbox's line count), the
@@ -340,7 +381,7 @@ fn apply_nd(inv: &Inv, st: &crate::meshw::store::MeshStore, id: &str, reader: Op
 
 /// The writes of `cmdInboxAckPrimary` and its result: nothing defers from here, a failure is reported in the result.
 pub(crate) fn apply_ack(inv: &Inv, plan: AckPlan) -> Obj {
-    let AckPlan { st, id, rid, rec, found_dir, ops, reader, repo_key } = plan;
+    let AckPlan { st, id, rid, rec, found_dir, ops, imports, reader, repo_key } = plan;
     let (id, rid, home) = (id.as_str(), rid.as_str(), &inv.home);
     mark_drain(inv, id);
     let mut procs = Procs::default();
@@ -348,46 +389,68 @@ pub(crate) fn apply_ack(inv: &Inv, plan: AckPlan) -> Obj {
     let mut acked: Option<f64> = None;
     let ns = defaults::text("mesh_write.ns_store");
     let nonce = reader.as_deref().map(cursors::short_nonce);
+    // `ackFor` imports a partition's legacy cursor files into floor rows the first time it moves it
+    let mut import_failed: Vec<String> = Vec::new();
+    for partition in &imports {
+        let done = (|| -> Result<(), String> {
+            let h = crate::migrate::readercur::Handle::Rw(
+                crate::meshw::store::MeshStore::open(&union::store_dir(home, &repo_key).join(defaults::text("mesh_write.store_file"))).map_err(|e| e.to_string())?,
+            );
+            let mut cx = crate::migrate::readercur::Cx::new(&home.to_string_lossy());
+            crate::migrate::readercur::import_legacy(&mut cx, &h, partition, None, false).map(|_| ())
+        })();
+        if let Err(e) = done {
+            import_failed.push(partition.clone());
+            failures.push(failure(partition, defaults::text("mesh_write.channel_store_cursor"), &e));
+        }
+    }
     for op in &ops {
-        let op = match op {
-            AckOp::Own(o) => o,
-            AckOp::Nd(o) => {
-                apply_nd(inv, &st, id, reader.as_deref(), nonce.clone(), &repo_key, o, &mut procs, &mut failures);
-                continue;
+        if import_failed.iter().any(|p| p == op.partition()) {
+            continue;
+        }
+        match op {
+            AckOp::Own { partition, target, delivered } => {
+                let r = cursors::ack_for(&st, home, partition, ns, reader.as_deref(), *target, &mut procs);
+                if r.ok {
+                    crate::meshw::mark_committed();
+                }
+                log_move(home, id, partition, &r, *target, *delivered, nonce.clone(), defaults::text("mesh_write.gate_owner"), &repo_key);
+                if let Some(e) = &r.error {
+                    failures.push(failure(partition, defaults::text("mesh_write.channel_store_cursor"), e));
+                }
+                // `Number.isFinite(committed.instance) ? committed.instance : Math.max(committed.floor || 0, op.target)`
+                acked = Some(match (reader.is_some(), r.own) {
+                    (true, Some(own)) if r.ok => own as f64,
+                    _ => (r.floor.unwrap_or(0) as f64).max(*target),
+                });
             }
-        };
-        let r = cursors::ack_for(&st, home, &op.partition, ns, reader.as_deref(), op.target, &mut procs);
-        if r.ok {
-            crate::meshw::mark_committed();
+            AckOp::Sibling { partition, ack_target, seen_target, delivered, not_ackable } => {
+                if *not_ackable {
+                    // a live sibling is not this caller's to ack: only the caller-scoped watermark moves, so the next read starts after it
+                    if *seen_target > 0.0 && !with_watermark_lock(inv, id, partition, || crate::meshw::meshgroup::write_seen_cursor(inv, id, partition, *seen_target)) {
+                        failures.push(failure(partition, defaults::text("mesh_write.channel_sibling_seen"), defaults::text("mesh_write.msg_seen_watermark_failed")));
+                    }
+                    continue;
+                }
+                let r = cursors::ack_for(&st, home, partition, ns, reader.as_deref(), *ack_target, &mut procs);
+                if r.ok {
+                    crate::meshw::mark_committed();
+                }
+                log_move(home, id, partition, &r, *ack_target, *delivered, nonce.clone(), defaults::text("mesh_write.gate_sibling"), &repo_key);
+                if let Some(e) = &r.error {
+                    failures.push(failure(partition, defaults::text("mesh_write.channel_sibling_store"), e));
+                    continue;
+                }
+                // the watermark this ack covers is no longer needed
+                with_watermark_lock(inv, id, partition, || {
+                    if *ack_target >= crate::meshw::meshgroup::seen_cursor(inv, id, partition) {
+                        crate::meshw::meshgroup::remove_seen_cursor(inv, id, partition);
+                    }
+                    true
+                });
+            }
+            AckOp::Nd(o) => apply_nd(inv, &st, id, reader.as_deref(), nonce.clone(), &repo_key, o, &mut procs, &mut failures),
         }
-        cursors::log_cursor_write(
-            home,
-            &LogRec {
-                id: &op.partition,
-                caller_id: Some(id),
-                ns: defaults::text("mesh_write.log_ns_store"),
-                from: r.from,
-                to: if r.ok { r.own.map(|x| x as f64) } else { Some(op.target) },
-                delivered: op.delivered,
-                nonce: nonce.clone(),
-                gate: defaults::text("mesh_write.gate_owner"),
-                verb: defaults::text("mesh_write.verb_ack_primary"),
-                cwd: None,
-                ok: r.ok,
-                err: r.error.as_deref(),
-                repo_key: Some(&repo_key),
-            },
-        );
-        if let Some(e) = &r.error {
-            let mut f = Obj::default();
-            f.put("partitionId", s(&op.partition)).put("channel", s(defaults::text("mesh_write.channel_store_cursor"))).put("error", s(e));
-            failures.push(f.done());
-        }
-        // `Number.isFinite(committed.instance) ? committed.instance : Math.max(committed.floor || 0, op.target)`
-        acked = Some(match (reader.is_some(), r.own) {
-            (true, Some(own)) if r.ok => own as f64,
-            _ => (r.floor.unwrap_or(0) as f64).max(op.target),
-        });
     }
     if let Some(why) = crate::meshw::summary::derive_after_write(&st, inv, &repo_key) {
         crate::meshw::log_summary_failure(defaults::text("mesh_write.verb_ack_primary"), &why);
@@ -423,6 +486,54 @@ pub(crate) fn apply_ack(inv: &Inv, plan: AckPlan) -> Obj {
         out.put("cursorWriteFailures", OVal::Arr(failures)).put("cursorPersisted", OVal::Bool(false));
     }
     out
+}
+
+/// One `cursorWriteFailures` entry.
+fn failure(partition: &str, channel: &str, error: &str) -> OVal {
+    let mut f = Obj::default();
+    f.put("partitionId", s(partition)).put("channel", s(channel)).put("error", s(error));
+    f.done()
+}
+
+/// The cursor-write journal line of one move.
+#[allow(clippy::too_many_arguments)]
+fn log_move(home: &Path, caller: &str, partition: &str, r: &cursors::Acked, target: f64, delivered: Option<f64>, nonce: Option<String>, gate: &str, repo_key: &str) {
+    cursors::log_cursor_write(
+        home,
+        &LogRec {
+            id: partition,
+            caller_id: Some(caller),
+            ns: defaults::text("mesh_write.log_ns_store"),
+            from: r.from,
+            to: if r.ok { r.own.map(|x| x as f64) } else { Some(target) },
+            delivered,
+            nonce,
+            gate,
+            verb: defaults::text("mesh_write.verb_ack_primary"),
+            cwd: None,
+            ok: r.ok,
+            err: r.error.as_deref(),
+            repo_key: Some(repo_key),
+        },
+    );
+}
+
+/// `withWatermarkLock(caller, sibling, home, fn)`: `fn` under the lock of the watermark file; contended or unlockable, it runs unlocked
+/// (a watermark is never dropped for want of a lock).
+fn with_watermark_lock(inv: &Inv, caller: &str, sibling: &str, f: impl FnOnce() -> bool) -> bool {
+    let sep = defaults::text("devswarm_recon.seen_sep");
+    let safe = |x: &str| is_safe_id(x) && !x.contains(sep);
+    if !(safe(caller) && safe(sibling)) {
+        return f();
+    }
+    match crate::meshw::idlock::acquire(&inv.home, &format!("{caller}{sep}{sibling}")) {
+        Some(lock) => {
+            let out = f();
+            lock.release();
+            out
+        }
+        None => f(),
+    }
 }
 
 #[cfg(test)]

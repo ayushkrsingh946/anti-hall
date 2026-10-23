@@ -98,21 +98,29 @@ impl Truncation {
     }
 }
 
-/// The per-call cap on store rows (`--limit N`: a finite positive number, floored, at least 1; anything else is ignored): the rows
+/// The per-call cap on store rows (`--limit N`: a finite positive number, floored, at least 1; anything else is ignored). The rows
 /// past it are withheld, the counts keep the real totals, and nothing past the cap is ever acked.
-pub(crate) fn apply_cap(c: &mut tick::Counted, a: &Args) -> Option<Truncation> {
-    let limit = a
-        .one(defaults::text("mesh_write.flag_limit"))
+pub(crate) fn limit_of(a: &Args) -> usize {
+    a.one(defaults::text("mesh_write.flag_limit"))
         .map(crate::checks::guardkit::text::js_number_of_str)
         .filter(|x| x.is_finite() && *x > 0.0)
-        .map_or(defaults::num("mesh_write.inbox_read_limit") as usize, |x| x.floor().max(1.0) as usize);
-    if c.store_rows.len() <= limit {
-        return None;
+        .map_or(defaults::num("mesh_write.inbox_read_limit") as usize, |x| x.floor().max(1.0) as usize)
+}
+
+/// The cut a count made, when it made one.
+fn truncation(c: &tick::Counted) -> Option<Truncation> {
+    (c.truncated > 0).then_some(Truncation { count: c.truncated, limit: c.limit })
+}
+
+/// A sibling partition's row as `read` lists it: `partitionId` first, then the row's own fields.
+fn sibling_row(pid: &str, r: &serde_json::Value) -> OVal {
+    let OVal::Obj(fields) = crate::meshw::readprimary::store_row(r) else { return OVal::Null };
+    let mut o = Obj::default();
+    o.put("partitionId", s(pid));
+    for (k, v) in fields {
+        o.put(&k, v);
     }
-    let count = c.store_rows.len() - limit;
-    c.store_rows.truncate(limit);
-    c.store_unread = limit;
-    Some(Truncation { count, limit })
+    o.done()
 }
 
 /// `inbox <verb> <id>`'s id, when the call has exactly that shape and no flag but the ones named (a flag the engine does not
@@ -166,9 +174,8 @@ pub fn run_count(inv: &Inv, a: &Args) -> R<Answer> {
         Found::Out(refused) => return Ok(refused),
     };
     let id = id.as_str();
-    let mut counted = tick::count_mail(inv, id, &desc, true, true)?;
-    let trunc = apply_cap(&mut counted, a);
-    let stdout = tick::count_json(inv, id, &counted, defaults::text("mesh_write.verb_count"), false, Some(trunc.as_ref()), resolved_from.as_deref())?;
+    let counted = tick::count_mail(inv, id, &desc, true, true, limit_of(a))?;
+    let stdout = tick::count_json(inv, id, &counted, defaults::text("mesh_write.verb_count"), false, resolved_from.as_deref())?;
     if !counted.known {
         warn_unknown(defaults::text("mesh_write.verb_count"), id);
     }
@@ -186,9 +193,8 @@ pub fn run_read(inv: &Inv, a: &Args) -> R<Answer> {
         Found::Out(refused) => return Ok(refused),
     };
     let id = id.as_str();
-    let mut c = tick::count_mail(inv, id, &desc, true, true)?;
+    let c = tick::count_mail(inv, id, &desc, true, true, limit_of(a))?;
     let Some(total) = c.total else { return defer("unknown-count-json") };
-    let trunc = apply_cap(&mut c, a);
     let mut o = Obj::default();
     o.put("ok", OVal::Bool(true))
         .put("action", s(defaults::text("mesh_write.action_read")))
@@ -199,9 +205,18 @@ pub fn run_read(inv: &Inv, a: &Args) -> R<Answer> {
     o.put("repoKey", s(&c.repo_key))
         .put("storePath", OVal::Str(union::store_dir(&inv.home, &c.repo_key).to_string_lossy().into_owned()))
         .put("cwd", s(&inv.cwd))
-        .put("meshPartitionIds", OVal::Arr(vec![s(id)]))
+        .put("meshPartitionIds", OVal::Arr(c.mesh_ids.iter().map(|x| s(x)).collect()))
         .put("lines", OVal::Arr(c.nd_lines.iter().map(|l| s(l)).collect()))
-        .put("meshMessages", OVal::Arr(c.store_rows.iter().map(crate::meshw::readprimary::store_row).collect()))
+        .put(
+            "meshMessages",
+            OVal::Arr(
+                c.store_rows
+                    .iter()
+                    .map(crate::meshw::readprimary::store_row)
+                    .chain(c.siblings.iter().flat_map(|sib| sib.delivered.iter().take(sib.kept).map(|r| sibling_row(&sib.id, r))))
+                    .collect(),
+            ),
+        )
         .put("unreadTotal", n(c.unread as f64))
         .put("unreadNdjson", n(c.nd_unread as f64))
         .put("unreadStore", n(c.store_unread as f64))
@@ -214,8 +229,11 @@ pub fn run_read(inv: &Inv, a: &Args) -> R<Answer> {
         .put("meshGroupUnresolved", OVal::Bool(false))
         .put("meshGroupError", OVal::Null)
         .put("totalsPartial", OVal::Bool(false));
-    if let Some(t) = &trunc {
-        t.put(&mut o, defaults::text("mesh_write.truncated_hint_read"));
+    if c.gap_withheld > 0 {
+        o.put("meshGapWithheld", OVal::Bool(true)).put("meshGapWithheldCount", n(c.gap_withheld as f64));
+    }
+    if let Some(t) = truncation(&c) {
+        t.put(&mut o, defaults::text("mesh_write.truncated_hint"));
     }
     if c.unread > 0 {
         o.put("cursorAdvanced", OVal::Bool(false)).put(
@@ -253,8 +271,8 @@ pub fn run_ack(inv: &Inv, a: &Args) -> R<Answer> {
     let id = id.as_str();
     let Some(inbox) = union::path_field(&desc, defaults::text("mesh_write.field_inbox_path"))? else { return defer("no-inbox-path") };
     let Some(cursor_file) = union::path_field(&desc, defaults::text("mesh_write.field_cursor_path"))? else { return defer("no-cursor-path") };
-    let mut c = tick::count_mail(inv, id, &desc, true, true)?;
-    let trunc = apply_cap(&mut c, a);
+    let c = tick::count_mail(inv, id, &desc, true, true, limit_of(a))?;
+    let trunc = truncation(&c);
     // `--to N`: the NDJSON position alone moves to N (a number, held to the inbox's line count); the store side is left as it is
     let to_raw = a.one(defaults::text("mesh_write.flag_to"));
     let explicit = match to_raw {
@@ -302,9 +320,19 @@ pub fn run_ack(inv: &Inv, a: &Args) -> R<Answer> {
     if cursors::needs_import(&cursors::rows_of(&st, id).map_err(|e| ident::Defer(format!("cursor-rows:{e}")))?) {
         return defer("cursor-import");
     }
+    // each sibling of the mesh group is judged now: a live one is not this caller's to ack
+    let mut skipped_gate: Vec<bool> = Vec::new();
     if owns_store && explicit.is_none() {
         crate::meshw::summary::check(&st, inv, None)?;
+        for sib in &c.siblings {
+            let gated = crate::meshw::meshgroup::ack_gate(inv, &rows, id, &sib.id)?;
+            if !gated && cursors::needs_import(&cursors::rows_of(&st, &sib.id).map_err(|e| ident::Defer(format!("cursor-rows:{e}")))?) {
+                return defer("cursor-import");
+            }
+            skipped_gate.push(gated);
+        }
     }
+    let mut live_skipped: Vec<OVal> = Vec::new();
     // ---- writes ----
     let reader = cursors::reader_key(tick::reader_nonce_cached(&inv.home).as_deref());
     let nonce = reader.as_deref().map(cursors::short_nonce);
@@ -357,7 +385,7 @@ pub fn run_ack(inv: &Inv, a: &Args) -> R<Answer> {
                 from: r.from,
                 to: if r.ok { r.own.map(|x| x as f64) } else { Some(to) },
                 delivered: Some(c.store_rows.len() as f64),
-                nonce,
+                nonce: nonce.clone(),
                 gate: defaults::text("mesh_write.gate_owner"),
                 verb: defaults::text("mesh_write.verb_log_ack"),
                 cwd: None, // absent for the CLI: Node's `ctx.cwd` is unset there
@@ -370,6 +398,38 @@ pub fn run_ack(inv: &Inv, a: &Args) -> R<Answer> {
             let mut f = Obj::default();
             f.put("partitionId", s(id)).put("channel", s(defaults::text("mesh_write.channel_store_cursor"))).put("error", s(e));
             failures.push(f.done());
+        }
+        // the siblings of the mesh group: each moves to where this read left it, never past a row it withheld
+        for (sib, gated) in c.siblings.iter().zip(&skipped_gate) {
+            if *gated {
+                live_skipped.push(s(&sib.id));
+                continue;
+            }
+            let target = sib.cursor + sib.physical;
+            let r = cursors::ack_for(&st, &inv.home, &sib.id, defaults::text("mesh_write.ns_store"), reader.as_deref(), target, &mut procs);
+            cursors::log_cursor_write(
+                &inv.home,
+                &cursors::LogRec {
+                    id: &sib.id,
+                    caller_id: Some(id),
+                    ns: defaults::text("mesh_write.log_ns_store"),
+                    from: r.from,
+                    to: if r.ok { r.own.map(|x| x as f64) } else { Some(target) },
+                    delivered: Some(sib.kept as f64),
+                    nonce: nonce.clone(),
+                    gate: defaults::text("mesh_write.gate_sibling"),
+                    verb: defaults::text("mesh_write.verb_log_ack"),
+                    cwd: None,
+                    ok: r.ok,
+                    err: if r.ok { None } else { r.error.as_deref() },
+                    repo_key: Some(&c.repo_key),
+                },
+            );
+            if let Some(e) = &r.error {
+                let mut f = Obj::default();
+                f.put("partitionId", s(&sib.id)).put("channel", s(defaults::text("mesh_write.channel_sibling_store"))).put("error", s(e));
+                failures.push(f.done());
+            }
         }
         if let Some(why) = crate::meshw::summary::derive_after_write(&st, inv, &c.repo_key) {
             crate::meshw::log_summary_failure(defaults::text("mesh_write.verb_ack"), &why);
@@ -389,6 +449,12 @@ pub fn run_ack(inv: &Inv, a: &Args) -> R<Answer> {
     }
     if !failures.is_empty() {
         out.put("cursorWriteFailures", OVal::Arr(failures)).put("cursorPersisted", OVal::Bool(false));
+    }
+    if !live_skipped.is_empty() {
+        out.put("liveSiblingsSkipped", OVal::Arr(live_skipped));
+    }
+    if c.gap_withheld > 0 {
+        out.put("meshGapWithheld", OVal::Bool(true)).put("meshGapWithheldCount", n(c.gap_withheld as f64));
     }
     if let Some(t) = &trunc {
         t.put(&mut out, defaults::text("mesh_write.truncated_hint_ack"));

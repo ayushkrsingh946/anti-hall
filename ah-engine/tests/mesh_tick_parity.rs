@@ -174,7 +174,9 @@ fn assert_same_home(name: &str, a: &Path, b: &Path, key: &str, what: &str) {
             let bytes = fs::read(p).unwrap();
             if bytes.starts_with(b"SQLite format 3\0") { raw_dump(p) } else { format!("not a database: {bytes:?}") }
         };
-        let (da, dbb) = (one(&db(a)), one(&db(b)));
+        // a registry row a group read touches carries the wall clock of whichever process wrote it
+        let wall = |t: String| regex::Regex::new(r"updated_at=i[0-9]+").unwrap().replace_all(&t, "updated_at=<wall>").into_owned();
+        let (da, dbb) = (wall(one(&db(a))), wall(one(&db(b))));
         assert!(da == dbb, "{name}: {what}: store differs: {}", first_diff(&da, &dbb));
     }
     let (fa, fb) = (tree(a), tree(b));
@@ -910,8 +912,10 @@ fn tick_matches_node_byte_for_byte_and_defers_without_writing() {
         }
         let e = engine_verb(&he, &he.join("state"), &cwd, &av, now, None, &extra);
         let log = last_log(&he.join("state"));
-        assert_eq!(log["result"] == "native", c.native, "{}: expected native={} but the engine logged {log}", c.name, c.native);
-        if c.native {
+        // a case listed as a deferral that the engine now answers natively is compared with Node all the same
+        let answered = log["result"] == "native";
+        assert!(answered || !c.native, "{}: expected native but the engine logged {log}", c.name);
+        if answered {
             native += 1;
             assert_eq!(log["verb"], "InboxTick", "{}: telemetry names the verb", c.name);
             // the JSON form names the home (storePath): the two scratch homes differ
@@ -938,5 +942,5 @@ fn tick_matches_node_byte_for_byte_and_defers_without_writing() {
         }
     }
     eprintln!("tick parity: {} cases, {native} answered by the engine and identical to Node, {deferred} deferred with nothing written", list.len());
-    assert!(native >= 35 && deferred >= 19, "{native} native, {deferred} deferred");
+    assert!(native >= 35 && deferred >= 15, "{native} native, {deferred} deferred");
 }

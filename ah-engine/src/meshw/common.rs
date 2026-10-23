@@ -168,7 +168,8 @@ pub(crate) fn daemon_healthy(inv: &Inv, repo_key: Option<&str>) -> R<bool> {
 }
 
 /// The store a verb writes, settled the way `openStore` settles it: only a store whose `BACKEND` marker says sqlite (or
-/// an explicit sqlite override) is opened; a journal store, or a store with no marker yet (Node would write one), defers.
+/// an explicit sqlite override) is opened; a journal store, or a marker of another backend, defers; a project with no store at all gets a
+/// new sqlite one.
 pub fn open_store(inv: &Inv, repo_key: &str) -> R<MeshStore> {
     let dir = devswarm_root(&inv.home).join(defaults::text("mesh_write.dir_store")).join(repo_key);
     let forced = inv.env("mesh_write.env_store_backend").map(|s| s.trim().to_lowercase()).unwrap_or_default();
@@ -179,7 +180,14 @@ pub fn open_store(inv: &Inv, repo_key: &str) -> R<MeshStore> {
         }
         let marker = std::fs::read_to_string(dir.join(defaults::text("mesh.backend_marker"))).map(|s| s.trim().to_lowercase()).unwrap_or_default();
         if marker != sqlite {
-            return defer("store-backend");
+            // a project with no store at all (no marker, no database, no journal): `resolveStoreBackend` creates it as sqlite
+            let empty = marker.is_empty()
+                && std::fs::metadata(dir.join(defaults::text("mesh_write.store_file"))).is_err()
+                && !std::fs::read_dir(dir.join(defaults::text("devswarm_role.pg_journal_dir"))).is_ok_and(|mut r| r.next().is_some());
+            if !empty {
+                return defer("store-backend");
+            }
+            init_new_store(inv, repo_key)?;
         }
     }
     let db = inv.store_override.clone().unwrap_or_else(|| dir.join(defaults::text("mesh_write.store_file")));
