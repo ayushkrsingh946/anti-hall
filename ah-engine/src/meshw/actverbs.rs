@@ -40,7 +40,7 @@ fn refusal(fields: &[(&str, OVal)]) -> Answer {
     answer(2, o.done())
 }
 
-fn quote(x: &str) -> String {
+pub(crate) fn quote(x: &str) -> String {
     serde_json::to_string(x).unwrap_or_default()
 }
 

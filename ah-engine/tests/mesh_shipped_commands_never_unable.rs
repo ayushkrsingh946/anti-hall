@@ -24,7 +24,6 @@ const INBOX_SUBS: &[&str] = &["tick", "pull", "ack", "ack-primary", "count", "re
 /// open work list, not an allowance: the test fails when a command is added to it without being unable, and when one listed here is
 /// answered (delete the entry). Porting every entry is tracked in the P0 mesh-defer task; the list only ever shrinks.
 const KNOWN_UNABLE: &[&str] = &[
-    "archive",            // not-an-active-id: an id with no active descriptor (resolveArchiveId forms)
     "inbox ack",          // unhandled_verb: cmdInbox count|read|ack (descriptor durable inbox)
     "inbox count",        // unhandled_verb
     "inbox peek-primary", // unhandled_verb: read-primary without the ack
