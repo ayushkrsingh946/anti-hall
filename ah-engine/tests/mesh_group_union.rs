@@ -135,3 +135,36 @@ fn a_message_present_in_both_partitions_is_delivered_once() {
     let bodies: Vec<&str> = v["messages"].as_array().unwrap().iter().map(|m| m["body"].as_str().unwrap()).collect();
     assert_eq!(bodies, ["same body", "only here"], "{v}");
 }
+
+#[test]
+fn a_live_sibling_is_read_but_never_acked_by_the_caller() {
+    let fx = Fx::new("live");
+    let (label, key) = fx.twins();
+    {
+        let st = fx.store(&key);
+        st.append_mesh_row(&row(&label, 1_000, "h-a1", "to label", "peer-a")).unwrap();
+        st.append_mesh_row(&row("child-x", 2_000, "h-b1", "to live child", "peer-b")).unwrap();
+    }
+    // the child is alive: a fresh heartbeat of its own session
+    let beats = fx.home.join(".anti-hall/devswarm/heartbeats");
+    fs::create_dir_all(&beats).unwrap();
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as i64;
+    fs::write(beats.join("child-x.json"), format!(r#"{{"ts":{now},"sessionId":"s-child"}}"#)).unwrap();
+    let (code, v) = fx.run(&["inbox", "read-primary", &label]);
+    assert_eq!(code, 0, "{v}");
+    assert_eq!(v["count"], Value::from(2), "the live child's mail is shown: {v}");
+    assert_eq!(v["liveSiblingsSkipped"], serde_json::json!(["child-x"]), "{v}");
+    let rid = v["readReceiptId"].as_str().unwrap().to_string();
+    let (code, a) = fx.run(&["inbox", "ack-primary", &label, "--receipt", &rid]);
+    assert_eq!(code, 0, "{a}");
+    // the caller-scoped watermark hides what it has seen from its next read ...
+    let (code, again) = fx.run(&["inbox", "read-primary", &label]);
+    assert_eq!(code, 0, "{again}");
+    assert_eq!(again["count"], Value::from(0), "{again}");
+    // ... but the child's own cursor never moved: its mail is still unread for the child
+    let st = fx.store(&key);
+    let rows = st.reader().reader_cursors("child-x").unwrap();
+    let floor = rows.iter().find(|r| r["ns"] == "store" && r["reader"] == "#floor").map(|r| r["value"].as_f64().unwrap_or(0.0)).unwrap_or(0.0);
+    assert_eq!(floor, 0.0, "{rows:?}");
+    assert!(fx.home.join(".anti-hall/devswarm/cursors").read_dir().unwrap().flatten().any(|e| e.file_name().to_string_lossy().contains(".seen-")), "the watermark file");
+}
