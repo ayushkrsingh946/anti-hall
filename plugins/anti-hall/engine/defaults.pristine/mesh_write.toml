@@ -673,6 +673,14 @@ value = "verb={verb} argv=[{argv}] reason={reason}"
 doc = "How many leading positional words (the verb and subcommand, never a message body) an abandoned mesh call's log line names."
 value = 2
 
+[mesh_write.reroute_incoherent]
+doc = "Why a send was rerouted: the addressed row is live but its session runs in another checkout (`rerouteReason`)."
+value = "session-worktree-incoherent"
+
+[mesh_write.reroute_not_live]
+doc = "Why a send was rerouted: the addressed row is not live and a live row of the same session exists (`rerouteReason`)."
+value = "addressed-row-not-live"
+
 [mesh_write.msg_unable]
 doc = "stderr line when the engine cannot answer a mesh verb (an unported verb, a case it cannot do, no plugin context). Nothing was written; the exit code is mesh_write.exit_unable. Placeholders: {site}, where it gave up; {detail}, which call and why."
 value = "ah-engine mesh: ERROR: this verb or case cannot be done by the engine ({site}: {detail}); nothing was done. Run the verb by hand with the devswarm shim (~/.anti-hall/bin/devswarm.js), or report this site."
