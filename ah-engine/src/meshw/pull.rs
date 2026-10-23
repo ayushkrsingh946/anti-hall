@@ -221,9 +221,7 @@ fn prepare_with(inv: &Inv, id: &str, desc: Option<&OVal>, rows_left_by_fold: boo
         return defer("app-archived");
     }
     let ctx = ident::resolve_context(&inv.cwd, true)?;
-    if ctx.kind.starts_with(defaults::text("mesh_write.kind_submodule_prefix")) {
-        return defer("submodule");
-    }
+    // a submodule context keys on its outermost superproject (ident::resolve_context), which Node does too; the kind is only a label
     let Some(current) = ctx.repo_key.clone() else { return defer("no-project") };
     let owner_key = defaults::text("mesh_write.field_owner_key");
     let wt_field = defaults::text("mesh_write.field_worktree_path");
@@ -383,9 +381,7 @@ fn prepare_with(inv: &Inv, id: &str, desc: Option<&OVal>, rows_left_by_fold: boo
         return defer("pull-store-differs");
     }
     let wctx = ident::resolve_context(&wt, false)?;
-    if wctx.kind.starts_with(defaults::text("mesh_write.kind_submodule_prefix")) {
-        return defer("submodule");
-    }
+    // a submodule context keys on its outermost superproject (ident::resolve_context), which Node does too; the kind is only a label
     let sender = ident::primary_workspace_id(wctx.main_worktree.as_deref().unwrap_or(&wt)).ok().filter(|x| idlock::is_safe_id(x));
     let root = devswarm_root(&inv.home);
     let wal_file = wal::wal_path(&root, defaults::text("mesh_write.pull_wal_kind"), id);

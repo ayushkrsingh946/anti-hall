@@ -405,9 +405,7 @@ pub fn archive(inv: &Inv, a: &Args) -> R<Answer> {
     let Some(wt) = nonempty(desc.get(text("mesh_write.field_worktree_path"))).map(str::to_string) else { return defer("descriptor-identity") };
     // the project of the caller's cwd and the proof that the descriptor is its own
     let ctx = ident::resolve_context(&inv.cwd, true)?;
-    if ctx.kind.starts_with(text("mesh_write.kind_submodule_prefix")) {
-        return defer("submodule");
-    }
+    // a submodule context keys on its outermost superproject (ident::resolve_context), which Node does too; the kind is only a label
     let hash = crate::meshw::send::hash_from_workspace_id(id);
     let current_owner = ctx.repo_key.clone().unwrap_or_else(|| hash.clone());
     if let Some(reg) = crate::meshw::inbox::registered_repo_key(&desc, id)?
