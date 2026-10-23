@@ -485,3 +485,35 @@ fn inbox_count_read_peek_and_ack_match_node_byte_for_byte_and_defer_without_writ
     let list = cases(&fx).into_iter().filter(|c| matches!(c.argv.get(1).map(String::as_str), Some("count" | "read" | "peek-primary" | "ack"))).collect();
     run_case_list("count+read+peek+ack", list, &fx);
 }
+
+/// A receipt Node files for a union partition carries an `nd` op; `inbox ack-primary` applies it natively (the NDJSON position and
+/// the descriptor's cursor file), with Node's own output, store, cursor files and journal.
+#[test]
+fn ack_primary_applies_the_ndjson_op_of_a_receipt_like_node() {
+    if !node_sqlite_available() {
+        eprintln!("SKIPPED: Node with node:sqlite is not available, so there is no Node writer to compare with");
+        return;
+    }
+    let fx = fixture("ican");
+    let nonode = no_node_path(&fx.root);
+    let list: Vec<Case> = cases(&fx).into_iter().filter(|c| c.name.starts_with("ack-") && c.native && c.name != "ack-as-owner-flag" && c.name != "ack-unknown-no-inbox-files").collect();
+    assert!(list.len() >= 4, "{}", list.len());
+    for (i, c) in list.iter().enumerate() {
+        let now = NOW + i as i64 * 7_919;
+        let (hn, he) = (fx.root.join(format!("{}-apn", c.name)), fx.root.join(format!("{}-ape", c.name)));
+        for h in [&hn, &he] {
+            copy_tree(&fx.seed_home, h);
+            seed(h, &fx, c, now);
+        }
+        let rp = |h: &Path| node_verb(h, &h.join("state"), &fx.child, &["inbox", "read-primary", "child-1"], now, None, &[]);
+        let (rn, re) = (rp(&hn), rp(&he));
+        let (rid_n, rid_e) = (rid_of(&rn.stdout).expect("a receipt"), rid_of(&re.stdout).expect("a receipt"));
+        assert!(rn.stdout.contains("\"ok\":true"), "{}: {}", c.name, rn.stdout);
+        let an = node_verb(&hn, &hn.join("state"), &fx.child, &["inbox", "ack-primary", "child-1", "--receipt", &rid_n], now + 1, None, &[]);
+        let ae = engine_verb(&he, &he.join("state"), &fx.child, &["inbox", "ack-primary", "child-1", "--receipt", &rid_e], now + 1, None, &[("PATH", nonode.as_str())]);
+        assert_eq!(last_log(&he.join("state"))["result"], "native", "{}: the engine did not apply the receipt: {} / {}", c.name, ae.code, ae.stdout);
+        assert_eq!(ae.code, an.code, "{}", c.name);
+        assert_eq!(canon_out(&he, &ae.stdout, std::slice::from_ref(&rid_e)), canon_out(&hn, &an.stdout, std::slice::from_ref(&rid_n)), "{}: ack output differs", c.name);
+        assert_same_homes(c.name, &hn, &he, &[], &[], &fx.repo_key, "after ack-primary");
+    }
+}

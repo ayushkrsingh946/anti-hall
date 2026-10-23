@@ -8,7 +8,7 @@
 //!
 //! The engine answers only the successful path it can reproduce exactly. Every refusal Node prints (unknown, expired,
 //! foreign or mismatched receipt, a foreign project, a caller that does not own the id), every receipt op the engine does
-//! not apply (`sibling`, `nd`), a re-home, a partition whose legacy cursors still need Node's one-time import, and a
+//! not apply (`sibling`), a re-home, a partition whose legacy cursors still need Node's one-time import, and a
 //! store the engine will not open are [`Defer`]s decided BEFORE the first write; Node then runs the verb. After the first
 //! cursor commit nothing defers: a later failure is reported in the result (`cursorWriteFailures`) exactly as Node
 //! reports it, never by running the verb again.
@@ -22,11 +22,26 @@ use crate::meshw::idlock::{devswarm_root, is_safe_id};
 use crate::meshw::send::{Answer, Effect, mesh_candidates, rehome_is_noop, resolve_mesh_target};
 use std::path::{Path, PathBuf};
 
-/// A receipt op the engine applies: a move of the caller's own partition cursor.
+/// A receipt op the engine applies: a move of the caller's own partition cursor, or of its NDJSON position.
+enum AckOp {
+    Own(OwnOp),
+    Nd(NdOp),
+}
+
+/// A move of the caller's own partition cursor.
 struct OwnOp {
     partition: String,
     target: f64,
     delivered: Option<f64>,
+}
+
+/// A move of the caller's NDJSON position (`commitNdAck`): the target is held to the inbox's line count, and the descriptor's cursor
+/// file follows the floor.
+struct NdOp {
+    partition: String,
+    target: f64,
+    cursor_path: Option<String>,
+    inbox_path: Option<String>,
 }
 
 /// `readReceiptDir(home, id)`.
@@ -81,7 +96,7 @@ pub(crate) fn registered_repo_key(desc: &OVal, id: &str) -> R<Option<String>> {
 /// The ops of a receipt: the `own` moves to apply. A `sibling` or `nd` op (a sibling partition's cursor, the NDJSON
 /// inbox) is Node's; so is an op whose fields the engine cannot read exactly like JavaScript does. An unknown kind is
 /// skipped, as Node skips it.
-fn own_ops(rec: &OVal, id: &str) -> R<Vec<OwnOp>> {
+fn own_ops(rec: &OVal, id: &str) -> R<Vec<AckOp>> {
     let Some(OVal::Arr(ops)) = rec.get("ops") else { return defer("receipt-ops") };
     let mut out = Vec::new();
     for op in ops {
@@ -103,9 +118,31 @@ fn own_ops(rec: &OVal, id: &str) -> R<Vec<OwnOp>> {
                     Some(OVal::Num(d)) if d.is_finite() => Some(*d),
                     _ => None,
                 };
-                out.push(OwnOp { partition, target, delivered });
+                out.push(AckOp::Own(OwnOp { partition, target, delivered }));
             }
-            Some(OVal::Str(k)) if k == defaults::text("mesh_write.op_sibling") || k == defaults::text("mesh_write.op_nd") => return defer("receipt-op-kind"),
+            Some(OVal::Str(k)) if k == defaults::text("mesh_write.op_nd") => {
+                let partition = match op.get("partition") {
+                    None | Some(OVal::Null) => id.to_string(),
+                    Some(OVal::Str(p)) => p.clone(),
+                    Some(_) => return defer("receipt-partition"),
+                };
+                let target = match op.get("target") {
+                    Some(OVal::Num(t)) if t.is_finite() => *t,
+                    _ => return defer("receipt-target"),
+                };
+                let path = |key: &str| -> R<Option<String>> {
+                    match op.get(key) {
+                        None | Some(OVal::Null) => Ok(None),
+                        Some(OVal::Str(t)) if t.is_empty() => Ok(None),
+                        Some(OVal::Str(t)) => Ok(Some(t.clone())),
+                        Some(_) => defer("receipt-nd-path"),
+                    }
+                };
+                // an NDJSON move without a cursor file has no legacy projection to follow: Node's alternative branch is its own
+                let Some(cursor_path) = path("cursorPath")? else { return defer("receipt-nd-cursor") };
+                out.push(AckOp::Nd(NdOp { partition, target, cursor_path: Some(cursor_path), inbox_path: path("inboxPath")? }));
+            }
+            Some(OVal::Str(k)) if k == defaults::text("mesh_write.op_sibling") => return defer("receipt-op-kind"),
             _ => {}
         }
     }
@@ -147,7 +184,7 @@ pub(crate) struct AckPlan {
     rid: String,
     rec: OVal,
     found_dir: String,
-    ops: Vec<OwnOp>,
+    ops: Vec<AckOp>,
     reader: Option<String>,
     repo_key: String,
 }
@@ -240,7 +277,11 @@ pub(crate) fn plan_ack(inv: &Inv, id: &str, rid: &str, ack_as_owner: bool, fresh
     }
     let ops = own_ops(&rec, id)?;
     for op in &ops {
-        let rows = cursors::rows_of(&st, &op.partition).map_err(|e| Defer(format!("cursor-rows:{e}")))?;
+        let partition = match op {
+            AckOp::Own(o) => &o.partition,
+            AckOp::Nd(o) => &o.partition,
+        };
+        let rows = cursors::rows_of(&st, partition).map_err(|e| Defer(format!("cursor-rows:{e}")))?;
         if cursors::needs_import(&rows) {
             return defer("cursor-import");
         }
@@ -248,6 +289,53 @@ pub(crate) fn plan_ack(inv: &Inv, id: &str, rid: &str, ack_as_owner: bool, fresh
     // the summary refresh after the write must be one the engine can do (else Node runs the whole verb)
     crate::meshw::summary::check(&st, inv, None)?;
     Ok(AckPlan { st, id: id.to_string(), rid: rid.to_string(), rec, found_dir, ops, reader, repo_key })
+}
+
+/// `commitNdAck` for one `nd` op of a receipt: the NDJSON position moves to the target (never past the inbox's line count), the
+/// descriptor's cursor file follows the floor, and a failure is reported in the result.
+#[allow(clippy::too_many_arguments)]
+fn apply_nd(inv: &Inv, st: &crate::meshw::store::MeshStore, id: &str, reader: Option<&str>, nonce: Option<String>, repo_key: &str, op: &NdOp, procs: &mut Procs, failures: &mut Vec<OVal>) {
+    let mut to = op.target.max(0.0).floor();
+    if let Some(inbox) = &op.inbox_path {
+        let lines = crate::meshw::union::non_empty_lines(inbox).ok().flatten().map_or(0, |l| l.len());
+        to = to.min(lines as f64);
+    }
+    let r = cursors::ack_for(st, &inv.home, &op.partition, defaults::text("mesh_write.cursor_ns_nd"), reader, to, procs);
+    if r.ok {
+        crate::meshw::mark_committed();
+    }
+    cursors::log_cursor_write(
+        &inv.home,
+        &LogRec {
+            id: &op.partition,
+            caller_id: Some(id),
+            ns: defaults::text("mesh_write.log_ns_nd"),
+            from: r.from,
+            to: if r.ok { r.own.map(|x| x as f64) } else { Some(to) },
+            delivered: None,
+            nonce,
+            gate: defaults::text("mesh_write.gate_min_floor"),
+            verb: defaults::text("mesh_write.verb_ack_primary"),
+            cwd: None,
+            ok: r.ok,
+            err: if r.ok { None } else { r.error.as_deref() },
+            repo_key: Some(repo_key),
+        },
+    );
+    if !r.ok {
+        let mut f = Obj::default();
+        f.put("partitionId", s(&op.partition))
+            .put("channel", s(defaults::text("mesh_write.channel_ndjson_cursor")))
+            .put("error", s(r.error.as_deref().unwrap_or(defaults::text("mesh_write.err_nd_ack_failed"))));
+        failures.push(f.done());
+        return;
+    }
+    // the legacy projection of the floor into the descriptor's cursor file: upward only, best effort
+    if let (Some(fl), Some(cp)) = (r.floor.filter(|f| *f > 0), &op.cursor_path)
+        && cursors::read_cursor(Path::new(cp)) < fl as f64
+    {
+        crate::discard::harmless(cursors::ack_to(Path::new(cp), fl as f64)); // keep: the projection is best-effort in Node
+    }
 }
 
 /// The writes of `cmdInboxAckPrimary` and its result: nothing defers from here, a failure is reported in the result.
@@ -261,6 +349,13 @@ pub(crate) fn apply_ack(inv: &Inv, plan: AckPlan) -> Obj {
     let ns = defaults::text("mesh_write.ns_store");
     let nonce = reader.as_deref().map(cursors::short_nonce);
     for op in &ops {
+        let op = match op {
+            AckOp::Own(o) => o,
+            AckOp::Nd(o) => {
+                apply_nd(inv, &st, id, reader.as_deref(), nonce.clone(), &repo_key, o, &mut procs, &mut failures);
+                continue;
+            }
+        };
         let r = cursors::ack_for(&st, home, &op.partition, ns, reader.as_deref(), op.target, &mut procs);
         if r.ok {
             crate::meshw::mark_committed();

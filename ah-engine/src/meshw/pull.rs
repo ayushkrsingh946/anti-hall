@@ -78,13 +78,36 @@ pub(crate) struct Plan {
     /// Batches the WAL holds without a closing record, oldest first.
     pending: Vec<wal::Open>,
     peek: Peek,
+    /// `res.error` of a failed `message-count` and whether it timed out.
+    peek_error: (String, bool),
 }
 
-/// What the pull reports to the tick.
+/// What `pullOnce` reports: the fields `inbox pull` prints.
+#[derive(Debug, Default, Clone)]
+pub(crate) struct PullRes {
+    pub ok: bool,
+    pub locked: bool,
+    pub imported: usize,
+    pub duplicate: usize,
+    pub native_count: f64,
+    pub lost: f64,
+    pub native_timeout: bool,
+    pub error: Option<String>,
+}
+
+impl PullRes {
+    fn failed(locked: bool, error: String) -> PullRes {
+        PullRes { ok: false, locked, error: Some(error), ..PullRes::default() }
+    }
+}
+
+/// What the pull reports to its caller.
 #[derive(Debug, Default)]
 pub(crate) struct Outcome {
     /// `walBlocked`: the delivery log cannot be written, so mail may be waiting that the count cannot see.
     pub wal_blocked: bool,
+    /// What `pullOnce` returned.
+    pub res: PullRes,
 }
 
 pub(crate) fn field_str(d: &OVal, key: &str) -> Option<String> {
@@ -407,6 +430,7 @@ fn prepare_with(inv: &Inv, id: &str, desc: Option<&OVal>, rows_left_by_fold: boo
         declare,
         pending: Vec::new(),
         peek: Peek::NotAsked,
+        peek_error: (String::new(), false),
     })
 }
 
@@ -498,6 +522,9 @@ impl Plan {
         self.check_wal(inv)?;
         let c = hivecontrol::call_in(&defaults::list("mesh_write.hc_message_count"), &inv.env, Some(&inv.cwd), defaults::millis("mesh_write.hivecontrol_timeout_ms"));
         self.peek = if c.ok { Peek::Count(parse_count(&c.raw)) } else { Peek::Failed };
+        if !c.ok {
+            self.peek_error = (c.error.clone(), c.timed_out);
+        }
         if let Peek::Count(n) = self.peek
             && !line_form
             && n > 0.0
@@ -709,14 +736,14 @@ pub(crate) fn execute(inv: &Inv, p: Plan) -> R<Outcome> {
     let ensured = ensure_locked(inv, &p);
     id_lock.release();
     if !ensured {
-        return Ok(Outcome::default());
+        return Ok(Outcome { res: PullRes::failed(false, defaults::text("mesh_write.msg_pull_ensure_failed").into()), ..Outcome::default() });
     }
     Ok(pull_once(inv, &p))
 }
 
 /// `pullOnce`: one bounded, guard-safe drain of the child's native queue into its durable inbox.
 fn pull_once(inv: &Inv, p: &Plan) -> Outcome {
-    let none = Outcome::default();
+    let none = Outcome { res: PullRes::failed(false, defaults::text("mesh_write.msg_pull_lock_held").into()), ..Outcome::default() };
     let Some(lock) = nodelock::acquire_stale_unless_live(&p.lock_file.to_string_lossy(), pull_lock_params()) else { return none };
     let out = pull_locked(inv, p);
     lock.release();
@@ -812,27 +839,33 @@ fn read_descriptor(home: &Path, id: &str) -> Option<OVal> {
 }
 
 fn pull_locked(inv: &Inv, p: &Plan) -> Outcome {
-    let blocked = Outcome { wal_blocked: true };
     // the descriptor is read again, as Node does (the ensure has written it)
     let Some(desc) = read_descriptor(&inv.home, &p.id) else {
-        return Outcome::default();
+        let id = OVal::Str(p.id.clone()).stringify();
+        return Outcome { res: PullRes::failed(true, defaults::render("mesh_write.msg_pull_no_descriptor", &[("id", &id)])), ..Outcome::default() };
     };
     let worktree = field_str(&desc, defaults::text("mesh_write.field_worktree_path")).unwrap_or_else(|| p.cwd.clone());
     // REPLAY FIRST: every batch a previous pull captured but never closed is ingested before any new destructive read
     if replay_pending(inv, p, &|_| {}).is_err() {
-        return Outcome::default();
+        return Outcome { res: PullRes::failed(true, defaults::text("mesh_write.msg_pull_replay_failed").into()), ..Outcome::default() };
     }
     // FAIL CLOSED: never a destructive read into a WAL that cannot be appended and fsynced right now
-    if wal::preflight(&p.wal).is_some() {
-        return blocked;
+    if let Some(why) = wal::preflight(&p.wal) {
+        let msg = defaults::render("mesh_write.msg_pull_wal_unwritable", &[("why", &why), ("wal", &p.wal.display())]);
+        return Outcome { wal_blocked: true, res: PullRes::failed(true, msg) };
     }
     let native = match p.peek {
         Peek::Count(n) => n,
-        Peek::Failed | Peek::NotAsked => return Outcome::default(),
+        Peek::Failed | Peek::NotAsked => {
+            let (error, timed_out) = &p.peek_error;
+            let error = if error.is_empty() { defaults::text("mesh_write.msg_pull_count_failed").to_string() } else { error.clone() };
+            let timed_out = *timed_out || regex::Regex::new(defaults::text("mesh_write.pull_timeout_re")).is_ok_and(|re| re.is_match(&error));
+            return Outcome { res: PullRes { native_timeout: timed_out, ..PullRes::failed(true, error) }, ..Outcome::default() };
+        }
     };
     if native <= 0.0 {
         wal::maybe_rotate(&p.wal, inv.now);
-        return Outcome::default();
+        return Outcome { res: PullRes { ok: true, locked: true, ..PullRes::default() }, ..Outcome::default() };
     }
     // ONE bounded read-messages (finite timeout, never monitor)
     let r = hivecontrol::call_in(&defaults::list("mesh_write.hc_read_messages"), &inv.env, Some(&inv.cwd), defaults::millis("mesh_write.pull_read_timeout_ms"));
@@ -846,11 +879,12 @@ fn pull_locked(inv: &Inv, p: &Plan) -> Outcome {
         }
     }
     if !r.ok {
-        return Outcome { wal_blocked: wal_error };
+        let error = if r.error.is_empty() { defaults::text("mesh_write.msg_pull_read_failed").to_string() } else { r.error.clone() };
+        return Outcome { wal_blocked: wal_error, res: PullRes::failed(true, error) };
     }
     let got = match ingest_raw(inv, p, &r.raw, &|_| {}) {
         Ok(g) => g,
-        Err(_) => return Outcome { wal_blocked: wal_error },
+        Err(e) => return Outcome { wal_blocked: wal_error, res: PullRes::failed(true, e) },
     };
     let recovered = (got.imported + got.duplicate) as f64;
     let shortfall = recovered < native;
@@ -892,7 +926,12 @@ fn pull_locked(inv: &Inv, p: &Plan) -> Outcome {
             )
         );
     }
-    Outcome { wal_blocked: wal_error }
+    let res = if shortfall {
+        PullRes { ok: false, locked: true, imported: got.imported, duplicate: got.duplicate, native_count: native, lost: native - recovered, ..PullRes::default() }
+    } else {
+        PullRes { ok: !wal_error, locked: true, imported: got.imported, duplicate: got.duplicate, native_count: native, ..PullRes::default() }
+    };
+    Outcome { wal_blocked: wal_error, res }
 }
 
 #[cfg(test)]

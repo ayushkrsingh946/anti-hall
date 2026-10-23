@@ -8,10 +8,10 @@ use crate::checks::guardkit::ojson::OVal;
 use crate::defaults;
 use crate::meshw::args::Args;
 use crate::meshw::common::{self, Inv, Obj, n, s};
-use crate::meshw::{cursors, ident};
 use crate::meshw::ident::{R, defer};
 use crate::meshw::idlock::is_safe_id;
 use crate::meshw::send::{Answer, Effect, resolve_mesh_target};
+use crate::meshw::{cursors, ident};
 use crate::meshw::{tick, union};
 
 /// `inbox <verb> <id>`'s id, when the call has exactly that shape and no flag but the ones named (a flag the engine does not
@@ -228,4 +228,43 @@ pub fn run_ack(inv: &Inv, a: &Args) -> R<Answer> {
         warn_unknown(defaults::text("mesh_write.verb_ack"), id);
     }
     Ok(Answer { code: 0, stdout: format!("{}\n", out.done().stringify()), effect: Effect::None })
+}
+
+/// `inbox pull <id>`: drain the native queue of a workspace into its durable inbox (the pull a `--child` tick runs first), and
+/// say what was imported. A pull that did not succeed prints its result and exits 2, and is logged like Node's `logVerbOutcome`.
+pub fn run_pull(inv: &Inv, a: &Args) -> R<Answer> {
+    let id = plain_id(a, &[])?;
+    crate::meshw::clog::ready(inv)?;
+    let found = ident::read_descriptor(&inv.home, id);
+    let plan = crate::meshw::pull::prepare(inv, id, found.as_ref())?;
+    // the count is not printed, so nothing here depends on it: the plan only settles the lock, the delivery log and the native count
+    let plan = plan.finish(inv, 0, true)?;
+    // `withSelfHeal` adds its fields to what `pull` returns (the plan already refused a heal that would spawn anything)
+    let heal = common::self_heal(inv)?;
+    let repo_key = ident::resolve_context(&inv.cwd, true)?.repo_key;
+    let out = crate::meshw::pull::execute(inv, plan)?;
+    let r = out.res;
+    let mut o = Obj::default();
+    o.put("ok", OVal::Bool(r.ok))
+        .put("action", s(defaults::text("mesh_write.verb_pull")))
+        .put("id", s(id))
+        .put("imported", n(r.imported as f64))
+        .put("duplicate", n(r.duplicate as f64))
+        .put("nativeCount", n(r.native_count))
+        .put("locked", OVal::Bool(r.locked))
+        .put("lost", n(r.lost));
+    if r.native_timeout {
+        o.put("nativeTimeout", OVal::Bool(true));
+    }
+    if let Some(e) = &r.error {
+        o.put("error", s(e));
+    }
+    for (k, v) in heal {
+        o.put(&k, v);
+    }
+    if !r.ok {
+        let msg = r.error.clone().unwrap_or_else(|| defaults::text("mesh_write.msg_verb_not_ok").to_string());
+        crate::meshw::clog::refusal(inv, defaults::text("mesh_write.log_op_inbox_pull"), repo_key.as_deref(), Some(id), &msg, None);
+    }
+    Ok(Answer { code: if r.ok { 0 } else { 2 }, stdout: format!("{}\n", o.done().stringify()), effect: Effect::None })
 }

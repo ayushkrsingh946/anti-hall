@@ -186,6 +186,8 @@ pub enum Verb {
     InboxPeekPrimary,
     /// `inbox ack <id>` (see [`inboxcmd`]).
     InboxAck,
+    /// `inbox pull <id>` (see [`inboxcmd`]).
+    InboxPull,
     /// A verb that needs no store: `help` and the unknown-command answer, `skip`, `archive-ignore`, `archive-unignore`,
     /// `gate-intent`, `notice --list` (see [`simple`]).
     Simple(simple::Simple),
@@ -270,6 +272,9 @@ pub fn verb_of(a: &args::Args) -> Option<Verb> {
     if p0 == defaults::text("mesh_write.verb_inbox") && p1 == Some(defaults::text("mesh_write.verb_ack")) {
         return Some(Verb::InboxAck);
     }
+    if p0 == defaults::text("mesh_write.verb_inbox") && p1 == Some(defaults::text("mesh_write.verb_pull")) {
+        return Some(Verb::InboxPull);
+    }
     if p0 == defaults::text("mesh_write.verb_inbox") && p1 == Some(defaults::text("mesh_write.verb_tick")) {
         return Some(Verb::InboxTick);
     }
@@ -294,6 +299,7 @@ pub fn run_native(inv: &Inv, a: &args::Args) -> R<Answer> {
         Some(Verb::InboxRead) => inboxcmd::run_read(inv, a),
         Some(Verb::InboxPeekPrimary) => readprimary::run_peek(inv, a),
         Some(Verb::InboxAck) => inboxcmd::run_ack(inv, a),
+        Some(Verb::InboxPull) => inboxcmd::run_pull(inv, a),
         Some(Verb::Simple(v)) => simple::run(inv, a, v),
         Some(Verb::Plan) => planverbs::run_plan(inv, a),
         Some(Verb::Scope) => planverbs::run_scope(inv, a),

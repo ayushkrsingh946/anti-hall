@@ -224,8 +224,15 @@ fn mask_journal(text: &str) -> String {
     regex::Regex::new(r#""(ts|pid)":[0-9]+"#).unwrap().replace_all(text, r#""$1":0"#).into_owned()
 }
 
+/// A native message hash is taken under the checkout's label in the engine and under the partition id in Node (the SkyCrew
+/// duplicate fix, by design): the digest differs, the shape does not.
+fn mask_native_hash(text: &str) -> String {
+    regex::Regex::new(r"native:[0-9a-f]{64}").unwrap().replace_all(text, "native:<H>").into_owned()
+}
+
 fn mask_dump(dump: &str) -> String {
-    dump.lines()
+    mask_native_hash(dump)
+        .lines()
         .map(|l| {
             if l.contains("reader=t\"") && l.contains(" ns=t\"") {
                 regex::Regex::new(r"updated_at=i[0-9]+").unwrap().replace_all(l, "updated_at=<wall>").into_owned()
@@ -241,9 +248,15 @@ fn tree(home: &Path) -> BTreeMap<String, String> {
     home_files(home)
         .into_iter()
         .map(|(k, v)| {
-            let text = String::from_utf8_lossy(&v).replace(home.to_string_lossy().as_ref(), "<HOME>");
+            let text = mask_native_hash(&String::from_utf8_lossy(&v).replace(home.to_string_lossy().as_ref(), "<HOME>"));
             let text = if k.contains("/wal/") || k.contains("/wal-spill/") { mask_wal(&text) } else { text };
             let text = if k.contains("/cursor-log/") { mask_journal(&text) } else { text };
+            // the central log's entries carry the wall clock and the writer's pid
+            let text = if k.ends_with("/logs/devswarm.jsonl") {
+                regex::Regex::new(r#""pid":[0-9]+"#).unwrap().replace_all(&regex::Regex::new(r#""ts":"[^"]*""#).unwrap().replace_all(&text, r#""ts":"T""#), r#""pid":0"#).into_owned()
+            } else {
+                text
+            };
             (k, text)
         })
         .collect()
@@ -1033,4 +1046,113 @@ fn a_date_form_the_engine_does_not_reproduce_is_stored_at_import_time_and_the_ba
         "the replayed store ends as Node's (but for the ts): {}",
         first_diff(&norm(&reference), &norm(&ours))
     );
+}
+
+// ---- `inbox pull <id>`: the pull a --child tick runs first, as a verb of its own ------------------------------------------
+
+fn pull_case(name: &str, native: bool, setup: impl Fn(&Path) + 'static) -> Lc {
+    let mut c = lc(name, &[], native);
+    c.argv = vec!["inbox".into(), "pull".into(), "child-1".into()];
+    c.setup(setup)
+}
+
+#[test]
+fn inbox_pull_matches_node_and_drains_like_the_child_tick() {
+    let Some((fx, w)) = setup_world("l8epull") else { return };
+    let wc = w.clone();
+    let b = move |extra: Vec<(&'static str, Value)>, drop: Vec<&'static str>| {
+        let wc = wc.clone();
+        move |h: &Path| base(&wc, h, &extra, &drop)
+    };
+    let wq = w.clone();
+    let queued = move |count: &'static str, read: String| {
+        let wc = wq.clone();
+        move |h: &Path| {
+            base(&wc, h, &[], &[]);
+            hc(h, "count", count);
+            hc(h, "read", &read);
+        }
+    };
+    let two = msgs(&[("first task", "2026-10-09T10:00:00.000Z"), ("second task", "2026-10-09T10:01:00.000Z")]);
+    let cases = vec![
+        pull_case("pull-nothing-queued", true, b(vec![], vec![])),
+        pull_case("pull-count-zero", true, {
+            let f = b(vec![], vec![]);
+            move |h| {
+                f(h);
+                hc(h, "count", "0\n");
+            }
+        }),
+        pull_case("pull-one-message", true, queued("1", msgs(&[("hello child", "2026-10-09T10:00:00.000Z")]))),
+        pull_case("pull-two-messages", true, queued("2", two.clone())),
+        pull_case("pull-count-as-json-object", true, queued("{\"count\":2}", two.clone())),
+        pull_case("pull-messages-wrapper-object", true, queued("2", format!("{{\"messages\":{two}}}"))),
+        pull_case("pull-duplicate-inside-one-batch", true, queued("2", msgs(&[("same", "2026-10-09T10:00:00Z"), ("same", "2026-10-09T10:00:00Z")]))),
+        pull_case("pull-shortfall-count-three-read-one", true, queued("3", msgs(&[("only one", "2026-10-09T10:00:00Z")]))),
+        pull_case("pull-unparseable-read-is-a-shortfall", true, queued("1", "this is not json".into())),
+        pull_case("pull-read-prints-an-empty-array", true, queued("1", "[]".into())),
+        pull_case("pull-read-exits-non-zero", true, {
+            let f = queued("1", msgs(&[("popped", "2026-10-09T10:00:00Z")]));
+            move |h| {
+                f(h);
+                hc(h, "read.rc", "3");
+            }
+        }),
+        pull_case("pull-hivecontrol-count-fails", true, {
+            let f = b(vec![], vec![]);
+            move |h| {
+                f(h);
+                hc(h, "count.rc", "1");
+                hc(h, "count", "DevSwarm is not running");
+            }
+        }),
+        pull_case("pull-hivecontrol-absent", true, b(vec![], vec![])).no_hc(),
+        pull_case("pull-count-is-garbage-zero", true, {
+            let f = b(vec![], vec![]);
+            move |h| {
+                f(h);
+                hc(h, "count", "no idea");
+            }
+        }),
+        pull_case("pull-lock-held-by-a-live-process", true, {
+            let f = b(vec![], vec![]);
+            move |h| {
+                f(h);
+                put(h, "locks/pull-child-1.lock", &json!({"pid": std::process::id(), "ts": NOW, "token": "t", "host": "h"}).to_string());
+                hc(h, "count", "2");
+            }
+        }),
+        pull_case("pull-descriptor-without-project-keys-is-backfilled", true, b(vec![], vec!["repoKey", "ownerKey"])),
+        pull_case("pull-the-inbox-has-a-torn-tail", true, {
+            let f = queued("1", msgs(&[("after a torn tail", "2026-10-09T10:00:00Z")]));
+            move |h| {
+                f(h);
+                put(h, "inbox/child-1.ndjson", "{\"_h\":\"native:old\",\"message\":\"torn");
+            }
+        }),
+        pull_case("pull-replay-wal-batch-written-inbox-not", true, pending_wal(&w, "2026-10-09T10:00:00Z", false)),
+        // ---- the deferrals ----
+        pull_case("pull-defer-unclaimed-session", false, b(vec![("sessionId", json!("unclaimed:child-1"))], vec![])),
+        pull_case("pull-a-foreign-reader-wal-has-an-open-batch", true, {
+            let f = b(vec![], vec![]);
+            move |h| {
+                f(h);
+                put(h, "wal/pull-other.ndjson", "{\"t\":\"batch\",\"e\":\"1-1-1-bbbb\",\"ts\":1,\"raw\":\"[]\"}\n");
+            }
+        }),
+        pull_case("pull-defer-a-spilled-batch-waits-in-wal-spill", false, {
+            let f = b(vec![], vec![]);
+            move |h| {
+                f(h);
+                put(h, "wal-spill/pull-child-1/x.json", "{\"e\":\"1-1-1-cccc\",\"ts\":1,\"raw\":\"[]\"}");
+            }
+        }),
+        {
+            let mut c = pull_case("pull-defer-a-flag", false, b(vec![], vec![]));
+            c.argv.push("--session".into());
+            c.argv.push("s1".into());
+            c
+        },
+    ];
+    run_cases(&fx, &w, &cases, 19, 3);
 }

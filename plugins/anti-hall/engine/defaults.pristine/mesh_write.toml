@@ -2033,3 +2033,51 @@ value = "inbox-ack-all"
 [mesh_write.verb_log_ack]
 doc = "The journal `verb` of an `inbox ack` store move."
 value = "inbox-ack"
+
+[mesh_write.msg_pull_lock_held]
+doc = "What `inbox pull` reports when another pull holds the workspace's pull lock."
+value = "another pull holds the lock"
+
+[mesh_write.msg_pull_ensure_failed]
+doc = "What `inbox pull` reports when the ensure's writes failed and the pull was skipped."
+value = "the workspace registration could not be written"
+
+[mesh_write.msg_pull_no_descriptor]
+doc = "What `inbox pull` reports when the descriptor is gone once the lock is held. Placeholder: {id} (JSON-quoted)."
+value = "no descriptor for workspace {id}"
+
+[mesh_write.msg_pull_replay_failed]
+doc = "What `inbox pull` reports when a pending delivery-log batch could not be replayed (nothing further is read)."
+value = "WAL replay failed (batch kept pending, no new native read)"
+
+[mesh_write.msg_pull_wal_unwritable]
+doc = "What `inbox pull` reports when the delivery log cannot be appended and fsynced (the destructive read is refused). Placeholders: {why} and {wal}."
+value = "delivery WAL not writable ({why}): {wal} — destructive native read refused"
+
+[mesh_write.msg_pull_count_failed]
+doc = "What `inbox pull` reports when the message count failed without saying why."
+value = "message-count failed"
+
+[mesh_write.msg_pull_read_failed]
+doc = "What `inbox pull` reports when the native read failed without saying why."
+value = "read-messages failed"
+
+[mesh_write.pull_timeout_re]
+doc = "Case-insensitive regular expression: a failed message-count whose error matches it is a native timeout (the app did not answer), reported as `nativeTimeout`."
+value = "(?i)request timeout|timed out|ETIMEDOUT"
+
+[mesh_write.msg_verb_not_ok]
+doc = "The central-log message of a verb that returned `ok: false` without an error or a reason."
+value = "verb returned ok:false"
+
+[mesh_write.log_op_inbox_pull]
+doc = "The central-log operation of an `inbox pull` that did not succeed."
+value = "inbox-pull"
+
+[mesh_write.channel_ndjson_cursor]
+doc = "The `channel` of a cursor-write failure of the NDJSON position."
+value = "ndjson-cursor"
+
+[mesh_write.err_nd_ack_failed]
+doc = "The error text of an NDJSON position move that failed without saying why."
+value = "reader-cursors nd ack failed"
