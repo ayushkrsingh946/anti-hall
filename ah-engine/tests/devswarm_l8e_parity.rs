@@ -1158,7 +1158,26 @@ fn inbox_pull_matches_node_and_drains_like_the_child_tick() {
             c
         },
         // ---- the deferrals ----
-        pull_case("pull-defer-unclaimed-session", false, b(vec![("sessionId", json!("unclaimed:child-1"))], vec![])),
+        // an `unclaimed:` row with no session to prove is pulled as it is; one with a session the caller owns is promoted first
+        pull_case("pull-unclaimed-session-without-a-session-of-its-own", true, b(vec![("sessionId", json!("unclaimed:child-1"))], vec![])),
+        {
+            let mut c = pull_case("pull-unclaimed-session-promoted-by-the-session-flag", true, b(vec![("sessionId", json!("unclaimed:child-1"))], vec![]));
+            c.argv.push("--session".into());
+            c.argv.push("real-session-1".into());
+            c
+        },
+        {
+            let mut c = pull_case("pull-session-flag-on-a-registered-child", true, b(vec![], vec![]));
+            c.argv.push("--session".into());
+            c.argv.push("s1".into());
+            c
+        },
+        {
+            let mut c = pull_case("pull-session-flag-creates-the-registration", true, |_| {});
+            c.argv.push("--session".into());
+            c.argv.push("s9".into());
+            c
+        },
         pull_case("pull-a-foreign-reader-wal-has-an-open-batch", true, {
             let f = b(vec![], vec![]);
             move |h| {
@@ -1173,12 +1192,6 @@ fn inbox_pull_matches_node_and_drains_like_the_child_tick() {
                 put(h, "wal-spill/pull-child-1/x.json", "{\"e\":\"1-1-1-cccc\",\"ts\":1,\"raw\":\"[]\"}");
             }
         }),
-        {
-            let mut c = pull_case("pull-defer-a-flag", false, b(vec![], vec![]));
-            c.argv.push("--session".into());
-            c.argv.push("s1".into());
-            c
-        },
     ];
-    run_cases(&fx, &w, &cases, 21, 3);
+    run_cases(&fx, &w, &cases, 24, 1);
 }

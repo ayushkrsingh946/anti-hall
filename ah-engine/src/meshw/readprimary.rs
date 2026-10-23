@@ -405,7 +405,7 @@ fn caller_owns_row(inv: &Inv, id: &str, target: &OVal) -> R<bool> {
 /// The engine reproduces the promotion the caller can prove from its own words: a real session id from `--session` or
 /// `CLAUDE_CODE_SESSION_ID` (the process-tree derivation spawns `ps` per hop: Node's) and the caller's own id (the other
 /// ownership proofs read every descriptor). Everything else defers before the first write.
-fn promote(inv: &Inv, a: &Args, desc: &OVal, desc_sid: Option<&str>, registry_sid: Option<&str>, marker: &str, repo_key: &str) -> R<Option<bool>> {
+pub(crate) fn promote(inv: &Inv, a: &Args, desc: &OVal, desc_sid: Option<&str>, registry_sid: Option<&str>, marker: &str, repo_key: &str) -> R<Option<bool>> {
     let id = desc.get(defaults::text("mesh_write.field_id")).and_then(|v| if let OVal::Str(i) = v { Some(i.as_str()) } else { None }).unwrap_or_default();
     let reg_real = registry_sid.filter(|r| !r.is_empty() && *r != marker);
     let desc_marked = desc_sid == Some(marker);

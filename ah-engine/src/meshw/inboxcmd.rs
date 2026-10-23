@@ -413,11 +413,35 @@ pub fn run_pull(inv: &Inv, a: &Args) -> R<Answer> {
         return Ok(refused);
     }
     // Node reads only `--session` of a pull (the rest it ignores): that one is the engine's own case below
-    let ignored: Vec<&str> = a.flags.keys().map(String::as_str).filter(|k| *k != defaults::text("mesh_write.flag_session")).collect();
-    let id = plain_id(a, &ignored)?;
+    let mut accepted: Vec<&str> = a.flags.keys().map(String::as_str).collect();
+    accepted.retain(|k| *k != defaults::text("mesh_write.flag_session"));
+    accepted.push(defaults::text("mesh_write.flag_session"));
+    let id = plain_id(a, &accepted)?;
+    let session = a.one(defaults::text("mesh_write.flag_session")).filter(|v| !v.is_empty());
     crate::meshw::clog::ready(inv)?;
-    let found = ident::read_descriptor(&inv.home, id);
-    let plan = crate::meshw::pull::prepare(inv, id, found.as_ref())?;
+    let mut found = ident::read_descriptor(&inv.home, id);
+    // `maybePromoteUnclaimed`: a row stamped `unclaimed:` is promoted by the session the caller proves it owns
+    let mut promoted_to: Option<String> = None;
+    let mut unclaimed_ok = false;
+    if let Some(d) = &found {
+        let marker = format!("{}{id}", defaults::text("mesh_write.synthetic_session_prefix"));
+        let desc_sid = crate::meshw::pull::field_str(d, defaults::text("mesh_write.field_session_id"));
+        // Node's ensure runs first and upserts the registry row from the descriptor, so by the time it looks the registry names the
+        // descriptor's own session
+        let opened = tick::open_partition(inv, id, d)?;
+        let registry_sid = desc_sid.clone();
+        // with no session to prove (no flag, no environment) Node promotes nothing and pulls the row as it is
+        let env_sid = inv.env.get(defaults::text("mesh_write.env_session_id")).map(String::as_str).filter(|v| !v.is_empty());
+        let marked = desc_sid.as_deref() == Some(marker.as_str());
+        unclaimed_ok = marked && session.is_none() && env_sid.is_none();
+        if marked && !unclaimed_ok {
+            if crate::meshw::readprimary::promote(inv, a, d, desc_sid.as_deref(), registry_sid.as_deref(), &marker, &opened.repo_key)? == Some(true) {
+                promoted_to = session.or(env_sid).map(|t| crate::checks::guardkit::text::js_trim(t).to_string());
+            }
+            found = ident::read_descriptor(&inv.home, id);
+        }
+    }
+    let plan = crate::meshw::pull::prepare_session(inv, id, found.as_ref(), session, unclaimed_ok)?;
     // the count is not printed, so nothing here depends on it: the plan only settles the lock, the delivery log and the native count
     let plan = plan.finish(inv, 0, true)?;
     // `withSelfHeal` adds its fields to what `pull` returns (the plan already refused a heal that would spawn anything)
@@ -434,6 +458,12 @@ pub fn run_pull(inv: &Inv, a: &Args) -> R<Answer> {
         .put("nativeCount", n(r.native_count))
         .put("locked", OVal::Bool(r.locked))
         .put("lost", n(r.lost));
+    if let Some(to) = &promoted_to {
+        o.put("sessionPromoted", s(to));
+        let mut p = Obj::default();
+        p.put("promoted", OVal::Bool(true));
+        o.put("promotion", p.done());
+    }
     if r.native_timeout {
         o.put("nativeTimeout", OVal::Bool(true));
     }

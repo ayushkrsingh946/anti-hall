@@ -222,17 +222,23 @@ fn foreign_open_batches(root: &Path, own: &Path, worktree: &str) -> bool {
 /// The first half of the plan: the ensure (what the descriptor, the registry and the summary become), decided without writing. The
 /// tick counts over [`Plan::ensured`], which is the descriptor Node's count reads after its own ensure.
 pub(crate) fn prepare(inv: &Inv, id: &str, desc: Option<&OVal>) -> R<Plan> {
-    prepare_with(inv, id, desc, false)
+    prepare_with(inv, id, desc, false, None, false)
+}
+
+/// [`prepare`] for an `inbox pull --session S`: a registration the ensure CREATES takes `S` as its session (`--session`, then
+/// `DEVSWARM_BUILDER_ID`, then the unclaimed marker); an existing one is left as it is.
+pub(crate) fn prepare_session(inv: &Inv, id: &str, desc: Option<&OVal>, session: Option<&str>, unclaimed_ok: bool) -> R<Plan> {
+    prepare_with(inv, id, desc, false, session, unclaimed_ok)
 }
 
 /// [`prepare`] for the reconcile sweep, which has already run the project-wide fold: another registry row on the workspace's worktree
 /// is then one the fold deliberately LEFT (its descriptor, a live reader or a heartbeat anchors it; nothing may retire it), so it does
 /// not stop the pull. `prepare` itself defers it, because `inbox pull` would run the fold there.
 pub(crate) fn prepare_swept(inv: &Inv, id: &str, desc: Option<&OVal>) -> R<Plan> {
-    prepare_with(inv, id, desc, true)
+    prepare_with(inv, id, desc, true, None, false)
 }
 
-fn prepare_with(inv: &Inv, id: &str, desc: Option<&OVal>, rows_left_by_fold: bool) -> R<Plan> {
+fn prepare_with(inv: &Inv, id: &str, desc: Option<&OVal>, rows_left_by_fold: bool, session_flag: Option<&str>, unclaimed_ok: bool) -> R<Plan> {
     if crate::meshw::heartbeat::is_primary_label(id) {
         return defer("primary-label");
     }
@@ -319,11 +325,10 @@ fn prepare_with(inv: &Inv, id: &str, desc: Option<&OVal>, rows_left_by_fold: boo
                 return defer("archived-counterpart");
             }
             // buildDescriptorFromFlags(id, { worktree, session, inbox, cursor }, null, env): keys in Node's order
-            let session = inv
-                .env
-                .get(defaults::text("mesh_write.env_builder_id"))
-                .filter(|b| !b.is_empty())
-                .cloned()
+            let session = session_flag
+                .filter(|v| !v.is_empty())
+                .map(str::to_string)
+                .or_else(|| inv.env.get(defaults::text("mesh_write.env_builder_id")).filter(|b| !b.is_empty()).cloned())
                 .unwrap_or_else(|| format!("{}{id}", defaults::text("mesh_write.synthetic_session_prefix")));
             let repo_id = inv.env.get(defaults::text("devswarm_gates.repo_id_env")).filter(|r| !r.is_empty()).cloned();
             let mut d = Obj::default();
@@ -368,7 +373,7 @@ fn prepare_with(inv: &Inv, id: &str, desc: Option<&OVal>, rows_left_by_fold: boo
         nudge_command: nudge,
     };
     // maybePromoteUnclaimed: a row stamped `unclaimed:` is promoted by a session the caller proves it owns
-    if row.session_id.as_deref() == Some(format!("{}{id}", defaults::text("mesh_write.synthetic_session_prefix")).as_str()) {
+    if !unclaimed_ok && row.session_id.as_deref() == Some(format!("{}{id}", defaults::text("mesh_write.synthetic_session_prefix")).as_str()) {
         return defer("unclaimed");
     }
     // the registry: the row's worktree must be the one the upsert would write (else the collision guard decides), and no other row
