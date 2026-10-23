@@ -538,7 +538,7 @@ fn write_cron_found_mail(inv: &Inv, id: &str, unread: usize) {
 }
 
 /// The JSON form of a tick: `count`'s result with `action` renamed in place, then `idMismatch` and `watcherArmed`.
-pub(crate) fn count_json(inv: &Inv, id: &str, c: &Counted, action: &str, tick: bool, resolved_from: Option<&str>) -> R<String> {
+pub(crate) fn count_json(inv: &Inv, id: &str, c: &Counted, action: &str, tick: bool, resolved_from: Option<&str>, redirected_from: Option<&str>) -> R<String> {
     let Some(total) = c.total else { return defer("unknown-count-json") };
     let mut o = Obj::default();
     o.put("ok", OVal::Bool(true))
@@ -546,6 +546,9 @@ pub(crate) fn count_json(inv: &Inv, id: &str, c: &Counted, action: &str, tick: b
         .put("id", s(id));
     if let Some(f) = resolved_from {
         o.put("resolvedFrom", s(f));
+    }
+    if let Some(f) = redirected_from {
+        o.put("redirected", OVal::Bool(true)).put("redirectedFrom", s(f));
     }
     o.put("repoKey", s(&c.repo_key))
         .put("storePath", OVal::Str(union::store_dir(&inv.home, &c.repo_key).to_string_lossy().into_owned()))
@@ -676,7 +679,7 @@ pub fn run(inv: &Inv, a: &Args) -> R<Answer> {
         if wal_blocked {
             return defer("wal-blocked-json");
         }
-        return Ok(Answer { code: 0, stdout: format!("{}\n", count_json(inv, id, &counted, defaults::text("mesh_write.verb_tick"), true, None)?), effect: Effect::None });
+        return Ok(Answer { code: 0, stdout: format!("{}\n", count_json(inv, id, &counted, defaults::text("mesh_write.verb_tick"), true, None, None)?), effect: Effect::None });
     }
     let line = defaults::render(
         "mesh_write.tick_line",

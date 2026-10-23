@@ -483,6 +483,21 @@ fn cases(fx: &Fx) -> Vec<Case> {
         v.push(base(lim, cmd(verb, "child-1", &[own, &["--limit", "3"]].concat()), Box::new(twin.clone()), twin_mail(3), true, vec!["child-1b"]));
     }
     v.push(base("count-mesh-group-nothing-for-the-twin", cmd("count", "child-1", &[]), Box::new(twin.clone()), twin_mail(0), true, vec!["child-1b"]));
+    // ---- a fold-retired id redirects to its survivor ----
+    for (name, verb, flags, live, expect) in [
+        ("count-retired-redirect", "count", vec![], false, "redirectedFrom"),
+        ("read-retired-redirect", "read", vec![], false, "redirectedFrom"),
+        ("ack-retired-redirect", "ack", vec![], false, "redirectedFrom"),
+    ] {
+        let mut c = base(name, cmd(verb, "gone-1", &flags), ack(floors("child-1", 0, 0), d_inbox.clone()), inbox(text3.clone()), true, vec![expect]);
+        c.fixup = with_launcher(move |h, now| {
+            put(h, "retired/gone-1.json", "{\"retiredTo\":\"child-1\"}");
+            if live {
+                put(h, "heartbeats/child-1.json", &format!("{{\"ts\":{now}}}"));
+            }
+        });
+        v.push(c);
+    }
     // ---- count: deferred ----
     v.push(base("count-no-descriptor", cmd("count", "ghost", &[]), ack(floors("child-1", 0, 0), d_inbox.clone()), inbox(text3.clone()), true, vec!["unregistered-workspace"]));
     v.push(base("read-no-descriptor", cmd("read", "ghost", &[]), ack(floors("child-1", 0, 0), d_inbox.clone()), inbox(text3.clone()), true, vec!["unregistered-workspace"]));

@@ -743,7 +743,7 @@ enum Settled {
 }
 
 /// `retiredTo` of `retired/<id>.json`: the survivor a fold-retired id was merged into.
-fn read_retired_redirect(inv: &Inv, id: &str) -> Option<String> {
+pub(crate) fn read_retired_redirect(inv: &Inv, id: &str) -> Option<String> {
     if !is_safe_id(id) {
         return None;
     }

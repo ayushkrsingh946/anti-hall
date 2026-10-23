@@ -17,17 +17,17 @@ use crate::meshw::{tick, union};
 
 /// Where a count, read or ack lands: the descriptor it works on, or the refusal Node prints for an id nothing resolves.
 enum Found {
-    Go { id: String, desc: OVal, resolved_from: Option<String> },
+    Go { id: String, desc: OVal, resolved_from: Option<String>, redirected_from: Option<String> },
     Out(Answer),
 }
 
 /// The descriptor of `raw` for `inbox <sub>`, as Node finds it: the dispatcher's canonical id, then (for an id with no descriptor of
 /// its own) the mesh label of a registered row, else the refusal `unregistered-workspace` / `no-inbox-path`. Anything else Node
 /// resolves (a prefix, a fold-retired redirect, an ambiguous label, a descriptor without an inbox path) is left to it.
-fn locate(inv: &Inv, sub: &str, raw: &str) -> R<Found> {
+fn locate(inv: &Inv, sub: &str, raw: &str, ack_as_owner: bool) -> R<Found> {
     let has_inbox = |d: &OVal| union::path_field(d, defaults::text("mesh_write.field_inbox_path")).map(|p| p.is_some());
     if let Some(desc) = ident::read_descriptor(&inv.home, raw) {
-        return if has_inbox(&desc)? { Ok(Found::Go { id: raw.to_string(), desc, resolved_from: None }) } else { defer("descriptor-without-inbox") };
+        return if has_inbox(&desc)? { Ok(Found::Go { id: raw.to_string(), desc, resolved_from: None, redirected_from: None }) } else { defer("descriptor-without-inbox") };
     }
     let action = format!("{}{sub}", defaults::text("mesh_write.act_inbox_prefix"));
     let id = match crate::meshw::actverbs::resolve_target_id(inv, raw, &action)? {
@@ -35,14 +35,70 @@ fn locate(inv: &Inv, sub: &str, raw: &str) -> R<Found> {
         Err(refused) => return Ok(Found::Out(refused)),
     };
     if let Some(desc) = ident::read_descriptor(&inv.home, &id) {
-        return if has_inbox(&desc)? { Ok(Found::Go { id, desc, resolved_from: None }) } else { defer("descriptor-without-inbox") };
-    }
-    if retired_redirect_exists(inv, &id) {
-        return defer("retired-redirect");
+        return if has_inbox(&desc)? { Ok(Found::Go { id, desc, resolved_from: None, redirected_from: None }) } else { defer("descriptor-without-inbox") };
     }
     let Some(repo_key) = ident::resolve_context(&inv.cwd, true)?.repo_key else { return defer("no-project") };
     let Some(reader) = tick::open_reader(inv, &repo_key)? else { return defer("no-store") };
     let rows = ident::rows_of(&reader.roster().map_err(|e| ident::Defer(format!("registry:{e}")))?);
+    if retired_redirect_exists(inv, &id) {
+        // a fold-retired id: its mail is its survivor's, unless the id was registered again since
+        let Some(survivor) = crate::meshw::readprimary::read_retired_redirect(inv, &id) else { return defer("retired-redirect") };
+        let re_registered = rows.iter().any(|r| r.id == id);
+        let survivor_desc = ident::read_descriptor(&inv.home, &survivor);
+        let Some(survivor_desc) = survivor_desc.filter(|d| survivor != id && !re_registered && has_inbox(d).unwrap_or(false)) else { return defer("retired-redirect") };
+        if sub == defaults::text("mesh_write.verb_ack") {
+            let q = |t: &str| OVal::Str(t.to_string()).stringify();
+            if ack_as_owner && crate::meshw::actverbs::has_fresh_heartbeat(inv, &survivor) {
+                // the override's purpose is a retired target with no live owner
+                let err = defaults::render("mesh_write.msg_redirect_live_log", &[("id", &id), ("survivor", &survivor)]);
+                cursors::log_cursor_write(
+                    &inv.home,
+                    &cursors::LogRec {
+                        id: &survivor,
+                        caller_id: Some(&id),
+                        ns: defaults::text("mesh_write.log_ns_plain_store"),
+                        from: None,
+                        to: None,
+                        delivered: None,
+                        nonce: None,
+                        gate: defaults::text("mesh_write.gate_redirect_live"),
+                        verb: defaults::text("mesh_write.verb_log_ack"),
+                        cwd: None,
+                        ok: false,
+                        err: Some(&err),
+                        repo_key: Some(&repo_key),
+                    },
+                );
+                let mut o = Obj::default();
+                o.put("ok", OVal::Bool(false))
+                    .put("action", s(sub))
+                    .put("id", s(&id))
+                    .put("reason", s(defaults::text("mesh_write.reason_redirect_live")))
+                    .put("redirectedTo", s(&survivor))
+                    .put("error", s(&defaults::render("mesh_write.msg_redirect_live", &[("id", &q(&id)), ("survivor", &q(&survivor))])));
+                return Ok(Found::Out(Answer { code: 2, stdout: format!("{}\n", o.done().stringify()), effect: Effect::None }));
+            }
+            if !ack_as_owner {
+                let caller = ident::caller_identity_detailed(&inv.env, &inv.cwd)?;
+                let own_entry = resolve_mesh_target(inv, Some(&reader), &rows, Some(caller.identity.as_str()))?;
+                let owns = caller.identity == survivor
+                    || own_entry.as_ref().is_some_and(|e| e.id == survivor)
+                    || ident::declared_self_id(&inv.env, &inv.cwd, &rows)?.as_deref() == Some(survivor.as_str());
+                if !owns {
+                    let mut o = Obj::default();
+                    o.put("ok", OVal::Bool(false))
+                        .put("action", s(sub))
+                        .put("id", s(&survivor))
+                        .put("reason", s(defaults::text("mesh_write.reason_redirect_unresolvable")))
+                        .put("error", s(&defaults::render("mesh_write.msg_redirect_unresolvable", &[("id", &q(&id)), ("survivor", &q(&survivor))])))
+                        .put("redirected", OVal::Bool(true))
+                        .put("redirectedFrom", s(&id));
+                    return Ok(Found::Out(Answer { code: 2, stdout: format!("{}\n", o.done().stringify()), effect: Effect::None }));
+                }
+            }
+        }
+        return Ok(Found::Go { id: survivor, desc: survivor_desc, resolved_from: None, redirected_from: Some(id) });
+    }
     let exact = rows.iter().any(|r| r.id == id);
     if !exact {
         // a mesh label of a registered row addresses that row
@@ -51,7 +107,7 @@ fn locate(inv: &Inv, sub: &str, raw: &str) -> R<Found> {
                 if let Some(desc) = ident::read_descriptor(&inv.home, &target.id)
                     && has_inbox(&desc)?
                 {
-                    return Ok(Found::Go { id: target.id, desc, resolved_from: Some(id) });
+                    return Ok(Found::Go { id: target.id, desc, resolved_from: Some(id), redirected_from: None });
                 }
             }
             return defer("resolved-without-inbox");
@@ -169,13 +225,13 @@ pub fn run_count(inv: &Inv, a: &Args) -> R<Answer> {
         return Ok(refused);
     }
     let raw = plain_id(a, &[defaults::text("mesh_write.flag_limit")])?;
-    let (id, desc, resolved_from) = match locate(inv, defaults::text("mesh_write.verb_count"), raw)? {
-        Found::Go { id, desc, resolved_from } => (id, desc, resolved_from),
+    let (id, desc, resolved_from, redirected_from) = match locate(inv, defaults::text("mesh_write.verb_count"), raw, false)? {
+        Found::Go { id, desc, resolved_from, redirected_from } => (id, desc, resolved_from, redirected_from),
         Found::Out(refused) => return Ok(refused),
     };
     let id = id.as_str();
     let counted = tick::count_mail(inv, id, &desc, true, true, limit_of(a))?;
-    let stdout = tick::count_json(inv, id, &counted, defaults::text("mesh_write.verb_count"), false, resolved_from.as_deref())?;
+    let stdout = tick::count_json(inv, id, &counted, defaults::text("mesh_write.verb_count"), false, resolved_from.as_deref(), redirected_from.as_deref())?;
     if !counted.known {
         warn_unknown(defaults::text("mesh_write.verb_count"), id);
     }
@@ -188,8 +244,8 @@ pub fn run_read(inv: &Inv, a: &Args) -> R<Answer> {
         return Ok(refused);
     }
     let raw = plain_id(a, &[defaults::text("mesh_write.flag_limit")])?;
-    let (id, desc, resolved_from) = match locate(inv, defaults::text("mesh_write.verb_read"), raw)? {
-        Found::Go { id, desc, resolved_from } => (id, desc, resolved_from),
+    let (id, desc, resolved_from, redirected_from) = match locate(inv, defaults::text("mesh_write.verb_read"), raw, false)? {
+        Found::Go { id, desc, resolved_from, redirected_from } => (id, desc, resolved_from, redirected_from),
         Found::Out(refused) => return Ok(refused),
     };
     let id = id.as_str();
@@ -201,6 +257,9 @@ pub fn run_read(inv: &Inv, a: &Args) -> R<Answer> {
         .put("id", s(id));
     if let Some(f) = &resolved_from {
         o.put("resolvedFrom", s(f));
+    }
+    if let Some(f) = &redirected_from {
+        o.put("redirected", OVal::Bool(true)).put("redirectedFrom", s(f));
     }
     o.put("repoKey", s(&c.repo_key))
         .put("storePath", OVal::Str(union::store_dir(&inv.home, &c.repo_key).to_string_lossy().into_owned()))
@@ -264,8 +323,8 @@ pub fn run_ack(inv: &Inv, a: &Args) -> R<Answer> {
     }
     let ack_as_owner = a.has(defaults::text("mesh_write.flag_ack_as_owner"));
     common::seat_check(inv)?;
-    let (id, desc, resolved_from) = match locate(inv, defaults::text("mesh_write.verb_ack"), id)? {
-        Found::Go { id, desc, resolved_from } => (id, desc, resolved_from),
+    let (id, desc, resolved_from, redirected_from) = match locate(inv, defaults::text("mesh_write.verb_ack"), id, ack_as_owner)? {
+        Found::Go { id, desc, resolved_from, redirected_from } => (id, desc, resolved_from, redirected_from),
         Found::Out(refused) => return Ok(refused),
     };
     let id = id.as_str();
@@ -446,6 +505,9 @@ pub fn run_ack(inv: &Inv, a: &Args) -> R<Answer> {
         .put("storeUnavailableReason", OVal::Null);
     if let Some(f) = &resolved_from {
         out.put("resolvedFrom", s(f));
+    }
+    if let Some(f) = &redirected_from {
+        out.put("redirected", OVal::Bool(true)).put("redirectedFrom", s(f));
     }
     if !failures.is_empty() {
         out.put("cursorWriteFailures", OVal::Arr(failures)).put("cursorPersisted", OVal::Bool(false));

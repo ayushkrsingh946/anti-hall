@@ -2187,3 +2187,31 @@ value = "workspace {id} is not registered and has no messages (no descriptor, no
 [mesh_write.msg_no_inbox_path]
 doc = "The refusal text for a registered id that never got an inbox path. Placeholder: {id} (JSON-quoted)."
 value = "no inboxPath for workspace {id} (registered, but never given an --inbox path — register it first)"
+
+[mesh_write.log_ns_plain_store]
+doc = "The journal `ns` of a refused move recorded outside the reader cursors."
+value = "store"
+
+[mesh_write.gate_redirect_live]
+doc = "The journal `gate` of an `inbox ack` refused because the fold-retired id redirects to a live owner."
+value = "redirect-to-live"
+
+[mesh_write.msg_redirect_live_log]
+doc = "The journal error of an `inbox ack` refused for a live survivor. Placeholders: {id} (the retired id) and {survivor}."
+value = "refused: retired id {id} redirects to LIVE owner {survivor}"
+
+[mesh_write.reason_redirect_live]
+doc = "The reason of an `inbox ack --ack-as-owner` on a retired id whose survivor is live."
+value = "redirect-to-live-owner"
+
+[mesh_write.msg_redirect_live]
+doc = "The refusal of an `inbox ack` on a retired id whose survivor is live. Placeholders: {id} and {survivor} (JSON-quoted)."
+value = "refusing to ack retired id {id} — it redirects to {survivor}, whose owner is LIVE. Acking here would consume that live agent's mail. Ack the survivor from its own session, or read without --ack."
+
+[mesh_write.reason_redirect_unresolvable]
+doc = "The reason of an `inbox ack` on a retired id by a caller not verifiable as the survivor."
+value = "retired-redirect-unresolvable-caller"
+
+[mesh_write.msg_redirect_unresolvable]
+doc = "The refusal of an `inbox ack` on a retired id by a caller not verifiable as the survivor. Placeholders: {id} and {survivor} (JSON-quoted)."
+value = "inbox ack {id} was redirected to survivor {survivor} after a fold, but the caller could not be verified as that survivor — refusing so an unrelated/unresolvable caller cannot advance the survivor's NDJSON cursor (pass --ack-as-owner to override)"
