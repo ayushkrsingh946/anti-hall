@@ -2,7 +2,7 @@
 // Node's app sync at a pinned clock against a scratch home: scripts/devswarm.js syncAppState.
 //   usage: node as_reference.js <home> <nowMs> <appDb> [dry]
 const path = require('path');
-const plugin = path.join(__dirname, '..', '..', '..', '..', 'plugins', 'anti-hall');
+const plugin = path.join(__dirname, '..', '..', '..', '..', 'plugins', 'anti-hall-node');
 const [home, now, appdb, dry] = process.argv.slice(2);
 if (!home || home === require('os').userInfo().homedir) { process.stderr.write('refusing: needs a scratch home\n'); process.exit(2); }
 process.env.HOME = home;

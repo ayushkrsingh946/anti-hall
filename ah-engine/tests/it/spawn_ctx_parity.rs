@@ -291,7 +291,7 @@ fn base_env(c: &mut Command, home: &Path, extra: &[(String, String)], now: u128)
 
 fn run_node(h: Hook, home: &Path, case: &Case, input: &[u8], now: u128) -> Out {
     let mut c = Command::new("node");
-    c.arg(plugin().join("hooks").join(h.script)).args(h.argv).current_dir(std::env::temp_dir());
+    c.arg(plugin().join("../anti-hall-node/hooks").join(h.script)).args(h.argv).current_dir(std::env::temp_dir());
     base_env(&mut c, home, &case.env, now);
     run(c, input)
 }

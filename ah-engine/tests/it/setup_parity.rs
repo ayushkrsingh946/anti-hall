@@ -221,7 +221,7 @@ fn case(name: &'static str, seed: Vec<(&'static str, &str)>, args: Vec<&'static 
 }
 
 fn script(name: &str) -> PathBuf {
-    plugin_src().join("scripts").join(name)
+    plugin_src().join("../anti-hall-node/scripts").join(name)
 }
 
 /// Run Node's jev-setup and the engine's on identical homes; return the outputs after asserting that they are equal.
@@ -851,7 +851,7 @@ fn briefing_header_and_frontmatter_scans_agree_with_node() -> R {
     // devswarm substrate pieces and a plugin.json without a version
     replace(
         &root,
-        "scripts/devswarm.js",
+        "../anti-hall-node/scripts/devswarm.js",
         "#!/usr/bin/env node\n// devswarm \u{2014} the cli\n//\n// SUBCOMMANDS\n//   list   all\n//   sync- x\n//    four spaces\n//   list again\n//   status-now  thing\n// not a subcommand\n//   after\n",
     )?;
     replace(&root, ".claude-plugin/plugin.json", r#"{"name":"x"}"#)?;

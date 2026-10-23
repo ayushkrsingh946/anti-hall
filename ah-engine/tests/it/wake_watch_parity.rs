@@ -130,7 +130,7 @@ impl Fx {
         let mut cmd = match kind {
             Kind::Node => {
                 let mut c = Command::new("node");
-                c.arg(plugin().join("companion/lib/devswarm-wake-watch.js"));
+                c.arg(plugin().join("../anti-hall-node/companion/lib/devswarm-wake-watch.js"));
                 c
             }
             Kind::Engine => {

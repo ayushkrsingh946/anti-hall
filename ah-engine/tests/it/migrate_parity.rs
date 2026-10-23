@@ -92,7 +92,7 @@ fn clean_env(cmd: &mut Command, home: &Path, env: &[(&str, &str)]) {
 
 fn run_node(fx: &Fx, dry: bool, env: &[(&str, &str)]) -> Out {
     let mut cmd = Command::new("node");
-    cmd.arg(plugin().join("hooks/doctor.js")).args(["--repair", "--migrations-only"]);
+    cmd.arg(plugin().join("../anti-hall-node/hooks/doctor.js")).args(["--repair", "--migrations-only"]);
     if dry {
         cmd.arg("--dry-run");
     }

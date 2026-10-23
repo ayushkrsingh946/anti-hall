@@ -84,7 +84,7 @@ fn both(guard: &str, patch: &str, subagent: bool, seed: &dyn Fn(&World)) -> (Out
     let mask = |s: &str, w: &World| s.replace(&*w.home.to_string_lossy(), "HOME");
     let node = {
         let mut c = Command::new("node");
-        c.arg(plugin().join("hooks").join(format!("{guard}.js")));
+        c.arg(plugin().join("../anti-hall-node/hooks").join(format!("{guard}.js")));
         run(c, &a, &payload(&a, &with(&a), subagent))
     };
     let eng = {

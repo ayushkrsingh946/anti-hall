@@ -3,7 +3,7 @@
 //   usage: node rt_reference.js <home> <nowMs> '<env json>'
 // Prints Node's sweep result as JSON.
 const path = require('path');
-const plugin = path.join(__dirname, '..', '..', '..', '..', 'plugins', 'anti-hall');
+const plugin = path.join(__dirname, '..', '..', '..', '..', 'plugins', 'anti-hall-node');
 const [home, now, envText] = process.argv.slice(2);
 if (!home || home === require('os').userInfo().homedir) { process.stderr.write('refusing: needs a scratch home\n'); process.exit(2); }
 process.env.HOME = home;

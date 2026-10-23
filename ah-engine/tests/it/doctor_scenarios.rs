@@ -1500,10 +1500,10 @@ fn json_output_carries_the_new_sections() {
 fn shadow_the_node_doctor_agrees_on_a_missing_hook_script_and_on_node_itself() {
     let mut sc = Sc::new();
     sc.own_plugin();
-    fs::remove_file(sc.plugin.join("hooks/git-guard.js")).unwrap();
+    fs::remove_file(sc.plugin.join("../anti-hall-node/hooks/git-guard.js")).unwrap();
     let mut n = Command::new("node");
     // the Node doctor runs read-only (--dry-run previews the repairs) from the scratch copy, in the scratch home
-    n.arg(sc.plugin.join("hooks/doctor.js")).arg("--dry-run");
+    n.arg(sc.plugin.join("../anti-hall-node/hooks/doctor.js")).arg("--dry-run");
     n.env_clear()
         .env("PATH", std::env::var("PATH").unwrap_or_default())
         .env("HOME", &sc.home)
@@ -1604,7 +1604,7 @@ fn ds_the_hook_tests_must_pass_and_no_syntax_check_starts_node() {
     fs::remove_file(sc.plugin.join("companion")).unwrap();
     copy_dir(&real_plugin().join("companion"), &sc.plugin.join("companion"));
     // the engine doctor starts no Node, so it does not syntax-check the supervisor scripts
-    let live = sc.plugin.join("companion/lib/liveness.js");
+    let live = sc.plugin.join("../anti-hall-node/companion/lib/liveness.js");
     fs::write(&live, "function (((\n").unwrap();
     let d = sc.doctor(&[]);
     d.lacks("DevSwarm liveness supervisor");

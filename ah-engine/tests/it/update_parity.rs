@@ -741,7 +741,7 @@ fn codex_run(c: &Cx, engine: bool, args: &[&str]) -> Out {
         cmd.arg("install-codex").args(args).arg("--root").arg(plugin());
     } else {
         cmd = Command::new("node");
-        cmd.arg(plugin().join("codex/install-codex.js")).args(args);
+        cmd.arg(plugin().join("../anti-hall-node/codex/install-codex.js")).args(args);
     }
     cmd.current_dir(&c.cwd).env_clear().env("PATH", std::env::var("PATH").unwrap()).env("HOME", &c.home);
     finish(cmd.output().unwrap())

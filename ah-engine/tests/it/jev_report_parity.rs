@@ -156,7 +156,7 @@ fn same(seed: Option<&Path>, env: &[(&str, &str)], args: &[&str]) -> R<Out> {
         }
     }
     let mut n = Command::new("node");
-    n.arg(plugin_src().join("scripts/jev-report.js")).args(args);
+    n.arg(plugin_src().join("../anti-hall-node/scripts/jev-report.js")).args(args);
     let mut e = Command::new(BIN);
     e.arg("jev-report").args(args);
     let (no, eo) = (run(n, nh.path(), env)?, run(e, eh.path(), env)?);
@@ -654,7 +654,7 @@ fn same_with_other_home(seed: &Path, other: &Path, env: &[(&str, &str)], args: &
     }
     let argv = |o: &Path| args.iter().map(|a| if *a == "{OTHER}" { o.to_string_lossy().into_owned() } else { (*a).to_string() }).collect::<Vec<_>>();
     let mut n = Command::new("node");
-    n.arg(plugin_src().join("scripts/jev-report.js")).args(argv(no_.path()));
+    n.arg(plugin_src().join("../anti-hall-node/scripts/jev-report.js")).args(argv(no_.path()));
     let mut e = Command::new(BIN);
     e.arg("jev-report").args(argv(eo_.path()));
     let (no, eo) = (run(n, nh.path(), env)?, run(e, eh.path(), env)?);
@@ -739,7 +739,7 @@ fn a_label_that_cannot_be_written_fails_like_node() -> R {
         fs::create_dir_all(h.path().join(".anti-hall/logs/jev-labels.ndjson"))?;
         let mut c = Command::new(bin);
         if script {
-            c.arg(plugin_src().join("scripts/jev-report.js"));
+            c.arg(plugin_src().join("../anti-hall-node/scripts/jev-report.js"));
         } else {
             c.arg("jev-report");
         }

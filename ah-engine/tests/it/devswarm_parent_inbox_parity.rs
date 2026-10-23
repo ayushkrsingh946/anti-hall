@@ -117,7 +117,7 @@ fn run(mut c: Command, input: &str) -> (i32, String, String) {
 
 fn node(home: &Path, payload: &str, env: &[(&str, &str)]) -> (i32, String, String) {
     let mut c = cmd("node", home, env);
-    c.arg(plugin().join("hooks/devswarm-parent-inbox.js"));
+    c.arg(plugin().join("../anti-hall-node/hooks/devswarm-parent-inbox.js"));
     run(c, payload)
 }
 
@@ -278,7 +278,11 @@ fn now_ms() -> i64 {
 
 /// The project key of the scratch checkout, asked of Node's own resolver.
 fn project_key(home: &Path) -> String {
-    let script = format!("process.stdout.write(require({:?}).repoKeyForWorktree({:?}))", plugin().join("companion/lib/devswarm-repokey.js"), home.join("proj"));
+    let script = format!(
+        "process.stdout.write(require({:?}).repoKeyForWorktree({:?}))",
+        plugin().join("../anti-hall-node/companion/lib/devswarm-repokey.js"),
+        home.join("proj")
+    );
     let o = cmd("node", home, &[]).arg("-e").arg(script).output().unwrap();
     String::from_utf8_lossy(&o.stdout).into_owned()
 }
@@ -296,7 +300,11 @@ fn store_dir(h: &Path) {
 }
 
 fn primary_id(h: &Path) -> String {
-    let script = format!("process.stdout.write(require({:?}).primaryWorkspaceId({:?}))", plugin().join("companion/install-devswarm-ingest.js"), h.join("proj"));
+    let script = format!(
+        "process.stdout.write(require({:?}).primaryWorkspaceId({:?}))",
+        plugin().join("../anti-hall-node/companion/install-devswarm-ingest.js"),
+        h.join("proj")
+    );
     let o = cmd("node", h, &[]).arg("-e").arg(script).output().unwrap();
     String::from_utf8_lossy(&o.stdout).into_owned()
 }
@@ -467,7 +475,7 @@ fn plugin_versions(versions: Vec<&'static str>, installed: Option<Value>, manife
 /// child's descriptor and the summary.
 fn warm_child(h: &Path) {
     let mut c = cmd("node", h, &[("DEVSWARM_SOURCE_BRANCH", "feat/x"), ("DEVSWARM_BUILDER_ID", "child-1")]);
-    c.arg(plugin().join("hooks/devswarm-child-turn.js"));
+    c.arg(plugin().join("../anti-hall-node/hooks/devswarm-child-turn.js"));
     let (code, _, err) = run(c, &payload(&h.join("proj"), "warm", None, false));
     assert_eq!(code, 0, "warm child turn failed: {err}");
 }

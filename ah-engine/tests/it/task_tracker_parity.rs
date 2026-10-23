@@ -218,7 +218,7 @@ fn run_side(engine: bool, home: &Path, case: &Case) -> Vec<Out> {
                 c.arg("check").arg("task-tracker").env("AH_ENGINE_DIR", home.join("engine-state")).env("AH_ENGINE_PLUGIN_ROOT", plugin());
             } else {
                 c = Command::new("node");
-                c.arg(plugin().join("hooks/task-tracker.js"));
+                c.arg(plugin().join("../anti-hall-node/hooks/task-tracker.js"));
             }
             c.current_dir(std::env::temp_dir());
             base_env(&mut c, home, case);

@@ -54,7 +54,7 @@ fn the_task_tracker_text_the_gate_recognises_is_what_the_hook_prints() {
     let run = |turn: u32| -> String {
         let payload = serde_json::json!({"session_id": "gate-parity", "cwd": home, "prompt": format!("p{turn}")}).to_string();
         let mut c = Command::new("node");
-        c.arg(plugin().join("hooks/task-tracker.js"))
+        c.arg(plugin().join("../anti-hall-node/hooks/task-tracker.js"))
             .env_clear()
             .env("HOME", &home)
             .env("ANTIHALL_EMIT_DEDUPE", "0")
@@ -75,7 +75,7 @@ fn the_task_tracker_text_the_gate_recognises_is_what_the_hook_prints() {
 
 #[test]
 fn the_comms_and_swarm_markers_are_in_the_hooks_that_print_them() {
-    let hooks = plugin().join("hooks");
+    let hooks = plugin().join("../anti-hall-node/hooks");
     let src = |f: &str| std::fs::read_to_string(hooks.join(f)).unwrap();
     let markers = ah_engine::defaults::list("inject_gate.comms_markers");
     for hook in ["devswarm-child-turn.js", "devswarm-parent-inbox.js"] {

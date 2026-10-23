@@ -6,7 +6,7 @@
 const path = require('path');
 const fs = require('fs');
 const cp = require('child_process');
-const plugin = path.join(__dirname, '..', '..', '..', '..', 'plugins', 'anti-hall');
+const plugin = path.join(__dirname, '..', '..', '..', '..', 'plugins', 'anti-hall-node');
 const store = require(path.join(plugin, 'companion', 'lib', 'devswarm-store.js'));
 const identity = require(path.join(plugin, 'companion', 'lib', 'identity.js'));
 const rc = require(path.join(plugin, 'companion', 'lib', 'reader-cursors.js'));

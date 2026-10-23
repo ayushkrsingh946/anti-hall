@@ -4,7 +4,7 @@
 //   usage: node rt_split.js <home> <hash> <seed> <nowMs> <nfiles> <pending 0|1>
 const path = require('path');
 const fs = require('fs');
-const plugin = path.join(__dirname, '..', '..', '..', '..', 'plugins', 'anti-hall');
+const plugin = path.join(__dirname, '..', '..', '..', '..', 'plugins', 'anti-hall-node');
 const store = require(path.join(plugin, 'companion', 'lib', 'devswarm-store.js'));
 const [home, hash, seedArg, nowArg, nfilesArg, pendingArg] = process.argv.slice(2);
 if (!home || home === require('os').userInfo().homedir) { process.stderr.write('refusing: needs a scratch home\n'); process.exit(2); }

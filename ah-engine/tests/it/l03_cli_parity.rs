@@ -254,7 +254,7 @@ fn defect_files(home: &Path, sub: &str) -> R<Vec<String>> {
 
 // ---- defect ---------------------------------------------------------------------------------------------------------------
 
-const DEFECT: &str = "scripts/defect.js";
+const DEFECT: &str = "../anti-hall-node/scripts/defect.js";
 
 #[test]
 fn defect_cuts_inside_a_surrogate_pair_with_a_replacement_character() -> R {
@@ -414,7 +414,7 @@ fn defect_identity_in_a_repository_the_file_resolver_is_unsure_of_matches_node()
 
 // ---- jev-setup: test, review-due, reviewed, snooze -----------------------------------------------------------------------
 
-const JEV_SETUP: &str = "scripts/jev-setup.js";
+const JEV_SETUP: &str = "../anti-hall-node/scripts/jev-setup.js";
 
 fn jev_same<'a>(seed: Option<&'a Path>, env: &'a [(&'a str, &'a str)]) -> Same<'a> {
     Same { script: JEV_SETUP, verb: "jev-setup", seed, cwd: None, env, stdin: "" }
@@ -639,7 +639,7 @@ fn same_outputs(c: &Same, args: &[&str]) -> R<Out> {
     Ok(eo)
 }
 
-const AHC: &str = "scripts/auto-handover-config.js";
+const AHC: &str = "../anti-hall-node/scripts/auto-handover-config.js";
 
 #[test]
 fn auto_handover_config_matches_node() -> R {
@@ -713,7 +713,7 @@ fn auto_handover_config_matches_node() -> R {
     Ok(())
 }
 
-const DISPATCH: &str = "scripts/dispatch-report.js";
+const DISPATCH: &str = "../anti-hall-node/scripts/dispatch-report.js";
 
 #[test]
 fn dispatch_report_matches_node() -> R {
@@ -749,7 +749,7 @@ fn dispatch_report_matches_node() -> R {
     Ok(())
 }
 
-const CWB: &str = "scripts/coordinator-work-baseline.js";
+const CWB: &str = "../anti-hall-node/scripts/coordinator-work-baseline.js";
 
 fn transcript(commands: &[(&str, bool, bool)]) -> String {
     // (command, is_error, sidechain): one assistant line with the Bash tool use, then the user line with its result
@@ -851,7 +851,7 @@ fn coordinator_work_baseline_errors_match_node() -> R {
     Ok(())
 }
 
-const DEDUP: &str = "scripts/finding-dedup.js";
+const DEDUP: &str = "../anti-hall-node/scripts/finding-dedup.js";
 
 #[test]
 fn finding_dedup_matches_node() -> R {

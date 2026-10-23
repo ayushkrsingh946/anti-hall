@@ -108,7 +108,8 @@ fn pids(v: &Value, field: &str) -> BTreeSet<u64> {
 /// The Node companion's selection on the same listing: `findOrphans(parsePs(text), null, <exclude as its buildExtraRe builds it>)`.
 fn node_selection(listing: &str, exclude: &str) -> BTreeSet<u64> {
     let js = "const m=require(process.argv[1]);const o=m.findOrphans(m.parsePs(process.argv[2]),null,process.argv[3]?new RegExp(process.argv[3],'i'):null);process.stdout.write(JSON.stringify(o.map(p=>p.pid)));";
-    let out = Command::new("node").args(["-e", js]).arg(plugin().join("companion/mcp-reaper.js")).arg(listing).arg(exclude).output().expect("node");
+    let out =
+        Command::new("node").args(["-e", js]).arg(plugin().join("../anti-hall-node/companion/mcp-reaper.js")).arg(listing).arg(exclude).output().expect("node");
     serde_json::from_slice::<Vec<u64>>(&out.stdout).expect("node selection").into_iter().collect()
 }
 

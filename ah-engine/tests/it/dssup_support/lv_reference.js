@@ -4,7 +4,7 @@
 // Prints {id: JSON.stringify(verdict)} (the exact text writeVerdict wrote).
 const path = require('path');
 const fs = require('fs');
-const plugin = path.join(__dirname, '..', '..', '..', '..', 'plugins', 'anti-hall');
+const plugin = path.join(__dirname, '..', '..', '..', '..', 'plugins', 'anti-hall-node');
 const [home, now, idle, win] = process.argv.slice(2);
 process.env.HOME = home;
 if (!home || home === require('os').userInfo().homedir) { process.stderr.write('refusing: needs a scratch home\n'); process.exit(2); }

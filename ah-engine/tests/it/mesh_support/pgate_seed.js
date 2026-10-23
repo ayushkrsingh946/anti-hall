@@ -9,7 +9,7 @@
 // PG_READER_AT=<n> puts that row at n instead (n < 2: the reader is behind its mail). PG_URGENCY=<u> sets the entry's urgencyMax.
 const path = require('path');
 const fs = require('fs');
-const lib = path.join(__dirname, '..', '..', '..', '..', 'plugins', 'anti-hall', 'companion');
+const lib = path.join(__dirname, '..', '..', '..', '..', 'plugins', 'anti-hall-node', 'companion');
 const repokey = require(path.join(lib, 'lib', 'devswarm-repokey.js'));
 const inst = require(path.join(lib, 'install-devswarm-ingest.js'));
 const identity = require(path.join(lib, 'lib', 'identity.js'));

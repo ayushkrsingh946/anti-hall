@@ -392,7 +392,7 @@ fn check_one(root: &Path, idx: usize, s: &Sc, mismatches: &mut Vec<String>) -> O
     let eh = materialize(root, &format!("{idx}-eng"), s);
     let body = |h: &Path| s.raw.clone().unwrap_or_else(|| subst(&s.payload, &h.to_string_lossy()).to_string());
     let mut n = Command::new("node");
-    n.arg(repo().join(format!("plugins/anti-hall/hooks/{}.js", s.hook)));
+    n.arg(repo().join(format!("plugins/anti-hall-node/hooks/{}.js", s.hook)));
     base_env(&mut n, &nh);
     let mut e = Command::new(env!("CARGO_BIN_EXE_ah-engine"));
     e.arg("check").arg(s.hook);
@@ -409,7 +409,7 @@ fn check_one(root: &Path, idx: usize, s: &Sc, mismatches: &mut Vec<String>) -> O
     if s.warm {
         for h in [&nh, &eh] {
             let mut w = Command::new("node");
-            w.arg(repo().join(format!("plugins/anti-hall/hooks/{}.js", s.hook)));
+            w.arg(repo().join(format!("plugins/anti-hall-node/hooks/{}.js", s.hook)));
             base_env(&mut w, h);
             for (k, v) in &s.env {
                 w.env(k, v);

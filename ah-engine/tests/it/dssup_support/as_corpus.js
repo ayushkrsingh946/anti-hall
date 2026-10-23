@@ -6,7 +6,7 @@
 const path = require('path');
 const fs = require('fs');
 const cp = require('child_process');
-const plugin = path.join(__dirname, '..', '..', '..', '..', 'plugins', 'anti-hall');
+const plugin = path.join(__dirname, '..', '..', '..', '..', 'plugins', 'anti-hall-node');
 const store = require(path.join(plugin, 'companion', 'lib', 'devswarm-store.js'));
 const repokey = require(path.join(plugin, 'companion', 'lib', 'devswarm-repokey.js'));
 const { DatabaseSync } = require('node:sqlite');

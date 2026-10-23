@@ -219,7 +219,7 @@ fn warm_daemon(s: &Scene, host: &str, event: &str, ran: &Path) {
 
 /// Warm the stable launchers the child-role check compares with (Node writes them when it loads), so the check can answer.
 fn warm_launchers(s: &Scene) {
-    let hook = Scene::plugin().join("hooks/devswarm-child-role.js");
+    let hook = Scene::plugin().join("../anti-hall-node/hooks/devswarm-child-role.js");
     let mut c = Command::new("node");
     c.arg(hook)
         .env_clear()

@@ -315,7 +315,7 @@ fn base_env(c: &mut Command, home: &Path, fakes: &Path, case: &Case) {
 
 fn run_node(home: &Path, fakes: &Path, case: &Case, input: &[u8]) -> Out {
     let mut c = Command::new("node");
-    c.arg(plugin().join("hooks/session-end-mcp-reaper.js")).current_dir(std::env::temp_dir());
+    c.arg(plugin().join("../anti-hall-node/hooks/session-end-mcp-reaper.js")).current_dir(std::env::temp_dir());
     base_env(&mut c, home, fakes, case);
     run(c, input)
 }
@@ -803,8 +803,8 @@ fn the_engine_really_signals_what_it_selects_and_nothing_else() {
 fn the_shipped_patterns_are_the_node_patterns() {
     // read this checkout's plugin files, not whatever a state-dir cache or an installed plugin holds
     ah_engine::defaults::reload(Some(&plugin())).unwrap();
-    let src = std::fs::read_to_string(plugin().join("companion/mcp-reaper.js")).unwrap();
-    let reaper = std::fs::read_to_string(plugin().join("hooks/session-end-mcp-reaper.js")).unwrap();
+    let src = std::fs::read_to_string(plugin().join("../anti-hall-node/companion/mcp-reaper.js")).unwrap();
+    let reaper = std::fs::read_to_string(plugin().join("../anti-hall-node/hooks/session-end-mcp-reaper.js")).unwrap();
     let norm = |s: &str| s.replace("\\/", "/");
     for (key, node_src) in [
         ("mcp_reaper.runtime_re", &src),

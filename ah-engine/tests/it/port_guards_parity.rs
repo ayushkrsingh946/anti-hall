@@ -151,7 +151,7 @@ fn base_env(c: &mut Command, home: &Path, case: &Case) {
 
 fn run_node(hook: &str, home: &Path, case: &Case) -> (i32, Vec<u8>, Vec<u8>) {
     let mut c = Command::new("node");
-    c.arg(repo().join("plugins/anti-hall/hooks").join(hook));
+    c.arg(repo().join("plugins/anti-hall-node/hooks").join(hook));
     base_env(&mut c, home, case);
     run(c, &case.input.replace("{HOME}", &home.to_string_lossy()))
 }

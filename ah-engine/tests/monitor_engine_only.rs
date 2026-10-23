@@ -37,7 +37,7 @@ fn run(tag: &str, engine_body: Option<&str>) -> Run {
         script(&home.join(".anti-hall/ah-engine/bin/ah-engine"), b);
     }
     script(&plugin.join("scripts/ah-run.sh"), "echo \"LAUNCHER $*\"");
-    script(&plugin.join("companion/lib/devswarm-wake-watch.js"), "echo NODE-WATCHER");
+    script(&plugin.join("../anti-hall-node/companion/lib/devswarm-wake-watch.js"), "echo NODE-WATCHER");
     let o = Command::new("/bin/sh")
         .arg("-c")
         .arg(monitor_command())

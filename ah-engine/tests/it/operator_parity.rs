@@ -291,7 +291,7 @@ const SETTINGS_CASES: &[&str] = &[
 fn settings_agree_with_node_on_a_seeded_home() -> R {
     let seed = Scratch::new("seed")?;
     settings_seed(seed.path())?;
-    let c = Same { script: "scripts/settings.js", verb: "settings", seed: Some(seed.path()), cwd: None, env: &[], stdin: "" };
+    let c = Same { script: "../anti-hall-node/scripts/settings.js", verb: "settings", seed: Some(seed.path()), cwd: None, env: &[], stdin: "" };
     for a in SETTINGS_CASES {
         same(&c, &a.split(' ').collect::<Vec<_>>())?;
     }
@@ -313,7 +313,7 @@ fn settings_agree_with_node_under_environment_overrides() -> R {
         &[("ANTIHALL_JEV", "0"), ("ANTHROPIC_API_KEY", "x")],
     ];
     for env in envs {
-        let c = Same { script: "scripts/settings.js", verb: "settings", seed: Some(seed.path()), cwd: None, env, stdin: "" };
+        let c = Same { script: "../anti-hall-node/scripts/settings.js", verb: "settings", seed: Some(seed.path()), cwd: None, env, stdin: "" };
         for a in [
             "show --json",
             "show --section jev",
@@ -334,7 +334,7 @@ fn settings_agree_with_node_on_a_corrupt_store() -> R {
     let seed = Scratch::new("seed")?;
     write(seed.path(), ".anti-hall/settings.json", "{not json")?;
     write(seed.path(), ".anti-hall/jev.json", r#"{"enabled":true,"budget":{"usdPerDay":9}}"#)?;
-    let c = Same { script: "scripts/settings.js", verb: "settings", seed: Some(seed.path()), cwd: None, env: &[], stdin: "" };
+    let c = Same { script: "../anti-hall-node/scripts/settings.js", verb: "settings", seed: Some(seed.path()), cwd: None, env: &[], stdin: "" };
     for a in ["set jev.enabled false", "get jev.enabled --json", "show --section jev --json", "reset jev.enabled"] {
         same(&c, &a.split(' ').collect::<Vec<_>>())?;
     }
@@ -352,7 +352,7 @@ fn trust_allowlists_agree_with_node() -> R {
         r#"{"patterns":["^npm test$","^ls ","^git status$|^rm -rf /$","^(.*)$","rm","^cat .*","^node [a-z]+\\.js$",5,"^x(","^a\\.b c$","^go build ./...$","^foo [^;]+$","^foo (?<n>x)$"]}"#,
     )?;
     write(&r, ".anti-hall/edit-allow.json", r#"{"paths":["docs/**","*.md","/abs","../x","a\\b","**"," pad",7,"~/x","C:foo","a/../b",""]}"#)?;
-    let c = Same { script: "scripts/settings.js", verb: "settings", seed: None, cwd: Some(&r), env: &[], stdin: "" };
+    let c = Same { script: "../anti-hall-node/scripts/settings.js", verb: "settings", seed: None, cwd: Some(&r), env: &[], stdin: "" };
     for a in [
         "trust-command-allow",
         "trust-command-allow --json",
@@ -494,7 +494,7 @@ fn defect_seed(root: &Path) -> R {
 
 #[test]
 fn defect_reports_and_listings_agree_with_node() -> R {
-    let c = Same { script: "scripts/defect.js", verb: "defect", seed: None, cwd: None, env: &[], stdin: "" };
+    let c = Same { script: "../anti-hall-node/scripts/defect.js", verb: "defect", seed: None, cwd: None, env: &[], stdin: "" };
     let long = "x".repeat(1500);
     let long_sym = "S".repeat(250);
     let long_proj = "P".repeat(100);
@@ -562,7 +562,7 @@ fn defect_reports_and_listings_agree_with_node() -> R {
 fn defect_state_changes_agree_with_node_on_a_seeded_store() -> R {
     let seed = Scratch::new("seed")?;
     defect_seed(seed.path())?;
-    let c = Same { script: "scripts/defect.js", verb: "defect", seed: Some(seed.path()), cwd: None, env: &[], stdin: "" };
+    let c = Same { script: "../anti-hall-node/scripts/defect.js", verb: "defect", seed: Some(seed.path()), cwd: None, env: &[], stdin: "" };
     let list = same(&c, &["list", "--json"])?;
     assert!(list.stdout.contains("regressed"), "the seed exercises the regression status");
     for a in [
@@ -637,7 +637,7 @@ fn defect_identity_and_history_agree_with_node_in_a_repository() -> R {
     git(&r, &["add", "-A"])?;
     git(&r, &["commit", "-q", "-m", "docs: changelog"])?;
     let repo_s = r.to_string_lossy().into_owned();
-    let c = Same { script: "scripts/defect.js", verb: "defect", seed: None, cwd: Some(&r), env: &[], stdin: "" };
+    let c = Same { script: "../anti-hall-node/scripts/defect.js", verb: "defect", seed: None, cwd: Some(&r), env: &[], stdin: "" };
     for a in [
         vec!["backfill", "--repo", &repo_s, "--dry-run"],
         vec!["backfill", "--repo", &repo_s],
@@ -658,13 +658,13 @@ fn defect_identity_and_history_agree_with_node_in_a_repository() -> R {
     // history queries over a backfilled store
     let store = Scratch::new("store")?;
     let seeded = Command::new("node")
-        .arg(plugin_src().join("scripts/defect.js"))
+        .arg(plugin_src().join("../anti-hall-node/scripts/defect.js"))
         .args(["backfill", "--repo", &repo_s])
         .env("HOME", store.path())
         .env("ANTIHALL_INGEST_DRY_RUN", "1")
         .output()?;
     assert!(seeded.status.success());
-    let c = Same { script: "scripts/defect.js", verb: "defect", seed: Some(store.path()), cwd: None, env: &[], stdin: "" };
+    let c = Same { script: "../anti-hall-node/scripts/defect.js", verb: "defect", seed: Some(store.path()), cwd: None, env: &[], stdin: "" };
     for a in ["recurring", "recurring --json", "similar lock race", "similar windows crash --json", "similar regex --component hooks/a", "list"] {
         same(&c, &a.split(' ').collect::<Vec<_>>())?;
     }
@@ -721,14 +721,20 @@ fn statusline_agrees_with_node() -> R {
     for (seeded, dirs) in [(Some(seed.path()), vec![r.as_path(), sub.as_path()]), (Some(bare.path()), vec![r.as_path()]), (None, vec![work.path()])] {
         for cwd in dirs {
             for input in &inputs {
-                let c = Same { script: "statusline/statusline.js", verb: "statusline", seed: seeded, cwd: Some(cwd), env: &[], stdin: input };
+                let c = Same { script: "../anti-hall-node/statusline/statusline.js", verb: "statusline", seed: seeded, cwd: Some(cwd), env: &[], stdin: input };
                 statusline_pair(&c, &[])?;
             }
         }
     }
     // colors off, base commands, consolidated base
-    let c =
-        Same { script: "statusline/statusline.js", verb: "statusline", seed: Some(seed.path()), cwd: Some(&r), env: &[("NO_COLOR", "1")], stdin: inputs[0] };
+    let c = Same {
+        script: "../anti-hall-node/statusline/statusline.js",
+        verb: "statusline",
+        seed: Some(seed.path()),
+        cwd: Some(&r),
+        env: &[("NO_COLOR", "1")],
+        stdin: inputs[0],
+    };
     statusline_pair(&c, &[])?;
     let base = Scratch::new("base")?;
     write(base.path(), ".anti-hall/base-statusline.json", r#"{"command":"printf 'BASE LINE\\n'"}"#)?;
@@ -759,7 +765,7 @@ fn statusline_agrees_with_node() -> R {
         r#"{"model":{"display_name":"M"},"cwd":"pkg"}"#,
     ] {
         for cwd in [r.as_path(), esc_dir.as_path()] {
-            let c = Same { script: "statusline/statusline.js", verb: "statusline", seed: Some(odd.path()), cwd: Some(cwd), env: &[], stdin };
+            let c = Same { script: "../anti-hall-node/statusline/statusline.js", verb: "statusline", seed: Some(odd.path()), cwd: Some(cwd), env: &[], stdin };
             statusline_pair(&c, &[])?;
         }
     }
@@ -767,7 +773,7 @@ fn statusline_agrees_with_node() -> R {
     for start in [two_hours_ago.as_str(), "true", "[\"2020-01-01T00:00:00Z\"]", "\"garbage\"", "{\"a\":1}", "1e300"] {
         write(&r, ".claude/session.json", &format!("{{\"startTime\":{start}}}"))?;
         let c = Same {
-            script: "statusline/statusline.js",
+            script: "../anti-hall-node/statusline/statusline.js",
             verb: "statusline",
             seed: Some(odd.path()),
             cwd: Some(&r),
@@ -851,7 +857,7 @@ fn phase_agrees_with_node() -> R {
             if state.is_some_and(|s| s.is_empty() || s == "{bad") && args.first() == Some(&"update") && args.contains(&"5=x") {
                 continue;
             }
-            let c = Same { script: "statusline/phase.js", verb: "phase", seed: state.map(|_| seed.path()), cwd: None, env: &[], stdin: "" };
+            let c = Same { script: "../anti-hall-node/statusline/phase.js", verb: "phase", seed: state.map(|_| seed.path()), cwd: None, env: &[], stdin: "" };
             // `update 5=x` (an index key, written first) and `update __proto__=1` (ignored unless an own key) answer natively too
             same(&c, args)?;
         }
@@ -935,8 +941,8 @@ fn inst(c: &Inst, steps: &[(&str, &str, &[&str])]) -> R<Out> {
     last.ok_or_else(|| "no steps".into())
 }
 
-const INSTALL: &str = "statusline/install-statusline.js";
-const UNINSTALL: &str = "statusline/uninstall-statusline.js";
+const INSTALL: &str = "../anti-hall-node/statusline/install-statusline.js";
+const UNINSTALL: &str = "../anti-hall-node/statusline/uninstall-statusline.js";
 
 fn one(c: &Inst, install: bool, args: &[&str]) -> R<Out> {
     let (script, verb) = if install { (INSTALL, "install-statusline") } else { (UNINSTALL, "uninstall-statusline") };
@@ -1391,7 +1397,7 @@ fn settings_writes_under_a_busy_lock_refuse_like_node() -> R {
     let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_millis() + 600_000;
     let rec = format!(r#"{{"pid":{},"host":"{host}","ts":{ts},"token":"held-by-the-test"}}"#, std::process::id());
     write(seed.path(), ".anti-hall/settings.json.lock", &rec)?;
-    let c = Same { script: "scripts/settings.js", verb: "settings", seed: Some(seed.path()), cwd: None, env: &[], stdin: "" };
+    let c = Same { script: "../anti-hall-node/scripts/settings.js", verb: "settings", seed: Some(seed.path()), cwd: None, env: &[], stdin: "" };
     for a in ["set autoHandover.pct 55", "set autoHandover.pct 55 --json", "reset autoHandover.pct", "reset autoHandover.pct --json", "judge on", "judge off"] {
         let o = same(&c, &a.split(' ').collect::<Vec<_>>())?;
         assert_eq!(o.code, 1, "{a}: a busy lock is a refusal, not a deferral");

@@ -210,7 +210,7 @@ fn compare(repo: &Path, hook: &str, check: &str, variants: &[Variant], payloads:
             // The engine allowed: Node must say nothing, exit 0 and touch nothing in the (identically seeded) home.
             let before = snapshot(&home);
             let mut n = Command::new("node");
-            n.arg(repo.join("plugins/anti-hall/hooks").join(format!("{hook}.js")))
+            n.arg(repo.join("plugins/anti-hall-node/hooks").join(format!("{hook}.js")))
                 .env_clear()
                 .env("PATH", std::env::var("PATH").unwrap_or_default())
                 .env("HOME", &home)
@@ -687,7 +687,7 @@ fn pg_exec(case: &PgCase) -> PgTally {
     }
     let node_run = |input: &str| {
         let mut n = Command::new("node");
-        n.arg(root.join("hooks/devswarm-parent-gate.js")).current_dir(&tmp);
+        n.arg(root.join("../anti-hall-node/hooks/devswarm-parent-gate.js")).current_dir(&tmp);
         pg_env(&mut n, &home, case);
         run(n, input.as_bytes())
     };

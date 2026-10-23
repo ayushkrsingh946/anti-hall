@@ -16,7 +16,7 @@ fn node_facts(file: &std::path::Path) -> Value {
     let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let hooks = std::env::var("AH_ENGINE_NODE_HOOKS")
         .map(std::path::PathBuf::from)
-        .unwrap_or_else(|_| manifest.join("..").join("plugins").join("anti-hall").join("hooks"));
+        .unwrap_or_else(|_| manifest.join("..").join("plugins").join("anti-hall-node").join("hooks"));
     let out = Command::new("node")
         .arg(manifest.join("parity").join("transcript-facts.js"))
         .arg(file)

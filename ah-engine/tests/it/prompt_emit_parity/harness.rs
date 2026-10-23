@@ -214,7 +214,7 @@ fn base_env(c: &mut Command, home: &Path, scn: &Scn) {
 
 fn run_node(scn: &Scn, home: &Path, input: &[u8]) -> Out {
     let mut c = Command::new("node");
-    c.arg(repo().join("plugins/anti-hall/hooks").join(format!("{}.js", scn.hook))).current_dir(home);
+    c.arg(repo().join("plugins/anti-hall-node/hooks").join(format!("{}.js", scn.hook))).current_dir(home);
     base_env(&mut c, home, scn);
     run(c, input)
 }

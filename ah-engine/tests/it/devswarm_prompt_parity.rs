@@ -303,7 +303,7 @@ fn engine_and_node_agree_on_every_scenario() {
             seed(&home, s);
             let before = snapshot(&home);
             let mut node = base_cmd("node", &home, &s.env);
-            node.arg(repo.join("plugins/anti-hall/hooks").join(file));
+            node.arg(repo.join("plugins/anti-hall-node/hooks").join(file));
             let (ncode, nout, nerr) = run(node, &s.payload);
             let after = snapshot(&home);
             let state_changed = before != after;

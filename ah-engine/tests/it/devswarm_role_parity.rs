@@ -145,8 +145,8 @@ fn base_env(cmd: &mut Command, home: Option<&str>, case: &Case, root: &Path) {
 fn node(case: &Case, home: &str, root: &Path, input: &str) -> (i32, String, String) {
     let mut cmd = Command::new("node");
     let script = match case.hook {
-        "devswarm-child-role" => "hooks/devswarm-child-role.js",
-        _ => "hooks/devswarm-parent-gate.js",
+        "devswarm-child-role" => "../anti-hall-node/hooks/devswarm-child-role.js",
+        _ => "../anti-hall-node/hooks/devswarm-parent-gate.js",
     };
     cmd.arg(root.join(script));
     base_env(&mut cmd, Some(home), case, root);

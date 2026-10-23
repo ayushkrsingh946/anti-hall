@@ -235,7 +235,7 @@ fn settings_text(h: &Home) -> String {
 }
 
 fn dispatcher() -> String {
-    plugin().join("statusline/statusline.js").display().to_string()
+    plugin().join("../anti-hall-node/statusline/statusline.js").display().to_string()
 }
 
 fn launcher() -> String {

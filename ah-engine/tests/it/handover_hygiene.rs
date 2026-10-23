@@ -683,7 +683,7 @@ fn node_shadow_the_discovery_rule_and_file_set_match_hooks_lib_handover_find() {
         return out.sort();
       })() }));
     "#;
-    let node = Command::new("node").args(["-e", script, "--"]).arg(plugin_root().join("hooks/lib/handover-find.js")).arg(w.hdir()).output();
+    let node = Command::new("node").args(["-e", script, "--"]).arg(plugin_root().join("../anti-hall-node/hooks/lib/handover-find.js")).arg(w.hdir()).output();
     let Ok(node) = node else { return }; // no node on this machine: the witness cannot run (CI has it)
     if !node.status.success() {
         return;

@@ -146,7 +146,7 @@ fn base_env(cmd: &mut Command, home: &str, case: &Case, root: &Path) {
 
 fn node(case: &Case, home: &str, root: &Path, input: &str) -> (i32, String, String) {
     let mut cmd = Command::new("node");
-    cmd.arg(root.join(if case.hook == DRAIN { "hooks/devswarm-child-drain.js" } else { "hooks/devswarm-parent-gate.js" }));
+    cmd.arg(root.join(if case.hook == DRAIN { "../anti-hall-node/hooks/devswarm-child-drain.js" } else { "../anti-hall-node/hooks/devswarm-parent-gate.js" }));
     base_env(&mut cmd, home, case, root);
     run(cmd, input)
 }

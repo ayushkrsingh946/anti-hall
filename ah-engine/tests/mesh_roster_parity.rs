@@ -350,7 +350,7 @@ fn roster_matches_node_for_a_project_with_no_rows_and_defers_every_other() {
     let ident = |p: &Path| {
         node_eval(&format!(
             "const i=require({:?});const c=i.resolveContext({:?},{{memo:false}});console.log(JSON.stringify({{k:c.repoKey,m:c.meshId}}))",
-            plugin.join("companion/lib/identity.js"),
+            plugin.join("../anti-hall-node/companion/lib/identity.js"),
             p
         ))
     };

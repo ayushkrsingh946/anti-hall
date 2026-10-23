@@ -80,7 +80,7 @@ fn pair(seed: &dyn Fn(&Home), env: &[(&str, &str)]) -> (Run, Run) {
     let (a, b) = (Home::new(), Home::new());
     seed(&a);
     seed(&b);
-    let node = exec(Command::new("node").arg(plugin().join("codex/scripts/limit-conserve-status.js")), &a, env);
+    let node = exec(Command::new("node").arg(plugin().join("../anti-hall-node/codex/scripts/limit-conserve-status.js")), &a, env);
     let engine = exec(Command::new(env!("CARGO_BIN_EXE_ah-engine")).arg("codex-limit-status"), &b, env);
     (node, engine)
 }
@@ -215,7 +215,7 @@ fn activate_writes_the_same_marker() {
             .replace(&*h.path().canonicalize().unwrap().to_string_lossy(), "CWD")
             .replace(&*h.path().to_string_lossy(), "CWD")
     };
-    let node = marker(&|h| exec(Command::new("node").arg(plugin().join("codex/scripts/write-activation-sentinel.js")), h, &[]));
+    let node = marker(&|h| exec(Command::new("node").arg(plugin().join("../anti-hall-node/codex/scripts/write-activation-sentinel.js")), h, &[]));
     let engine = marker(&|h| exec(Command::new(env!("CARGO_BIN_EXE_ah-engine")).arg("codex-activate"), h, &[]));
     assert_eq!(engine, node);
     assert!(engine.contains("\"scope\": \"CWD\"") && engine.ends_with("}\n"), "{engine}");

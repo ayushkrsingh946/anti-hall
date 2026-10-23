@@ -39,7 +39,7 @@ fn both(check: &str, hook: &str, dir: &std::path::Path, payload: &Value) -> ((i3
     let mut e = Command::new(env!("CARGO_BIN_EXE_ah-engine"));
     e.args(["check", check]).env_clear();
     let mut n = Command::new("node");
-    n.arg(plugin().join("hooks").join(hook)).env_clear();
+    n.arg(plugin().join("../anti-hall-node/hooks").join(hook)).env_clear();
     // each runner has its own home and state: the first one's loop-state and records must not decide the second's answer
     let (eh, nh) = (dir.join("e"), dir.join("n"));
     for h in [&eh, &nh] {
@@ -378,7 +378,7 @@ fn the_history_ledger_and_progress_prune_key_on_the_superproject_for_a_submodule
             if is_engine {
                 c.args(["check", check]);
             } else {
-                c.arg(plugin().join("hooks").join(hook));
+                c.arg(plugin().join("../anti-hall-node/hooks").join(hook));
             }
             c.env_clear();
             std::fs::create_dir_all(dir.join("home")).unwrap();

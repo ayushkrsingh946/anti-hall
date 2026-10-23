@@ -171,7 +171,7 @@ fn run_side(sc: &Scenario, engine: bool) -> Side {
         c
     } else {
         let mut c = Command::new("node");
-        c.arg(repo().join("plugins/anti-hall/hooks").join(sc.hook));
+        c.arg(repo().join("plugins/anti-hall-node/hooks").join(sc.hook));
         c
     };
     c.env_clear()

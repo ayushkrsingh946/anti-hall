@@ -115,7 +115,7 @@ fn run(mut c: Command, input: &str) -> (i32, String, String) {
 
 fn node(home: &Path, payload: &str, env: &[(&str, &str)]) -> (i32, String, String) {
     let mut c = cmd("node", home, env);
-    c.arg(plugin().join("hooks/devswarm-child-turn.js"));
+    c.arg(plugin().join("../anti-hall-node/hooks/devswarm-child-turn.js"));
     run(c, payload)
 }
 

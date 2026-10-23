@@ -85,7 +85,7 @@ fn env(cmd: &mut Command, fx: &Fx) {
 
 fn run_node(fx: &Fx, args: &[&str]) -> (i32, String) {
     let mut cmd = Command::new("node");
-    cmd.arg(plugin().join("hooks/doctor.js")).args(args);
+    cmd.arg(plugin().join("../anti-hall-node/hooks/doctor.js")).args(args);
     env(&mut cmd, fx);
     let o = cmd.output().expect("node");
     (o.status.code().unwrap_or(-1), String::from_utf8_lossy(&o.stdout).into_owned())
