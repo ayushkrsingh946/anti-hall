@@ -290,15 +290,22 @@ pub fn inv_from_process(stdin: Option<String>) -> Option<Inv> {
 
 /// The engine cannot answer this call and there is no Node to hand it to: count it, say so on stderr with the site, and exit with
 /// the visible error code `mesh_write.exit_unable` (nothing was done; never the 75 of a deferral).
-fn unable(site: &str) -> i32 {
-    crate::obs::counters::handback(crate::obs::counters::Handback::Abandoned, site);
+fn unable(site: &str, detail: &str) -> i32 {
+    crate::obs::counters::handback_why(crate::obs::counters::Handback::Abandoned, site, detail);
     eprintln!("{}", defaults::render("mesh_write.msg_unable", &[("site", &site)]));
     defaults::num("mesh_write.exit_unable") as i32
 }
 
+/// Which call gave up, for the abandoned line: the verb label, the first two positionals (the verb words, never a message body)
+/// and the reason, each leading word from `mesh_write.detail_*`.
+pub fn call_detail(a: &args::Args, reason: &str) -> String {
+    let sub = a.positionals.iter().take(defaults::num("mesh_write.detail_positionals") as usize).cloned().collect::<Vec<_>>().join(" ");
+    defaults::render("mesh_write.msg_detail", &[("verb", &verb_label(a)), ("argv", &sub), ("reason", &reason)])
+}
+
 /// The switch is off: nothing is done, and it is counted and said, never a silent success.
 fn disabled(site: &str) -> i32 {
-    crate::obs::counters::handback(crate::obs::counters::Handback::Abandoned, site);
+    crate::obs::counters::handback_why(crate::obs::counters::Handback::Abandoned, site, "");
     eprintln!("{}", defaults::render("mesh_write.msg_disabled", &[("site", &site)]));
     defaults::num("mesh_write.exit_unable") as i32
 }
@@ -319,14 +326,14 @@ fn read_stdin() -> String {
 /// `ah-engine mesh <devswarm.js argv...>`: see the module header.
 pub fn run_front(raw: &[std::ffi::OsString]) -> i32 {
     let Some(argv) = raw.iter().map(|a| a.to_str().map(str::to_string)).collect::<Option<Vec<String>>>() else {
-        return unable("meshw:non_utf8_argument");
+        return unable("meshw:non_utf8_argument", "");
     };
     let a = args::parse(&argv);
     if mode() == Mode::Off {
         return disabled("meshw:native_off");
     }
     if verb_of(&a).is_none() {
-        return unable("meshw:unhandled_verb");
+        return unable("meshw:unhandled_verb", &call_detail(&a, ""));
     }
     // a help request (or any verb of `simple`) never reads fd 0
     let wants_stdin = a.has(defaults::text("mesh_write.flag_message_stdin")) && !cli_witnessed(verb_of(&a));
@@ -336,7 +343,7 @@ pub fn run_front(raw: &[std::ffi::OsString]) -> i32 {
     let w = |k: &str| defaults::text(k).to_string();
     let Some(inv) = inv_from_process(stdin) else {
         shadow_log(&serde_json::json!({"ts": t0, "verb": verb, "mode": w("mesh_write.mode_on"), "result": w("mesh_write.shadow_defer"), "reason": "no-context"}));
-        return unable("meshw:no_context");
+        return unable("meshw:no_context", &call_detail(&a, "no-context"));
     };
     let r = std::panic::catch_unwind(|| run_native(&inv, &a));
     let (step, result, reason) = next_step(r, committed());
@@ -350,7 +357,7 @@ pub fn run_front(raw: &[std::ffi::OsString]) -> i32 {
             eprintln!("{}", defaults::text("mesh_write.msg_committed_failure"));
             defaults::num("mesh_write.exit_committed_failure") as i32
         }
-        Next::Unable => unable("meshw:deferred"),
+        Next::Unable => unable("meshw:deferred", &call_detail(&a, &reason)),
     }
 }
 
@@ -414,6 +421,14 @@ mod tests {
         assert_ne!(defaults::num("mesh_write.exit_unable"), 0);
         assert_ne!(defaults::num("mesh_write.exit_committed_failure"), defaults::num("mesh_write.exit_unable"));
         assert_ne!(defaults::num("mesh_write.exit_committed_failure"), 0);
+    }
+
+    #[test]
+    fn an_abandoned_call_names_its_verb_words_and_reason_but_not_the_message() {
+        let argv: Vec<String> = ["send", "--to", "ws-1", "--message", "secret body"].iter().map(|s| s.to_string()).collect();
+        let d = call_detail(&args::parse(&argv), "mesh-group");
+        assert!(d.contains("verb=Send") && d.contains("reason=mesh-group"), "{d}");
+        assert!(!d.contains("secret body"), "{d}");
     }
 
     #[test]
