@@ -1646,8 +1646,8 @@ value = "could not resolve this workspace's id"
 # ---- roster with rows (lane l8f): scripts/devswarm-lib/roster-diag.js cmdRoster, rosterHints, rosterHumanText -----------------
 
 [devswarm_cli.rr_set_dormant_ms]
-doc = "How long a workspace whose session transcript resolves may stay silent before the roster calls it dormant (Node: devswarm.dormantMs, a positive number; liveness.js dormantThresholdMs). A value of zero or below is not read by the engine (Node skips it); the roster then goes to Node."
-value = { type = "number", section = "devswarm", key = "dormantMs", env = "ANTIHALL_DEVSWARM_DORMANT_MS", exact = true, default = 1800000 }
+doc = "How long a workspace whose session transcript resolves may stay silent before the roster calls it dormant (Node: devswarm.dormantMs, a positive number; liveness.js dormantThresholdMs). A value of zero or below is no reading of the setting, as in Node (`exclusiveMin`): the next tier answers, last the default."
+value = { type = "number", section = "devswarm", key = "dormantMs", env = "ANTIHALL_DEVSWARM_DORMANT_MS", exact = true, exclusive_min = 0, default = 1800000 }
 
 [devswarm_cli.rr_env_idle_ms]
 doc = "The environment variable that sets the wide idle window of a workspace whose transcript does not resolve (liveness.js idleThresholdMs)."
@@ -3623,3 +3623,85 @@ value = "no-primary-worktree"
 [devswarm_cli.msg_send_no_primary_worktree]
 doc = "The refusal text of that case."
 value = "send --to-primary: cwd is not inside a resolvable git worktree"
+
+[devswarm_cli.msg_roster_no_project]
+doc = "The refusal text of `roster` run outside any project."
+value = "roster must run from inside a git worktree of a DevSwarm project (the mesh store is per-project) — cd into the repo first"
+
+[devswarm_cli.rr_set_archived_grace_ms]
+doc = "How much older than the active-list snapshot a row must be before its absence from that snapshot reads as archived in the app (Node: devswarm.archivedGraceMs, devswarm-archived-cache.js resolveArchivedGraceMs)."
+value = { type = "number", section = "devswarm", key = "archivedGraceMs", env = "ANTIHALL_DEVSWARM_ARCHIVED_GRACE_MS", exact = true, min = 0, default = 600000 }
+
+[devswarm_cli.rr_env_active_max_age]
+doc = "The variable that sets how old the supervisor's active-list snapshot may be and still be believed (positive integer milliseconds); otherwise twice the reconcile sweep interval."
+value = "ANTIHALL_DEVSWARM_ARCHIVED_CACHE_MAX_AGE_MS"
+
+[devswarm_cli.rr_active_max_age_mult]
+doc = "How many reconcile sweep intervals old the active-list snapshot may be (resolveArchivedCacheMaxAgeMs: twice the sweep)."
+value = 2
+min = 1
+
+[devswarm_cli.rr_sweep_fallback_ms]
+doc = "The reconcile sweep interval used when the setting reads as no positive number (FALLBACK_SWEEP_INTERVAL_MS)."
+value = 900000
+min = 1000
+
+[devswarm_cli.log_level_warn]
+doc = "The level of a warning entry of the central log."
+value = "warn"
+
+[devswarm_cli.rr_native_fold_op]
+doc = "The central-log operation of a native child dropped from the roster."
+value = "roster-native-fold"
+
+[devswarm_cli.msg_roster_native_dropped]
+doc = "The warning when native children of another repository are dropped from the roster: {count}."
+value = "dropped {count} native child(ren) whose repositoryId did not match this repo (cross-repo env hijack guard)"
+
+[devswarm_cli.rr_tok_suffix]
+doc = "What follows the token total on a roster plan label."
+value = " tok"
+
+[devswarm_cli.rr_tok_sep]
+doc = "What separates the plan label from the token total on a roster plan label."
+value = " · "
+
+[devswarm_cli.rr_tok_mega]
+doc = "The unit of a token total of a million or more (devswarm-token-usage.js fmt)."
+value = "M"
+
+[devswarm_cli.rr_tok_kilo]
+doc = "The unit of a token total of a thousand or more."
+value = "k"
+
+[devswarm_cli.rr_tok_mega_at]
+doc = "The token total from which fmt counts in millions."
+value = 1000000
+min = 1
+
+[devswarm_cli.rr_tok_kilo_at]
+doc = "The token total from which fmt counts in thousands."
+value = 1000
+min = 1
+
+[devswarm_cli.rr_tok_tenth_div]
+doc = "fmt rounds a million-count to a tenth: the total is divided by this (a tenth of a million), rounded, then divided by `rr_tok_tenths`."
+value = 100000
+min = 1
+
+[devswarm_cli.rr_tok_tenths]
+doc = "The number of tenths in a whole, in that rounding."
+value = 10
+min = 1
+
+[devswarm_cli.rr_source_native]
+doc = "The `source` of a roster row for a native hivecontrol child no store row represents."
+value = "native"
+
+[devswarm_cli.rr_source_fallback]
+doc = "The `source` of the roster row of a Primary found in the legacy hash bucket's summary (the split-brain fold)."
+value = "store-fallback"
+
+[devswarm_cli.rr_dir_token_usage]
+doc = "Directory under the DevSwarm state directory of the supervisor's per-plan token usage files (devswarm-token-usage.js statePath)."
+value = "token-usage"
