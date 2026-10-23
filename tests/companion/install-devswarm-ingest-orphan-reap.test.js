@@ -18,7 +18,7 @@ const path = require('node:path');
 
 const cp = require('node:child_process');
 
-const inst = require('../../plugins/anti-hall/companion/install-devswarm-ingest.js');
+const inst = require('../../plugins/anti-hall-node/companion/install-devswarm-ingest.js');
 
 // mkGitRepo(tag) -> a REAL git repo dir. repoKeyForWorktree spawns `git
 // rev-parse --git-common-dir` (mirrors tests/scripts/devswarm-send.test.js /
@@ -287,7 +287,7 @@ test('doctor-repair runIngestOrphanRepair: dry-run (default) never calls schedRu
   try {
     const label = 'com.anti-hall.devswarm-ingest.projz-eeeeee';
     let schedCalls = 0;
-    const doctorRepair = require('../../plugins/anti-hall/hooks/lib/doctor-repair.js');
+    const doctorRepair = require('../../plugins/anti-hall-node/hooks/lib/doctor-repair.js');
     const results = doctorRepair.runIngestOrphanRepair({
       home, platform: 'darwin', dryRun: true,
       io: { listLoaded: () => [{ label, pid: null, lastExit: '19968' }], schedRun: () => { schedCalls++; return { status: 0 }; } },
@@ -310,7 +310,7 @@ test('doctor-repair runIngestOrphanRepair: apply calls bootout ONLY for eligible
     const liveLabel = 'com.anti-hall.devswarm-ingest.projl-999999';
     writeHeartbeat(home, 'projl-999999', Date.now(), 777);
     const bootoutCalls = [];
-    const doctorRepair = require('../../plugins/anti-hall/hooks/lib/doctor-repair.js');
+    const doctorRepair = require('../../plugins/anti-hall-node/hooks/lib/doctor-repair.js');
     const results = doctorRepair.runIngestOrphanRepair({
       home, platform: 'darwin', dryRun: false,
       io: {
@@ -401,7 +401,7 @@ test('install-devswarm-ingest.js main(): NO explicit dry-run flag/env, isolated 
 
   const home = tmpHome();
   const repo = mkGitRepo('structural-guard');
-  const installerPath = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'install-devswarm-ingest.js');
+  const installerPath = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'install-devswarm-ingest.js');
   try {
     // Deliberately NO --dry-run arg, NO ANTIHALL_INGEST_DRY_RUN in env — the
     // exact shape of the ORIGINAL leaking test. `...process.env` carries

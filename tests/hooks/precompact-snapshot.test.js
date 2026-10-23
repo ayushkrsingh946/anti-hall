@@ -12,7 +12,7 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { testHookRaw } = require('../helpers/spawn-hook.js');
 const { makeHome } = require('../helpers/fixtures.js');
-const find = require('../../plugins/anti-hall/hooks/lib/handover-find.js');
+const find = require('../../plugins/anti-hall-node/hooks/lib/handover-find.js');
 
 const HOOK = 'precompact-snapshot.js';
 
@@ -195,11 +195,12 @@ test('never snapshots for a subagent payload', () => {
 
 test('registered on PreCompact in BOTH the Claude and Codex hooks.json, and in install-codex.js', () => {
   const root = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
+  const NODE_root = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
   const claude = JSON.parse(fs.readFileSync(path.join(root, 'hooks', 'hooks.registry.json'), 'utf8'));
   const codex = JSON.parse(fs.readFileSync(path.join(root, 'codex', 'hooks', 'hooks.registry.json'), 'utf8'));
   const has = (cfg) => (cfg.hooks.PreCompact || []).some((g) => g.hooks.some((x) => /precompact-snapshot\.js/.test(x.command)));
   assert.ok(has(claude), 'Claude hooks.json PreCompact');
   assert.ok(has(codex), 'Codex hooks.json PreCompact');
-  const { ANTI_HALL_HOOKS } = require(path.join(root, 'codex', 'install-codex.js'));
+  const { ANTI_HALL_HOOKS } = require(path.join(NODE_root, 'codex', 'install-codex.js'));
   assert.ok((ANTI_HALL_HOOKS.PreCompact || []).length > 0, 'install-codex.js PreCompact');
 });

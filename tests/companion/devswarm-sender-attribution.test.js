@@ -51,9 +51,9 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const store = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
-const inst = require('../../plugins/anti-hall/companion/install-devswarm-ingest.js');
-const replyStateLib = require('../../plugins/anti-hall/companion/lib/devswarm-reply-state.js');
+const store = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
+const inst = require('../../plugins/anti-hall-node/companion/install-devswarm-ingest.js');
+const replyStateLib = require('../../plugins/anti-hall-node/companion/lib/devswarm-reply-state.js');
 
 function tmpHome() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'anti-hall-attrib-'));
@@ -194,7 +194,7 @@ for (const B of backends) {
 // 6. recipientFamilyIds — the ONE shared definition both sides consume.
 // ---------------------------------------------------------------------------
 test('recipientFamilyIds covers the recipient and its cross-linked twins only, and is empty without a recipient', () => {
-  const identityFamily = require('../../plugins/anti-hall/companion/lib/devswarm-identity-family.js');
+  const identityFamily = require('../../plugins/anti-hall-node/companion/lib/devswarm-identity-family.js');
   const rows = [
     { id: 'P', worktreePath: SHARED_WT, sessionId: 'sess-P' },
     { id: 'T-uuid', worktreePath: SHARED_WT, sessionId: 'P' },   // twin: sessionId IS P's id

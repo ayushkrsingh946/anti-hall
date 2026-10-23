@@ -13,7 +13,7 @@ const os = require('node:os');
 const path = require('node:path');
 const cp = require('node:child_process');
 
-const cli = require(path.join(__dirname, '../../plugins/anti-hall/scripts/devswarm.js'));
+const cli = require(path.join(__dirname, '../../plugins/anti-hall-node/scripts/devswarm.js'));
 
 function tmpHome() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'anti-hall-tick-roster-'));
@@ -132,7 +132,8 @@ test('unread > 0 on the Nth tick: no roster', () => {
 
 test('schema parity for devswarm.tickRosterEvery (settings file + env only, no /config row)', () => {
   const plugin = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-  const e = require(path.join(plugin, 'hooks', 'lib', 'settings-schema.js')).findSetting('devswarm', 'tickRosterEvery');
+  const NODE_plugin = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+  const e = require(path.join(NODE_plugin, 'hooks', 'lib', 'settings-schema.js')).findSetting('devswarm', 'tickRosterEvery');
   assert.ok(e);
   assert.deepStrictEqual([e.default, e.env, e.min], [0, 'ANTIHALL_DEVSWARM_TICK_ROSTER_EVERY', 0]);
 });

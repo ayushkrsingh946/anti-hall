@@ -38,10 +38,10 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const migrate = require('../../plugins/anti-hall/companion/devswarm-migrate.js');
-const storeLib = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
-const archiveGateLib = require('../../plugins/anti-hall/companion/lib/devswarm-archive-gate.js');
-const { DEFAULT_ROSTER_IDLE_MS } = require('../../plugins/anti-hall/companion/lib/liveness.js');
+const migrate = require('../../plugins/anti-hall-node/companion/devswarm-migrate.js');
+const storeLib = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
+const archiveGateLib = require('../../plugins/anti-hall-node/companion/lib/devswarm-archive-gate.js');
+const { DEFAULT_ROSTER_IDLE_MS } = require('../../plugins/anti-hall-node/companion/lib/liveness.js');
 
 // Past isDormantByActivity's "no transcript" (registration-ts-fallback) idle
 // window (DEFAULT_ROSTER_IDLE_MS, 6h default) with margin — see the header
@@ -408,7 +408,7 @@ for (const backend of ['direct']) {
 test('doctor healOrphanPartitions does not re-adopt a worktree-group sibling the migration gate skips', () => {
   const home = tmpHome();
   try {
-    const ds = require('../../plugins/anti-hall/scripts/devswarm.js');
+    const ds = require('../../plugins/anti-hall-node/scripts/devswarm.js');
     const now = Date.now();
     const wt = fs.mkdtempSync(path.join(os.tmpdir(), 'ah-heal-wt-'));
     try {
@@ -428,8 +428,8 @@ test('doctor healOrphanPartitions does not re-adopt a worktree-group sibling the
       writeActiveDescriptor(home, 'B', { worktreePath: wt, sessionId: 'sess-B' }, { mtime: now - STALE_MS });
       // Give B a store message so it is enumerated as an orphan id at all
       // (healOrphanPartitions iterates listWorkspaceIds(), store message rows).
-      const store = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
-      const repoKeyLib = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
+      const store = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
+      const repoKeyLib = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
       const repoKey = repoKeyLib.repoKeyForWorktree(wt, {}) || 'unresolved';
       const s = store.openStore({ home, hash: repoKey, env: {} });
       try { s.appendMessage({ workspaceId: 'B', body: 'hi', hash: 'h1', ts: now }); } finally { s.close(); }

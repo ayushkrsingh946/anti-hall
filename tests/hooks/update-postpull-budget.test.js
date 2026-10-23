@@ -30,7 +30,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const U = require('../../plugins/anti-hall/skills/update/scripts/update.js');
+const U = require('../../plugins/anti-hall-node/skills/update/scripts/update.js');
 
 const REPO_ROOT = path.join(__dirname, '..', '..');
 const REAL_PLUGIN_SRC_DIR = path.join(REPO_ROOT, 'plugins', 'anti-hall');

@@ -186,6 +186,11 @@ fn build(w: &Path, spec: &World) {
 }
 
 /// The tree under W as path to content. Directories are listed as `<dir>`; symlinks as `-> target`.
+fn name_is_engine_advisory_state(rel: &str) -> bool {
+    let file = rel.rsplit('/').next().unwrap_or(rel);
+    file.starts_with("advisory-state-") || file == ".prune-stamp-advisory-state.json"
+}
+
 fn snapshot(w: &Path, skip: Option<fn(&str) -> bool>, async_effects: bool) -> BTreeMap<String, String> {
     let ws = w.to_string_lossy().to_string();
     let ts = Regex::new(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z").unwrap();
@@ -205,7 +210,10 @@ fn snapshot(w: &Path, skip: Option<fn(&str) -> bool>, async_effects: bool) -> BT
             if r.ends_with(".anti-hall/ah-engine") {
                 continue; // the engine's own state dir (its telemetry): Node has nothing to compare it with
             }
-            if skip.is_some_and(|f| f(&r)) || (asynchronous && r.ends_with("logs/jev-assist.ndjson")) {
+            // the engine keeps its advisory once-per-change state in files of its own (advisory-state-<session>.json and its prune stamp);
+            // the Node hooks write none, and they are not part of what the two sides must agree on
+            let engine_only = name_is_engine_advisory_state(&r);
+            if engine_only || skip.is_some_and(|f| f(&r)) || (asynchronous && r.ends_with("logs/jev-assist.ndjson")) {
                 continue;
             }
             let Ok(md) = std::fs::symlink_metadata(&p) else { continue };
@@ -252,7 +260,7 @@ fn lock(m: &Mutex<Stats>) -> std::sync::MutexGuard<'_, Stats> {
 }
 
 pub(crate) fn run_fx(o: &Opts, hooks: &Path, scenarios: &[Scenario]) -> Report {
-    let plugin_root = hooks.parent().expect("hooks directory has a parent").to_path_buf();
+    let plugin_root = engine_plugin_root(hooks);
     let hook = hooks.join(o.hook_file);
     let scratch = Scratch::new(&format!("fx-{}", o.name));
     let tmp = scratch.path().to_path_buf();
@@ -373,13 +381,13 @@ pub(crate) fn run_fx(o: &Opts, hooks: &Path, scenarios: &[Scenario]) -> Report {
                 // The Node hook starts detached workers whose files land asynchronously: only the deferral itself is checked.
                 if deferred {
                     st.deferred += 1;
-                } else if n1.code == e1.code && n1.out.trim() == e1.out.trim() && n1.err.trim() == e1.err.trim() {
-                    // a scripted check runs in a UTF-16 interpreter: the lone surrogate the compiled port could not hold is held, so the
-                    // engine may answer where it once deferred, as long as the answer is Node's byte for byte
-                    st.same += 1;
+                } else if crate::common::not_weaker_than_node((n1.code.parse().unwrap_or(-1), &n1.out), (e1.code.parse().unwrap_or(-1), &e1.out)).is_ok() {
+                    // the old engine handed this input to the Node hook; it now answers it itself: the answer may say less than
+                    // Node's (advisory text is dropped on purpose) or more, but where Node blocks the engine must block
+                    st.deferred += 1;
                 } else {
                     st.mismatch += 1;
-                    mism.lock().unwrap_or_else(|e| e.into_inner()).push(note("expected a deferral (or Node's own answer)"));
+                    mism.lock().unwrap_or_else(|e| e.into_inner()).push(note("the engine allows where Node blocks"));
                 }
                 continue;
             }
@@ -396,6 +404,16 @@ pub(crate) fn run_fx(o: &Opts, hooks: &Path, scenarios: &[Scenario]) -> Report {
                 st.same += 1;
                 if tn.keys().any(|k| !k.starts_with("home")) {
                     st.effects += 1;
+                }
+            } else if !o.mutate && o.may_defer.as_ref().is_some_and(|f| f(sc, step)) {
+                // A case the old engine could hand back to Node (a window it cannot read exactly, a path only the hook process can resolve)
+                // is now answered natively: advisory text and side files may differ, but where Node blocks the engine must block.
+                match crate::common::not_weaker_than_node((n1.code.parse().unwrap_or(-1), &n1.out), (e1.code.parse().unwrap_or(-1), &e1.out)) {
+                    Ok(()) => st.deferred += 1,
+                    Err(w) => {
+                        st.mismatch += 1;
+                        mism.lock().unwrap_or_else(|e| e.into_inner()).push(note(&format!("the engine allows where Node blocks ({w})")));
+                    }
                 }
             } else {
                 st.mismatch += 1;

@@ -12,7 +12,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { testHook, testHookRaw } = require('../helpers/spawn-hook.js');
 const { makeHome } = require('../helpers/fixtures.js');
-const { WAKE_CRON_DEFAULT } = require('../../plugins/anti-hall/hooks/lib/devswarm-wake.js');
+const { WAKE_CRON_DEFAULT } = require('../../plugins/anti-hall-node/hooks/lib/devswarm-wake.js');
 
 const HOOK = 'devswarm-child-gate.js';
 
@@ -557,8 +557,8 @@ test('FAIL-OPEN: native message-count probe has no binary on PATH -> exit 0, blo
 // Skip the block when summaries/<repoKey>.json shows an OUTBOUND row this child
 // itself sent (recent[], sender === DEVSWARM_BUILDER_ID) THIS stop episode.
 
-const repokey = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
-const meshStore = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
+const repokey = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
+const meshStore = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
 const REPO_CWD = process.cwd();
 const REPO_KEY = repokey.repoKeyForWorktree(REPO_CWD);
 
@@ -671,7 +671,7 @@ test('ALREADY-REPORTED + inbound clears between probes (nothing owed): allowed A
     const sh = path.join(bin, 'hivecontrol');
     fs.writeFileSync(sh, '#!/bin/sh\nif [ -f "' + counter + '" ]; then echo 0; else echo x > "' + counter + '"; echo 1; fi\n');
     fs.chmodSync(sh, 0o755);
-    const sp = require('../../plugins/anti-hall/hooks/lib/stop-policy.js');
+    const sp = require('../../plugins/anti-hall-node/hooks/lib/stop-policy.js');
     sp.consume(h.home, 's1', 'child-gate', ['heartbeat-report', 'inbox'], 2, Date.now());
     sp.consume(h.home, 's1', 'child-gate', ['heartbeat-report', 'inbox'], 2, Date.now());
     const before = JSON.stringify(fs.readFileSync(sp.statePath(h.home, 's1'), 'utf8'));
@@ -1791,7 +1791,7 @@ test('ARCHIVED CHILD-GATE: metrics record the block and (on the next Stop) the c
     testHook(HOOK, stopPayload(), { home: h.home, expectJson: true, env });
     testHook(HOOK, stopPayload(), { home: h.home, env });
 
-    const metricsLib = require('../../plugins/anti-hall/companion/lib/archived-child-metrics.js');
+    const metricsLib = require('../../plugins/anti-hall-node/companion/lib/archived-child-metrics.js');
     const m = metricsLib.readMetrics(h.home);
     assert.strictEqual(m.totals['stop-blocked'], 1);
     assert.strictEqual(m.totals['stop-cleared'], 1);
@@ -1816,7 +1816,7 @@ function archivedGateReason(wtOpt, prepare) {
     return r.json.reason;
   } finally { h.cleanup(); fs.rmSync(wt, { recursive: true, force: true }); }
 }
-const todayLocal = () => require('../../plugins/anti-hall/hooks/lib/handover-find.js').localDate();
+const todayLocal = () => require('../../plugins/anti-hall-node/hooks/lib/handover-find.js').localDate();
 
 test('ARCHIVED CHILD-GATE: reason names the exact canonical handover path, never a flat file', () => {
   const reason = archivedGateReason();

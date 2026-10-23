@@ -244,7 +244,7 @@ test('phase-bar fail-open: malformed phase-state JSON yields no phase line', () 
 // phase bar takes priority over the context gauge but must not suppress the
 // bridge write underneath it).
 
-const store = require('../../plugins/anti-hall/hooks/lib/context-pct-store.js');
+const store = require('../../plugins/anti-hall-node/hooks/lib/context-pct-store.js');
 
 test('phase-bar persists context_window to the hook-side store, keyed by session_id', () => {
   const h = makeStatusHome();

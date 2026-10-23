@@ -588,14 +588,14 @@ function buildLegacyHookCopy() {
   let oldSrc;
   try {
     oldSrc = execFileSync(
-      'git', ['show', `${LEGACY_BASE_REF}:plugins/anti-hall/hooks/speculation-guard.js`],
+      'git', ['show', `${LEGACY_BASE_REF}:plugins/anti-hall-node/hooks/speculation-guard.js`],
       { cwd: repoRoot, encoding: 'utf8' }
     );
   } catch (_) {
     try {
       execFileSync('git', ['-C', repoRoot, 'fetch', '--depth=1', 'origin', LEGACY_BASE_REF]);
       oldSrc = execFileSync(
-        'git', ['show', `${LEGACY_BASE_REF}:plugins/anti-hall/hooks/speculation-guard.js`],
+        'git', ['show', `${LEGACY_BASE_REF}:plugins/anti-hall-node/hooks/speculation-guard.js`],
         { cwd: repoRoot, encoding: 'utf8' }
       );
     } catch (fetchErr) {
@@ -836,13 +836,13 @@ for (const text of QUOTED_ALLOW) {
 
 // ---- reply-text helper: load failure, unit behaviour, payload masking, tool_use shape ----
 const osSync = require('node:os');
-const { payloadReplyText, selectReplyText } = require('../../plugins/anti-hall/hooks/lib/reply-text.js');
+const { payloadReplyText, selectReplyText } = require('../../plugins/anti-hall-node/hooks/lib/reply-text.js');
 
 test('LAM load-failure: lib/reply-text.js missing -> guard falls back to the transcript and still blocks', () => {
   const h = makeHome();
   const copy = fsSync.mkdtempSync(pathSync.join(osSync.tmpdir(), 'antihall-spec-hooks-'));
   try {
-    const src = pathSync.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'hooks');
+    const src = pathSync.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'hooks');
     fsSync.cpSync(src, copy, { recursive: true });
     fsSync.rmSync(pathSync.join(copy, 'lib', 'reply-text.js'));
     const tp = h.writeTranscript([assistantMessage('This should be fine now.')]);
@@ -922,5 +922,41 @@ test('LAM tool_use shape: clean transcript, hedged payload -> block', () => {
     assert.ok(isBlock(r), `hedged payload must block; stdout: ${r.stdout}`);
   } finally {
     h.cleanup();
+  }
+});
+
+// Dogfood 2026-10-09: same-turn tool output is a citation for a reply that names specifics found in it.
+function userPrompt(text) { return { type: 'user', message: { role: 'user', content: text } }; }
+function toolTurn(id, command, output) {
+  return [
+    { type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id, name: 'Bash', input: { command } }] } },
+    { type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: output }] } },
+  ];
+}
+const CITING = 'The migration should be applied: 0042_add_index.sql ran and schema_version is now 42.';
+test('ALLOW: hedge whose specifics appear in tool output of the same turn', () => {
+  const h = makeHome();
+  try {
+    const tp = h.writeTranscript([
+      userPrompt('apply the migration'),
+      ...toolTurn('t1', 'run-migrate', 'applied 0042_add_index.sql\nschema_version=42\n'),
+      assistantMessage(CITING),
+    ]);
+    const r = testHook(HOOK, stopPayload(tp), { home: h.home });
+    assert.ok(!isBlock(r), `same-turn tool output cites the specifics; stdout: ${r.stdout}`);
+  } finally { h.cleanup(); }
+});
+test('BLOCK still: the same reply when the tool output is from an EARLIER turn, or does not contain the specifics', () => {
+  for (const entries of [
+    [userPrompt('first'), ...toolTurn('t1', 'run-migrate', 'applied 0042_add_index.sql\nschema_version=42\n'), userPrompt('and now?'), assistantMessage(CITING)],
+    [userPrompt('apply'), ...toolTurn('t1', 'ls', 'README.md\npackage.json\n'), assistantMessage(CITING)],
+    [userPrompt('apply'), ...toolTurn('t1', 'run-migrate', 'applied 0042_add_index.sql\n'), assistantMessage('This should be fine now, 0042_add_index.sql was touched.')],
+  ]) {
+    const h = makeHome();
+    try {
+      const tp = h.writeTranscript(entries);
+      const r = testHook(HOOK, stopPayload(tp), { home: h.home });
+      assert.ok(isBlock(r), `expected block; stdout: ${r.stdout}`);
+    } finally { h.cleanup(); }
   }
 });

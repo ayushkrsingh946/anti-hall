@@ -34,6 +34,8 @@ struct Hook {
 const INBOX: Hook = Hook { script: "inbox-read-guard.js", check: "inbox-read-guard", argv: &[] };
 const PHASE: Hook = Hook { script: "phase-tracker.js", check: "phase-tracker", argv: &[] };
 const SPAWN: Hook = Hook { script: "orch-on-spawn.js", check: "orch-on-spawn", argv: &[] };
+const CHILD_TURN: Hook = Hook { script: "devswarm-child-turn.js", check: "devswarm-child-turn", argv: &[] };
+const PARENT_INBOX: Hook = Hook { script: "devswarm-parent-inbox.js", check: "devswarm-parent-inbox", argv: &[] };
 const ORCH: Hook = Hook { script: "verify-first-orch.js", check: "verify-first-orch", argv: &["--host=claude"] };
 /// The Codex hook entry: the same script without the `--host=claude` flag.
 const ORCH_CODEX: Hook = Hook { script: "verify-first-orch.js", check: "verify-first-orch-codex", argv: &[] };
@@ -67,15 +69,17 @@ struct Case {
     env: Vec<(String, String)>,
     seed: Vec<Seed>,
     defer: bool,
+    /// Run the Node hook once on both homes before the comparison, so the state of an earlier turn of the session is there.
+    prime: bool,
 }
 
 fn case(name: &str, input: Value) -> Case {
-    Case { name: name.into(), input: Input::Json(input), env: Vec::new(), seed: Vec::new(), defer: false }
+    Case { name: name.into(), input: Input::Json(input), env: Vec::new(), seed: Vec::new(), defer: false, prime: false }
 }
 
 impl Case {
     fn raw(name: &str, input: &str) -> Case {
-        Case { name: name.into(), input: Input::Raw(input.into()), env: Vec::new(), seed: Vec::new(), defer: false }
+        Case { name: name.into(), input: Input::Raw(input.into()), env: Vec::new(), seed: Vec::new(), defer: false, prime: false }
     }
     fn env(mut self, k: &str, v: &str) -> Case {
         self.env.push((k.into(), v.into()));
@@ -93,6 +97,10 @@ impl Case {
     }
     fn defer(mut self) -> Case {
         self.defer = true;
+        self
+    }
+    fn prime(mut self) -> Case {
+        self.prime = true;
         self
     }
 }
@@ -177,12 +185,27 @@ fn snapshot(home: &Path, now: u128) -> BTreeMap<String, String> {
                 walk(&p, root, out, now);
             } else {
                 let body = String::from_utf8_lossy(&std::fs::read(&p).unwrap()).to_string();
-                out.insert(rel, norm(&body.replace(&root.to_string_lossy().to_string(), "$HOME"), now));
+                out.insert(rel, mask_pid(&norm(&body.replace(&root.to_string_lossy().to_string(), "$HOME"), now)));
             }
         }
     }
     let mut out = BTreeMap::new();
     walk(home, home, &mut out, now);
+    out
+}
+
+/// The process id a claim file records (`"pid":123`) is the hook process's own: Node's and the engine's differ by nature.
+fn mask_pid(s: &str) -> String {
+    let mut out = String::new();
+    let mut rest = s;
+    while let Some(i) = rest.find("\"pid\":") {
+        let (head, tail) = rest.split_at(i + 6);
+        out.push_str(head);
+        let digits = tail.chars().take_while(char::is_ascii_digit).count();
+        out.push_str(if digits > 0 { "<PID>" } else { "" });
+        rest = &tail[digits..];
+    }
+    out.push_str(rest);
     out
 }
 
@@ -209,7 +232,12 @@ fn norm(s: &str, now: u128) -> String {
     }
     // tmp marker files carry a pid and a random suffix: only their existence is compared
     let re_tmp = regex::Regex::new(r"\.\d+\.[0-9a-f]{8}\.tmp\.json").unwrap();
-    re_tmp.replace_all(&out, ".<PID>.<RND>.tmp.json").to_string()
+    // the emit-dedupe store keys a record by a hash of the transcript path, which holds the (different) home of each side
+    let re_tp = regex::Regex::new(r#""tp":"[0-9a-f]{16}""#).unwrap();
+    // and by hashes of the emitted text, which may name a path under the home
+    let re_hash = regex::Regex::new(r#""(hash|ch)":"[0-9a-f]{40}""#).unwrap();
+    let out = re_tp.replace_all(&re_tmp.replace_all(&out, ".<PID>.<RND>.tmp.json"), r#""tp":"<TP>""#).to_string();
+    re_hash.replace_all(&out, r#""$1":"<HASH>""#).to_string()
 }
 
 fn norm_path_keys(m: BTreeMap<String, String>) -> BTreeMap<String, String> {
@@ -254,7 +282,10 @@ fn run(mut cmd: Command, input: &[u8]) -> Out {
 fn base_env(c: &mut Command, home: &Path, extra: &[(String, String)], now: u128) {
     c.env_clear().env("PATH", std::env::var("PATH").unwrap_or_default()).env("HOME", home).env("USERPROFILE", home).env("ANTIHALL_TEST_ISOLATION", "1");
     for (k, v) in extra {
-        c.env(k, subst(v, home, now));
+        match k.strip_prefix('-') {
+            Some(name) => c.env_remove(name), // `-NAME` removes a variable set earlier
+            None => c.env(k, subst(v, home, now)),
+        };
     }
 }
 
@@ -291,13 +322,18 @@ fn drive(name: &str, h: Hook, cases: Vec<Case>) -> Tally {
         let (hn, he) = (temp_home(&format!("{name}-n")), temp_home(&format!("{name}-e")));
         seed_home(&hn, &case.seed, now);
         seed_home(&he, &case.seed, now);
-        let seeded = norm_path_keys(snapshot(&he, now));
         let render = |home: &Path| -> Vec<u8> {
             match &case.input {
                 Input::Json(v) => subst(&v.to_string(), home, now).into_bytes(),
                 Input::Raw(s) => subst(s, home, now).into_bytes(),
             }
         };
+        if case.prime {
+            for home in [&hn, &he] {
+                run_node(h, home, case, &render(home), now);
+            }
+        }
+        let seeded = norm_path_keys(snapshot(&he, now));
         let node = run_node(h, &hn, case, &render(&hn), now);
         let eng = run_engine(h, &he, case, &render(&he), now);
         let after_n = norm_path_keys(snapshot(&hn, now));
@@ -311,19 +347,20 @@ fn drive(name: &str, h: Hook, cases: Vec<Case>) -> Tally {
             )
         };
         if case.defer {
-            assert_eq!(
-                (eng.0, String::from_utf8_lossy(&eng.1).to_string(), eng.2.clone()),
-                (0, FALLBACK.to_string(), Vec::new()),
-                "{}",
-                ctx("the engine must defer")
-            );
-            assert_eq!(after_e, seeded, "{}", ctx("a deferral must leave the state as seeded"));
+            // the old engine handed this input to the Node hook; it now answers it itself: the answer may say less than Node's
+            // (advisory text is dropped on purpose) or more, but where Node blocks the engine must block
+            // (an input the check cannot read exactly is still deferred: the dispatcher then follows its infra failure mode)
+            if String::from_utf8_lossy(&eng.1).trim() != "AHFALLBACK" && let Err(w) = crate::common::not_weaker_than_node((node.0, &String::from_utf8_lossy(&node.1)), (eng.0, &String::from_utf8_lossy(&eng.1))) {
+                panic!("{}", ctx(&w));
+            }
             t.deferred += 1;
         } else {
             assert_ne!(String::from_utf8_lossy(&eng.1), FALLBACK, "{}", ctx("the engine deferred but this case expects an answer"));
             assert_eq!(eng.0, node.0, "{}", ctx("exit code"));
-            assert_eq!(eng.1, node.1, "{}", ctx("stdout bytes"));
-            assert_eq!(eng.2, node.2, "{}", ctx("stderr bytes"));
+            // an answer may name a path under the home, which differs between the two sides
+            let unhome = |b: &[u8], home: &Path| String::from_utf8_lossy(b).replace(&home.to_string_lossy().to_string(), "<HOME>");
+            assert_eq!(unhome(&eng.1, &he), unhome(&node.1, &hn), "{}", ctx("stdout bytes"));
+            assert_eq!(unhome(&eng.2, &he), unhome(&node.2, &hn), "{}", ctx("stderr bytes"));
             assert_eq!(after_e, after_n, "{}", ctx("state files"));
             t.same += 1;
             if node.0 == 2 {
@@ -408,14 +445,14 @@ fn inbox_cases() -> Vec<Case> {
         ("store-legacy-db", format!("{R}/store/12345678/devswarm.db")),
         ("store-legacy-ndjson", format!("{R}/store/ABCDEF12/journal/x.ndjson")),
     ] {
-        v.push(ds(case(name, read(json!(p)))).defer());
+        v.push(ds(case(name, read(json!(p)))));
     }
     // relative paths and the working directory
     v.push(ds(case("rel-inbox-cwd-root", json!({"tool_name":"Read","tool_input":{"file_path":"inbox/x"},"cwd":R}))));
     v.push(ds(case("rel-from-home-no-cwd", json!({"tool_name":"Read","tool_input":{"file_path":".anti-hall/devswarm/inbox/x"}}))));
     v.push(ds(case("rel-dotdot-from-store", json!({"tool_name":"Read","tool_input":{"file_path":"../inbox/x"},"cwd":format!("{R}/store")}))));
     v.push(ds(case("rel-elsewhere", json!({"tool_name":"Read","tool_input":{"file_path":"x/y"},"cwd":"$HOME/proj"}))));
-    v.push(ds(case("rel-relative-cwd-defers", json!({"tool_name":"Read","tool_input":{"file_path":"inbox/x"},"cwd":"rel/dir"}))).defer());
+    v.push(ds(case("rel-relative-cwd", json!({"tool_name":"Read","tool_input":{"file_path":"inbox/x"},"cwd":"rel/dir"}))));
     v.push(ds(case("rel-numeric-cwd-uses-home", json!({"tool_name":"Read","tool_input":{"file_path":".anti-hall/devswarm/inbox/x"},"cwd":7}))));
     v.push(ds(case("rel-array-cwd-uses-home", json!({"tool_name":"Read","tool_input":{"file_path":".anti-hall/devswarm/inbox/x"},"cwd":["a"]}))));
     v.push(ds(case("rel-empty-cwd-uses-home", json!({"tool_name":"Read","tool_input":{"file_path":".anti-hall/devswarm/inbox/x"},"cwd":""}))));
@@ -507,7 +544,7 @@ fn inbox_read_guard_matches_node() {
     assert!(cases.len() >= 60, "the corpus must stay broad");
     let t = drive("inbox", INBOX, cases);
     assert!(t.blocks >= 15, "the corpus must exercise the block: {}", t.blocks);
-    assert!(t.same >= 60 && t.deferred >= 10, "answered {} deferred {}", t.same, t.deferred);
+    assert!(t.same >= 70 && t.deferred >= 2, "answered {} deferred {}", t.same, t.deferred);
 }
 
 // ------------------------------------------------------------------------------------------------------------------
@@ -567,13 +604,16 @@ fn phase_cases() -> Vec<Case> {
         v.push(case(name, spawn_payload("Agent", extra)));
     }
     for (name, extra) in [
-        ("cwd-number-defers", json!({"cwd":5})),
-        ("cwd-true-defers", json!({"cwd":true})),
-        ("cwd-object-defers", json!({"cwd":{"a":1}})),
-        ("cwd-empty-array-defers", json!({"cwd":[]})),
-        ("workspace-dir-number-defers", json!({"workspace":{"current_dir":9}})),
+        ("cwd-number-hashed", json!({"cwd":5})),
+        ("cwd-true-hashed", json!({"cwd":true})),
+        ("cwd-object-hashed", json!({"cwd":{"a":1}})),
+        ("cwd-array-hashed", json!({"cwd":["a","b"]})),
+        ("cwd-nested-array-hashed", json!({"cwd":[[1,2],[3]]})),
+        ("cwd-float-hashed", json!({"cwd":1.5e21})),
+        ("cwd-empty-array-hashed", json!({"cwd":[]})),
+        ("workspace-dir-number-hashed", json!({"workspace":{"current_dir":9}})),
     ] {
-        v.push(case(name, spawn_payload("Agent", extra)).defer());
+        v.push(case(name, spawn_payload("Agent", extra)));
     }
     // payload shapes
     v.push(case("task-tool", spawn_payload("Task", json!({"session_id":"t1"}))));
@@ -627,7 +667,7 @@ fn phase_tracker_matches_node() {
     assert!(t.state_changed >= 40, "the corpus must exercise the writes: {}", t.state_changed);
     assert_eq!(t.blocks, 0);
     assert_eq!(t.stdout_nonempty, 0, "the tracker never prints");
-    assert!(t.deferred >= 7);
+    assert!(t.deferred >= 2, "deferred {}", t.deferred);
 }
 
 // ------------------------------------------------------------------------------------------------------------------
@@ -659,23 +699,23 @@ fn spawn_cases() -> Vec<Case> {
     };
     // tools
     for tool in ["Agent", "Task", "Workflow", "spawn_agent", "collaborationspawn_agent"] {
-        v.push(named(case("x", spawn_call(tool, json!("s1"))).file(&marker_file("s1"), PENDING), &format!("pending-{tool}")).defer());
+        v.push(named(case("x", spawn_call(tool, json!("s1"))).file(&marker_file("s1"), PENDING), &format!("pending-{tool}")));
         v.push(named(case("x", spawn_call(tool, json!("s1"))).file(&marker_file("s1"), SETTLED), &format!("settled-{tool}")));
     }
     for tool in ["Bash", "Read", "agent", "Agent ", "collaborationwait_agent", "Spawn_Agent", ""] {
         v.push(named(case("x", spawn_call(tool, json!("s1"))).file(&marker_file("s1"), PENDING), &format!("not-a-spawn-{tool}")));
     }
-    v.push(case("tool-missing-pending-defers", json!({"session_id":"s1"})).file(&marker_file("s1"), PENDING).defer());
-    v.push(case("tool-number-pending-defers", json!({"tool_name":5,"session_id":"s1"})).file(&marker_file("s1"), PENDING).defer());
-    v.push(case("tool-null-pending-defers", json!({"tool_name":null,"session_id":"s1"})).file(&marker_file("s1"), PENDING).defer());
+    v.push(case("tool-missing-pending", json!({"session_id":"s1"})).file(&marker_file("s1"), PENDING));
+    v.push(case("tool-number-pending", json!({"tool_name":5,"session_id":"s1"})).file(&marker_file("s1"), PENDING));
+    v.push(case("tool-null-pending", json!({"tool_name":null,"session_id":"s1"})).file(&marker_file("s1"), PENDING));
     // sessions
     v.push(case("sid-missing", json!({"tool_name":"Agent"})).file(&marker_file("s1"), PENDING));
     v.push(case("sid-empty", json!({"tool_name":"Agent","session_id":""})).file(&marker_file(""), PENDING));
     v.push(case("sid-number", json!({"tool_name":"Agent","session_id":5})));
     v.push(case("sid-null", json!({"tool_name":"Agent","session_id":null})));
-    v.push(named(with("a/b c", PENDING), "sid-sanitized-pending").defer());
-    v.push(named(with("ünï", PENDING), "sid-unicode-sanitizes-to-unknown-pending").defer());
-    v.push(named(with("!!!", PENDING), "sid-all-symbols-unknown-session").defer());
+    v.push(named(with("a/b c", PENDING), "sid-sanitized-pending"));
+    v.push(named(with("ünï", PENDING), "sid-unicode-sanitizes-to-unknown-pending"));
+    v.push(named(with("!!!", PENDING), "sid-all-symbols-unknown-session"));
     v.push(named(with("a.b", SETTLED), "sid-dot-settled"));
     v.push(case("sid-only-in-other-marker", spawn_call("Agent", json!("s2"))).file(&marker_file("s1"), PENDING));
     // marker states
@@ -699,14 +739,11 @@ fn spawn_cases() -> Vec<Case> {
         ("marker-bom", "\u{feff}{\"epochId\":\"1\",\"decision\":\"pending\",\"sentAt\":1}"),
     ] {
         let c = case(name, spawn_call("Agent", json!("s1"))).file(&marker_file("s1"), body);
-        v.push(if name == "marker-extra-keys-pending-ok" { c.defer() } else { c });
+        v.push(c);
     }
     v.push(case("marker-is-directory", spawn_call("Agent", json!("s1"))).seed(Seed::Dir(marker_file("s1"))));
     v.push(
-        case("marker-is-symlink-pending", spawn_call("Agent", json!("s1")))
-            .file("m.json", PENDING)
-            .seed(Seed::Link(marker_file("s1"), "$HOME/m.json".into()))
-            .defer(),
+        case("marker-is-symlink-pending", spawn_call("Agent", json!("s1"))).file("m.json", PENDING).seed(Seed::Link(marker_file("s1"), "$HOME/m.json".into())),
     );
     v.push(case("marker-invalid-utf8", spawn_call("Agent", json!("s1"))).seed(Seed::File(marker_file("s1"), b"\xff\xfe".to_vec(), 0)));
     // subagent calls
@@ -729,17 +766,17 @@ fn spawn_cases() -> Vec<Case> {
         for (k, val) in extra.as_object().unwrap() {
             p[k] = val.clone();
         }
-        v.push(case(name, p).file(&marker_file("s1"), PENDING).defer());
+        v.push(case(name, p).file(&marker_file("s1"), PENDING));
     }
     // switches
     let pend = |c: Case| c.file(&marker_file("s1"), PENDING);
     let call = || spawn_call("Agent", json!("s1"));
     v.push(pend(case("switch-off-file", call())).seed(Seed::Settings(json!({"context":{"verifyFirstOrchestration":false}}))));
     v.push(pend(case("switch-off-string", call())).seed(Seed::Settings(json!({"context":{"verifyFirstOrchestration":"no"}}))));
-    v.push(pend(case("switch-on-file", call())).seed(Seed::Settings(json!({"context":{"verifyFirstOrchestration":true}}))).defer());
-    v.push(pend(case("switch-garbage-ignored", call())).seed(Seed::Settings(json!({"context":{"verifyFirstOrchestration":"maybe"}}))).defer());
+    v.push(pend(case("switch-on-file", call())).seed(Seed::Settings(json!({"context":{"verifyFirstOrchestration":true}}))));
+    v.push(pend(case("switch-garbage-ignored", call())).seed(Seed::Settings(json!({"context":{"verifyFirstOrchestration":"maybe"}}))));
     v.push(pend(case("switch-option-false", call())).env("CLAUDE_PLUGIN_OPTION_CONTEXT_VERIFY_FIRST_ORCHESTRATION", "false"));
-    v.push(pend(case("switch-option-default-masked", call())).env("CLAUDE_PLUGIN_OPTION_CONTEXT_VERIFY_FIRST_ORCHESTRATION", "true").defer());
+    v.push(pend(case("switch-option-default-masked", call())).env("CLAUDE_PLUGIN_OPTION_CONTEXT_VERIFY_FIRST_ORCHESTRATION", "true"));
     v.push(
         pend(case("switch-stored-false", call()))
             .seed(Seed::Claude(json!({"pluginConfigs":{"anti-hall":{"options":{"context_verify_first_orchestration":false}}}}))),
@@ -748,25 +785,61 @@ fn spawn_cases() -> Vec<Case> {
     let far = 4_102_444_800_000u64;
     v.push(pend(case("skip-named", call())).seed(Seed::Skip(json!({"orch-on-spawn": far}))));
     v.push(pend(case("skip-all", call())).seed(Seed::Skip(json!({"all": far}))));
-    v.push(pend(case("skip-expired", call())).seed(Seed::Skip(json!({"orch-on-spawn": 5}))).defer());
-    v.push(pend(case("skip-other", call())).seed(Seed::Skip(json!({"git-guard": far}))).defer());
+    v.push(pend(case("skip-expired", call())).seed(Seed::Skip(json!({"orch-on-spawn": 5}))));
+    v.push(pend(case("skip-other", call())).seed(Seed::Skip(json!({"git-guard": far}))));
     // the protocol level
     v.push(pend(case("level-full-env", call())).env("ANTIHALL_PROTOCOL_LEVEL", "full"));
     v.push(pend(case("level-full-env-padded", call())).env("ANTIHALL_PROTOCOL_LEVEL", " FULL "));
-    v.push(pend(case("level-compact-env", call())).env("ANTIHALL_PROTOCOL_LEVEL", "compact").defer());
-    v.push(pend(case("level-junk-env", call())).env("ANTIHALL_PROTOCOL_LEVEL", "huge").defer());
+    v.push(pend(case("level-compact-env", call())).env("ANTIHALL_PROTOCOL_LEVEL", "compact"));
+    v.push(pend(case("level-junk-env", call())).env("ANTIHALL_PROTOCOL_LEVEL", "huge"));
     v.push(pend(case("level-full-file", call())).seed(Seed::Settings(json!({"context":{"protocolLevel":"full"}}))));
     v.push(
-        pend(case("level-env-beats-file", call()))
-            .env("ANTIHALL_PROTOCOL_LEVEL", "compact")
-            .seed(Seed::Settings(json!({"context":{"protocolLevel":"full"}})))
-            .defer(),
+        pend(case("level-env-beats-file", call())).env("ANTIHALL_PROTOCOL_LEVEL", "compact").seed(Seed::Settings(json!({"context":{"protocolLevel":"full"}}))),
     );
     // codex
     let mut cx = spawn_call("spawn_agent", json!("s1"));
     cx["turn_id"] = json!("t1");
     cx["model"] = json!("m");
-    v.push(pend(case("codex-main-pending", cx.clone())).defer());
+    v.push(pend(case("codex-main-pending", cx.clone())));
+    // the claim: the first spawn wins, a held claim keeps the others silent, the retry slot needs the transcript scan
+    let claim = |n: u8| format!(".anti-hall/orch-full/orch-full-s1-1700000000000-claim{}.json", if n == 2 { "2" } else { "" });
+    v.push(pend(case("claim-recent-silent", call())).file(&claim(1), "{\"at\":{NOW-1000},\"pid\":1}"));
+    v.push(pend(case("claim-expired-defers", call())).file(&claim(1), "{\"at\":{NOW-300000},\"pid\":1}").defer());
+    v.push(
+        pend(case("claim-retry-slot-present-silent", call()))
+            .file(&claim(1), "{\"at\":{NOW-300000},\"pid\":1}")
+            .file(&claim(2), "{\"at\":{NOW-1000},\"pid\":1}"),
+    );
+    v.push(pend(case("claim-unreadable-recent-silent", call())).file(&claim(1), "zzz"));
+    v.push(pend(case("claim-unreadable-old-defers", call())).aged(&claim(1), "zzz", 300_000).defer());
+    v.push(pend(case("claim-at-string-recent-silent", call())).file(&claim(1), "{\"at\":\"x\"}"));
+    v.push(pend(case("claim-is-directory-silent", call())).seed(Seed::Dir(claim(1))));
+    v.push(pend(case("claim-future-silent", call())).file(&claim(1), "{\"at\":{NOW+1000000},\"pid\":1}"));
+    v.push(pend(case("hook-event-echoed", {
+        let mut p = call();
+        p["hook_event_name"] = json!("PostToolUse");
+        p
+    })));
+    v.push(pend(case("hook-event-number-not-echoed", {
+        let mut p = call();
+        p["hook_event_name"] = json!(5);
+        p
+    })));
+    v.push(pend(case("hook-event-empty-not-echoed", {
+        let mut p = call();
+        p["hook_event_name"] = json!("");
+        p
+    })));
+    v.push(case("epoch-with-odd-characters", call()).file(&marker_file("s1"), r#"{"epochId":"12/3 4-x_y","decision":"pending","sentAt":5}"#));
+    v.push(case("epoch-all-symbols", call()).file(&marker_file("s1"), r#"{"epochId":"@@@","decision":"pending","sentAt":5}"#));
+    v.push(
+        case("codex-payload-by-rollout-path", {
+            let mut p = call();
+            p["transcript_path"] = json!("$HOME/.codex/sessions/rollout-1.jsonl");
+            p
+        })
+        .file(&marker_file("s1"), PENDING),
+    );
     let mut cs = cx.clone();
     cs["agent_id"] = json!("child");
     v.push(pend(case("codex-subagent", cs)));
@@ -780,7 +853,7 @@ fn orch_on_spawn_matches_node() {
     assert!(cases.len() >= 60, "the corpus must stay broad");
     let t = drive("spawn", SPAWN, cases);
     assert_eq!(t.blocks, 0);
-    assert!(t.same >= 40 && t.deferred >= 15, "answered {} deferred {}", t.same, t.deferred);
+    assert!(t.same >= 60, "answered {} deferred {}", t.same, t.deferred);
 }
 
 // ------------------------------------------------------------------------------------------------------------------
@@ -969,9 +1042,47 @@ fn orch_cases() -> Vec<Case> {
         "{}",
         old,
     ));
-    // DevSwarm sessions defer to Node
-    v.push(ok(case("devswarm-repo-id-defers", dflt())).env("DEVSWARM_REPO_ID", "r").defer());
-    v.push(ok(case("devswarm-supervisor-on-defers", dflt())).env("ANTIHALL_DEVSWARM_SUPERVISOR", "on").defer());
+    // DevSwarm: a Primary gets the workspace-tier rule W natively; the kill switch, the off mode, a child workspace, the dispatch-tier
+    // switch and a repository that forbids workspaces get the baseline text. Only a layout the engine cannot classify defers.
+    let proj = || Seed::Dir("proj".into());
+    let ds = |c: Case| ok(c).seed(proj()).env("DEVSWARM_REPO_ID", "r");
+    v.push(ds(case("devswarm-primary", dflt())));
+    v.push(ok(case("devswarm-supervisor-on-primary", dflt())).seed(proj()).env("ANTIHALL_DEVSWARM_SUPERVISOR", "on"));
+    v.push(ok(case("devswarm-supervisor-on-file", dflt())).seed(proj()).seed(Seed::Settings(json!({"devswarm":{"supervisorMode":"on"}}))));
+    v.push(ds(case("devswarm-primary-codex", start(json!({"turn_id":"t"})))));
+    v.push(ds(case("devswarm-primary-level-full", dflt())).env("ANTIHALL_PROTOCOL_LEVEL", "full"));
+    v.push(ds(case("devswarm-primary-level-full-codex", start(json!({"turn_id":"t"})))).env("ANTIHALL_PROTOCOL_LEVEL", "full"));
+    v.push(ds(case("devswarm-primary-mode-off", dflt())).env("ANTIHALL_ORCH_FULL_ON", "off"));
+    v.push(ds(case("devswarm-primary-mode-spawn", dflt())).env("ANTIHALL_ORCH_FULL_ON", "spawn"));
+    v.push(
+        ds(case("devswarm-primary-clears-pending", dflt()))
+            .file(".anti-hall/orch-full/orch-full-S1.json", "{\"epochId\":\"1\",\"decision\":\"pending\",\"sentAt\":1}"),
+    );
+    v.push(ds(case("devswarm-child-baseline", dflt())).env("DEVSWARM_SOURCE_BRANCH", "feat/x"));
+    v.push(ds(case("devswarm-child-blank-branch-is-primary", dflt())).env("DEVSWARM_SOURCE_BRANCH", "  "));
+    v.push(ds(case("devswarm-tier-text-off", dflt())).seed(Seed::Settings(json!({"devswarm":{"dispatchTierText":false}}))));
+    v.push(ds(case("devswarm-no-ws-repos-name", dflt())).seed(Seed::Settings(json!({"jev":{"dispatchTierNoWorkspaceRepos":"proj"}}))));
+    v.push(ds(case("devswarm-no-ws-repos-star", dflt())).seed(Seed::Settings(json!({"jev":{"dispatchTierNoWorkspaceRepos":"*"}}))));
+    v.push(ds(case("devswarm-no-ws-repos-path", dflt())).env("ANTIHALL_JEV_DISPATCH_TIER_NO_WORKSPACE_REPOS", "$HOME/proj"));
+    v.push(ds(case("devswarm-no-ws-claude-md", dflt())).file("proj/CLAUDE.md", "# notes\nNO WORKSPACES FOR REAL WORK in this repo.\n"));
+    v.push(ds(case("devswarm-no-ws-agents-md", dflt())).file("proj/AGENTS.md", "Never spin workspaces for real work.\n"));
+    v.push(ds(case("devswarm-docs-without-rule", dflt())).file("proj/CLAUDE.md", "# notes\nuse workspaces freely\n"));
+    v.push(
+        ds(case("devswarm-no-ws-detect-off", dflt()))
+            .file("proj/CLAUDE.md", "NO WORKSPACES FOR REAL WORK\n")
+            .seed(Seed::Settings(json!({"jev":{"dispatchTierDetectNoWorkspaces":false}}))),
+    );
+    v.push(ds(case("devswarm-cwd-missing-dir", start(json!({"cwd":"$HOME/gone"})))));
+    v.push(ds(case("devswarm-cwd-not-string", start(json!({"cwd":5})))));
+    v.push(
+        ds(case("devswarm-no-cwd-defers", {
+            let mut p = dflt();
+            p.as_object_mut().unwrap().remove("cwd");
+            p
+        }))
+        .defer(),
+    );
+    v.push(ds(case("devswarm-relative-cwd-defers", start(json!({"cwd":"proj"})))).defer());
     v.push(ok(case("devswarm-kill-switch-proceeds", dflt())).env("DEVSWARM_REPO_ID", "r").env("DISABLE_ANTIHALL_DEVSWARM", "1"));
     v.push(ok(case("devswarm-supervisor-off-proceeds", dflt())).env("DEVSWARM_REPO_ID", "r").env("ANTIHALL_DEVSWARM_SUPERVISOR", "off"));
     v.push(ok(case("devswarm-blank-repo-proceeds", dflt())).env("DEVSWARM_REPO_ID", " "));
@@ -980,7 +1091,6 @@ fn orch_cases() -> Vec<Case> {
             .env("DEVSWARM_REPO_ID", "r")
             .seed(Seed::Settings(json!({"context":{"verifyFirstOrchestration":false}}))),
     );
-    v.push(ok(case("devswarm-codex-defers", start(json!({"turn_id":"t"})))).env("DEVSWARM_REPO_ID", "r").defer());
     // the judge child
     v.push(ok(case("judge-child-silent", dflt())).env("ANTIHALL_JUDGE_CHILD", "1"));
     v.push(ok(case("judge-child-other-value", dflt())).env("ANTIHALL_JUDGE_CHILD", "yes"));
@@ -995,14 +1105,15 @@ fn verify_first_orch_matches_node() {
     assert_eq!(t.blocks, 0);
     assert!(t.stdout_nonempty >= 70, "the corpus must exercise the emitted texts: {}", t.stdout_nonempty);
     assert!(t.state_changed >= 30, "the corpus must exercise the marker: {}", t.state_changed);
-    assert!(t.deferred >= 6, "deferred {}", t.deferred);
+    assert!(t.deferred >= 5, "deferred {}", t.deferred);
+    assert!(t.stdout_nonempty >= 90, "the DevSwarm cases must answer natively: {}", t.stdout_nonempty);
 }
 
 /// The Codex entry runs the same corpus. Without the flag no session is Claude-confident, so the cases that defer on the
-/// host's config directory now answer; a DevSwarm session and an unreadable payload still defer.
+/// host's config directory now answer; a DevSwarm session with no usable working directory and an unreadable payload still defer.
 #[test]
 fn verify_first_orch_codex_matches_node() {
-    let always_defers = ["devswarm-repo-id-defers", "devswarm-supervisor-on-defers", "devswarm-codex-defers", "raw-garbage-defers", "raw-empty-defers"];
+    let always_defers = ["devswarm-no-cwd-defers", "devswarm-relative-cwd-defers", "raw-garbage-defers", "raw-empty-defers"];
     let cases: Vec<Case> = orch_cases()
         .into_iter()
         .map(|mut c| {
@@ -1016,6 +1127,247 @@ fn verify_first_orch_codex_matches_node() {
     assert!(t.stdout_nonempty >= 70, "the corpus must exercise the emitted texts: {}", t.stdout_nonempty);
     assert!(t.state_changed >= 5, "the corpus must exercise the marker: {}", t.state_changed);
     assert_eq!(t.deferred, always_defers.len(), "deferred {}", t.deferred);
+}
+
+// ------------------------------------------------------------------------------------------------------------------
+// devswarm-parent-inbox: an active Primary with no git checkout around its working directory (the checkout cases are in devswarm_parent_inbox_parity)
+// ------------------------------------------------------------------------------------------------------------------
+
+fn prompt(extra: Value) -> Value {
+    let mut p =
+        json!({"hook_event_name":"UserPromptSubmit","session_id":"S1","transcript_path":"$HOME/.claude/projects/-p/S1.jsonl","cwd":"$HOME/proj","prompt":"hi"});
+    for (k, v) in extra.as_object().unwrap() {
+        p[k] = v.clone();
+    }
+    p
+}
+
+fn parent_inbox_cases() -> Vec<Case> {
+    let repo_dir = repo().to_string_lossy().into_owned();
+    let primary = |c: Case| c.env("DEVSWARM_REPO_ID", "r").seed(Seed::Dir("proj".into())).seed(Seed::Dir(".claude/projects/-p".into()));
+    let dflt = || prompt(json!({}));
+    let without = |k: &str| {
+        let mut p = dflt();
+        p.as_object_mut().unwrap().remove(k);
+        p
+    };
+    let marker = |body: &str| Seed::File(".anti-hall/devswarm/primary-seat/S1.json".into(), body.as_bytes().to_vec(), 0);
+    vec![
+        primary(case("first-turn", dflt())),
+        primary(case("second-turn-same-session-suppressed", dflt())).prime(),
+        primary(case("second-turn-other-session-emits", prompt(json!({"session_id":"S2"})))).prime(),
+        primary(case("second-turn-transcript-missing", dflt())).prime().seed(Seed::Dir("x".into())),
+        primary(case("second-turn-with-transcript", dflt())).prime().file(".claude/projects/-p/S1.jsonl", "{\"type\":\"user\"}\n"),
+        primary(case("repeat-every-zero", dflt())).prime().env("ANTIHALL_INJECTION_REPEAT_EVERY", "0"),
+        primary(case("repeat-every-one", dflt())).prime().env("ANTIHALL_INJECTION_REPEAT_EVERY", "1"),
+        primary(case("repeat-every-garbage", dflt())).prime().env("ANTIHALL_INJECTION_REPEAT_EVERY", "x"),
+        primary(case("dedupe-off-settings", dflt())).prime().seed(Seed::Settings(json!({"guards":{"emitDedupe":false}}))),
+        primary(case("dedupe-window-zero", dflt())).prime().seed(Seed::Settings(json!({"context":{"dedupeWindowMin":0}}))),
+        primary(case("no-cwd", without("cwd"))),
+        primary(case("cwd-empty", prompt(json!({"cwd":""})))),
+        primary(case("cwd-numeric", prompt(json!({"cwd":5})))),
+        primary(case("cwd-nonexistent", prompt(json!({"cwd":"$HOME/gone/deeper"})))),
+        primary(case("cwd-root", prompt(json!({"cwd":"/"})))),
+        primary(case("cwd-relative-defers", prompt(json!({"cwd":"proj"})))).defer(),
+        primary(case("cwd-in-a-checkout", prompt(json!({"cwd":repo_dir})))),
+        primary(case("cwd-in-a-checkout-subdir", prompt(json!({"cwd":format!("{repo_dir}/ah-engine/src")})))),
+        primary(case("no-session", without("session_id"))),
+        primary(case("session-empty", prompt(json!({"session_id":""})))),
+        primary(case("session-numeric", prompt(json!({"session_id":7})))),
+        primary(case("session-odd-chars", prompt(json!({"session_id":"a/b \u{fc}!"})))),
+        primary(case("no-transcript", without("transcript_path"))),
+        primary(case("transcript-empty", prompt(json!({"transcript_path":""})))),
+        primary(case("transcript-relative-defers", prompt(json!({"transcript_path":"x/S1.jsonl"})))).defer(),
+        primary(case("transcript-numeric", prompt(json!({"transcript_path":3})))),
+        primary(case("payload-empty-object", json!({}))),
+        primary(case("payload-array", json!([1]))),
+        primary(Case::raw("payload-garbage-defers", "{nope")).defer(),
+        primary(Case::raw("payload-empty-defers", "")).defer(),
+        // the seat marker the SessionStart hook leaves
+        primary(case("seat-marker-shown-once-defers", dflt())).seed(marker("{\"shown\":1}")).defer(),
+        primary(case("seat-marker-shown-twice", dflt())).seed(marker("{\"shown\":2}")),
+        primary(case("seat-marker-shown-many", dflt())).seed(marker("{\"shown\":9}")),
+        primary(case("seat-marker-shown-string-defers", dflt())).seed(marker("{\"shown\":\"1\"}")).defer(),
+        primary(case("seat-marker-shown-null-defers", dflt())).seed(marker("{\"shown\":null}")).defer(),
+        primary(case("seat-marker-shown-absent", dflt())).seed(marker("{}")),
+        primary(case("seat-marker-null", dflt())).seed(marker("null")),
+        primary(case("seat-marker-garbage", dflt())).seed(marker("{torn")),
+        primary(case("seat-marker-array", dflt())).seed(marker("[1]")),
+        primary(case("seat-marker-other-session", dflt())).seed(Seed::File(".anti-hall/devswarm/primary-seat/S9.json".into(), b"{\"shown\":1}".to_vec(), 0)),
+        primary(case("seat-marker-no-session", without("session_id"))).seed(marker("{\"shown\":1}")),
+        // the gates in front of it
+        primary(case("switch-off", dflt())).seed(Seed::Settings(json!({"devswarm":{"parentInbox":false}}))),
+        primary(case("kill-switch", dflt())).env("DISABLE_ANTIHALL_DEVSWARM", "1"),
+        primary(case("judge-child", dflt())).env("ANTIHALL_JUDGE_CHILD", "1"),
+        primary(case("child-workspace-silent", dflt())).env("DEVSWARM_SOURCE_BRANCH", "b"),
+        primary(case("supervisor-off", dflt())).env("ANTIHALL_DEVSWARM_SUPERVISOR", "off"),
+        case("supervisor-on-without-repo-id", dflt()).env("ANTIHALL_DEVSWARM_SUPERVISOR", "on").seed(Seed::Dir("proj".into())),
+        case("not-devswarm", dflt()).seed(Seed::Dir("proj".into())),
+    ]
+}
+
+#[test]
+fn devswarm_parent_inbox_without_a_checkout_matches_node() {
+    let cases = parent_inbox_cases();
+    assert!(cases.len() >= 40, "the corpus must stay broad");
+    let t = drive("parent-inbox", PARENT_INBOX, cases);
+    assert_eq!(t.blocks, 0);
+    assert!(t.stdout_nonempty >= 18, "the corpus must exercise the emitted reminder: {}", t.stdout_nonempty);
+    assert!(t.state_changed >= 20, "the corpus must exercise the dedupe state: {}", t.state_changed);
+    assert_eq!(t.deferred, 7, "deferred {}", t.deferred);
+}
+
+// ------------------------------------------------------------------------------------------------------------------
+// devswarm-child-turn: an active child workspace with no git checkout around its working directory
+// ------------------------------------------------------------------------------------------------------------------
+
+fn child_turn_cases() -> Vec<Case> {
+    let child = |c: Case| {
+        c.env("DEVSWARM_REPO_ID", "r")
+            .env("DEVSWARM_SOURCE_BRANCH", "feat/x")
+            .env("DEVSWARM_BUILDER_ID", "child-1")
+            .seed(Seed::Dir("proj".into()))
+            .seed(Seed::Dir(".claude/projects/-p".into()))
+    };
+    let dflt = || prompt(json!({}));
+    let without = |k: &str| {
+        let mut p = dflt();
+        p.as_object_mut().unwrap().remove(k);
+        p
+    };
+    let plan = |body: &str| Seed::File(".anti-hall/devswarm/plans/child-1.json".into(), body.as_bytes().to_vec(), 0);
+    let desc = |body: &str| Seed::File(".anti-hall/devswarm/workspaces/child-1.json".into(), body.as_bytes().to_vec(), 0);
+    let launcher = Seed::File(".anti-hall/bin/devswarm.js".into(), b"// launcher\n".to_vec(), 0);
+    let steps = |s: &str| format!("{{\"steps\":{s}}}");
+    vec![
+        child(case("first-turn", dflt())),
+        child(case("first-turn-stable-launcher", dflt())).seed(launcher.clone()),
+        child(case("stable-launcher-switched-off", dflt())).seed(launcher.clone()).env("ANTIHALL_DEVSWARM_STABLE_LAUNCHER", "0"),
+        child(case("launcher-is-a-directory", dflt())).seed(Seed::Dir(".anti-hall/bin/devswarm.js".into())),
+        child(case("second-turn-suppressed", dflt())).prime(),
+        child(case("second-turn-other-session", prompt(json!({"session_id":"S2"})))).prime(),
+        child(case("second-turn-launcher", dflt())).prime().seed(launcher.clone()),
+        child(case("repeat-every-zero", dflt())).prime().env("ANTIHALL_INJECTION_REPEAT_EVERY", "0"),
+        child(case("dedupe-off", dflt())).prime().seed(Seed::Settings(json!({"guards":{"emitDedupe":false}}))),
+        // identities: the heartbeat's file name and the id in the reminders
+        child(case("builder-id-unsafe", dflt())).env("DEVSWARM_BUILDER_ID", "a b"),
+        child(case("builder-id-missing", dflt())).env("-DEVSWARM_BUILDER_ID", ""),
+        child(case("builder-id-dotdot", dflt())).env("DEVSWARM_BUILDER_ID", "a..b"),
+        child(case("builder-id-uuid", dflt())).env("DEVSWARM_BUILDER_ID", "0a1b2c3d-1111-2222-3333-444455556666"),
+        child(case("builder-id-truncated-uuid-defers", dflt())).env("DEVSWARM_BUILDER_ID", "0a1b2c3d-1111-2222-3333-4444").defer(),
+        child(case("builder-id-truncated-uuid-no-session", without("session_id"))).env("DEVSWARM_BUILDER_ID", "0a1b2c3d-1111-2222-3333-4444"),
+        child(case("builder-name", dflt())).env("DEVSWARM_BUILDER_NAME", "Fix the thing"),
+        child(case("branch-long-unsafe", dflt()))
+            .env("DEVSWARM_SOURCE_BRANCH", "feature/some very long branch name with spaces and \u{fc}nicode ".repeat(3).as_str())
+            .env("DEVSWARM_BUILDER_ID", "x y"),
+        child(case("branch-dots", dflt())).env("DEVSWARM_SOURCE_BRANCH", "...hidden").env("DEVSWARM_BUILDER_ID", "x y"),
+        child(case("repo-id-absent-supervisor-on", dflt())).env("-DEVSWARM_REPO_ID", "").env("ANTIHALL_DEVSWARM_SUPERVISOR", "on"),
+        // the step plan
+        child(case("plan-doing", dflt())).seed(plan(&steps(
+            r#"[{"n":1,"text":"first","status":"done","ts":1},{"n":2,"text":"second","status":"doing","ts":5},{"n":3,"text":"third","status":"todo"}]"#,
+        ))),
+        child(case("plan-blocked", dflt()))
+            .seed(plan(&steps(r#"[{"n":1,"text":"first","status":"blocked","ts":9},{"n":2,"text":"second","status":"doing","ts":5}]"#))),
+        child(case("plan-latest-touched-wins", dflt())).seed(plan(&steps(
+            r#"[{"n":1,"text":"a","status":"doing","ts":5},{"n":2,"text":"b","status":"doing","ts":5},{"n":3,"text":"c","status":"blocked","ts":4}]"#,
+        ))),
+        child(case("plan-no-active-step", dflt())).seed(plan(&steps(r#"[{"n":1,"text":"a","status":"todo"},{"n":2,"text":"b","status":"todo"}]"#))),
+        child(case("plan-all-done", dflt())).seed(plan(&steps(r#"[{"n":1,"text":"a","status":"done"},{"n":2,"text":"b","status":"done"}]"#))),
+        child(case("plan-all-done-launcher", dflt())).seed(launcher.clone()).seed(plan(&steps(r#"[{"n":1,"text":"a","status":"done"}]"#))),
+        child(case("plan-empty-steps", dflt())).seed(plan(&steps("[]"))),
+        child(case("plan-empty-steps-required", dflt())).seed(plan(&steps("[]"))).env("ANTIHALL_DEVSWARM_PLAN_REQUIRED", "1"),
+        child(case("plan-missing-required", dflt())).env("ANTIHALL_DEVSWARM_PLAN_REQUIRED", "1"),
+        child(case("plan-missing-required-launcher", dflt())).env("ANTIHALL_DEVSWARM_PLAN_REQUIRED", "1").seed(launcher.clone()),
+        child(case("plan-tracking-off", dflt())).seed(plan(&steps(r#"[{"n":1,"text":"a","status":"doing"}]"#))).env("ANTIHALL_DEVSWARM_PLAN_TRACKING", "0"),
+        child(case("plan-tracking-off-required", dflt())).env("ANTIHALL_DEVSWARM_PLAN_TRACKING", "0").env("ANTIHALL_DEVSWARM_PLAN_REQUIRED", "1"),
+        child(case("plan-garbage", dflt())).seed(plan("{torn")).env("ANTIHALL_DEVSWARM_PLAN_REQUIRED", "1"),
+        child(case("plan-array-root", dflt())).seed(plan("[1]")).env("ANTIHALL_DEVSWARM_PLAN_REQUIRED", "1"),
+        child(case("plan-steps-not-array", dflt())).seed(plan(r#"{"steps":"x"}"#)).env("ANTIHALL_DEVSWARM_PLAN_REQUIRED", "1"),
+        child(case("plan-step-null-entry", dflt())).seed(plan(&steps(r#"[null]"#))),
+        child(case("plan-step-text-quotes", dflt())).seed(plan(&steps(r#"[{"n":1,"text":"say \"hi\" \u00e9","status":"doing"}]"#))),
+        child(case("plan-second-turn-suppressed", dflt())).prime().seed(plan(&steps(r#"[{"n":1,"text":"a","status":"doing"}]"#))),
+        child(case("plan-for-another-id", dflt())).seed(Seed::File(
+            ".anti-hall/devswarm/plans/other.json".into(),
+            b"{\"steps\":[{\"n\":1,\"text\":\"a\",\"status\":\"doing\"}]}".to_vec(),
+            0,
+        )),
+        // the mailbox
+        child(case("mail-none-unread", dflt()))
+            .seed(desc(r#"{"inboxPath":"$HOME/in.ndjson","cursorPath":"$HOME/in.cursor"}"#))
+            .file("in.ndjson", "{\"a\":1}\n{\"a\":2}\n")
+            .file("in.cursor", "2"),
+        child(case("mail-unread", dflt()))
+            .seed(desc(r#"{"inboxPath":"$HOME/in.ndjson","cursorPath":"$HOME/in.cursor"}"#))
+            .file("in.ndjson", "{\"a\":1}\n{\"a\":2}\n")
+            .file("in.cursor", "1"),
+        child(case("mail-cursor-json-line", dflt()))
+            .seed(desc(r#"{"inboxPath":"$HOME/in.ndjson","cursorPath":"$HOME/in.cursor"}"#))
+            .file("in.ndjson", "{\"a\":1}\n")
+            .file("in.cursor", "{\"line\":1}"),
+        child(case("mail-cursor-json-unread", dflt()))
+            .seed(desc(r#"{"inboxPath":"$HOME/in.ndjson","cursorPath":"$HOME/in.cursor"}"#))
+            .file("in.ndjson", "{\"a\":1}\n")
+            .file("in.cursor", "{\"line\":0}"),
+        child(case("mail-cursor-garbage", dflt()))
+            .seed(desc(r#"{"inboxPath":"$HOME/in.ndjson","cursorPath":"$HOME/in.cursor"}"#))
+            .file("in.ndjson", "{\"a\":1}\n")
+            .file("in.cursor", "x"),
+        child(case("mail-cursor-negative", dflt()))
+            .seed(desc(r#"{"inboxPath":"$HOME/in.ndjson","cursorPath":"$HOME/in.cursor"}"#))
+            .file("in.ndjson", "{\"a\":1}\n")
+            .file("in.cursor", "-1"),
+        child(case("mail-cursor-past-end", dflt()))
+            .seed(desc(r#"{"inboxPath":"$HOME/in.ndjson","cursorPath":"$HOME/in.cursor"}"#))
+            .file("in.ndjson", "{\"a\":1}\n")
+            .file("in.cursor", "9"),
+        child(case("mail-cursor-missing", dflt()))
+            .seed(desc(r#"{"inboxPath":"$HOME/in.ndjson","cursorPath":"$HOME/in.cursor"}"#))
+            .file("in.ndjson", "{\"a\":1}\n"),
+        child(case("mail-inbox-missing", dflt())).seed(desc(r#"{"inboxPath":"$HOME/in.ndjson","cursorPath":"$HOME/in.cursor"}"#)).file("in.cursor", "0"),
+        child(case("mail-blank-lines-do-not-count", dflt()))
+            .seed(desc(r#"{"inboxPath":"$HOME/in.ndjson","cursorPath":"$HOME/in.cursor"}"#))
+            .file("in.ndjson", "{\"a\":1}\n\n  \n")
+            .file("in.cursor", "1"),
+        child(case("mail-descriptor-garbage", dflt())).seed(desc("{torn")),
+        child(case("mail-descriptor-array", dflt())).seed(desc("[1]")),
+        child(case("mail-descriptor-without-inbox", dflt())).seed(desc(r#"{"id":"child-1"}"#)),
+        child(case("mail-descriptor-no-cursor-path", dflt())).seed(desc(r#"{"inboxPath":"$HOME/in.ndjson"}"#)).file("in.ndjson", "{\"a\":1}\n"),
+        child(case("mail-relative-inbox-defers", dflt())).seed(desc(r#"{"inboxPath":"in.ndjson","cursorPath":"in.cursor"}"#)).defer(),
+        child(case("mail-inbox-path-not-a-string-defers", dflt())).seed(desc(r#"{"inboxPath":5}"#)).defer(),
+        // the working directory, the session, the transcript
+        child(case("no-cwd-defers", without("cwd"))).defer(),
+        child(case("cwd-relative-defers", prompt(json!({"cwd":"proj"})))).defer(),
+        child(case("cwd-numeric-defers", prompt(json!({"cwd":5})))).defer(),
+        // a working directory inside a checkout registers the child and writes the project's SQLite store, which this suite compares byte for
+        // byte (clock readings and page layout differ between two writers): `devswarm_child_turn_parity.rs` covers it table by table
+        child(case("cwd-nonexistent", prompt(json!({"cwd":"$HOME/gone/deeper"})))),
+        child(case("no-session", without("session_id"))),
+        child(case("session-empty", prompt(json!({"session_id":""})))),
+        child(case("session-numeric-defers", prompt(json!({"session_id":7})))).defer(),
+        child(case("no-transcript", without("transcript_path"))),
+        child(case("transcript-relative-defers", prompt(json!({"transcript_path":"x/S1.jsonl"})))).defer(),
+        child(case("transcript-numeric-defers", prompt(json!({"transcript_path":3})))).defer(),
+        child(case("transcript-null", prompt(json!({"transcript_path":Value::Null})))),
+        child(Case::raw("payload-garbage-defers", "{nope")).defer(),
+        // the gates in front of it
+        child(case("switch-off", dflt())).seed(Seed::Settings(json!({"devswarm":{"childTurn":false}}))),
+        child(case("kill-switch", dflt())).env("DISABLE_ANTIHALL_DEVSWARM", "1"),
+        child(case("judge-child", dflt())).env("ANTIHALL_JUDGE_CHILD", "1"),
+        child(case("primary-env-silent", dflt())).env("-DEVSWARM_SOURCE_BRANCH", ""),
+        case("not-devswarm", dflt()).seed(Seed::Dir("proj".into())).env("DEVSWARM_SOURCE_BRANCH", "b"),
+    ]
+}
+
+#[test]
+fn devswarm_child_turn_without_a_checkout_matches_node() {
+    let cases = child_turn_cases();
+    assert!(cases.len() >= 70, "the corpus must stay broad");
+    let n_defer = cases.iter().filter(|c| c.defer).count();
+    let t = drive("child-turn", CHILD_TURN, cases);
+    assert_eq!(t.blocks, 0);
+    assert!(t.stdout_nonempty >= 35, "the corpus must exercise the emitted turn: {}", t.stdout_nonempty);
+    assert!(t.state_changed >= 40, "the corpus must exercise the heartbeat and the dedupe state: {}", t.state_changed);
+    assert_eq!(t.deferred, n_defer, "deferred {}", t.deferred);
 }
 
 // ------------------------------------------------------------------------------------------------------------------

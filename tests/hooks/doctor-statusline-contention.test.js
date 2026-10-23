@@ -27,7 +27,7 @@ const os = require('node:os');
 const path = require('node:path');
 const cp = require('node:child_process');
 
-const DOCTOR_JS = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'hooks', 'doctor.js');
+const DOCTOR_JS = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'hooks', 'doctor.js');
 
 function makeFakeHome() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'antihall-doctor-slct-home-'));

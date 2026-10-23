@@ -12,7 +12,7 @@ const assert = require('node:assert');
 const path = require('node:path');
 
 const M = require(path.join(
-  __dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'lib', 'target-session.js',
+  __dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'lib', 'target-session.js',
 ));
 
 const UUID = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';

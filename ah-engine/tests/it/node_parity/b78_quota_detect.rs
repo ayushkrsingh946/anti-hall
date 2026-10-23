@@ -3,6 +3,7 @@
 use super::b78::*;
 use super::support::*;
 use serde_json::{Value, json};
+use std::collections::BTreeMap;
 
 include!("b78_quota_detect_tables.rs");
 
@@ -197,3 +198,62 @@ pub(crate) fn scenarios() -> Vec<Sc> {
     }
     out
 }
+
+/// #243: a retry date the engine cannot read exactly (one only V8 normalises, such as a 30th of February) must still record the
+/// outage, with the default cooldown, instead of leaving the shared availability file untouched. Needs no Node.
+#[test]
+fn an_uncertain_retry_date_still_records_the_outage() {
+    for date in ["2030-02-30T12:00:00Z", "2030-10-08T24:00:00Z", "12/25/2026", "Oct 3rd, 2026 9:11 PM"] {
+        let s = Scratch::new("q243");
+        let root = s.path();
+        std::fs::create_dir_all(root.join("home/.anti-hall")).unwrap();
+        let (home, tmp) = (root.join("home").to_string_lossy().to_string(), root.join("tmp").to_string_lossy().to_string());
+        std::fs::create_dir_all(&tmp).unwrap();
+        let path = std::env::var("PATH").unwrap_or_default();
+        let env = env_of(&[("PATH", &path), ("HOME", &home), ("ANTIHALL_TEST_ISOLATION", "1"), ("ANTIHALL_INGEST_DRY_RUN", "1"), ("TMPDIR", &tmp), ("TZ", "UTC")]);
+        let payload = ag(json!(format!("hit your usage limit, try again at {date}."))).to_string();
+        let before = std::time::SystemTime::now();
+        let r = run(ENGINE, &strs(&["check", "codex-quota-detect"]), payload.as_bytes(), &env, &root.to_string_lossy());
+        let file = std::fs::read_to_string(root.join("home/.anti-hall/codex-availability.json")).unwrap_or_default();
+        let v: Value = serde_json::from_str(&file).unwrap_or_else(|_| panic!("{date}: no availability record written; stdout {:?} stderr {:?}", r.out, r.err));
+        assert_eq!(v["quota"]["available"], json!(false), "{date}: {file}");
+        let until = v["quota"]["until"].as_u64().unwrap_or(0) as u128;
+        let now = before.duration_since(std::time::UNIX_EPOCH).unwrap().as_millis();
+        assert!(until > now, "{date}: the recorded cooldown must lie ahead: {file}");
+        assert!(r.out.contains("codex-quota"), "{date}: the advisory still goes out: {:?}", r.out);
+    }
+}
+
+const AVAIL: &str = "home/.anti-hall/codex-availability.json";
+
+/// The lane's one documented difference (#243): when the retry date is one the engine does not read exactly (a shape only V8's
+/// parser accepts), the engine records the outage with the default cooldown where Node records the exact date. Everything else
+/// (exit code, stderr, every other file, the reason, the advisory apart from the date) must be identical, Node's date must be a real
+/// number, and the engine's must be the default cooldown.
+fn default_cooldown_for_uncertain_date(n: &Out, e: &Out, ns: &BTreeMap<String, String>, es: &BTreeMap<String, String>) -> bool {
+    if n.code != e.code || n.err != e.err {
+        return false;
+    }
+    let (Some(nf), Some(ef)) = (ns.get(AVAIL), es.get(AVAIL)) else { return false };
+    let (Ok(mut nv), Ok(ev)) = (serde_json::from_str::<Value>(nf), serde_json::from_str::<Value>(ef)) else { return false };
+    // Node's date is a real one still ahead (recorded as a number) or already past (recorded as the default); the engine's is the default
+    if ev["quota"]["until"] != json!("<NOW+6H>") {
+        return false;
+    }
+    if nv["quota"]["until"].is_u64() {
+        nv["quota"]["until"] = json!("<NOW+6H>");
+    }
+    if nv != ev {
+        return false;
+    }
+    let others = |m: &BTreeMap<String, String>| m.iter().filter(|(k, _)| k.as_str() != AVAIL).map(|(k, v)| (k.clone(), v.clone())).collect::<BTreeMap<_, _>>();
+    if others(ns) != others(es) {
+        return false;
+    }
+    // the advisory names the recorded date; the engine's names the default cooldown
+    let lead = "codex-availability.json until ";
+    let (Some(from), Some(to)) = (n.out.find(lead).map(|i| i + lead.len()), n.out.find("; Codex is unavailable")) else { return false };
+    from <= to && format!("{}(cooldown default){}", &n.out[..from], &n.out[to..]) == e.out
+}
+
+pub(crate) const TOLERANCE: Option<Tolerance> = Some(default_cooldown_for_uncertain_date);

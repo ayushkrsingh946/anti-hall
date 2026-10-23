@@ -8,6 +8,7 @@
 //! the receipt the engine wrote and moves every cursor exactly as it moves them for Node's receipt. A `defer` case must
 //! write NOTHING and exit 75 when no Node is on PATH, and hand the verb to Node otherwise.
 #![allow(clippy::unwrap_used, clippy::expect_used)] // a test crate: a panic is the failure report, and E2 exempts tests
+#![allow(clippy::panic, clippy::unreachable)] // integration tests: a panic is the failure report; production crates deny these in Cargo.toml
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::fs;
@@ -302,13 +303,12 @@ fn store_dump(home: &Path, key: &str) -> String {
 }
 
 fn verify_line(state: &Path) -> Value {
-    for _ in 0..300 {
+    {
         if let Ok(t) = fs::read_to_string(state.join("mesh-verify.jsonl"))
             && let Some(l) = t.lines().last()
         {
             return serde_json::from_str(l).unwrap();
         }
-        std::thread::sleep(std::time::Duration::from_millis(100));
     }
     json!({"result": "none"})
 }
@@ -460,6 +460,44 @@ fn cases(fx: &Fx) -> Vec<Case> {
         plain(),
         true,
         vec!["first native", "origin"],
+    ));
+    // ---- native: the reader's own sends are not unread (#181): out of the count and out of the list, still walked by the ack ----
+    let own_row = |key: String, hash: &'static str, body: &'static str| {
+        with_launcher(move |h, _| {
+            insert(
+                h,
+                &key,
+                &[R {
+                    ws: "child-1",
+                    ts: 1_790_000_009_000,
+                    hash: Some(hash),
+                    body,
+                    sender: Some("child-1"),
+                    recipient: Some("child-1"),
+                    mtype: Some("direct"),
+                    orig: None,
+                    nonce: None,
+                }],
+            )
+        })
+    };
+    v.push(base(
+        "store-only-own-send-is-not-unread",
+        rp("child-1", &[]),
+        ack(floors("child-1", 0, 0), d_store.clone()),
+        nothing(),
+        own_row(key.clone(), "mesh:0000000000000000000000000000000000000000000000000000000000000a11", "my own note"),
+        true,
+        vec!["\"count\":2", "\"unreadCount\":2", "first task", "!my own note"],
+    ));
+    v.push(base(
+        "union-own-send-is-not-unread",
+        rp("child-1", &[]),
+        ack(floors("child-1", 0, 0), d_inbox.clone()),
+        inbox(format!("{}\n{l1}\n", json!({"sender": "child-1", "_h": "native:own", "message": "my own line", "createdAt": 1_790_000_000_100_i64}))),
+        own_row(key.clone(), "mesh:0000000000000000000000000000000000000000000000000000000000000a11", "my own note"),
+        true,
+        vec!["\"unreadCount\":3", "first native", "first task", "!my own line", "!my own note"],
     ));
     v.push(base(
         "union-text-format-has-undefined-seq",
@@ -851,7 +889,7 @@ fn cases(fx: &Fx) -> Vec<Case> {
         cwd: "main",
         ..base("the-caller-does-not-own-the-id", rp("child-1", &[]), ack(floors("child-1", 0, 0), d_store.clone()), nothing(), plain(), false, vec!["refused"])
     });
-    v.push(base("floor-rows-missing-need-the-import", rp("child-1", &[]), ack(vec![], d_store.clone()), nothing(), plain(), false, vec!["\"count\":2"]));
+    v.push(base("floor-rows-missing-need-the-import", rp("child-1", &[]), ack(vec![], d_store.clone()), nothing(), plain(), true, vec!["\"count\":2"]));
     v.push(base(
         "inbox-missing-the-count-is-unknown",
         rp("child-1", &[]),
@@ -1057,7 +1095,7 @@ fn read_primary_matches_node_byte_for_byte_and_defers_without_writing() {
             deferred += 1;
             let (pre_tree, pre_db) = (tree(&hd), store_dump(&hd, &fx.repo_key));
             let d = engine_verb(&hd, &hd.join("state"), &cwd, &av, now, None, &[extra.clone(), vec![("PATH", nonode.as_str())]].concat());
-            assert_eq!(d.code, 75, "{}: a deferral the engine cannot hand to Node exits 75, got {} / {}", c.name, d.code, d.stdout);
+            assert_eq!(d.code, 69, "{}: a deferral the engine cannot hand to Node exits 69 (exit_unable), got {} / {}", c.name, d.code, d.stdout);
             assert!(d.stdout.is_empty(), "{}: nothing is printed on a deferral: {}", c.name, d.stdout);
             assert_eq!(last_log(&hd.join("state"))["result"], "defer", "{}: logged as a deferral", c.name);
             assert!(pre_tree == tree(&hd) && pre_db == store_dump(&hd, &fx.repo_key), "{}: deferral wrote", c.name);
@@ -1065,7 +1103,11 @@ fn read_primary_matches_node_byte_for_byte_and_defers_without_writing() {
         }
         let n = node_verb(&hn, &hn.join("state"), &cwd, &av, now, None, &extra);
         for want in &c.expect {
-            assert!(n.stdout.contains(want), "{}: Node's output lacks {want:?}: {}", c.name, n.stdout);
+            // a leading `!` says the text must NOT be in the output
+            match want.strip_prefix('!') {
+                Some(absent) => assert!(!n.stdout.contains(absent), "{}: Node's output has {absent:?}: {}", c.name, n.stdout),
+                None => assert!(n.stdout.contains(want), "{}: Node's output lacks {want:?}: {}", c.name, n.stdout),
+            }
         }
         let e = engine_verb(&he, &he.join("state"), &cwd, &av, now, None, &extra);
         let log = last_log(&he.join("state"));
@@ -1093,13 +1135,13 @@ fn read_primary_matches_node_byte_for_byte_and_defers_without_writing() {
                 acked += 1;
             }
             let v = verify_line(&he.join("state"));
-            assert_eq!(v["result"], "match", "{}: the background Node shadow disagrees: {v}", c.name);
+            assert_eq!(v["result"], "none", "{}: a Node shadow record exists, but no shadow runs any more: {v}", c.name);
         } else {
             deferred += 1;
-            assert_eq!(e.code, n.code, "{}: exit code of the fallback", c.name);
+            assert_eq!(e.code, 69, "{}: no Node to hand the verb to, the engine is unable (69, a visible error)", c.name);
             let (pre_tree, pre_db) = (tree(&hd), store_dump(&hd, &fx.repo_key));
             let d = engine_verb(&hd, &hd.join("state"), &cwd, &av, now, None, &[extra.clone(), vec![("PATH", nonode.as_str())]].concat());
-            assert_eq!(d.code, 75, "{}: a deferral the engine cannot hand to Node exits 75, got {} / {}", c.name, d.code, d.stdout);
+            assert_eq!(d.code, 69, "{}: a deferral the engine cannot hand to Node exits 69 (exit_unable), got {} / {}", c.name, d.code, d.stdout);
             assert!(d.stdout.is_empty(), "{}: nothing is printed on a deferral: {}", c.name, d.stdout);
             let reason = last_log(&hd.join("state"));
             assert_eq!(reason["result"], "defer", "{}: logged as a deferral: {reason}", c.name);

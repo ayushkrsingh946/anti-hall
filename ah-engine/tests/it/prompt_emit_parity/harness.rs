@@ -382,28 +382,27 @@ fn run_one(scn: &Scn, root: &Path, report: &Mutex<Report>) {
         if std::env::var("PE_SHOW").is_ok_and(|n| scn.name.contains(&n)) {
             eprintln!("[{}] step {i}: node {} | engine deferred={was_deferred}\n  state: {:?}", scn.name, show(&node), tree(&sn, &home, now0));
         }
-        if let Some(want) = scn.expect_defer
-            && want != was_deferred
-        {
-            bad.push(format!(
-                "[{}] step {i}: expected {} but the engine {}",
-                scn.name,
-                if want { "a deferral" } else { "an answer" },
-                if was_deferred { "deferred" } else { "answered" }
-            ));
+        // a step the old engine handed to the Node hook is now answered natively: its answer may say less than Node's (advisory
+        // text is dropped on purpose) or more, but where Node blocks the engine must block; the state is then Node's
+        let defer_expected = scn.expect_defer == Some(true) || (scn.last_defers && i + 1 == scn.steps.len());
+        if scn.expect_defer == Some(false) && was_deferred {
+            bad.push(format!("[{}] step {i}: expected an answer but the engine deferred", scn.name));
         }
-        if scn.last_defers && i + 1 == scn.steps.len() && !was_deferred {
-            bad.push(format!("[{}] step {i}: expected a deferral on the last step but the engine answered", scn.name));
-        }
-        if node.code != eng.code || node.out != eng.out || node.err != eng.err {
-            bad.push(format!("[{}] step {i}: output differs\n  node  : {}\n  engine: {}", scn.name, show(&node), show(&eng)));
-        }
-        let (tn, te) = (tree(&sn, &home, now0), tree(&home, &home, now0));
-        if tn != te {
-            let keys: Vec<&String> = tn.keys().chain(te.keys()).collect::<std::collections::BTreeSet<_>>().into_iter().collect();
-            for k in keys {
-                if tn.get(k) != te.get(k) {
-                    bad.push(format!("[{}] step {i}: file {k} differs\n  node  : {:?}\n  engine: {:?}", scn.name, tn.get(k), te.get(k)));
+        if defer_expected && !was_deferred {
+            if let Err(w) = crate::common::not_weaker_than_node((node.code, &String::from_utf8_lossy(&node.out)), (eng.code, &String::from_utf8_lossy(&eng.out))) {
+                bad.push(format!("[{}] step {i}: {w}", scn.name));
+            }
+        } else {
+            if node.code != eng.code || node.out != eng.out || node.err != eng.err {
+                bad.push(format!("[{}] step {i}: output differs\n  node  : {}\n  engine: {}", scn.name, show(&node), show(&eng)));
+            }
+            let (tn, te) = (tree(&sn, &home, now0), tree(&home, &home, now0));
+            if tn != te {
+                let keys: Vec<&String> = tn.keys().chain(te.keys()).collect::<std::collections::BTreeSet<_>>().into_iter().collect();
+                for k in keys {
+                    if tn.get(k) != te.get(k) {
+                        bad.push(format!("[{}] step {i}: file {k} differs\n  node  : {:?}\n  engine: {:?}", scn.name, tn.get(k), te.get(k)));
+                    }
                 }
             }
         }

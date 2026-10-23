@@ -33,7 +33,7 @@ function hookStats(manifest) {
 }
 
 function computed() {
-  const schema = require(P('hooks', 'lib', 'settings-schema.js'));
+  const schema = require(path.join(REPO, 'plugins', 'anti-hall-node', 'hooks', 'lib', 'settings-schema.js'));
   const all = schema.allSettings();
   const claude = hookStats(P('hooks', 'hooks.registry.json'));
   const codex = hookStats(P('codex', 'hooks', 'hooks.registry.json'));
@@ -54,7 +54,7 @@ function computed() {
     alsoCodex: [...claude.scripts].filter((s) => codex.scripts.has(s)).length,
     claudeSkills: dirs(P('skills')),
     codexSkills: dirs(P('codex', 'skills')),
-    hookFiles: fs.readdirSync(P('hooks')).filter((f) => f.endsWith('.js')).length,
+    hookFiles: fs.readdirSync(path.join(REPO, 'plugins', 'anti-hall-node', 'hooks')).filter((f) => f.endsWith('.js')).length,
     userConfig: Object.keys(JSON.parse(read(P('.claude-plugin', 'plugin.json'))).userConfig || {}).length,
     // per-section key counts, addressed as `section:<key>`
     ...Object.fromEntries(schema.SECTIONS.map((s) => [`section:${s.key}`, s.settings.length])),
@@ -81,7 +81,7 @@ const CONTRACT = [
   ['homeOnly keys (prose)', /(\d+) are `homeOnly`/, 'homeOnly'],
 ];
 // One claim per schema section: the `Keys` cell of its row in the contract's section table.
-const SECTION_ROWS = require(P('hooks', 'lib', 'settings-schema.js')).SECTIONS.map((s) => [
+const SECTION_ROWS = require(path.join(REPO, 'plugins', 'anti-hall-node', 'hooks', 'lib', 'settings-schema.js')).SECTIONS.map((s) => [
   `section "${s.key}" keys (table row)`,
   new RegExp('\\| `' + s.key + '` \\|[^|\\n]*\\| (\\d+) \\|'),
   `section:${s.key}`,
@@ -148,7 +148,7 @@ for (const [rel, claims] of DOCS) {
 
 test('docs/CONTRACT-1.0.md: section table has one row per schema section, with matching headline keys', () => {
   const text = read(path.join(REPO, 'docs/CONTRACT-1.0.md'));
-  const schema = require(P('hooks', 'lib', 'settings-schema.js'));
+  const schema = require(path.join(REPO, 'plugins', 'anti-hall-node', 'hooks', 'lib', 'settings-schema.js'));
   const problems = [];
   const rows = text.match(/^\| `\w+` \| [^|\n]+ \| \d+ \|.*$/gm) || [];
   const docSections = rows.map((r) => /^\| `(\w+)`/.exec(r)[1]);

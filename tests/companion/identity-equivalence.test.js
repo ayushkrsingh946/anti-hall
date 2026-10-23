@@ -26,7 +26,7 @@ process.env.HOME = fx.home;
 process.env.USERPROFILE = fx.home;
 process.env.ANTIHALL_INGEST_DRY_RUN = '1';
 
-const LIB = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'lib');
+const LIB = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'lib');
 const identity = require(path.join(LIB, 'identity.js'));
 const repokey = require(path.join(LIB, 'devswarm-repokey.js'));
 // B1: the live repokey resolvers are shims over identity now, so the byte-identity

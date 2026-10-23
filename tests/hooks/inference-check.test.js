@@ -12,8 +12,8 @@ const path = require('node:path');
 const { testHook } = require('../helpers/spawn-hook.js');
 const { makeHome } = require('../helpers/fixtures.js');
 const bench = require('../../tools/eval/inference-bench.js');
-const ic = require('../../plugins/anti-hall/hooks/lib/inference-check.js');
-const jc = require('../../plugins/anti-hall/hooks/lib/judge-core.js');
+const ic = require('../../plugins/anti-hall-node/hooks/lib/inference-check.js');
+const jc = require('../../plugins/anti-hall-node/hooks/lib/judge-core.js');
 
 const CLAIM = 'The crash is caused by the cache race.';
 
@@ -40,7 +40,7 @@ for (const shape of ['claude', 'codex']) {
   test('detector on the eval corpus (' + shape + ' transcripts): precision >= 0.9 and recall >= 0.9', () => {
     const rows = bench.CASES.map((c) => ({
       label: c.label,
-      flagged: !!ic.findUnsupportedClaim(require('../../plugins/anti-hall/hooks/lib/quote-mask.js').maskQuotedText(c.reply), bench.transcriptLines(c, shape), c.reply),
+      flagged: !!ic.findUnsupportedClaim(require('../../plugins/anti-hall-node/hooks/lib/quote-mask.js').maskQuotedText(c.reply), bench.transcriptLines(c, shape), c.reply),
     }));
     const s = bench.score(rows);
     assert.ok(s.precision >= 0.9, 'precision ' + s.precision);
@@ -59,7 +59,7 @@ test('findCausalClaims: skips questions, conditionals, plans and first-person ra
 });
 
 test('findUnsupportedClaim: label forms, "comes down to", "is what", code-span causes, trailing modal clauses', () => {
-  const { maskQuotedText } = require('../../plugins/anti-hall/hooks/lib/quote-mask.js');
+  const { maskQuotedText } = require('../../plugins/anti-hall-node/hooks/lib/quote-mask.js');
   const lines = [JSON.stringify(user('Why does it crash?'))];
   const flags = (t) => !!ic.findUnsupportedClaim(maskQuotedText(t), lines, t);
   for (const t of [

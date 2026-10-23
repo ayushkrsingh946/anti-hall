@@ -18,9 +18,9 @@ fn a_norm_round_trips_scratch_paths_and_their_canonical_form() {
 
 #[test]
 fn the_fingerprint_closure_follows_requires_and_joins() {
-    let fp = fingerprint(&["plugins/anti-hall/hooks/api-guard.js"], &[]);
+    let fp = fingerprint(&["plugins/anti-hall-node/hooks/api-guard.js"], &[]);
     let names: Vec<&str> = fp.parts.iter().map(|(r, _)| r.as_str()).collect();
-    for want in ["plugins/anti-hall/hooks/api-guard.js", "plugins/anti-hall/hooks/lib/settings.js", "plugins/anti-hall/.claude-plugin/plugin.json"] {
+    for want in ["plugins/anti-hall-node/hooks/api-guard.js", "plugins/anti-hall-node/hooks/lib/settings.js", "plugins/anti-hall/.claude-plugin/plugin.json"] {
         assert!(names.contains(&want), "{want} missing from {names:?}");
     }
 }

@@ -47,8 +47,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 
 const REPO_ROOT = path.join(__dirname, '..', '..');
-const HOOK_JS = path.join(REPO_ROOT, 'plugins', 'anti-hall', 'hooks', 'session-end-mcp-reaper.js');
-const MCP_REAPER_JS = path.join(REPO_ROOT, 'plugins', 'anti-hall', 'companion', 'mcp-reaper.js');
+const HOOK_JS = path.join(REPO_ROOT, 'plugins', 'anti-hall-node', 'hooks', 'session-end-mcp-reaper.js');
+const MCP_REAPER_JS = path.join(REPO_ROOT, 'plugins', 'anti-hall-node', 'companion', 'mcp-reaper.js');
 const hook = require(HOOK_JS);
 const mcpReaper = require(MCP_REAPER_JS);
 
@@ -427,7 +427,7 @@ test('sweepOrphans: a stale test-runner (vitest on a file named mcp-server.test.
 test('sweepOrphans: this hook\'s OWN process line is never selected (matchesMcp\'s "mcp-reaper" substring exclusion)', () => {
   const procs = [
     { pid: 1, ppid: 0, cmd: '/sbin/launchd' },
-    { pid: 700, ppid: 1, cmd: 'node /path/to/plugins/anti-hall/hooks/session-end-mcp-reaper.js' },
+    { pid: 700, ppid: 1, cmd: 'node /path/to/plugins/anti-hall-node/hooks/session-end-mcp-reaper.js' },
   ];
   const out = callSweep(procs, { platform: NOOP_PLATFORM, getAges: fakeGetAges({ 700: 3600 }) });
   assert.deepStrictEqual(out, [], 'the hook\'s own filename contains "mcp-reaper", hard-excluded by matchesMcp');

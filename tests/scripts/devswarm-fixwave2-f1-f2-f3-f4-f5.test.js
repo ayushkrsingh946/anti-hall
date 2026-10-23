@@ -60,7 +60,7 @@
 // is unknowable).
 //
 // MUTATION CHECK (documented per anti-hall protocol; each mutant applied
-// directly to plugins/anti-hall/scripts/devswarm.js via a byte-exact
+// directly to plugins/anti-hall-node/scripts/devswarm.js via a byte-exact
 // string-replace, run against the specific test named, confirmed RED, then
 // reverted and diffed byte-identical against the pre-mutant file):
 //   F1/M1 (the literal Wave-1 regression): replace `foldSiblingGapRows`'s
@@ -96,10 +96,10 @@ const path = require('node:path');
 const devswarmSource = require('./lib/devswarm-source.js');
 const cp = require('node:child_process');
 
-const DEVSWARM_PATH = path.join(__dirname, '../../plugins/anti-hall/scripts/devswarm.js');
+const DEVSWARM_PATH = path.join(__dirname, '../../plugins/anti-hall-node/scripts/devswarm.js');
 const cli = require(DEVSWARM_PATH);
-const storeLib = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
-const repokey = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
+const storeLib = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
+const repokey = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
 const mutantKit = require('./lib/devswarm-mutant-kit.js');
 
 function tmpHome() {

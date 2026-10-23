@@ -63,7 +63,7 @@ const os = require('node:os');
 const path = require('node:path');
 const cp = require('node:child_process');
 
-const cli = require('../../plugins/anti-hall/scripts/devswarm.js');
+const cli = require('../../plugins/anti-hall-node/scripts/devswarm.js');
 // These fixtures test the fold DECISION (cursor / anchor logic) from the production
 // caller shape: the survivor is a REGISTERED row and the caller HOLDS its lock
 // (cmdRegister -> retireWorktreeDuplicates). A fake-home fixture gets a real tmp
@@ -81,9 +81,9 @@ function asSurvivorCaller(cliObj, s, home, survivorId, cands, opts) {
   if (r && r.lockBusy) throw new Error('fixture: survivor lock unavailable');
   return r;
 }
-const storeLib = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
-const inst = require('../../plugins/anti-hall/companion/install-devswarm-ingest.js');
-const repokey = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
+const storeLib = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
+const inst = require('../../plugins/anti-hall-node/companion/install-devswarm-ingest.js');
+const repokey = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
 
 function tmpHome() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'anti-hall-fold-cursor-'));

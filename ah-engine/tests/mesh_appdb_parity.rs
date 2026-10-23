@@ -12,6 +12,7 @@
 //! cases pre-run Node, poison the cache so the answer proves whether it was used, and age or invalidate it.
 //! Native cases are also checked by the background Node shadow (`mesh-verify.jsonl`).
 #![allow(clippy::unwrap_used, clippy::expect_used)] // a test crate: a panic is the failure report, and E2 exempts tests
+#![allow(clippy::panic, clippy::unreachable)] // integration tests: a panic is the failure report; production crates deny these in Cargo.toml
 use serde_json::{Value, json};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -65,13 +66,12 @@ fn assert_same_home(name: &str, a: &Path, b: &Path, what: &str) {
 }
 
 fn verify_line(state: &Path) -> Value {
-    for _ in 0..300 {
+    {
         if let Ok(t) = fs::read_to_string(state.join("mesh-verify.jsonl"))
             && let Some(l) = t.lines().last()
         {
             return serde_json::from_str(l).unwrap();
         }
-        std::thread::sleep(std::time::Duration::from_millis(100));
     }
     json!({"result": "none"})
 }
@@ -440,12 +440,12 @@ fn app_database_heartbeats_match_node_byte_for_byte_and_defer_without_writing() 
             assert_eq!((e.code, &e.stdout), (n.code, &n.stdout), "{}: stdout/exit differ", case.name);
             assert_same_home(case.name, &hn, &he, "node vs engine");
             let v = verify_line(&he.join("state"));
-            assert_eq!(v["result"], "match", "{}: the background Node shadow disagrees: {v}", case.name);
+            assert_eq!(v["result"], "none", "{}: a Node shadow record exists, but no shadow runs any more: {v}", case.name);
             verified += 1;
         } else {
             deferred += 1;
-            assert_eq!(e.code, n.code, "{}: exit code of the fallback", case.name);
-            // the contract: deferred means NOTHING written, and exit 75 when the engine cannot run Node
+            assert_eq!(e.code, 69, "{}: no Node to hand the verb to, the engine is unable (69, a visible error)", case.name);
+            // the contract: deferred means NOTHING written, and exit 69 (exit_unable) when the engine cannot do it
             let before = fx.root.join(format!("{}-before", case.name));
             copy_tree(&fx.seed_home, &before);
             seed(&before, &fx, case, &fx.child);
@@ -457,7 +457,7 @@ fn app_database_heartbeats_match_node_byte_for_byte_and_defer_without_writing() 
                 }
             }
             let dd = engine_verb(&hd, &hd.join("state"), &fx.child, &av, now, None, &[extra.clone(), vec![("PATH", nonode.as_str())]].concat());
-            assert_eq!(dd.code, 75, "{}: a deferral the engine cannot hand to Node exits 75, got {} / {}", case.name, dd.code, dd.stdout);
+            assert_eq!(dd.code, 69, "{}: a deferral the engine cannot hand to Node exits 69 (exit_unable), got {} / {}", case.name, dd.code, dd.stdout);
             assert!(dd.stdout.is_empty(), "{}: nothing is printed on a deferral: {}", case.name, dd.stdout);
             assert_eq!(last_log(&hd.join("state"))["result"], "defer", "{}: logged as a deferral", case.name);
             if case.pre_ms.is_none() {

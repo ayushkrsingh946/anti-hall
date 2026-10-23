@@ -13,7 +13,7 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const path = require('node:path');
 
-const MOD = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'hooks', 'coordinator-detect.js');
+const MOD = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'hooks', 'coordinator-detect.js');
 
 function withEnv(vars, fn) {
   const prev = {};

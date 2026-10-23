@@ -30,9 +30,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 
-const store = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
-const migrate = require('../../plugins/anti-hall/companion/devswarm-migrate.js');
-const unread = require('../../plugins/anti-hall/companion/lib/devswarm-unread.js');
+const store = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
+const migrate = require('../../plugins/anti-hall-node/companion/devswarm-migrate.js');
+const unread = require('../../plugins/anti-hall-node/companion/lib/devswarm-unread.js');
 
 const REPO_KEY = 'repo-crosspath';
 const ID = 'ws1';

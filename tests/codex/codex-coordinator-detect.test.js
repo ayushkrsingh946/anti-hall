@@ -17,7 +17,7 @@ const path = require('node:path');
 const { testHook } = require('../helpers/spawn-hook.js');
 const { makeHome } = require('../helpers/fixtures.js');
 
-const MOD = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'hooks', 'coordinator-detect.js');
+const MOD = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'hooks', 'coordinator-detect.js');
 
 const MAIN = {
   session_id: '01a102fe-6130-7830-81c2-f7d43573e17b',

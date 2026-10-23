@@ -2,7 +2,7 @@
 // Defect 7d0a948031cd (P1): cmdRegisterPrimary never checks for an existing
 // LIVE Primary row on the same worktree/checkout before upserting.
 //
-// Root cause (file:line, HEAD 5631695): plugins/anti-hall/scripts/devswarm.js
+// Root cause (file:line, HEAD 5631695): plugins/anti-hall-node/scripts/devswarm.js
 // cmdRegisterPrimary (~7837-7863) derives a DETERMINISTIC id from the worktree
 // (`inst.primaryWorkspaceId(worktree)`) and calls `cmdRegister(id, ...)`
 // unconditionally. cmdRegister is a plain upsert keyed on that id — a SECOND
@@ -28,10 +28,12 @@ const cp = require('node:child_process');
 
 const antiHallDir = process.env.DEVSWARM_ANTIHALL_DIR
   || path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const cli = require(path.join(antiHallDir, 'scripts', 'devswarm.js'));
-const storeLib = require(path.join(antiHallDir, 'companion', 'lib', 'devswarm-store.js'));
-const repokey = require(path.join(antiHallDir, 'companion', 'lib', 'devswarm-repokey.js'));
-const liveness = require(path.join(antiHallDir, 'companion', 'lib', 'liveness.js'));
+const NODE_antiHallDir = process.env.DEVSWARM_ANTIHALL_DIR
+  || path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const cli = require(path.join(NODE_antiHallDir, 'scripts', 'devswarm.js'));
+const storeLib = require(path.join(NODE_antiHallDir, 'companion', 'lib', 'devswarm-store.js'));
+const repokey = require(path.join(NODE_antiHallDir, 'companion', 'lib', 'devswarm-repokey.js'));
+const liveness = require(path.join(NODE_antiHallDir, 'companion', 'lib', 'liveness.js'));
 
 function tmpHome() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'anti-hall-regprimary-'));

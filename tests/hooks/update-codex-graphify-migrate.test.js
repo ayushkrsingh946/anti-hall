@@ -18,7 +18,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 
-const { codexGraphifyHooksMigratePostUpdate } = require('../../plugins/anti-hall/skills/update/scripts/update.js');
+const { codexGraphifyHooksMigratePostUpdate } = require('../../plugins/anti-hall-node/skills/update/scripts/update.js');
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
 const PATHS = { pluginSrcDir: path.join(REPO_ROOT, 'plugins', 'anti-hall') };
@@ -45,16 +45,16 @@ function readHooksJson(dir) {
 const STALE_CONFIG = {
   hooks: {
     SessionStart: [
-      { hooks: [{ type: 'command', command: 'node /some/path/plugins/anti-hall/hooks/graphify-session.js', timeout: 10 }] },
-      { hooks: [{ type: 'command', command: 'node /some/path/plugins/anti-hall/hooks/version-alert.js', timeout: 10 }] },
+      { hooks: [{ type: 'command', command: 'node /some/path/plugins/anti-hall-node/hooks/graphify-session.js', timeout: 10 }] },
+      { hooks: [{ type: 'command', command: 'node /some/path/plugins/anti-hall-node/hooks/version-alert.js', timeout: 10 }] },
     ],
     PreToolUse: [
-      { matcher: 'Bash', hooks: [{ type: 'command', command: 'node /some/path/plugins/anti-hall/hooks/graphify-guard.js', timeout: 10 }] },
-      { matcher: 'Bash', hooks: [{ type: 'command', command: 'node /some/path/plugins/anti-hall/hooks/git-guard.js', timeout: 10 }] },
+      { matcher: 'Bash', hooks: [{ type: 'command', command: 'node /some/path/plugins/anti-hall-node/hooks/graphify-guard.js', timeout: 10 }] },
+      { matcher: 'Bash', hooks: [{ type: 'command', command: 'node /some/path/plugins/anti-hall-node/hooks/git-guard.js', timeout: 10 }] },
     ],
     Stop: [
-      { hooks: [{ type: 'command', command: 'node /some/path/plugins/anti-hall/hooks/graphify-reminder.js', timeout: 30 }] },
-      { hooks: [{ type: 'command', command: 'node /some/path/plugins/anti-hall/hooks/task-guard.js', timeout: 30 }] },
+      { hooks: [{ type: 'command', command: 'node /some/path/plugins/anti-hall-node/hooks/graphify-reminder.js', timeout: 30 }] },
+      { hooks: [{ type: 'command', command: 'node /some/path/plugins/anti-hall-node/hooks/task-guard.js', timeout: 30 }] },
     ],
   },
 };

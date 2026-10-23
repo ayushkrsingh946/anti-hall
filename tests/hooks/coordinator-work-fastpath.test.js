@@ -13,7 +13,7 @@ const path = require('node:path');
 const childProcess = require('node:child_process');
 
 const ROOT = path.join(__dirname, '..', '..');
-const HOOKS = path.join(ROOT, 'plugins', 'anti-hall', 'hooks');
+const HOOKS = path.join(ROOT, 'plugins', 'anti-hall-node', 'hooks');
 const { provablyNotWork } = require(path.join(HOOKS, 'lib', 'coordinator-work.js'));
 const { classifyBashWork } = require(path.join(HOOKS, 'command-guard.js'));
 

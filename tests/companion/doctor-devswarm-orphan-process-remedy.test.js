@@ -22,7 +22,8 @@ const os = require('node:os');
 const path = require('node:path');
 
 const ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const doc = require(path.join(ROOT, 'companion', 'lib', 'doctor-devswarm.js'));
+const NODE_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const doc = require(path.join(NODE_ROOT, 'companion', 'lib', 'doctor-devswarm.js'));
 
 function rm(p) { try { fs.rmSync(p, { recursive: true, force: true }); } catch (_) {} }
 

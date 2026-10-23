@@ -37,7 +37,7 @@ const path = require('node:path');
 const cp = require('node:child_process');
 const { testHook, testHookRaw } = require('../helpers/spawn-hook.js');
 const { makeHome } = require('../helpers/fixtures.js');
-const repokey = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
+const repokey = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
 
 const PARENT_INBOX = 'devswarm-parent-inbox.js';
 const PARENT_GATE = 'devswarm-parent-gate.js';
@@ -254,7 +254,7 @@ test('8b. a corrupt devswarm-repokey.js module fails BOTH hooks open (D27 — la
   // files; corrupting the REAL repo-tree copy would be flaky-by-construction
   // for the whole suite (the exact hazard devswarm-parent-inbox.test.js's own
   // D27 comment documents). Corrupt only this PRIVATE copy instead.
-  const pluginSrc = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
+  const pluginSrc = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
   const pluginCopy = fs.mkdtempSync(path.join(os.tmpdir(), 'mesh-proj-plugin-copy-'));
   try {
     fs.cpSync(pluginSrc, pluginCopy, { recursive: true });

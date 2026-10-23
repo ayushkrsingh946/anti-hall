@@ -17,8 +17,10 @@ const path = require('node:path');
 
 const ROOT = process.env.ANTIHALL_TEST_PLUGIN_ROOT
   || path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const cli = require(path.join(ROOT, 'scripts', 'devswarm.js'));
-const doctorDevswarm = require(path.join(ROOT, 'companion', 'lib', 'doctor-devswarm.js'));
+const NODE_ROOT = process.env.ANTIHALL_TEST_PLUGIN_ROOT
+  || path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const cli = require(path.join(NODE_ROOT, 'scripts', 'devswarm.js'));
+const doctorDevswarm = require(path.join(NODE_ROOT, 'companion', 'lib', 'doctor-devswarm.js'));
 
 function tmpHome() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ah-8b21gc-'));
@@ -209,7 +211,7 @@ function gitRepo(tag) {
   cp2.spawnSync('git', ['-C', dir, 'commit', '-q', '-m', 'init']);
   return dir;
 }
-const storeLib2 = require(path.join(ROOT, 'companion', 'lib', 'devswarm-store.js'));
+const storeLib2 = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-store.js'));
 function be2() { return (storeLib2.sqliteAvailable && storeLib2.sqliteAvailable()) ? 'sqlite' : 'journal'; }
 
 test('8b211241bbe9 R2: a fresh register REFUSES an id carrying a reserved cursor token', () => {

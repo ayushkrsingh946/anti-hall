@@ -28,9 +28,11 @@ const { spawnSync } = require('node:child_process');
 
 const ROOT = process.env.ANTIHALL_TEST_PLUGIN_ROOT
   || path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
+const NODE_ROOT = process.env.ANTIHALL_TEST_PLUGIN_ROOT
+  || path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
 
-const pullPath = path.join(ROOT, 'companion', 'lib', 'devswarm-pull.js');
-const wakeWatchPath = path.join(ROOT, 'companion', 'lib', 'devswarm-wake-watch.js');
+const pullPath = path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-pull.js');
+const wakeWatchPath = path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-wake-watch.js');
 if (!fs.existsSync(pullPath) || !fs.existsSync(wakeWatchPath)) {
   throw new Error(
     'ANTIHALL_TEST_PLUGIN_ROOT=' + JSON.stringify(ROOT) + ' is not a plugins/anti-hall-shaped '
@@ -285,6 +287,9 @@ test('F: a watcher whose lock is stolen mid-loop prints LOCK LOST to stderr, exi
     // still wrote its own stale state on a lock-lost exit, this seeded value
     // would be clobbered back down to the exiting watcher's lower baseline.
     fs.mkdirSync(require('node:path').dirname(seenPath), { recursive: true });
+    const inboxPath = require('../../plugins/anti-hall-node/companion/lib/devswarm-pull.js').inboxDefaultPath(home, id);
+    fs.mkdirSync(require('node:path').dirname(inboxPath), { recursive: true });
+    fs.writeFileSync(inboxPath, Array.from({ length: 42 }, (_, i) => JSON.stringify({ seq: i + 1 })).join('\n') + '\n');
     fs.writeFileSync(seenPath, JSON.stringify({ lastTotal: 42, lastTotal2: 7 }));
     const env = {
       PATH: process.env.PATH,

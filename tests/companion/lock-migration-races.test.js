@@ -20,6 +20,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
+const NODE_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
 // Isolate the central log before anything that may log is required.
 const LOG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'ah-lockrace-log-'));
 process.env.ANTI_HALL_LOG_DIR = LOG_DIR;
@@ -62,7 +63,7 @@ function tornFresh(lockPath, acquire) {
 }
 
 test('supervisor sweep lock: reclaim race + torn read', () => {
-  const sup = require(path.join(ROOT, 'companion', 'devswarm-supervisor.js'));
+  const sup = require(path.join(NODE_ROOT, 'companion', 'devswarm-supervisor.js'));
   const home = tmpHome();
   try {
     const p = sup.sweepLockPath(home);
@@ -74,7 +75,7 @@ test('supervisor sweep lock: reclaim race + torn read', () => {
 });
 
 test('migrate lock: reclaim race (stale + dead holder) + torn read', () => {
-  const mig = require(path.join(ROOT, 'companion', 'devswarm-migrate.js'));
+  const mig = require(path.join(NODE_ROOT, 'companion', 'devswarm-migrate.js'));
   const home = tmpHome();
   try {
     const p = mig.migrateLockPath(home);
@@ -86,7 +87,7 @@ test('migrate lock: reclaim race (stale + dead holder) + torn read', () => {
 });
 
 test('pull lock (acquireExclLock, also wake-watch): reclaim race (stale + dead holder) + torn read', () => {
-  const pull = require(path.join(ROOT, 'companion', 'lib', 'devswarm-pull.js'));
+  const pull = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-pull.js'));
   const home = tmpHome();
   try {
     const p = path.join(home, 'locks', 'pull-x.lock');
@@ -118,7 +119,7 @@ function globalReclaimRace(t, lockPath, seed, acquire) {
 }
 
 test('retention lock: reclaim race (dead holder) + torn read', (t) => {
-  const ret = require(path.join(ROOT, 'companion', 'lib', 'devswarm-retention.js'));
+  const ret = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-retention.js'));
   const home = tmpHome();
   try {
     const p = ret.lockPath(home);
@@ -130,7 +131,7 @@ test('retention lock: reclaim race (dead holder) + torn read', (t) => {
 });
 
 test('log rotate lock: reclaim race (stale + dead holder) + torn read', (t) => {
-  const alog = require(path.join(ROOT, 'companion', 'lib', 'anti-hall-log.js'));
+  const alog = require(path.join(NODE_ROOT, 'companion', 'lib', 'anti-hall-log.js'));
   const p = alog.rotateLockPath();
   const w = globalReclaimRace(t, p, { pid: 2147483646, ts: 1000, token: 'dead' }, () => alog.acquireRotateLockBlocking());
   w.release();
@@ -144,8 +145,8 @@ test('log rotate lock: reclaim race (stale + dead holder) + torn read', (t) => {
 });
 
 test('store journal messages.lock: a writer that judged a stale dead holder never deletes a fresh lock published meanwhile', () => {
-  const store = require(path.join(ROOT, 'companion', 'lib', 'devswarm-store.js'));
-  const lockLib = require(path.join(ROOT, 'companion', 'lib', 'lock.js'));
+  const store = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-store.js'));
+  const lockLib = require(path.join(NODE_ROOT, 'companion', 'lib', 'lock.js'));
   const home = tmpHome();
   try {
     const dir = store.journalDir(home);
@@ -177,7 +178,7 @@ test('store journal messages.lock: a writer that judged a stale dead holder neve
 });
 
 test('ingest lock: two starters reclaiming the SAME dead holder — exactly one wins', () => {
-  const ingest = require(path.join(ROOT, 'companion', 'devswarm-ingest.js'));
+  const ingest = require(path.join(NODE_ROOT, 'companion', 'devswarm-ingest.js'));
   const home = tmpHome();
   try {
     const p = ingest.ingestLockPath(home);
@@ -188,7 +189,7 @@ test('ingest lock: two starters reclaiming the SAME dead holder — exactly one 
 });
 
 test('ingest orphan sweep: a fresh lock published at the path just before the removal is kept, never deleted', () => {
-  const ingest = require(path.join(ROOT, 'companion', 'devswarm-ingest.js'));
+  const ingest = require(path.join(NODE_ROOT, 'companion', 'devswarm-ingest.js'));
   const home = tmpHome();
   try {
     const dir = ingest.ingestLocksDir(home);
@@ -222,8 +223,8 @@ test('ingest orphan sweep: a fresh lock published at the path just before the re
 });
 
 test('settings lock: a writer that judged a dead holder never deletes a live writer\'s fresh lock; a fresh empty lock is waited on', (t) => {
-  const settings = require(path.join(ROOT, 'hooks', 'lib', 'settings.js'));
-  const lockLib = require(path.join(ROOT, 'companion', 'lib', 'lock.js'));
+  const settings = require(path.join(NODE_ROOT, 'hooks', 'lib', 'settings.js'));
+  const lockLib = require(path.join(NODE_ROOT, 'companion', 'lib', 'lock.js'));
   const home = tmpHome();
   try {
     const p = settings.path({ home }) + '.lock';
@@ -250,7 +251,7 @@ test('settings lock: a writer that judged a dead holder never deletes a live wri
 });
 
 test('repair-on-reload lock: two hooks reclaiming the SAME dead holder never both spawn; a fresh torn lock is respected', (t) => {
-  const ror = require(path.join(ROOT, 'hooks', 'repair-on-reload.js'));
+  const ror = require(path.join(NODE_ROOT, 'hooks', 'repair-on-reload.js'));
   const home = tmpHome();
   try {
     const p = ror.lockPath(home);
@@ -262,7 +263,7 @@ test('repair-on-reload lock: two hooks reclaiming the SAME dead holder never bot
 });
 
 test('swarm-guard lock: a stealer never deletes a fresh lock another stealer published just before its removal; a fresh torn lock is respected', (t) => {
-  const sg = require(path.join(ROOT, 'hooks', 'swarm-guard.js'));
+  const sg = require(path.join(NODE_ROOT, 'hooks', 'swarm-guard.js'));
   const home = tmpHome();
   try {
     const p = path.join(home, 'swarm-spawns.lock');

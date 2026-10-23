@@ -20,7 +20,7 @@ const { spawn, spawnSync } = require('node:child_process');
 const { makeHome, assistantMessage } = require('../helpers/fixtures.js');
 
 const ROOT = path.join(__dirname, '..', '..');
-const HOOKS = path.join(ROOT, 'plugins', 'anti-hall', 'hooks');
+const HOOKS = path.join(ROOT, 'plugins', 'anti-hall-node', 'hooks');
 const COORD = { CLAUDE_CODE_ENTRYPOINT: 'cli' }; // main-thread (coordinator) marker
 const CONCURRENCY = 6;
 

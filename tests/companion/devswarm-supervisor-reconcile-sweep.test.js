@@ -39,19 +39,19 @@ process.env.ANTI_HALL_LOG_DIR = LOG_DIR;
 process.on('exit', () => { try { fs.rmSync(LOG_DIR, { recursive: true, force: true }); } catch (_) {} });
 
 const M = require(path.join(
-  __dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'devswarm-supervisor.js',
+  __dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'devswarm-supervisor.js',
 ));
 const pull = require(path.join(
-  __dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'lib', 'devswarm-pull.js',
+  __dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'lib', 'devswarm-pull.js',
 ));
 const devswarmCli = require(path.join(
-  __dirname, '..', '..', 'plugins', 'anti-hall', 'scripts', 'devswarm.js',
+  __dirname, '..', '..', 'plugins', 'anti-hall-node', 'scripts', 'devswarm.js',
 ));
 const storeLib = require(path.join(
-  __dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'lib', 'devswarm-store.js',
+  __dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'lib', 'devswarm-store.js',
 ));
 const repokeyLib = require(path.join(
-  __dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'lib', 'devswarm-repokey.js',
+  __dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'lib', 'devswarm-repokey.js',
 ));
 
 const UUID = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
@@ -463,7 +463,7 @@ test('REAL WIRING: an unmocked reconcile call against a real registered descript
     assert.ok(r.repoKey.length > 0);
     // Independently re-derive the SAME repoKey the real devswarm-repokey.js
     // module would, to prove it's the genuine per-project key, not a stub value.
-    const repokey = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
+    const repokey = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
     assert.strictEqual(r.repoKey, repokey.repoKeyForWorktree(repo));
   } finally { cleanup(); fs.rmSync(repo, { recursive: true, force: true }); }
 });
@@ -522,7 +522,7 @@ test('REAL LOCK REUSE: the reconcile sweep observes the SAME per-id O_EXCL pull 
 // still-empty exports object.
 // ---------------------------------------------------------------------------
 
-const SUPERVISOR_SCRIPT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'devswarm-supervisor.js');
+const SUPERVISOR_SCRIPT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'devswarm-supervisor.js');
 
 test('main() as a real entry-script process: reconcile-sweep runs, persists cooldown state, and the process exits 0 (circular-require fix holds)', () => {
   const { home, cleanup } = makeHome();

@@ -16,8 +16,8 @@ const os = require('node:os');
 const path = require('node:path');
 const cp = require('node:child_process');
 
-const health = require('../../plugins/anti-hall/companion/lib/ingest-health.js');
-const cli = require('../../plugins/anti-hall/scripts/devswarm.js');
+const health = require('../../plugins/anti-hall-node/companion/lib/ingest-health.js');
+const cli = require('../../plugins/anti-hall-node/scripts/devswarm.js');
 
 function tmpHome() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'anti-hall-ingest-health-'));
@@ -331,6 +331,14 @@ function makeGitRepo(tag) {
 }
 const ACTIVE_ENV = { DEVSWARM_REPO_ID: 'repo-1' };
 
+// A registered workspace descriptor naming repoKey: since 2026-10-16 only a
+// registered project qualifies for an automatic (selfHeal) ingest install.
+function registerProject(home, repoKey) {
+  const dir = path.join(home, '.anti-hall', 'devswarm', 'workspaces');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'primary-' + repoKey + '.json'), JSON.stringify({ id: 'primary-' + repoKey, repoKey, worktreePath: '/x', sessionId: 's' }));
+}
+
 test('selfHeal: healthy daemon -> daemonHealthy:true, no spawn attempted', () => {
   const home = tmpHome();
   const repo = makeGitRepo('healthy');
@@ -358,6 +366,7 @@ test('selfHeal: stale + gated (DevSwarm active + resolved worktree) + cooldown e
   const home = tmpHome();
   const repo = makeGitRepo('stale-gated');
   try {
+    registerProject(home, 'proj-y');
     let spawned = 0;
     const ctx = {
       home, env: ACTIVE_ENV, cwd: repo, now: Date.now(),
@@ -380,6 +389,7 @@ test('selfHeal: a SECOND stale send within the cooldown window -> no re-spawn', 
   const home = tmpHome();
   const repo = makeGitRepo('cooldown');
   try {
+    registerProject(home, 'proj-z');
     let spawned = 0;
     const now = Date.now();
     const ctx = (at) => ({
@@ -487,6 +497,7 @@ test('withSelfHeal: merges heal fields onto the action result without clobbering
   const home = tmpHome();
   const repo = makeGitRepo('with-heal');
   try {
+    registerProject(home, 'proj-t');
     const ctx = {
       home, env: ACTIVE_ENV, cwd: repo, now: Date.now(),
       io: {
@@ -514,7 +525,7 @@ test('withSelfHeal: merges heal fields onto the action result without clobbering
 test('D27 contract: a lazy require of a nonexistent module resolves to null, never throws, matching the hooks\' guard idiom', () => {
   let mod = null;
   assert.doesNotThrow(() => {
-    try { mod = require('../../plugins/anti-hall/companion/lib/does-not-exist-ingest-health.js'); } catch (_) { mod = null; }
+    try { mod = require('../../plugins/anti-hall-node/companion/lib/does-not-exist-ingest-health.js'); } catch (_) { mod = null; }
   });
   assert.strictEqual(mod, null);
 });
@@ -597,6 +608,7 @@ test('selfHeal: stale + job DISABLED in launchd -> NO installer spawn, daemonDis
   const home = tmpHome();
   const repo = makeGitRepo('disabled');
   try {
+    registerProject(home, 'proj-d');
     let spawned = 0;
     const runs = [];
     const ctx = {
@@ -623,4 +635,22 @@ test('selfHeal: stale + job DISABLED in launchd -> NO installer spawn, daemonDis
     assert.strictEqual(cli.selfHeal(ctx).daemonHealAttempted, true);
     assert.strictEqual(spawned, 1);
   } finally { rm(home); rm(repo); }
+});
+
+test('staleBannerOnce: a seconds-old heartbeat with a LIVE lock holder (daemon hand-over) is quiet; a DEAD holder still warns', () => {
+  const home = tmpHome();
+  try {
+    const t0 = Date.now();
+    const lockDir = path.join(home, '.anti-hall', 'devswarm', 'locks');
+    fs.mkdirSync(lockDir, { recursive: true });
+    fs.writeFileSync(path.join(lockDir, 'ingest-project-proj-h.lock'), JSON.stringify({ pid: process.pid }));
+    const base = { home, sessionId: 'sess-hand', repoKey: 'proj-h', platform: 'linux', stale: true, beatTs: t0 - 3000, now: t0 };
+    assert.strictEqual(health.staleBannerOnce(base), null, 'live holder + 3s-old heartbeat: not stale');
+    fs.writeFileSync(path.join(lockDir, 'ingest-project-proj-h.lock'), JSON.stringify({ pid: 2147483646 }));
+    const dead = health.staleBannerOnce(Object.assign({}, base, { sessionId: 'sess-dead' }));
+    assert.ok(dead && /devswarm-stale-data/.test(dead), 'dead holder + fresh heartbeat (D25) still warns: ' + dead);
+    fs.writeFileSync(path.join(lockDir, 'ingest-project-proj-h.lock'), JSON.stringify({ pid: process.pid }));
+    const old = health.staleBannerOnce(Object.assign({}, base, { sessionId: 'sess-old', beatTs: t0 - 6 * 60000 }));
+    assert.ok(old, 'a heartbeat past the grace warns even with a live holder');
+  } finally { rm(home); }
 });

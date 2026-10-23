@@ -13,8 +13,8 @@ const path = require('node:path');
 const cp = require('node:child_process');
 
 const REPO_ROOT = path.join(__dirname, '..', '..');
-const DOCTOR_JS = path.join(REPO_ROOT, 'plugins', 'anti-hall', 'hooks', 'doctor.js');
-const cachePrune = require(path.join(REPO_ROOT, 'plugins', 'anti-hall', 'hooks', 'lib', 'cache-prune.js'));
+const DOCTOR_JS = path.join(REPO_ROOT, 'plugins', 'anti-hall-node', 'hooks', 'doctor.js');
+const cachePrune = require(path.join(REPO_ROOT, 'plugins', 'anti-hall-node', 'hooks', 'lib', 'cache-prune.js'));
 
 function makeFixture(versions) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'antihall-prune-cache-'));
@@ -350,7 +350,7 @@ test('doctor --prune-cache prints the cron/Monitor versioned-path warning in BOT
 });
 
 test('nothing but doctor --prune-cache reaches the prune code', () => {
-  const pluginDir = path.join(REPO_ROOT, 'plugins', 'anti-hall');
+  const pluginDir = path.join(REPO_ROOT, 'plugins', 'anti-hall-node'); // cache-prune and doctor live in the Node backup tree
   const hits = [];
   const walk = (d) => {
     for (const e of fs.readdirSync(d, { withFileTypes: true })) {

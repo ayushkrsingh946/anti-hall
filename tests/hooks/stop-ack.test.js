@@ -10,7 +10,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const stopAck = require('../../plugins/anti-hall/hooks/lib/stop-ack.js');
+const stopAck = require('../../plugins/anti-hall-node/hooks/lib/stop-ack.js');
 
 // Safety-net sweep: every makeHome() dir is tracked here regardless of
 // whether a given test's own fs.rmSync ran, so a missed cleanup never leaks

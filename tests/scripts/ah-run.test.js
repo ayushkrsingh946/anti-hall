@@ -8,7 +8,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const cp = require('node:child_process');
 
-const RUN = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'scripts', 'ah-run.sh');
+const RUN = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'scripts', 'ah-run.sh');
 const HOME = fs.realpathSync(fs.mkdtempSync(path.join(process.env.HOME, 'ah-run-')));
 process.on('exit', () => { try { fs.rmSync(HOME, { recursive: true, force: true }); } catch (_) { /* best effort */ } });
 

@@ -1,4 +1,6 @@
 #![allow(
+    clippy::panic,
+    clippy::unreachable,
     dead_code,
     clippy::type_complexity,
     clippy::collapsible_if,
@@ -188,7 +190,7 @@ struct Out {
 }
 
 fn node_cli(home: &Path, cwd: &Path, argv: &[String], now: i64, env: &[(String, String)]) -> Out {
-    let cli = plugin_root().join("scripts").join("devswarm.js");
+    let cli = node_root().join("scripts").join("devswarm.js");
     let mut c = Command::new("node");
     let e: Vec<(&str, &str)> = env.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
     c.arg("-e").arg(SNIPPET).arg(&cli).arg(now.to_string()).args(argv).current_dir(cwd).env_clear().envs(base_env(home, &home.join("state"), &e));
@@ -324,7 +326,7 @@ fn run_cases(fx: &Fx, w: &W, cases: &[Lc], min_native: usize, min_deferred: usiz
             }
         } else {
             deferred += 1;
-            assert_eq!(e.code, n.code, "{}: exit code of the fallback", c.name);
+            assert_eq!(e.code, 69, "{}: no Node to hand the verb to, the engine is unable (mesh_write.exit_unable)", c.name);
             let snap = |h: &Path| {
                 let mut t = tree(h);
                 t.retain(|k, _| !k.starts_with("hc/calls.log"));
@@ -332,7 +334,7 @@ fn run_cases(fx: &Fx, w: &W, cases: &[Lc], min_native: usize, min_deferred: usiz
             };
             let pre = snap(&homes[2]);
             let d = engine_cli(&homes[2], &cwd, &c.argv, now, &env_for(path_with(&nonode)));
-            assert_eq!(d.code, 75, "{}: a deferral the engine cannot hand to Node exits 75, got {} / {} / {}", c.name, d.code, d.stdout, d.stderr);
+            assert_eq!(d.code, 69, "{}: a deferral the engine cannot hand to Node exits mesh_write.exit_unable, got {} / {} / {}", c.name, d.code, d.stdout, d.stderr);
             assert!(d.stdout.is_empty(), "{}: nothing is printed on a deferral: {}", c.name, d.stdout);
             assert_eq!(last_log(&homes[2].join("state"))["result"], "defer", "{}", c.name);
             assert!(pre == snap(&homes[2]), "{}: a deferral wrote", c.name);
@@ -506,15 +508,6 @@ fn child_tick_steady_state_matches_node() {
                 put(h, "wal-spill/pull-child-1/x.json", "{\"e\":\"1-1-1-cccc\",\"ts\":1,\"raw\":\"[]\"}");
             }
         }),
-        case("defer-a-pending-batch-with-a-date-form-the-engine-does-not-reproduce", &["--quiet"], false, {
-            let f = b(vec![], vec![]);
-            move |h| {
-                f(h);
-                let raw = serde_json::to_string(&json!([{"message": "m", "createdAt": "2026-10-09 10:00"}])).unwrap();
-                let rec = json!({"t": "batch", "e": "1-1-1-dddd", "ts": 1, "raw": raw}).to_string() + "\n";
-                put(h, "wal/pull-child-1.ndjson", &rec);
-            }
-        }),
         case("defer-registry-holds-a-second-row-of-the-same-worktree", &["--quiet"], false, {
             let f = b(vec![], vec![]);
             let (rk, wt) = (w.repo_key.clone(), w.child.clone());
@@ -526,7 +519,7 @@ fn child_tick_steady_state_matches_node() {
         }),
         case("defer-no-descriptor", &["--quiet"], false, |_| {}),
     ];
-    run_cases(&fx, &w, &cases, 18, 8);
+    run_cases(&fx, &w, &cases, 18, 7);
 }
 
 fn hash_of(id: &str) -> String {
@@ -794,7 +787,7 @@ fn spawn_tick(tool: Tool, home: &Path, cwd: &Path, now: i64, env: &[(String, Str
     let mut c = match tool {
         Tool::Node => {
             let mut c = Command::new("node");
-            c.arg("-e").arg(SNIPPET).arg(plugin_root().join("scripts").join("devswarm.js")).arg(now.to_string()).args(&argv);
+            c.arg("-e").arg(SNIPPET).arg(node_root().join("scripts").join("devswarm.js")).arg(now.to_string()).args(&argv);
             c
         }
         Tool::Engine => {
@@ -975,11 +968,12 @@ fn a_kill_at_every_step_loses_and_duplicates_nothing_whoever_runs_next() {
 
 // ---- the one deliberate difference: a date form the engine does not reproduce in a FRESH batch -------------------------------
 
-/// The batch is already read (destructive), so the engine cannot hand it to Node. It appends the rows to the inbox (no date is
-/// needed for that), leaves the store feed to Node and leaves the batch PENDING in the WAL; the next tick defers to Node, which
-/// replays it: nothing is lost, nothing is duplicated, and the store ends where Node's own pull would have left it.
+/// The batch is already read (destructive). The engine appends the rows to the inbox and feeds the store natively: a message whose
+/// time is a form `Date.parse` accepts but the port does not reproduce is stored at the import time (the documented fallback). The
+/// batch closes in the same tick, the next tick has nothing to replay, nothing is lost or duplicated, and the store ends as Node's
+/// own pull leaves it except for that one `ts`.
 #[test]
-fn a_date_form_the_engine_does_not_reproduce_leaves_the_batch_pending_for_node() {
+fn a_date_form_the_engine_does_not_reproduce_is_stored_at_import_time_and_the_batch_closes() {
     let Some((fx, w)) = setup_world("l8edate") else { return };
     let tools = tools_path(&fx.root, true);
     let stub = stub_dir(&fx.root);
@@ -999,18 +993,44 @@ fn a_date_form_the_engine_does_not_reproduce_leaves_the_batch_pending_for_node()
     assert_eq!(e.stdout, n.stdout, "the tick prints the same count");
     assert_eq!(last_log(&ours.join("state"))["result"], "native");
     assert_eq!(read_inbox(&ours), read_inbox(&reference), "the inbox is the same");
-    assert!(wal_text(&ours).contains("\"t\":\"batch\"") && !wal_text(&ours).contains("\"t\":\"done\""), "the batch stays pending");
-    // the next tick: the engine defers (exit 75 without Node, else Node runs); Node replays and closes
+    assert!(wal_text(&ours).contains("\"t\":\"batch\"") && wal_text(&ours).contains("\"t\":\"done\""), "the batch is closed in the same tick");
+    // the next tick finds nothing pending: the engine answers it natively and nothing is replayed or duplicated
     let again = engine_cli(&ours, &fx.child, &child(&["--quiet"]), NOW, &env);
-    assert_eq!(last_log(&ours.join("state"))["result"], "defer", "{}", again.stderr);
+    assert_eq!(last_log(&ours.join("state"))["result"], "native", "{}", again.stderr);
     assert_eq!(read_inbox(&ours).lines().count(), 1, "nothing duplicated");
-    assert!(wal_text(&ours).contains("\"t\":\"done\""), "Node closed the batch");
     let key_db = |h: &Path| ds(h).join("store").join(&fx.repo_key).join("devswarm.db");
-    // the second tick (Node, real clock) ensured the registration once more, so only the message rows are compared
-    let norm = |h: &Path| mask_dump(&raw_dump(&key_db(h))).lines().filter(|l| l.contains("hash=t\"native:")).collect::<Vec<_>>().join("\n");
+    // only the message rows are compared, and not their `ts`: Node reads the odd form as local time, the engine stores the import time
+    let norm = |h: &Path| {
+        let ts = regex::Regex::new(r"\bts=i[0-9]+").unwrap();
+        mask_dump(&raw_dump(&key_db(h))).lines().filter(|l| l.contains("hash=t\"native:")).map(|l| ts.replace_all(l, "ts=<time>").into_owned()).collect::<Vec<_>>().join("\n")
+    };
     assert!(
         !norm(&ours).is_empty() && norm(&ours) == norm(&reference),
-        "the store ends as Node's own pull leaves it: {}",
+        "the store ends as Node's own pull leaves it (but for the ts): {}",
+        first_diff(&norm(&reference), &norm(&ours))
+    );
+    assert_eq!(norm(&ours).lines().count(), 1, "the message is stored once");
+
+    // the same form in a batch an earlier pull captured but never closed: the replay feeds the store at the import time and closes it
+    let (reference, ours) = (fx.root.join("ref-pending"), fx.root.join("ours-pending"));
+    for h in [&reference, &ours] {
+        copy_tree(&fx.seed_home, h);
+        fs::create_dir_all(h.join(".anti-hall")).unwrap();
+        fs::write(h.join(".anti-hall/settings.json"), "{\"mesh\":{\"engine_writes\":\"on\"}}\n").unwrap();
+        base(&w, h, &[], &[]);
+        let raw = serde_json::to_string(&json!([{"message": "m", "createdAt": "2026-10-09 10:00"}])).unwrap();
+        let rec = json!({"t": "batch", "e": "1-1-1-dddd", "ts": 1, "raw": raw}).to_string() + "\n";
+        put(h, "wal/pull-child-1.ndjson", &rec);
+    }
+    let n = node_cli(&reference, &fx.child, &child(&["--quiet"]), NOW, &env);
+    let e = engine_cli(&ours, &fx.child, &child(&["--quiet"]), NOW, &env);
+    assert_eq!(e.stdout, n.stdout, "the pending-batch tick prints the same count");
+    assert_eq!(last_log(&ours.join("state"))["result"], "native", "{}", e.stderr);
+    assert_eq!(read_inbox(&ours), read_inbox(&reference), "the replayed inbox is the same");
+    assert!(wal_text(&ours).contains("\"t\":\"done\""), "the replayed batch is closed");
+    assert!(
+        !norm(&ours).is_empty() && norm(&ours) == norm(&reference),
+        "the replayed store ends as Node's (but for the ts): {}",
         first_diff(&norm(&reference), &norm(&ours))
     );
 }

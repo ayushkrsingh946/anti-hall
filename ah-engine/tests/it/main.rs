@@ -3,24 +3,34 @@
 //! `cargo nextest run -E 'test(/^<name>::/)'`). Tests that set process-global state stay in their own binaries under
 //! `tests/` (`config_hotswap`, `runtime_config`, `jev_http`: they `set_var` HOME / proxy variables and rely on being alone in
 //! their process); see docs/DEVELOPMENT.md.
-#![allow(clippy::unwrap_used, clippy::expect_used)] // a test crate: a panic is the failure report, and E2 exempts tests
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unreachable)] // a test crate: a panic is the failure report, and E2 exempts tests
 
+mod broad_kill;
 #[path = "../common/mod.rs"]
 mod common;
+mod event_budgets;
+mod guards_quoted;
 mod replies;
 mod roles;
 mod transcript_support;
 
 mod agent_cli;
 mod agent_controls_parity;
+mod agent_scan_kept;
 mod cascade_judge;
+mod cli_pipe;
+mod codex_apply_patch_e2e;
+mod codex_scripts_parity;
 mod compiled_logic_gate;
+mod crashloop_drill;
 mod ctxbudget_e2e;
 mod defaults_failover;
 mod defaults_keys;
 mod dep_budget;
 mod devswarm_act_witness;
+mod devswarm_child_turn_parity;
 mod devswarm_gates_parity;
+mod devswarm_parent_inbox_parity;
 mod devswarm_prompt_parity;
 mod devswarm_readside_parity;
 mod devswarm_role_parity;
@@ -39,10 +49,12 @@ mod dssup_ingest;
 mod dssup_kill;
 mod dssup_liveness;
 mod dssup_retention;
+mod dssup_telemetry;
 mod durability;
 mod e2e;
+mod engine_update;
 mod fail_closed_matrix;
-mod fallback_read;
+mod client_no_hooks;
 mod flip_parity;
 mod gitcache_parity;
 mod gitcheck;
@@ -55,17 +67,24 @@ mod jev_cache_parity;
 mod jev_integrations_parity;
 mod jev_keep_parity;
 mod jev_report_parity;
+mod jev_review_scan_mem;
 mod jev_scrub_reload;
 mod js_number_printers;
 mod judge_parity;
+mod l03_cli_parity;
 mod launcher_parity;
+mod mcp_reaper_job;
 mod mcp_reaper_parity;
+mod mem_guard;
+mod mem_restart_e2e;
 mod memory_soak;
 mod mesh_parity;
 mod migrate_parity;
 mod model_routing_parity;
+mod native_session_checks;
 mod no_compiled_config;
 mod no_hardcoded_tunables;
+mod nodeback;
 mod node_parity;
 mod operator_parity;
 mod port_guards_parity;
@@ -83,12 +102,18 @@ mod setup_parity;
 mod sibling_sweep_reload;
 mod spawn_ctx_parity;
 mod spool;
+mod stop_scripts_guardrail;
 mod task_checks_e2e;
 mod task_tracker_parity;
+mod w2_behaviour_matrix;
 mod telemetry;
 mod temp_leaks;
-mod template_drift;
+mod devswarm_shims;
 mod transcript_index;
 mod transcript_parity;
 mod update_parity;
+mod update_post_recon;
+mod update_post_stages;
 mod wake_watch_parity;
+mod w6_command_allow;
+mod w6_task_tracker;

@@ -13,6 +13,7 @@ const { makeHome } = require('../helpers/fixtures.js');
 const { assertShape } = require('../helpers/block-shape.js');
 
 const ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
+const NODE_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
 const edit = (i) => ({
   type: 'assistant', timestamp: new Date().toISOString(),
   message: { role: 'assistant', content: [{ type: 'tool_use', name: 'Edit', id: 'toolu_e' + i, input: { file_path: '/x/f' + i } }] },
@@ -93,7 +94,7 @@ test('task-tracker directive has the shared shape (tip icon)', () => {
 });
 
 test('auto-handover builders produce the shared shape', () => {
-  const t = require(path.join(ROOT, 'hooks', 'lib', 'auto-handover-text.js'));
+  const t = require(path.join(NODE_ROOT, 'hooks', 'lib', 'auto-handover-text.js'));
   const payload = { session_id: 's1', cwd: '/tmp/x' };
   assertShape(t.buildFireDirective({ pct: 85, estimated: false }, 'pct', payload, 0), 'auto-handover', 'fire pct', { requireWhy: true });
   assertShape(t.buildFireDirective({ pct: 85, used: 400000 }, 'tokens', payload, 300000), 'auto-handover', 'fire tokens', { requireWhy: true });
@@ -104,7 +105,7 @@ test('auto-handover builders produce the shared shape', () => {
 });
 
 test('update-available advisory uses the update icon; claude-cli drift uses the warn icon', () => {
-  const bm = require(path.join(ROOT, 'hooks', 'lib', 'block-message.js'));
+  const bm = require(path.join(NODE_ROOT, 'hooks', 'lib', 'block-message.js'));
   const u = bm.message({ kind: 'update', guard: 'version-alert', what: 'v9.9.9 is available (you are running v1.0.0).', instead: 'tell the user now: run /anti-hall:update.' });
   assertShape(u, 'version-alert', 'version-alert');
   assert.match(u, /^⬆️ /);

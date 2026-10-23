@@ -11,10 +11,10 @@ const os = require('node:os');
 const path = require('node:path');
 
 const C = require(path.join(
-  __dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'lib', 'devswarm-inbox-cursor.js',
+  __dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'lib', 'devswarm-inbox-cursor.js',
 ));
 const { unreadBacklog } = require(path.join(
-  __dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'lib', 'liveness.js',
+  __dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'lib', 'liveness.js',
 ));
 
 function tmp() {

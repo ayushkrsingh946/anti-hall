@@ -32,8 +32,8 @@ const LOG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'anti-hall-app-arch-log-')
 process.env.ANTI_HALL_LOG_DIR = LOG_DIR;
 process.on('exit', () => { try { fs.rmSync(LOG_DIR, { recursive: true, force: true }); } catch (_) {} });
 
-const cli = require('../../plugins/anti-hall/scripts/devswarm.js');
-const appDb = require('../../plugins/anti-hall/companion/lib/devswarm-app-db.js');
+const cli = require('../../plugins/anti-hall-node/scripts/devswarm.js');
+const appDb = require('../../plugins/anti-hall-node/companion/lib/devswarm-app-db.js');
 
 let sqlite = null;
 try { sqlite = require('node:sqlite'); } catch (_) { sqlite = null; }

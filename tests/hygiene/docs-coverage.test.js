@@ -20,9 +20,10 @@ const path = require('node:path');
 
 const REPO = path.join(__dirname, '..', '..');
 const PLUGIN = path.join(REPO, 'plugins', 'anti-hall');
+const NODE_PLUGIN = path.join(REPO, 'plugins', 'anti-hall-node');
 const read = (...p) => fs.readFileSync(path.join(REPO, ...p), 'utf8');
 
-const schema = require(path.join(PLUGIN, 'hooks', 'lib', 'settings-schema.js'));
+const schema = require(path.join(PLUGIN, '..', 'anti-hall-node', 'hooks', 'lib', 'settings-schema.js'));
 const SETTING_KEYS = [];
 for (const sec of schema.SECTIONS) for (const s of sec.settings) SETTING_KEYS.push(sec.key + '.' + s.key);
 
@@ -51,7 +52,7 @@ function switchVerbs(rel, fnHeader) {
   return verbs;
 }
 function jevReportVerbs() {
-  const src = read('plugins/anti-hall/scripts/jev-report.js');
+  const src = read('plugins/anti-hall-node/scripts/jev-report.js');
   const verbs = [];
   src.replace(/argv\[0\] === '([a-z][a-z-]*)'/g, (m, v) => { if (!verbs.includes(v)) verbs.push(v); return m; });
   return verbs;
@@ -63,7 +64,7 @@ const mentionsVerb = (text, verb) => new RegExp('`(?:[^`\\n]*[ /])?' + verb.repl
 // that load them (doctor.js's own self-test ids excluded).
 function jevIntegrationIds() {
   const ids = new Set();
-  const dirs = [path.join(PLUGIN, 'hooks'), path.join(PLUGIN, 'hooks', 'lib')];
+  const dirs = [path.join(NODE_PLUGIN, 'hooks'), path.join(NODE_PLUGIN, 'hooks', 'lib')];
   for (const d of dirs) {
     for (const f of fs.readdirSync(d)) {
       if (!f.endsWith('.js') || f === 'doctor.js') continue;
@@ -104,9 +105,9 @@ test('(4) every devswarm.js / jev-report.js / settings.js verb is documented in 
   const devswarmDocs = read('plugins/anti-hall/skills/devswarm/SKILL.md') + '\n' + read('docs/KB-devswarm-hivecontrol.md');
   const jevDocs = read('plugins/anti-hall/skills/jev/SKILL.md') + '\n' + read('docs/KB-jev-classifier.md');
   const settingsDocs = read('plugins/anti-hall/skills/settings/SKILL.md');
-  const dv = switchVerbs('plugins/anti-hall/scripts/devswarm.js', 'function runArmed(');
+  const dv = switchVerbs('plugins/anti-hall-node/scripts/devswarm.js', 'function runArmed(');
   const jv = jevReportVerbs();
-  const sv = switchVerbs('plugins/anti-hall/scripts/settings.js', 'function main(');
+  const sv = switchVerbs('plugins/anti-hall-node/scripts/settings.js', 'function main(');
   assert.ok(dv.length > 30 && jv.length >= 2 && sv.length >= 4, 'parsed the verb lists: ' + [dv.length, jv.length, sv.length]);
   const missing = [
     ...dv.filter((v) => !mentionsVerb(devswarmDocs, v)).map((v) => 'devswarm.js ' + v + ' (skills/devswarm or KB-devswarm-hivecontrol)'),
@@ -129,9 +130,9 @@ test('(5) every Jev integration id is in docs/KB-jev-classifier.md and skills/je
 });
 
 test('(6) the system-briefing operator guide (Claude + Codex) lists every setting key and every CLI verb', () => {
-  const dv = switchVerbs('plugins/anti-hall/scripts/devswarm.js', 'function runArmed(');
+  const dv = switchVerbs('plugins/anti-hall-node/scripts/devswarm.js', 'function runArmed(');
   const jv = jevReportVerbs();
-  const sv = switchVerbs('plugins/anti-hall/scripts/settings.js', 'function main(');
+  const sv = switchVerbs('plugins/anti-hall-node/scripts/settings.js', 'function main(');
   const out = [];
   for (const [name, text] of BRIEFINGS) {
     for (const k of SETTING_KEYS) if (!text.includes('`' + k + '`')) out.push(name + ': setting ' + k);
@@ -145,9 +146,9 @@ test('(6) the system-briefing operator guide (Claude + Codex) lists every settin
 test('the SessionStart foundation points agents at the operator guide by name', () => {
   // The full discipline index lives in verify-first-core.js (shared with PROTOCOL.md); the compact
   // session core (the default) carries the same pointer in its SKILLS line.
-  const src = read('plugins', 'anti-hall', 'hooks', 'verify-first-core.js');
+  const src = read('plugins', 'anti-hall-node', 'hooks', 'verify-first-core.js');
   assert.match(src, /\/anti-hall:system-briefing \(Codex: anti-hall-system-briefing\)/);
-  const core = require(path.join(PLUGIN, 'hooks', 'verify-first-core.js'));
+  const core = require(path.join(NODE_PLUGIN, 'hooks', 'verify-first-core.js'));
   assert.match(core.coreCompactSession('/x'), /system-briefing \(operator guide; Codex: anti-hall-system-briefing\)/);
 });
 
@@ -178,7 +179,7 @@ test('(8) docs/KB.md component counts are generated from disk (tools/gen-kb-coun
   const gen = require(path.join(REPO, 'tools', 'gen-kb-counts.js'));
   const kb = read('docs', 'KB.md');
   assert.strictEqual(kb, gen.build(kb), 'docs/KB.md counts are stale — run node tools/gen-kb-counts.js');
-  const drift = require(path.join(REPO, 'plugins', 'anti-hall', 'hooks', 'repo-self-drift.js'));
+  const drift = require(path.join(REPO, 'plugins', 'anti-hall-node', 'hooks', 'repo-self-drift.js'));
   const c = gen.counts();
   assert.deepStrictEqual(drift.parseClaims(kb), { claimedHooks: c.hooks, claimedSkills: c.claudeSkills });
 });

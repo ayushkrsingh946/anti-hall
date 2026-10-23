@@ -14,9 +14,10 @@ const { testHook } = require('../helpers/spawn-hook.js');
 const { switchOff } = require('../helpers/settings-switch.js');
 
 const ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const installIngest = require(path.join(ROOT, 'companion', 'install-devswarm-ingest.js'));
-const { resolveContext } = require(path.join(ROOT, 'companion', 'lib', 'identity.js'));
-const { lockPathFor } = require(path.join(ROOT, 'companion', 'lib', 'devswarm-wake-watch.js'));
+const NODE_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const installIngest = require(path.join(NODE_ROOT, 'companion', 'install-devswarm-ingest.js'));
+const { resolveContext } = require(path.join(NODE_ROOT, 'companion', 'lib', 'identity.js'));
+const { lockPathFor } = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-wake-watch.js'));
 
 const HOOK = 'devswarm-parent-inbox.js';
 const CLAUDE_ENV = { DEVSWARM_REPO_ID: 'repo-1', DEVSWARM_AI_AGENT: 'claude' };
@@ -81,11 +82,11 @@ test('Primary + live child + no watcher + no tick -> the full NO MAILBOX WAKE PA
   } finally { s.cleanup(); }
 });
 
-test('only one missing -> the shorter variant naming just that one', () => {
+test('only the cron missing -> the short NO MAILBOX TICK line; a lapsed watcher under a live cron is NOT nagged (the tick re-arms it)', () => {
   const s = setup();
   try {
     writeTick(s, 5);
-    assert.ok(seg(run(s)).startsWith('NO MAILBOX WATCHER'));
+    assert.strictEqual(seg(run(s)), '', 'watcher lapsed at its 30-min cap, cron alive: the cron tick re-arms it, no nag');
   } finally { s.cleanup(); }
   const s2 = setup();
   try {

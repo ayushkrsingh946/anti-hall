@@ -1,4 +1,6 @@
 #![allow(
+    clippy::panic,
+    clippy::unreachable,
     dead_code,
     clippy::type_complexity,
     clippy::collapsible_if,
@@ -78,7 +80,7 @@ fn tools_path(root: &Path, with_node: bool) -> String {
 }
 
 fn node_cli(home: &Path, cwd: &Path, argv: &[String], now: i64, env: &[(&str, &str)]) -> Run {
-    let cli = plugin_root().join("scripts").join("devswarm.js");
+    let cli = node_root().join("scripts").join("devswarm.js");
     let mut c = Command::new("node");
     c.arg("-e").arg(SNIPPET).arg(&cli).arg(now.to_string()).args(argv).current_dir(cwd).env_clear().envs(base_env(home, &home.join("state"), env));
     let o = run(&mut c, None);
@@ -201,26 +203,19 @@ fn check_from(
             pending.push((c.name.clone(), homes[1].join("state")));
         } else {
             deferred += 1;
-            assert_eq!(e.code, n.code, "{}: exit code of the fallback", c.name);
+            assert_eq!(e.code, 69, "{}: no Node to hand the verb to, the engine is unable (mesh_write.exit_unable)", c.name);
             let pre = (tree(&homes[2]), key_db(&homes[2]).is_file().then(|| raw_dump(&key_db(&homes[2]))));
             let d = engine_cli(&homes[2], &cwd, &c.argv, now, &to_ref(&ed));
-            assert_eq!(d.code, 75, "{}: a deferral the engine cannot hand to Node exits 75, got {} / {}", c.name, d.code, d.stdout);
+            assert_eq!(d.code, 69, "{}: a deferral the engine cannot hand to Node exits mesh_write.exit_unable, got {} / {}", c.name, d.code, d.stdout);
             assert!(d.stdout.is_empty(), "{}: nothing is printed on a deferral: {}", c.name, d.stdout);
             assert_eq!(last_log(&homes[2].join("state"))["result"], "defer", "{}", c.name);
             let post = (tree(&homes[2]), key_db(&homes[2]).is_file().then(|| raw_dump(&key_db(&homes[2]))));
             assert!(pre == post, "{}: a deferral wrote", c.name);
         }
     }
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    // the background Node witness was removed with the Node fallbacks: an answered call leaves no witness record
     for (name, state) in &pending {
-        let line = loop {
-            if let Some(l) = verify_lines(state).into_iter().last() {
-                break l;
-            }
-            assert!(std::time::Instant::now() < deadline, "{name}: the Node witness never logged");
-            std::thread::sleep(std::time::Duration::from_millis(100));
-        };
-        assert_eq!(line["result"], "match", "{name}: the background Node witness disagrees: {line}");
+        assert!(verify_lines(state).is_empty(), "{name}: a Node witness record exists, but no witness runs any more");
     }
     eprintln!("l8b cli parity: {} cases, {native} answered by the engine and identical to Node, {deferred} deferred with nothing written", cases.len());
     if std::env::var("AH_L8B_FILTER").is_err() {
@@ -462,7 +457,7 @@ fn app_sync_hands_a_retirement_to_node_with_nothing_written() {
     let cases = vec![
         lc("app-state-unsettled", &["app-state", "--json"], "nongit", true, "AppState").env("ANTIHALL_DEVSWARM_APP_DB", db),
         lc("app-sync-dry-unsettled", &["app-sync", "--dry-run"], "nongit", true, "AppSync").env("ANTIHALL_DEVSWARM_APP_DB", db),
-        lc("app-sync-unsettled-is-node", &["app-sync"], "nongit", false, "AppSync").env("ANTIHALL_DEVSWARM_APP_DB", db).env("ANTIHALL_INGEST_DRY_RUN", "0"),
+        lc("app-sync-unsettled", &["app-sync"], "nongit", true, "AppSync").env("ANTIHALL_DEVSWARM_APP_DB", db).env("ANTIHALL_INGEST_DRY_RUN", "0"),
     ];
-    check_from(&fx, &cases, &[], &raw, Some(CORPUS_DIRS), now, 2, 1);
+    check_from(&fx, &cases, &[], &raw, Some(CORPUS_DIRS), now, 3, 0);
 }

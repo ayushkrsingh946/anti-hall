@@ -17,7 +17,7 @@ const cp = require('node:child_process');
 const LOG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'anti-hall-subrepair-log-'));
 process.env.ANTI_HALL_LOG_DIR = LOG_DIR;
 process.on('exit', () => { try { fs.rmSync(LOG_DIR, { recursive: true, force: true }); } catch (_) {} });
-const cli = require('../../plugins/anti-hall/scripts/devswarm.js');
+const cli = require('../../plugins/anti-hall-node/scripts/devswarm.js');
 
 const GIT_ENV = Object.assign({}, process.env, {
   HOME: LOG_DIR, USERPROFILE: LOG_DIR, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1',

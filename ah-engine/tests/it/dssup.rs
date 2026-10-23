@@ -143,7 +143,8 @@ fn a_witness_tick_runs_nothing_and_writes_nothing() {
     let (st, rec) = (settings(&f, &[]), Rec::default());
     let before = walk(&f.home);
     let out = tick::run(&ctx(&f, &st, true), Owner::Witness, &rec);
-    assert_eq!(out["reason"], "witness");
+    // the off switch (the diagnostic word of `devswarm_sup.mode`): the tick says it is off, counted as disabled
+    assert_eq!(out["reason"], "off");
     assert_eq!(rec.n(), 0);
     assert_eq!(walk(&f.home), before, "no file was created or changed");
 }
@@ -211,23 +212,12 @@ fn a_tick_runs_the_duties_in_nodes_order_with_the_poke_owner_and_the_shared_lock
     let out = tick::run(&ctx(&f, &st, true), Owner::Engine, &rec);
     let names: Vec<&str> = out["duties"].as_array().unwrap().iter().map(|d| d["duty"].as_str().unwrap()).collect();
     assert_eq!(names, ["log_rotate", "verdicts", "reconcile", "deferred", "app_sync", "retention", "housekeeping"]);
+    // every duty is native: the only process the tick starts is git (the liveness sweep asks it for the worktree's last commit)
     let calls = rec.calls.lock().unwrap();
-    // the liveness sweep, the deferred stage's tick (nothing deferred), app sync (no app database in the fixture), retention and
-    // housekeeping are native (the sweep asks git for the worktree's last commit); reconcile is Node's function
-    let node: Vec<&RunSpec> = calls.iter().filter(|c| c.bin.as_deref() == Some("node")).collect();
-    assert_eq!(node.len(), 1, "{calls:?}");
-    assert!(calls.iter().filter(|c| c.bin.as_deref() != Some("node")).all(|c| c.bin.as_deref() == Some("git")));
-    for c in node.iter() {
-        assert_eq!(c.args[0], "-e");
-        assert_eq!(c.args[2], f.root.to_string_lossy());
-        assert_eq!(c.args[3], f.home.to_string_lossy());
-        assert!(c.timeout_ms > 0 && c.timeout_ms <= 900_000);
-    }
-    assert!(node[0].args[1].contains("reconcileSweepIfDue"));
-    assert!(calls.iter().all(|c| c.args.len() < 2 || !c.args[1].contains("housekeepingSweepIfDue")), "housekeeping is native: no worker for it");
+    assert!(calls.iter().all(|c| c.bin.as_deref() == Some("git")), "no Node is launched: {calls:?}");
     drop(calls);
     assert!(!dev(&f).join("locks/sweep.lock").exists(), "the lock is released");
-    // a workspace with a step plan is one Node has tail work for: the sweep is then told who pokes
+    // a workspace with a step plan changes nothing about that, whoever owns the poke
     put(
         &dev(&f).join("plans/ws-1.json"),
         &json!({"v": 1, "key": "ws-1", "id": "ws-1", "created_at": 1, "steps": [{"n": 1, "text": "a", "status": "doing", "ts": 1, "started_at": 1}]}),
@@ -235,10 +225,33 @@ fn a_tick_runs_the_duties_in_nodes_order_with_the_poke_owner_and_the_shared_lock
     let (rec_e, rec_n) = (Rec::default(), Rec::default());
     tick::run(&ctx(&f, &st, true), Owner::Engine, &rec_e);
     tick::run(&ctx(&f, &st, false), Owner::Engine, &rec_n);
-    let sweep_owner = |r: &Rec| r.calls.lock().unwrap().iter().find(|c| c.args.get(1).is_some_and(|a| a.contains("sweepOnce"))).map(|c| c.args[4].clone());
-    assert_eq!(sweep_owner(&rec_e).as_deref(), Some("engine"), "the tail sweep is told the engine pokes");
-    assert_eq!(sweep_owner(&rec_n).as_deref(), Some("node"), "Node's poke step runs only when the engine does not own it");
+    for r in [&rec_e, &rec_n] {
+        assert!(r.calls.lock().unwrap().iter().all(|c| c.bin.as_deref() != Some("node")), "no Node sweep is started");
+    }
     assert!(f.home.join(".anti-hall/logs/devswarm-supervisor-engine.ndjson").exists(), "the engine's own tick log");
+}
+
+#[test]
+fn a_gated_duty_is_not_run_again_while_its_inputs_are_unchanged() {
+    let f = fx("gate", true);
+    let (st, rec) = (settings(&f, &[]), Rec::default());
+    let duty = |out: &Value, name: &str| out["duties"].as_array().unwrap().iter().find(|d| d["duty"] == name).cloned().unwrap();
+    let first = tick::run(&ctx(&f, &st, true), Owner::Engine, &rec);
+    assert_eq!(duty(&first, "verdicts")["outcome"], "ran", "{first}");
+    assert!(duty(&first, "verdicts")["cpuMs"].is_number(), "every duty record carries its CPU");
+    let second = tick::run(&ctx(&f, &st, true), Owner::Engine, &rec);
+    let v = duty(&second, "verdicts");
+    assert_eq!((v["outcome"].as_str(), v["gate"].as_str()), (Some("skipped"), Some("inputs-unchanged")), "nothing it reads moved: {second}");
+    for name in ["app_sync", "retention"] {
+        assert_eq!(duty(&second, name)["gate"], "inputs-unchanged", "{name}: {second}");
+    }
+    assert_eq!(duty(&second, "log_rotate")["outcome"], "ran", "an ungated duty runs every tick");
+    // a descriptor that changes is an input that moved: the next tick runs the duty at once
+    let wt = f.home.join("wt-2");
+    std::fs::create_dir_all(&wt).unwrap();
+    put(&dev(&f).join("workspaces/ws-2.json"), &json!({"id": "ws-2", "worktreePath": wt, "sessionId": "11111111-2222-3333-4444-666666666666"}));
+    let third = tick::run(&ctx(&f, &st, true), Owner::Engine, &rec);
+    assert_eq!(duty(&third, "verdicts")["outcome"], "ran", "a new workspace is run at once: {third}");
 }
 
 /// A runner that looks at the lock while a duty runs.
@@ -307,7 +320,7 @@ fn cooldown_duties_follow_nodes_state_files_and_switches() {
         let out = tick::run_duty(d, &ctx(&f, &st, true), &rec);
         assert_eq!((out["outcome"].as_str(), out["reason"].as_str()), (Some("skipped"), Some("cooldown")), "{d}");
     }
-    assert_eq!(rec.n(), 1, "only the first reconcile started a worker");
+    assert_eq!(rec.n(), 0, "reconcile is native: no worker is started");
     // past the setting's seconds: due again
     put(&dev(&f).join("reconcile-sweep-state.json"), &json!({"lastRunAt": now() - 1_000_000}));
     assert_eq!(tick::run_duty("reconcile", &ctx(&f, &st, true), &rec)["outcome"], "ran");
@@ -317,7 +330,8 @@ fn cooldown_duties_follow_nodes_state_files_and_switches() {
     let n = rec.n();
     for d in ["reconcile", "housekeeping"] {
         let out = tick::run_duty(d, &ctx(&f, &st, true), &rec);
-        assert_eq!((out["outcome"].as_str(), out["reason"].as_str()), (Some("skipped"), Some("disabled")), "{d}");
+        // a duty switched off names its outcome (`disabled`: counted, nothing done), it is not a silent skip
+        assert_eq!((out["outcome"].as_str(), out["reason"].as_str()), (Some("disabled"), Some("disabled")), "{d}");
     }
     assert_eq!(rec.n(), n);
     // the cool-down seconds setting is floored at 300 like Node's
@@ -412,8 +426,8 @@ fn a_missing_node_fails_the_duty_and_not_the_tick() {
     let d = out["duties"].as_array().unwrap();
     assert_eq!(d[0]["outcome"], "ran", "the native duty does not need Node");
     for x in &d[1..] {
-        let native = ["housekeeping", "verdicts", "deferred", "app_sync", "retention"].contains(&x["duty"].as_str().unwrap());
-        assert_eq!(x["outcome"] == "ran", native, "{x}: a native duty runs without Node, the others fail alone");
+        let native = ["housekeeping", "verdicts", "deferred", "app_sync", "retention", "reconcile"].contains(&x["duty"].as_str().unwrap());
+        assert_eq!(x["outcome"] == "ran", native, "{x}: every duty is native and runs without Node");
     }
 }
 
@@ -586,80 +600,38 @@ fn recover_refuses_before_it_touches_anything() {
     put(&dev(&f).join("liveness/ws-1.json"), &json!({"status": "stale", "recoveries": 3}));
     assert!(why(&do_recover(&f, &st, &rec, "ws-1", "r1")).contains("limit 3"));
     put(&f.home.join(".anti-hall/settings.json"), &json!({"devswarm": {"maxRecoveries": 5}}));
-    let (r, _) = do_recover(&f, &st, &rec, "ws-1", "r1");
-    assert_eq!(r["outcome"], "handled", "with a limit of 5 and 3 done it may run: {r}");
-    assert_eq!(r["result"]["action"], "abstain", "the stub process table has no such session: nothing is signalled");
-    assert!(!f.state.join("none").exists());
-    // none of the refusals started anything or wrote the ledger (only the last, allowed, request did)
-    let ledger = std::fs::read_to_string(f.state.join("rt-recover.ndjson")).unwrap();
-    assert_eq!(ledger.lines().count(), 1);
+    // #233: every request that passed those checks is still refused: the engine never kills or resumes a session (owner decision F);
+    // nothing is signalled, nothing is recorded, and the refusal is the explicit outcome
+    let (r, code) = do_recover(&f, &st, &rec, "ws-1", "r1");
+    assert_eq!((r["outcome"].as_str(), code), (Some("refused"), 64), "{r}");
+    assert!(why(&(r, code)).contains("no rollback of a kill"));
+    assert_eq!(rec.n(), 0, "the runner was never asked for the process table");
+    assert!(!f.state.join("rt-recover.ndjson").exists(), "a refusal writes no request ledger");
 }
 
 #[test]
-fn the_rollback_hands_the_kill_to_nodes_recover_cli_with_exactly_the_one_id() {
-    let f = fx("rec-ok", true);
-    let st = settings(&f, &[]);
-    struct Cli(Mutex<Vec<RunSpec>>);
-    impl Runner for Cli {
-        fn run(&self, s: &RunSpec) -> RunResult {
-            self.0.lock().unwrap().push(s.clone());
-            RunResult {
-                ok: true,
-                status: Some(0),
-                stdout: "{\"ok\":true,\"id\":\"ws-1\",\"result\":{\"action\":\"abstain\"}}\n".into(),
-                ..RunResult::default()
-            }
-        }
-    }
-    let cli = Cli(Mutex::new(vec![]));
-    let place = recover::Place { home: &f.home, root: &f.root, state_dir: &f.state };
-    let (r, code) = recover::run_node(&place, &st, &cli, "ws-1", "req-1", now());
-    assert_eq!((r["outcome"].as_str(), code), (Some("handled"), 0), "{r}");
-    assert_eq!(r["node"]["result"]["action"], "abstain");
-    let calls = cli.0.lock().unwrap();
-    assert_eq!(calls.len(), 1);
-    assert_eq!(calls[0].args[0], "-e");
-    assert!(calls[0].args[1].contains("devswarm-recover.js") && calls[0].args[1].contains(".run(["), "Node's own run, as its CLI calls it");
-    assert_eq!(
-        calls[0].args[2..],
-        [f.root.to_string_lossy().into_owned(), f.home.to_string_lossy().into_owned(), "ws-1".to_string()],
-        "exactly the one id, nothing else"
-    );
-    drop(calls);
-    // a failing Node is reported, not hidden
-    struct Bad;
-    impl Runner for Bad {
-        fn run(&self, _s: &RunSpec) -> RunResult {
-            RunResult { ok: false, status: Some(1), stderr: "boom".into(), ..RunResult::default() }
-        }
-    }
-    let (r, code) = recover::run_node(&place, &st, &Bad, "ws-1", "req-2", now());
-    assert_eq!((r["outcome"].as_str(), code), (Some("failed"), 1));
-}
-
-#[test]
-fn a_recover_request_runs_once() {
+fn a_recover_request_is_refused_every_time_and_nothing_is_recorded() {
     let f = fx("rec-once", true);
     let st = settings(&f, &[]);
     let rec = Rec::default();
-    let (r, code) = do_recover(&f, &st, &rec, "ws-1", "req-1");
-    assert_eq!((r["outcome"].as_str(), code), (Some("handled"), 0), "{r}");
-    let (again, code) = do_recover(&f, &st, &rec, "ws-1", "req-1");
-    assert_eq!((again["outcome"].as_str(), code), (Some("refused"), 64), "the same request never runs twice");
+    for _ in 0..2 {
+        let (r, code) = do_recover(&f, &st, &rec, "ws-1", "req-1");
+        assert_eq!((r["outcome"].as_str(), code), (Some("refused"), 64), "{r}");
+    }
+    assert!(!f.state.join("rt-recover.ndjson").exists());
 }
 
 #[test]
-fn recover_against_real_node_abstains_on_a_session_that_is_not_running() {
+fn recover_never_signals_a_process_even_with_a_matching_session() {
     if !have_node() {
         return;
     }
     let f = fx("rec-real", true);
     let st = settings(&f, &[]);
     let (r, code) = do_recover(&f, &st, &System::configured(), "ws-1", "real-1");
-    assert_eq!(code, 0, "{r}");
-    assert_eq!(r["outcome"], "handled");
-    assert_eq!(r["result"]["action"], "abstain", "no process matches the session: nothing is killed: {r}");
-    assert_eq!(r["result"]["reason"], "no-candidate");
+    assert_eq!(code, 64, "{r}");
+    assert_eq!(r["outcome"], "refused");
+    assert!(r.get("result").is_none(), "no kill was attempted: {r}");
 }
 
 #[test]
@@ -694,7 +666,7 @@ fn the_status_verb_reports_owner_guard_and_gates() {
     assert_eq!(v["duties"].as_array().unwrap().len(), 7);
     put(&dev(&f).join("housekeeping-sweep-state.json"), &json!({"lastRunAt": now()}));
     let v = ah_engine::dssup::cli::status(&f.home, &st, Owner::Witness, now());
-    assert_eq!(v["mode"], "witness");
+    assert_eq!(v["mode"], "off");
     let hk = v["duties"].as_array().unwrap().iter().find(|d| d["duty"] == "housekeeping").unwrap();
     assert_eq!(hk["notDue"], "cooldown");
 }
@@ -896,56 +868,102 @@ fn native_housekeeping_is_off_with_the_switches_and_where_the_directories_are_ab
     assert_eq!((out["outcome"].as_str(), out["detail"]["results"]["reapedLogs"].clone()), (Some("ran"), json!([])));
 }
 
-#[test]
-fn the_witness_runs_nodes_sweep_on_a_scratch_mirror_and_logs_agreement() {
-    if !have_node() {
-        return;
+/// A recording runner that answers a `git log -1` call with a fixed commit time.
+struct GitCount(Mutex<usize>);
+impl Runner for GitCount {
+    fn run(&self, _spec: &RunSpec) -> RunResult {
+        *self.0.lock().unwrap() += 1;
+        RunResult { ok: true, status: Some(0), stdout: "1700000000\n".into(), ..RunResult::default() }
     }
-    let at = now();
-    let f = fx("witness-hk", true);
-    seed_housekeeping(&f, at);
-    let st = settings(&f, &[("ANTIHALL_DEVSWARM_SUP_WITNESS", "on")]);
-    let mut c = ctx(&f, &st, true);
-    c.now = at;
-    let sys = System::configured();
-    let out = tick::run(&c, Owner::Engine, &sys);
-    let hk = out["duties"].as_array().unwrap().iter().find(|d| d["duty"] == "housekeeping").unwrap();
-    assert_eq!(hk["witness"]["match"], true, "{out}");
-    let log = std::fs::read_to_string(f.home.join(".anti-hall/logs/devswarm-sup-witness.ndjson")).unwrap();
-    let lines: Vec<Value> = log.lines().map(|l| serde_json::from_str(l).unwrap()).collect();
-    let h = lines.iter().find(|l| l["duty"] == "housekeeping").unwrap();
-    assert_eq!(h["match"], true);
-    assert_eq!(h["detail"], json!({"onlyEngine": [], "onlyNode": []}));
-    assert!(h["engine"].as_array().unwrap().len() >= 5, "the five old files the engine removed");
-    assert!(lines.iter().any(|l| l["duty"] == "log_rotate" && l["match"] == true), "log rotation is witnessed too");
-    // the scratch mirror is gone, and the witness never ran Node against the live home
-    assert_eq!(std::fs::read_dir(f.home.join(".anti-hall/witness")).map(|d| d.count()).unwrap_or(0), 0);
-    // sampled: a second tick inside the interval does not run the witness again
-    let before = log.lines().count();
-    put(&dev(&f).join("housekeeping-sweep-state.json"), &json!({"lastRunAt": 0}));
-    tick::run(&c, Owner::Engine, &sys);
-    assert_eq!(std::fs::read_to_string(f.home.join(".anti-hall/logs/devswarm-sup-witness.ndjson")).unwrap().lines().count(), before);
 }
 
 #[test]
-fn the_witness_logs_a_mismatch_when_the_engine_and_node_disagree() {
-    if !have_node() {
-        return;
+fn the_liveness_sweep_asks_git_for_a_worktree_only_when_its_head_moved() {
+    use ah_engine::dssup::liveness::worktree_activity;
+    ah_engine::defaults::init().unwrap();
+    let t = TempDir::new("lv-git-cache");
+    let wt = std::fs::canonicalize(&t.0).unwrap().join("wt");
+    let git = |args: &[&str]| {
+        let o = Command::new("git")
+            .args(args)
+            .current_dir(&wt)
+            .env("GIT_AUTHOR_NAME", "t")
+            .env("GIT_AUTHOR_EMAIL", "t@t")
+            .env("GIT_COMMITTER_NAME", "t")
+            .env("GIT_COMMITTER_EMAIL", "t@t")
+            .output()
+            .unwrap();
+        assert!(o.status.success(), "{args:?}");
+    };
+    std::fs::create_dir_all(&wt).unwrap();
+    git(&["init", "-q"]);
+    git(&["commit", "-q", "--allow-empty", "-m", "a"]);
+    let w = wt.to_string_lossy().into_owned();
+    let r = GitCount(Mutex::new(0));
+    assert_eq!(worktree_activity(&r, &w), Some(1_700_000_000_000.0));
+    worktree_activity(&r, &w);
+    worktree_activity(&r, &w);
+    assert_eq!(*r.0.lock().unwrap(), 1, "an unchanged HEAD is asked about once");
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    git(&["commit", "-q", "--allow-empty", "-m", "b"]);
+    worktree_activity(&r, &w);
+    assert_eq!(*r.0.lock().unwrap(), 2, "a new commit is asked about again");
+    let gone = t.0.join("gone").to_string_lossy().into_owned();
+    assert_eq!(worktree_activity(&r, &gone), None);
+    assert_eq!(*r.0.lock().unwrap(), 2, "a worktree that is gone is not worth a git process");
+}
+
+#[test]
+fn an_unchanged_liveness_verdict_is_not_written_again() {
+    use std::os::unix::fs::MetadataExt;
+    let f = fx("lv-nowrite", true);
+    let st = settings(&f, &[]);
+    let verdict = f.home.join(".anti-hall/devswarm/liveness/ws-1.json");
+    tick::run_duty("verdicts", &ctx(&f, &st, true), &Rec::default());
+    let first = std::fs::read_to_string(&verdict).expect("the first sweep writes the verdict");
+    let ino = std::fs::metadata(&verdict).unwrap().ino();
+    tick::run_duty("verdicts", &ctx(&f, &st, true), &Rec::default());
+    assert_eq!(std::fs::metadata(&verdict).unwrap().ino(), ino, "an identical verdict is left alone (no temporary file, no fsync, no rename)");
+    // a changed one is still written
+    std::fs::write(&verdict, first.replace("alive", "stale")).unwrap();
+    tick::run_duty("verdicts", &ctx(&f, &st, true), &Rec::default());
+    assert_eq!(std::fs::read_to_string(&verdict).unwrap(), first, "a verdict that differs from the computed one is rewritten");
+}
+
+/// Measurement, not a gate: where one tick's CPU goes at live weight (700 old workspaces, 10 live ones), duty by duty.
+#[test]
+#[ignore = "measurement: cargo test --release --test it -- --ignored --nocapture where_a_supervisor_tick_spends_its_cpu"]
+fn where_a_supervisor_tick_spends_its_cpu() {
+    let f = fx("tickprof", true);
+    for i in 0..700 {
+        put(&dev(&f).join(format!("heartbeats/old-{i}.json")), &json!({"ts": now() - 86_400_000}));
+        put(
+            &dev(&f).join(format!("workspaces/old-{i}.json")),
+            &json!({"id": format!("old-{i}"), "worktreePath": format!("/gone/{i}"), "sessionId": format!("{i}"), "status": "done"}),
+        );
+        put(&dev(&f).join(format!("summaries/old-{i}.json")), &json!({"workspaces": {}}));
+        put(&dev(&f).join(format!("plans/old-{i}.json")), &json!({"steps": []}));
     }
-    let at = now();
-    let f = fx("witness-mismatch", true);
-    seed_housekeeping(&f, at);
-    let st = settings(&f, &[("ANTIHALL_DEVSWARM_SUP_WITNESS", "on")]);
-    let mut c = ctx(&f, &st, true);
-    c.now = at;
-    let job = ah_engine::dssup::housekeep::witness_prepare(&c).unwrap();
-    // the engine claims it removed nothing at all, but five files were eligible: Node's run on the mirror disagrees
-    let claimed = json!({"duty": "housekeeping", "outcome": "ran", "detail": {"ran": true, "results": {"reapedLogs": [], "childGate": []}}});
-    let rec = ah_engine::dssup::witness::finish(job, &c, &System::configured(), &claimed);
-    assert_eq!(rec["match"], false);
-    assert_eq!(rec["detail"]["onlyNode"].as_array().unwrap().len(), 5, "{rec}");
-    let log = std::fs::read_to_string(f.home.join(".anti-hall/logs/devswarm-sup-witness.ndjson")).unwrap();
-    assert!(log.contains("\"match\":false"));
-    // the live files were never touched by the witness
-    assert!(tree(&f).contains(&"reaped/old.ndjson".to_string()));
+    for i in 2..=10 {
+        let wt = f.home.join(format!("wt-{i}"));
+        std::fs::create_dir_all(&wt).unwrap();
+        put(
+            &dev(&f).join(format!("workspaces/ws-{i}.json")),
+            &json!({"id": format!("ws-{i}"), "worktreePath": wt, "sessionId": format!("{i}1111111-2222-3333-4444-555555555555")}),
+        );
+        put(&dev(&f).join(format!("heartbeats/ws-{i}.json")), &json!({"ts": now()}));
+    }
+    let st = settings(&f, &[]);
+    for round in 0..3 {
+        let out = tick::run(&ctx(&f, &st, true), Owner::Engine, &Rec::default());
+        let per: Vec<String> = out["duties"]
+            .as_array()
+            .map(|d| {
+                d.iter()
+                    .map(|x| format!("{}={}ms/{}ms-cpu({})", x["duty"].as_str().unwrap_or("?"), x["ms"], x["cpuMs"], x["outcome"].as_str().unwrap_or("?")))
+                    .collect()
+            })
+            .unwrap_or_default();
+        eprintln!("TICKPROF round {round}: ran={} {}", out["ran"], per.join(" "));
+    }
 }

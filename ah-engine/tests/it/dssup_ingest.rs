@@ -9,7 +9,6 @@ use ah_engine::dssup::ingest::drain::{Drainer, Project, Start};
 use ah_engine::dssup::ingest::import::{self, Refused};
 use ah_engine::dssup::ingest::monitor::{Breaker, Poll};
 use ah_engine::dssup::ingest::wal;
-use ah_engine::meshw::store::MeshStore;
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -119,6 +118,13 @@ fn now() -> i64 {
     ah_engine::health::now_ms() as i64
 }
 
+/// A workspace descriptor the way `register` writes it (`devswarm/workspaces/<id>.json`): what makes a project registered.
+fn register(x: &Ix, id: &str, repo_key: &str, worktree: &Path) {
+    let dir = dev(x).join("workspaces");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join(format!("{id}.json")), json!({"id": id, "repoKey": repo_key, "worktreePath": worktree, "sessionId": "s"}).to_string()).unwrap();
+}
+
 // ---- the batch: parse, hash, rows against Node -----------------------------------------------------------------------------
 
 const MSG: &str = r#"{"fromBranch":"feat-a","toBranch":"main","message":"hello there","status":"unread","createdAt":"2026-10-09T01:02:03.456Z"}"#;
@@ -167,7 +173,7 @@ fn the_batch_parser_the_hash_and_the_rows_are_nodes() {
         .iter()
         .map(|raw| {
             let b = import::parse_batch(raw);
-            let rows = import::rows(ws, &b, fixed_now);
+            let rows = import::rows(ws, ws, &b, fixed_now);
             let lossy = rows.is_empty() && !raw.trim().is_empty() && !b.recognized;
             json!({"total": rows.len(), "lossy": lossy, "recognized": b.recognized,
                    "rows": rows.iter().map(|r| json!({"hash": r.hash, "ts": r.ts, "body": r.body})).collect::<Vec<_>>()})
@@ -362,7 +368,7 @@ fn the_drain_imports_a_batch_loss_free_and_idempotently_and_matches_nodes_rows()
     assert!(wal::pending(&wal::wal_path(&dev(&x), "monitor", &x.project.repo_key)).unwrap().is_empty());
     let calls = std::fs::read_to_string(&x.log).unwrap();
     let first = calls.lines().next().unwrap();
-    assert_eq!(first, format!("{}|workspace monitor -i 3 -t 30|unset", x.main.display()), "{calls}");
+    assert_eq!(first, format!("{}|workspace monitor -i {} -t 30|unset", x.main.display(), ah_engine::defaults::num("devswarm_ingest.interval_sec")), "{calls}");
     // the same batch again (a re-observed in-flight batch) inserts nothing; two different ones add
     enqueue(&x, "2", a);
     d.step(&sys);
@@ -613,7 +619,7 @@ fn a_missing_binary_backs_off_on_the_configuration_ladder_and_a_killed_poll_keep
     assert_eq!(d.start(&sys), Start::Started);
     let t0 = std::time::Instant::now();
     d.step(&sys);
-    assert!(t0.elapsed().as_secs() < 20, "bounded by the hard limit (timeout + margin), not by the child");
+    assert!(t0.elapsed() < crate::common::scaled(std::time::Duration::from_secs(20)), "bounded by the hard limit (timeout + margin), not by the child");
     assert_eq!(rows(&x).iter().map(|r| r.3.as_str()).collect::<Vec<_>>(), ["printed before the kill"]);
     assert_eq!(d.stats.errors, 1);
     d.stop();
@@ -635,70 +641,13 @@ fn the_workspace_identity_of_the_daemon_never_reaches_the_monitor_child() {
     assert!(line.trim_end().ends_with("|unset"), "{line}");
 }
 
-#[test]
-fn the_node_witness_agrees_with_the_engine_on_a_scratch_store_and_never_touches_the_live_one() {
-    if !have_node() {
-        return;
-    }
-    let x = ix("witness");
-    let sys = System::configured();
-    let mut d = Drainer::new(&x.home, &st(&x), x.project.clone());
-    assert_eq!(d.start(&sys), Start::Started);
-    enqueue(&x, "1", &format!("[{MSG}]"));
-    enqueue(&x, "2", r#"{"data":[{"message":"no created at","n":[1,2,{"k":"v"}]},{"message":"b","createdAt":"2026-10-09T05:02:03.5+04:00"}]}"#);
-    enqueue(&x, "3", "garbage {");
-    enqueue(&x, "4", "[]");
-    for _ in 0..4 {
-        d.step(&sys);
-    }
-    let before = rows(&x);
-    assert_eq!(before.len(), 3);
-    // run the comparison now (the interval gate is for the loop; the comparison itself is what is tested)
-    let store = MeshStore::open(&db(&x)).unwrap();
-    let mirror = x.home.join(format!(".anti-hall/witness/ingest-{}.ndjson", x.project.repo_key));
-    assert_eq!(std::fs::read_to_string(&mirror).unwrap().lines().count(), 3, "two batches with messages and the lossy one; the quiet polls are not mirrored");
-    let mut m = ah_engine::dssup::ingest::witness::Mirror::open(&x.home, &x.project.repo_key).unwrap();
-    let root = ah_engine::defaults::root().unwrap();
-    let rec = m.compare(&sys, &root, &store, &x.project, now()).unwrap();
-    assert_eq!(rec["match"], true, "{rec}");
-    assert_eq!(rec["batches"], 3);
-    assert!(!mirror.exists(), "the mirror was consumed");
-    assert_eq!(std::fs::read_dir(x.home.join(".anti-hall/witness")).unwrap().count(), 0, "scratch removed");
-    assert_eq!(rows(&x), before, "the live store was not touched");
-    let log = std::fs::read_to_string(x.home.join(".anti-hall/logs/devswarm-ingest-witness.ndjson")).unwrap();
-    assert!(log.contains("\"match\":true"));
-    d.stop();
-}
-
-#[test]
-fn the_witness_reports_a_row_the_engine_claims_but_the_store_does_not_have() {
-    if !have_node() {
-        return;
-    }
-    let x = ix("witness-loss");
-    let sys = System::configured();
-    let mut d = Drainer::new(&x.home, &st(&x), x.project.clone());
-    assert_eq!(d.start(&sys), Start::Started);
-    enqueue(&x, "1", &format!("[{MSG}]"));
-    d.step(&sys);
-    // someone deletes the row behind the engine's back: the mirror says it was written, the store has no such row
-    let c = rusqlite::Connection::open(db(&x)).unwrap();
-    c.execute("DELETE FROM messages WHERE hash LIKE 'native:%'", []).unwrap();
-    drop(c);
-    let store = MeshStore::open(&db(&x)).unwrap();
-    let mut m = ah_engine::dssup::ingest::witness::Mirror::open(&x.home, &x.project.repo_key).unwrap();
-    let rec = m.compare(&sys, &ah_engine::defaults::root().unwrap(), &store, &x.project, now()).unwrap();
-    assert_eq!(rec["match"], false);
-    assert_eq!(rec["diffs"][0]["what"], "store");
-    d.stop();
-}
-
 // ---- discovery and the switch ---------------------------------------------------------------------------------------------------
 
 #[test]
 fn projects_come_from_the_setting_fresh_node_heartbeats_and_memory() {
     ah_engine::defaults::init().unwrap();
     let x = ix("discover");
+    register(&x, &x.project.workspace_id, &x.project.repo_key, &x.main);
     let hb_dir = dev(&x).join("heartbeats");
     std::fs::create_dir_all(&hb_dir).unwrap();
     // a fresh Node heartbeat naming the repo; a stale one naming a path that exists; a fresh one naming a path that does not
@@ -737,13 +686,73 @@ fn projects_come_from_the_setting_fresh_node_heartbeats_and_memory() {
 }
 
 #[test]
+fn a_scratch_clone_with_a_fresh_node_heartbeat_is_never_drained_or_remembered() {
+    // live 2026-10-16 19:33: an agent's `devswarm.js send` in a scratch clone installed a Node unit; its fresh heartbeat then made
+    // the engine adopt the clone as a project and remember it forever. Only a project a workspace descriptor names qualifies.
+    ah_engine::defaults::init().unwrap();
+    let x = ix("discover-scratch");
+    let scratch = x.home.join("work").join("wt-scratch");
+    std::fs::create_dir_all(&scratch).unwrap();
+    git(&["init", "-q"], &scratch);
+    let scratch_key = Project::resolve(scratch.to_str().unwrap()).unwrap().repo_key;
+    let hb_dir = dev(&x).join("heartbeats");
+    std::fs::create_dir_all(&hb_dir).unwrap();
+    std::fs::write(hb_dir.join(format!("ingest-{scratch_key}.json")), json!({"ts": now() - 1000, "workingDir": scratch}).to_string()).unwrap();
+    let found = ah_engine::dssup::ingest::discover(&x.home, &x.state, "", now());
+    assert!(found.iter().all(|p| p.repo_key != scratch_key), "{found:?}");
+    let remembered = std::fs::read_to_string(x.state.join("devswarm-ingest-projects.json")).unwrap_or_default();
+    assert!(!remembered.contains("wt-scratch"), "{remembered}");
+    // the same path named in devswarm_ingest.projects is the owner's explicit choice and qualifies
+    let explicit = ah_engine::dssup::ingest::discover(&x.home, &x.state, scratch.to_str().unwrap(), now());
+    assert!(explicit.iter().any(|p| p.repo_key == scratch_key));
+}
+
+#[test]
+fn a_registered_project_is_drained_without_any_node_heartbeat() {
+    // live 2026-10-16 19:36: tesla-docker had a registered Primary but no Node unit, so the engine never found it and Node's
+    // self-heal installed one. The registered workspaces are a discovery source of their own.
+    ah_engine::defaults::init().unwrap();
+    let x = ix("discover-registered");
+    let found = ah_engine::dssup::ingest::discover(&x.home, &x.state, "", now());
+    assert!(found.is_empty(), "nothing registered, no heartbeat: {found:?}");
+    register(&x, &x.project.workspace_id, &x.project.repo_key, &x.main);
+    let found = ah_engine::dssup::ingest::discover(&x.home, &x.state, "", now());
+    assert_eq!(found.iter().map(|p| p.repo_key.as_str()).collect::<Vec<_>>(), [x.project.repo_key.as_str()]);
+}
+
+#[test]
+fn the_ownership_marker_names_the_owner_and_how_long_it_holds() {
+    use ah_engine::dssup::ingest::{Owner, write_owner};
+    ah_engine::defaults::init().unwrap();
+    let t = TempDir::new("ingest-owner");
+    let home = std::fs::canonicalize(&t.0).unwrap();
+    let path = home.join(".anti-hall/devswarm/ingest-owner.json");
+    write_owner(&home, Owner::Engine, 1234);
+    let m: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(m["owner"], "engine");
+    assert_eq!(m["ts"], 1234);
+    assert_eq!(m["pid"], std::process::id());
+    assert_eq!(m["validForMs"], ah_engine::defaults::num("devswarm_ingest.owner_valid_ms"));
+    write_owner(&home, Owner::Witness, 5678);
+    let m: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(m["owner"], "witness", "switching to witness hands installs back to Node at once");
+}
+
+#[test]
 fn the_loop_drains_stops_on_request_and_leaves_no_lock_behind() {
     let x = ix("loop");
     enqueue(&x, "1", r#"[{"message":"via the loop"}]"#);
     let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let (s2, home, stn, project) = (stop.clone(), x.home.clone(), st(&x), x.project.clone());
     let h = std::thread::spawn(move || {
-        ah_engine::dssup::ingest::run_project(&home, &stn, project, &System::configured(), &|| s2.load(std::sync::atomic::Ordering::SeqCst))
+        ah_engine::dssup::ingest::run_project(
+            &home,
+            &stn,
+            project,
+            &System::configured(),
+            &|| s2.load(std::sync::atomic::Ordering::SeqCst),
+            &std::sync::atomic::AtomicBool::new(false),
+        )
     });
     let t0 = std::time::Instant::now();
     while rows(&x).is_empty() && t0.elapsed().as_secs() < 20 {
@@ -766,6 +775,7 @@ fn the_ingest_verb_is_read_only_open_to_every_role_and_names_the_owner_and_the_p
     for role in ["main", "child", "subagent", "codex"] {
         assert!(ah_engine::dswire::cli::allowed(role, "ingest"), "{role}");
     }
+    register(&x, &x.project.workspace_id, &x.project.repo_key, &x.main);
     let hb_dir = dev(&x).join("heartbeats");
     std::fs::create_dir_all(&hb_dir).unwrap();
     std::fs::write(hb_dir.join(format!("ingest-{}.json", x.project.repo_key)), json!({"ts": now(), "workingDir": x.main}).to_string()).unwrap();
@@ -782,7 +792,7 @@ fn the_ingest_verb_is_read_only_open_to_every_role_and_names_the_owner_and_the_p
         .unwrap();
     assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
     let v: Value = serde_json::from_slice(&o.stdout).unwrap_or_else(|e| panic!("{e}: {}", String::from_utf8_lossy(&o.stdout)));
-    assert_eq!(v["mode"], "witness", "the default: the Node daemons drain");
+    assert_eq!(v["mode"], "engine", "the default: the engine drains");
     assert_eq!(v["projects"][0]["repoKey"], x.project.repo_key.as_str());
     assert_eq!(v["projects"][0]["workspaceId"], x.project.workspace_id.as_str());
     assert!(v["projects"][0]["heartbeat"]["workingDir"].is_string());
@@ -792,4 +802,79 @@ fn the_ingest_verb_is_read_only_open_to_every_role_and_names_the_owner_and_the_p
     assert!(!dev(&x).join(format!("locks/ingest-project-{}.lock", x.project.repo_key)).exists());
     // nothing is running at shutdown: joining the drain threads is immediate
     assert!(ah_engine::dssup::ingest::join_all());
+}
+
+// ---- a repository nested in another repository (no Node needed) -------------------------------------------------------------
+
+/// `outer/` and `outer/inner/`, each an independent repository with one commit (the `~/Projects/tesla` / `tesla-docker` shape).
+fn nested(tag: &str) -> (TempDir, PathBuf, PathBuf, PathBuf) {
+    ah_engine::defaults::init().unwrap();
+    let t = TempDir::new(tag);
+    let root = std::fs::canonicalize(&t.0).unwrap();
+    let (home, outer, inner) = (root.join("home"), root.join("outer"), root.join("outer").join("inner"));
+    for d in [&home, &inner] {
+        std::fs::create_dir_all(d).unwrap();
+    }
+    for d in [&outer, &inner] {
+        git(&["init", "-q"], d);
+        git(&["commit", "-q", "--allow-empty", "-m", "init"], d);
+    }
+    (t, home, outer, inner)
+}
+
+fn descriptor(home: &Path, id: &str, repo_key: &str, worktree: &Path) {
+    let dir = home.join(".anti-hall/devswarm/workspaces");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join(format!("{id}.json")), json!({"id": id, "repoKey": repo_key, "worktreePath": worktree, "sessionId": "s"}).to_string()).unwrap();
+}
+
+fn ingest_log(home: &Path) -> String {
+    std::fs::read_to_string(home.join(ah_engine::defaults::text("devswarm_ingest.log_file"))).unwrap_or_default()
+}
+
+#[test]
+fn an_independent_repository_nested_in_another_is_its_own_project() {
+    // live 2026-10-16: tesla-docker (its own .git directory) inside ~/Projects/tesla (also a repository) was never drained: the
+    // identity resolver deferred "git-superproject" and the drain dropped the project without a word.
+    let (_t, home, outer, inner) = nested("ingest-nested");
+    let p = Project::resolve(inner.to_str().unwrap()).expect("a nested independent repository resolves");
+    assert_eq!(p.worktree, inner.to_string_lossy(), "rooted at the inner checkout, not the outer one");
+    let o = Project::resolve(outer.to_str().unwrap()).unwrap();
+    assert_ne!(o.repo_key, p.repo_key);
+    // registered, it is found with no heartbeat and no explicit setting
+    descriptor(&home, &p.workspace_id, &p.repo_key, &inner);
+    let t2 = TempDir::new("ingest-nested-state");
+    let found = ah_engine::dssup::ingest::discover(&home, &t2.0, "", now());
+    assert_eq!(found.iter().map(|f| f.repo_key.as_str()).collect::<Vec<_>>(), [p.repo_key.as_str()], "{found:?}");
+}
+
+#[test]
+fn a_dropped_path_is_logged_once_with_its_reason() {
+    ah_engine::defaults::init().unwrap();
+    let t = TempDir::new("ingest-drops");
+    let home = std::fs::canonicalize(&t.0).unwrap();
+    let plain = home.join("plain");
+    std::fs::create_dir_all(&plain).unwrap();
+    let state = home.join("state");
+    let explicit = plain.to_str().unwrap();
+    for _ in 0..3 {
+        assert!(ah_engine::dssup::ingest::discover(&home, &state, explicit, now()).is_empty());
+    }
+    let log = ingest_log(&home);
+    let lines: Vec<&str> = log.lines().filter(|l| l.contains(explicit)).collect();
+    assert_eq!(lines.len(), 1, "one line per (path, reason), not one per pass: {log}");
+    assert!(lines[0].contains(ah_engine::defaults::text("devswarm_ingest.drop_reason_non_git")), "{}", lines[0]);
+}
+
+#[test]
+fn an_unregistered_project_skipped_by_require_registered_is_logged() {
+    let (_t, home, _outer, inner) = nested("ingest-unregistered");
+    let hb = home.join(".anti-hall/devswarm/heartbeats");
+    std::fs::create_dir_all(&hb).unwrap();
+    std::fs::write(hb.join("ingest-x.json"), json!({"ts": now() - 1000, "workingDir": inner}).to_string()).unwrap();
+    let state = home.join("state");
+    assert!(ah_engine::dssup::ingest::discover(&home, &state, "", now()).is_empty());
+    let log = ingest_log(&home);
+    let want = ah_engine::defaults::text("devswarm_ingest.drop_reason_unregistered");
+    assert!(log.lines().any(|l| l.contains(inner.to_str().unwrap()) && l.contains(want)), "{log}");
 }

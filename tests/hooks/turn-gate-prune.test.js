@@ -7,7 +7,7 @@ const path = require('node:path');
 const { test } = require('node:test');
 const assert = require('node:assert');
 const { makeHome } = require('../helpers/fixtures.js');
-const { firstThisTurn } = require('../../plugins/anti-hall/hooks/lib/turn-gate.js');
+const { firstThisTurn } = require('../../plugins/anti-hall-node/hooks/lib/turn-gate.js');
 
 const DAY = 24 * 60 * 60 * 1000;
 

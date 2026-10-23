@@ -24,11 +24,11 @@ const os = require('node:os');
 const path = require('node:path');
 const cp = require('node:child_process');
 
-const DEVSWARM_PATH = path.join(__dirname, '../../plugins/anti-hall/scripts/devswarm.js');
+const DEVSWARM_PATH = path.join(__dirname, '../../plugins/anti-hall-node/scripts/devswarm.js');
 const cli = require(DEVSWARM_PATH);
-const storeLib = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
-const repokey = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
-const { lockPathFor } = require('../../plugins/anti-hall/companion/lib/devswarm-wake-watch.js');
+const storeLib = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
+const repokey = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
+const { lockPathFor } = require('../../plugins/anti-hall-node/companion/lib/devswarm-wake-watch.js');
 
 function tmpHome() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'anti-hall-inbox-tick-'));
@@ -169,6 +169,26 @@ test('D13: inbox tick with NO prior heartbeat writes an honestly-empty one (matc
     assert.deepStrictEqual(beat.blockers, []);
     assert.strictEqual(beat.sessionId, null);
     assert.strictEqual(beat.source, 'inbox-tick');
+  } finally { rm(home); rm(repo); }
+});
+
+// GH #181 (watcher false negatives). Engine twin: ah-engine/src/meshw/watcher.rs `a_lock_of_another_row_on_the_same_checkout_arms_the_workspace`.
+test('#181: a --child tick counts the live lock of another row on the SAME checkout as the armed watcher (as a plain tick does)', () => {
+  const home = tmpHome();
+  const repo = makeGitRepo('a');
+  try {
+    register(home, repo, 'w1');
+    // a second registered row of the same checkout (the DevSwarm app's own row id), and the Monitor's lock under THAT id
+    const wsDir = path.join(home, '.anti-hall', 'devswarm', 'workspaces');
+    fs.mkdirSync(wsDir, { recursive: true });
+    fs.writeFileSync(path.join(wsDir, 'w2.json'), JSON.stringify({ id: 'w2', worktreePath: repo, sessionId: 's-w2' }));
+    const lockPath = lockPathFor(home, 'w2');
+    fs.mkdirSync(path.dirname(lockPath), { recursive: true });
+    fs.writeFileSync(lockPath, JSON.stringify({ pid: process.pid, ts: Date.now() }));
+    const plain = cli.run(['inbox', 'tick', 'w1'], ctx(home, { cwd: repo })).result;
+    assert.strictEqual(plain.watcherArmed, true, 'sanity: the plain tick already matches by checkout');
+    const child = cli.run(['inbox', 'tick', 'w1', '--child'], ctx(home, { cwd: repo, env: { PATH: os.tmpdir() } })).result;
+    assert.strictEqual(child.watcherArmed, true, '--child must use the same check');
   } finally { rm(home); rm(repo); }
 });
 

@@ -71,7 +71,7 @@ function staleTs() {
 // evaluated at call time (not at require time) inside the module.
 function callDetect(home, opts, envOverrides) {
   const detectorPath = require.resolve(
-    '../../plugins/anti-hall/hooks/omc-detect.js'
+    '../../plugins/anti-hall-node/hooks/omc-detect.js'
   );
   delete require.cache[detectorPath];
 

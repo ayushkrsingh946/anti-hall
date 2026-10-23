@@ -10,7 +10,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
 
-const { familyKeyOf, collapseFamilies, crossLinkedIdentity, identityFamilyTwins } = require('../../plugins/anti-hall/companion/lib/devswarm-identity-family.js');
+const { familyKeyOf, collapseFamilies, crossLinkedIdentity, identityFamilyTwins } = require('../../plugins/anti-hall-node/companion/lib/devswarm-identity-family.js');
 
 test('familyKeyOf: same worktreePath -> same key via the injected resolver', () => {
   const resolve = (wt) => 'canon:' + wt;

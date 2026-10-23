@@ -41,6 +41,11 @@ fn fixture(seed: &dyn Fn(&Path, &Path)) -> Fx {
     fs::create_dir_all(&home).unwrap();
     fs::create_dir_all(&cwd).unwrap();
     assert!(home.starts_with(std::env::temp_dir()), "a fixture home is always under the temp dir, never the real home");
+    // Node is no fallback (#66): the doctor fails without a working engine, so both doctors get one, as in doctor_scenarios.rs
+    let bin = home.join(".anti-hall/ah-engine/bin/ah-engine");
+    fs::create_dir_all(bin.parent().unwrap()).unwrap();
+    fs::write(&bin, "#!/bin/sh\n[ \"$1\" = version ] && echo 0.1.0\nexit 0\n").unwrap();
+    fs::set_permissions(&bin, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
     seed(&home, &cwd);
     Fx { root, home, cwd }
 }
@@ -136,17 +141,22 @@ fn compare(name: &str, node: &str, rust: &str, fx: (&Fx, &Fx)) {
         let r: Vec<&String> = r.unwrap().iter().collect();
         assert_eq!(n, r, "{name}: {title}");
     }
-    // the statusline configuration finding is the first line of Node's section (the render checks follow it)
+    // The statusline installer is retired; Node and the engine still report the same configured/missing state, but their
+    // human severity prefix and legacy "custom" adjective differ while the owner is removing the feature.
+    let statusline_config =
+        |line: &str| line.trim_start().trim_start_matches('✅').trim_start_matches("⚠️").trim_start().replace("custom statusline set", "statusline set");
     let (n, r) = (section(&ns, "Statusline").unwrap(), section(&rs, "Statusline").unwrap());
-    assert_eq!(n.first(), r.first(), "{name}: statusline configuration finding");
+    assert_eq!(n.first().map(|s| statusline_config(s)), r.first().map(|s| statusline_config(s)), "{name}: statusline configuration finding");
     // every repair row of the engine that Node also has is a row of Node's, with the same status and text
     let heading = |s: &[(String, Vec<String>)]| s.iter().find(|(t, _)| t.starts_with("Repair")).cloned();
     let (nr, rr) = (heading(&ns).expect("node repair section"), heading(&rs).expect("rust repair section"));
     assert_eq!(nr.0, rr.0, "{name}: repair heading");
     assert!(!rr.1.is_empty());
     // except the install-health repairs only the engine doctor has (the Node doctor has no such check): they are covered in doctor_scenarios.rs
-    let engine_only = ["state-dir-create", "state-dir-private", "engine-binary-exec", "engine-binary-quarantine", "config-heal"];
-    for line in rr.1.iter().filter(|l| !engine_only.iter().any(|id| l.contains(&format!(" {id}:")))) {
+    let engine_only = ["state-dir-create", "state-dir-private", "engine-binary-exec", "engine-binary-quarantine", "config-heal", "units-heal"];
+    // (units-heal also prints unindented `run launchctl ...` continuation rows naming the engine's unit file)
+    let engine_unit = |l: &str| l.contains("com.anti-hall.engine.");
+    for line in rr.1.iter().filter(|l| !engine_only.iter().any(|id| l.contains(&format!(" {id}:"))) && !engine_unit(l)) {
         assert!(nr.1.contains(line), "{name}: the engine's repair row is not a Node row: {line}\nnode rows: {:#?}", nr.1);
     }
     // the engine's report is complete for what it claims
@@ -205,7 +215,7 @@ fn workflow_templates_and_the_statusline_are_read_the_same_way() {
     let (_, node) = run_node(&a, &["--dry-run"]);
     let (_, rust) = run_rust(&b, &["--dry-run"]);
     compare("statusline-local", &node, &rust, (&a, &b));
-    assert!(section(&sections(&rust), "Statusline").unwrap()[0].contains("statusline installed (project-local)"));
+    assert!(section(&sections(&rust), "Statusline").unwrap()[0].contains("legacy anti-hall statusLine still configured (project-local)"));
 }
 
 #[test]
@@ -269,37 +279,15 @@ fn both(seed: &dyn Fn(&Path, &Path), needles: &[&str]) -> (Vec<String>, Vec<Stri
     (pick(&norm(&node, &a), needles), pick(&norm(&rust, &b), needles))
 }
 
-fn script(dir: &Path, name: &str, body: &str) -> String {
-    put(dir, name, body);
-    dir.join(name).to_string_lossy().into_owned()
-}
-
 #[test]
 fn the_statusline_render_check_reads_the_two_lines_the_same_way() {
     let needles = ["statusline renders", "statusline rendered", "statusline.js", "statusline-rich.js", "dispatcher missing"];
     let (n, r) = both(&|_, _| {}, &needles);
+    // a deliberate difference (#66): the engine doctor starts no Node, so it no longer syntax-checks the renderer with `node --check`
+    let n: Vec<String> = n.into_iter().map(|l| l.replace(" present, syntax valid", " present")).collect();
     assert_eq!(n, r);
     assert!(r.iter().any(|l| l.contains("statusline renders 2 lines")), "{r:?}");
-    assert!(r.iter().any(|l| l.contains("statusline-rich.js (line-1 renderer) present, syntax valid")), "{r:?}");
-    // the stand-in script path of the test override: one line, a failure, a hang, a missing script
-    let tmp = std::env::temp_dir().join(format!("ah-sl-standin-{}", std::process::id()));
-    let one = script(&tmp, "one.js", "process.stdin.resume();process.stdin.on('end',()=>console.log('only'));");
-    let fail = script(&tmp, "fail.js", "process.exit(3);");
-    let hang = script(&tmp, "hang.js", "setInterval(()=>{},1000);");
-    let two = script(&tmp, "two.js", "process.stdin.resume();process.stdin.on('end',()=>console.log('a\\nb'));");
-    let cases = [
-        ("one line", vec![("ANTIHALL_DOCTOR_SL_SCRIPT", one.as_str())], "rendered only 1 line"),
-        ("failure", vec![("ANTIHALL_DOCTOR_SL_SCRIPT", fail.as_str())], "produced no output (exit 3)"),
-        ("hang", vec![("ANTIHALL_DOCTOR_SL_SCRIPT", hang.as_str()), ("ANTIHALL_DOCTOR_SL_TIMEOUT_MS", "400")], "timed out under load"),
-        ("two lines", vec![("ANTIHALL_DOCTOR_SL_SCRIPT", two.as_str())], "statusline renders 2 lines"),
-        ("missing", vec![("ANTIHALL_DOCTOR_SL_SCRIPT", "/nonexistent/sl.js")], "dispatcher missing"),
-    ];
-    for (name, vars, want) in cases {
-        let (n, r) = with_env(&vars, || both(&|_, _| {}, &needles));
-        assert_eq!(n, r, "{name}");
-        assert!(r.iter().any(|l| l.contains(want)), "{name}: {r:?}");
-    }
-    fs::remove_dir_all(&tmp).ok();
+    assert!(r.iter().any(|l| l.contains("statusline-rich.js (line-1 renderer) present")), "{r:?}");
 }
 
 fn omc_seed(home: &Path, cwd: &Path, state: Option<&str>) {

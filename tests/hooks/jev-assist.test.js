@@ -9,8 +9,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { makeHome } = require('../helpers/fixtures.js');
 
-const LIB = require.resolve('../../plugins/anti-hall/hooks/lib/jev-assist.js');
-const CLIENT_LIB = require.resolve('../../plugins/anti-hall/hooks/lib/jev-client.js');
+const LIB = require.resolve('../../plugins/anti-hall-node/hooks/lib/jev-assist.js');
+const CLIENT_LIB = require.resolve('../../plugins/anti-hall-node/hooks/lib/jev-client.js');
 
 function freshLib() {
   delete require.cache[LIB];
@@ -1209,7 +1209,7 @@ test('askDetached(): codexNudgeSubstantial fails open to baseline when Jev is un
 // ---- audit redactor hardening (v0.108.0 review, HIGH). All values below are
 // FAKE shapes built for the test — never real credentials.
 test('scrubSecrets: AWS key ids, KEY=/PASSWORD= identifiers, JWTs, URL credentials, PEM blocks', () => {
-  const { scrubSecrets } = require('../../plugins/anti-hall/hooks/lib/jev-assist.js');
+  const { scrubSecrets } = require('../../plugins/anti-hall-node/hooks/lib/jev-assist.js');
   const fakeAkia = 'AKIA' + 'FAKEFAKEFAKEFAKE';
   const fakeAsia = 'ASIA' + 'TESTTESTTESTTEST';
   const cases = [

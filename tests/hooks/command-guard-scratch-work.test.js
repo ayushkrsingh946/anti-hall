@@ -15,9 +15,9 @@ const childProcess = require('node:child_process');
 const { testHook } = require('../helpers/spawn-hook.js');
 const { makeHome } = require('../helpers/fixtures.js');
 
-const HOOK = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'hooks', 'command-guard.js');
+const HOOK = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'hooks', 'command-guard.js');
 const cg = require(HOOK);
-const allowLib = require('../../plugins/anti-hall/hooks/lib/command-allow.js');
+const allowLib = require('../../plugins/anti-hall-node/hooks/lib/command-allow.js');
 const COORD = { CLAUDE_CODE_ENTRYPOINT: 'cli' };
 const H = process.env.HOME; // the isolated test HOME; fixture HOME files live here
 const OLD = Date.now() / 1000 - 2 * 86400;

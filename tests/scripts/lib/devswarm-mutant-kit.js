@@ -4,7 +4,7 @@
 // tests/scripts/devswarm-fixwave3-g1-g2-g3.test.js).
 //
 // ROOT CAUSE this exists to fix: both callers used to mutate
-// plugins/anti-hall/scripts/devswarm.js ON DISK, IN PLACE — writing a
+// plugins/anti-hall-node/scripts/devswarm.js ON DISK, IN PLACE — writing a
 // "buggy" variant, requiring it, running assertions, then writing the
 // original bytes back. `.github/workflows/test.yml` runs `node --test --test-shard=i/n` (a sharded `node --test`),
 // which parallelizes per FILE by default, and node:test files across a run
@@ -20,7 +20,7 @@
 // scratch copy of scripts/devswarm.js (the ONLY file any mutation in this
 // suite ever edits) inside a fresh `fs.mkdtempSync` directory, mutates ONLY
 // that copy, `require()`s the copy, and discards the whole scratch directory
-// afterward. `plugins/anti-hall/scripts/devswarm.js` is opened READ-ONLY by
+// afterward. `plugins/anti-hall-node/scripts/devswarm.js` is opened READ-ONLY by
 // every helper here.
 //
 // companion/ and hooks/ are SYMLINKED into the scratch dir rather than
@@ -59,8 +59,9 @@ const path = require('node:path');
 const devswarmSource = require('./devswarm-source.js');
 
 const PLUGIN_ROOT = path.join(__dirname, '..', '..', '..', 'plugins', 'anti-hall');
-const LIVE_DEVSWARM_PATH = path.join(PLUGIN_ROOT, 'scripts', 'devswarm.js');
-const LIVE_DEVSWARM_LIB = path.join(PLUGIN_ROOT, 'scripts', 'devswarm-lib');
+const NODE_PLUGIN_ROOT = path.join(__dirname, '..', '..', '..', 'plugins', 'anti-hall-node');
+const LIVE_DEVSWARM_PATH = path.join(NODE_PLUGIN_ROOT, 'scripts', 'devswarm.js');
+const LIVE_DEVSWARM_LIB = path.join(NODE_PLUGIN_ROOT, 'scripts', 'devswarm-lib');
 
 // copyDirFiles: copy every regular file of `src` into `dest` (recursive,
 // preserving the relative layout). devswarm-lib/ holds plain .js modules.
@@ -97,8 +98,8 @@ function createCopy(prefix) {
   const devswarmPath = path.join(scriptsDir, 'devswarm.js');
   fs.copyFileSync(LIVE_DEVSWARM_PATH, devswarmPath);
   if (fs.existsSync(LIVE_DEVSWARM_LIB)) copyDirFiles(LIVE_DEVSWARM_LIB, path.join(scriptsDir, 'devswarm-lib'));
-  fs.symlinkSync(path.join(PLUGIN_ROOT, 'companion'), path.join(dir, 'companion'), 'dir');
-  fs.symlinkSync(path.join(PLUGIN_ROOT, 'hooks'), path.join(dir, 'hooks'), 'dir');
+  fs.symlinkSync(path.join(NODE_PLUGIN_ROOT, 'companion'), path.join(dir, 'companion'), 'dir');
+  fs.symlinkSync(path.join(NODE_PLUGIN_ROOT, 'hooks'), path.join(dir, 'hooks'), 'dir');
   return { dir, devswarmPath };
 }
 
@@ -201,7 +202,7 @@ function withMutantTransform(transform, fn, opts) {
 // snapshot taken before a mutation test ran. Call with the snapshot from
 // BEFORE any createCopy()/mutate() calls in the test.
 function assertLiveUntouched(liveBefore, assert) {
-  assert.equal(devswarmSource.readAll(), liveBefore, 'live plugins/anti-hall/scripts/devswarm.js (and devswarm-lib/*) must never be modified by a mutation test');
+  assert.equal(devswarmSource.readAll(), liveBefore, 'live plugins/anti-hall-node/scripts/devswarm.js (and devswarm-lib/*) must never be modified by a mutation test');
 }
 
 module.exports = {

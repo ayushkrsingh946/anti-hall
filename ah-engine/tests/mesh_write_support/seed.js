@@ -5,7 +5,7 @@
 // usage: node seed.js <home> <repo-main-worktree> <child-worktree>
 const path = require('path');
 const fs = require('fs');
-const plugin = path.join(__dirname, '..', '..', '..', 'plugins', 'anti-hall');
+const plugin = path.join(__dirname, '..', '..', '..', 'plugins', 'anti-hall-node');
 const store = require(path.join(plugin, 'companion', 'lib', 'devswarm-store.js'));
 const identity = require(path.join(plugin, 'companion', 'lib', 'identity.js'));
 const [home, main, child] = process.argv.slice(2);

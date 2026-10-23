@@ -11,8 +11,8 @@ const path = require('node:path');
 const { testHook } = require('../helpers/spawn-hook.js');
 const { makeHome } = require('../helpers/fixtures.js');
 
-const { backfillSubjects } = require('../../plugins/anti-hall/hooks/lib/task-subject-backfill.js');
-const { unseenTask } = require('../../plugins/anti-hall/hooks/lib/task-state.js');
+const { backfillSubjects } = require('../../plugins/anti-hall-node/hooks/lib/task-subject-backfill.js');
+const { unseenTask } = require('../../plugins/anti-hall-node/hooks/lib/task-state.js');
 
 const asst = (content, extra) => Object.assign({ type: 'assistant', message: { role: 'assistant', content } }, extra || {});
 function create(n, subject, toolId, extra) {
@@ -250,7 +250,7 @@ test('a REAL numbering restart (#1,#2,#1) is the boundary: the earlier epoch is 
       upd('2', { description: 'more' }, 'toolu_u'),
     ]);
     assert.strictEqual(blocked(r), false, r.stdout);
-    assert.ok(r.stdout.includes(UNKNOWN_NOTE), r.stdout);
+    assert.ok(r.stderr.includes(UNKNOWN_NOTE), r.stderr);
   } finally { h.cleanup(); }
 });
 
@@ -260,9 +260,9 @@ test('UNKNOWN NOTE: advisory only (never blocks by itself), throttled (not repea
     const msgs = [...create(17, 'stale', 'toolu_a'), ...taskListEmpty('toolu_l'), ...filler(BIG), upd('17', { description: 'more' }, 'toolu_u')];
     const first = guard(h, msgs);
     assert.strictEqual(blocked(first), false, first.stdout);
-    assert.ok(first.stdout.includes('[task-guard] ' + UNKNOWN_NOTE), first.stdout);
+    assert.ok(first.stderr.includes('[task-guard] ' + UNKNOWN_NOTE), first.stderr);
     const second = guard(h, msgs);
-    assert.ok(!second.stdout.includes('unknown state'), 'throttled: ' + second.stdout);
+    assert.ok(!second.stderr.includes('unknown state'), 'throttled: ' + second.stderr);
     const h2 = makeHome();
     try {
       const r = guard(h2, [...create(17, 'stale', 'toolu_a'), ...taskListEmpty('toolu_l'), ...filler(BIG), ...create(5, 'visible open', 'toolu_v'), upd('17', { description: 'more' }, 'toolu_u')]);
@@ -283,7 +283,7 @@ test('UNKNOWN NOTE: the tracker line says it too, once', () => {
 });
 
 test('RULE: a KNOWN open status stays open (listed) when the scan stops before the create; it is only excluded from idle-neglect and counted unknown', () => {
-  const { openOf, unknownOf, classifyOpen } = require('../../plugins/anti-hall/hooks/lib/task-state.js');
+  const { openOf, unknownOf, classifyOpen } = require('../../plugins/anti-hall-node/hooks/lib/task-state.js');
   const h = makeHome();
   try {
     const mk = (status, tool) => [
@@ -355,7 +355,7 @@ test('PRUNE: the last-unknown-* throttle files are swept after the 7-day TTL (ow
     const eightDays = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000);
     fs.utimesSync(old, eightDays, eightDays);
     const r = guard(h, [...create(17, 'stale', 'toolu_a'), ...taskListEmpty('toolu_l'), ...filler(BIG), upd('17', { description: 'more' }, 'toolu_u')]);
-    assert.ok(r.stdout.includes(UNKNOWN_NOTE), r.stdout);
+    assert.ok(r.stderr.includes(UNKNOWN_NOTE), r.stderr);
     assert.ok(!fs.existsSync(old), 'stale throttle file swept');
     assert.ok(fs.readdirSync(dir).some((n) => /^last-unknown-guard-t\.json$/.test(n)), 'own file kept');
   } finally { h.cleanup(); }
@@ -382,7 +382,7 @@ test('PARALLEL creates of ONE assistant message numbered in reverse are not a re
 });
 
 test('PARALLEL creates of ONE assistant message numbered in reverse are not a restart (in-window parsers)', () => {
-  const { reconstructTasks } = require('../../plugins/anti-hall/hooks/lib/task-state.js');
+  const { reconstructTasks } = require('../../plugins/anti-hall-node/hooks/lib/task-state.js');
   const a = reconstructTasks({ data: parallelCreates(1).map((m) => JSON.stringify(m)).join('\n'), truncated: false });
   assert.strictEqual(a.windowReset, false);
   assert.strictEqual(a.taskMap.size, 2);
@@ -396,7 +396,7 @@ test('PARALLEL creates of ONE assistant message numbered in reverse are not a re
 });
 
 test('task-state: an update for an unseen id is status-UNKNOWN (not pending, not open); the in-window create fills it', () => {
-  const { reconstructTasks } = require('../../plugins/anti-hall/hooks/lib/task-state.js');
+  const { reconstructTasks } = require('../../plugins/anti-hall-node/hooks/lib/task-state.js');
   const L = (arr) => arr.map((m) => JSON.stringify(m)).join('\n');
   const a = reconstructTasks({ data: L([upd('9', { description: 'd' }, 'toolu_u')]), truncated: false });
   assert.strictEqual(a.taskMap.get('9').status, undefined);

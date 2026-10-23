@@ -5,8 +5,8 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
 const { makeHome } = require('../helpers/fixtures.js');
-const M = require('../../plugins/anti-hall/companion/lib/migrations.js');
-const { pruneJevTriage } = require('../../plugins/anti-hall/hooks/lib/state-prune.js');
+const M = require('../../plugins/anti-hall-node/companion/lib/migrations.js');
+const { pruneJevTriage } = require('../../plugins/anti-hall-node/hooks/lib/state-prune.js');
 
 const cacheDir = (home) => path.join(home, '.anti-hall', 'cache');
 const cacheFile = (home) => path.join(cacheDir(home), 'jev-triage.json');

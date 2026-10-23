@@ -9,7 +9,7 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const path = require('node:path');
 
-const repokey = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
+const repokey = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
 const { sanitizeRepoName, gitCommonDir, repoKeyForWorktree, winCanonicalizeCommonDir } = repokey;
 
 // expectCommonDir(raw) -> the value gitCommonDir() should return for a given

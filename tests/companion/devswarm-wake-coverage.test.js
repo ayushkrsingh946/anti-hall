@@ -13,9 +13,10 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
 const ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const { wakeCoverage } = require(path.join(ROOT, 'companion', 'lib', 'devswarm-wake-coverage.js'));
-const { lockPathFor } = require(path.join(ROOT, 'companion', 'lib', 'devswarm-wake-watch.js'));
-const { noWakePathLine } = require(path.join(ROOT, 'hooks', 'lib', 'devswarm-wake.js'));
+const NODE_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const { wakeCoverage } = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-wake-coverage.js'));
+const { lockPathFor } = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-wake-watch.js'));
+const { noWakePathLine } = require(path.join(NODE_ROOT, 'hooks', 'lib', 'devswarm-wake.js'));
 
 const PRIMARY_ID = 'primary-abc123';
 const NOW = 1_800_000_000_000;
@@ -135,14 +136,13 @@ test('noWakePathLine: both missing -> the full line, names both launchers, under
   assert.ok(t.length < 400, 'length ' + t.length);
 });
 
-test('noWakePathLine: only the watcher missing / only the cron missing -> shorter line naming just that one', () => {
+test('noWakePathLine: a lapsed watcher under a live cron is silent (the tick re-arms it); only the cron missing -> the short tick line', () => {
   const w = noWakePathLine(Object.assign({}, base, { cronLikelyMissing: false, lastTickAgeMin: 4 }), CLAUDE, CLI, WATCH, PRIMARY_ID);
-  assert.ok(w.startsWith('NO MAILBOX WATCHER'), w);
-  assert.ok(w.includes(WATCH) && !w.includes('CronCreate'), w);
+  assert.strictEqual(w, '', 'watcher lapsed, cron alive: no nag');
   const c = noWakePathLine(Object.assign({}, base, { watcherLive: true }), CLAUDE, CLI, WATCH, PRIMARY_ID);
   assert.ok(c.startsWith('NO MAILBOX TICK'), c);
   assert.ok(c.includes('CronCreate') && !c.includes('Monitor:'), c);
-  assert.ok(w.length < 400 && c.length < 400);
+  assert.ok(c.length < 400);
 });
 
 test('noWakePathLine: empty when healthy, no live child, not Claude, or watcher switched off with a fresh tick', () => {

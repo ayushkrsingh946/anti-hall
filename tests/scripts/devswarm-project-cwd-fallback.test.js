@@ -13,7 +13,7 @@ const cp = require('node:child_process');
 
 process.env.ANTI_HALL_LOG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'anti-hall-pcwd-log-'));
 
-const cli = require('../../plugins/anti-hall/scripts/devswarm.js');
+const cli = require('../../plugins/anti-hall-node/scripts/devswarm.js');
 
 function tmp(tag) { return fs.mkdtempSync(path.join(os.tmpdir(), 'anti-hall-pcwd-' + tag + '-')); }
 function rm(p) { try { fs.rmSync(p, { recursive: true, force: true }); } catch (_) {} }

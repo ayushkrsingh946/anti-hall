@@ -13,9 +13,9 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const store = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
-const inst = require('../../plugins/anti-hall/companion/install-devswarm-ingest.js');
-const triage = require('../../plugins/anti-hall/hooks/lib/jev-triage.js');
+const store = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
+const inst = require('../../plugins/anti-hall-node/companion/install-devswarm-ingest.js');
+const triage = require('../../plugins/anti-hall-node/hooks/lib/jev-triage.js');
 
 function tmpHome(jev) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'anti-hall-arrival-'));

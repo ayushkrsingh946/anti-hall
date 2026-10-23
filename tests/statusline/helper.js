@@ -15,7 +15,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 // Statusline scripts live in plugins/anti-hall/statusline, resolved absolutely.
-const SL_DIR = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'statusline');
+const SL_DIR = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'statusline');
 
 // isolatedEnv(home) — build the env that points a child at a fake HOME, cross
 // platform. os.homedir() reads USERPROFILE/HOMEDRIVE+HOMEPATH on win32, $HOME

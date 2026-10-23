@@ -10,8 +10,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const { makeHome } = require('../helpers/fixtures.js');
-const M = require('../../plugins/anti-hall/companion/lib/migrations.js');
-const settings = require('../../plugins/anti-hall/hooks/lib/settings.js');
+const M = require('../../plugins/anti-hall-node/companion/lib/migrations.js');
+const settings = require('../../plugins/anti-hall-node/hooks/lib/settings.js');
 
 const SECRET = 'sk-' + 'key-file-secret-value';
 function putKeyFile(home, rel, body) {
@@ -118,7 +118,7 @@ test('update.js settings-migrate stage carries the ENABLED notice', () => {
   try {
     h.writeState('settings.json', { jev: { enabled: true } });
     putKeyFile(h.home, KEY_REL, SECRET);
-    const update = require('../../plugins/anti-hall/skills/update/scripts/update.js');
+    const update = require('../../plugins/anti-hall-node/skills/update/scripts/update.js');
     assert.strictEqual(typeof update.settingsMigratePostUpdate, 'function');
     const r = update.settingsMigratePostUpdate({ home: h.home, version: '9.9.9-test' });
     assert.match(r.detail, /legacy-key-opt-in fixed: ENABLED jev\.allowLegacyKeyRead/);

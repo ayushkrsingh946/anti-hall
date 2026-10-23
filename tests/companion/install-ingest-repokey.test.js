@@ -23,9 +23,9 @@ const path = require('node:path');
 const cp = require('node:child_process');
 const { execFileSync } = require('node:child_process');
 
-const MOD = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'install-devswarm-ingest.js');
+const MOD = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'install-devswarm-ingest.js');
 const m = require(MOD);
-const repokey = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
+const repokey = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
 
 function tmpHome() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ingest-repokey-'));

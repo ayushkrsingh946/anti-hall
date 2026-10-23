@@ -48,10 +48,11 @@ const os = require('node:os');
   const isolated = require('node:fs').mkdtempSync(require('node:path').join(require('node:os').tmpdir(), 'update-test-home-'));
   process.env.HOME = isolated; process.env.USERPROFILE = isolated;
 }
-const U = require('../../plugins/anti-hall/skills/update/scripts/update.js');
-const installer = require('../../plugins/anti-hall/companion/install-devswarm-ingest.js');
+const U = require('../../plugins/anti-hall-node/skills/update/scripts/update.js');
+const installer = require('../../plugins/anti-hall-node/companion/install-devswarm-ingest.js');
 
 const REAL_PLUGIN_SRC_DIR = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
+const REAL_NODE_SRC_DIR = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
 const SKIP = process.platform === 'win32';
 
 // --- fixtures --------------------------------------------------------------
@@ -67,8 +68,11 @@ function makeMarketplace(version) {
   fs.mkdirSync(path.join(srcDir, '.claude-plugin'), { recursive: true });
   fs.writeFileSync(path.join(srcDir, '.claude-plugin', 'plugin.json'),
     JSON.stringify({ name: 'anti-hall', version }), 'utf8');
+  // the Node files live in the sibling Node backup tree (plugins/anti-hall-node)
+  const nodeDir = path.join(marketplaceDir, 'plugins', 'anti-hall-node');
+  fs.mkdirSync(nodeDir, { recursive: true });
   for (const d of ['companion', 'hooks']) {
-    fs.symlinkSync(path.join(REAL_PLUGIN_SRC_DIR, d), path.join(srcDir, d), 'dir');
+    fs.symlinkSync(path.join(REAL_NODE_SRC_DIR, d), path.join(nodeDir, d), 'dir');
   }
   fs.writeFileSync(path.join(marketplaceDir, 'CHANGELOG.md'), '# Changelog\n\n## ' + version + '\n- x\n', 'utf8');
   // installed == latest, and NO cache root => syncCache no-ops => cache.synced false.

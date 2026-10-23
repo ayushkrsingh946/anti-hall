@@ -10,7 +10,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const { isChildWorkspace, isChildWorkspaceCorroborated } = require(path.join(
-  __dirname, '..', '..', 'plugins', 'anti-hall', 'hooks', 'lib', 'devswarm-role.js',
+  __dirname, '..', '..', 'plugins', 'anti-hall-node', 'hooks', 'lib', 'devswarm-role.js',
 ));
 
 function tmpHome() {

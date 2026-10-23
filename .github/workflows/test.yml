@@ -85,7 +85,7 @@ jobs:
       #
       # Fix Wave 5 Item 5: `--test-concurrency=1` (a belt-and-braces mitigation
       # against cross-file interleaving over the one shared
-      # plugins/anti-hall/scripts/devswarm.js path) is removed — the mutation
+      # plugins/anti-hall-node/scripts/devswarm.js path) is removed — the mutation
       # race it guarded against is now structurally fixed: no test file
       # mutates that live path on disk at all (every mutation test runs
       # against its own throwaway scratch copy, see

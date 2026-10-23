@@ -1,4 +1,6 @@
 #![allow(
+    clippy::panic,
+    clippy::unreachable,
     dead_code,
     clippy::type_complexity,
     clippy::collapsible_if,
@@ -17,9 +19,9 @@
 
 use ah_engine::checks::git::util::Settings;
 use ah_engine::checks::guardkit::ojson::OVal;
-use ah_engine::dsact::runner::{RunResult, RunSpec, Runner, System};
+use ah_engine::dsact::runner::System;
 use ah_engine::dssup::recon::gate::{self, Job, Verdict};
-use ah_engine::dssup::recon::{Hooks, Op, UnitEnd, apply, archived, dup, fold, heal, norm, orphans, side};
+use ah_engine::dssup::recon::{Hooks, Op, UnitEnd, apply, archived, dup, fold, heal, norm, orphans, rehome, side};
 use ah_engine::dssup::tick::Ctx;
 use ah_engine::meshw::store::{CursorPut, MeshRow, MeshStore, RegistryRow};
 use serde_json::Value;
@@ -44,6 +46,9 @@ fn init_defaults() {
     ONCE.call_once(|| {
         // SAFETY: set once, before this process reads the defaults; nothing else here touches this variable
         unsafe { std::env::set_var("AH_ENGINE_PLUGIN_ROOT", Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().join("plugins/anti-hall")) };
+        // the hivecontrol guard (src/hcguard.rs) only lets a stub run from a scratch root; the fixtures live under ~/.anti-hall/scratch
+        // SAFETY: same once-guarded init as above, before any thread reads it
+        unsafe { std::env::set_var("AH_HC_STUB_DIR", PathBuf::from(std::env::var("HOME").unwrap()).join(".anti-hall/scratch/recon-tests")) };
         ah_engine::defaults::init().expect("defaults load");
     });
 }
@@ -473,38 +478,7 @@ fn s1_startup_sampling_matches_node_and_never_calls_read_messages() {
     t.print();
 }
 
-// ---------------------------------------------------------------- the gate refuses what it cannot witness
-
-struct Lying;
-impl Runner for Lying {
-    fn run(&self, _: &RunSpec) -> RunResult {
-        RunResult { ok: true, status: Some(0), stdout: "[null]\n".into(), ..Default::default() }
-    }
-}
-struct Absent;
-impl Runner for Absent {
-    fn run(&self, _: &RunSpec) -> RunResult {
-        RunResult { ok: false, missing: true, error: Some("no node".into()), ..Default::default() }
-    }
-}
-
-#[test]
-fn a_disagreeing_or_absent_witness_writes_nothing() {
-    let f = fix("gate");
-    let job = job_for("sweep", vec![side::plan_sweep_state(&f.home, NOW)], &[]);
-    // Node says "null" where the engine expects a value: mismatch on a call that has an expected value
-    let mut j = job_for("name", vec![side::plan_name(&f.home, "ws-1", "n", NOW)], &[]);
-    let out = gate::run(&f.ctx(), &Lying, &j, &Hooks::none());
-    assert!(matches!(out.verdict, Verdict::Mismatch(_)), "{:?}", out.verdict);
-    assert!(matches!(&out.ends[0], UnitEnd::Deferred(w) if w == "witness-mismatch"));
-    assert!(f.read(&f.ds("names/ws-1.json")).is_none());
-    // Node absent: unwitnessed, so unapplied
-    let out = gate::run(&f.ctx(), &Absent, &job, &Hooks::none());
-    assert!(matches!(out.verdict, Verdict::NodeUnavailable(_)));
-    assert!(matches!(&out.ends[0], UnitEnd::Deferred(w) if w == "node-unavailable"));
-    assert!(f.read(&f.ds("reconcile-sweep-state.json")).is_none());
-    j.units.clear();
-}
+// ---------------------------------------------------------------- the gate applies what the planner decided
 
 #[test]
 fn a_drifted_precondition_or_a_busy_lock_defers_the_unit_untouched() {
@@ -659,13 +633,13 @@ fn heal_cases() -> Vec<HealCase> {
             deferred: &[],
         },
         HealCase {
-            name: "mis-keyed row goes to Node",
+            name: "mis-keyed row is moved",
             build: |f| {
                 let (_, k, q) = base(f);
                 f.row(&k, "w1", &q, "s1");
                 f.descriptor("w1", &desc_json("w1", &q, "s1", None, None));
             },
-            deferred: &["w1"],
+            deferred: &[],
         },
         HealCase {
             name: "worktree gone with an archived counterpart",
@@ -717,7 +691,7 @@ fn heal_cases() -> Vec<HealCase> {
                 f.descriptor("c3", &desc_json("c3", &q, "sc", None, None));
                 f.row(&k, "d4", &p, "sd");
             },
-            deferred: &["c3"],
+            deferred: &[],
         },
     ]
 }
@@ -747,10 +721,11 @@ fn s2_heal_registry_matches_node_for_every_row_shape() {
 }
 
 #[test]
-fn s2_rehome_core_answers_the_trivial_cases_and_defers_moves() {
-    assert_eq!(heal::rehome_core("w1", ""), heal::Core::Nothing);
-    assert_eq!(heal::rehome_core("w1", &ah_engine::meshw::send::hash_from_workspace_id("w1")), heal::Core::Nothing);
-    assert!(matches!(heal::rehome_core("w1", "repo-abc123"), heal::Core::Node(_)));
+fn s2_rehome_core_answers_the_trivial_cases_and_moves_nothing_for_them() {
+    let f = fix("s2core");
+    let ctx = f.ctx();
+    assert_eq!(rehome::core(&ctx, "w1", ""), rehome::Moved::default());
+    assert_eq!(rehome::core(&ctx, "w1", &ah_engine::meshw::send::hash_from_workspace_id("w1")), rehome::Moved::default());
 }
 
 #[test]
@@ -984,13 +959,9 @@ fn s5_heal_orphan_partitions_matches_node_for_every_store_shape() {
                 assert_eq!(again.result["adopted"], 0, "{}", c.name);
                 assert_eq!(f.snapshot(), after, "{}: the second pass wrote something", c.name);
             }
-            (Ok(run), Err(why)) => {
-                // decided natively, but the summary projection after the adoption is not the engine's: the witness fails and the
-                // adoption is handed back with nothing written
-                assert!(matches!(&run.verdict, Verdict::MirrorFailed(w) if w.contains(why)), "{}: {:?}", c.name, run.verdict);
-                assert_eq!(run.deferred.len(), 1, "{}", c.name);
-                assert_eq!(run.result["adopted"], 0, "{}", c.name);
-                assert!(ah_engine::dssup::recon::view::registry(&f.home, &key).unwrap().is_empty(), "{}: nothing adopted", c.name);
+            (Ok(run), Err(_why)) => {
+                // there is no Node comparison any more: the adoption the witness used to refuse is applied by the engine's applier
+                assert_eq!(run.verdict, Verdict::Agreed, "{}: {:?}", c.name, run.verdict);
                 t.case(false);
             }
             (Err(d), Err(why)) => {
@@ -1030,7 +1001,7 @@ fn s5_a_busy_lock_hands_the_adoption_back_untouched() {
     assert!(ah_engine::dssup::recon::view::registry(&f.home, &k).unwrap().is_empty(), "nothing was adopted");
 }
 
-/// `sweep_tail_mode`: default `node` leaves the stage to Node alone; `engine` runs the witnessed orphan heal first and records it.
+/// `sweep_tail_mode`: the default (`engine`) runs the orphan heal natively and records it; `off` runs no engine part (counted, nothing run).
 #[test]
 fn s5_the_sweep_tail_mode_selects_the_engine_part_of_the_deferred_stage() {
     if !have("node") || !have("git") {
@@ -1049,11 +1020,11 @@ fn s5_the_sweep_tail_mode_selects_the_engine_part_of_the_deferred_stage() {
         }
         (f, k)
     };
-    let (node_home, k) = build("s5mode-node", None);
-    let rec = ah_engine::dssup::deferred::duty(&node_home.ctx(), &System::configured());
+    let (off_home, k) = build("s5mode-off", Some("off"));
+    let rec = ah_engine::dssup::deferred::duty(&off_home.ctx(), &System::configured());
     assert!(rec.get("engine").is_none(), "{rec}");
     let _ = k;
-    let (eng_home, k) = build("s5mode-engine", Some("engine"));
+    let (eng_home, k) = build("s5mode-engine", None);
     let rec = ah_engine::dssup::deferred::duty(&eng_home.ctx(), &System::configured());
     let items = rec["engine"]["items"].as_array().unwrap_or_else(|| panic!("no engine part: {rec}"));
     assert_eq!(items.len(), 1, "{rec}");
@@ -1440,7 +1411,7 @@ fn s6_cases() -> Vec<FoldCase> {
             whole: true,
         },
         FoldCase {
-            name: "the id-first row is not the live one: the survivor needs liveness, Node's",
+            name: "the id-first row is not the live one: the live row survives",
             build: |f| {
                 let (wt, k) = s6_base(f);
                 f.row_s(&k, "w-live", &wt, Some("s1"));
@@ -1449,10 +1420,10 @@ fn s6_cases() -> Vec<FoldCase> {
                 f.msg_at(&k, "w-adup", 10, "kept", "snd");
                 (k.clone(), pair(&k, &wt))
             },
-            retired: &[],
-            forwarded: 0,
-            deferred: 1,
-            whole: false,
+            retired: &["w-adup"],
+            forwarded: 1,
+            deferred: 0,
+            whole: true,
         },
         FoldCase {
             name: "a retired partition left with unread mail cannot be summarised natively: Node's",
@@ -1508,7 +1479,7 @@ fn s6_cases() -> Vec<FoldCase> {
             whole: true,
         },
         FoldCase {
-            name: "a stale cross-reference makes two live-shaped rows: Node's survivor pick",
+            name: "a stale cross-reference makes two live-shaped rows: the aliased one is not the survivor",
             build: |f| {
                 let (wt, k) = s6_base(f);
                 f.row_s(&k, "w-live", &wt, Some("s1"));
@@ -1516,10 +1487,10 @@ fn s6_cases() -> Vec<FoldCase> {
                 f.descriptor("w-x", &desc_json("w-x", &wt, "w-live", None, None));
                 (k.clone(), vec![k, wt])
             },
-            retired: &[],
+            retired: &["w-x"],
             forwarded: 0,
-            deferred: 1,
-            whole: false,
+            deferred: 0,
+            whole: true,
         },
         FoldCase {
             name: "a lone subdirectory row is re-keyed to its toplevel",
@@ -1625,20 +1596,20 @@ fn s6_cases() -> Vec<FoldCase> {
             whole: true,
         },
         FoldCase {
-            name: "two live sessions: the survivor needs liveness, Node's",
+            name: "two live sessions: the freshest live row survives",
             build: |f| {
                 let (wt, k) = s6_base(f);
                 f.row_s(&k, "w-a", &wt, Some("s1"));
                 f.row_s(&k, "w-b", &wt, Some("s2"));
                 (k.clone(), pair(&k, &wt))
             },
-            retired: &[],
+            retired: &["w-b"],
             forwarded: 0,
-            deferred: 1,
-            whole: false,
+            deferred: 0,
+            whole: true,
         },
         FoldCase {
-            name: "an anchor with a real session and no descriptor needs dormancy, Node's",
+            name: "two live rows, the anchor (newest) survives and the older live row folds into it",
             build: |f| {
                 let (wt, k) = s6_base(f);
                 let anchor = ah_engine::meshw::ident::primary_workspace_id(&wt).unwrap();
@@ -1646,13 +1617,13 @@ fn s6_cases() -> Vec<FoldCase> {
                 f.row_s(&k, &anchor, &wt, Some("s9"));
                 (k.clone(), vec![k, wt, anchor])
             },
-            retired: &[],
+            retired: &["w-live"],
             forwarded: 0,
-            deferred: 1,
-            whole: false,
+            deferred: 0,
+            whole: true,
         },
         FoldCase {
-            name: "unread mail without floor rows needs the legacy cursor import, Node's",
+            name: "unread mail without floor rows is decided by the engine, like Node",
             build: |f| {
                 let (wt, k) = s6_base(f);
                 f.row_s(&k, "w-live", &wt, Some("s1"));
@@ -1660,10 +1631,10 @@ fn s6_cases() -> Vec<FoldCase> {
                 f.msg_at(&k, "w-ph", 10, "one", "snd");
                 (k.clone(), pair(&k, &wt))
             },
-            retired: &[],
-            forwarded: 0,
-            deferred: 1,
-            whole: false,
+            retired: &["w-ph"],
+            forwarded: 1,
+            deferred: 0,
+            whole: true,
         },
     ]
 }
@@ -1754,14 +1725,42 @@ fn s6_fold_mesh_duplicates_matches_node_for_every_group_shape() {
     t.print();
 }
 
+/// A cross-referenced anchor keeps only the unforgeable half of its liveness: a heartbeat written to its own file right now. With one it
+/// stays (left, not retired); without, the ordinary path folds it into the live survivor. The engine decides both itself.
+#[test]
+fn dssup_recon_s6_a_fresh_heartbeat_protects_a_cross_referenced_anchor_and_its_absence_does_not() {
+    if !have("git") {
+        return;
+    }
+    for (beating, retired) in [(true, vec![]), (false, vec!["anchor".to_string()])] {
+        let f = fix6("s6-anchor-beat");
+        let (wt, k) = s6_base(&f);
+        let anchor = ah_engine::meshw::ident::primary_workspace_id(&wt).unwrap();
+        f.row_s(&k, "w-live", &wt, Some("s1"));
+        f.row_s(&k, &anchor, &wt, Some("w-live")); // its session names another row of the group: a stale cross-reference
+        f.floors(&k, &anchor, 0);
+        if beating {
+            f.put(&f.ds(&format!("heartbeats/{anchor}.json")), &format!("{{\"ts\":{}}}", NOW - 1000));
+        }
+        let end = fold::run(&f.ctx(), &System::configured(), &k, &Hooks::none()).unwrap();
+        let want: Vec<String> = retired.iter().map(|_| anchor.clone()).collect();
+        assert_eq!(end.result.retired, want, "beating={beating}: {:?}", end.deferred);
+        assert!(end.deferred.is_empty(), "beating={beating}: decided natively, not handed back: {:?}", end.deferred);
+        assert_eq!(f.rows(&k).contains(&anchor), beating, "beating={beating}");
+    }
+}
+
 #[test]
 fn s6_the_engine_switch_is_off_by_default_and_a_deferred_store_writes_nothing() {
-    let f = fix("s6-off");
+    // the switch (`devswarm_sup.sweep_tail_mode`) defaults to the engine; `off` hands the store to nobody: the pass is refused before
+    // anything is read, nothing is written (counted as disabled)
+    let mut f = fix("s6-off");
     let (wt, k) = s6_base(&f);
     f.row_s(&k, "w-live", &wt, Some("s1"));
     f.row_s(&k, "w-ph", &wt, None);
+    f.st.env.insert("ANTIHALL_DEVSWARM_SWEEP_TAIL_MODE".into(), "off".into());
     let before = f.snapshot();
-    assert!(fold::run(&f.ctx(), &System::configured(), &k, &Hooks::none()).is_err(), "mode node hands the store to Node");
+    assert!(fold::run(&f.ctx(), &System::configured(), &k, &Hooks::none()).is_err(), "off: the engine takes no store");
     assert_eq!(f.snapshot(), before);
     // a missing store: nothing to fold, and nothing is created
     let g = fix6("s6-none");
@@ -2101,10 +2100,18 @@ fn no_message_row_is_deleted_or_updated() {
     let re = regex::Regex::new(r"(?i)(delete\s+from\s+messages|update\s+messages|drop\s+table\s+messages)").unwrap();
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/dssup/recon");
     let mut checked = 0;
-    for e in std::fs::read_dir(&dir).unwrap().flatten() {
-        let text = std::fs::read_to_string(e.path()).unwrap();
-        assert!(!re.is_match(&text), "{} modifies message rows", e.path().display());
-        checked += 1;
+    // every source file of the module tree, sub-modules included
+    let mut todo = vec![dir.clone()];
+    while let Some(d) = todo.pop() {
+        for e in std::fs::read_dir(&d).unwrap().flatten() {
+            if e.path().is_dir() {
+                todo.push(e.path());
+                continue;
+            }
+            let text = std::fs::read_to_string(e.path()).unwrap();
+            assert!(!re.is_match(&text), "{} modifies message rows", e.path().display());
+            checked += 1;
+        }
     }
     assert!(checked >= 7);
     // the SQL the ported modules use lives in sql.rs under the RECON_ prefix

@@ -132,7 +132,9 @@ fn snapshot(home: &Path, now: u128) -> BTreeMap<String, String> {
             } else {
                 let body = String::from_utf8_lossy(&std::fs::read(&path).unwrap()).replace(&root.to_string_lossy().to_string(), "$HOME");
                 let body = if rel.ends_with(".ndjson") {
-                    body.lines()
+                    // detached asks land in no fixed order: the rows are compared as a set
+                    let mut rows = body
+                        .lines()
                         .map(|l| {
                             serde_json::from_str::<Value>(l).map_or(l.to_string(), |mut v| {
                                 if let Some(o) = v.as_object_mut() {
@@ -142,8 +144,9 @@ fn snapshot(home: &Path, now: u128) -> BTreeMap<String, String> {
                                 v.to_string()
                             })
                         })
-                        .collect::<Vec<_>>()
-                        .join("\n")
+                        .collect::<Vec<_>>();
+                    rows.sort();
+                    rows.join("\n")
                 } else {
                     body
                 };
@@ -226,14 +229,18 @@ fn run_side(engine: bool, home: &Path, case: &Case) -> Vec<Out> {
         .collect()
 }
 
-/// Wait for the detached Jev asks of this home to land (the row count stops changing).
-fn settle(home: &Path) {
-    let log = home.join(".anti-hall/logs/jev-assist.ndjson");
-    let count = || std::fs::read_to_string(&log).map(|t| t.lines().count()).unwrap_or(0);
-    let (mut last, mut since) = (count(), Instant::now());
-    while since.elapsed() < Duration::from_millis(400) {
+/// Wait for the detached Jev asks of the two homes to land: both row counts have stopped changing AND are equal. A quiet
+/// spell alone is no sign of arrival: on a loaded machine a detached worker can need longer than the quiet spell to start
+/// and write its row, and the engine's worker starts after the Node one (gate run 2026-10-15: the Node home had the row, the
+/// engine home had not yet). The two sides must end with the same rows, so waiting for equal counts loses nothing; a real
+/// difference in the rows still fails, after the deadline.
+fn settle(a: &Path, b: &Path) {
+    let count = |home: &Path| std::fs::read_to_string(home.join(".anti-hall/logs/jev-assist.ndjson")).map(|t| t.lines().count()).unwrap_or(0);
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let (mut last, mut since) = ((count(a), count(b)), Instant::now());
+    while since.elapsed() < Duration::from_millis(400) || (last.0 != last.1 && Instant::now() < deadline) {
         std::thread::sleep(Duration::from_millis(40));
-        let n = count();
+        let n = (count(a), count(b));
         if n != last {
             (last, since) = (n, Instant::now());
         }
@@ -256,9 +263,10 @@ fn drive(name: &str, cases: Vec<Case>) -> (usize, usize, usize) {
         let seeded = snapshot(&he, now);
         let node = run_side(false, &hn, case);
         let eng = run_side(true, &he, case);
-        settle(&hn);
-        settle(&he);
-        let (an, ae) = (snapshot(&hn, now), snapshot(&he, now));
+        settle(&hn, &he);
+        let (an, mut ae) = (snapshot(&hn, now), snapshot(&he, now));
+        // the engine's advisory layer keeps its own per-session table state (W2: a fixed reminder fires once per change); Node has none
+        ae.retain(|k, _| !(k.starts_with(".anti-hall/advisory-state-") || k == ".anti-hall/.prune-stamp-advisory-state.json"));
         let ctx = |what: &str| {
             format!(
                 "{name}/{}: {what}\n node: {:?}\n  eng: {:?}\n node home: {an:?}\n  eng home: {ae:?}",
@@ -268,13 +276,23 @@ fn drive(name: &str, cases: Vec<Case>) -> (usize, usize, usize) {
             )
         };
         if case.defer {
-            assert_eq!(String::from_utf8_lossy(&eng[0].1), FALLBACK, "{}", ctx("the first step must defer"));
-            assert_eq!(
-                snapshot(&he, now).keys().filter(|k| *k != "t.jsonl").collect::<Vec<_>>(),
-                seeded.keys().collect::<Vec<_>>(),
-                "{}",
-                ctx("a deferral leaves the home as seeded")
-            );
+            // The old engine handed these inputs to the Node hook. It now answers them itself: the advisory text may be dropped (the
+            // Primary dispatch-tier block needs a working directory the request does not carry) but where Node blocks the engine must.
+            if String::from_utf8_lossy(&eng[0].1) == FALLBACK {
+                assert_eq!(
+                    snapshot(&he, now).keys().filter(|k| *k != "t.jsonl").collect::<Vec<_>>(),
+                    seeded.keys().collect::<Vec<_>>(),
+                    "{}",
+                    ctx("a deferral leaves the home as seeded")
+                );
+            } else {
+                for (i, (n, e)) in node.iter().zip(&eng).enumerate() {
+                    let (nt, et) = (String::from_utf8_lossy(&n.1), String::from_utf8_lossy(&e.1));
+                    if let Err(w) = crate::common::not_weaker_than_node((n.0, &nt), (e.0, &et)) {
+                        panic!("{}", ctx(&format!("step {i}: {w}")));
+                    }
+                }
+            }
             deferred += 1;
         } else {
             for (i, (n, e)) in node.iter().zip(&eng).enumerate() {
@@ -343,7 +361,8 @@ fn cases() -> Vec<Case> {
     v.push(case("stamp-negative-size", vec![step(p("s1"))]).file(".anti-hall/task-tracker-s1.json", &stamp(now - 1000.0, -5)));
     let mut grew = step(p("s1"));
     grew.transcript = Some(vec!["x".repeat(300_000)]);
-    v.push(case("growth-triggers-full", vec![grew.clone()]).file(".anti-hall/task-tracker-s1.json", &stamp(now - 1000.0, 10)));
+    // the full directive is re-sent on growth only once the minimum gap (growth_min_gap_ms, 30 min) since the last one has passed
+    v.push(case("growth-triggers-full", vec![grew.clone()]).file(".anti-hall/task-tracker-s1.json", &stamp(now - 7_200_000.0, 10)));
     v.push(case("growth-below-threshold", vec![grew.clone()]).file(".anti-hall/task-tracker-s1.json", &stamp(now - 1000.0, 200_000)));
     v.push(case(
         "no-transcript-path",
@@ -382,7 +401,7 @@ fn cases() -> Vec<Case> {
         vec![with(vec![upd, res]), step(p("s1")), step(p("s1"))]
     }));
     // what the engine hands to Node
-    v.push(case("actionable-pending-defers", vec![with(task(1, "Free and pending", "pending", json!({})))]).defer());
+    v.push(case("actionable-pending-demand", vec![with(task(1, "Free and pending", "pending", json!({})))]));
     v.push(case("actionable-pending-demand-off", vec![with(task(1, "Free and pending", "pending", json!({})))]).env("ANTIHALL_DISPATCH_DEMAND", "0"));
     let rule = "# Rules\n\nNo workspaces for real work.\n";
     v.push(case("devswarm-primary", vec![step(p("s1")), step(p("s1")), step(p("s1"))]).env("DEVSWARM_REPO_ID", "r"));
@@ -411,9 +430,8 @@ fn cases() -> Vec<Case> {
     v.push(case("devswarm-primary-cwd-number", vec![step(json!({"session_id":"s1","prompt":"x","cwd":5}))]).env("DEVSWARM_REPO_ID", "r"));
     v.push(case("devswarm-child-answers", vec![step(p("s1"))]).env("DEVSWARM_REPO_ID", "r").env("DEVSWARM_SOURCE_BRANCH", "b"));
     v.push(
-        case("dispatch-tier-outcome-pending-defers", vec![with(task(1, "x", "completed", json!({})))])
-            .file(".anti-hall/dispatch-tier-state.json", r#"{"requested":{},"sessions":{"s1":{"t":1,"tasks":{"1":{"tier":"subagent","h":"x"}}}}}"#)
-            .defer(),
+        case("dispatch-tier-outcome-pending", vec![with(task(1, "x", "completed", json!({})))])
+            .file(".anti-hall/dispatch-tier-state.json", r#"{"requested":{},"sessions":{"s1":{"t":1,"tasks":{"1":{"tier":"subagent","h":"x"}}}}}"#),
     );
     v.push(case("dispatch-tier-outcome-complete", vec![with(task(1, "x", "completed", json!({})))]).file(
         ".anti-hall/dispatch-tier-state.json",
@@ -487,6 +505,156 @@ fn cases() -> Vec<Case> {
         case("metrics-clean-no-rewrite", vec![step(p("s1"))])
             .file(".anti-hall/dispatch-demand-metrics.json", r#"{"demandsShown":1,"demandsFollowed":0,"demandsIgnored":0,"idleNeglectBlocks":0,"pending":{}}"#),
     );
+    // the per-turn DISPATCH NOW line, the running-agent cover and the unknown count
+    let agent_launch = |n: u32, desc: &str| {
+        let launch = json!({"type":"assistant","timestamp":"2026-10-06T08:01:00.000Z","message":{"id":format!("ag{n}"),"role":"assistant","content":[{"type":"tool_use","id":format!("tu_ag{n}"),"name":"Agent","input":{"description":desc,"prompt":"go","run_in_background":true}}]}}).to_string();
+        let res = json!({"type":"user","timestamp":"2026-10-06T08:01:01.000Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":format!("tu_ag{n}"),"content":[{"type":"text","text":format!("Async agent launched successfully.\nagentId: a{n}0000000000000 (internal ID)\noutput_file: /nonexistent/a{n}.output\n")}]}]}}).to_string();
+        vec![launch, res]
+    };
+    let mut two = task(1, "Parse the config", "pending", json!({}));
+    two.extend(task(2, "Write \"quoted\" docs", "pending", json!({})));
+    v.push(case("demand-two-pending", vec![with(two.clone()), step(p("s1"))]));
+    v.push(case("demand-priority-prefix", vec![with(task(1, "P1: tag stripped from the label", "pending", json!({})))]));
+    v.push(case("demand-with-blocked-and-open", {
+        let mut l = task(1, "In flight", "in_progress", json!({}));
+        l.extend(task(2, "Free", "pending", json!({})));
+        l.extend(task(3, "OWNER: choose", "pending", json!({})));
+        vec![with(l)]
+    }));
+    v.push(case("demand-fifteen-pending", {
+        let mut l = Vec::new();
+        for n in 1..=15 {
+            l.extend(task(n, &format!("Task number {n}"), "pending", json!({})));
+        }
+        vec![with(l)]
+    }));
+    v.push(case("demand-covered-by-running-agent", {
+        let mut l = two.clone();
+        l.extend(agent_launch(1, "work on #1 now"));
+        vec![with(l)]
+    }));
+    v.push(case("demand-all-covered", {
+        let mut l = two.clone();
+        l.extend(agent_launch(1, "work on #1"));
+        l.extend(agent_launch(2, "and #2"));
+        vec![with(l)]
+    }));
+    v.push(
+        case("demand-unmapped-agent-absorbs", {
+            let mut l = two.clone();
+            l.extend(agent_launch(1, "something else"));
+            vec![with(l)]
+        })
+        .env("ANTIHALL_MAX_PARALLEL_DISPATCH", "4"),
+    );
+    v.push(
+        case("demand-cap-reached", {
+            let mut l = two.clone();
+            l.extend(agent_launch(1, "work on #1"));
+            vec![with(l)]
+        })
+        .env("ANTIHALL_MAX_PARALLEL_DISPATCH", "1"),
+    );
+    v.push(case("demand-unknown-count", {
+        let mut l = task(1, "Old task", "pending", json!({}));
+        l.extend((0..160_000).map(|i| json!({"type":"assistant","timestamp":"2026-10-06T08:02:00.000Z","message":{"id":format!("f{i}"),"role":"assistant","content":[{"type":"text","text":"x".repeat(60)}]}}).to_string()));
+        vec![with(l)]
+    }));
+    v.push(case("demand-records-and-scores", vec![with(two.clone()), step(p("s1")), step(p("s1"))]));
+
+    // the dispatchTier annotation, its requests and the outcome tracking (Jev on: the cache and the state are the home's)
+    let th = |text: &str| ah_engine::jev::assist::content_hash(&["dispatchTier", "v1", text]);
+    let cache_of = |rows: &[(&str, &str)]| format!("{{{}}}", rows.iter().map(|(t, body)| format!("\"{}\":{}", th(t), body)).collect::<Vec<_>>().join(","));
+    let jev_file = ".anti-hall/cache/jev-assist.json";
+    let free = || vec![with(task(1, "Free and pending", "pending", json!({})))];
+    let t = |c: Case| c.env("ANTIHALL_JEV", "1");
+    v.push(t(case("tier-subagent-shown", free()).file(jev_file, &cache_of(&[("Free and pending", r#"{"answer":"subagent","confidence":0.912}"#)]))));
+    v.push(t(case("tier-workflow-confident", free()).file(jev_file, &cache_of(&[("Free and pending", r#"{"answer":"workflow","confidence":0.8}"#)]))));
+    v.push(t(case("tier-workflow-low-confidence", free()).file(jev_file, &cache_of(&[("Free and pending", r#"{"answer":"workflow","confidence":0.5}"#)]))));
+    v.push(t(case("tier-workflow-no-confidence", free()).file(jev_file, &cache_of(&[("Free and pending", r#"{"answer":"workflow"}"#)]))));
+    v.push(t(case("tier-workspace", free()).file(jev_file, &cache_of(&[("Free and pending", r#"{"answer":"workspace","confidence":0.95}"#)]))));
+    v.push(t(case("tier-workspace-repo-override", free())
+        .file(jev_file, &cache_of(&[("Free and pending", r#"{"answer":"workspace","confidence":0.95}"#)]))
+        .file("proj/CLAUDE.md", "# Rules\n\nNo workspaces for real work.\n")));
+    v.push(t(case(
+        "tier-workspace-relative-cwd-defers",
+        vec![Step {
+            payload: {
+                let mut x = p("s1");
+                x["cwd"] = json!("proj");
+                x
+            },
+            transcript: Some(task(1, "Free and pending", "pending", json!({}))),
+        }],
+    )
+    .file(jev_file, &cache_of(&[("Free and pending", r#"{"answer":"workspace","confidence":0.95}"#)]))
+    .defer()));
+    v.push(t(case("tier-unknown-answer-no-note", free()).file(jev_file, &cache_of(&[("Free and pending", r#"{"answer":"banana","confidence":0.9}"#)]))));
+    v.push(t(case("tier-non-string-answer", free()).file(jev_file, &cache_of(&[("Free and pending", r#"{"answer":5,"confidence":0.9}"#)]))));
+    v.push(t(case("tier-no-verdict-asks", free())));
+    v.push(t(case("tier-no-verdict-marker-fresh", free())
+        .file(".anti-hall/dispatch-tier-state.json", &format!(r#"{{"requested":{{"{}":9999999999999}},"sessions":{{}}}}"#, th("Free and pending")))));
+    v.push(t(case("tier-with-description", vec![with(task(1, "Ship it", "pending", json!({"description": "in two parts"})))])
+        .file(jev_file, &cache_of(&[("Ship it\nin two parts", r#"{"answer":"subagent","confidence":0.7}"#)]))));
+    v.push(t(case("tier-shadow-logs-only", free())
+        .file(".anti-hall/settings.json", r#"{"jevIntegrations":{"dispatchTier":"shadow"}}"#)
+        .file(jev_file, &cache_of(&[("Free and pending", r#"{"answer":"subagent","confidence":0.9}"#)]))));
+    v.push(t(case("tier-integration-off", free())
+        .file(".anti-hall/settings.json", r#"{"jevIntegrations":{"dispatchTier":"off"}}"#)
+        .file(jev_file, &cache_of(&[("Free and pending", r#"{"answer":"subagent","confidence":0.9}"#)]))));
+    v.push(t(case("tier-two-prompts-remember-once", {
+        let mut f = free();
+        f.push(step(p("s1")));
+        f
+    })
+    .file(jev_file, &cache_of(&[("Free and pending", r#"{"answer":"subagent","confidence":0.9}"#)]))));
+    v.push(t(case("tier-state-array-defers", free()).file(".anti-hall/dispatch-tier-state.json", "[]").defer()));
+    v.push(t(case("tier-state-garbage-ok", free())
+        .file(".anti-hall/dispatch-tier-state.json", "{oops")
+        .file(jev_file, &cache_of(&[("Free and pending", r#"{"answer":"subagent","confidence":0.9}"#)]))));
+    v.push(t(case("tier-cache-garbage", free()).file(jev_file, "{oops")));
+    let tracked = |tier: &str, extra: &str| {
+        format!(
+            r#"{{"requested":{{}},"sessions":{{"s1":{{"t":1,"tasks":{{"1":{{"h":"hh","tier":"{tier}","raw":"{tier}","conf":0.9,"mode":"on"{extra}}}}}}}}}}}"#
+        )
+    };
+    let spawn_for = |n: u32| {
+        let mut l = task(1, "Free and pending", "completed", json!({}));
+        for i in 0..n {
+            l.extend(agent_launch(i + 1, "work on #1"));
+        }
+        l
+    };
+    v.push(t(case("outcome-subagent-one-lane", vec![with(spawn_for(1))]).file(".anti-hall/dispatch-tier-state.json", &tracked("subagent", ""))));
+    v.push(t(case("outcome-subagent-escalated", vec![with(spawn_for(2))]).file(".anti-hall/dispatch-tier-state.json", &tracked("subagent", ""))));
+    v.push(t(case("outcome-workflow-fanned-out", vec![with(spawn_for(3))]).file(".anti-hall/dispatch-tier-state.json", &tracked("workflow", ""))));
+    v.push(t(case("outcome-workflow-no-fanout", vec![with(spawn_for(1))]).file(".anti-hall/dispatch-tier-state.json", &tracked("workflow", ""))));
+    v.push(t(case("outcome-workspace-overridden", vec![with(spawn_for(1))]).file(".anti-hall/dispatch-tier-state.json", &tracked("workspace", ""))));
+    v.push(t(case("outcome-not-dispatched-yet", vec![with(task(1, "Free and pending", "pending", json!({})))])
+        .file(".anti-hall/dispatch-tier-state.json", &tracked("subagent", ""))));
+    v.push(t(case("outcome-dispatched-then-done", vec![with(task(1, "Free and pending", "completed", json!({})))])
+        .file(".anti-hall/dispatch-tier-state.json", &tracked("subagent", r#","dispatch":"subagent""#))));
+    v.push(t(case("outcome-workspace-spawn-command", {
+        let mut l = task(1, "Free and pending", "pending", json!({}));
+        l.push(json!({"type":"assistant","timestamp":"2026-10-06T08:03:00.000Z","message":{"id":"w1","role":"assistant","content":[{"type":"tool_use","id":"tw1","name":"Bash","input":{"command":"node scripts/devswarm.js spawn feat --task #1"}}]}}).to_string());
+        vec![with(l)]
+    }).file(".anti-hall/dispatch-tier-state.json", &tracked("workspace", ""))));
+    v.push(
+        case("outcome-sessions-array-reads-as-js", vec![with(task(1, "x", "completed", json!({})))])
+            .env("ANTIHALL_DISPATCH_DEMAND", "0")
+            .file(".anti-hall/dispatch-tier-state.json", r#"{"sessions":[]}"#),
+    );
+    v.push(
+        case("outcome-state-array-reads-as-js", vec![with(task(1, "x", "completed", json!({})))])
+            .env("ANTIHALL_DISPATCH_DEMAND", "0")
+            .file(".anti-hall/dispatch-tier-state.json", "[]"),
+    );
+    v.push(t(case("outcome-record-not-object-defers", vec![with(task(1, "x", "completed", json!({})))])
+        .file(".anti-hall/dispatch-tier-state.json", r#"{"requested":{},"sessions":{"s1":{"t":1,"tasks":{"1":7}}}}"#)
+        .defer()));
+    v.push(t(case("outcome-odd-id-defers", vec![with(task(1, "x", "completed", json!({})))])
+        .file(".anti-hall/dispatch-tier-state.json", r#"{"requested":{},"sessions":{"s1":{"t":1,"tasks":{"1.5":{"h":"hh","tier":"subagent"}}}}}"#)
+        .defer()));
     // the burst collapse: a queued prompt delivered twice with the same text
     v.push(case("burst-same-session-twice", vec![step(p("s1")), step(p("s1"))]).env("ANTIHALL_INJECTION_REPEAT_EVERY", "0"));
     v.push(case("dedupe-store-garbage", vec![step(p("s1"))]).file(".anti-hall/emit-dedupe/dedupe-s1.json", "{oops"));
@@ -497,7 +665,14 @@ fn cases() -> Vec<Case> {
 fn the_tracker_says_and_writes_exactly_what_node_does() {
     let cs = cases();
     assert!(cs.len() >= 60, "the corpus must stay broad: {}", cs.len());
+    // `AH_PARITY_ONLY=<substring>` runs the matching cases only (a focused check; the full corpus is the gate)
+    if let Ok(only) = std::env::var("AH_PARITY_ONLY") {
+        let picked: Vec<Case> = cs.into_iter().filter(|c| c.name.contains(only.as_str())).collect();
+        assert!(!picked.is_empty(), "no case matches AH_PARITY_ONLY={only}");
+        drive("tracker", picked);
+        return;
+    }
     let (same, deferred, emitted) = drive("tracker", cs);
-    assert!(same >= 50 && deferred >= 5, "answered {same} deferred {deferred}");
+    assert!(same >= 50 && deferred >= 4, "answered {same} deferred {deferred}");
     assert!(emitted >= 40, "the corpus must exercise the emitted texts: {emitted}");
 }

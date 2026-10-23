@@ -18,7 +18,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 
-const { autoArchivedStateMigratePostUpdate } = require('../../plugins/anti-hall/skills/update/scripts/update.js');
+const { autoArchivedStateMigratePostUpdate } = require('../../plugins/anti-hall-node/skills/update/scripts/update.js');
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
 const PATHS = { pluginSrcDir: path.join(REPO_ROOT, 'plugins', 'anti-hall') };

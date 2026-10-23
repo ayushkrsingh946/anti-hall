@@ -19,8 +19,8 @@ const os = require('node:os');
 const path = require('node:path');
 const cp = require('node:child_process');
 
-const cli = require('../../plugins/anti-hall/scripts/devswarm.js');
-const identity = require('../../plugins/anti-hall/companion/lib/identity.js');
+const cli = require('../../plugins/anti-hall-node/scripts/devswarm.js');
+const identity = require('../../plugins/anti-hall-node/companion/lib/identity.js');
 
 function rm(p) { try { fs.rmSync(p, { recursive: true, force: true }); } catch (_) {} }
 function makeGitRepo(root, tag) {

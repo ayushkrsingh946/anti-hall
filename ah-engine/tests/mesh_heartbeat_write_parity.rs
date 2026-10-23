@@ -14,6 +14,7 @@
 //! The other tests: concurrent writers (engine and Node on one plan and one store, loss-free), the plan lock (held by a live
 //! process, left by a dead one) and injected faults (an unwritable plan directory, a store another process holds).
 #![allow(clippy::unwrap_used, clippy::expect_used)] // a test crate: a panic is the failure report, and E2 exempts tests
+#![allow(clippy::panic, clippy::unreachable)] // integration tests: a panic is the failure report; production crates deny these in Cargo.toml
 use serde_json::{Value, json};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -127,7 +128,16 @@ fn no_node_path(root: &Path) -> String {
 }
 
 fn tree(home: &Path) -> std::collections::BTreeMap<String, Vec<u8>> {
-    home_files(home).into_iter().map(|(k, v)| (k, normalized(home, &v))).collect()
+    // the caller log of a session-less heartbeat names the writing process (pid, parent pid, its own argv): blanked on both sides
+    let who = regex::Regex::new(r#""pid":[0-9]+,"ppid":[0-9]+,"argv":"(?:[^"\\]|\\.)*""#).unwrap();
+    home_files(home)
+        .into_iter()
+        .map(|(k, v)| {
+            let v = normalized(home, &v);
+            let v = if k.ends_with("heartbeat-callers.log") { who.replace_all(&String::from_utf8_lossy(&v), r#""pid":0,"ppid":0,"argv":"""#).into_owned().into_bytes() } else { v };
+            (k, v)
+        })
+        .collect()
 }
 
 fn assert_same_home(name: &str, a: &Path, b: &Path, key: &str, what: &str) {
@@ -147,13 +157,12 @@ fn assert_same_home(name: &str, a: &Path, b: &Path, key: &str, what: &str) {
 
 /// The detached verifier's newest record, waited for up to 40 s.
 fn verify_line(state: &Path) -> Value {
-    for _ in 0..400 {
+    {
         if let Ok(t) = fs::read_to_string(state.join("mesh-verify.jsonl"))
             && let Some(l) = t.lines().last()
         {
             return serde_json::from_str(l).unwrap();
         }
-        std::thread::sleep(std::time::Duration::from_millis(100));
     }
     json!({"result": "none"})
 }
@@ -299,7 +308,7 @@ fn cases() -> Vec<Case> {
             argv: vec![s("heartbeat"), s("child-1"), s("--summary"), s("x")],
             extra: vec![],
             setup: nothing(),
-            native: false,
+            native: true,
             expect: vec!["\"meshBroadcast\""],
             code: 0,
         },
@@ -954,14 +963,14 @@ fn run_cases(tag: &str, list: Vec<Case>, min_native: usize, min_deferred: usize)
             assert_eq!((e.code, &e.stdout), (n.code, &n.stdout), "{}: stdout/exit differ", c.name);
             assert_same_home(c.name, &hn, &he, &fx.repo_key, "node vs engine");
             let v = verify_line(&he.join("state"));
-            assert_eq!(v["result"], "match", "{}: the background Node shadow disagrees: {v}", c.name);
+            assert_eq!(v["result"], "none", "{}: a Node shadow record exists, but no shadow runs any more: {v}", c.name);
         } else {
             deferred += 1;
-            assert_eq!(e.code, n.code, "{}: exit code of the fallback", c.name);
+            assert_eq!(e.code, 69, "{}: no Node to hand the verb to, the engine is unable (69, a visible error)", c.name);
             let before = fx.root.join(format!("{}-before", c.name));
             prepare(&before, &fx, c);
             let d = engine_verb(&hd, &hd.join("state"), &cwd, &av, now, None, &[extra.clone(), vec![("PATH", nonode.as_str())]].concat());
-            assert_eq!(d.code, 75, "{}: a deferral the engine cannot hand to Node exits 75, got {} / {}", c.name, d.code, d.stdout);
+            assert_eq!(d.code, 69, "{}: a deferral the engine cannot hand to Node exits 69 (exit_unable), got {} / {}", c.name, d.code, d.stdout);
             assert!(d.stdout.is_empty(), "{}: nothing is printed on a deferral: {}", c.name, d.stdout);
             assert_eq!(last_log(&hd.join("state"))["result"], "defer", "{}: logged as a deferral", c.name);
             assert_same_home(c.name, &before, &hd, &fx.repo_key, "deferral wrote");
@@ -985,7 +994,7 @@ fn summary_and_plan_heartbeats_match_node_byte_for_byte_and_defer_without_writin
 
 /// A Node process that takes the plan's lock the way `updatePlan` does and holds it.
 fn hold_plan_lock(home: &Path, lock: &Path, hold_ms: u64) -> std::process::Child {
-    let lock_js = plugin_root().join("companion/lib/lock.js");
+    let lock_js = node_root().join("companion/lib/lock.js");
     let code = format!(
         "const l=require({:?});const h=l.acquire({:?},{{waitMs:0,stealDead:true,staleMs:30000,liveStaleMs:30000}});if(!h){{console.log('FAILED');process.exit(3)}}console.log('ready');setTimeout(()=>process.exit(0),{hold_ms});",
         lock_js.to_string_lossy(),
@@ -1166,9 +1175,9 @@ fn same_or_deferred(name: &str, fx: &Fx, prep: &dyn Fn(&Path), undo: &dyn Fn(&Pa
     if native {
         assert_eq!((e.code, &e.stdout), (n.code, &n.stdout), "{name}: stdout/exit differ");
     } else {
-        assert_eq!(e.code, n.code, "{name}: exit code of the fallback");
+        assert_eq!(e.code, 69, "{name}: no Node to hand the verb to, the engine is unable (69, a visible error)");
         let d = engine_verb(&hd, &hd.join("state"), &fx.child, &av, now, None, &[("PATH", nonode.as_str())]);
-        assert_eq!((d.code, d.stdout.is_empty()), (75, true), "{name}: deferral contract: {} / {}", d.code, d.stdout);
+        assert_eq!((d.code, d.stdout.is_empty()), (69, true), "{name}: deferral contract: {} / {}", d.code, d.stdout);
     }
     for h in [&hn, &he, &hd] {
         undo(h);

@@ -1,5 +1,5 @@
 'use strict';
-// proves: plugins/anti-hall/scripts/devswarm.js#appendIntoPartition — every routed writer below writes only under the verified lock.
+// proves: plugins/anti-hall-node/scripts/devswarm.js#appendIntoPartition — every routed writer below writes only under the verified lock.
 // PROOFS for tests/hygiene/partition-append-single-door.test.js. Every claim that a
 // writer "runs under the destination's lock" or "only writes its own / the broadcast
 // partition" is MEASURED here with tests/helpers/partition-lock-probe.js: for every
@@ -20,12 +20,13 @@ const path = require('node:path');
 const cp = require('node:child_process');
 
 const ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const cli = require(path.join(ROOT, 'scripts', 'devswarm.js'));
-const storeLib = require(path.join(ROOT, 'companion', 'lib', 'devswarm-store.js'));
-const recovery = require(path.join(ROOT, 'companion', 'lib', 'recovery.js'));
-const liveness = require(path.join(ROOT, 'companion', 'lib', 'liveness.js'));
-const inst = require(path.join(ROOT, 'companion', 'install-devswarm-ingest.js'));
-const repokey = require(path.join(ROOT, 'companion', 'lib', 'devswarm-repokey.js'));
+const NODE_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const cli = require(path.join(NODE_ROOT, 'scripts', 'devswarm.js'));
+const storeLib = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-store.js'));
+const recovery = require(path.join(NODE_ROOT, 'companion', 'lib', 'recovery.js'));
+const liveness = require(path.join(NODE_ROOT, 'companion', 'lib', 'liveness.js'));
+const inst = require(path.join(NODE_ROOT, 'companion', 'install-devswarm-ingest.js'));
+const repokey = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-repokey.js'));
 const probeLib = require('../helpers/partition-lock-probe.js');
 const { testHook } = require('../helpers/spawn-hook.js');
 
@@ -71,7 +72,7 @@ function directFields(to, message, hash) {
 // ---------------------------------------------------------------------------
 // child-turn (subprocess, probe preloaded)
 // ---------------------------------------------------------------------------
-test('proves: plugins/anti-hall/hooks/devswarm-child-turn.js#registerStoreDescriptor — the phantom-rescue fold writes into the child partition only under its lock', () => {
+test('proves: plugins/anti-hall-node/hooks/devswarm-child-turn.js#registerStoreDescriptor — the phantom-rescue fold writes into the child partition only under its lock', () => {
   const home = tmpHome();
   const out = path.join(home, 'probe.ndjson');
   const BUILDER = 'child-lockproof-rescue';
@@ -93,7 +94,7 @@ test('proves: plugins/anti-hall/hooks/devswarm-child-turn.js#registerStoreDescri
   } finally { rm(home); }
 });
 
-test('proves: plugins/anti-hall/hooks/devswarm-child-turn.js#retirePhantomWorktreeDuplicates — the phantom-descriptor retire forwards only under the survivor lock', () => {
+test('proves: plugins/anti-hall-node/hooks/devswarm-child-turn.js#retirePhantomWorktreeDuplicates — the phantom-descriptor retire forwards only under the survivor lock', () => {
   const home = tmpHome();
   const out = path.join(home, 'probe.ndjson');
   const PHANTOM = 'aaaaaaaa-bbbb-cccc-dddd-c45c1d4196'; // truncated uuid shape
@@ -119,7 +120,7 @@ test('proves: plugins/anti-hall/hooks/devswarm-child-turn.js#retirePhantomWorktr
 // ---------------------------------------------------------------------------
 // devswarm.js writers (in-process probe)
 // ---------------------------------------------------------------------------
-test('proves: plugins/anti-hall/scripts/devswarm.js#retireWorktreeDuplicates — cmdRegister\'s duplicate fold forwards only under the survivor lock', () => {
+test('proves: plugins/anti-hall-node/scripts/devswarm.js#retireWorktreeDuplicates — cmdRegister\'s duplicate fold forwards only under the survivor lock', () => {
   const home = tmpHome();
   const repo = makeGitRepo('reg');
   const BUILDER = 'builder-lockproof-reg';
@@ -139,7 +140,7 @@ test('proves: plugins/anti-hall/scripts/devswarm.js#retireWorktreeDuplicates —
   } finally { rm(home); rm(repo); }
 });
 
-test('proves: plugins/anti-hall/scripts/devswarm.js#rehomeAcrossStores — a rehome writes the destination only under the id lock, even when its caller took none', () => {
+test('proves: plugins/anti-hall-node/scripts/devswarm.js#rehomeAcrossStores — a rehome writes the destination only under the id lock, even when its caller took none', () => {
   const home = tmpHome();
   const id = 'rehome-lockproof';
   try {
@@ -154,7 +155,7 @@ test('proves: plugins/anti-hall/scripts/devswarm.js#rehomeAcrossStores — a reh
   } finally { rm(home); }
 });
 
-test('proves: plugins/anti-hall/scripts/devswarm.js#cmdSend — a direct send writes the recipient partition only under its lock', () => {
+test('proves: plugins/anti-hall-node/scripts/devswarm.js#cmdSend — a direct send writes the recipient partition only under its lock', () => {
   const home = tmpHome();
   const repo = makeGitRepo('send');
   try {
@@ -169,7 +170,7 @@ test('proves: plugins/anti-hall/scripts/devswarm.js#cmdSend — a direct send wr
   } finally { rm(home); rm(repo); }
 });
 
-test('proves: plugins/anti-hall/scripts/devswarm.js#cmdArchiveRequest — archive-request writes the child partition only under its lock', () => {
+test('proves: plugins/anti-hall-node/scripts/devswarm.js#cmdArchiveRequest — archive-request writes the child partition only under its lock', () => {
   const home = tmpHome();
   const repo = makeGitRepo('ar');
   try {
@@ -181,7 +182,7 @@ test('proves: plugins/anti-hall/scripts/devswarm.js#cmdArchiveRequest — archiv
   } finally { rm(home); rm(repo); }
 });
 
-test('proves: plugins/anti-hall/scripts/devswarm.js#cmdHeartbeat — heartbeat writes ONLY the shared broadcast partition', () => {
+test('proves: plugins/anti-hall-node/scripts/devswarm.js#cmdHeartbeat — heartbeat writes ONLY the shared broadcast partition', () => {
   const home = tmpHome();
   const repo = makeGitRepo('hb');
   try {
@@ -196,7 +197,7 @@ test('proves: plugins/anti-hall/scripts/devswarm.js#cmdHeartbeat — heartbeat w
   } finally { rm(home); rm(repo); }
 });
 
-test('proves: plugins/anti-hall/scripts/devswarm.js#cmdMergeVerb — merge writes ONLY the shared broadcast partition', () => {
+test('proves: plugins/anti-hall-node/scripts/devswarm.js#cmdMergeVerb — merge writes ONLY the shared broadcast partition', () => {
   const home = tmpHome();
   const repo = makeGitRepo('merge');
   try {
@@ -207,7 +208,7 @@ test('proves: plugins/anti-hall/scripts/devswarm.js#cmdMergeVerb — merge write
   } finally { rm(home); rm(repo); }
 });
 
-test('proves: plugins/anti-hall/companion/lib/devswarm-store.js#* — the store API writes exactly where it is told (direct -> `to`, broadcast -> the broadcast partition)', () => {
+test('proves: plugins/anti-hall-node/companion/lib/devswarm-store.js#* — the store API writes exactly where it is told (direct -> `to`, broadcast -> the broadcast partition)', () => {
   const home = tmpHome();
   try {
     const recs = withProbe(() => {

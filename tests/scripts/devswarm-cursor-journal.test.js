@@ -15,7 +15,9 @@ const path = require('node:path');
 
 const ROOT = process.env.ANTIHALL_TEST_PLUGIN_ROOT
   || path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const cli = require(path.join(ROOT, 'scripts', 'devswarm.js'));
+const NODE_ROOT = process.env.ANTIHALL_TEST_PLUGIN_ROOT
+  || path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const cli = require(path.join(NODE_ROOT, 'scripts', 'devswarm.js'));
 
 function tmpHome() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ah-cjrnl-'));
@@ -114,9 +116,9 @@ test('cursor journal: a torn line is skipped, never thrown on', () => {
 // ---------------------------------------------------------------------------
 
 const cp3 = require('node:child_process');
-const storeLib3 = require(path.join(ROOT, 'companion', 'lib', 'devswarm-store.js'));
-const repokey3 = require(path.join(ROOT, 'companion', 'lib', 'devswarm-repokey.js'));
-const cli3 = require(path.join(ROOT, 'scripts', 'devswarm.js'));
+const storeLib3 = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-store.js'));
+const repokey3 = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-repokey.js'));
+const cli3 = require(path.join(NODE_ROOT, 'scripts', 'devswarm.js'));
 function be3() { return (storeLib3.sqliteAvailable && storeLib3.sqliteAvailable()) ? 'sqlite' : 'journal'; }
 function repo3(tag) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ah-cj3-' + tag + '-'));

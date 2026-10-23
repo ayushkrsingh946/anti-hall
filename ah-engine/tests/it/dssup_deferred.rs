@@ -1,6 +1,7 @@
 //! The native deferred-stage tick against Node's `deferredSweepIfDue`: the same rotation cursor bytes, the same stage taken,
 //! the same "nothing pending" answer, and for a stage that has work the same final files (the stage body is Node's function in
-//! both). Cases cover every marker shape the peek reads and every cursor shape, ticking the whole rotation more than once.
+//! both). Cases cover every marker shape the peek reads and every cursor shape, ticking the whole rotation more than once. A shape the
+//! engine cannot read exactly like JavaScript is HELD (no Node to hand it to): counted, nothing written, tried again.
 use ah_engine::checks::git::util::Settings;
 use ah_engine::db::TempDir;
 use ah_engine::dsact::runner::System;
@@ -27,6 +28,11 @@ fn tree(home: &Path) -> BTreeMap<String, String> {
             let p = e.path();
             if e.file_type().unwrap().is_dir() {
                 walk(base, &p, out, re);
+            } else if p.file_name().is_some_and(|n| n.to_string_lossy().starts_with("devswarm-recon-witness")) {
+                // the engine's own result log of the native stages (devswarm_recon): Node writes no such file
+            } else if p.file_name().is_some_and(|n| n == "BACKEND") {
+                // Node opens a store the pending list names even when it does not exist yet, and leaves an empty store's backend marker;
+                // the engine creates no store it was not asked to heal (nothing a user's data lives in)
             } else if let Ok(t) = std::fs::read_to_string(&p) {
                 out.insert(p.strip_prefix(base).unwrap().to_string_lossy().into_owned(), re.replace_all(&t, "T").into_owned());
             }
@@ -54,8 +60,17 @@ fn engine_tick(home: &Path) -> Value {
     ah_engine::dssup::deferred::duty(&ctx, &System::configured())
 }
 
+/// The clock values masked, and every number compared as a number (the engine's record holds `20000.0` where Node's holds `20000`).
 fn mask(v: &Value) -> Value {
-    serde_json::from_str(&regex::Regex::new(r"[0-9]{13}").unwrap().replace_all(&v.to_string(), "T")).unwrap()
+    fn norm(v: Value) -> Value {
+        match v {
+            Value::Number(n) => n.as_f64().map_or(Value::Number(n), |x| serde_json::json!(x)),
+            Value::Array(a) => Value::Array(a.into_iter().map(norm).collect()),
+            Value::Object(o) => Value::Object(o.into_iter().map(|(k, x)| (k, norm(x))).collect()),
+            other => other,
+        }
+    }
+    norm(serde_json::from_str(&regex::Regex::new(r"[0-9]{13}").unwrap().replace_all(&v.to_string(), "T")).unwrap())
 }
 
 struct Case {
@@ -116,7 +131,7 @@ fn the_deferred_tick_is_nodes_on_every_marker_and_cursor_shape() {
         return;
     }
     ah_engine::defaults::init().unwrap();
-    let (mut ran, mut idle) = (0, 0);
+    let (mut ran, mut idle, mut held) = (0, 0, 0);
     for case in cases() {
         let t = TempDir::new("dssup-deferred");
         let dir = std::fs::canonicalize(&t.0).unwrap();
@@ -128,7 +143,16 @@ fn the_deferred_tick_is_nodes_on_every_marker_and_cursor_shape() {
             }
         }
         for tick in 0..5 {
-            let (n, e) = (node_tick(&a), engine_tick(&b));
+            let before = tree(&b);
+            let e = engine_tick(&b);
+            if e["outcome"] == "held" {
+                // the one shape the engine will not guess (a fractional cursor): nothing written
+                assert_eq!(case.name, "cursor fractional", "{}: only this shape is held: {e}", case.name);
+                assert_eq!(before, tree(&b), "{}: a held tick wrote", case.name);
+                held += 1;
+                break;
+            }
+            let n = node_tick(&a);
             // Node's record is the duty's detail; a fallback to Node's function carries it too
             if n["ran"] == true {
                 ran += 1;
@@ -139,5 +163,6 @@ fn the_deferred_tick_is_nodes_on_every_marker_and_cursor_shape() {
             assert_eq!(tree(&a), tree(&b), "{}: tick {tick}", case.name);
         }
     }
+    assert_eq!(held, 1, "the fractional cursor is held");
     assert!(ran >= 5 && idle >= 30, "the cases must reach both the stage run and the idle answer: ran {ran}, idle {idle}");
 }

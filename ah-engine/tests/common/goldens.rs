@@ -137,7 +137,7 @@ fn refs(file: &Path, src: &str, plugin: &Path) -> Vec<PathBuf> {
     out
 }
 
-/// The fingerprint of `entries` (paths relative to the repository root, e.g. `plugins/anti-hall/hooks/api-guard.js`) and their
+/// The fingerprint of `entries` (paths relative to the repository root, e.g. `plugins/anti-hall-node/hooks/api-guard.js`) and their
 /// require-closure, plus `.claude-plugin/plugin.json` (read by the settings layer) and the tools' versions.
 pub fn fingerprint(entries: &[&str], tools: &[Tool]) -> Fingerprint {
     let root = repo_root();
@@ -245,6 +245,17 @@ impl Norm {
             t = re.replace_all(&t, tok.as_str()).to_string();
         }
         t
+    }
+    /// The declared intended difference: `node <path>/devswarm.js` becomes the engine shim under the registered `HOME`
+    /// (`wake-watch.js` likewise); without a registered `HOME` only the file name is kept.
+    pub fn engine_cmds(&self, s: &str) -> String {
+        let home = self.subs.iter().find(|(_, tok)| tok == "{HOME}").map(|(from, _)| from.clone());
+        let re = Regex::new(r"node (?:\S*/)?(devswarm|wake-watch)\.js\b").expect("static regex");
+        re.replace_all(s, |c: &regex::Captures| match &home {
+            Some(h) => format!("{h}/{}/{}.js", ".anti-hall/bin", &c[1]),
+            None => format!("{}.js", &c[1]),
+        })
+        .to_string()
     }
     pub fn undo(&self, s: &str) -> String {
         let mut t = s.to_string();
@@ -396,7 +407,15 @@ impl Golden {
 
     /// Node's answer for case `id` (one id per case and step). `input` is everything that determines the answer, already free of
     /// run-specific text except what `norm` replaces; it is stored only as a hash. `live` runs Node.
+    ///
+    /// ONE declared intended difference is applied to what is returned (never to what is stored or compared against the golden): Node
+    /// tells agents to run `node <...>/devswarm.js` (or `wake-watch.js`); the engine names the shim `devswarm_role.engine_cli` /
+    /// `engine_watcher` instead, which needs no Node. Node's text is mapped to the engine's string (see `Norm::engine_cmds`).
     pub fn node(&self, id: &str, input: &[u8], norm: &Norm, live: impl FnOnce() -> Answer) -> Answer {
+        self.node_raw(id, input, norm, live).map(|s| norm.engine_cmds(s))
+    }
+
+    fn node_raw(&self, id: &str, input: &[u8], norm: &Norm, live: impl FnOnce() -> Answer) -> Answer {
         let in_hash = sha256_hex(norm.apply(&String::from_utf8_lossy(input)).as_bytes())[..16].to_string();
         let volatile = self.is_volatile(id);
         match self.mode {

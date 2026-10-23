@@ -23,6 +23,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const PLUGIN = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
+const NODE_PLUGIN = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
 const CLAUDE_HOOKS_JSON = path.join(PLUGIN, 'hooks', 'hooks.registry.json');
 const CODEX_HOOKS_JSON = path.join(PLUGIN, 'codex', 'hooks', 'hooks.registry.json');
 
@@ -53,7 +54,7 @@ test('Claude hooks.json is valid JSON and registers the four Phase-1 hooks on th
 
   // Every command uses the ${CLAUDE_PLUGIN_ROOT} shape the other entries use.
   for (const c of [...ups, ...stop].filter((c) => /devswarm-(parent|child)-/.test(c))) {
-    assert.match(c, /\$\{CLAUDE_PLUGIN_ROOT\}\/hooks\/devswarm-/, `Phase-1 hook not using CLAUDE_PLUGIN_ROOT: ${c}`);
+    assert.match(c, /\$\{CLAUDE_PLUGIN_ROOT\}\/(?:\.\.\/anti-hall-node\/)?hooks\/devswarm-/, `Phase-1 hook not using CLAUDE_PLUGIN_ROOT: ${c}`);
   }
 });
 
@@ -100,7 +101,7 @@ test('Codex port mirrors the five Phase-1 DevSwarm hooks on the matching events'
   // Every command uses the ${PLUGIN_ROOT} shape the rest of the Codex file uses
   // (never ${CLAUDE_PLUGIN_ROOT}) — reuse of the SAME shared hook files, no fork.
   for (const c of [...sessionStart, ...ups, ...stop].filter((c) => /devswarm-(parent|child)-/.test(c))) {
-    assert.match(c, /\$\{PLUGIN_ROOT\}\/hooks\/devswarm-/, `Codex Phase-1 hook not using PLUGIN_ROOT: ${c}`);
+    assert.match(c, /\$\{PLUGIN_ROOT\}\/(?:\.\.\/anti-hall-node\/)?hooks\/devswarm-/, `Codex Phase-1 hook not using PLUGIN_ROOT: ${c}`);
     assert.doesNotMatch(c, /CLAUDE_PLUGIN_ROOT/, `Codex Phase-1 hook wrongly using CLAUDE_PLUGIN_ROOT: ${c}`);
   }
 });
@@ -108,7 +109,7 @@ test('Codex port mirrors the five Phase-1 DevSwarm hooks on the matching events'
 test('install-codex.js writes the thin trigger on every event the five Phase-1 DevSwarm hooks live on', () => {
   const { spawnSync } = require('node:child_process');
   const os = require('node:os');
-  const installer = path.join(PLUGIN, 'codex', 'install-codex.js');
+  const installer = path.join(NODE_PLUGIN, 'codex', 'install-codex.js');
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'antihall-devswarm-codex-install-'));
   try {
     const r = spawnSync(process.execPath, [installer], { cwd: tmp, encoding: 'utf8' });
@@ -138,7 +139,7 @@ test('codex/hooks/hooks.json and install-codex.js both register the PostToolUse 
 
   const { spawnSync } = require('node:child_process');
   const os = require('node:os');
-  const installer = path.join(PLUGIN, 'codex', 'install-codex.js');
+  const installer = path.join(NODE_PLUGIN, 'codex', 'install-codex.js');
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'antihall-devswarm-codex-install-posttooluse-'));
   try {
     const r = spawnSync(process.execPath, [installer], { cwd: tmp, encoding: 'utf8' });

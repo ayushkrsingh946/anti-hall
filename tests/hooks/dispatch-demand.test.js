@@ -258,7 +258,7 @@ test('METRICS: demand shown -> next turn with an Agent spawn scores followed; ID
     m = JSON.parse(fs.readFileSync(mpath, 'utf8'));
     assert.strictEqual(m.idleNeglectBlocks, 1, JSON.stringify(m));
     // The report surfaces the three metrics.
-    const rep = require('../../plugins/anti-hall/scripts/dispatch-report.js').build(h.home).dispatchDemand;
+    const rep = require('../../plugins/anti-hall-node/scripts/dispatch-report.js').build(h.home).dispatchDemand;
     assert.deepStrictEqual(
       [rep.demandsShown, rep.demandsFollowed, rep.complianceRate, rep.idleNeglectBlocks], [1, 1, 1, 1]);
   } finally { h.cleanup(); }
@@ -385,7 +385,7 @@ test('L34: agent launched in-window and pending is counted regardless of plugin 
 });
 
 test('L34: transcript unreadable by the scan -> evaluate() reports unknown, never fires', () => {
-  const DD = require('../../plugins/anti-hall/hooks/lib/dispatch-demand.js');
+  const DD = require('../../plugins/anti-hall-node/hooks/lib/dispatch-demand.js');
   const res = DD.evaluate({ actionable: [{ id: '1', content: 'a' }], knownIds: ['1'], running: null, cap: 14 });
   assert.strictEqual(res.fire, false);
   assert.strictEqual(res.unknown, true);
@@ -502,7 +502,7 @@ test('PROVEN-ONLY probes: still blocks when the claim is proven', () => {
 });
 
 test('evaluate(): proven is fire && dispatch > unmapped', () => {
-  const DD = require('../../plugins/anti-hall/hooks/lib/dispatch-demand.js');
+  const DD = require('../../plugins/anti-hall-node/hooks/lib/dispatch-demand.js');
   const act = [{ id: '2', content: 'b' }];
   const one = DD.evaluate({ actionable: act, knownIds: ['1', '2'], inProgressIds: ['1'], running: [{ description: 'x' }], cap: 8 });
   assert.strictEqual(one.fire, true);
@@ -576,7 +576,7 @@ test('PROVEN COVER: an agent launched before the task existed (an unrelated revi
 });
 
 test('evaluate(): proven discounts stale and pre-task unmapped agents; unknown times keep them', () => {
-  const DD = require('../../plugins/anti-hall/hooks/lib/dispatch-demand.js');
+  const DD = require('../../plugins/anti-hall-node/hooks/lib/dispatch-demand.js');
   const now = Date.parse('2026-10-04T12:00:00Z');
   const base = { knownIds: ['1'], inProgressIds: [], cap: 8, nowMs: now, agentMaxAgeMs: 30 * 60 * 1000 };
   const task = (sinceMs) => [{ id: '1', content: 'a', sinceMs }];
@@ -587,4 +587,35 @@ test('evaluate(): proven discounts stale and pre-task unmapped agents; unknown t
   assert.strictEqual(run(task(now - 5 * 60000), ag({ launchedAtMs: now - 10 * 60000, lastActivityMs: now - 1 * 60000 })).proven, true, 'launched before the task');
   assert.strictEqual(run(task(undefined), ag({ launchedAtMs: now - 10 * 60000, lastActivityMs: now - 1 * 60000 })).proven, false, 'unknown task time counts');
   assert.strictEqual(run(task(now - 5 * 60000), ag({ launchedAtMs: NaN, lastActivityMs: NaN })).proven, false, 'unknown agent age counts');
+});
+
+// ---- generic block: a task owned by a RUNNING agent is attended (dogfood 2026-10-09) ----
+function genericBlocked(r) { return r.status === 0 && r.json && r.json.decision === 'block'; }
+function ownedTranscript(owner, extra) {
+  return [
+    ...createTasks(['implement the cache layer'], 1),
+    taskUpdate('toolu_u1', { taskId: '1', status: 'in_progress', owner }),
+    ...agentLaunch('toolu_a1', 'abc123def', 'implement the cache layer'),
+    ...(extra || []),
+  ];
+}
+for (const [what, owner] of [['agent id', 'abc123def'], ['agent description', 'implement the cache layer']]) {
+  test('ATTENDED: open task owned by a running agent (' + what + ') -> task-guard does not block', () => {
+    const h = makeHome();
+    try {
+      const tp = h.writeTranscript(ownedTranscript(owner));
+      const r = testHook(GUARD, stopPayload(tp), { home: h.home, env: HIGH_CAP });
+      assert.ok(!genericBlocked(r), 'a live agent owns it; stdout: ' + r.stdout);
+    } finally { h.cleanup(); }
+  });
+}
+test('STILL BLOCKS: owner names an agent that already finished, or one that never existed', () => {
+  for (const [owner, extra] of [['abc123def', [agentDone('abc123def')]], ['ghost-agent', []]]) {
+    const h = makeHome();
+    try {
+      const tp = h.writeTranscript(ownedTranscript(owner, extra));
+      const r = testHook(GUARD, stopPayload(tp), { home: h.home, env: HIGH_CAP });
+      assert.ok(genericBlocked(r), 'owner ' + owner + ' is not a live agent; stdout: ' + r.stdout);
+    } finally { h.cleanup(); }
+  }
 });

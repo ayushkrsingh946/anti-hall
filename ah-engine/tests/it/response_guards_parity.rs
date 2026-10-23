@@ -106,10 +106,10 @@ fn output_verify_cases() -> Vec<Case> {
         format!(r#"{{"hook_event_name":"PostToolUse","tool_name":"Bash","session_id":"s1","tool_input":{{"command":"npm test"}},"tool_response":{resp}}}"#)
     };
     v.push(c("ov-raw-unsorted-unambiguous").raw(&raw_resp(r#"{"stdout":"8 passed","stderr":"2 failed","interrupted":false}"#), Expect::Same));
-    v.push(c("ov-raw-unsorted-ambiguous-defers").raw(&raw_resp(r#"{"stdout":"2 failed 8 passed","stderr":"5 failed"}"#), Expect::Defer));
-    v.push(c("ov-raw-unsorted-ambiguous-pass-defers").raw(&raw_resp(r#"{"stdout":"9 passed","stderr":"4 passed 1 failed"}"#), Expect::Defer));
+    v.push(c("ov-raw-unsorted-ambiguous-matches").raw(&raw_resp(r#"{"stdout":"2 failed 8 passed","stderr":"5 failed"}"#), Expect::Same));
+    v.push(c("ov-raw-unsorted-ambiguous-pass-matches").raw(&raw_resp(r#"{"stdout":"9 passed","stderr":"4 passed 1 failed"}"#), Expect::Same));
     v.push(c("ov-raw-unsorted-same-text-in-both").raw(&raw_resp(r#"{"stdout":"2 failed 8 passed","stderr":"2 failed"}"#), Expect::Same));
-    v.push(c("ov-raw-unsorted-exit-codes-defer").raw(&raw_resp(r#"{"stdout":"8 passed exit code: 2","stderr":"exit code: 5"}"#), Expect::Defer));
+    v.push(c("ov-raw-unsorted-exit-codes-matches").raw(&raw_resp(r#"{"stdout":"8 passed exit code: 2","stderr":"exit code: 5"}"#), Expect::Same));
     v.push(
         c("ov-raw-unsorted-structured-exit-wins").raw(&raw_resp(r#"{"stdout":"8 passed exit code: 2","stderr":"exit code: 5","exit_code":1}"#), Expect::Same),
     );
@@ -127,9 +127,9 @@ fn output_verify_cases() -> Vec<Case> {
     // size
     v.push(c("ov-huge-string-head-tail").same(post("npm test", json!(format!("{}8 passed\n{}2 failed", big(150_000, "a"), big(150_000, "b"))))));
     v.push(c("ov-huge-string-astral").same(post("npm test", json!(format!("{}8 passed 2 failed{}", big(100_001, "😀"), big(5, "z"))))));
-    v.push(c("ov-huge-string-astral-split-defers").defer(post("npm test", json!(format!("a{}8 passed 2 failed", big(100_000, "😀"))))));
+    v.push(c("ov-huge-string-astral-split-matches").same(post("npm test", json!(format!("a{}8 passed 2 failed", big(100_000, "😀"))))));
     v.push(c("ov-node-dash-test-is-not-a-runner").same(post("node --test", json!(mixed))));
-    v.push(c("ov-huge-object-defers").defer(post("npm test", json!({"stdout":big(250_000, "a"),"stderr":"2 failed"}))));
+    v.push(c("ov-huge-object-matches").same(post("npm test", json!({"stdout":big(250_000, "a"),"stderr":"2 failed"}))));
     // switches
     v.push(c("ov-env-off").env("ANTIHALL_OUTPUT_VERIFY_GUARD", "0").same(post("npm test", json!(mixed))));
     v.push(c("ov-env-off-word").env("ANTIHALL_OUTPUT_VERIFY_GUARD", "off").same(post("npm test", json!(mixed))));
@@ -339,7 +339,9 @@ fn claim_ledger_cases() -> Vec<Case> {
     v.push(c("no-transcript-path").same(without(msg("took 12 seconds"), "transcript_path")));
     v.push(c("transcript-path-number").same(stop(json!({"transcript_path": 5}))));
     v.push(c("transcript-path-empty").same(stop(json!({"transcript_path": ""}))));
-    v.push(c("transcript-relative-defers").defer(stop(json!({"transcript_path": "rel/t.jsonl"}))));
+    // #68: a relative transcript path is opened from the absolute payload cwd (/tmp holds no rel/t.jsonl): answered natively
+    v.push(c("transcript-relative-from-cwd").same(stop(json!({"transcript_path": "rel/t.jsonl"}))));
+    v.push(c("transcript-relative-no-cwd-defers").defer(without(stop(json!({"transcript_path": "rel/t.jsonl"})), "cwd")));
     v.push(c("transcript-missing-file").same(stop(json!({"transcript_path": "/nonexistent/dir/t.jsonl"}))));
     v.push(c("transcript-empty-file").transcript_raw("").same(stop(json!({}))));
     v.push(c("transcript-garbage-lines").transcript_raw("garbage\n{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"took 12 seconds\"}]}}\n[1,2]\n\"str\"\nnull\n").same(stop(json!({}))));
@@ -597,7 +599,10 @@ fn spec_cases() -> Vec<Case> {
     v.push(c("skip-all").file(".anti-hall/skip.json", &format!(r#"{{"all": {future}}}"#)).same(msg("It is probably the cache.")));
     v.push(c("skip-expired").file(".anti-hall/skip.json", r#"{"speculation-guard": 5}"#).same(msg("It is probably the cache.")));
     v.push(c("jev-env-answered").env("ANTIHALL_JEV", "1").same(msg("It is probably the cache.")));
-    v.push(c("jev-env-answered-no-hedge").env("ANTIHALL_JEV", "1").same(msg("All fine.")));
+    // Intended divergence (owner option B, the Stop-Jev gate, fix/stop-jev-gate 25832add): Node asks Jev about every reply and logs a
+    // jev-judge row, the engine asks only when the rule layer flagged a claim, so an unflagged reply leaves no row. Only that
+    // log row may differ; the verdict, exit code and stdout of this step are still compared exactly.
+    v.push(c("jev-env-answered-no-hedge").env("ANTIHALL_JEV", "1").engine_omits(".anti-hall/logs/jev-judge.ndjson").same(msg("All fine.")));
     v.push(c("jev-settings-answered").file(".anti-hall/settings.json", r#"{"jev":{"enabled":true}}"#).same(msg("It is probably the cache.")));
     v.push(c("jev-legacy-file-answered").file(".anti-hall/jev.json", r#"{"enabled":true}"#).same(msg("It is probably the cache.")));
     v.push(

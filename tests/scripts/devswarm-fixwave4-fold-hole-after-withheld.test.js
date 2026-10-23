@@ -9,7 +9,7 @@
 // fixwave2/fixwave3 files for another concurrently-running agent. This file
 // touches neither; it only READS `devswarm-mutant-kit.js` (shared helper,
 // safe to require from any test file) and the LIVE
-// `plugins/anti-hall/scripts/devswarm.js` (read-only — see
+// `plugins/anti-hall-node/scripts/devswarm.js` (read-only — see
 // `devswarm-mutant-kit.js`'s own header for why every mutation here runs
 // against an isolated scratch copy, never the live file on disk).
 //
@@ -71,7 +71,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const devswarmSource = require('./lib/devswarm-source.js');
 
-const DEVSWARM_PATH = path.join(__dirname, '../../plugins/anti-hall/scripts/devswarm.js');
+const DEVSWARM_PATH = path.join(__dirname, '../../plugins/anti-hall-node/scripts/devswarm.js');
 const mutantKit = require('./lib/devswarm-mutant-kit.js');
 
 // EXPORT_ANCHOR — same anchor Fix Wave 3's G2 unit test uses to export the

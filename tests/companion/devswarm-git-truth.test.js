@@ -12,7 +12,7 @@ const os = require('node:os');
 const path = require('node:path');
 const cp = require('node:child_process');
 
-const gitTruth = require('../../plugins/anti-hall/companion/lib/devswarm-git-truth.js');
+const gitTruth = require('../../plugins/anti-hall-node/companion/lib/devswarm-git-truth.js');
 
 function git(dir, args) {
   const r = cp.spawnSync('git', ['-C', dir, ...args], { encoding: 'utf8' });

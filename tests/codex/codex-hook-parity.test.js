@@ -1,5 +1,5 @@
 'use strict';
-// AH01 regression: plugins/anti-hall/codex/install-codex.js's ANTI_HALL_HOOKS
+// AH01 regression: plugins/anti-hall-node/codex/install-codex.js's ANTI_HALL_HOOKS
 // registry must match the shipped Codex template at
 // plugins/anti-hall/codex/hooks/hooks.json's hook-file set, event by event.
 // The template is what ships in the .codex-plugin bundle; the installer is a
@@ -15,7 +15,7 @@ const path = require('node:path');
 
 const REPO = path.resolve(__dirname, '..', '..');
 const TEMPLATE_PATH = path.join(REPO, 'plugins', 'anti-hall', 'codex', 'hooks', 'hooks.registry.json');
-const INSTALLER_PATH = path.join(REPO, 'plugins', 'anti-hall', 'codex', 'install-codex.js');
+const INSTALLER_PATH = path.join(REPO, 'plugins', 'anti-hall-node', 'codex', 'install-codex.js');
 
 // Normalized full command of every hook a hooks-registry object (either the
 // parsed hooks.json `.hooks` object, or install-codex.js's ANTI_HALL_HOOKS)

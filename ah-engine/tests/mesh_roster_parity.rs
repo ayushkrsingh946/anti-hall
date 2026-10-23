@@ -6,6 +6,7 @@
 //! termination signal (only the engine runs that one: Node would wait for it for ever), a child it does report, and no
 //! binary at all. A fixture app database and the split-brain fallback summary are in play where they could matter.
 #![allow(clippy::unwrap_used, clippy::expect_used)] // a test crate: a panic is the failure report, and E2 exempts tests
+#![allow(clippy::panic, clippy::unreachable)] // integration tests: a panic is the failure report; production crates deny these in Cargo.toml
 use serde_json::{Value, json};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -85,7 +86,7 @@ fn stub_dir(root: &Path, name: &str, body: &str, lists: bool) -> PathBuf {
 
 /// Node's own probe (and, for a stub without the verb, Node's recording of the dormant line), run once on a home.
 fn prime_cache(home: &Path, path: &str, dormant: bool) {
-    let caps = plugin_root().join("companion/lib/devswarm-capabilities.js");
+    let caps = node_root().join("companion/lib/devswarm-capabilities.js");
     let dorm = if dormant { "c.can('workspace.list',{env:process.env,home:process.env.HOME});" } else { "" };
     let src = format!("const c=require({:?});c.probe({{env:process.env,home:process.env.HOME}});{dorm}", caps);
     let o = Command::new("node").args(["-e", &src]).env_clear().env("PATH", path).env("HOME", home).output().unwrap();
@@ -479,10 +480,10 @@ fn roster_matches_node_for_a_project_with_no_rows_and_defers_every_other() {
                 assert!(!stub.as_ref().unwrap().join("hivecontrol.ran").exists(), "{}: a refused call must not start the binary", c.name);
             }
             let verify = verify_line(&he.join("state"));
-            assert_eq!(verify["result"], "match", "{}: the background Node shadow disagrees: {verify}", c.name);
+            assert_eq!(verify["result"], "none", "{}: a Node shadow record exists, but no shadow runs any more: {verify}", c.name);
         } else {
             deferred += 1;
-            assert_eq!(e.code, n.code, "{}: exit code of the fallback", c.name);
+            assert_eq!(e.code, 69, "{}: no Node to hand the verb to, the engine is unable (69, a visible error)", c.name);
             let pre_tree = home_files(&hd);
             let pre_db = store_dump(&hd, &empty_key);
             let ran = stub.as_ref().map(|s| s.join("hivecontrol.ran"));
@@ -490,7 +491,7 @@ fn roster_matches_node_for_a_project_with_no_rows_and_defers_every_other() {
                 fs::remove_file(r).ok(); // Node's own run above started the stub
             }
             let d = run_engine(&hd, &nonode);
-            assert_eq!(d.code, 75, "{}: a deferral the engine cannot hand to Node exits 75, got {} / {}", c.name, d.code, d.stdout);
+            assert_eq!(d.code, 69, "{}: a deferral the engine cannot hand to Node exits 69 (exit_unable), got {} / {}", c.name, d.code, d.stdout);
             assert!(d.stdout.is_empty(), "{}: nothing is printed on a deferral: {}", c.name, d.stdout);
             assert_eq!(last_log(&hd.join("state"))["result"], "defer", "{}", c.name);
             assert!(pre_tree == home_files(&hd) && pre_db == store_dump(&hd, &empty_key), "{}: deferral wrote", c.name);
@@ -501,13 +502,12 @@ fn roster_matches_node_for_a_project_with_no_rows_and_defers_every_other() {
 }
 
 fn verify_line(state: &Path) -> Value {
-    for _ in 0..300 {
+    {
         if let Ok(t) = fs::read_to_string(state.join("mesh-verify.jsonl"))
             && let Some(l) = t.lines().last()
         {
             return serde_json::from_str(l).unwrap();
         }
-        std::thread::sleep(std::time::Duration::from_millis(100));
     }
     json!({"result": "none"})
 }

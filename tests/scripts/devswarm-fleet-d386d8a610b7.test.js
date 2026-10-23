@@ -36,9 +36,11 @@ const path = require('node:path');
 
 const ROOT = process.env.ANTIHALL_TEST_PLUGIN_ROOT
   || path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
+const NODE_ROOT = process.env.ANTIHALL_TEST_PLUGIN_ROOT
+  || path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
 
-const cliPath = path.join(ROOT, 'scripts', 'devswarm.js');
-const livenessPath = path.join(ROOT, 'companion', 'lib', 'liveness.js');
+const cliPath = path.join(NODE_ROOT, 'scripts', 'devswarm.js');
+const livenessPath = path.join(NODE_ROOT, 'companion', 'lib', 'liveness.js');
 if (!fs.existsSync(cliPath) || !fs.existsSync(livenessPath)) {
   throw new Error(
     'ANTIHALL_TEST_PLUGIN_ROOT=' + JSON.stringify(ROOT) + ' is not a plugins/anti-hall-shaped '

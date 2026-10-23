@@ -9,9 +9,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const { makeHome } = require('../helpers/fixtures.js');
-const M = require('../../plugins/anti-hall/companion/lib/migrations.js');
-const settings = require('../../plugins/anti-hall/hooks/lib/settings.js');
-const SCHEMA = require('../../plugins/anti-hall/hooks/lib/settings-schema.js');
+const M = require('../../plugins/anti-hall-node/companion/lib/migrations.js');
+const settings = require('../../plugins/anti-hall-node/hooks/lib/settings.js');
+const SCHEMA = require('../../plugins/anti-hall-node/hooks/lib/settings-schema.js');
 const manifest = require('../../plugins/anti-hall/.claude-plugin/plugin.json');
 
 function claudeSettings(home) { return path.join(home, '.claude', 'settings.json'); }
@@ -24,7 +24,7 @@ function seed(home, options, key, shape) {
 }
 const HEADLINE = ['safety.gitGuard', 'safety.commandGuard', 'safety.editGuard', 'safety.swarmGuard', 'autoHandover.enabled',
   'autoHandover.pct', 'jev.enabled', 'devswarm.supervisorMode', 'guards.modelRouting', 'limitConserve.mode'];
-const LOCKED_KEYS = ['devswarm.maintainerNotice.post', 'guards.allowAnthropicEnvKey', 'guards.allowSubagentMailbox', 'guards.editGuardAllow',
+const LOCKED_KEYS = ['devswarm.maintainerNotice.post', 'guards.allowAnthropicEnvKey', 'guards.allowSubagentMailbox', 'guards.broadKill', 'guards.editGuardAllow',
   'guards.gitAliasResolve', 'guards.gitReusedMessageCheck', 'guards.stashGuard', 'jev.allowLegacyKeyRead', 'jev.genericKeyVendor', 'safety.commandGuard', 'safety.editGuard', 'safety.gitGuard', 'safety.swarmGuard'];
 const eligible = () => SCHEMA.allSettings().filter((e) => e.pluginOption && !e.headline && !e.homeOnly);
 // n-th distinct valid non-default value for a setting (undefined when the type has no such value).

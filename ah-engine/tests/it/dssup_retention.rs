@@ -91,6 +91,10 @@ fn env_of(days: &str, keep: &str, max_mb: &str, archive: &str) -> HashMap<String
     e.insert("ANTIHALL_DEVSWARM_RETENTION_MAX_STORE_MB".into(), max_mb.into());
     e.insert("ANTIHALL_DEVSWARM_RETENTION_ARCHIVE".into(), archive.into());
     e.insert("ANTIHALL_DEVSWARM_RETENTION_BUDGET_MS".into(), "600000".into());
+    // the comparison with Node's sweep needs the two owner-gated removals ON (they are OFF by default and held: see
+    // `the_journal_fold_and_the_archive_cap_are_held_unless_the_owner_gates_are_on`)
+    e.insert("ANTIHALL_DEVSWARM_SUP_RETENTION_FOLD_ALONE".into(), "true".into());
+    e.insert("ANTIHALL_DEVSWARM_SUP_RETENTION_CAP_ALONE".into(), "true".into());
     e
 }
 
@@ -205,34 +209,6 @@ fn a_large_store_is_swept_like_nodes() {
 
 // ---- the safety properties ----------------------------------------------------------------------------------------------------
 
-/// Runs everything for real except Node's witness, whose answer a test rewrites.
-struct Rewriting<'a> {
-    inner: System,
-    witness: Box<dyn Fn(Value) -> Value + 'a>,
-    after_witness: Option<Box<dyn Fn() + 'a>>,
-    seen: Mutex<usize>,
-}
-
-impl Runner for Rewriting<'_> {
-    fn run(&self, spec: &RunSpec) -> RunResult {
-        let mut r = self.inner.run(spec);
-        let is_witness = spec.args.get(1).is_some_and(|s| s.contains("planStore"));
-        if is_witness && r.ok {
-            *self.seen.lock().unwrap() += 1;
-            let v: Value = serde_json::from_str(r.stdout.lines().last().unwrap()).unwrap();
-            r.stdout = format!("{}\n", (self.witness)(v));
-            if let Some(f) = &self.after_witness {
-                f();
-            }
-        }
-        r
-    }
-}
-
-fn rewriting<'a>(f: impl Fn(Value) -> Value + 'a) -> Rewriting<'a> {
-    Rewriting { inner: System::configured(), witness: Box::new(f), after_witness: None, seen: Mutex::new(0) }
-}
-
 fn untouched(c: &Corpus, home: &Path) {
     assert_eq!(bodies(&c.home), bodies(home), "a body changed");
     assert!(!home.join(".anti-hall/devswarm/archive").exists(), "an archive was written");
@@ -246,129 +222,6 @@ fn held_log(home: &Path) -> Vec<Value> {
         .lines()
         .filter_map(|l| serde_json::from_str(l).ok())
         .collect()
-}
-
-#[test]
-fn a_witness_that_disagrees_makes_the_engine_write_nothing() {
-    if !have_node_sqlite() {
-        return;
-    }
-    let c = generate("rt-dis", 41, "small");
-    let env = env_of("30", "5", "100", "true");
-    // one candidate fewer, one extra, one with another position, one statistic off: each alone must stop the sweep
-    type Rewrite = Box<dyn Fn(Value) -> Value>;
-    let cases: Vec<(&str, Rewrite)> = vec![
-        (
-            "a candidate missing",
-            Box::new(|mut v| {
-                v["cands"].as_array_mut().unwrap().pop();
-                v
-            }),
-        ),
-        (
-            "an extra candidate",
-            Box::new(|mut v| {
-                v["cands"].as_array_mut().unwrap().push(serde_json::json!([999_999, 1, "ws-1", 5, 1]));
-                v
-            }),
-        ),
-        (
-            "another position",
-            Box::new(|mut v| {
-                v["cands"][0][1] = serde_json::json!(v["cands"][0][1].as_i64().unwrap() + 1);
-                v
-            }),
-        ),
-        (
-            "a statistic off",
-            Box::new(|mut v| {
-                let k = v["parts"].as_object().unwrap().keys().next().unwrap().clone();
-                v["parts"][k]["protected"]["unread"] = serde_json::json!(-1);
-                v
-            }),
-        ),
-        (
-            "another count chosen",
-            Box::new(|mut v| {
-                v["dry"]["ageCandidates"] = serde_json::json!(v["dry"]["ageCandidates"].as_i64().unwrap() + 1);
-                v
-            }),
-        ),
-        (
-            "node could not plan",
-            Box::new(|mut v| {
-                v["dry"]["ok"] = serde_json::json!(false);
-                v
-            }),
-        ),
-    ];
-    for (name, f) in cases {
-        let h = copy_home(&c, &format!("dis-{}", name.replace(' ', "-")));
-        let r = rewriting(f);
-        let out = engine_duty(&h, c.now, &env, &r);
-        assert_eq!(*r.seen.lock().unwrap(), 1, "{name}");
-        assert!(out["detail"]["store"]["held"].is_string(), "{name}: {out}");
-        untouched(&c, &h);
-        let last = held_log(&h).into_iter().rev().find(|l| l["duty"] == "retention").unwrap();
-        assert_eq!(last["match"], false, "{name}: {last}");
-        // and it is not retried before the witness interval: the next tick does not even ask Node
-        let again = rewriting(|v| v);
-        engine_duty(&h, c.now + 1000, &env, &again);
-        assert_eq!(*again.seen.lock().unwrap(), 0, "{name}: retried at once");
-        untouched(&c, &h);
-    }
-}
-
-#[test]
-fn a_witness_that_cannot_run_writes_nothing_unless_it_is_switched_off() {
-    if !have_node_sqlite() {
-        return;
-    }
-    let c = generate("rt-nowit", 42, "small");
-    let env = env_of("30", "5", "100", "true");
-    struct NoNode(System);
-    impl Runner for NoNode {
-        fn run(&self, spec: &RunSpec) -> RunResult {
-            if spec.bin.as_deref() == Some("node") {
-                return RunResult { missing: true, error: Some("not found".into()), ..RunResult::default() };
-            }
-            self.0.run(spec)
-        }
-    }
-    let h = copy_home(&c, "nonode");
-    let out = engine_duty(&h, c.now, &env, &NoNode(System::configured()));
-    assert!(out["detail"]["store"]["held"].is_string(), "{out}");
-    untouched(&c, &h);
-    // switched off (Node decommissioned): the engine's two identical plans and its transaction checks are the guard
-    let mut off = env.clone();
-    off.insert("ANTIHALL_DEVSWARM_SUP_RETENTION_REQUIRE_WITNESS".into(), "false".into());
-    let h2 = copy_home(&c, "nonode-off");
-    let out = engine_duty(&h2, c.now, &off, &NoNode(System::configured()));
-    assert!(out["detail"]["store"]["tombstoned"].as_i64().unwrap() > 0, "{out}");
-}
-
-#[test]
-fn a_store_that_changes_during_the_comparison_is_left_alone() {
-    if !have_node_sqlite() {
-        return;
-    }
-    let c = generate("rt-move", 43, "small");
-    let env = env_of("30", "5", "100", "true");
-    let h = copy_home(&c, "move");
-    let mut r = rewriting(|v| v);
-    let home = h.clone();
-    // a reader falls back in the middle: a floor row is lowered after Node answered
-    r.after_witness = Some(Box::new(move || {
-        let conn = rusqlite::Connection::open(plan::db_path(&home, HASH)).unwrap();
-        conn.execute("UPDATE reader_cursors SET value = value / 2 WHERE ns = 'store'", []).unwrap();
-        conn.execute("DELETE FROM messages WHERE id = (SELECT MAX(id) FROM messages)", []).unwrap();
-    }));
-    let out = engine_duty(&h, c.now, &env, &r);
-    assert!(out["detail"]["store"]["held"].is_string(), "{out}");
-    let b = bodies(&h);
-    let b0 = bodies(&c.home);
-    assert!(b.iter().all(|(id, v)| b0.get(id) == Some(v) || !b0.contains_key(id)), "a body changed");
-    assert!(!h.join(".anti-hall/devswarm/archive").exists());
 }
 
 #[test]
@@ -431,8 +284,7 @@ fn the_dry_run_the_dry_run_phase_and_a_disabled_retention_write_nothing() {
     assert_eq!(out["outcome"], "dry-run", "{out}");
     assert!(out["detail"]["store"]["candidates"].as_i64().unwrap() > 0, "{out}");
     untouched(&c, &h);
-    // not armed, and Node's witness cannot answer (a recording runner stands in for Node): the engine writes nothing itself and
-    // the whole sweep is handed to Node's own function
+    // not armed (the first-run report phase): the engine reports natively, tombstones nothing, and asks no process for anything
     let h2 = copy_home(&c, "phase");
     std::fs::write(h2.join(".anti-hall/devswarm/retention-state.json"), r#"{"stores":{},"holds":{},"phase":"dry-run"}"#).unwrap();
     struct Rec(Mutex<Vec<String>>);
@@ -445,11 +297,10 @@ fn the_dry_run_the_dry_run_phase_and_a_disabled_retention_write_nothing() {
     let rec = Rec(Mutex::new(vec![]));
     let out = engine_duty(&h2, c.now, &env, &rec);
     assert_eq!(out["outcome"], "ran", "{out}");
-    let calls = rec.0.lock().unwrap();
-    assert_eq!(calls.len(), 2, "{calls:?}");
-    assert!(calls[0].contains("planStore") && calls[1].contains(".sweep("), "the witness first, then the whole sweep is Node's: {calls:?}");
+    assert_eq!(out["detail"]["phase"], "dry-run", "{out}");
+    assert!(rec.0.lock().unwrap().is_empty(), "the sweep is the engine's own, no process is run: {:?}", rec.0.lock().unwrap());
     assert_eq!(bodies(&c.home), bodies(&h2));
-    assert!(!h2.join(".anti-hall/devswarm/retention-dry-run.json").exists(), "the engine wrote a report without a witness");
+    assert!(h2.join(".anti-hall/devswarm/retention-dry-run.json").exists(), "the engine writes the first-run report itself");
     // disabled (days = 0): nothing runs at all
     let h3 = copy_home(&c, "off");
     let rec = Rec(Mutex::new(vec![]));
@@ -505,13 +356,12 @@ fn a_body_the_engine_cannot_read_like_node_hands_the_whole_sweep_to_node() {
     conn.execute("UPDATE messages SET body = x'00ff10' WHERE id = (SELECT MIN(id) FROM messages WHERE body IS NOT NULL)", []).unwrap();
     drop(conn);
     let before = bodies_raw(&h);
+    // there is no Node to hand the sweep to: the sweep is HELD (counted, nothing written), and no process is run
     let rec = Rec(Mutex::new(vec![]));
     let out = engine_duty(&h, c.now, &env_of("30", "5", "100", "true"), &rec);
-    let calls = rec.0.lock().unwrap();
-    assert_eq!(calls.len(), 1, "{calls:?}");
-    assert!(calls[0].contains(".sweep("), "{calls:?}");
-    assert_eq!(out["outcome"], "ran", "{out}");
-    assert_eq!(before, bodies_raw(&h), "the engine wrote before handing over");
+    assert!(rec.0.lock().unwrap().is_empty(), "{:?}", rec.0.lock().unwrap());
+    assert_eq!(out["outcome"], "held", "{out}");
+    assert_eq!(before, bodies_raw(&h), "the engine wrote before holding");
     assert!(!h.join(".anti-hall/devswarm/archive").exists());
 }
 
@@ -597,21 +447,25 @@ fn golden_ticks(c: &Corpus, env: &HashMap<String, String>, ticks: usize, witness
     let (a, b) = (copy_home(c, "node-t"), copy_home(c, "engine-t"));
     let mut out = Vec::new();
     for i in 0..ticks {
-        let now = c.now + (i as i64) * 1000;
-        let nres = node_sweep(&a, now, env);
-        let eres = engine_duty(&b, now, env, witness);
-        assert!(eres["detail"].get("node").is_none(), "tick {i}: the engine must decide itself: {eres}");
-        let (da, db) = (mask(&dump(&a)).replace(&*a.to_string_lossy(), "<h>"), mask(&dump(&b)).replace(&*b.to_string_lossy(), "<h>"));
-        if da != db
-            && let Ok(d) = std::env::var("AH_TEST_DUMP_DIR")
-        {
-            std::fs::write(Path::new(&d).join("a.txt"), &da).unwrap();
-            std::fs::write(Path::new(&d).join("b.txt"), &db).unwrap();
-        }
-        assert_eq!(da, db, "tick {i}: the engine's store, archive, report, state or log differ from Node's\nnode: {nres}\nengine: {eres}");
-        out.push(eres);
+        out.push(golden_tick(c, &a, &b, env, i, witness));
     }
     out
+}
+
+fn golden_tick(c: &Corpus, a: &Path, b: &Path, env: &HashMap<String, String>, i: usize, witness: &dyn Runner) -> Value {
+    let now = c.now + (i as i64) * 1000;
+    let nres = node_sweep(a, now, env);
+    let eres = engine_duty(b, now, env, witness);
+    assert!(eres["detail"].get("node").is_none(), "tick {i}: the engine must decide itself: {eres}");
+    let (da, db) = (mask(&dump(a)).replace(&*a.to_string_lossy(), "<h>"), mask(&dump(b)).replace(&*b.to_string_lossy(), "<h>"));
+    if da != db
+        && let Ok(d) = std::env::var("AH_TEST_DUMP_DIR")
+    {
+        std::fs::write(Path::new(&d).join("a.txt"), &da).unwrap();
+        std::fs::write(Path::new(&d).join("b.txt"), &db).unwrap();
+    }
+    assert_eq!(da, db, "tick {i}: the engine's store, archive, report, state or log differ from Node's\nnode: {nres}\nengine: {eres}");
+    eres
 }
 
 #[test]
@@ -680,63 +534,6 @@ fn the_engine_dry_switch_reports_nothing_to_disk_in_the_first_run_phase() {
     );
 }
 
-#[test]
-fn a_witness_that_disagrees_in_the_report_phase_leaves_the_sweep_to_node() {
-    if !have_node_sqlite() {
-        return;
-    }
-    let c = generate_multi("rt-dryph-dis", 65, 1, 0);
-    extra(&["dry-state", &c.home.to_string_lossy()]);
-    let env = env_of("30", "5", "100", "true");
-    let h = copy_home(&c, "dis");
-    let r = rewriting(|mut v| {
-        v["dry"]["overLimitProtected"] = serde_json::json!(true);
-        v
-    });
-    let out = engine_duty(&h, c.now, &env, &r);
-    assert!(out["node"].is_string(), "the sweep must go to Node: {out}");
-    // what Node then wrote is Node's own report (its clock, not the test's), and no body changed
-    assert!(h.join(".anti-hall/devswarm/retention-dry-run.json").exists());
-    assert_eq!(bodies(&c.home), bodies(&h));
-    let last = held_log(&h).into_iter().rev().find(|l| l["duty"] == "retention").unwrap();
-    assert_eq!(last["match"], false, "{last}");
-}
-
-/// Runs everything for real except the answer of the Node snippet that contains `marker`, which `f` rewrites.
-struct Alter<'a> {
-    inner: System,
-    marker: &'static str,
-    f: Box<dyn Fn(Value) -> Value + 'a>,
-    seen: Mutex<usize>,
-    fail: bool,
-}
-
-impl Runner for Alter<'_> {
-    fn run(&self, spec: &RunSpec) -> RunResult {
-        if spec.args.get(1).is_some_and(|s| s.contains(self.marker)) {
-            *self.seen.lock().unwrap() += 1;
-            if self.fail {
-                return RunResult { missing: true, error: Some("not found".into()), ..RunResult::default() };
-            }
-            let mut r = self.inner.run(spec);
-            if r.ok {
-                let v: Value = serde_json::from_str(r.stdout.lines().last().unwrap()).unwrap();
-                r.stdout = format!("{}\n", (self.f)(v));
-            }
-            return r;
-        }
-        self.inner.run(spec)
-    }
-}
-
-fn alter<'a>(marker: &'static str, f: impl Fn(Value) -> Value + 'a) -> Alter<'a> {
-    Alter { inner: System::configured(), marker, f: Box::new(f), seen: Mutex::new(0), fail: false }
-}
-
-fn no_node_for(marker: &'static str) -> Alter<'static> {
-    Alter { inner: System::configured(), marker, f: Box::new(|v| v), seen: Mutex::new(0), fail: true }
-}
-
 /// Every file under `dir` (relative path -> size).
 fn tree(dir: &Path) -> BTreeMap<String, u64> {
     let mut out = BTreeMap::new();
@@ -785,65 +582,33 @@ fn the_legacy_journal_fold_is_nodes_and_a_pending_merge_is_never_folded() {
     assert!(folded >= 10);
 }
 
+/// #234: with the owner gate on, the raw journal is removed only for a store whose merge is proven complete: sqlite chosen, the merge
+/// recorded (MERGE-STATE.json) and a fresh dry run of the merge finding nothing left to carry over. Node's `foldLegacyJournal` checks
+/// exactly this before it compresses and unlinks; byte-equality of the archive copy proves nothing about the messages in SQLite.
 #[test]
-fn a_journal_is_folded_only_when_nodes_dry_run_names_the_same_files() {
+fn a_journal_is_folded_only_for_a_store_whose_merge_is_recorded_and_has_nothing_pending() {
     if !have_node_sqlite() {
         return;
     }
-    let c = generate_multi("rt-fold-dis", 72, 0, 1);
-    let env = env_of("30", "5", "100", "true");
-    type Rewrite = Box<dyn Fn(Value) -> Value>;
-    let cases: Vec<(&str, Rewrite)> = vec![
-        (
-            "a file missing",
-            Box::new(|mut v| {
-                v["files"].as_array_mut().unwrap().pop();
-                v
-            }),
-        ),
-        (
-            "another destination",
-            Box::new(|mut v| {
-                v["files"][0]["dest"] = serde_json::json!("elsewhere/x.ndjson.gz");
-                v
-            }),
-        ),
-        (
-            "another size",
-            Box::new(|mut v| {
-                v["files"][0]["bytes"] = serde_json::json!(1);
-                v
-            }),
-        ),
-        (
-            "not eligible",
-            Box::new(|mut v| {
-                v["eligible"] = serde_json::json!(false);
-                v["reason"] = serde_json::json!("merge-pending");
-                v
-            }),
-        ),
-    ];
-    for (name, f) in cases {
-        let h = copy_home(&c, &format!("fold-{}", name.replace(' ', "-")));
-        let before = journals(&h);
-        // the main store goes first (largest); sweep until the split store has had its turn
-        let r = alter("foldLegacyJournal", f);
-        for i in 0..2 {
-            engine_duty(&h, c.now + i * 1000, &env, &r);
-        }
-        assert!(*r.seen.lock().unwrap() >= 1, "{name}: the fold never asked Node");
-        assert_eq!(before, journals(&h), "{name}: a journal changed");
-        assert!(!tree(&h.join(".anti-hall/devswarm")).keys().any(|k| k.contains("legacy-journal")), "{name}: an archive file was written");
-    }
-    // Node cannot run: nothing is folded either
-    let h = copy_home(&c, "fold-nonode");
+    ah_engine::defaults::init().unwrap();
+    let c = generate_multi("rt-fold-proof", 74, 0, 3);
+    let h = copy_home(&c, "proof");
+    let (no_marker, folded, pending) = ("projfold-f01d00", "projfold-f01d01", "projfold-f01d02");
+    let marker = |hash: &str| h.join(".anti-hall/devswarm/store").join(hash).join("MERGE-STATE.json");
+    assert!(marker(no_marker).exists() && marker(folded).exists(), "the fixture records the merge of the settled stores");
+    std::fs::remove_file(marker(no_marker)).unwrap();
     let before = journals(&h);
-    let r = no_node_for("foldLegacyJournal");
-    for i in 0..2 {
-        engine_duty(&h, c.now + i * 1000, &env, &r);
+    let mut env = env_of("30", "5", "100", "true");
+    env.insert("ANTIHALL_DEVSWARM_SUP_RETENTION_FOLD_ALONE".into(), "true".into());
+    for i in 0..6 {
+        engine_duty(&h, c.now + i * 1000, &env, &System::configured());
     }
-    assert_eq!(before, journals(&h));
+    let after = journals(&h);
+    let of = |m: &BTreeMap<String, u64>, hash: &str| m.iter().filter(|(k, _)| k.contains(hash)).map(|(k, v)| (k.clone(), *v)).collect::<BTreeMap<_, _>>();
+    assert!(!of(&before, no_marker).is_empty() && !of(&before, pending).is_empty());
+    assert_eq!(of(&after, no_marker), of(&before, no_marker), "a store whose merge was never recorded was folded");
+    assert_eq!(of(&after, pending), of(&before, pending), "a store whose merge is pending was folded");
+    assert!(of(&after, folded).len() < of(&before, folded).len(), "the settled store was not folded at all");
 }
 
 #[test]
@@ -884,13 +649,76 @@ fn archive_home(tag: &str, seed: u32, n: u32) -> Corpus {
     c
 }
 
+fn archive_boundaries(home: &Path, evict: usize) -> (u64, u64, u64) {
+    let mut files = ah_engine::dssup::retention::cap::list(home);
+    files.sort_by(|a, b| a.sort_key.as_bytes().cmp(b.sort_key.as_bytes()).then(a.mtime_ms.partial_cmp(&b.mtime_ms).unwrap_or(std::cmp::Ordering::Equal)));
+    assert!(evict > 0 && evict < files.len(), "need an interior eviction boundary: {evict}/{}", files.len());
+    let total: u64 = files.iter().map(|f| f.bytes).sum();
+    let after_prev = total - files[..evict - 1].iter().map(|f| f.bytes).sum::<u64>();
+    let after_target = after_prev - files[evict - 1].bytes;
+    let smallest = files.iter().map(|f| f.bytes).min().unwrap();
+    (after_target, after_prev, smallest)
+}
+
+fn archive_shared_interval(homes: &[&Path], evict: usize) -> (u64, u64, u64) {
+    let (mut low, mut high, mut smallest) = (0u64, u64::MAX, u64::MAX);
+    for h in homes {
+        let (after_target, after_prev, min_file) = archive_boundaries(h, evict);
+        low = low.max(after_target);
+        high = high.min(after_prev);
+        smallest = smallest.min(min_file);
+    }
+    (low, high, smallest)
+}
+
+fn archive_cap_with_shared_margin(homes: &[&Path]) -> String {
+    let files = ah_engine::dssup::retention::cap::list(homes[0]);
+    let mut best = None;
+    for evict in 1..files.len() {
+        let (low, high, smallest) = archive_shared_interval(homes, evict);
+        if low >= high {
+            continue;
+        }
+        let cap = (low + high) as f64 / 2.0;
+        let margin = smallest as f64 * 0.10;
+        if cap - low as f64 >= margin && high as f64 - cap >= margin {
+            let width = high - low;
+            if match best {
+                Some((w, _, _)) => width > w,
+                None => true,
+            } {
+                best = Some((width, evict, cap));
+            }
+        }
+    }
+    let Some((_, _, cap)) = best else { panic!("no shared archive cap interval has the required margin") };
+    format!("{:.9}", cap / ah_engine::defaults::num("devswarm_sup.rt_mb") as f64)
+}
+
+fn archive_cap_seed80(c: &Corpus) -> usize {
+    let (a, b) = (copy_home(c, "node-t"), copy_home(c, "engine-t"));
+    let mut env = env_of("30", "5", "100", "true");
+    env.insert("ANTIHALL_DEVSWARM_RETENTION_ARCHIVE_MAX_MB".into(), "0".into());
+    // tick 0 is the dry run, tick 1 prunes and writes the archive months (each side with its own compressor); the cap is
+    // only measured and applied on tick 2, once no further archive file can appear in the same tick
+    golden_tick(c, &a, &b, &env, 0, &System::configured());
+    golden_tick(c, &a, &b, &env, 1, &System::configured());
+    let before = tree(&b.join(".anti-hall/devswarm/archive"));
+    let cap = archive_cap_with_shared_margin(&[a.as_path(), b.as_path()]);
+    env.insert("ANTIHALL_DEVSWARM_RETENTION_ARCHIVE_MAX_MB".into(), cap);
+    golden_tick(c, &a, &b, &env, 2, &System::configured());
+    let after = tree(&b.join(".anti-hall/devswarm/archive"));
+    assert!(after.contains_key("README.txt"), "a file that is not an archive month was touched");
+    before.keys().filter(|k| !after.contains_key(*k)).count()
+}
+
 #[test]
 fn the_archive_cap_evicts_what_node_evicts() {
     if !have_node_sqlite() {
         return;
     }
     let mut evicted = 0;
-    for (seed, cap) in [(80u32, "0.004"), (81, "0.002"), (82, "0.00001"), (83, "5")] {
+    for (seed, cap) in [(81u32, "0.002"), (82, "0.00001"), (83, "5")] {
         let c = archive_home(&format!("rt-cap-{seed}"), seed, 30);
         let mut env = env_of("30", "5", "100", "true");
         env.insert("ANTIHALL_DEVSWARM_RETENTION_ARCHIVE_MAX_MB".into(), cap.into());
@@ -900,59 +728,44 @@ fn the_archive_cap_evicts_what_node_evicts() {
         evicted += before.keys().filter(|k| !after.contains_key(*k)).count();
         assert!(after.contains_key("README.txt"), "a file that is not an archive month was touched");
     }
+    let c = archive_home("rt-cap-80", 80, 30);
+    evicted += archive_cap_seed80(&c);
     assert!(evicted >= 30, "{evicted}");
 }
 
+/// The two removals that destroy data for good are owner-gated and OFF by default (`rt_fold_alone`, `rt_cap_alone`): while off the
+/// step is `held` (named in the record, nothing removed); the same home with the gates on does remove them.
 #[test]
-fn an_archive_file_is_evicted_only_when_nodes_dry_run_names_the_same_list() {
+fn the_journal_fold_and_the_archive_cap_are_held_unless_the_owner_gates_are_on() {
     if !have_node_sqlite() {
         return;
     }
-    let c = archive_home("rt-cap-dis", 84, 30);
-    let mut env = env_of("30", "5", "100", "true");
-    env.insert("ANTIHALL_DEVSWARM_RETENTION_ARCHIVE_MAX_MB".into(), "0.003".into());
-    type Rewrite = Box<dyn Fn(Value) -> Value>;
-    let cases: Vec<(&str, Rewrite)> = vec![
-        (
-            "one file fewer",
-            Box::new(|mut v| {
-                v["removed"].as_array_mut().unwrap().pop();
-                v
-            }),
-        ),
-        (
-            "another order",
-            Box::new(|mut v| {
-                v["removed"].as_array_mut().unwrap().reverse();
-                v
-            }),
-        ),
-        (
-            "another total",
-            Box::new(|mut v| {
-                v["totalBytes"] = serde_json::json!(v["totalBytes"].as_i64().unwrap() + 1);
-                v
-            }),
-        ),
-    ];
-    for (name, f) in cases {
-        let h = copy_home(&c, &format!("cap-{}", name.replace(' ', "-")));
-        let before = tree(&h.join(".anti-hall/devswarm/archive"));
-        let r = alter("enforceArchiveCap", f);
-        engine_duty(&h, c.now, &env, &r);
-        assert_eq!(*r.seen.lock().unwrap(), 1, "{name}");
-        // the sweep adds its own archive months before the cap is looked at; nothing of the seeded files may be gone
-        let after = tree(&h.join(".anti-hall/devswarm/archive"));
-        assert!(before.keys().all(|k| after.contains_key(k)), "{name}: an archive file was evicted");
-        let last = held_log(&h).into_iter().rev().find(|l| l["duty"] == "retention-cap").unwrap();
-        assert_eq!(last["match"], false, "{name}: {last}");
+    let c = archive_home("rt-gates", 85, 30);
+    let jd = c.home.join(".anti-hall/devswarm/store").join(HASH).join("journal");
+    std::fs::create_dir_all(&jd).unwrap();
+    std::fs::write(jd.join("messages.ndjson"), "{\"a\":1}\n").unwrap();
+    let mut on = env_of("30", "5", "100", "true");
+    on.insert("ANTIHALL_DEVSWARM_RETENTION_ARCHIVE_MAX_MB".into(), "0.00001".into());
+    let mut off = on.clone();
+    off.remove("ANTIHALL_DEVSWARM_SUP_RETENTION_FOLD_ALONE");
+    off.remove("ANTIHALL_DEVSWARM_SUP_RETENTION_CAP_ALONE");
+    let (h_off, h_on) = (copy_home(&c, "gates-off"), copy_home(&c, "gates-on"));
+    let (arch0, jour0) = (tree(&h_off.join(".anti-hall/devswarm/archive")), journals(&h_off));
+    for i in 0..4 {
+        let out = engine_duty(&h_off, c.now + i * 1000, &off, &System::configured());
+        assert_eq!(out["outcome"], "ran", "{out}");
     }
-    let h = copy_home(&c, "cap-nonode");
-    let before = tree(&h.join(".anti-hall/devswarm/archive"));
-    let r = no_node_for("enforceArchiveCap");
-    engine_duty(&h, c.now, &env, &r);
-    let after = tree(&h.join(".anti-hall/devswarm/archive"));
-    assert!(before.keys().all(|k| after.contains_key(k)));
+    let arch1 = tree(&h_off.join(".anti-hall/devswarm/archive"));
+    assert!(arch0.keys().all(|k| arch1.contains_key(k)), "an archive file was evicted with the gate off");
+    assert_eq!(jour0, journals(&h_off), "a journal file was removed with the gate off");
+    let held: Vec<Value> = held_log(&h_off).into_iter().filter(|l| l["held"].is_string()).collect();
+    assert!(held.iter().any(|l| l["duty"] == "retention_cap"), "the held eviction is named in the record: {held:?}");
+    assert!(held.iter().any(|l| l["duty"] == "retention_fold"), "the held fold is named in the record: {held:?}");
+    for i in 0..4 {
+        engine_duty(&h_on, c.now + i * 1000, &on, &System::configured());
+    }
+    let arch2 = tree(&h_on.join(".anti-hall/devswarm/archive"));
+    assert!(arch0.keys().any(|k| !arch2.contains_key(k)), "with the gate on the eviction runs");
 }
 
 #[test]

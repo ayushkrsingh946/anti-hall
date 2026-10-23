@@ -24,12 +24,12 @@ const os = require('node:os');
 const path = require('node:path');
 const cp = require('node:child_process');
 
-const cli = require('../../plugins/anti-hall/scripts/devswarm.js');
-const storeLib = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
-const inst = require('../../plugins/anti-hall/companion/install-devswarm-ingest.js');
-const repokey = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
-const doctorRepair = require('../../plugins/anti-hall/hooks/lib/doctor-repair.js');
-const U = require('../../plugins/anti-hall/skills/update/scripts/update.js');
+const cli = require('../../plugins/anti-hall-node/scripts/devswarm.js');
+const storeLib = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
+const inst = require('../../plugins/anti-hall-node/companion/install-devswarm-ingest.js');
+const repokey = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
+const doctorRepair = require('../../plugins/anti-hall-node/hooks/lib/doctor-repair.js');
+const U = require('../../plugins/anti-hall-node/skills/update/scripts/update.js');
 
 const REPO_ROOT = path.join(__dirname, '..', '..');
 const REAL_PLUGIN_SRC_DIR = path.join(REPO_ROOT, 'plugins', 'anti-hall');

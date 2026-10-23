@@ -34,9 +34,10 @@ after(() => {
 });
 
 const ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const L = require(path.join(ROOT, 'companion', 'lib', 'devswarm-lifecycle.js'));
-const caps = require(path.join(ROOT, 'companion', 'lib', 'devswarm-capabilities.js'));
-const dw = require(path.join(ROOT, 'scripts', 'devswarm.js'));
+const NODE_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const L = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-lifecycle.js'));
+const caps = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-capabilities.js'));
+const dw = require(path.join(NODE_ROOT, 'scripts', 'devswarm.js'));
 const { fakeHivecontrol, readCalls } = require('../helpers/fake-hivecontrol.js');
 
 let sqlite = null;
@@ -220,7 +221,7 @@ test('manual all-gates path still works (via gates)', { skip }, () => {
 });
 
 test('chat text "DONE" with no structured report -> blocked on a-done (real store)', { skip }, () => {
-  const store = require(path.join(ROOT, 'companion', 'lib', 'devswarm-store.js'));
+  const store = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-store.js'));
   const fx = fixture(V252, [{ id: 'c1', done: false }]);
   const env = { HOME: fx.home };
   const s = store.openStore({ home: fx.home, hash: 'proj-abc123', env });
@@ -404,8 +405,8 @@ function realLane(fx) {
   return { wt, head };
 }
 function realSummary(fx, wt) {
-  const store = require(path.join(ROOT, 'companion', 'lib', 'devswarm-store.js'));
-  const repoKey = require(path.join(ROOT, 'companion', 'lib', 'devswarm-repokey.js')).repoKeyForWorktree(wt);
+  const store = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-store.js'));
+  const repoKey = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-repokey.js')).repoKeyForWorktree(wt);
   const s = store.openStore({ home: fx.home, hash: repoKey, backend: 'journal', env: {} });
   try { const sum = store.computeSummary(s, { home: fx.home, env: {}, now: NOW }); sum.workspaces.c1.unread = 0; return sum; }
   finally { s.close(); }
@@ -758,8 +759,8 @@ test('approved prune: re-verifies, deletes via hivecontrol, logs, tombstones, pl
 });
 
 test('notifyPrimary lands ONE line in the Primary partition through the partition door (real store)', { skip }, () => {
-  const store = require(path.join(ROOT, 'companion', 'lib', 'devswarm-store.js'));
-  const identity = require(path.join(ROOT, 'companion', 'lib', 'identity.js'));
+  const store = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-store.js'));
+  const identity = require(path.join(NODE_ROOT, 'companion', 'lib', 'identity.js'));
   const base = fs.realpathSync(mkdtemp('ah-lc-notify-'));
   const home = path.join(base, 'home'); fs.mkdirSync(home);
   const repo = path.join(base, 'repo'); fs.mkdirSync(repo);
@@ -941,8 +942,8 @@ for (const [label, bt] of [['NULL', null], ['empty', ''], ['whitespace-only', ' 
       assert.ok(!c1.blockers.some((b) => b.gate === 'e-primary'), JSON.stringify(c1.blockers));
       assert.deepStrictEqual(plan.toArchive, ['c1']);
       // primary-seat.js applies the same rule (whitespace-only = unknown).
-      const seat = require(path.join(ROOT, 'companion', 'lib', 'primary-seat.js'));
-      const appDb = require(path.join(ROOT, 'companion', 'lib', 'devswarm-app-db.js'));
+      const seat = require(path.join(NODE_ROOT, 'companion', 'lib', 'primary-seat.js'));
+      const appDb = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-app-db.js'));
       const row = appDb.builderForWorktree({ home, env, worktreePath: repo });
       assert.strictEqual(row && row.id, 'p-1', 'the app DB row is read (non-vacuous): ' + JSON.stringify(row));
       assert.ok(seat.primaryCheckout({ home, env, cwd: repo }), 'main checkout is the Primary seat');
@@ -958,7 +959,7 @@ for (const [label, bt] of [['NULL', null], ['empty', ''], ['whitespace-only', ' 
 // each wake rewrote the heartbeat and the transcript, so idle never expired.
 // Real work (an AI turn, tool activity, a new inbound message, a commit) must
 // still reset idle. Transcripts are written under the isolated fixture home.
-const liveness = require(path.join(ROOT, 'companion', 'lib', 'liveness.js'));
+const liveness = require(path.join(NODE_ROOT, 'companion', 'lib', 'liveness.js'));
 const CLI = '/x/anti-hall/scripts/devswarm.js';
 const iso = (t) => new Date(t).toISOString();
 
@@ -1168,7 +1169,7 @@ test('0.109 idle: background work still pending blocks archive even when every l
 });
 
 test('0.109 idle: a native-drained inbound message (mtype null) resets idle; broadcasts and own rows do not (real store)', { skip }, () => {
-  const store = require(path.join(ROOT, 'companion', 'lib', 'devswarm-store.js'));
+  const store = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-store.js'));
   const run = (rows) => {
     const fx = fixture(V253, [{ id: 'c1', activity: NOW - 1 * MIN }]);
     writeTranscript(fx, 'c1', realWorkThenPings(PINGS));

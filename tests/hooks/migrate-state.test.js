@@ -10,7 +10,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
-const { migrateLegacyState, migrateGsdPlanning, migrateDevswarmStore } = require('../../plugins/anti-hall/scripts/migrate-state.js');
+const { migrateLegacyState, migrateGsdPlanning, migrateDevswarmStore } = require('../../plugins/anti-hall-node/scripts/migrate-state.js');
 
 function makeTmpDir() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'migrate-state-test-'));
@@ -330,7 +330,7 @@ test('migrateDevswarmStore dryRun: no descriptors at all -> not pending', () => 
 // fixes this: "imported" and "pending" now agree on the exact same line. ----
 test('migrateDevswarmStore dryRun: pending flips true -> false after a migrate that cross-path-dedupes against a pre-existing global-store row', () => {
   withHome((home) => {
-    const storeLib = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
+    const storeLib = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
     const id = 'primary-aaaaaaaa';
 
     // Seed a legacy GLOBAL store with a native-hash row (as the v0.54 ingest
@@ -369,7 +369,7 @@ test('migrateDevswarmStore dryRun: pending flips true -> false after a migrate t
 
 test('migrateDevswarmStore: markRead OFF (default) preserves the legacy (absent -> 0) cursor -- backlog surfaces as unread', () => {
   withHome((home) => {
-    const storeLib = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
+    const storeLib = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
     seedDescriptor(home, 'w1', ['m1', 'm2', 'm3']); // no cursorPath -> legacy cursor 0
 
     const applied = migrateDevswarmStore({});
@@ -383,7 +383,7 @@ test('migrateDevswarmStore: markRead OFF (default) preserves the legacy (absent 
 
 test('migrateDevswarmStore: markRead ON via opts advances the cursor -- imported backlog reads unread 0', () => {
   withHome((home) => {
-    const storeLib = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
+    const storeLib = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
     seedDescriptor(home, 'w1', ['m1', 'm2', 'm3']);
 
     const applied = migrateDevswarmStore({ markRead: true });

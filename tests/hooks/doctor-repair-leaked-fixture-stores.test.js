@@ -14,8 +14,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const doctorRepair = require('../../plugins/anti-hall/hooks/lib/doctor-repair.js');
-const storeLib = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
+const doctorRepair = require('../../plugins/anti-hall-node/hooks/lib/doctor-repair.js');
+const storeLib = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
 
 function tmpHome() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'anti-hall-leaked-fixture-store-'));

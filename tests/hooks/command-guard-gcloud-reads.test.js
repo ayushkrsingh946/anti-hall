@@ -255,7 +255,7 @@ test('gcloud-reads: every other redirection stays blocked', () => {
 // a file or switch into a different program mode. `gcloud ... describe` is not a
 // heavy command, so the gcloud carve-out is asserted on the predicate itself;
 // the heavy verification pipeline is asserted end to end through the hook.
-const { isAllowedGcloudReadCommand } = require('../../plugins/anti-hall/hooks/command-guard.js');
+const { isAllowedGcloudReadCommand } = require('../../plugins/anti-hall-node/hooks/command-guard.js');
 const GD = 'gcloud functions describe fn --format=json';
 
 test('gcloud-reads: sink stages with a file operand or unknown flag are refused', () => {

@@ -14,7 +14,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync, spawn } = require('node:child_process');
 
-const MODULE_PATH = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'lib', 'devswarm-wake-watch.js');
+const MODULE_PATH = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'lib', 'devswarm-wake-watch.js');
 const { lockPathFor } = require(MODULE_PATH);
 
 function tmpHome() {
@@ -109,8 +109,8 @@ function idleSkipFor(markerAgeMin) {
   const repo = makeGitRepo('marker');
   try {
     const env = { PATH: process.env.PATH, HOME: home, USERPROFILE: home, DEVSWARM_REPO_ID: 'r1' };
-    const id = require('../../plugins/anti-hall/companion/install-devswarm-ingest.js').primaryWorkspaceId(
-      require('../../plugins/anti-hall/companion/lib/identity.js').resolveContext(repo, { home, missingPath: 'ancestor' }).worktreeRoot);
+    const id = require('../../plugins/anti-hall-node/companion/install-devswarm-ingest.js').primaryWorkspaceId(
+      require('../../plugins/anti-hall-node/companion/lib/identity.js').resolveContext(repo, { home, missingPath: 'ancestor' }).worktreeRoot);
     if (markerAgeMin !== null) {
       const dir = path.join(home, '.anti-hall', 'devswarm', 'wake-tick');
       fs.mkdirSync(dir, { recursive: true });

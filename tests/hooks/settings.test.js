@@ -7,7 +7,7 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 
 const { makeHome } = require('../helpers/fixtures.js');
-const settings = require('../../plugins/anti-hall/hooks/lib/settings.js');
+const settings = require('../../plugins/anti-hall-node/hooks/lib/settings.js');
 
 test('load(): fail-open on missing/corrupt settings.json', () => {
   const home = makeHome();
@@ -303,7 +303,7 @@ test('legacy ranks above plugin-option until the settings migration marker is st
 
     // Stamp the migration marker for the running plugin version, then the
     // /config value (which differs from the manifest default) outranks legacy.
-    const migrations = require('../../plugins/anti-hall/companion/lib/migrations.js');
+    const migrations = require('../../plugins/anti-hall-node/companion/lib/migrations.js');
     const version = migrations.pluginVersion();
     migrations.markApplied(home.home, 'migrateSettingsFromLegacy', version);
 
@@ -334,7 +334,7 @@ test('concurrent writers: 8 processes each set a different key at once -> every 
   const fsx = require('node:fs'); const osx = require('node:os'); const px = require('node:path');
   const { spawn } = require('node:child_process');
   const home = fsx.mkdtempSync(px.join(osx.tmpdir(), 'ah-settings-race-'));
-  const lib = px.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'hooks', 'lib', 'settings.js');
+  const lib = px.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'hooks', 'lib', 'settings.js');
   const writes = [
     ['guards', 'mergeGate', 'true'], ['guards', 'shipitGate', 'true'], ['guards', 'claimLedger', 'false'], // stashGuard is safety-locked (0.108.4)
     ['limitConserve', 'threshold', '70'], ['autoHandover', 'pct', '80'], ['autoHandover', 'nagStepPct', '7'],
@@ -357,7 +357,7 @@ test('concurrent writers: 8 processes each set a different key at once -> every 
 
 test('a lock held by a live writer past the wait budget -> {ok:false, lockBusy} (never throws); a dead holder is reclaimed', () => {
   const fsx = require('node:fs'); const osx = require('node:os'); const px = require('node:path');
-  const settings = require(px.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'hooks', 'lib', 'settings.js'));
+  const settings = require(px.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'hooks', 'lib', 'settings.js'));
   const home = fsx.mkdtempSync(px.join(osx.tmpdir(), 'ah-settings-lock-'));
   try {
     const lock = settings.path({ home }) + '.lock';
@@ -376,7 +376,7 @@ test('a lock held by a live writer past the wait budget -> {ok:false, lockBusy} 
 // ~/.claude/settings.json pluginConfigs (the CLI / statusline fallback) — with
 // source 'plugin-option' (rendered "/config"). The value used always differs
 // from the manifest default (a default-equal value is masked by design).
-const SCHEMA = require('../../plugins/anti-hall/hooks/lib/settings-schema.js');
+const SCHEMA = require('../../plugins/anti-hall-node/hooks/lib/settings-schema.js');
 const path = require('node:path');
 function nonDefaultValue(e) {
   if (e.type === 'boolean') return !e.default;

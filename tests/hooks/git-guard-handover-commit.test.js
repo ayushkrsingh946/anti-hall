@@ -180,7 +180,7 @@ test('ALLOW: the plugin\'s own handover skill / KB docs / tests (not named HANDO
     'docs/KB-session-handover.md',
     'tests/hooks/handover-find.test.js',
     'tests/hooks/auto-handover-gate.test.js',
-    'plugins/anti-hall/hooks/handover-resume.js',
+    'plugins/anti-hall-node/hooks/handover-resume.js',
   ];
   const dir = makeRepo(Object.fromEntries(files.map((f) => [f, 'x\n'])));
   try {
@@ -303,7 +303,7 @@ test('ALLOW: `git add -A && git commit` when .anti-hall/ is git-ignored, or the 
 });
 
 test('isHandoverPath: root-only basename rule + any-depth .anti-hall/handovers/ (unit)', () => {
-  const { isHandoverPath } = require('../../plugins/anti-hall/hooks/lib/handover-find.js');
+  const { isHandoverPath } = require('../../plugins/anti-hall-node/hooks/lib/handover-find.js');
   for (const p of ['HANDOVER.md', 'HANDOVER-3.md', './HANDOVER.md', 'CONTINUE-HERE.md', 'y.continue-here.md', '.anti-hall/handovers/d/s/HANDOVER.md', 'a/.anti-hall/handovers/x.md']) {
     assert.ok(isHandoverPath(p), p);
   }

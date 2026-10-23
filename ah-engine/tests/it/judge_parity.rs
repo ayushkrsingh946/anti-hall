@@ -222,7 +222,7 @@ fn judge_side(c: &JudgeCase, engine: bool, plugin_root: Option<&Path>) -> JudgeS
             cmd
         } else {
             let mut cmd = Command::new("node");
-            cmd.arg(repo().join("plugins/anti-hall/hooks/speculation-judge.js"));
+            cmd.arg(repo().join("plugins/anti-hall-node/hooks/speculation-judge.js"));
             cmd
         };
         cmd.env_clear()
@@ -373,13 +373,6 @@ fn the_speculation_judge_makes_the_same_cli_call_and_decision_as_node() {
                 failures.push(format!("{who}: {side} left {left:?} in its temporary directory"));
             }
         }
-        // D88: the model call is the Node hook's; the speculation-judge script answers every path without one and defers the rest
-        if c.calls > 0 {
-            if !eo.iter().all(|o| o.0 == 0 && o.1.contains("AHFALLBACK")) || !ec.is_empty() {
-                failures.push(format!("{who}: the engine must defer without calling the model: {eo:?} calls={}", ec.len()));
-            }
-            continue;
-        }
         if no != eo {
             failures.push(format!("{who}: output differs\n  node  ={no:?}\n  engine={eo:?}"));
         }
@@ -446,11 +439,12 @@ fn the_jev_backend_switch_and_the_api_backend_never_call_the_cli() {
     c.env = vec![("ANTIHALL_JEV_SPECULATION_BACKEND", "jev".into())];
     let e = judge_side(&c, true, None);
     assert_eq!((e.outs[0].0, e.outs[0].1.as_str(), e.calls.len(), e.tree.len(), e.telemetry.len()), (0, "", 0, 0, 0), "{:?}", e.outs);
-    // the API route with a key is Node's: the engine defers before any call
+    // the API route with a key: the engine never sends a key (no hand-back to Node any more), so it makes no call and allows
+    // (the script counts `speculation-judge:api_route` as unable)
     let mut c = JudgeCase::new("api-with-key", &block);
     c.env = vec![("ANTIHALL_JUDGE_BACKEND", "api".into()), ("CLAUDE_PLUGIN_OPTION_ANTHROPIC_API_KEY", "parity-key-not-real".into())];
     let e = judge_side(&c, true, None);
-    assert_eq!((e.outs[0].1.trim(), e.calls.len()), ("AHFALLBACK", 0));
+    assert_eq!((e.outs[0].0, e.outs[0].1.as_str(), e.calls.len()), (0, "", 0), "{:?}", e.outs);
 }
 
 /// A copy of the plugin's engine directory with `edit` applied to judge.toml, for a test that needs a smaller limit.
@@ -475,7 +469,7 @@ fn plugin_with(edit: impl Fn(String) -> String) -> PathBuf {
 }
 
 #[test]
-fn a_judge_call_is_left_to_node_so_the_engine_never_waits_for_the_model() {
+fn a_judge_call_past_its_timeout_is_cut_and_fails_open() {
     let _g = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let root = plugin_with(|t| {
         t.replace("[speculation_judge.timeout_ms]\ndoc = ", "[speculation_judge.timeout_ms]\nvalue = 2000\ndoc = ").replace("\nvalue = 25000\n", "\n")
@@ -484,10 +478,12 @@ fn a_judge_call_is_left_to_node_so_the_engine_never_waits_for_the_model() {
     c.env = vec![("FAKE_CLAUDE_SLEEP", "8".into())];
     let started = Instant::now();
     let e = judge_side(&c, true, Some(&root));
-    // the script never waits on a model: it defers at once and the Node hook owns the call and its timeout
-    assert!(started.elapsed() < Duration::from_secs(6), "the engine waited for the model: {:?}", started.elapsed());
-    assert!(e.outs[0].1.contains("AHFALLBACK"), "{:?}", e.outs);
-    assert!(e.calls.is_empty() && e.tree.is_empty() && e.telemetry.is_empty(), "no call, no state: {:?}", e.calls.len());
+    // the call is cut at its timeout (2 s here, 8 s asleep), fails open and leaves no state, only its telemetry row
+    assert!(started.elapsed() < crate::common::scaled(Duration::from_secs(6)), "the call was not cut at its timeout: {:?}", started.elapsed());
+    assert_eq!((e.outs[0].0, e.outs[0].1.as_str()), (0, ""), "{:?}", e.outs);
+    assert!(e.tree.is_empty(), "no state: {:?}", e.tree);
+    assert_eq!((e.calls.len(), e.telemetry.len()), (1, 1));
+    assert_eq!(e.telemetry[0]["error"], "timeout", "{:?}", e.telemetry);
     ah_engine::discard::harmless(std::fs::remove_dir_all(&root));
 }
 
@@ -602,7 +598,7 @@ fn triage_side(engine: bool, env: &[(&str, String)], answers: Value, model_text:
         cmd
     } else {
         let mut cmd = Command::new("node");
-        cmd.arg("-r").arg(&stub).arg(repo().join("plugins/anti-hall/hooks/lib/jev-triage-worker.js"));
+        cmd.arg("-r").arg(&stub).arg(repo().join("plugins/anti-hall-node/hooks/lib/jev-triage-worker.js"));
         cmd
     };
     cmd.env_clear()

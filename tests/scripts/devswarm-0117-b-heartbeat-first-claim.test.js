@@ -47,7 +47,7 @@ const LOG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'anti-hall-0117b-log-'));
 process.env.ANTI_HALL_LOG_DIR = LOG_DIR;
 process.on('exit', () => { try { fs.rmSync(LOG_DIR, { recursive: true, force: true }); } catch (_) {} });
 
-const DEVSWARM_PATH = path.join(__dirname, '../../plugins/anti-hall/scripts/devswarm.js');
+const DEVSWARM_PATH = path.join(__dirname, '../../plugins/anti-hall-node/scripts/devswarm.js');
 const cli = require(DEVSWARM_PATH);
 const mutantKit = require('./lib/devswarm-mutant-kit.js');
 

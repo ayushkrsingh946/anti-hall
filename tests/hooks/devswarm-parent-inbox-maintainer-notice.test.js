@@ -13,8 +13,9 @@ const path = require('node:path');
 process.env.ANTI_HALL_LOG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'ah-pi-maintnotice-log-'));
 
 const ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const noticeLib = require(path.join(ROOT, 'companion', 'lib', 'devswarm-maintainer-notice.js'));
-const hook = require(path.join(ROOT, 'hooks', 'devswarm-parent-inbox.js'));
+const NODE_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const noticeLib = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-maintainer-notice.js'));
+const hook = require(path.join(NODE_ROOT, 'hooks', 'devswarm-parent-inbox.js'));
 
 function tmpHome() { return fs.mkdtempSync(path.join(os.tmpdir(), 'ah-pi-maintnotice-')); }
 function rm(p) { try { fs.rmSync(p, { recursive: true, force: true }); } catch (_) {} }

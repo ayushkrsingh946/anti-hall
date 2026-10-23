@@ -22,10 +22,11 @@ const path = require('node:path');
 const cp = require('node:child_process');
 
 const ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const cli = require(path.join(ROOT, 'scripts', 'devswarm.js'));
-const storeLib = require(path.join(ROOT, 'companion', 'lib', 'devswarm-store.js'));
-const repokey = require(path.join(ROOT, 'companion', 'lib', 'devswarm-repokey.js'));
-const liveness = require(path.join(ROOT, 'companion', 'lib', 'liveness.js'));
+const NODE_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const cli = require(path.join(NODE_ROOT, 'scripts', 'devswarm.js'));
+const storeLib = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-store.js'));
+const repokey = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-repokey.js'));
+const liveness = require(path.join(NODE_ROOT, 'companion', 'lib', 'liveness.js'));
 
 const UUID = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
 const CHILD = '11111111-2222-4333-8444-555555555555';
@@ -113,7 +114,7 @@ const skip = sqlite ? false : 'node:sqlite unavailable';
 // builders own `terminals` [{ sid, wt, active }].
 // transcript(home, wt, sid, cwd) — Claude's own transcript for `sid`, filed under
 // `wt`'s project dir and recording `cwd` (the app-map corroboration).
-const { projectDirFor } = require(path.join(ROOT, 'companion', 'lib', 'target-session.js'));
+const { projectDirFor } = require(path.join(NODE_ROOT, 'companion', 'lib', 'target-session.js'));
 function transcript(home, wt, sid, cwd) {
   const d = projectDirFor(wt, home);
   fs.mkdirSync(d, { recursive: true });

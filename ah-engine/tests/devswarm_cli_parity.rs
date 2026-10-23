@@ -1,4 +1,6 @@
 #![allow(
+    clippy::panic,
+    clippy::unreachable,
     dead_code,
     clippy::type_complexity,
     clippy::collapsible_if,
@@ -253,7 +255,7 @@ fn plan_key(h: &Path) -> String {
     // the worktree's mesh id, as the plan file is named
     let o = Command::new("node")
         .args(["-e", "console.log(require(process.argv[1]).resolveContext(process.argv[2]).meshId)"])
-        .arg(plugin_root().join("companion/lib/identity.js"))
+        .arg(node_root().join("companion/lib/identity.js"))
         .arg(wt(h))
         .env_clear()
         .env("PATH", std::env::var("PATH").unwrap())
@@ -650,7 +652,9 @@ fn cases(verbs: &[String]) -> Vec<Case> {
         &["plan", "set", "ws-9", "--steps", two],
         "Plan",
         nothing,
-        true,
+        // no project store yet: Node creates one while resolving the id (`resolveTargetId`), which the engine leaves to Node
+        // (2d76160c; the sibling `plan show` case says the same)
+        false,
         "wt-child",
         vec![("DEVSWARM_BUILDER_ID", "ws-9".into())],
     );
@@ -849,7 +853,7 @@ fn tools_path(root: &Path, with_node: bool) -> String {
 }
 
 fn node_cli(home: &Path, cwd: &Path, argv: &[String], now: i64, env: &[(&str, &str)]) -> Run {
-    let cli = plugin_root().join("scripts").join("devswarm.js");
+    let cli = node_root().join("scripts").join("devswarm.js");
     let mut c = Command::new("node");
     c.arg("-e").arg(SNIPPET).arg(&cli).arg(now.to_string()).args(argv).current_dir(cwd).env_clear().envs(base_env(home, &home.join("state"), env));
     let o = run(&mut c, None);
@@ -904,7 +908,7 @@ fn the_store_free_cli_verbs_match_node_and_defer_what_they_cannot_reproduce() {
     // the verb list is Node's own (also checks the shipped list)
     let o = Command::new("node")
         .args(["-e", "console.log(JSON.stringify(require(process.argv[1]).run(['help']).result.verbs))"])
-        .arg(plugin_root().join("scripts").join("devswarm.js"))
+        .arg(node_root().join("scripts").join("devswarm.js"))
         .env_clear()
         .env("PATH", &tools)
         .env("HOME", &root)
@@ -971,7 +975,7 @@ fn the_store_free_cli_verbs_match_node_and_defer_what_they_cannot_reproduce() {
             }
         } else {
             deferred += 1;
-            assert_eq!(e.code, n.code, "{}: exit code of the fallback", c.name);
+            assert_eq!(e.code, 69, "{}: no Node to hand the verb to, the engine is unable (mesh_write.exit_unable)", c.name);
             // Node's own run (the fallback) uses the real clock: the digits of a timestamp are masked
             let mask = |t: &str, h: &Path| {
                 t.replace(h.to_string_lossy().as_ref(), "<HOME>").chars().map(|c| if c.is_ascii_digit() { '#' } else { c }).collect::<String>()
@@ -979,23 +983,16 @@ fn the_store_free_cli_verbs_match_node_and_defer_what_they_cannot_reproduce() {
             assert_eq!(mask(&e.stdout, &homes[1]), mask(&n.stdout, &homes[0]), "{}: the fallback prints what Node prints", c.name);
             let pre = tree(&homes[2]);
             let d = engine_cli(&homes[2], &cwd, &c.argv, now, &with_path(refs(&env_d), nonode.as_str()));
-            assert_eq!(d.code, 75, "{}: a deferral the engine cannot hand to Node exits 75, got {} / {}", c.name, d.code, d.stdout);
+            assert_eq!(d.code, 69, "{}: a deferral the engine cannot hand to Node exits mesh_write.exit_unable, got {} / {}", c.name, d.code, d.stdout);
             assert!(d.stdout.is_empty(), "{}: nothing is printed on a deferral: {}", c.name, d.stdout);
             assert_eq!(last_log(&homes[2].join("state"))["result"], "defer", "{}", c.name);
             assert!(pre == tree(&homes[2]), "{}: a deferral wrote", c.name);
         }
     }
     // the background Node witness of every answered call must have logged a match
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    // the background Node witness was removed with the Node fallbacks: an answered call leaves no witness record
     for (name, state) in &pending {
-        let line = loop {
-            if let Some(l) = verify_lines(state).into_iter().last() {
-                break l;
-            }
-            assert!(std::time::Instant::now() < deadline, "{name}: the Node witness never logged");
-            std::thread::sleep(std::time::Duration::from_millis(100));
-        };
-        assert_eq!(line["result"], "match", "{name}: the background Node witness disagrees: {line}");
+        assert!(verify_lines(state).is_empty(), "{name}: a Node witness record exists, but no witness runs any more");
     }
     eprintln!("devswarm cli parity: {} cases, {native} answered by the engine and identical to Node, {deferred} deferred with nothing written", all.len());
     if std::env::var("AH_CLI_PARITY_FILTER").is_err() {
@@ -1026,9 +1023,9 @@ fn the_devswarm_command_runs_the_cli_verbs_under_the_role_matrix() {
     let mk = |name: &str, on: bool| {
         let h = root.join(name);
         fs::create_dir_all(h.join(".anti-hall")).unwrap();
-        if on {
-            fs::write(h.join(".anti-hall/settings.json"), "{\"mesh\":{\"engine_writes\":\"on\"}}\n").unwrap();
-        }
+        // the shipped default is `on`; the off case says so in the settings file
+        let word = if on { "on" } else { "off" };
+        fs::write(h.join(".anti-hall/settings.json"), format!("{{\"mesh\":{{\"engine_writes\":\"{word}\"}}}}\n")).unwrap();
         h
     };
     let engine = |h: &Path, argv: &[&str], env: &[(&str, &str)]| {
@@ -1073,11 +1070,11 @@ fn the_devswarm_command_runs_the_cli_verbs_under_the_role_matrix() {
     let (code, _, err) = engine(&hs, &["skip", "tg"], &sub);
     assert!(code == 64 && err.contains("subagent"), "{code} {err}");
     assert_eq!(engine(&hs, &["help", "skip"], &sub).0, 0);
-    // engine off: the same verbs run in Node
+    // engine off: nothing runs (there is no Node to run the verb), it says so and exits mesh_write.exit_unable (69)
     let ho = mk("off", false);
-    let (code, out, _) = engine(&ho, &["help", "skip"], &[]);
-    let n = node(&hn, &["help", "skip"]);
-    assert_eq!((code, out), (n.code, n.stdout));
+    let (code, out, err) = engine(&ho, &["help", "skip"], &[]);
+    assert_eq!(code, 69, "{out} {err}");
+    assert!(out.is_empty() && !err.is_empty(), "off prints nothing and says why: {out} {err}");
     assert!(!ho.join("state").join("mesh-shadow.jsonl").exists(), "off: the engine did not answer");
     // an unknown verb is still refused by the command, before anything runs
     let (code, _, err) = engine(&hm, &["no-such-verb"], &[]);
@@ -1114,7 +1111,7 @@ fn child_descriptor(h: &Path) {
 fn stranded_descriptor(h: &Path) {
     let o = Command::new("node")
         .args(["-e", "console.log(require(process.argv[1]).hashFromWorkspaceId('stray-1'))"])
-        .arg(plugin_root().join("companion/lib/devswarm-store.js"))
+        .arg(node_root().join("companion/lib/devswarm-store.js"))
         .env_clear()
         .env("PATH", std::env::var("PATH").unwrap())
         .env("HOME", h)
@@ -1226,25 +1223,18 @@ fn gate_and_workspaces_list_match_node_on_a_seeded_store() {
             pending.push((c.name.to_string(), homes[1].join("state")));
         } else {
             deferred += 1;
-            assert_eq!(e.code, n.code, "{}: exit code of the fallback", c.name);
+            assert_eq!(e.code, 69, "{}: no Node to hand the verb to, the engine is unable (mesh_write.exit_unable)", c.name);
             let pre = (tree(&homes[2]), raw_dump(&key_dir(&homes[2])));
             let d = engine_cli(&homes[2], &cwd, &argv, now, &[("PATH", nonode.as_str())]);
-            assert_eq!(d.code, 75, "{}: a deferral the engine cannot hand to Node exits 75, got {} / {}", c.name, d.code, d.stdout);
+            assert_eq!(d.code, 69, "{}: a deferral the engine cannot hand to Node exits mesh_write.exit_unable, got {} / {}", c.name, d.code, d.stdout);
             assert!(d.stdout.is_empty(), "{}: nothing is printed on a deferral: {}", c.name, d.stdout);
             assert_eq!(last_log(&homes[2].join("state"))["result"], "defer", "{}", c.name);
             assert!(pre == (tree(&homes[2]), raw_dump(&key_dir(&homes[2]))), "{}: a deferral wrote", c.name);
         }
     }
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    // the background Node witness was removed with the Node fallbacks: an answered call leaves no witness record
     for (name, state) in &pending {
-        let line = loop {
-            if let Some(l) = verify_lines(state).into_iter().last() {
-                break l;
-            }
-            assert!(std::time::Instant::now() < deadline, "{name}: the Node witness never logged");
-            std::thread::sleep(std::time::Duration::from_millis(100));
-        };
-        assert_eq!(line["result"], "match", "{name}: the background Node witness disagrees: {line}");
+        assert!(verify_lines(state).is_empty(), "{name}: a Node witness record exists, but no witness runs any more");
     }
     eprintln!(
         "store cli parity: {} cases, {native} answered by the engine and identical to Node, {deferred} deferred with nothing written",

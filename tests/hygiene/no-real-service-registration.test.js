@@ -27,7 +27,8 @@ const path = require('node:path');
 const cp = require('node:child_process');
 
 const ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const guard = require(path.join(ROOT, 'companion', 'lib', 'test-home-guard.js'));
+const NODE_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const guard = require(path.join(NODE_ROOT, 'companion', 'lib', 'test-home-guard.js'));
 const REAL = os.userInfo().homedir;
 const POSIX = process.platform !== 'win32';
 
@@ -109,7 +110,7 @@ test('installers force dry-run on the ANTIHALL_TEST_ISOLATION marker alone (no N
         PATH: bin + path.delimiter + process.env.PATH, HOME: home, ANTIHALL_TEST_ISOLATION: '1',
         ANTIHALL_SUPERVISOR_ALLOW_TMP_HOME: '1', ANTIHALL_INGEST_ALLOW_TMP_HOME: '1', ANTIHALL_DEVSWARM_HIVECONTROL: '/nonexistent/hivecontrol',
       };
-      const r = cp.spawnSync(process.execPath, [path.join(ROOT, 'companion', inst)], { cwd: repo, env, encoding: 'utf8', timeout: 30000 });
+      const r = cp.spawnSync(process.execPath, [path.join(NODE_ROOT, 'companion', inst)], { cwd: repo, env, encoding: 'utf8', timeout: 30000 });
       assert.match(r.stdout + r.stderr, /dry-run/, inst + ' must run as a dry-run: ' + (r.stdout + r.stderr).slice(0, 400));
     }
     assert.strictEqual(recorded(record), '', 'no launchctl/systemctl/crontab call may reach even a stub');
@@ -130,23 +131,21 @@ test('vulnerable call shapes (runRepairs env:{} dryRun:false; selfHeal with a pa
     fs.writeFileSync(path.join(home, 'Library', 'LaunchAgents', 'com.anti-hall.devswarm-supervisor.plist'), '<plist/>');
     fs.mkdirSync(path.join(home, '.config', 'systemd', 'user'), { recursive: true });
     fs.writeFileSync(path.join(home, '.config', 'systemd', 'user', 'anti-hall-devswarm-supervisor.timer'), '[Timer]\n');
-    // A settings.json in the fake home: the statusline repair installs into it,
-    // which proves where the installer child resolved HOME.
+    // A settings.json in the fake home: retired statusline repair must leave it untouched.
     fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
     fs.writeFileSync(path.join(home, '.claude', 'settings.json'), '{}\n');
 
     withProcessEnv({ HOME: home, USERPROFILE: home, PATH: bin + path.delimiter + process.env.PATH }, () => {
-      const repair = require(path.join(ROOT, 'hooks', 'lib', 'doctor-repair.js'));
+      const repair = require(path.join(NODE_ROOT, 'hooks', 'lib', 'doctor-repair.js'));
       repair.runRepairs({ home, cwd: repo, env: { DEVSWARM_REPO_ID: 'repo-hygiene' }, dryRun: false });
       repair.runRepairs({ home, cwd: repo, env: {}, dryRun: false });
-      const cli = require(path.join(ROOT, 'scripts', 'devswarm.js'));
+      const cli = require(path.join(NODE_ROOT, 'scripts', 'devswarm.js'));
       cli.selfHeal({ home, cwd: repo, env: { DEVSWARM_REPO_ID: 'repo-hygiene' } });
     });
 
-    // Non-vacuity: the statusline installer child ran with the FAKE home
-    // (the pre-fix `env: {}` child resolved the REAL home instead).
+    // Non-vacuity: retired statusline repair did not write either fake or real HOME.
     const fakeSettings = path.join(home, '.claude', 'settings.json');
-    assert.ok(JSON.parse(fs.readFileSync(fakeSettings, 'utf8')).statusLine, 'installer children must resolve the fake HOME, proving the env reached them');
+    assert.ok(!JSON.parse(fs.readFileSync(fakeSettings, 'utf8')).statusLine, 'retired statusline repair must not write statusLine');
     assert.strictEqual(recorded(record), '', 'no launchctl/systemctl/crontab call may be issued under a test');
     assert.deepStrictEqual(realMentions(), before, 'no real-home unit/config may newly reference this checkout');
   } finally { rm(home); rm(repo); rm(bin); }
@@ -196,7 +195,7 @@ test('install-reaper.js forces dry-run on a temp HOME with NO test marker at all
     // only the temp-HOME guard stands between this run and a real unit. PATH
     // stubs catch launchctl/systemctl/crontab even if that guard broke.
     const bare = { PATH: bin + path.delimiter + process.env.PATH, HOME: home, USERPROFILE: home };
-    const r = cp.spawnSync(process.execPath, [path.join(ROOT, 'companion', 'install-reaper.js')], { cwd: home, env: bare, encoding: 'utf8', timeout: 30000 });
+    const r = cp.spawnSync(process.execPath, [path.join(NODE_ROOT, 'companion', 'install-reaper.js')], { cwd: home, env: bare, encoding: 'utf8', timeout: 30000 });
     assert.match(r.stderr, /forced dry-run \(HOME .* temp directory\)/, r.stdout + r.stderr);
     assert.strictEqual(recorded(record), '', 'no scheduler call reached even a stub');
     assert.deepStrictEqual(fs.readdirSync(home).filter((f) => f === 'Library' || f === '.config'), []);

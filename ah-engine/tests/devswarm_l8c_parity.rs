@@ -1,4 +1,6 @@
 #![allow(
+    clippy::panic,
+    clippy::unreachable,
     dead_code,
     clippy::type_complexity,
     clippy::collapsible_if,
@@ -78,7 +80,7 @@ fn tools_path(root: &Path, with_node: bool) -> String {
 }
 
 fn node_cli(home: &Path, cwd: &Path, argv: &[String], now: i64, env: &[(&str, &str)]) -> Run {
-    let cli = plugin_root().join("scripts").join("devswarm.js");
+    let cli = node_root().join("scripts").join("devswarm.js");
     let mut c = Command::new("node");
     c.arg("-e").arg(SNIPPET).arg(&cli).arg(now.to_string()).args(argv).current_dir(cwd).env_clear().envs(base_env(home, &home.join("state"), env));
     let o = run(&mut c, None);
@@ -231,26 +233,19 @@ fn check_from(
             pending.push((c.name.clone(), homes[1].join("state")));
         } else {
             deferred += 1;
-            assert_eq!(e.code, n.code, "{}: exit code of the fallback", c.name);
+            assert_eq!(e.code, 69, "{}: no Node to hand the verb to, the engine is unable (mesh_write.exit_unable)", c.name);
             let pre = (tree(&homes[2]), key_db(&homes[2]).is_file().then(|| raw_dump(&key_db(&homes[2]))));
             let d = engine_cli(&homes[2], &cwd, &c.argv, now, &to_ref(&ed));
-            assert_eq!(d.code, 75, "{}: a deferral the engine cannot hand to Node exits 75, got {} / {}", c.name, d.code, d.stdout);
+            assert_eq!(d.code, 69, "{}: a deferral the engine cannot hand to Node exits mesh_write.exit_unable, got {} / {}", c.name, d.code, d.stdout);
             assert!(d.stdout.is_empty(), "{}: nothing is printed on a deferral: {}", c.name, d.stdout);
             assert_eq!(last_log(&homes[2].join("state"))["result"], "defer", "{}", c.name);
             let post = (tree(&homes[2]), key_db(&homes[2]).is_file().then(|| raw_dump(&key_db(&homes[2]))));
             assert!(pre == post, "{}: a deferral wrote", c.name);
         }
     }
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    // the background Node witness was removed with the Node fallbacks: an answered call leaves no witness record
     for (name, state) in &pending {
-        let line = loop {
-            if let Some(l) = verify_lines(state).into_iter().last() {
-                break l;
-            }
-            assert!(std::time::Instant::now() < deadline, "{name}: the Node witness never logged");
-            std::thread::sleep(std::time::Duration::from_millis(100));
-        };
-        assert_eq!(line["result"], "match", "{name}: the background Node witness disagrees: {line}");
+        assert!(verify_lines(state).is_empty(), "{name}: a Node witness record exists, but no witness runs any more");
     }
     eprintln!("l8c cli parity: {} cases, {native} answered by the engine and identical to Node, {deferred} deferred with nothing written", cases.len());
     if std::env::var("AH_L8C_FILTER").is_err() {
@@ -829,15 +824,16 @@ fn retention_matches_node() {
             let _ = fs::remove_dir_all(&homes[1]);
         } else {
             deferred += 1;
-            assert_eq!(e.code, n.code, "{}: exit code of the fallback", k.name);
+            assert_eq!(e.code, 69, "{}: no Node to hand the verb to, the engine is unable (mesh_write.exit_unable)", k.name);
             let pre = rt_dump(&homes[2]);
             let d = engine_cli(&homes[2], &nongit, &argv, now, &to_ref(&ed));
-            assert_eq!(d.code, 75, "{}: a deferral the engine cannot hand to Node exits 75, got {} / {}", k.name, d.code, d.stdout);
+            assert_eq!(d.code, 69, "{}: a deferral the engine cannot hand to Node exits mesh_write.exit_unable, got {} / {}", k.name, d.code, d.stdout);
             assert!(d.stdout.is_empty(), "{}: nothing is printed on a deferral", k.name);
             assert!(pre == rt_dump(&homes[2]), "{}: a deferral wrote", k.name);
         }
     }
-    // an acting run with no Node to agree with the plan writes nothing and exits 75
+    // no Node on the machine at all (v1.0 lane L08a): the witness is decommissioned, not failing, so the engine acts on its own two
+    // identical plans, the in-transaction re-checks and the archive written first (a Node that FAILS still blocks the write)
     let h = fx.root.join("ret-nowitness");
     assert!(Command::new("cp").arg("-Rp").arg(&seed).arg(&h).status().unwrap().success());
     fs::create_dir_all(h.join(".anti-hall")).unwrap();
@@ -847,11 +843,12 @@ fn retention_matches_node() {
     e.push(("PATH".into(), nonode.clone()));
     let argv: Vec<String> = vec!["retention".into(), "run".into()];
     let d = engine_cli(&h, &nongit, &argv, NOW, &to_ref(&e));
-    assert_eq!(d.code, 75, "no witness, no write: {} / {}", d.code, d.stdout);
-    assert!(pre == rt_dump(&h), "an acting run without a witness wrote");
-    let (deferred, total) = (deferred + 1, cases.len() + 1);
+    assert_eq!(d.code, 0, "no Node on the machine: the engine acts on its own plans: {} / {}", d.code, d.stdout);
+    assert!(d.stdout.contains("retention-run"), "the run reports itself: {}", d.stdout);
+    assert!(pre != rt_dump(&h), "the acting run without a (removed) witness made its prunes");
+    let (deferred, total) = (deferred, cases.len() + 1);
     eprintln!("l8c retention parity: {total} cases, {native} answered by the engine and identical to Node, {deferred} deferred with nothing written");
     if std::env::var("AH_L8C_FILTER").is_err() {
-        assert!(native >= 13 && deferred >= 4, "{native} native, {deferred} deferred");
+        assert!(native >= 13 && deferred >= 3, "{native} native, {deferred} deferred");
     }
 }

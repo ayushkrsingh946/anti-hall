@@ -13,7 +13,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { makeHome } = require('../helpers/fixtures.js');
 
-const MOD = require('../../plugins/anti-hall/scripts/finding-dedup.js');
+const MOD = require('../../plugins/anti-hall-node/scripts/finding-dedup.js');
 const { buildPairs, groupPairs, makeUnionFind, dedupe, MAX_PAIRS, CONFIDENCE_FLOOR } = MOD;
 
 // ---------------------------------------------------------------------------
@@ -194,9 +194,9 @@ function noulHandler(n, hits) {
 }
 
 function freshAskPair() {
-  const LIB = require.resolve('../../plugins/anti-hall/scripts/finding-dedup.js');
-  const ASSIST = require.resolve('../../plugins/anti-hall/hooks/lib/jev-assist.js');
-  const CLIENT = require.resolve('../../plugins/anti-hall/hooks/lib/jev-client.js');
+  const LIB = require.resolve('../../plugins/anti-hall-node/scripts/finding-dedup.js');
+  const ASSIST = require.resolve('../../plugins/anti-hall-node/hooks/lib/jev-assist.js');
+  const CLIENT = require.resolve('../../plugins/anti-hall-node/hooks/lib/jev-client.js');
   delete require.cache[LIB];
   delete require.cache[ASSIST];
   delete require.cache[CLIENT];
@@ -352,17 +352,17 @@ test('malformed/missing input -> loadFindings degrades to [] rather than throwin
 // docs: the Codex mirror mentions it
 // ---------------------------------------------------------------------------
 
-test('the Codex mirror (anti-hall-deadly-loop SKILL.md) mentions finding-dedup.js', () => {
+test('the Codex mirror (anti-hall-deadly-loop SKILL.md) mentions the engine finding-dedup verb', () => {
   const p = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'codex', 'skills', 'anti-hall-deadly-loop', 'SKILL.md');
   const content = fs.readFileSync(p, 'utf8');
-  assert.match(content, /finding-dedup\.js/);
+  assert.match(content, /ah-engine finding-dedup/); // the skills call the engine verb now, not the Node script
   assert.match(content, /findingDedup/);
 });
 
-test('the Claude-side deadly-loop and deadly-loop-multi SKILL.md files mention finding-dedup.js', () => {
+test('the Claude-side deadly-loop and deadly-loop-multi SKILL.md files call the engine finding-dedup verb', () => {
   const base = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'skills');
   const dl = fs.readFileSync(path.join(base, 'deadly-loop', 'SKILL.md'), 'utf8');
   const dlm = fs.readFileSync(path.join(base, 'deadly-loop-multi', 'SKILL.md'), 'utf8');
-  assert.match(dl, /finding-dedup\.js/);
-  assert.match(dlm, /finding-dedup\.js/);
+  assert.match(dl, /ah-engine finding-dedup/);
+  assert.match(dlm, /finding-dedup/);
 });

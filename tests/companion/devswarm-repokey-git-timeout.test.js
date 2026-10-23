@@ -28,7 +28,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const repokey = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
+const repokey = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
 
 test('defaultRun (default export): GIT_SPAWN_TIMEOUT_MS honors the test-only env override', () => {
   assert.strictEqual(repokey.GIT_SPAWN_TIMEOUT_MS, 300);

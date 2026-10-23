@@ -26,10 +26,10 @@ const os = require('node:os');
 // repair stage mutated a real store through exactly this gap).
 process.env.HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'update-skill-home-'));
 
-const U = require('../../plugins/anti-hall/skills/update/scripts/update.js');
-const devswarmCli = require('../../plugins/anti-hall/scripts/devswarm.js');
-const devswarmStore = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
-const devswarmRepokey = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
+const U = require('../../plugins/anti-hall-node/skills/update/scripts/update.js');
+const devswarmCli = require('../../plugins/anti-hall-node/scripts/devswarm.js');
+const devswarmStore = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
+const devswarmRepokey = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
 
 // ---------------------------------------------------------------------------
 // Fixture helpers
@@ -489,6 +489,16 @@ test('renderHuman: includes installed/latest/action and changelog block', () => 
   assert.match(out, /New skill\./);
 });
 
+test('renderHuman: --check with an update available does not claim "already up to date" in the headline', () => {
+  const out = U.renderHuman(
+    { installed: '0.1.0', latest: '0.2.0', updated: false, cacheSynced: false, action: 'update available (0.1.0 \u2192 0.2.0) \u2014 run without --check to apply' },
+    ''
+  );
+  const head = out.split('\n')[0];
+  assert.doesNotMatch(head, /already up to date/);
+  assert.match(head, /v0\.2\.0 available/);
+});
+
 // ===========================================================================
 // REGRESSION (live E2E 2026-06-10): the REAL installed_plugins.json is the v2
 // schema — { version: 2, plugins: { "<name>@<marketplace>": [ { scope,
@@ -796,6 +806,7 @@ test('resolvePaths: valid absolute existing override → used, no report', () =>
 // test ever reads/writes this machine's REAL installed units.
 // ---------------------------------------------------------------------------
 const REAL_PLUGIN_SRC_DIR = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
+const NODE_REAL_PLUGIN_SRC_DIR = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
 
 test('healIngestDaemon: gate closed (not a DevSwarm session) → attempted:false, never spawns', () => {
   const result = U.healIngestDaemon({
@@ -855,7 +866,7 @@ test('healIngestDaemon: gate open + nothing installed ("absent") → attempted:t
 });
 
 test('healIngestDaemon: gate open + stale-script unit → spawns the (fresh) installer, reclassifies ok, healed:true', { skip: process.platform === 'win32' }, () => {
-  const installer = require('../../plugins/anti-hall/companion/install-devswarm-ingest.js');
+  const installer = require('../../plugins/anti-hall-node/companion/install-devswarm-ingest.js');
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'update-heal-stale-'));
   const wt = process.cwd(); // a real git worktree (this repo)
   const staleScript = path.join(home, 'this-script-does-not-exist.js');
@@ -898,7 +909,7 @@ test('healIngestDaemon: gate open + stale-script unit → spawns the (fresh) ins
 });
 
 test('healIngestDaemon: gate open + reinstall does NOT fix it → attempted:true, healed:false', { skip: process.platform === 'win32' }, () => {
-  const installer = require('../../plugins/anti-hall/companion/install-devswarm-ingest.js');
+  const installer = require('../../plugins/anti-hall-node/companion/install-devswarm-ingest.js');
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'update-heal-stillstale-'));
   const wt = process.cwd();
   const staleScript = path.join(home, 'this-script-does-not-exist.js');
@@ -933,7 +944,7 @@ test('healIngestDaemon: gate open + reinstall does NOT fix it → attempted:true
 });
 
 test('healIngestDaemon: gate open + unstable-script (drift) unit → env is passed through to classify, spawns installer, reclassifies ok, healed:true', { skip: process.platform === 'win32' }, () => {
-  const installer = require('../../plugins/anti-hall/companion/install-devswarm-ingest.js');
+  const installer = require('../../plugins/anti-hall-node/companion/install-devswarm-ingest.js');
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'update-heal-drift-'));
   const wt = process.cwd(); // a real git worktree (this repo)
   // A fake "current stable" marketplace clone whose companion/devswarm-ingest.js
@@ -941,7 +952,7 @@ test('healIngestDaemon: gate open + unstable-script (drift) unit → env is pass
   // is exactly the drift classifyIngestUnit's 'unstable-script' branch detects,
   // but ONLY when `env` reaches it (root cause of the P1 this test guards).
   const fakeMarketplaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'update-heal-drift-mkt-'));
-  const stableScriptDir = path.join(fakeMarketplaceDir, 'plugins', 'anti-hall', 'companion');
+  const stableScriptDir = path.join(fakeMarketplaceDir, 'plugins', 'anti-hall-node', 'companion');
   fs.mkdirSync(stableScriptDir, { recursive: true });
   const stableScript = path.join(stableScriptDir, 'devswarm-ingest.js');
   fs.writeFileSync(stableScript, '// fake current-stable ingest script\n');
@@ -988,11 +999,11 @@ test('healIngestDaemon: gate open + unstable-script (drift) unit → env is pass
 });
 
 test('healIngestDaemon: gate open + already-stable ("ok") unit under a drift-aware env → attempted:true, healed:true, FORCES a restart anyway (pacing-fix delivery gap — the running process must re-exec onto post-pull content even when install-shape is already ok)', { skip: process.platform === 'win32' }, () => {
-  const installer = require('../../plugins/anti-hall/companion/install-devswarm-ingest.js');
+  const installer = require('../../plugins/anti-hall-node/companion/install-devswarm-ingest.js');
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'update-heal-stable-'));
   const wt = process.cwd();
   const fakeMarketplaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'update-heal-stable-mkt-'));
-  const stableScriptDir = path.join(fakeMarketplaceDir, 'plugins', 'anti-hall', 'companion');
+  const stableScriptDir = path.join(fakeMarketplaceDir, 'plugins', 'anti-hall-node', 'companion');
   fs.mkdirSync(stableScriptDir, { recursive: true });
   const stableScript = path.join(stableScriptDir, 'devswarm-ingest.js');
   fs.writeFileSync(stableScript, '// fake current-stable ingest script\n');
@@ -1033,8 +1044,8 @@ test('healIngestDaemon: gate open + already-stable ("ok") unit under a drift-awa
 });
 
 test('healIngestDaemon: repoKey-aware (v0.57 mesh Phase 6, D9/D24) — after a spawn that reaps the LEGACY unit and installs the PER-PROJECT unit (what the real installer now does on a real git worktree), the FRESH project unit is detected, not the just-reaped legacy one → healed:true', { skip: process.platform === 'win32' }, () => {
-  const installer = require('../../plugins/anti-hall/companion/install-devswarm-ingest.js');
-  const repokey = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
+  const installer = require('../../plugins/anti-hall-node/companion/install-devswarm-ingest.js');
+  const repokey = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'update-heal-repokey-'));
   const wt = process.cwd(); // a real git worktree (this repo) — repoKey resolves
   const repoKey = repokey.repoKeyForWorktree(wt);
@@ -1362,7 +1373,7 @@ test('runUpdate: reconcile is NOT attempted outside a DevSwarm session (default 
     writeChangelog(t.marketplaceDir, SAMPLE_CHANGELOG);
     writeInstalled(t.root, '0.32.1');
     const p = pathsFor(t);
-    p.pluginSrcDir = REAL_PLUGIN_SRC_DIR; // real scripts/hooks tree, so this exercises the GATE, not "files not found"
+    p.pluginSrcDir = REAL_PLUGIN_SRC_DIR; p.nodeSrcDir = NODE_REAL_PLUGIN_SRC_DIR; // real scripts/hooks tree, so this exercises the GATE, not "files not found"
     fs.mkdirSync(p.cacheRoot, { recursive: true });
     const exec = execStub({ status: '', pull: 'Updating...\n' });
     const { status } = U.runUpdate({ paths: p, exec, env: {}, cwd: process.cwd() });
@@ -1379,7 +1390,7 @@ test('runUpdate: reconcile runs inside a DevSwarm session, regardless of cache.s
     writeChangelog(t.marketplaceDir, SAMPLE_CHANGELOG);
     writeInstalled(t.root, '0.33.0'); // already at latest -> cache does NOT sync this run
     const p = pathsFor(t);
-    p.pluginSrcDir = REAL_PLUGIN_SRC_DIR; // real scripts/hooks tree, so the gate check itself runs
+    p.pluginSrcDir = REAL_PLUGIN_SRC_DIR; p.nodeSrcDir = NODE_REAL_PLUGIN_SRC_DIR; // real scripts/hooks tree, so the gate check itself runs
     fs.mkdirSync(p.cacheRoot, { recursive: true });
     fs.mkdirSync(path.join(p.cacheRoot, '0.33.0'), { recursive: true }); // already cached
     const exec = execStub({ status: '', pull: 'Already up to date.\n' });
@@ -1401,7 +1412,7 @@ test('runUpdate: a reconcile failure is reported but never fails the update (fai
     writeChangelog(t.marketplaceDir, SAMPLE_CHANGELOG);
     writeInstalled(t.root, '0.32.1');
     const p = pathsFor(t);
-    p.pluginSrcDir = REAL_PLUGIN_SRC_DIR; // real scripts/hooks tree, so the gate opens and devswarm.run is actually called
+    p.pluginSrcDir = REAL_PLUGIN_SRC_DIR; p.nodeSrcDir = NODE_REAL_PLUGIN_SRC_DIR; // real scripts/hooks tree, so the gate opens and devswarm.run is actually called
     fs.mkdirSync(p.cacheRoot, { recursive: true });
     const exec = execStub({ status: '', pull: 'Updating...\n' });
     const fakeDevswarm = { run: () => { throw new Error('reconcile boom'); } };
@@ -1674,7 +1685,7 @@ test('runUpdate: healRegistryRows is NOT attempted outside a DevSwarm session (d
     writeChangelog(t.marketplaceDir, SAMPLE_CHANGELOG);
     writeInstalled(t.root, '0.32.1');
     const p = pathsFor(t);
-    p.pluginSrcDir = REAL_PLUGIN_SRC_DIR;
+    p.pluginSrcDir = REAL_PLUGIN_SRC_DIR; p.nodeSrcDir = NODE_REAL_PLUGIN_SRC_DIR;
     fs.mkdirSync(p.cacheRoot, { recursive: true });
     const exec = execStub({ status: '', pull: 'Updating...\n' });
     const { status } = U.runUpdate({ paths: p, exec, env: {}, cwd: process.cwd() });
@@ -1709,7 +1720,7 @@ test('runUpdate: healRegistryRows runs inside a DevSwarm session, regardless of 
     writeChangelog(t.marketplaceDir, SAMPLE_CHANGELOG);
     writeInstalled(t.root, '0.33.0'); // already at latest -> cache does NOT sync this run
     const p = pathsFor(t);
-    p.pluginSrcDir = REAL_PLUGIN_SRC_DIR;
+    p.pluginSrcDir = REAL_PLUGIN_SRC_DIR; p.nodeSrcDir = NODE_REAL_PLUGIN_SRC_DIR;
     fs.mkdirSync(p.cacheRoot, { recursive: true });
     fs.mkdirSync(path.join(p.cacheRoot, '0.33.0'), { recursive: true });
     const exec = execStub({ status: '', pull: 'Already up to date.\n' });
@@ -1753,7 +1764,7 @@ test('runUpdate: a healRegistryRows failure is reported but never fails the upda
     writeChangelog(t.marketplaceDir, SAMPLE_CHANGELOG);
     writeInstalled(t.root, '0.32.1');
     const p = pathsFor(t);
-    p.pluginSrcDir = REAL_PLUGIN_SRC_DIR;
+    p.pluginSrcDir = REAL_PLUGIN_SRC_DIR; p.nodeSrcDir = NODE_REAL_PLUGIN_SRC_DIR;
     fs.mkdirSync(p.cacheRoot, { recursive: true });
     const exec = execStub({ status: '', pull: 'Updating...\n' });
     let called = false;
@@ -1813,7 +1824,7 @@ test('renderHuman: omits the heal-registry-rows block entirely when not attempte
 // liveness.js is exercised, not a hand-rolled stub. `home` is always an
 // isolated tmpdir.
 // ---------------------------------------------------------------------------
-const wakeWatch = require('../../plugins/anti-hall/companion/lib/devswarm-wake-watch.js');
+const wakeWatch = require('../../plugins/anti-hall-node/companion/lib/devswarm-wake-watch.js');
 
 test('wakeMonitorPostUpdate: not a DevSwarm session (no DEVSWARM_REPO_ID) -> attempted:false, gate closed', () => {
   const result = U.wakeMonitorPostUpdate({
@@ -1856,7 +1867,7 @@ test('wakeMonitorPostUpdate: gate open + real watcher shipped but NOT live -> sh
     assert.strictEqual(result.live, false);
     assert.match(result.detail, /NOT live|live-check skipped/);
     assert.match(result.detail, /Monitor.*tool/, 'must surface the exact manual arm command since no watcher is live');
-    const watcherPath = path.join(REAL_PLUGIN_SRC_DIR, 'companion', 'lib', 'devswarm-wake-watch.js');
+    const watcherPath = path.join(NODE_REAL_PLUGIN_SRC_DIR, 'companion', 'lib', 'devswarm-wake-watch.js');
     assert.ok(result.detail.includes(watcherPath), 'the manual arm command must name the real watcher script path');
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
@@ -2026,7 +2037,7 @@ test('runUpdate: wakeMonitor is NOT attempted outside a DevSwarm session (defaul
     writeChangelog(t.marketplaceDir, SAMPLE_CHANGELOG);
     writeInstalled(t.root, '0.32.1');
     const p = pathsFor(t);
-    p.pluginSrcDir = REAL_PLUGIN_SRC_DIR;
+    p.pluginSrcDir = REAL_PLUGIN_SRC_DIR; p.nodeSrcDir = NODE_REAL_PLUGIN_SRC_DIR;
     fs.mkdirSync(p.cacheRoot, { recursive: true });
     const exec = execStub({ status: '', pull: 'Updating...\n' });
     const { status } = U.runUpdate({ paths: p, exec, env: {}, cwd: process.cwd() });
@@ -2045,7 +2056,7 @@ test('runUpdate: wakeMonitor runs inside a DevSwarm session and never flips stop
     writeChangelog(t.marketplaceDir, SAMPLE_CHANGELOG);
     writeInstalled(t.root, '0.32.1');
     const p = pathsFor(t);
-    p.pluginSrcDir = REAL_PLUGIN_SRC_DIR;
+    p.pluginSrcDir = REAL_PLUGIN_SRC_DIR; p.nodeSrcDir = NODE_REAL_PLUGIN_SRC_DIR;
     fs.mkdirSync(p.cacheRoot, { recursive: true });
     const exec = execStub({ status: '', pull: 'Updating...\n' });
     const { status, stop } = U.runUpdate({ paths: p, exec, env: { DEVSWARM_REPO_ID: 'r1' }, cwd: repo, home });
@@ -2562,7 +2573,7 @@ test('healOrphanPartitionsPostUpdate: runUpdate wires it into status, after fold
     writeChangelog(t.marketplaceDir, SAMPLE_CHANGELOG);
     writeInstalled(t.root, '0.32.1');
     const p = pathsFor(t);
-    p.pluginSrcDir = REAL_PLUGIN_SRC_DIR; // real scripts/hooks tree, so the gate opens for real
+    p.pluginSrcDir = REAL_PLUGIN_SRC_DIR; p.nodeSrcDir = NODE_REAL_PLUGIN_SRC_DIR; // real scripts/hooks tree, so the gate opens for real
     fs.mkdirSync(p.cacheRoot, { recursive: true });
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'update-healorphan-runupdate-'));
     try {
@@ -2827,12 +2838,12 @@ test('runUpdate: shared store-hash enumeration — devswarmStore.listStoreHashes
     writeChangelog(t.marketplaceDir, SAMPLE_CHANGELOG);
     writeInstalled(t.root, '0.32.1');
     const p = pathsFor(t);
-    p.pluginSrcDir = REAL_PLUGIN_SRC_DIR;
+    p.pluginSrcDir = REAL_PLUGIN_SRC_DIR; p.nodeSrcDir = NODE_REAL_PLUGIN_SRC_DIR;
     fs.mkdirSync(p.cacheRoot, { recursive: true });
     const exec = execStub({ status: '', pull: 'Updating...\n' });
 
     let listCalls = 0;
-    const realStore = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
+    const realStore = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
     const spyStore = Object.assign({}, realStore, {
       listStoreHashes: (...args) => { listCalls++; return realStore.listStoreHashes(...args); },
     });
@@ -2874,7 +2885,7 @@ test('runUpdate: shared store-hash enumeration — devswarmStore.listStoreHashes
 test('orderStoreHashesBySize: smallest-disk-size-first, not raw readdir/input order', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'update-order-size-'));
   try {
-    const storeLib = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
+    const storeLib = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
     const mk = (hash, bytes) => {
       const dir = storeLib.storeDirForHash(home, hash);
       fs.mkdirSync(dir, { recursive: true });
@@ -2894,7 +2905,7 @@ test('orderStoreHashesBySize: smallest-disk-size-first, not raw readdir/input or
 test('orderStoreHashesBySize: fail-open — an unreadable/missing store dir scores 0, never throws, list is still returned in full', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'update-order-size-failopen-'));
   try {
-    const storeLib = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
+    const storeLib = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
     const dir = storeLib.storeDirForHash(home, 'realone');
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, 'devswarm.db'), Buffer.alloc(500));
@@ -2907,7 +2918,7 @@ test('orderStoreHashesBySize: fail-open — an unreadable/missing store dir scor
 test('smallest-first ordering reaches a store that would previously starve behind a large one, within the same tiny budget', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'update-order-starve-'));
   try {
-    const storeLib = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
+    const storeLib = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
     const mk = (hash, bytes) => {
       const dir = storeLib.storeDirForHash(home, hash);
       fs.mkdirSync(dir, { recursive: true });
@@ -2942,7 +2953,7 @@ test('smallest-first ordering reaches a store that would previously starve behin
 test('storeDirSizeBytes/orderStoreHashesBySize measured cost: stat-ing 242 stores is negligible next to the 20s sweep budget', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'update-order-size-cost-'));
   try {
-    const storeLib = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
+    const storeLib = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
     const hashes = [];
     for (let i = 0; i < 242; i++) {
       const hash = 'store' + String(i).padStart(4, '0') + 'aa';
@@ -3163,7 +3174,7 @@ test('runUpdate: ANTIHALL_UPDATE_QUIET=1 suppresses every [update] stage STDERR 
 // invocation appends one line to markerPath, so "ran exactly once" is
 // directly observable.
 function writeFakeNewUpdateJs(marketplaceDir, markerPath) {
-  const dir = path.join(marketplaceDir, 'plugins', 'anti-hall', 'skills', 'update', 'scripts');
+  const dir = path.join(marketplaceDir, 'plugins', 'anti-hall-node', 'skills', 'update', 'scripts');
   fs.mkdirSync(dir, { recursive: true });
   const src = `
 'use strict';

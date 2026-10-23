@@ -18,11 +18,12 @@ const path = require('node:path');
 const cp = require('node:child_process');
 
 const ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const ui = require(path.join(ROOT, 'companion', 'lib', 'devswarm-ui-sync.js'));
-const appDb = require(path.join(ROOT, 'companion', 'lib', 'devswarm-app-db.js'));
-const dw = require(path.join(ROOT, 'scripts', 'devswarm.js'));
-const names = require(path.join(ROOT, 'companion', 'lib', 'devswarm-names.js'));
-const repokey = require(path.join(ROOT, 'companion', 'lib', 'devswarm-repokey.js'));
+const NODE_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const ui = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-ui-sync.js'));
+const appDb = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-app-db.js'));
+const dw = require(path.join(NODE_ROOT, 'scripts', 'devswarm.js'));
+const names = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-names.js'));
+const repokey = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-repokey.js'));
 const { testHook } = require('../helpers/spawn-hook.js');
 const { buildAppDb, rmFixture } = require('../helpers/app-db-fixture.js');
 
@@ -179,7 +180,7 @@ function conflictAskFixture() {
     generatedAt: Date.now(), requiredGates: ['done'], recent: [], archivedRegistryRows: [],
     workspaces: { 'b-b': { worktreePath: plain, sessionId: null, total: 0, cursor: 0, unread: 0, directUnread: 0, gates: {}, archive_ready: false } },
   }));
-  const identity = require(path.join(ROOT, 'companion', 'lib', 'identity.js'));
+  const identity = require(path.join(NODE_ROOT, 'companion', 'lib', 'identity.js'));
   const gitTop = identity.resolveContext(f.repoPath, { home: f.home, missingPath: 'ancestor' }).worktreeRoot;
   const run = (sid) => {
     const r = testHook('devswarm-parent-inbox.js', { hook_event_name: 'UserPromptSubmit', session_id: sid, prompt: 'hi', cwd: f.repoPath },

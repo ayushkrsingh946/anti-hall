@@ -3,7 +3,7 @@
 // broadcast seq at or below the cursor is permanently lost, because
 // `mesh read` always advances the cursor.
 //
-// Root cause (file:line, HEAD 5631695): plugins/anti-hall/scripts/devswarm.js
+// Root cause (file:line, HEAD 5631695): plugins/anti-hall-node/scripts/devswarm.js
 // cmdMeshRead (~10659-10690) filters `storeSeq > cursor` and then
 // UNCONDITIONALLY calls `s.advanceBroadcastCursor(cursorKey)` — there is no
 // `--peek`/`--seq` mode anywhere in the function, so a message once read can
@@ -23,7 +23,9 @@ const cp = require('node:child_process');
 
 const antiHallDir = process.env.DEVSWARM_ANTIHALL_DIR
   || path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const cli = require(path.join(antiHallDir, 'scripts', 'devswarm.js'));
+const NODE_antiHallDir = process.env.DEVSWARM_ANTIHALL_DIR
+  || path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const cli = require(path.join(NODE_antiHallDir, 'scripts', 'devswarm.js'));
 
 function tmpHome() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'anti-hall-meshread-'));

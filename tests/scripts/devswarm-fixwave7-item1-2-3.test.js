@@ -52,10 +52,10 @@ const path = require('node:path');
 const devswarmSource = require('./lib/devswarm-source.js');
 const cp = require('node:child_process');
 
-const DEVSWARM_PATH = path.join(__dirname, '../../plugins/anti-hall/scripts/devswarm.js');
+const DEVSWARM_PATH = path.join(__dirname, '../../plugins/anti-hall-node/scripts/devswarm.js');
 const cli = require(DEVSWARM_PATH);
-const storeLib = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
-const livenessLib = require('../../plugins/anti-hall/companion/lib/liveness.js');
+const storeLib = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
+const livenessLib = require('../../plugins/anti-hall-node/companion/lib/liveness.js');
 const mutantKit = require('./lib/devswarm-mutant-kit.js');
 
 function tmpHome() {
@@ -93,7 +93,7 @@ function register(home, repoDir, id, sessionId) {
 }
 
 function seedPartition(home, repoDir, toId, rows) {
-  const repokey = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
+  const repokey = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
   const repoKey = repokey.repoKeyForWorktree(repoDir);
   assert.ok(repoKey, 'repoKey must resolve for a real git repo');
   const s = storeLib.openStore({ home, hash: repoKey, backend: 'journal' });
@@ -108,7 +108,7 @@ function seedPartition(home, repoDir, toId, rows) {
 }
 
 function readCursorFile(home, repo, id) {
-  const repokey = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
+  const repokey = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
   const repoKey = repokey.repoKeyForWorktree(repo);
   const s = storeLib.openStore({ home, hash: repoKey, backend: 'journal' });
   try { return s.cursorValue(id); } finally { s.close(); }

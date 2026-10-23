@@ -11,9 +11,9 @@ const fs       = require('node:fs');
 const os       = require('node:os');
 const path     = require('node:path');
 
-const REFRESH_ABS = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'hooks', 'devswarm-version-refresh.js');
+const REFRESH_ABS = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'hooks', 'devswarm-version-refresh.js');
 const refresh = require(REFRESH_ABS);
-const { DEVSWARM_BASELINE } = require(path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'hooks', 'lib', 'devswarm-baseline.js'));
+const { DEVSWARM_BASELINE } = require(path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'hooks', 'lib', 'devswarm-baseline.js'));
 
 function tmpHome() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'anti-hall-test-refresh-'));

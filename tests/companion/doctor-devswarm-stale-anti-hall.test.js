@@ -15,10 +15,10 @@ const os = require('node:os');
 const path = require('node:path');
 
 const D = require(path.join(
-  __dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'lib', 'doctor-devswarm.js',
+  __dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'lib', 'doctor-devswarm.js',
 ));
 const { projectDirFor, writeVerdict, heartbeatPathFor } = require(path.join(
-  __dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'lib', 'liveness.js',
+  __dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'lib', 'liveness.js',
 ));
 
 function makeHome() {

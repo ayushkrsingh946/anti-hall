@@ -20,7 +20,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const REPO_ROOT = path.join(__dirname, '..', '..');
-const REPAIR_JS = path.join(REPO_ROOT, 'plugins', 'anti-hall', 'hooks', 'lib', 'doctor-repair.js');
+const REPAIR_JS = path.join(REPO_ROOT, 'plugins', 'anti-hall-node', 'hooks', 'lib', 'doctor-repair.js');
 const repair = require(REPAIR_JS);
 
 function makeHome() {
@@ -118,7 +118,7 @@ test('checkSupersededArchivedMarkers: caps the shown list at 5 and notes the rem
 });
 
 test('doctor.js wires checkSupersededArchivedMarkers into a report-only, info-labeled section', () => {
-  const DOCTOR_JS = path.join(REPO_ROOT, 'plugins', 'anti-hall', 'hooks', 'doctor.js');
+  const DOCTOR_JS = path.join(REPO_ROOT, 'plugins', 'anti-hall-node', 'hooks', 'doctor.js');
   const src = fs.readFileSync(DOCTOR_JS, 'utf8');
   assert.match(src, /checkSupersededArchivedMarkers/);
   assert.match(src, /superseded archived markers/);

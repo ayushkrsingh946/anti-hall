@@ -18,9 +18,9 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const store = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
-const policy = require('../../plugins/anti-hall/companion/lib/devswarm-orphan-policy.js');
-const devswarm = require('../../plugins/anti-hall/scripts/devswarm.js');
+const store = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
+const policy = require('../../plugins/anti-hall-node/companion/lib/devswarm-orphan-policy.js');
+const devswarm = require('../../plugins/anti-hall-node/scripts/devswarm.js');
 
 function tmpHome() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'anti-hall-orphanpolicy-'));

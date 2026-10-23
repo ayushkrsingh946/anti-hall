@@ -11,8 +11,8 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { makeHome } = require('../helpers/fixtures.js');
 
-const REVIEW = require('../../plugins/anti-hall/hooks/lib/jev-review.js');
-const CLI = require.resolve('../../plugins/anti-hall/scripts/jev-setup.js');
+const REVIEW = require('../../plugins/anti-hall-node/hooks/lib/jev-review.js');
+const CLI = require.resolve('../../plugins/anti-hall-node/scripts/jev-setup.js');
 
 function writeJevConfig(home, cfg) {
   const dir = path.join(home, '.anti-hall');

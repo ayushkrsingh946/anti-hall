@@ -14,7 +14,7 @@ const assert = require('node:assert');
 const cp = require('node:child_process');
 
 const { buildIdentityFixtures } = require('../helpers/git-fixtures.js');
-const identity = require('../../plugins/anti-hall/companion/lib/identity.js');
+const identity = require('../../plugins/anti-hall-node/companion/lib/identity.js');
 
 const fx = buildIdentityFixtures();
 after(() => fx.cleanup());

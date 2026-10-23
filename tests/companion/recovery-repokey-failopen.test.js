@@ -23,7 +23,7 @@ const { spawnSync } = require('node:child_process');
 // on POSIX. Mirrors tests/hooks/devswarm-child-gate.test.js:657.
 const BREAK_REPOKEY = path.join(__dirname, '..', 'helpers', 'break-devswarm-repokey.js').replace(/\\/g, '/');
 const RECOVERY_JS = path.join(
-  __dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'lib', 'recovery.js',
+  __dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'lib', 'recovery.js',
 ).replace(/\\/g, '/');
 
 test('D27 fail-open: an UNLOADABLE devswarm-repokey.js -> requiring recovery.js still succeeds, notifyParentEscalation still does not throw', () => {

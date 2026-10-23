@@ -14,6 +14,7 @@
 //! Isolation: HOME is a scratch directory, `ANTIHALL_INGEST_DRY_RUN=1`, `ANTIHALL_DEVSWARM_APP_DB=off`, the environment is
 //! cleared, the engine state directory is scratch; nothing under the real home is read or written.
 #![allow(clippy::unwrap_used, clippy::expect_used)] // a test crate: a panic is the failure report, and E2 exempts tests
+#![allow(clippy::panic, clippy::unreachable)] // integration tests: a panic is the failure report; production crates deny these in Cargo.toml
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -40,6 +41,13 @@ struct Case {
 
 /// Cases that first add an orphan partition with unread mail to both homes (`orphan.js`).
 const ORPHAN_CASES: &[&str] = &["send-with-orphan", "mesh-read-with-orphan"];
+
+/// Cases that first add a live descriptor (`workspaces/<id>.json`, no registry row of that id) to both homes: the id, and whether
+/// its worktree is the registered child's (else a path nothing is registered under).
+const DESCRIPTOR_CASES: &[(&str, &str, bool)] = &[
+    ("send-by-descriptor-short-id", "aaaa1111-0000-4000-8000-000000000001", true),
+    ("send-by-descriptor-unmatched", "bbbb2222-0000-4000-8000-000000000002", false),
+];
 
 #[test]
 fn engine_verbs_match_node_byte_for_byte() {
@@ -190,7 +198,41 @@ fn engine_verbs_match_node_byte_for_byte() {
             argv: vec![s("send"), s("--to"), s("nobody"), s("--message"), s("x")],
             stdin: None,
             extra: vec![],
-            native: false,
+            native: true,
+        },
+        // GH #203: the roster shows a short id; a unique id prefix addresses the row, an ambiguous one refuses and lists the ids
+        Case {
+            name: "send-by-id-prefix",
+            cwd: "child",
+            argv: vec![s("send"), s("--to"), s("primary-"), s("--message"), s("via short id")],
+            stdin: None,
+            extra: as_child.clone(),
+            native: false, // the Primary row carries a live session, so the engine hands a stale-twin check to Node (as for its exact id)
+        },
+        Case {
+            name: "send-ambiguous-id-prefix",
+            cwd: "main",
+            argv: vec![s("send"), s("--to"), s("child-"), s("--message"), s("x")],
+            stdin: None,
+            extra: vec![],
+            native: true,
+        },
+        // GH #203: a descriptor-only workspace's short id resolves through its descriptor (the engine answers it, no defer)
+        Case {
+            name: "send-by-descriptor-short-id",
+            cwd: "main",
+            argv: vec![s("send"), s("--to"), s("aaaa1111"), s("--message"), s("via descriptor short id")],
+            stdin: None,
+            extra: vec![],
+            native: true,
+        },
+        Case {
+            name: "send-by-descriptor-unmatched",
+            cwd: "main",
+            argv: vec![s("send"), s("--to"), s("bbbb2222"), s("--message"), s("x")],
+            stdin: None,
+            extra: vec![],
+            native: true,
         },
         Case { name: "send-no-target", cwd: "main", argv: vec![s("send"), s("--message"), s("x")], stdin: None, extra: vec![], native: true },
         Case {
@@ -239,7 +281,7 @@ fn engine_verbs_match_node_byte_for_byte() {
             argv: vec![s("send"), s("--to"), s("child-1,child-2"), s("--message"), s("x")],
             stdin: None,
             extra: vec![],
-            native: false,
+            native: true,
         },
         Case {
             name: "send-broadcast-question",
@@ -297,9 +339,9 @@ fn engine_verbs_match_node_byte_for_byte() {
             argv: vec![s("send"), s("--to"), s("child-1"), s("--message"), s("x")],
             stdin: None,
             extra: vec![],
-            native: false,
+            native: true,
         },
-        Case { name: "mesh-read-with-orphan", cwd: "main", argv: vec![s("mesh"), s("read")], stdin: None, extra: vec![], native: false },
+        Case { name: "mesh-read-with-orphan", cwd: "main", argv: vec![s("mesh"), s("read")], stdin: None, extra: vec![], native: true },
         Case {
             name: "jev-on-direct",
             cwd: "main",
@@ -337,6 +379,12 @@ fn engine_verbs_match_node_byte_for_byte() {
                     .unwrap();
                 assert!(o.status.success(), "orphan seed failed: {}", String::from_utf8_lossy(&o.stderr));
             }
+            if let Some((_, id, child)) = DESCRIPTOR_CASES.iter().find(|(n, _, _)| *n == c.name) {
+                let wt = if *child { fx.child.clone() } else { fx.root.join("no-such-worktree") };
+                let dir = h.join(".anti-hall/devswarm/workspaces");
+                fs::create_dir_all(&dir).unwrap();
+                fs::write(dir.join(format!("{id}.json")), format!("{{\"id\":\"{id}\",\"worktreePath\":{:?}}}\n", wt.to_string_lossy())).unwrap();
+            }
             fs::create_dir_all(h.join(".anti-hall")).unwrap();
             fs::write(h.join(".anti-hall").join("settings.json"), "{\"mesh\":{\"engine_writes\":\"on\"}}\n").unwrap();
         }
@@ -355,10 +403,8 @@ fn engine_verbs_match_node_byte_for_byte() {
         }
         if !c.native {
             // Node ran it for the engine; the timestamp of a Node run is its own clock, so only refusals are compared exactly
-            assert_eq!(e.code, n.code, "{}: exit code of the fallback", c.name);
-            if n.code != 0 {
-                assert_eq!(e.stdout, n.stdout, "{}: stdout of the fallback", c.name);
-            }
+            assert_eq!(e.code, 69, "{}: no Node to hand the verb to, the engine is unable (69, a visible error)", c.name);
+            assert!(e.stdout.is_empty(), "{}: an unable engine prints nothing: {}", c.name, e.stdout);
             continue;
         }
         assert_eq!((e.code, &e.stdout), (n.code, &n.stdout), "{}: stdout/exit differ", c.name);
@@ -431,15 +477,27 @@ fn off_mode_hands_every_call_to_node_and_shadow_logs_a_match() {
     let db = home.join(".anti-hall/devswarm/store").join(&fx.repo_key).join("devswarm.db");
     let count = || rusqlite::Connection::open(&db).unwrap().query_row("SELECT COUNT(*) FROM messages", [], |r| r.get::<_, i64>(0)).unwrap();
     let before = count();
-    // off (the shipped default, no settings file): Node acts, the engine only forwards and logs nothing
+    // the shipped default (no settings file) is `on`: the engine acts and logs a native answer
     let mut c = Command::new(BIN);
-    c.args(["mesh", "send", "--to", "child-1", "--message", "off mode"]).current_dir(&fx.main).env_clear().envs(base_env(&home, &state, &[]));
+    c.args(["mesh", "send", "--to", "child-1", "--message", "default mode"]).current_dir(&fx.main).env_clear().envs(base_env(&home, &state, &[]));
     let o = run(&mut c, None);
     assert_eq!(o.status.code(), Some(0), "{}", String::from_utf8_lossy(&o.stderr));
     assert!(String::from_utf8_lossy(&o.stdout).starts_with("{\"ok\":true,\"action\":\"send\""));
     assert_eq!(count(), before + 1);
-    assert!(!state.join("mesh-shadow.jsonl").exists(), "off mode logs nothing");
-    // shadow: Node acts (its stdout passes through), the engine replays on a copy and logs the comparison
+    let rec = last_log(&state);
+    assert_eq!((rec["mode"].as_str(), rec["result"].as_str()), (Some("on"), Some("native")), "{rec}");
+    // off: nothing is done and nothing is logged, and the refusal is said (exit 69), never a silent success
+    fs::write(home.join(".anti-hall").join("settings.json"), "{\"mesh\":{\"engine_writes\":\"off\"}}\n").unwrap();
+    let lines_before = fs::read_to_string(state.join("mesh-shadow.jsonl")).unwrap_or_default().lines().count();
+    let mut c = Command::new(BIN);
+    c.args(["mesh", "send", "--to", "child-1", "--message", "off mode"]).current_dir(&fx.main).env_clear().envs(base_env(&home, &state, &[]));
+    let o = run(&mut c, None);
+    assert_eq!(o.status.code(), Some(69), "{}", String::from_utf8_lossy(&o.stderr));
+    assert!(o.stdout.is_empty(), "off mode prints nothing: {}", String::from_utf8_lossy(&o.stdout));
+    assert!(!String::from_utf8_lossy(&o.stderr).is_empty(), "off mode says it is off");
+    assert_eq!(count(), before + 1, "off mode wrote nothing");
+    assert_eq!(fs::read_to_string(state.join("mesh-shadow.jsonl")).unwrap_or_default().lines().count(), lines_before, "off mode logs nothing");
+    // the word `shadow` reads as `on` (no Node to replay on a copy): the engine acts and logs a native answer
     fs::write(home.join(".anti-hall").join("settings.json"), "{\"mesh\":{\"engine_writes\":\"shadow\"}}\n").unwrap();
     for (argv, effect) in [
         (vec!["send", "--to", "child-1", "--message", "shadowed"], "row"),
@@ -452,15 +510,9 @@ fn off_mode_hands_every_call_to_node_and_shadow_logs_a_match() {
         let o = run(&mut c, None);
         assert_eq!(o.status.code(), Some(0), "{argv:?}: {}", String::from_utf8_lossy(&o.stderr));
         let rec = last_log(&state);
-        assert_eq!(rec["mode"], "shadow");
-        assert_eq!(rec["result"], "match", "{argv:?} ({effect}): {rec}");
+        assert_eq!(rec["mode"], "on");
+        assert_eq!(rec["result"], "native", "{argv:?} ({effect}): {rec}");
     }
-    assert_eq!(count(), before + 3, "shadow wrote only Node's rows to the real store");
-    assert!(!state.join("mesh-shadow").exists() || fs::read_dir(state.join("mesh-shadow")).unwrap().next().is_none(), "the scratch copies are removed");
-    // an unported verb runs in Node whatever the mode
-    let mut c = Command::new(BIN);
-    c.args(["mesh", "roster", "--json"]).current_dir(&fx.main).env_clear().envs(base_env(&home, &state, &[]));
-    let o = run(&mut c, None);
-    assert_eq!(o.status.code(), Some(0));
-    assert!(String::from_utf8_lossy(&o.stdout).contains("\"action\":\"roster\""));
+    assert_eq!(count(), before + 3, "the engine wrote exactly the two send rows of the shadow word on top of the default send");
+    assert!(!state.join("mesh-shadow").exists() || fs::read_dir(state.join("mesh-shadow")).unwrap().next().is_none(), "no scratch copies are left");
 }

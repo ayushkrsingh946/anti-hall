@@ -1,6 +1,6 @@
 'use strict';
 // Item H (fleet wave): three independent, small robustness fixes bundled
-// together in plugins/anti-hall/scripts/devswarm.js:
+// together in plugins/anti-hall-node/scripts/devswarm.js:
 //
 //   1. readRetiredRedirect(home, id) joined caller-controlled `id` straight
 //      into a filesystem path with no validation — a traversal id (e.g.
@@ -31,7 +31,9 @@ const cp = require('node:child_process');
 
 const antiHallDir = process.env.ANTIHALL_TEST_PLUGIN_ROOT
   || path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const cli = require(path.join(antiHallDir, 'scripts', 'devswarm.js'));
+const NODE_antiHallDir = process.env.ANTIHALL_TEST_PLUGIN_ROOT
+  || path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const cli = require(path.join(NODE_antiHallDir, 'scripts', 'devswarm.js'));
 
 function tmpHome() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'anti-hall-h-flags-'));

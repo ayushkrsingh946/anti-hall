@@ -29,9 +29,10 @@ const { writeSettings, switchOff } = require('../helpers/settings-switch.js');
 
 const REPO = path.join(__dirname, '..', '..');
 const PLUGIN = path.join(REPO, 'plugins', 'anti-hall');
-const schema = require(path.join(PLUGIN, 'hooks', 'lib', 'settings-schema.js'));
-const settings = require(path.join(PLUGIN, 'hooks', 'lib', 'settings.js'));
-const CLI = path.join(PLUGIN, 'scripts', 'settings.js');
+const NODE_PLUGIN = path.join(REPO, 'plugins', 'anti-hall-node');
+const schema = require(path.join(NODE_PLUGIN, 'hooks', 'lib', 'settings-schema.js'));
+const settings = require(path.join(NODE_PLUGIN, 'hooks', 'lib', 'settings.js'));
+const CLI = path.join(NODE_PLUGIN, 'scripts', 'settings.js');
 
 // hook file -> the setting that switches it off. Hooks whose switch predates
 // 0.108.4 are included so the drift check covers every registered hook.
@@ -116,6 +117,7 @@ const LOCKED_KEYS = [
   'safety.gitGuard', 'safety.commandGuard', 'safety.editGuard', 'safety.swarmGuard',
   'guards.stashGuard', 'guards.editGuardAllow', 'guards.allowSubagentMailbox',
   'guards.gitAliasResolve', 'guards.gitReusedMessageCheck',
+  'guards.broadKill',
   'devswarm.maintainerNotice.post',
 ];
 
@@ -124,6 +126,10 @@ const LOCKED_KEYS = [
 // able to widen where a key is read from), so they are exempt from the
 // /config-row + env checks below.
 const HOME_ONLY_LOCKED_KEYS = ['guards.allowAnthropicEnvKey', 'jev.allowLegacyKeyRead', 'jev.genericKeyVendor'];
+// Env-only safety switches have no native /config row. This preserves the
+// manifest contract that only headline settings are native rows while still
+// proving Codex can change them through ANTIHALL_* env.
+const ENV_ONLY_LOCKED_KEYS = ['guards.broadKill'];
 
 // Exact warning text per key (owner-specified wording, 2026-09-25 revision):
 // the template states the CONSEQUENCE of the risky change, not a generic
@@ -137,6 +143,7 @@ const EXPECTED_WARNING = {
   'guards.stashGuard': 'Turning off stash-guard means git stash commands that can silently drop uncommitted work will no longer be blocked. Ask the user to confirm, then re-run with --confirmed.',
   'guards.gitAliasResolve': 'Turning off git-alias-resolve means a git alias (or a shell alias) that runs a force push or an AI-credited commit will no longer be seen through. Ask the user to confirm, then re-run with --confirmed.',
   'guards.gitReusedMessageCheck': 'Turning off git-reused-message-check means a commit that reuses an AI-credited message (-C/-c <rev>, --amend, a commit template) will no longer be blocked before it runs. Ask the user to confirm, then re-run with --confirmed.',
+  'guards.broadKill': 'Turning off broad-kill means a broad pkill, killall, kill -9 -1 or a pattern kill from any agent (including subagents) will no longer be blocked, and can take down the user\'s dev servers and other agents\' processes. Ask the user to confirm, then re-run with --confirmed.',
   'guards.editGuardAllow': 'Adding foo to edit-guard\'s allow list means those files can be edited without edit-guard\'s protection. Ask the user to confirm, then re-run with --confirmed.',
   'guards.allowSubagentMailbox': 'Turning on allow-subagent-mailbox means subagents can read/ack the Primary\'s mailbox, which is normally blocked. Ask the user to confirm, then re-run with --confirmed.',
   'devswarm.maintainerNotice.post': 'Turning on maintainer-notice.post means this checkout would be allowed to post a maintainer notice that every project\'s Primary sees — the checkout-name check is a mistake guard, not authentication, so only turn this on in the anti-hall dev checkout. Ask the user to confirm, then re-run with --confirmed.',
@@ -182,15 +189,15 @@ test('DRIFT: each mapped switch exists in the schema and each 0.108.4 hook sourc
     const [sec, key] = split(k);
     assert.ok(schema.findSetting(sec, key), k + ' (for ' + file + ') missing from the schema');
     if (!NEW_KEYS.includes(k) && k !== 'guards.modelRouting') continue;
-    const src = fs.readFileSync(path.join(PLUGIN, 'hooks', file), 'utf8');
+    const src = fs.readFileSync(path.join(NODE_PLUGIN, 'hooks', file), 'utf8');
     assert.ok(src.includes("'" + sec + "', '" + key + "'"), file + ' never reads its switch ' + k);
   }
   for (const [file, k] of Object.entries(COMPANION_SWITCHES)) {
     const [sec, key] = split(k);
     // scripts/devswarm.js + scripts/devswarm-lib/* are one logical source unit.
     const src = file === 'scripts/devswarm.js'
-      ? require('../scripts/lib/devswarm-source.js').readAll(PLUGIN)
-      : fs.readFileSync(path.join(PLUGIN, file), 'utf8');
+      ? require('../scripts/lib/devswarm-source.js').readAll(NODE_PLUGIN)
+      : fs.readFileSync(path.join(NODE_PLUGIN, file), 'utf8');
     assert.ok(src.includes("'" + sec + "', '" + key + "'"), file + ' never reads its switch ' + k);
   }
 });
@@ -301,7 +308,7 @@ const CASES = [
     payload: (s) => ({ hook_event_name: 'SessionStart', session_id: 't', cwd: s.cwd, source: 'startup' }),
     // It prints only when there is something to report, but it always arms
     // its once-a-day stamp when it runs — that stamp is the proof it ran.
-    fired: (r, s, h) => fs.existsSync(require(path.join(PLUGIN, 'hooks', 'lib', 'defect-store.js')).nudgeStampFile(h.home)),
+    fired: (r, s, h) => fs.existsSync(require(path.join(NODE_PLUGIN, 'hooks', 'lib', 'defect-store.js')).nudgeStampFile(h.home)),
   },
   {
     hook: 'claim-ledger.js', key: 'guards.claimLedger',
@@ -368,9 +375,9 @@ const CASES = [
       tool_response: { content: 'Error: out of quota until 2026-09-27T00:00:00Z. Try again later.' },
       session_id: 't',
     }),
-    fired: (r, s, h) => fs.existsSync(require(path.join(PLUGIN, 'hooks', 'lib', 'codex-quota.js')).statePath(h.home)) &&
-      JSON.parse(fs.readFileSync(require(path.join(PLUGIN, 'hooks', 'lib', 'codex-quota.js')).statePath(h.home), 'utf8')).quota &&
-      JSON.parse(fs.readFileSync(require(path.join(PLUGIN, 'hooks', 'lib', 'codex-quota.js')).statePath(h.home), 'utf8')).quota.available === false,
+    fired: (r, s, h) => fs.existsSync(require(path.join(NODE_PLUGIN, 'hooks', 'lib', 'codex-quota.js')).statePath(h.home)) &&
+      JSON.parse(fs.readFileSync(require(path.join(NODE_PLUGIN, 'hooks', 'lib', 'codex-quota.js')).statePath(h.home), 'utf8')).quota &&
+      JSON.parse(fs.readFileSync(require(path.join(NODE_PLUGIN, 'hooks', 'lib', 'codex-quota.js')).statePath(h.home), 'utf8')).quota.available === false,
   },
 ];
 
@@ -413,7 +420,7 @@ test('SWITCH guards.modelRouting=advisory (settings.json) downgrades the block t
 test('SWITCH maintenance.sessionEndReaper: off returns before reading the SessionEnd payload', () => {
   const h = makeHome();
   try {
-    const mod = path.join(PLUGIN, 'hooks', 'session-end-mcp-reaper.js');
+    const mod = path.join(NODE_PLUGIN, 'hooks', 'session-end-mcp-reaper.js');
     const code = 'let read=false; const o={ logDir: process.argv[2], get stdinRaw(){ read=true; return "not json"; } };'
       + ' require(' + JSON.stringify(mod) + ').main(o); process.stdout.write(String(read));';
     const env = { PATH: process.env.PATH, HOME: h.home, ANTIHALL_TEST_ISOLATION: '1' };
@@ -433,13 +440,18 @@ test('SAFETY: every locked key is exactly the expected set; non-advanced ones ar
     const e = schema.findSetting(...split(k));
     assert.ok(e.homeOnly && !e.env && !e.pluginOption, k + ' must stay home-settings-only (no env override, no /config row)');
   }
+  for (const k of ENV_ONLY_LOCKED_KEYS) {
+    const e = schema.findSetting(...split(k));
+    assert.ok(e.env && !e.pluginOption, k + ' must stay env-only (no /config row)');
+  }
   const uc = require(path.join(PLUGIN, '.claude-plugin', 'plugin.json')).userConfig;
   for (const k of LOCKED_KEYS) {
     const [sec, key] = split(k);
     const e = schema.findSetting(sec, key);
     // Non-advanced keys are /config rows; advanced ones (pluginOptionLegacy) live in /anti-hall:settings only.
     // An advanced key added after the /config trim never had a plugin option at all.
-    if (e.pluginOptionLegacy) assert.ok(e.pluginOption && !uc[e.pluginOption], k + ' is advanced: no /config row, legacy read source only');
+    if (ENV_ONLY_LOCKED_KEYS.includes(k)) assert.ok(!e.pluginOption, k + ' is env-only: no /config row');
+    else if (e.pluginOptionLegacy) assert.ok(e.pluginOption && !uc[e.pluginOption], k + ' is advanced: no /config row, legacy read source only');
     else if (e.advanced && !e.pluginOption) assert.ok(true);
     else assert.ok(e.pluginOption && uc[e.pluginOption], k + ' must be a /config row so the human can change it natively');
     assert.ok(e.env, k + ' must keep an env override (Codex has no /config)');

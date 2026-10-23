@@ -8,6 +8,7 @@
 //! no Node on the PATH: it must exit 75, print nothing and write nothing. The background Node witness of each answered call is
 //! checked at the end: it must have logged a match.
 #![allow(clippy::unwrap_used, clippy::expect_used)] // a test crate: a panic is the failure report, and E2 exempts tests
+#![allow(clippy::panic, clippy::unreachable)] // integration tests: a panic is the failure report; production crates deny these in Cargo.toml
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::fs;
@@ -70,7 +71,7 @@ fn tools_path(root: &Path, with_node: bool) -> String {
 }
 
 fn node_cli(home: &Path, cwd: &Path, argv: &[String], now: i64, env: &[(&str, &str)]) -> Run {
-    let cli = plugin_root().join("scripts").join("devswarm.js");
+    let cli = node_root().join("scripts").join("devswarm.js");
     let mut c = Command::new("node");
     c.arg("-e").arg(SNIPPET).arg(&cli).arg(now.to_string()).args(argv).current_dir(cwd).env_clear().envs(base_env(home, &home.join("state"), env));
     let o = run(&mut c, None);
@@ -96,12 +97,30 @@ fn mask_log(text: &str) -> String {
     pid.replace_all(&ts.replace_all(text, r#"{"ts":"T""#), r#""pid":0,"msg""#).into_owned()
 }
 
+/// The cursor journal's lines carry the wall-clock `ts` and the writer's `pid`, which differ by design (Node's clock is faked, the
+/// engine's is not, and they are two processes): both are blanked on both sides; every other field is compared.
+fn mask_cursor_log(text: &str) -> String {
+    let ts = regex::Regex::new(r#"(?m)^\{"ts":[0-9]+"#).unwrap();
+    let pid = regex::Regex::new(r#""pid":[0-9]+"#).unwrap();
+    pid.replace_all(&ts.replace_all(text, r#"{"ts":0"#), r#""pid":0"#).into_owned()
+}
+
 fn tree(home: &Path) -> BTreeMap<String, String> {
     home_files(home)
         .into_iter()
         .map(|(k, v)| {
             let text = String::from_utf8_lossy(&v).replace(home.to_string_lossy().as_ref(), "<HOME>");
-            (k.clone(), if k.contains("devswarm.jsonl") && !k.ends_with(".lock") { mask_log(&text) } else { text })
+            let text = if k.contains("devswarm.jsonl") && !k.ends_with(".lock") {
+                mask_log(&text)
+            } else if k.contains("cursor-log/") {
+                mask_cursor_log(&text)
+            } else if k.contains("devswarm/reaped/") {
+                // `reapedAt` is `new Date()` on both sides: two real clocks
+                regex::Regex::new(r#""reapedAt":"[^"]*""#).unwrap().replace_all(&text, r#""reapedAt":"T""#).into_owned()
+            } else {
+                text
+            };
+            (k.clone(), text)
         })
         .collect()
 }
@@ -226,26 +245,19 @@ fn check_from(
             pending.push((c.name.clone(), homes[1].join("state")));
         } else {
             deferred += 1;
-            assert_eq!(e.code, n.code, "{}: exit code of the fallback", c.name);
+            assert_eq!(e.code, 69, "{}: no Node to hand the verb to, the engine is unable (mesh_write.exit_unable)", c.name);
             let pre = (tree(&homes[2]), key_db(&homes[2]).is_file().then(|| raw_dump(&key_db(&homes[2]))));
             let d = engine_cli(&homes[2], &cwd, &c.argv, now, &to_ref(&ed));
-            assert_eq!(d.code, 75, "{}: a deferral the engine cannot hand to Node exits 75, got {} / {}", c.name, d.code, d.stdout);
+            assert_eq!(d.code, 69, "{}: a deferral the engine cannot hand to Node exits mesh_write.exit_unable, got {} / {}", c.name, d.code, d.stdout);
             assert!(d.stdout.is_empty(), "{}: nothing is printed on a deferral: {}", c.name, d.stdout);
             assert_eq!(last_log(&homes[2].join("state"))["result"], "defer", "{}", c.name);
             let post = (tree(&homes[2]), key_db(&homes[2]).is_file().then(|| raw_dump(&key_db(&homes[2]))));
             assert!(pre == post, "{}: a deferral wrote", c.name);
         }
     }
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    // the background Node witness was removed with the Node fallbacks: an answered call leaves no witness record
     for (name, state) in &pending {
-        let line = loop {
-            if let Some(l) = verify_lines(state).into_iter().last() {
-                break l;
-            }
-            assert!(std::time::Instant::now() < deadline, "{name}: the Node witness never logged");
-            std::thread::sleep(std::time::Duration::from_millis(100));
-        };
-        assert_eq!(line["result"], "match", "{name}: the background Node witness disagrees: {line}");
+        assert!(verify_lines(state).is_empty(), "{name}: a Node witness record exists, but no witness runs any more");
     }
     eprintln!("l8h cli parity: {} cases, {native} answered by the engine and identical to Node, {deferred} deferred with nothing written", cases.len());
     if std::env::var("AH_L8H_FILTER").is_err() {
@@ -581,7 +593,7 @@ fn ensure_and_register_match_node() {
         e("ens-reserved-id-is-node", &["ensure", "reg.base", "--worktree", &w2, "--session", "s"], "wt2", false),
         e("ens-without-worktree-is-node", &["ensure", "reg-nowt", "--session", "s"], "wt2", false),
         e("ens-without-session-is-node", &["ensure", "reg-nosess", "--worktree", &w2], "wt2", false),
-        e("ens-second-row-of-a-worktree-is-node", &["ensure", "reg-dup", "--worktree", &child, "--session", "s"], "wt2", false),
+        e("ens-second-row-of-a-worktree-folds-it", &["ensure", "reg-dup", "--worktree", &child, "--session", "s"], "wt2", true),
         e(
             "ens-another-project-worktree-is-node",
             &["ensure", "reg-x", "--worktree", fx.root.join("repo-other").to_str().unwrap(), "--session", "s"],
@@ -608,12 +620,12 @@ fn ensure_and_register_match_node() {
         r("reg-re-registers-the-same-descriptor", &["register", "reg-full", "--worktree", &w2, "--session", "s-full"], "wt2", true).setup(full),
         r("reg-over-an-archived-twin-revives-nothing-else", &["register", "reg-arch", "--worktree", &w2, "--session", "s"], "wt2", true).setup(archived_twin2),
         r("reg-without-session-is-node", &["register", "reg-nosess", "--worktree", &w2], "wt2", false),
-        r("reg-second-row-of-a-worktree-is-node", &["register", "reg-dup", "--worktree", &child, "--session", "s"], "wt2", false),
+        r("reg-second-row-of-a-worktree-folds-it", &["register", "reg-dup", "--worktree", &child, "--session", "s"], "wt2", true),
         r("reg-reserved-id-is-node", &["register", "x.inst-abcdef", "--worktree", &w2, "--session", "s"], "wt2", false),
         r("reg-unsafe-id", &["register", "a/b"], "wt2", true),
         r("reg-empty-flag-value-is-node", &["register", "reg-new", "--worktree", "", "--session", "s"], "wt2", false),
     ];
-    check(&fx, &cases, &extra, 16, 15);
+    check(&fx, &cases, &extra, 18, 13);
 }
 
 // ---- correct --------------------------------------------------------------------------------------------------------------
@@ -665,7 +677,7 @@ fn correct_matches_node() {
         }),
         c("corr-sends-the-message-and-records-the-warning", &["correct", "child-1"], true).setup(plan_with(two, "")),
         c("corr-sends-with-stray-signals-and-jev", &["correct", "child-1"], true).setup(both(Box::new(plan_with(two, "")), stray)),
-        c("corr-to-an-unregistered-id-is-node", &["correct", "ghost"], false).setup(|h| {
+        c("corr-to-an-unregistered-id", &["correct", "ghost"], true).setup(|h| {
             put(
                 h,
                 ".anti-hall/devswarm/plans/ghost.json",
@@ -675,7 +687,7 @@ fn correct_matches_node() {
         c("corr-unsafe-id", &["correct", "../x"], true),
         c("corr-no-id", &["correct"], true),
     ];
-    check(&fx, &cases, &[], 11, 1);
+    check(&fx, &cases, &[], 13, 0);
 }
 
 // ---- reap-orphans ---------------------------------------------------------------------------------------------------------
@@ -694,8 +706,8 @@ fn reap_orphans_matches_node() {
     let orphan2 = orphan.clone();
     let orphan3 = orphan.clone();
     let cases = vec![
-        r("reap-dry-run-with-an-orphan-is-node", &["reap-orphans"], "main", false).setup(orphan),
-        r("reap-apply-with-an-orphan-is-node", &["reap-orphans", "--apply", "--max", "1", "--i-am-a-human"], "main", false).setup(orphan2),
+        r("reap-dry-run-with-an-orphan", &["reap-orphans"], "main", true).setup(orphan),
+        r("reap-apply-with-an-orphan", &["reap-orphans", "--apply", "--max", "1", "--i-am-a-human"], "main", true).setup(orphan2),
         r("reap-refusal-does-not-need-the-orphans", &["reap-orphans", "--apply"], "main", true).setup(orphan3),
         r("reap-dry-run", &["reap-orphans"], "main", true),
         r("reap-apply-as-a-human", &["reap-orphans", "--apply", "--max", "3", "--i-am-a-human"], "main", true),
@@ -711,5 +723,5 @@ fn reap_orphans_matches_node() {
         r("reap-apply-outside-a-project", &["reap-orphans", "--apply", "--max", "3"], "nongit", true),
         r("reap-from-a-child", &["reap-orphans", "--apply"], "child", true),
     ];
-    check(&fx, &cases, &[], 11, 2);
+    check(&fx, &cases, &[], 13, 0);
 }

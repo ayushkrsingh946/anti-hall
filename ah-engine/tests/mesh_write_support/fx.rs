@@ -19,6 +19,11 @@ pub fn plugin_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().join("plugins").join("anti-hall")
 }
 
+/// The Node runtime the parity tests compare against (the local backup of the Node plugin, not shipped).
+pub fn node_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().join("plugins").join("anti-hall-node")
+}
+
 /// A file of the support directory.
 pub fn support(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests").join("mesh_write_support").join(name)
@@ -257,6 +262,16 @@ pub fn home_files(home: &Path) -> BTreeMap<String, Vec<u8>> {
     }
     let mut out = BTreeMap::new();
     walk(home, home, &mut out);
+    // the engine's own logs (`devswarm_sup.witness_file`: the native duties' results, `devswarm_sup.action_log`: the supervisor's action
+    // ledger, `devswarm_recon.witness_file`: the native fold jobs) exist only in the engine: they are not part of what a verb leaves behind that Node leaves too, and a logs directory holding
+    // nothing else goes with them
+    let mut gone = false;
+    for own in [".anti-hall/logs/devswarm-sup-witness.ndjson", ".anti-hall/logs/devswarm-sup-actions.ndjson", ".anti-hall/logs/devswarm-recon-witness.ndjson"] {
+        gone |= out.remove(own).is_some();
+    }
+    if gone && !out.keys().any(|k| k.starts_with(".anti-hall/logs/") && k != ".anti-hall/logs/") {
+        out.remove(".anti-hall/logs/");
+    }
     out
 }
 

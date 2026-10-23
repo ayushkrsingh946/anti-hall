@@ -13,8 +13,9 @@ const { spawnSync } = require('node:child_process');
 const { makeHome } = require('../helpers/fixtures.js');
 
 const PLUGIN = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const HOOKS = path.join(PLUGIN, 'hooks', 'lib');
-const SETUP = path.join(PLUGIN, 'scripts', 'jev-setup.js');
+const NODE_PLUGIN = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const HOOKS = path.join(NODE_PLUGIN, 'hooks', 'lib');
+const SETUP = path.join(NODE_PLUGIN, 'scripts', 'jev-setup.js');
 const LIBS = ['jev-client.js', 'credentials.js', 'settings.js'].map((f) => require.resolve(path.join(HOOKS, f)));
 const fresh = () => { for (const l of LIBS) delete require.cache[l]; return require(path.join(HOOKS, 'jev-client.js')); };
 const Q = { type: 'noul', instructions: 'x', criteria: { true: 't', false: 'f' } };

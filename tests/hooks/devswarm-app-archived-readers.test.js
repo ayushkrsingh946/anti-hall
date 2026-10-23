@@ -31,10 +31,10 @@ const path = require('node:path');
 const os = require('node:os');
 const { testHook } = require('../helpers/spawn-hook.js');
 const { makeHome } = require('../helpers/fixtures.js');
-const repokey = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
-const store = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
-const cli = require('../../plugins/anti-hall/scripts/devswarm.js');
-const cacheLib = require('../../plugins/anti-hall/companion/lib/devswarm-archived-cache.js');
+const repokey = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
+const store = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
+const cli = require('../../plugins/anti-hall-node/scripts/devswarm.js');
+const cacheLib = require('../../plugins/anti-hall-node/companion/lib/devswarm-archived-cache.js');
 
 const HOOK = 'devswarm-parent-inbox.js';
 const PRIMARY_ENV = { DEVSWARM_REPO_ID: 'repo-1' };

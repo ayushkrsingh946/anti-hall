@@ -67,8 +67,8 @@ const os = require('node:os');
 const cp = require('node:child_process');
 const { testHookRaw } = require('../helpers/spawn-hook.js');
 const { makeHome } = require('../helpers/fixtures.js');
-const repokey = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
-const { stateFileFor } = require('../../plugins/anti-hall/companion/lib/devswarm-gate-state.js');
+const repokey = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
+const { stateFileFor } = require('../../plugins/anti-hall-node/companion/lib/devswarm-gate-state.js');
 
 const HOOK = 'devswarm-parent-gate.js';
 const PRIMARY_ENV = { DEVSWARM_REPO_ID: 'repo-1' };
@@ -159,7 +159,7 @@ test('D3 (NDJSON path, v0.109 Bug 1 fix): a row with sender === own id STILL cou
   try {
     // own.id for a Primary at `a.wt` is `primary-<hash>` (installIngest);
     // resolve it the same way the hook does.
-    const installIngest = require('../../plugins/anti-hall/companion/install-devswarm-ingest.js');
+    const installIngest = require('../../plugins/anti-hall-node/companion/install-devswarm-ingest.js');
     const ownId = installIngest.primaryWorkspaceId(a.wt);
     seedDescriptor(h.home, 'ws1', a.wt, {
       rows: [{ message: 'outbound message this Primary itself sent', sender: ownId }],

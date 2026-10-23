@@ -17,7 +17,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { makeHome } = require('../helpers/fixtures.js');
 
-const store = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
+const store = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
 
 const DAY = 24 * 60 * 60 * 1000;
 

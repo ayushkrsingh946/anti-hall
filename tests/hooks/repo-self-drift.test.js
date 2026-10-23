@@ -14,14 +14,14 @@ const { testHook } = require('../helpers/spawn-hook.js');
 const { makeHome } = require('../helpers/fixtures.js');
 
 const HOOK = 'repo-self-drift.js';
-const HOOK_ABS = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'hooks', HOOK);
+const HOOK_ABS = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'hooks', HOOK);
 const PAYLOAD = { hook_event_name: 'SessionStart', session_id: 't' };
 const NOW = Date.now();
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 const rsd = require(HOOK_ABS);
 const { MODEL_KB_AUDIT_DATE, STALENESS_THRESHOLD_DAYS } = require(
-  path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'hooks', 'lib', 'repo-audit-baseline.js')
+  path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'hooks', 'lib', 'repo-audit-baseline.js')
 );
 
 function writeCache(h, obj) {
@@ -86,7 +86,7 @@ test('daysBetween: unparseable date => null', () => {
 });
 
 test('countJsFiles / countSkillDirs: counts real repo hooks dir (sanity, not exact — repo evolves)', () => {
-  const hooksDir = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'hooks');
+  const hooksDir = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'hooks');
   const skillsDir = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'skills');
   assert.ok(rsd.countJsFiles(hooksDir) > 0);
   assert.ok(rsd.countSkillDirs(skillsDir) > 0);
@@ -98,7 +98,7 @@ test('countJsFiles: absent dir => null (fail-open, never guess)', () => {
 });
 
 test('resolveKbPath: tries installed-package layout then dev-repo layout', () => {
-  const p = rsd.resolveKbPath(path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'hooks'));
+  const p = rsd.resolveKbPath(path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'hooks'));
   assert.ok(p, 'must find docs/KB.md via the dev-repo fallback in this checkout');
   assert.ok(fs.existsSync(p));
 });
@@ -115,7 +115,7 @@ test('resolveKbPath: neither candidate exists => null', () => {
 });
 
 test('scan: real repo — actual counts are computed, model-kb staleness computed', () => {
-  const hooksDir = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'hooks');
+  const hooksDir = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'hooks');
   const r = rsd.scan(hooksDir);
   assert.ok(Number.isFinite(r.actualHooks));
   assert.ok(Number.isFinite(r.actualSkills));

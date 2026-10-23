@@ -1,6 +1,6 @@
 'use strict';
 // Defect D (routing-path parity, part of the d386d8a610b7 archive-marker
-// family): isArchivedForRouting (plugins/anti-hall/scripts/devswarm.js,
+// family): isArchivedForRouting (plugins/anti-hall-node/scripts/devswarm.js,
 // isRoutingLiveRowStrict/isRoutingLiveRow's shared archive gate) called
 // isArchivedWorkspace(home, row.id, row.worktreePath, {}) — an EMPTY opts
 // object — instead of passing { sessionId: row.sessionId, log } the way the
@@ -24,7 +24,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const cli = require(path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'scripts', 'devswarm.js'));
+const cli = require(path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'scripts', 'devswarm.js'));
 
 function tmpHome() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'anti-hall-d386-routing-'));

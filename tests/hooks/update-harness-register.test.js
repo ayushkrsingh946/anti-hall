@@ -25,7 +25,7 @@ const os = require('node:os');
   const isolated = require('node:fs').mkdtempSync(require('node:path').join(require('node:os').tmpdir(), 'update-test-home-'));
   process.env.HOME = isolated; process.env.USERPROFILE = isolated;
 }
-const U = require('../../plugins/anti-hall/skills/update/scripts/update.js');
+const U = require('../../plugins/anti-hall-node/skills/update/scripts/update.js');
 
 const REAL_PLUGIN_SRC_DIR = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
 
@@ -195,7 +195,8 @@ test('runUpdate: never writes installed_plugins.json directly (harness-owned con
 function reexecFixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ah-reg-reexec-'));
   const src = path.join(root, 'plugins', 'anti-hall');
-  const f = path.join(src, 'skills', 'update', 'scripts', 'update.js');
+  const NODE_src = path.join(root, 'plugins', 'anti-hall-node');
+  const f = path.join(NODE_src, 'skills', 'update', 'scripts', 'update.js');
   fs.mkdirSync(path.dirname(f), { recursive: true });
   fs.writeFileSync(f, '// placeholder; spawnReexec is injected\n');
   return { root, paths: { pluginSrcDir: src, marketplaceDir: root } };

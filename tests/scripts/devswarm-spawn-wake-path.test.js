@@ -17,10 +17,11 @@ process.env.ANTI_HALL_LOG_DIR = LOG_DIR;
 process.on('exit', () => { try { fs.rmSync(LOG_DIR, { recursive: true, force: true }); } catch (_) {} });
 
 const ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const cli = require(path.join(ROOT, 'scripts', 'devswarm.js'));
-const installIngest = require(path.join(ROOT, 'companion', 'install-devswarm-ingest.js'));
-const { resolveContext } = require(path.join(ROOT, 'companion', 'lib', 'identity.js'));
-const { lockPathFor } = require(path.join(ROOT, 'companion', 'lib', 'devswarm-wake-watch.js'));
+const NODE_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const cli = require(path.join(NODE_ROOT, 'scripts', 'devswarm.js'));
+const installIngest = require(path.join(NODE_ROOT, 'companion', 'install-devswarm-ingest.js'));
+const { resolveContext } = require(path.join(NODE_ROOT, 'companion', 'lib', 'identity.js'));
+const { lockPathFor } = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-wake-watch.js'));
 
 const GIT_ENV = Object.assign({}, process.env, {
   HOME: LOG_DIR, USERPROFILE: LOG_DIR, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1',
@@ -87,11 +88,11 @@ test('Primary spawn with no watcher and no tick -> warnings carries the full NO 
   } finally { rm(f); }
 });
 
-test('only one path missing -> the shorter line for just that one', () => {
+test('only the cron missing -> the short NO MAILBOX TICK line (a lapsed watcher under a live cron is not warned about)', () => {
   const f = fixture();
   try {
     writeTick(f, 5);
-    assert.ok(spawn(f, 'child-b', CLAUDE).warnings[0].startsWith('NO MAILBOX WATCHER'));
+    assert.strictEqual(spawn(f, 'child-b', CLAUDE).warnings, undefined, 'a lapsed watcher under a live cron is re-armed by the tick: no warning');
   } finally { rm(f); }
   const f2 = fixture();
   try {

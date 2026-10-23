@@ -10,7 +10,7 @@ const path = require('node:path');
 const childProcess = require('node:child_process');
 
 const ROOT = path.join(__dirname, '..', '..');
-const SCRIPT = path.join(ROOT, 'plugins', 'anti-hall', 'scripts', 'coordinator-work-baseline.js');
+const SCRIPT = path.join(ROOT, 'plugins', 'anti-hall-node', 'scripts', 'coordinator-work-baseline.js');
 const FIXTURE = require(path.join(ROOT, 'tests', 'fixtures', 'coordinator-drift-replay.json'));
 const H = process.env.HOME;
 delete process.env.S;

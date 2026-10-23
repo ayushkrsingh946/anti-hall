@@ -15,6 +15,7 @@ const { makeHome } = require('../helpers/fixtures.js');
 const HOOK = 'ask-guard.js';
 const ROOT = path.join(__dirname, '..', '..');
 const PLUGIN = path.join(ROOT, 'plugins', 'anti-hall');
+const NODE_PLUGIN = path.join(ROOT, 'plugins', 'anti-hall-node');
 
 function payload(questions) {
   return {
@@ -38,7 +39,7 @@ function homeWith(mode) {
 }
 function run(h, pl, env) { return testHook(HOOK, pl, { home: h.home, env: env || {} }); }
 
-const ADVISE = require('../../plugins/anti-hall/hooks/lib/block-message.js').message({
+const ADVISE = require('../../plugins/anti-hall-node/hooks/lib/block-message.js').message({
   kind: 'tip', guard: 'ask-guard', what: 'do not hold work on a question.',
   instead: "take the recommended option, say which you took, and continue; list anything destructive or irreversible as a non-blocking 'needs your OK' line.",
 });
@@ -222,14 +223,14 @@ test('hooks.json registers the guard under PreToolUse with matcher AskUserQuesti
   assert.strictEqual(groups[0].hooks.length, 1);
   assert.deepStrictEqual(groups[0].hooks[0], {
     type: 'command',
-    command: 'node --no-concurrent-recompilation --no-concurrent-sparkplug "${CLAUDE_PLUGIN_ROOT}/hooks/ask-guard.js"',
+    command: 'node --no-concurrent-recompilation --no-concurrent-sparkplug "${CLAUDE_PLUGIN_ROOT}/../anti-hall-node/hooks/ask-guard.js"',
     timeout: 10,
   });
   assert.ok(!/hooks\/ask-guard\.js/.test(fs.readFileSync(path.join(PLUGIN, 'codex', 'hooks', 'hooks.registry.json'), 'utf8')), 'no Codex registration');
 });
 
 test('schema / manifest / docs parity for guards.noBlockingQuestions', () => {
-  const schema = require(path.join(PLUGIN, 'hooks', 'lib', 'settings-schema.js'));
+  const schema = require(path.join(NODE_PLUGIN, 'hooks', 'lib', 'settings-schema.js'));
   const e = schema.findSetting('guards', 'noBlockingQuestions');
   assert.ok(e, 'schema entry exists');
   assert.strictEqual(e.type, 'enum');
@@ -363,7 +364,7 @@ test('questionAgentsNote: block mode still blocks an unmarked question; the note
 });
 
 test('schema / manifest parity for guards.questionAgentsNote', () => {
-  const schema = require(path.join(PLUGIN, 'hooks', 'lib', 'settings-schema.js'));
+  const schema = require(path.join(NODE_PLUGIN, 'hooks', 'lib', 'settings-schema.js'));
   const e = schema.findSetting('guards', 'questionAgentsNote');
   assert.ok(e);
   assert.strictEqual(e.type, 'boolean');

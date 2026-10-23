@@ -25,11 +25,12 @@ const os = require('node:os');
 const path = require('node:path');
 
 const ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const cli = require(path.join(ROOT, 'scripts', 'devswarm.js'));
-const storeLib = require(path.join(ROOT, 'companion', 'lib', 'devswarm-store.js'));
-const rc = require(path.join(ROOT, 'companion', 'lib', 'reader-cursors.js'));
-const inboxCursor = require(path.join(ROOT, 'companion', 'lib', 'devswarm-inbox-cursor.js'));
-const liveness = require(path.join(ROOT, 'companion', 'lib', 'liveness.js'));
+const NODE_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const cli = require(path.join(NODE_ROOT, 'scripts', 'devswarm.js'));
+const storeLib = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-store.js'));
+const rc = require(path.join(NODE_ROOT, 'companion', 'lib', 'reader-cursors.js'));
+const inboxCursor = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-inbox-cursor.js'));
+const liveness = require(path.join(NODE_ROOT, 'companion', 'lib', 'liveness.js'));
 
 function tmpHome() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ah-rc-p3v2-'));
@@ -233,7 +234,7 @@ test('P2 parity boundary: a new reader acks first; an old (pre-0.99, shared-curs
 test('P1 roster: an unreadable reader_cursors table shows the direct count as UNKNOWN, never 0', () => {
   const home = tmpHome();
   const cp = require('node:child_process');
-  const repokey = require(path.join(ROOT, 'companion', 'lib', 'devswarm-repokey.js'));
+  const repokey = require(path.join(NODE_ROOT, 'companion', 'lib', 'devswarm-repokey.js'));
   const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'ah-rc-p3v2-repo-'));
   try {
     cp.spawnSync('git', ['init', '-q', repo]);

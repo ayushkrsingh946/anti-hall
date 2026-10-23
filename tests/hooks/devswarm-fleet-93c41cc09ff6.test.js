@@ -26,9 +26,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { testHookRaw, postToolUseBashPayload } = require('../helpers/spawn-hook.js');
 const { makeHome } = require('../helpers/fixtures.js');
-const { readReplyState } = require('../../plugins/anti-hall/companion/lib/devswarm-reply-state.js');
-const repokey = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
-const cli = require('../../plugins/anti-hall/scripts/devswarm.js');
+const { readReplyState } = require('../../plugins/anti-hall-node/companion/lib/devswarm-reply-state.js');
+const repokey = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
+const cli = require('../../plugins/anti-hall-node/scripts/devswarm.js');
 
 const HOOK = 'devswarm-parent-reply-tracker.js';
 const PRIMARY_ENV = { DEVSWARM_REPO_ID: 'repo-1' };

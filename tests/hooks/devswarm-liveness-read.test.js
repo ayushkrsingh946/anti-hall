@@ -31,7 +31,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 
 const liveness = require(path.join(
-  __dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'lib', 'liveness.js',
+  __dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'lib', 'liveness.js',
 ));
 const {
   isDormantActivity, dormantThresholdMs, DEFAULT_DORMANT_MS,
@@ -39,7 +39,7 @@ const {
   readActivityTs, isDormantRow, projectDirFor, heartbeatPathFor,
 } = liveness;
 const { displayStatus } = require(path.join(
-  __dirname, '..', '..', 'plugins', 'anti-hall', 'hooks', 'devswarm-parent-inbox.js',
+  __dirname, '..', '..', 'plugins', 'anti-hall-node', 'hooks', 'devswarm-parent-inbox.js',
 ));
 
 // ---- env hermeticity (P2-c) -------------------------------------------------

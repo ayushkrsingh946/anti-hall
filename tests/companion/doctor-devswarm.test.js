@@ -11,10 +11,10 @@ const os = require('node:os');
 const path = require('node:path');
 
 const D = require(path.join(
-  __dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'lib', 'doctor-devswarm.js',
+  __dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'lib', 'doctor-devswarm.js',
 ));
 const { projectDirFor, writeVerdict } = require(path.join(
-  __dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'lib', 'liveness.js',
+  __dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'lib', 'liveness.js',
 ));
 
 function makeHome() {
@@ -89,11 +89,11 @@ test('per-workspace readout: `nudged` verdict -> WARN (soft — no more stuck-ti
 // automatically — no doctor.js change needed since it just iterates
 // report.results with the same PASS/WARN/FAIL constants).
 // ---------------------------------------------------------------------------
-const REAL_PLUGIN_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
-const wakeWatch = require(path.join(REAL_PLUGIN_ROOT, 'companion', 'lib', 'devswarm-wake-watch.js'));
+const NODE_REAL_PLUGIN_ROOT = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
+const wakeWatch = require(path.join(NODE_REAL_PLUGIN_ROOT, 'companion', 'lib', 'devswarm-wake-watch.js'));
 
 test('wakeMonitorShipped: the REAL plugin tree reports shipped:true (watcher present + devswarm-wake.js emits Monitor text)', () => {
-  const r = D.wakeMonitorShipped(REAL_PLUGIN_ROOT);
+  const r = D.wakeMonitorShipped(NODE_REAL_PLUGIN_ROOT);
   assert.strictEqual(r.shipped, true);
   assert.ok(r.watcherPath.endsWith(path.join('companion', 'lib', 'devswarm-wake-watch.js')));
   assert.ok(r.watcherMod && typeof r.watcherMod.tick === 'function');
@@ -117,8 +117,8 @@ test('wakeMonitorShipped: watcher present (with its real sibling deps) but devsw
     // hooks/lib/devswarm-role.js) but deliberately DELETE hooks/lib/
     // devswarm-wake.js itself, so this fixture proves the "both halves
     // present" requirement, not just "watcher script parses".
-    fs.cpSync(path.join(REAL_PLUGIN_ROOT, 'companion'), path.join(root, 'companion'), { recursive: true });
-    fs.cpSync(path.join(REAL_PLUGIN_ROOT, 'hooks'), path.join(root, 'hooks'), { recursive: true });
+    fs.cpSync(path.join(NODE_REAL_PLUGIN_ROOT, 'companion'), path.join(root, 'companion'), { recursive: true });
+    fs.cpSync(path.join(NODE_REAL_PLUGIN_ROOT, 'hooks'), path.join(root, 'hooks'), { recursive: true });
     fs.rmSync(path.join(root, 'hooks', 'lib', 'devswarm-wake.js'));
     const r = D.wakeMonitorShipped(root);
     assert.strictEqual(r.shipped, false);
@@ -127,7 +127,7 @@ test('wakeMonitorShipped: watcher present (with its real sibling deps) but devsw
 });
 
 test('wakeMonitorSelfTest: the PURE tick() core proves silent-then-emits (both PASS on the real watcher module)', () => {
-  const shipped = D.wakeMonitorShipped(REAL_PLUGIN_ROOT);
+  const shipped = D.wakeMonitorShipped(NODE_REAL_PLUGIN_ROOT);
   assert.strictEqual(shipped.shipped, true);
   const out = D.wakeMonitorSelfTest(shipped.watcherMod);
   assert.strictEqual(out.length, 2);
@@ -149,7 +149,7 @@ test('wakeMonitorSelfTest: a broken tick() (throws) -> WARN, fail-open, never th
 });
 
 test('wakeMonitorLiveCheck: no identity resolvable for cwd -> WARN, live-check skipped, manual arm command surfaced', () => {
-  const shipped = D.wakeMonitorShipped(REAL_PLUGIN_ROOT);
+  const shipped = D.wakeMonitorShipped(NODE_REAL_PLUGIN_ROOT);
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'antihall-doctor-ds-nolock-'));
   const notAGitDir = fs.mkdtempSync(path.join(os.tmpdir(), 'antihall-doctor-ds-notgit-'));
   try {
@@ -164,7 +164,7 @@ test('wakeMonitorLiveCheck: no identity resolvable for cwd -> WARN, live-check s
 });
 
 test('wakeMonitorLiveCheck: a lock held by a genuinely dead pid -> WARN not live, never mutates/deletes the stale lock', () => {
-  const shipped = D.wakeMonitorShipped(REAL_PLUGIN_ROOT);
+  const shipped = D.wakeMonitorShipped(NODE_REAL_PLUGIN_ROOT);
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'antihall-doctor-ds-deadlock-'));
   try {
     const identity = wakeWatch.resolveIdentity({}, process.cwd(), {});
@@ -181,7 +181,7 @@ test('wakeMonitorLiveCheck: a lock held by a genuinely dead pid -> WARN not live
 });
 
 test('wakeMonitorLiveCheck: no live children (empty registry) -> PASS idleSkip, no "arm it" advice; setting off -> WARN advice', () => {
-  const shipped = D.wakeMonitorShipped(REAL_PLUGIN_ROOT);
+  const shipped = D.wakeMonitorShipped(NODE_REAL_PLUGIN_ROOT);
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'antihall-doctor-ds-idle-'));
   try {
     const r = D.wakeMonitorLiveCheck(shipped.watcherMod, shipped.watcherPath, home, {}, process.cwd());
@@ -196,7 +196,7 @@ test('wakeMonitorLiveCheck: no live children (empty registry) -> PASS idleSkip, 
 });
 
 test('wakeMonitorLiveCheck: a lock held by THIS live process -> PASS live', () => {
-  const shipped = D.wakeMonitorShipped(REAL_PLUGIN_ROOT);
+  const shipped = D.wakeMonitorShipped(NODE_REAL_PLUGIN_ROOT);
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'antihall-doctor-ds-livelock-'));
   try {
     const identity = wakeWatch.resolveIdentity({}, process.cwd(), {});
@@ -597,7 +597,7 @@ test('versionMismatchCheck: malformed cache JSON => fail-open, never throws (WAR
 
 test('versionMismatchCheck: baseline used for comparison is the SAME constant hooks/devswarm-version.js uses (P2-C)', () => {
   const { DEVSWARM_BASELINE } = require(path.join(
-    __dirname, '..', '..', 'plugins', 'anti-hall', 'hooks', 'lib', 'devswarm-baseline.js',
+    __dirname, '..', '..', 'plugins', 'anti-hall-node', 'hooks', 'lib', 'devswarm-baseline.js',
   ));
   const { home, cleanup } = makeHome();
   try {

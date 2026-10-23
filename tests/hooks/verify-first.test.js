@@ -157,7 +157,7 @@ test('NUDGES array has exactly 20 entries (count asserted via the source)', () =
   const path = require('node:path');
   const fs = require('node:fs');
   const src = fs.readFileSync(
-    path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'hooks', 'verify-first.js'),
+    path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'hooks', 'verify-first.js'),
     'utf8',
   );
   const arr = src.match(/const NUDGES = \[([\s\S]*?)\n\];/);

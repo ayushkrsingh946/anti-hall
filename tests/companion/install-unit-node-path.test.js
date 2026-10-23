@@ -59,8 +59,8 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const path = require('node:path');
 
-const ingest = require('../../plugins/anti-hall/companion/install-devswarm-ingest.js');
-const supervisor = require('../../plugins/anti-hall/companion/install-devswarm-supervisor.js');
+const ingest = require('../../plugins/anti-hall-node/companion/install-devswarm-ingest.js');
+const supervisor = require('../../plugins/anti-hall-node/companion/install-devswarm-supervisor.js');
 
 // A node path that is NOT on any scheduler's default PATH — the shape a
 // version-manager install actually produces.

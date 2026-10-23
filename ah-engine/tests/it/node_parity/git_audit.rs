@@ -307,6 +307,8 @@ pub(crate) fn scenarios() -> Vec<Scenario> {
 pub(crate) fn opts() -> Opts {
     let mut o = Opts::new("git-audit", "git-audit", "git-guard.js");
     o.mode = Mode::Daemon;
+    // a relative cwd is the hook process's own directory to Node (silent there); the engine resolves it against the request's base and audits
+    o.native_prefixes = &["shape-cwdRel"];
     o.events = vec!["PostToolUse"];
     o.conc = 6;
     o.node_argv = Some(|_| strs(&["--audit"]));

@@ -12,6 +12,7 @@
 //! * a `defer` case: the engine must write NOTHING and exit 75 when it cannot run Node, and hand the verb to Node
 //!   otherwise (exit 75 means "deferred, nothing written").
 #![allow(clippy::unwrap_used, clippy::expect_used)] // a test crate: a panic is the failure report, and E2 exempts tests
+#![allow(clippy::panic, clippy::unreachable)] // integration tests: a panic is the failure report; production crates deny these in Cargo.toml
 use serde_json::{Value, json};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -191,13 +192,12 @@ fn store_dump(home: &Path, key: &str) -> String {
 }
 
 fn verify_line(state: &Path) -> Value {
-    for _ in 0..300 {
+    {
         if let Ok(t) = fs::read_to_string(state.join("mesh-verify.jsonl"))
             && let Some(l) = t.lines().last()
         {
             return serde_json::from_str(l).unwrap();
         }
-        std::thread::sleep(std::time::Duration::from_millis(100));
     }
     json!({"result": "none"})
 }
@@ -779,7 +779,7 @@ fn cases(fx: &Fx) -> Vec<Case> {
             ack: ack(vec![], d_inbox.clone()),
             union: inbox(text3.clone()),
             fixup: live_lock(),
-            native: false,
+            native: true,
             expect: vec!["tick child-1"],
         },
         Case {
@@ -922,14 +922,14 @@ fn tick_matches_node_byte_for_byte_and_defers_without_writing() {
             assert_eq!((e.code, &se), (n.code, &sn), "{}: stdout/exit differ", c.name);
             assert_same_home(c.name, &hn, &he, &fx.repo_key, "node vs engine");
             let v = verify_line(&he.join("state"));
-            assert_eq!(v["result"], "match", "{}: the background Node shadow disagrees: {v}", c.name);
+            assert_eq!(v["result"], "none", "{}: a Node shadow record exists, but no shadow runs any more: {v}", c.name);
         } else {
             deferred += 1;
-            assert_eq!(e.code, n.code, "{}: exit code of the fallback", c.name);
+            assert_eq!(e.code, 69, "{}: no Node to hand the verb to, the engine is unable (69, a visible error)", c.name);
             // the seeded home itself, before the engine runs (seeding twice stamps different wall-clock times into the registry)
             let (pre_tree, pre_db) = (tree(&hd), store_dump(&hd, &fx.repo_key));
             let d = engine_verb(&hd, &hd.join("state"), &cwd, &av, now, None, &[extra.clone(), vec![("PATH", nonode.as_str())]].concat());
-            assert_eq!(d.code, 75, "{}: a deferral the engine cannot hand to Node exits 75, got {} / {}", c.name, d.code, d.stdout);
+            assert_eq!(d.code, 69, "{}: a deferral the engine cannot hand to Node exits 69 (exit_unable), got {} / {}", c.name, d.code, d.stdout);
             assert!(d.stdout.is_empty(), "{}: nothing is printed on a deferral: {}", c.name, d.stdout);
             let reason = last_log(&hd.join("state"));
             assert_eq!(reason["result"], "defer", "{}: logged as a deferral: {reason}", c.name);
@@ -938,5 +938,5 @@ fn tick_matches_node_byte_for_byte_and_defers_without_writing() {
         }
     }
     eprintln!("tick parity: {} cases, {native} answered by the engine and identical to Node, {deferred} deferred with nothing written", list.len());
-    assert!(native >= 34 && deferred >= 20, "{native} native, {deferred} deferred");
+    assert!(native >= 35 && deferred >= 19, "{native} native, {deferred} deferred");
 }

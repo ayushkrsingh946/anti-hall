@@ -1,5 +1,5 @@
 'use strict';
-// proves: plugins/anti-hall/companion/devswarm-migrate.js#* — same-id copy: every migration below asserts the rows land in the SAME partition id they came from (per-partition listMessages / messageCount checks).
+// proves: plugins/anti-hall-node/companion/devswarm-migrate.js#* — same-id copy: every migration below asserts the rows land in the SAME partition id they came from (per-partition listMessages / messageCount checks).
 // devswarm-migrate — AUTOMATIC-BUT-SAFE migration of on-disk state into the
 // store. Idempotence, non-destructiveness, count-verification, and the
 // single-consumer lock refusal, all against a forced journal backend.
@@ -11,8 +11,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const migrate = require('../../plugins/anti-hall/companion/devswarm-migrate.js');
-const storeLib = require('../../plugins/anti-hall/companion/lib/devswarm-store.js');
+const migrate = require('../../plugins/anti-hall-node/companion/devswarm-migrate.js');
+const storeLib = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js');
 
 function tmpHome() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'anti-hall-migrate-'));
@@ -227,7 +227,7 @@ test('migrateOne verifies coverage even when the store ALSO holds a native-drain
   try {
     // A native-drained row already sits in this workspace's store (unrelated to
     // the legacy inbox — e.g. live mesh traffic since the last migration).
-    const s0 = require('../../plugins/anti-hall/companion/lib/devswarm-store.js')
+    const s0 = require('../../plugins/anti-hall-node/companion/lib/devswarm-store.js')
       .openStore({ home, workspaceId: 'a', backend: 'journal' });
     try { s0.appendMessage({ workspaceId: 'a', body: 'native-only', hash: 'native:1' }); } finally { s0.close(); }
 
@@ -690,3 +690,64 @@ test('F-C: migrateOne reports verified:false (not a false success) when the regi
     } finally { s2.close(); }
   } finally { rm(home); }
 });
+
+// R1 GUARDS B6 (#181, `from: null`): the legacy durable inbox is the NDJSON `inbox pull` mirrored, and each line carries its sender
+// and/or the branch that names it. The import kept only the raw line, so every migrated row read back `sender: null` and
+// `read-primary` printed `from: null`. The import now stamps the sender (line sender, else the one workspace checked out under the
+// named branch); a plain line or an unknown branch stays unattributed, never guessed.
+for (const backend of ['journal', 'sqlite']) {
+  let ok = true;
+  if (backend === 'sqlite') { try { require('node:sqlite'); } catch (_) { ok = false; } }
+  (ok ? test : test.skip)(`migrate stamps the sender of a legacy NDJSON inbox line (${backend})`, () => {
+    const home = tmpHome();
+    try {
+      writeWorkspace(home, 'fix-child', { lines: ['c1'], cursor: 0 });
+      writeWorkspace(home, 'zz-parent', {
+        lines: [
+          JSON.stringify({ _h: 'h1', fromBranch: 'fix/child', message: 'DONE: fix/child - repo@main@abc', createdAt: '2026-01-01T00:00:00Z', sender: 'fix-child' }),
+          JSON.stringify({ _h: 'h2', fromBranch: 'fix/child', message: 'DONE: fix/child - repo@main@def', createdAt: '2026-01-01T00:00:01Z', sender: null }),
+          JSON.stringify({ _h: 'h3', fromBranch: 'ghost/none', message: 'hello', createdAt: '2026-01-01T00:00:02Z' }),
+          'plain legacy line',
+        ],
+        cursor: 0,
+      });
+      const o = { home, backend, env: {} };
+      assert.equal(migrate.migrateToStore(o).ok, true);
+      const s = storeLib.openStore({ home, workspaceId: 'zz-parent', backend });
+      try {
+        const rows = s.listMessages('zz-parent');
+        assert.deepEqual(rows.map((r) => r.sender), ['fix-child', 'fix-child', null, null], 'line sender, then branch-resolved, then unknown stays null');
+      } finally { s.close(); }
+    } finally { rm(home); }
+  });
+}
+
+// ---- the global legacy copy keeps who a message came from and went to --------------------------------------------------------
+// The copy used to append {workspaceId, body, hash, ts} only, so a mesh row lost its sender, recipient and mtype on the way to
+// the per-project store (and a direct message then read as a row of unknown kind).
+for (const srcBackend of ['journal', 'sqlite']) {
+  for (const dstBackend of ['journal', 'sqlite']) {
+    test(`global migrate keeps sender, recipient and mtype (legacy ${srcBackend} -> ${dstBackend})`, { skip: (srcBackend === 'sqlite' || dstBackend === 'sqlite') && !storeLib.sqliteAvailable() }, () => {
+      const home = tmpHome();
+      try {
+        const legacyDir = storeLib.storeRootDir(home);
+        const src = storeLib.openStore({ home, backend: srcBackend, dir: legacyDir, hash: 'legacy' });
+        try {
+          src.appendMeshRow({ workspaceId: 'primary-aaaaaaaa', body: 'HELLO', hash: 'mesh:1', sender: 'child-bbbbbbbb', recipient: 'primary-aaaaaaaa', mtype: 'direct' });
+          src.appendMeshRow({ workspaceId: 'primary-aaaaaaaa', body: 'ALL', hash: 'mesh:2', sender: 'child-bbbbbbbb', recipient: null, mtype: 'broadcast' });
+          src.appendMessage({ workspaceId: 'primary-aaaaaaaa', body: 'PLAIN', hash: 'native:3' });
+        } finally { src.close(); }
+
+        const rep = migrate.migrateGlobalStoreToPerProject({ home, backend: dstBackend, env: {} });
+        assert.equal(rep.copied, 3);
+        const dst = storeLib.openStore({ home, workspaceId: 'primary-aaaaaaaa', backend: dstBackend });
+        try {
+          const by = Object.fromEntries(dst.listMessages('primary-aaaaaaaa').map((m) => [m.body, m]));
+          assert.deepEqual([by.HELLO.sender, by.HELLO.recipient, by.HELLO.mtype], ['child-bbbbbbbb', 'primary-aaaaaaaa', 'direct']);
+          assert.deepEqual([by.ALL.sender, by.ALL.recipient, by.ALL.mtype], ['child-bbbbbbbb', null, 'broadcast']);
+          assert.deepEqual([by.PLAIN.sender, by.PLAIN.recipient, by.PLAIN.mtype], [null, null, null], 'a row that had none stays without');
+        } finally { dst.close(); }
+      } finally { rm(home); }
+    });
+  }
+}

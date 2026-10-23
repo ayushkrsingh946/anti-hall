@@ -8,7 +8,7 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const io = require(path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'hooks', 'lib', 'guard-io.js'));
+const io = require(path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'hooks', 'lib', 'guard-io.js'));
 
 function eagain() { const e = new Error('resource temporarily unavailable'); e.code = 'EAGAIN'; return e; }
 

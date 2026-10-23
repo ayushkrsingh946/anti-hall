@@ -14,10 +14,10 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { execFileSync, spawnSync } = require('node:child_process');
 
-const MOD = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'install-devswarm-ingest.js');
+const MOD = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'install-devswarm-ingest.js');
 const m = require(MOD);
 
-const SUP = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'install-devswarm-supervisor.js');
+const SUP = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'install-devswarm-supervisor.js');
 const sup = require(SUP);
 
 const NASTY = '/Users/a b & c/<x>/"q\'/node';
@@ -377,9 +377,9 @@ test('listInstalledIngestUnits fail-opens to [] when nothing is installed', () =
 });
 
 test('capability-scan discovers and reports the devswarm-ingest companion', () => {
-  const { scanCapabilities } = require('../../plugins/anti-hall/scripts/capability-scan.js');
+  const { scanCapabilities } = require('../../plugins/anti-hall-node/scripts/capability-scan.js');
   // Real plugin root so the actual install-devswarm-ingest.js is discovered.
-  const root = path.join(__dirname, '..', '..', 'plugins', 'anti-hall');
+  const root = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node');
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ingest-capscan-'));
   try {
     const report = scanCapabilities({ root, home, cwd: home, platform: 'darwin' });
@@ -406,7 +406,7 @@ test('capability-scan discovers and reports the devswarm-ingest companion', () =
 test('resolveStableScript prefers the marketplace clone devswarm-ingest.js when present', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ingest-stablepath-'));
   try {
-    const mktCompanion = path.join(home, '.claude', 'plugins', 'marketplaces', 'anti-hall', 'plugins', 'anti-hall', 'companion');
+    const mktCompanion = path.join(home, '.claude', 'plugins', 'marketplaces', 'anti-hall', 'plugins', 'anti-hall-node', 'companion');
     fs.mkdirSync(mktCompanion, { recursive: true });
     const scriptFile = path.join(mktCompanion, 'devswarm-ingest.js');
     fs.writeFileSync(scriptFile, '// fixture\n');
@@ -425,7 +425,7 @@ test('resolveStableScript honors ANTIHALL_MARKETPLACE_DIR (same test-only overri
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ingest-stablepath-override-home-'));
   const override = fs.mkdtempSync(path.join(os.tmpdir(), 'ingest-stablepath-override-'));
   try {
-    const companion = path.join(override, 'plugins', 'anti-hall', 'companion');
+    const companion = path.join(override, 'plugins', 'anti-hall-node', 'companion');
     fs.mkdirSync(companion, { recursive: true });
     const scriptFile = path.join(companion, 'devswarm-ingest.js');
     fs.writeFileSync(scriptFile, '// fixture\n');
@@ -443,7 +443,7 @@ test('SCRIPT (module-load-time): resolves to the marketplace clone path when pre
   if (process.platform === 'win32') return; // os.homedir() does not honor HOME on win32
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ingest-stablepath-subproc-'));
   try {
-    const mktCompanion = path.join(home, '.claude', 'plugins', 'marketplaces', 'anti-hall', 'plugins', 'anti-hall', 'companion');
+    const mktCompanion = path.join(home, '.claude', 'plugins', 'marketplaces', 'anti-hall', 'plugins', 'anti-hall-node', 'companion');
     fs.mkdirSync(mktCompanion, { recursive: true });
     const stableScript = path.join(mktCompanion, 'devswarm-ingest.js');
     fs.writeFileSync(stableScript, '// fixture\n');

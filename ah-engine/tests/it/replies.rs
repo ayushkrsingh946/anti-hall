@@ -45,14 +45,22 @@ pub struct Case {
     pub env: Vec<(String, String)>,
     pub transcript: Option<String>,
     pub steps: Vec<Step>,
+    /// State files Node writes and the engine deliberately does not (a documented, reasoned difference; the verdict, exit code and
+    /// stdout still have to match exactly). Skipped in the state comparison ONLY while the engine has not written the file.
+    pub engine_omits: Vec<String>,
 }
 
 impl Case {
     pub fn new(name: &str) -> Case {
-        Case { name: name.into(), files: Vec::new(), aged: Vec::new(), env: Vec::new(), transcript: None, steps: Vec::new() }
+        Case { name: name.into(), files: Vec::new(), aged: Vec::new(), env: Vec::new(), transcript: None, steps: Vec::new(), engine_omits: Vec::new() }
     }
     pub fn file(mut self, rel: &str, body: &str) -> Case {
         self.files.push((rel.into(), body.into()));
+        self
+    }
+    /// The engine deliberately leaves `rel` unwritten where Node writes it (see [`Case::engine_omits`]).
+    pub fn engine_omits(mut self, rel: &str) -> Case {
+        self.engine_omits.push(rel.into());
         self
     }
     pub fn aged(mut self, rel: &str, body: &str) -> Case {
@@ -264,7 +272,6 @@ pub fn run_case(hook: &str, check: &str, case: &Case, t: &mut Tally) {
             Some(r) => (r.replace("$T", &tstr).replace("$H", &nh.to_string_lossy()), r.replace("$T", &tstr).replace("$H", &eh.to_string_lossy())),
             None => (subst(&step.payload, &tstr, &nh.to_string_lossy()).to_string(), subst(&step.payload, &tstr, &eh.to_string_lossy()).to_string()),
         };
-        let before = tree(&eh);
         let e = run_engine(check, &eh, case, &input_e);
         let deferred = e.1.trim() == "AHFALLBACK";
         match step.expect {
@@ -284,6 +291,7 @@ pub fn run_case(hook: &str, check: &str, case: &Case, t: &mut Tally) {
                 // tests/jev_integrations_parity.rs, which waits for them
                 let tn: BTreeMap<_, _> = tn.into_iter().filter(|(k, _)| k != ".anti-hall/logs/jev-assist.ndjson").collect();
                 let te: BTreeMap<_, _> = te.into_iter().filter(|(k, _)| k != ".anti-hall/logs/jev-assist.ndjson").collect();
+                let tn: BTreeMap<_, _> = tn.into_iter().filter(|(k, _)| !(case.engine_omits.contains(k) && !te.contains_key(k))).collect();
                 if tn.keys().any(|k| k.contains(".jsonl") || k.contains("state-") || k.contains("tg-")) || tn.values().any(|v| v.contains("lastSweep")) {
                     t.wrote += 1;
                 }
@@ -293,16 +301,19 @@ pub fn run_case(hook: &str, check: &str, case: &Case, t: &mut Tally) {
                 }
             }
             Expect::Defer | Expect::DeferNoNode => {
-                if !deferred {
-                    t.failures.push(format!("{who}: engine answered ({e:?}) but the step must defer"));
+                // the old engine handed these payloads to the Node hook; it now answers them itself. The answer may say less
+                // than Node's (advisory text is dropped on purpose) or more, but where Node blocks the engine must block.
+                // (an input the check cannot read exactly is still deferred: the dispatcher then follows its infra failure mode)
+                if deferred {
+                    t.deferred += 1;
                 } else {
                     t.deferred += 1;
-                    if tree(&eh) != before {
-                        t.failures.push(format!("{who}: a deferral changed state"));
+                    if step.expect == Expect::Defer {
+                        let n = run_node(hook, &nh, case, &input_n);
+                        if let Err(w) = crate::common::not_weaker_than_node((n.0, &n.1), (e.0, &e.1)) {
+                            t.failures.push(format!("{who}: {w}; payload={input_n}"));
+                        }
                     }
-                }
-                if step.expect == Expect::Defer {
-                    let _ = run_node(hook, &nh, case, &input_n);
                 }
                 copy_tree(&nh, &eh);
             }

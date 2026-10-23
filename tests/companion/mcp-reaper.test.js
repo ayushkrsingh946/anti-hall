@@ -8,7 +8,7 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const path = require('node:path');
 
-const MOD = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'mcp-reaper.js');
+const MOD = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'mcp-reaper.js');
 const m = require(MOD);
 
 test('require is side-effect-free (no ps, no kill; exports present)', () => {

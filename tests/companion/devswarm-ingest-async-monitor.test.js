@@ -28,10 +28,10 @@ const { EventEmitter } = require('node:events');
 const LOG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'anti-hall-async-monitor-logs-'));
 process.env.ANTI_HALL_LOG_DIR = LOG_DIR;
 
-const INGEST_PATH = path.join(__dirname, '..', '..', 'plugins', 'anti-hall', 'companion', 'devswarm-ingest.js');
+const INGEST_PATH = path.join(__dirname, '..', '..', 'plugins', 'anti-hall-node', 'companion', 'devswarm-ingest.js');
 const ingest = require(INGEST_PATH);
-const health = require('../../plugins/anti-hall/companion/lib/ingest-health.js');
-const repair = require('../../plugins/anti-hall/hooks/lib/doctor-repair.js');
+const health = require('../../plugins/anti-hall-node/companion/lib/ingest-health.js');
+const repair = require('../../plugins/anti-hall-node/hooks/lib/doctor-repair.js');
 
 const POSIX = process.platform !== 'win32';
 

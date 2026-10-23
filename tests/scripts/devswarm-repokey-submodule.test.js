@@ -15,7 +15,7 @@ const os = require('node:os');
 const path = require('node:path');
 const cp = require('node:child_process');
 
-const repokey = require('../../plugins/anti-hall/companion/lib/devswarm-repokey.js');
+const repokey = require('../../plugins/anti-hall-node/companion/lib/devswarm-repokey.js');
 
 function git(args, cwd) {
   const r = cp.spawnSync('git', args, { cwd, encoding: 'utf8' });

@@ -1,5 +1,5 @@
 'use strict';
-// FROZEN COPY (test-only) of plugins/anti-hall/companion/lib/devswarm-repokey.js as shipped
+// FROZEN COPY (test-only) of plugins/anti-hall-node/companion/lib/devswarm-repokey.js as shipped
 // in v0.103.0 (commit de31b7b), BEFORE mesh-redesign Phase 2 B1 routed it through
 // companion/lib/identity.js. Kept so the identity equivalence / key-stability proof
 // stays meaningful after the live module became a shim (spec 2.1(5): no `git show`

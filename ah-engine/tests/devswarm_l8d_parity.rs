@@ -11,6 +11,7 @@
 //! happen at different instants. [`mask_log`] blanks exactly those two fields on both sides (the same patterns as the plugin's
 //! `devswarm_cli.log_masks`, which the Node witness applies); every other byte of the line, and the number of lines, must be equal.
 #![allow(clippy::unwrap_used, clippy::expect_used)] // a test crate: a panic is the failure report, and E2 exempts tests
+#![allow(clippy::panic, clippy::unreachable)] // integration tests: a panic is the failure report; production crates deny these in Cargo.toml
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::fs;
@@ -73,7 +74,7 @@ fn tools_path(root: &Path, with_node: bool) -> String {
 }
 
 fn node_cli(home: &Path, cwd: &Path, argv: &[String], now: i64, env: &[(&str, &str)]) -> Run {
-    let cli = plugin_root().join("scripts").join("devswarm.js");
+    let cli = node_root().join("scripts").join("devswarm.js");
     let mut c = Command::new("node");
     c.arg("-e").arg(SNIPPET).arg(&cli).arg(now.to_string()).args(argv).current_dir(cwd).env_clear().envs(base_env(home, &home.join("state"), env));
     let o = run(&mut c, None);
@@ -247,26 +248,19 @@ fn check_from(
             }
         } else {
             deferred += 1;
-            assert_eq!(e.code, n.code, "{}: exit code of the fallback", c.name);
+            assert_eq!(e.code, 69, "{}: no Node to hand the verb to, the engine is unable (mesh_write.exit_unable)", c.name);
             let pre = (tree(&homes[2]), key_db(&homes[2]).is_file().then(|| raw_dump(&key_db(&homes[2]))));
             let d = engine_cli(&homes[2], &cwd, &c.argv, now, &to_ref(&ed));
-            assert_eq!(d.code, 75, "{}: a deferral the engine cannot hand to Node exits 75, got {} / {}", c.name, d.code, d.stdout);
+            assert_eq!(d.code, 69, "{}: a deferral the engine cannot hand to Node exits mesh_write.exit_unable, got {} / {}", c.name, d.code, d.stdout);
             assert!(d.stdout.is_empty(), "{}: nothing is printed on a deferral: {}", c.name, d.stdout);
             assert_eq!(last_log(&homes[2].join("state"))["result"], "defer", "{}", c.name);
             let post = (tree(&homes[2]), key_db(&homes[2]).is_file().then(|| raw_dump(&key_db(&homes[2]))));
             assert!(pre == post, "{}: a deferral wrote", c.name);
         }
     }
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    // the background Node witness was removed with the Node fallbacks: an answered call leaves no witness record
     for (name, state) in &pending {
-        let line = loop {
-            if let Some(l) = verify_lines(state).into_iter().last() {
-                break l;
-            }
-            assert!(std::time::Instant::now() < deadline, "{name}: the Node witness never logged");
-            std::thread::sleep(std::time::Duration::from_millis(100));
-        };
-        assert_eq!(line["result"], "match", "{name}: the background Node witness disagrees: {line}");
+        assert!(verify_lines(state).is_empty(), "{name}: a Node witness record exists, but no witness runs any more");
     }
     eprintln!("l8d cli parity: {} cases, {native} answered by the engine and identical to Node, {deferred} deferred with nothing written", cases.len());
     if std::env::var("AH_L8D_FILTER").is_err() {
@@ -486,10 +480,10 @@ fn send_refusals_match_node() {
         sd("send-to-primary-from-the-primary", &["send", "--to-primary", "--message", "hi"], "main", true),
         sd("send-refused-in-a-log-dir-of-its-own", &["send", "--message", "hi"], "child", true).env("ANTI_HALL_LOG_DIR", "{HOME}/elsewhere"),
         sd("send-refused-under-a-test-context-is-node", &["send", "--message", "hi"], "child", false).env("NODE_TEST_CONTEXT", "child-v8"),
-        sd("send-unreadable-message-file-is-node", &["send", "--to", "child-2", "--message-file", "/no/such/file"], "child", false),
+        sd("send-unreadable-message-file", &["send", "--to", "child-2", "--message-file", "/no/such/file"], "child", true),
         sd("send-a-good-message-still-sends", &["send", "--to", "child-2", "--message", "hello"], "child", true),
     ];
-    check(&fx, &cases, &[], 17, 2);
+    check(&fx, &cases, &[], 20, 1);
 }
 
 // ---- done refusals --------------------------------------------------------------------------------------------------------
