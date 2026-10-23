@@ -455,6 +455,8 @@ pub(super) fn picture(w: &World, answer: Value, anchor: Option<&str>) -> Value {
                 && !k.contains("/store/")
                 && !k.contains("/locks/")
                 && !k.starts_with(".anti-hall/state")
+                // the engine-written sh shims (devswarm.js, wake-watch.js) are a declared difference: Node wrote none
+                && !k.starts_with(".anti-hall/bin")
                 && (!k.starts_with(".anti-hall/logs") || k == ".anti-hall/logs/" || k == ".anti-hall/logs/devswarm.jsonl")
         })
         .map(|(k, v)| {
@@ -566,6 +568,20 @@ fn stage_node_calls(w: &World) -> Vec<String> {
     node_calls(w).lines().map(str::to_string).collect()
 }
 
+/// The declared difference in the arm command: Node names `node <plugin>/devswarm-wake-watch.js`, the engine the sh shim it writes
+/// under the home (`.anti-hall/bin/wake-watch.js`), which needs no Node.
+fn engine_watcher_cmd(v: Value) -> Value {
+    match v {
+        Value::String(t) => {
+            let re = regex::Regex::new(r"node \S*/(?:devswarm-)?wake-watch\.js").expect("static regex");
+            Value::String(re.replace_all(&t, "{ROOT}/home/.anti-hall/bin/wake-watch.js").into_owned())
+        }
+        Value::Array(a) => Value::Array(a.into_iter().map(engine_watcher_cmd).collect()),
+        Value::Object(o) => Value::Object(o.into_iter().map(|(k, x)| (k, engine_watcher_cmd(x))).collect()),
+        other => other,
+    }
+}
+
 /// Record (when asked) and replay one scenario; returns the replay world's picture and the world, for follow-up checks.
 fn replay(c: &Case) -> (Value, World, Opt) {
     let o = c.opt();
@@ -585,6 +601,7 @@ fn replay(c: &Case) -> (Value, World, Opt) {
             .unwrap_or_else(|e| panic!("{}/{}: no fixture ({e}); record with AH_RECORD_UPDATE_FIXTURES=1", c.stage, c.name)),
     )
     .unwrap();
+    let want = engine_watcher_cmd(want);
     let eo = Opt { no_node: true, stage_only: Some(c.row), ..o };
     let w = world(&eo);
     (c.seed)(&w.home);
@@ -1511,7 +1528,12 @@ fn wake_monitor_arms_nothing_deletes_nothing_and_runs_no_node() {
     let new: Vec<&String> = after_tree
         .keys()
         .filter(|k| !before_tree.contains_key(*k))
-        .filter(|k| !k.starts_with(".anti-hall/ah-engine") && !k.starts_with(".anti-hall/logs") && !k.starts_with(".anti-hall/state"))
+        .filter(|k| {
+            !k.starts_with(".anti-hall/ah-engine")
+                && !k.starts_with(".anti-hall/logs")
+                && !k.starts_with(".anti-hall/state")
+                && !k.starts_with(".anti-hall/bin")
+        })
         .collect();
     assert_eq!(new, vec![".anti-hall/devswarm/wake/"], "only the watcher state directory is created");
     for k in before_tree.keys().filter(|k| !k.starts_with(".anti-hall/ah-engine") && !k.starts_with(".anti-hall/logs")) {
