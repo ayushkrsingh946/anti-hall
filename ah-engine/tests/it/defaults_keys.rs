@@ -172,6 +172,8 @@ fn every_key_the_source_reads_is_shipped_and_every_shipped_key_is_read() {
             || k == "files.unreachable_notice" // the wrapper's and the launcher's once-per-session stamp of the engine-unreachable notice
             || k == "msg.engine_unreachable_notice" // that notice's text (read by hooks/ah-hook.sh and by the launcher)
             || k == "msg.run_engine_missing" // the text the thin client (`ah-hook <verb>`) prints when no engine can run its command
+            || k.starts_with("doctor_l.") // the thin client's built-in doctor (`ah-hook doctor`, ah-launcher/src/doctor.rs) reads these; the engine does not
+            || k.starts_with("hooks_form.") // the direct form of a hook command: read by `ah-hook doctor --repair` (the engine's hooks generator follows it)
             || k.starts_with("updater.") // the thin client's updater (`ah-hook update`, ah-launcher/src/update.rs) reads these; the engine does not
             || k.starts_with("msg.updater_") // the updater's texts
             || k == "env.live_kit" // the live-kit directory override, read by the updater

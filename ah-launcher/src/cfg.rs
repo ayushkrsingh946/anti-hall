@@ -39,6 +39,8 @@ pub struct Settings {
     engine: Cfg,
     dispatch: Cfg,
     messages: Cfg,
+    /// `doctor.toml`, loaded only by the doctor (`with_doctor`): the hook path never pays for parsing it.
+    doctor: Cfg,
     pub bad_files: Vec<String>,
 }
 
@@ -63,14 +65,26 @@ impl Settings {
             engine,
             dispatch,
             messages,
+            doctor: Cfg::default(),
             bad_files: bad,
         }
+    }
+
+    /// Add the doctor's own file (`doctor.*` and `doctor_msg.*` keys) from `dir`.
+    pub fn with_doctor(mut self, dir: &Path) -> Settings {
+        if let Some(c) = Cfg::load(&dir.join(builtin::CFG_DOCTOR_FILE)) {
+            self.doctor = c;
+        } else {
+            self.bad_files.push(builtin::CFG_DOCTOR_FILE.to_string());
+        }
+        self
     }
 
     fn table(&self, key: &str) -> &Cfg {
         match key.split('.').next() {
             Some("dispatch") => &self.dispatch,
             Some("msg") => &self.messages,
+            Some("doctor") | Some("doctor_msg") | Some("doctor_l") => &self.doctor,
             _ => &self.engine,
         }
     }

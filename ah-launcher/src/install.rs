@@ -187,7 +187,7 @@ pub fn run_limited(argv: &[String], envs: &[(&str, &Path)], out: Option<&Path>, 
     let t0 = Instant::now();
     loop {
         match child.try_wait() {
-            Ok(Some(st)) => return Ran::Done(st.code().unwrap_or(-1)),
+            Ok(Some(st)) => return Ran::Done(st.code().unwrap_or_else(|| 128 + std::os::unix::process::ExitStatusExt::signal(&st).unwrap_or(0))),
             Ok(None) => {}
             Err(_) => return Ran::CannotStart,
         }
@@ -246,7 +246,7 @@ fn field(c: &[libc::c_char]) -> String {
     String::from_utf8_lossy(&bytes).into_owned()
 }
 
-fn host_uname() -> (String, String, String) {
+pub fn host_uname() -> (String, String, String) {
     // SAFETY: uname fills a zeroed utsname.
     unsafe {
         let mut u: libc::utsname = std::mem::zeroed();
@@ -257,7 +257,7 @@ fn host_uname() -> (String, String, String) {
     }
 }
 
-fn is_apple_silicon(name: &str) -> bool {
+pub fn is_apple_silicon(name: &str) -> bool {
     let Ok(c) = std::ffi::CString::new(name) else { return false };
     let mut val: libc::c_int = 0;
     let mut len = std::mem::size_of::<libc::c_int>();
@@ -687,7 +687,17 @@ mod tests {
 
 /// True when an executable file `prog` is in a directory of the search path.
 pub fn on_path(prog: &str) -> bool {
-    std::env::var_os("PATH").is_some_and(|p| std::env::split_paths(&p).any(|d| d.join(prog).is_file()))
+    find_on_path(prog).is_some()
+}
+
+/// The first executable file `prog` in the search path.
+pub fn find_on_path(prog: &str) -> Option<std::path::PathBuf> {
+    std::env::var_os("PATH").and_then(|p| std::env::split_paths(&p).map(|d| d.join(prog)).find(|f| f.is_file()))
+}
+
+/// The search path as the doctor reports on it.
+pub fn path_env() -> String {
+    std::env::var_os("PATH").map(|p| p.to_string_lossy().into_owned()).unwrap_or_default()
 }
 
 /// The release triple of this machine for the updater: the triple, or the "unsupported" word.

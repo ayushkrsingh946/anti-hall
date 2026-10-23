@@ -1807,6 +1807,44 @@ value = "AH_UPDATE_TRIPLE"
 doc = "Test-only: environment variable that, set to 1, skips the build attestation check."
 value = "AH_UPDATE_NO_ATTEST"
 
+# ---- the direct form of a hook command (read by `ah-hook doctor --repair`; hooks.json generation follows it) -----------------------------
+
+[hooks_form.template]
+doc = "A hook command in the direct form: run the installed thin client, else the installer. Placeholders: {event}, {host_args}, {prefix} (the plugin root variable or path)."
+value = "[ -x \"$HOME/.anti-hall/ah-engine/bin/ah-hook\" ] && exec \"$HOME/.anti-hall/ah-engine/bin/ah-hook\" {event}{host_args} || exec sh \"{prefix}/hooks/install.sh\" {event}{host_args}"
+
+[hooks_form.host_claude]
+doc = "The name of the Claude host."
+value = "claude"
+
+[hooks_form.host_codex]
+doc = "The name of the Codex host (the value of --host)."
+value = "codex"
+
+[hooks_form.host_args_codex]
+doc = "What a Codex hook command adds after the event."
+value = " --host codex"
+
+[hooks_form.hooks_dir_word]
+doc = "The directory below the plugin root that holds the hook scripts (stripped to find the plugin root variable of an old command)."
+value = "/hooks"
+
+[hooks_form.node_word]
+doc = "The program name that marks Node on an entry path."
+value = "node"
+
+[hooks_form.old_markers]
+doc = "Text in a hook or statusLine command that marks the retired shell wrappers."
+value = ["ah-hook.sh", "ah-run.sh"]
+
+[launcher.cli_doctor_verb]
+doc = "The ah-hook command-line verb of the built-in doctor (`ah-hook doctor [--builtin] [--check] [--repair [--dry-run]]`); it hands over to the engine's doctor when the engine runs."
+value = "doctor"
+
+[launcher.knob_doctor_rosetta]
+doc = "Test-only: environment variable naming the file whose presence means Rosetta is installed (honoured only when the test flag is set)."
+value = "AH_DOCTOR_ROSETTA"
+
 # ---- the hook launcher (ah-launcher, binary `ah-hook`): its own limits, names and switches ------------------------------------
 # The launcher is the bootloader in front of the engine; it reads these at start. A missing or invalid file falls back to the
 # launcher's built-in copy (ah-launcher/src/builtin.rs, kept equal to this file by a test).
@@ -2108,9 +2146,9 @@ value = "fallback.node"
 doc = "The shell wrapper in the plugin's hooks directory; the launcher hands the call to it while the Node fallback switch is on (files.fallback_switch)."
 value = "ah-hook.sh"
 
-[launcher.script_doctor]
-doc = "Doctor script in the plugin's hooks directory (the --doctor mode runs it)."
-value = "ah-doctor.sh"
+[launcher.arg_builtin]
+doc = "The argument that makes `ah-hook doctor` run its built-in diagnosis even when the engine runs."
+value = "--builtin"
 
 [launcher.engine_lock_file]
 doc = "File name, in the plugin root, of the engine lock: when present the session start may bootstrap the engine."

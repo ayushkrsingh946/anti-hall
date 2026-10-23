@@ -746,6 +746,16 @@ fn plugin_root(args: &[String], env_names: &[String]) -> Option<PathBuf> {
         .map(canonical)
 }
 
+/// The plugin root exactly as the caller wrote it (the `--plugin-root` pair, else the environment): the doctor shows paths the way
+/// the engine's doctor does, without resolving symbolic links.
+fn raw_plugin_root(args: &[String], env_name: &str) -> Option<PathBuf> {
+    args.iter()
+        .position(|a| a == "--plugin-root")
+        .and_then(|i| args.get(i + 1))
+        .map(PathBuf::from)
+        .or_else(|| env_nonempty(env_name).map(PathBuf::from))
+}
+
 fn arg_after(args: &[String], flag: &str) -> Option<String> {
     args.iter()
         .position(|a| a == flag)
@@ -845,14 +855,15 @@ pub fn run() -> i32 {
             );
         }
         Some("--doctor") => {
-            let doctor = hooks_dir.join(s.text("launcher.script_doctor"));
-            if doctor.is_file() {
-                let err = Command::new("sh").arg(doctor).args(&args[1..]).exec();
-                say(&s.msg("msg.launcher_doctor_failed", &[("err", &err.to_string())]));
-            } else {
-                say(&s.text("msg.launcher_no_doctor"));
-            }
-            return 1;
+            // the old wrapper form: the built-in diagnosis, whatever the engine says
+            let mut rest = vec![s.text("launcher.arg_builtin")];
+            rest.extend(cli::forwarded(&args)[1..].iter().cloned());
+            let shown = raw_plugin_root(&args, boot_plugin_env).or_else(|| cfg_root.clone().or(root.clone()));
+            return crate::doctor::run(s, &cfg_dir, &state_dir, shown.as_deref(), &rest);
+        }
+        Some(first) if first == s.text("launcher.cli_doctor_verb") => {
+            let shown = raw_plugin_root(&args, boot_plugin_env).or_else(|| cfg_root.clone().or(root.clone()));
+            return crate::doctor::run(s, &cfg_dir, &state_dir, shown.as_deref(), &cli::forwarded(&args)[1..]);
         }
         Some(first) if first == s.text("launcher.cli_integrity_verb") => {
             return crate::integrity::run(&s, &state_dir, &cli::forwarded(&args)[1..]);

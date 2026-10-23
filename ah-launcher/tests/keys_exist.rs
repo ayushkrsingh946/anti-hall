@@ -10,7 +10,7 @@ use std::path::Path;
 fn shipped() -> BTreeSet<String> {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../plugins/anti-hall/engine/defaults");
     let mut keys = BTreeSet::new();
-    for f in ["engine.toml", "messages.toml", "dispatch.toml"] {
+    for f in ["engine.toml", "messages.toml", "dispatch.toml", "doctor.toml"] {
         let doc: toml::Table = fs::read_to_string(dir.join(f)).unwrap().parse().unwrap();
         fn walk(prefix: &str, t: &toml::Table, out: &mut BTreeSet<String>) {
             for (k, v) in t {
@@ -46,7 +46,7 @@ fn referenced(src: &str, section: &str) -> BTreeSet<String> {
                 j += 1;
             }
             let lit = &body[start..j.min(body.len())];
-            let prefixes = ["updater.", "install.", "rollback.", "msg.updater_", "msg.install_", "msg.launcher_update", "msg.launcher_integrity"];
+            let prefixes = ["updater.", "install.", "rollback.", "msg.updater_", "msg.install_", "msg.launcher_update", "msg.launcher_integrity", "doctor_l.", "doctor_msg.", "hooks_form."];
             if !lit.contains(char::is_whitespace) && !lit.contains('{') && prefixes.iter().any(|p| lit.starts_with(p)) && lit.chars().all(|c| c.is_ascii_lowercase() || c == '.' || c == '_' || c.is_ascii_digit()) {
                 out.insert(lit.to_string());
             }
@@ -70,7 +70,7 @@ fn referenced(src: &str, section: &str) -> BTreeSet<String> {
 fn every_key_the_maintenance_verbs_read_is_shipped() {
     let have = shipped();
     let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-    for (file, section) in [("update.rs", "updater"), ("install.rs", "install"), ("integrity.rs", "rollback")] {
+    for (file, section) in [("update.rs", "updater"), ("install.rs", "install"), ("integrity.rs", "rollback"), ("doctor.rs", "doctor_l")] {
         let text = fs::read_to_string(src.join(file)).unwrap();
         let want = referenced(&text, section);
         assert!(want.len() >= 8, "{file}: the scan found only {} keys (the scan is broken)", want.len());

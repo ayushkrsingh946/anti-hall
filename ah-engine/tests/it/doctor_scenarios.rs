@@ -1,7 +1,7 @@
 //! `ah-engine doctor` against every documented failure scenario, each simulated in a scratch HOME:
 //! stub and fixture binaries (a wrong-OS or wrong-architecture header, a quarantined file), fake sockets and lock holders,
 //! read-only and unowned directories, a scratch copy of the plugin with its files broken, stub `node`/`git` programs on a
-//! restricted PATH. The shell doctor (`ah-hook.sh --doctor`) runs on the same fixtures and must say the same thing for every
+//! restricted PATH. The thin client's built-in doctor (`ah-hook doctor --builtin`) runs on the same fixtures and must say the same thing for every
 //! check both make. Nothing here touches the real HOME.
 #![allow(clippy::unwrap_used, clippy::expect_used)] // a test crate: a panic is the failure report, and E2 exempts tests
 use std::fs;
@@ -250,14 +250,29 @@ impl Sc {
         Out { code: o.status.code().unwrap_or(-1), text: String::from_utf8_lossy(&o.stdout).into_owned(), err: String::from_utf8_lossy(&o.stderr).into_owned() }
     }
 
-    /// The shell doctor of the same plugin.
+    /// The built-in doctor of the thin client, on the same plugin.
     fn shell(&self) -> Out {
-        let mut c = Command::new("sh");
-        c.arg(self.plugin.join("hooks/ah-hook.sh")).arg("--doctor");
+        let mut c = builtin_doctor(&self.plugin);
         self.env(&mut c);
         c.env("AH_WRAPPER_TEST", "1");
         self.finish(c)
     }
+}
+
+/// The built-in doctor of the thin client (`ah-hook --plugin-root <plugin> doctor --builtin`): AH_HOOK_BIN, else the release or debug
+/// build of `ah-launcher` in this checkout.
+fn builtin_doctor(plugin: &Path) -> Command {
+    let bin = std::env::var_os("AH_HOOK_BIN")
+        .map(PathBuf::from)
+        .filter(|p| p.is_file())
+        .or_else(|| {
+            let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().join("ah-launcher/target");
+            ["release", "debug"].iter().map(|b| root.join(b).join("ah-hook")).find(|p| p.is_file())
+        })
+        .expect("no ah-hook binary: build ah-launcher (cargo build in ah-launcher/) or set AH_HOOK_BIN");
+    let mut c = Command::new(bin);
+    c.arg("--plugin-root").arg(plugin).arg("doctor").arg("--builtin").env("AH_WRAPPER_TEST", "1");
+    c
 }
 
 fn which(name: &str) -> Option<PathBuf> {
@@ -1304,16 +1319,16 @@ fn ev_01_02_03_home_unset_relative_or_not_a_directory() {
     let d = sc.finish(c);
     d.has("bad", &["HOME is not set; the engine cannot find its state", "export HOME="]);
     assert_eq!(d.code, 1);
-    let mut s = Command::new("sh");
-    s.arg(sc.plugin.join("hooks/ah-hook.sh")).arg("--doctor").env_clear().env("PATH", &sc.path).current_dir(&sc.cwd);
+    let mut s = builtin_doctor(&sc.plugin);
+    s.env_clear().env("PATH", &sc.path).current_dir(&sc.cwd);
     sc.finish(s).has("bad", &["HOME is not set; the engine cannot find its state"]);
     // relative
     let mut c = Command::new(BIN);
     c.arg("doctor").arg("--check").arg("--plugin-root").arg(&sc.plugin).env_clear().env("PATH", &sc.path).env("HOME", "rel/home").current_dir(&sc.cwd);
     let d = sc.finish(c);
     d.has("bad", &["HOME is \"rel/home\", a relative path"]);
-    let mut s = Command::new("sh");
-    s.arg(sc.plugin.join("hooks/ah-hook.sh")).arg("--doctor").env_clear().env("PATH", &sc.path).env("HOME", "rel/home").current_dir(&sc.cwd);
+    let mut s = builtin_doctor(&sc.plugin);
+    s.env_clear().env("PATH", &sc.path).env("HOME", "rel/home").current_dir(&sc.cwd);
     sc.finish(s).has("bad", &["HOME is \"rel/home\", a relative path"]);
     // not a directory
     let missing = sc.root.join("no-such-home");
@@ -1355,8 +1370,7 @@ fn ev_08_path_oddities() {
     run(&format!("{sys}::/tmp")).has("warn", &["PATH has an empty entry"]);
     run("/nonexistent").has("warn", &["PATH lacks /usr/bin, /bin"]);
     // the shell doctor says the same
-    let mut s = Command::new("sh");
-    s.arg(sc.plugin.join("hooks/ah-hook.sh")).arg("--doctor");
+    let mut s = builtin_doctor(&sc.plugin);
     sc.env(&mut s);
     s.env("PATH", format!("{sys}:."));
     sc.finish(s).has("warn", &["PATH has . entry, resolved against the current directory"]);

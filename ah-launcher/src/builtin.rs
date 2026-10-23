@@ -107,6 +107,9 @@ pub const STRS: &[(&str, &str)] = &[
     ("launcher.cli_integrity_verb", "integrity"),
     ("launcher.cli_install_verb", "install"),
     ("launcher.cli_update_verb", "update"),
+    ("launcher.cli_doctor_verb", "doctor"),
+    ("launcher.arg_builtin", "--builtin"),
+    ("launcher.knob_doctor_rosetta", "AH_DOCTOR_ROSETTA"),
     ("launcher.knob_update_api_base", "AH_UPDATE_API_BASE"),
     ("launcher.knob_update_download_base", "AH_UPDATE_DOWNLOAD_BASE"),
     ("launcher.knob_update_git_url", "AH_UPDATE_GIT_URL"),
@@ -120,7 +123,6 @@ pub const STRS: &[(&str, &str)] = &[
     ("launcher.knob_install_retry_s", "AH_BOOTSTRAP_RETRY_S"),
     ("launcher.knob_install_run_s", "AH_BOOTSTRAP_RUN_S"),
     ("launcher.script_hook", "ah-hook.sh"),
-    ("launcher.script_doctor", "ah-doctor.sh"),
     ("launcher.engine_lock_file", "ah-engine.lock"),
     ("launcher.engine_bin_rel", "bin/ah-engine"),
     ("launcher.engine_bin_name", "ah-engine"),
@@ -143,14 +145,6 @@ pub const STRS: &[(&str, &str)] = &[
     (
         "msg.launcher_fallback_exec_failed",
         "anti-hall: cannot run the Node fallback wrapper: {err}; the engine answers",
-    ),
-    (
-        "msg.launcher_no_doctor",
-        "anti-hall: ah-doctor.sh is missing next to ah-hook.sh; reinstall the plugin",
-    ),
-    (
-        "msg.launcher_doctor_failed",
-        "anti-hall: cannot run ah-doctor.sh: {err}",
     ),
     (
         "msg.launcher_fail_closed",
@@ -271,6 +265,7 @@ pub const CFG_MARKER_FILE: &str = "index.toml";
 pub const CFG_ENGINE_FILE: &str = "engine.toml";
 pub const CFG_DISPATCH_FILE: &str = "dispatch.toml";
 pub const CFG_MESSAGES_FILE: &str = "messages.toml";
+pub const CFG_DOCTOR_FILE: &str = "doctor.toml";
 /// The plugin's hooks directory below the plugin root.
 pub const HOOKS_DIR: &str = "hooks";
 

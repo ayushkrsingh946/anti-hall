@@ -617,6 +617,18 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `hook.event_keys` | `hook_event_name, hookEventName, event` |  |  | Payload fields that can carry the event name, tried in order (Claude Code and Codex send `hook_event_name`). |
 | `hook.warn_prefix` | `anti-hall warning: ` |  |  | Prefix of a `warn` rule's message in agent-visible output. |
 
+### engine.toml / hooks_form
+
+| Key | Default | Env override | Unit | What it is |
+|---|---|---|---|---|
+| `hooks_form.hooks_dir_word` | `/hooks` |  |  | The directory below the plugin root that holds the hook scripts (stripped to find the plugin root variable of an old command). |
+| `hooks_form.host_args_codex` | ` --host codex` |  |  | What a Codex hook command adds after the event. |
+| `hooks_form.host_claude` | `claude` |  |  | The name of the Claude host. |
+| `hooks_form.host_codex` | `codex` |  |  | The name of the Codex host (the value of --host). |
+| `hooks_form.node_word` | `node` |  |  | The program name that marks Node on an entry path. |
+| `hooks_form.old_markers` | `ah-hook.sh, ah-run.sh` |  |  | Text in a hook or statusLine command that marks the retired shell wrappers. |
+| `hooks_form.template` | `[ -x "$HOME/.anti-hall/ah-engine/bin/ah-hook" ] && exec "$HOME/.anti-hall/ah-...` |  |  | A hook command in the direct form: run the installed thin client, else the installer. Placeholders: {event}, {host_args}, {prefix} (the plugin root variable or path). |
+
 ### engine.toml / install
 
 | Key | Default | Env override | Unit | What it is |
@@ -675,6 +687,8 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | Key | Default | Env override | Unit | What it is |
 |---|---|---|---|---|
 | `launcher.arg_auto` | `--auto` |  |  | The argument the session start gives `ah-hook install` for the automatic form (installs only when the opt-in setting or the environment variable says so). |
+| `launcher.arg_builtin` | `--builtin` |  |  | The argument that makes `ah-hook doctor` run its built-in diagnosis even when the engine runs. |
+| `launcher.cli_doctor_verb` | `doctor` |  |  | The ah-hook command-line verb of the built-in doctor (`ah-hook doctor [--builtin] [--check] [--repair [--dry-run]]`); it hands over to the engine's doctor when the engine runs. |
 | `launcher.cli_install_verb` | `install` |  |  | The ah-hook command-line verb that installs the pinned engine (and thin client) from the release archive (`ah-hook install [--lock FILE] [--print-target] [--auto] [-v]`). |
 | `launcher.cli_integrity_verb` | `integrity` |  |  | The ah-hook command-line verb that runs the binary integrity check and roll-back (`ah-hook integrity record\|accept\|check\|fail\|status\|lock\|unlock`); the launcher starts itself with it in the background. |
 | `launcher.cli_lowercase_verbs` | `1` |  |  | 1: a first argument that starts with a lowercase letter is an engine command (`ah-hook <verb> [args...]` runs `ah-engine <verb> [args...]` by exec); hook event names are PascalCase, so they never match. 0: every first argument is a hook event. |
@@ -696,6 +710,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `launcher.in_process_env` | `AH_ENGINE_DISPATCH_IN_PROCESS` |  |  | Environment variable that, set to 1, runs the engine's dispatch in process; the launcher then ignores the daemon-down marker. |
 | `launcher.io_chunk_bytes` | `65536` |  | bytes | Size of the fixed buffer the launcher moves the payload and the engine's output with. Memory stays this size however large the payload is. |
 | `launcher.io_drain_ms` | `100` |  | ms | How long, after the engine has exited, the launcher waits for its output pipes to reach end of file before it treats a helper still holding them as a failure. |
+| `launcher.knob_doctor_rosetta` | `AH_DOCTOR_ROSETTA` |  |  | Test-only: environment variable naming the file whose presence means Rosetta is installed (honoured only when the test flag is set). |
 | `launcher.knob_engine_bin` | `AH_ENGINE_BIN` |  |  | Test-only: environment variable that replaces the engine binary (honoured only when the test flag is set). |
 | `launcher.knob_fallback_list` | `AH_FALLBACK_LIST` |  |  | Test-only: environment variable that replaces the fallback list file. |
 | `launcher.knob_fault` | `AH_LAUNCHER_FAULT` |  |  | Test-only: environment variable that injects a fault into the launcher (panic, hang, spin or alloc) so its never-panic and hard-limit paths can be tested end to end. |
@@ -731,7 +746,6 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `launcher.run_fail_open_file` | `fail_open` |  |  | Name, inside a per-call run directory, of the file the engine client appends the call's reported fail-opens to (see env.fail_open_file). |
 | `launcher.run_spool_file` | `payload` |  |  | Name, inside a per-call run directory, of the private copy of a large payload (see launcher.spool_max_bytes). |
 | `launcher.run_wait_file` | `wait` |  |  | Name, inside a per-call run directory, of the file the engine creates while it waits on a live daemon. |
-| `launcher.script_doctor` | `ah-doctor.sh` |  |  | Doctor script in the plugin's hooks directory (the --doctor mode runs it). |
 | `launcher.script_hook` | `ah-hook.sh` |  |  | The shell wrapper in the plugin's hooks directory; the launcher hands the call to it while the Node fallback switch is on (files.fallback_switch). |
 | `launcher.selftest_engine_timeout_ms` | `3000` |  | ms | How long --selftest lets the engine binary run its version check before it calls the binary broken. |
 | `launcher.spawn_backoff_base_ms` | `5` |  | ms | First wait between engine start retries; each retry doubles it up to launcher.spawn_backoff_cap_ms. |
@@ -5023,6 +5037,70 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `doctor.xml_unescape` | `&lt;\\|<, &gt;\\|>, &quot;\\|", &apos;\\|', &amp;\\|&` |  |  | The XML entities a property list value is read back through, in order, as `entity\|text`. |
 | `doctor.yes_short` | `y` |  |  | The short yes of the orphan rows. |
 
+### doctor.toml / doctor_l
+
+| Key | Default | Env override | Unit | What it is |
+|---|---|---|---|---|
+| `doctor_l.arch_label_arm` | `arm64` |  |  | The architecture name printed for 64-bit ARM. |
+| `doctor_l.arch_label_x86` | `x64` |  |  | The architecture name printed for x86-64. |
+| `doctor_l.backup_infix` | `.bak-antihall-` |  |  | Infix of the backup a repair keeps of a file it changes: <file><infix><UTC time>. |
+| `doctor_l.claude_settings_rel` | `.claude/settings.json` |  |  | Claude Code's settings file, relative to HOME. |
+| `doctor_l.cmd_word` | `doctor` |  |  | The engine verb the thin client hands over to when the engine runs. |
+| `doctor_l.defaults_dir` | `engine/defaults` |  |  | The plugin's defaults directory, relative to the plugin root. |
+| `doctor_l.defaults_index` | `index.toml` |  |  | The file that marks a defaults directory as complete. |
+| `doctor_l.engine_serve_word` | `serve` |  |  | The word in the command line of a running engine daemon. |
+| `doctor_l.excerpt_chars` | `120` |  |  | How many characters of a hook command or a file's first line a finding quotes. |
+| `doctor_l.gh_name` | `gh` |  |  | The GitHub CLI program. |
+| `doctor_l.git_name` | `git` |  |  | The git program. |
+| `doctor_l.header_bytes` | `200` |  | bytes | How many bytes of the engine binary the doctor reads to tell what kind of program it is (ELF and Mach-O headers fit in 200). |
+| `doctor_l.hook_files` | `{root}/hooks/hooks.json, {root}/codex/hooks/hooks.json, {home}/.codex/hooks.j...` |  |  | The hooks files the doctor looks at; {root} is the plugin root, {home} the home directory, * matches one path segment. |
+| `doctor_l.hooks_claude_rel` | `hooks/hooks.json` |  |  | Claude's hooks file, relative to the plugin root. |
+| `doctor_l.hooks_codex_rel` | `codex/hooks/hooks.json` |  |  | Codex's hooks file, relative to the plugin root. |
+| `doctor_l.install_health_fail` | `0` |  |  | 1 = a failed install-health check (old-form hook commands, Node on an entry path, extra shell files, a bad launcher shim, a missing thin client) fails the doctor; 0 = it only warns. |
+| `doctor_l.kill_grace_s` | `1` |  | s | How long a timed-out command the doctor ran gets after TERM before it is killed. |
+| `doctor_l.line_chars` | `160` |  |  | How many characters of a command's output a finding quotes. |
+| `doctor_l.msg_builtin_daemon_note` | `the built-in doctor reads the daemon's files only; it never contacts or signa...` |  |  | Informational line of the built-in doctor. |
+| `doctor_l.msg_builtin_defaults_missing` | `{path} is missing; the engine has no settings and the hooks pass through - Fi...` |  |  | The defaults index is missing. Placeholder: {path}. |
+| `doctor_l.msg_builtin_defaults_ok` | `the plugin's defaults and their pristine copy are present` |  |  | The defaults and their pristine copy are present. |
+| `doctor_l.msg_err_eacces` | `Permission denied (os error 13)` |  |  | The reason text for a lock file that exists but cannot be read. |
+| `doctor_l.msg_err_enoent` | `No such file or directory (os error 2)` |  |  | The reason text for a lock file that does not exist. |
+| `doctor_l.msg_head_health` | `Install health` |  |  | Heading of the install-health checks. |
+| `doctor_l.msg_health_client_differs` | `the thin client {path} differs from the build the installer put there (sha256...` |  |  | Placeholders: {path}, {have}, {want}, {install}. |
+| `doctor_l.msg_health_client_missing` | `the thin client {path} is not installed - Fix: sh {install} --download -v` |  |  | Placeholders: {path}, {install}. |
+| `doctor_l.msg_health_client_not_exec` | `the thin client {path} is not executable (mode {mode}) - Fix: chmod u+x {path...` |  |  | Placeholders: {path}, {mode}. |
+| `doctor_l.msg_health_client_ok` | `the thin client {path} is installed and executable` |  |  | Placeholder: {path}. |
+| `doctor_l.msg_health_hooks_ok` | `{file}: every hook command is the direct form` |  |  | Placeholder: {file}. |
+| `doctor_l.msg_health_hooks_old` | `{file} still runs {n} hook command(s) through the retired shell wrapper (firs...` |  |  | Placeholders: {file}, {n}, {first}. |
+| `doctor_l.msg_health_node_entry` | `{file} runs Node on an entry path ({n} command(s), first: {first}) - Fix: upd...` |  |  | Placeholders: {file}, {n}, {first}. |
+| `doctor_l.msg_health_shim_bad` | `{path} is not an sh shim for ah-hook (first line: {first}) - Fix: ah-engine d...` |  |  | Placeholders: {path}, {first}. |
+| `doctor_l.msg_health_shims_ok` | `{n} launcher shim(s) in {dir} are sh shims` |  |  | Placeholders: {n}, {dir}. |
+| `doctor_l.msg_health_shipped_sh` | `the plugin ships {n} shell file(s) besides hooks/install.sh (first: {first}) ...` |  |  | Placeholders: {n}, {first}. |
+| `doctor_l.msg_health_shipped_sh_ok` | `the plugin ships no shell file besides hooks/install.sh` |  |  | Said when the plugin ships only hooks/install.sh. |
+| `doctor_l.msg_health_statusline_old` | `the statusLine in {file} still runs the retired shell wrapper ({command}) - F...` |  |  | Placeholders: {file}, {command}. |
+| `doctor_l.msg_repair_exec` | `made {path} executable` |  |  | Placeholder: {path}. |
+| `doctor_l.msg_repair_hooks_form` | `rewrote {n} hook command(s) in {file} to the direct form; the previous file i...` |  |  | Placeholders: {n}, {file}, {backup}. |
+| `doctor_l.msg_repair_hooks_nobackup` | `{file} was not changed: no backup could be kept` |  |  | Placeholder: {file}. |
+| `doctor_l.msg_repair_hooks_nowrite` | `{file} could not be written; the backup is untouched` |  |  | Placeholder: {file}. |
+| `doctor_l.msg_repair_hooks_would` | `would rewrite {n} hook command(s) in {file} to the direct form (the previous ...` |  |  | Dry run. Placeholders: {n}, {file}. |
+| `doctor_l.msg_repair_state_dir` | `created the state directory {dir} (mode 700)` |  |  | Placeholder: {dir}. |
+| `doctor_l.os_label_linux` | `linux` |  |  | The OS name printed for Linux. |
+| `doctor_l.os_label_macos` | `darwin` |  |  | The OS name printed for macOS. |
+| `doctor_l.other_arch_name` | `other` |  |  | Said of an architecture the doctor does not know. |
+| `doctor_l.path_wanted` | `/usr/bin, /bin` |  |  | Directories of which PATH should contain at least one. |
+| `doctor_l.poll_ms` | `50` |  | ms | How often the doctor looks at a command it started. |
+| `doctor_l.pristine_dir` | `engine/defaults.pristine` |  |  | The pristine copy of the defaults, relative to the plugin root. |
+| `doctor_l.probe_prefix` | `.doctor-probe-` |  |  | Prefix of the scratch file the doctor creates (and removes) to test that a directory is writable. |
+| `doctor_l.ps_cmd` | `ps, -p, {pid}, -o, command=` |  |  | The command that prints the command line of one process. Placeholder: {pid}. |
+| `doctor_l.run_s` | `5` |  |  | Hard limit for one command the doctor runs (the engine's version, git). |
+| `doctor_l.scan_skip_dirs` | `.git, node_modules` |  |  | Directories the scan for shell files does not enter. |
+| `doctor_l.shell_ext` | `sh` |  |  | File extension of a shell file. |
+| `doctor_l.shim_dir` | `bin` |  |  | The directory of the launcher shims, below the base directory (~/.anti-hall). |
+| `doctor_l.shim_shebang` | `#!/bin/sh` |  |  | The first line of an sh shim. |
+| `doctor_l.version_flag` | `--version` |  |  | The flag with which git prints its version. |
+| `doctor_l.wrapper_name` | `ah-hook.sh` |  |  | File name of the retired shell wrapper. |
+| `doctor_l.wsl_word_upper` | `WSL` |  |  | The other spelling of the WSL marker in the kernel release. |
+| `doctor_l.xattr_cmd` | `xattr, -p, {attr}, {path}` |  |  | The macOS command that reads a file attribute (exit 0 = the attribute is set). Placeholders: {attr}, {path}. |
+
 ### doctor.toml / doctor_msg
 
 | Key | Default | Env override | Unit | What it is |
@@ -5092,7 +5170,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `doctor_msg.ds_scheduler_systemd` | `systemd` |  |  | The name of the Linux scheduler in the installed line. |
 | `doctor_msg.ds_turn_bad` | `devswarm-child-turn did NOT heartbeat/remind a child session (said={said}, he...` |  |  | The child-turn hook failed. Placeholders: {said}, {beat}. |
 | `doctor_msg.ds_turn_ok` | `devswarm-child-turn writes a turn-authored heartbeat + reminds the child to u...` |  |  | The child-turn hook still works. |
-| `doctor_msg.engine_on_path` | `the hooks run ah-engine from PATH ({path}) because the home install is not ex...` |  |  | The home install is not executable and the hook wrapper runs ah-engine from PATH instead (ah-hook.sh), so that engine counts as working. The ah-doctor.sh fallback prints the same text. Placeholder: {path}. |
+| `doctor_msg.engine_on_path` | `the hooks run ah-engine from PATH ({path}) because the home install is not ex...` |  |  | The home install is not executable and the hook wrapper (the thin client) runs ah-engine from PATH instead, so that engine counts as working. The thin client's built-in doctor prints the same text. Placeholder: {path}. |
 | `doctor_msg.engine_version` | `ah-engine {version}` |  |  | The engine version finding. Placeholder: {version}. |
 | `doctor_msg.enotdir` | `Not a directory (os error 20)` |  |  | The OS error for a path component that is a file. |
 | `doctor_msg.explicit_failed` | `FAILED ` |  |  | The mark of a failed explicit repair. |
@@ -5185,7 +5263,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `doctor_msg.logs_repo_tag` | ` repoKey={repo}` |  |  | The repository tag of an entry line. Placeholder: {repo}. |
 | `doctor_msg.logs_showing` | `showing the most recent {shown} of {n} — re-run with a narrower window if you...` |  |  | --logs prints only the most recent entries. Placeholders: {shown}, {n}. |
 | `doctor_msg.logs_summary` | `{n} warn/error entries in the central anti-hall log across {components} compo...` |  |  | --logs found entries. Placeholders: {n}, {components}, {summary} (component:count, sorted), {at}. |
-| `doctor_msg.no_engine` | `no working engine: the anti-hall hooks do not run - Fix: reinstall the engine...` |  |  | ND-04: no working engine. The ah-doctor.sh fallback prints the same text. |
+| `doctor_msg.no_engine` | `no working engine: the anti-hall hooks do not run - Fix: reinstall the engine...` |  |  | ND-04: no working engine. The thin client's built-in doctor prints the same text. |
 | `doctor_msg.no_entry` | `(no entry)` |  |  | Stands for an event with no entry. |
 | `doctor_msg.no_parent` | `no parent directory exists` |  |  | Reason. |
 | `doctor_msg.no_plugin_root` | `plugin root not found (pass --plugin-root <dir> or set AH_ENGINE_PLUGIN_ROOT)...` |  |  | The doctor could not find the plugin root, so the checks that read the plugin's files were skipped. |
@@ -11166,7 +11244,6 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `msg.launcher_bad_host` | Printed when --host names a host the launcher does not serve; the default host is used. |
 | `msg.launcher_config_invalid` | Log line when a defaults file is missing or invalid and the built-in copy is used; {file} names it. |
 | `msg.launcher_cpu_hard` | Printed when the launcher passed its hard CPU limit and let the hook through. |
-| `msg.launcher_doctor_failed` | Printed by --doctor when the doctor script cannot be started; {err} is the reason. |
 | `msg.launcher_fail_closed` | Printed when a guard event is blocked because the launcher cannot run it safely; {event} is the event, {why} the reason. |
 | `msg.launcher_fail_open_stop` | Printed instead of blocking when the event is a stop hook that is already active; {event} and {why} as above. |
 | `msg.launcher_fallback_exec_failed` | Written when the launcher cannot hand the call to the shell wrapper while the Node fallback switch is on; the engine answers instead. Placeholder: {err}. |
@@ -11175,7 +11252,6 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `msg.launcher_integrity_usage` | Printed by `ah-hook integrity` for a verb it does not know. |
 | `msg.launcher_internal` | Printed (once) when the launcher itself failed and let the hook through; {what} is the failure. |
 | `msg.launcher_mem_hard` | Printed when the launcher passed its hard heap limit and let the hook through. |
-| `msg.launcher_no_doctor` | Printed by --doctor when the doctor script is missing. |
 | `msg.launcher_selftest_fail` | Selftest line for a failing check; {check} names it, {why} the reason. |
 | `msg.launcher_selftest_ok` | Selftest line for a passing check; {check} names it. |
 | `msg.launcher_st_cannot_start` | Selftest reason: the engine binary could not be started; {errno} is the system error number. |

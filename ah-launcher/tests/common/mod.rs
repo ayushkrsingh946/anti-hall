@@ -63,6 +63,7 @@ impl Env {
             "engine.toml",
             "dispatch.toml",
             "messages.toml",
+            "doctor.toml",
         ] {
             std::fs::copy(repo_defaults().join(f), defaults.join(f)).unwrap();
         }
