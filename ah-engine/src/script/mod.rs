@@ -326,10 +326,23 @@ pub fn pool_usage() -> Option<(usize, i64, i64, i64, i64)> {
     })
 }
 
+/// The shared regex cache against what its programs measured (`status --memory`): patterns and bytes held under the cache's weights,
+/// and the totals of every compile so far, estimated and measured (the calibration of the two `script.regex_*` weights).
+pub fn regex_diag() -> serde_json::Value {
+    let (patterns, held) = recache::usage();
+    let (compiled, est, measured, n) = recache::compiled_totals();
+    serde_json::json!({
+        "patterns_held": patterns, "bytes_held_by_cache_weights": held,
+        "compiled": {"programs": compiled, "estimated_bytes": est, "measured_programs": n, "measured_bytes": measured},
+    })
+}
+
 /// This thread's share of the memory picture for the cap-trip snapshot: its interpreter (runtimes, contexts, loaded checks, bytes
 /// QuickJS holds) and its regex cache. Runs a collection, so only for a diagnostic, never on a request path.
 pub fn thread_diag() -> serde_json::Value {
     let regex_cache = host::regex_cache_len();
+    let (compiled, est, measured, n) = host::regex_totals();
+    let regex_compiled = serde_json::json!({"programs": compiled, "estimated_bytes": est, "measured_bytes": measured, "measured_programs": n});
     let thread = std::thread::current().name().map(str::to_string);
     // QuickJS bytes before and after one collection: a drop is garbage that waited for the GC threshold, not a leak
     let before = POOL.with(|c| c.borrow().as_ref().map(|p| p.rt.memory_usage().malloc_size));
@@ -337,8 +350,9 @@ pub fn thread_diag() -> serde_json::Value {
         Some((checks, bytes, allocs, funcs, code)) => serde_json::json!({
             "thread": thread, "runtimes": 1, "contexts": 1, "checks_loaded": checks, "quickjs_bytes": bytes, "quickjs_bytes_before_gc": before,
             "quickjs_allocs": allocs, "js_funcs": funcs, "js_func_code_bytes": code, "regex_cache": regex_cache,
+            "regex_compiled": regex_compiled,
         }),
-        None => serde_json::json!({"thread": thread, "runtimes": 0, "contexts": 0, "regex_cache": regex_cache}),
+        None => serde_json::json!({"thread": thread, "runtimes": 0, "contexts": 0, "regex_cache": regex_cache, "regex_compiled": regex_compiled}),
     }
 }
 

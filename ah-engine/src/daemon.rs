@@ -411,6 +411,7 @@ impl Shared {
         let ledger = crate::memdiag::live_ledger(m.get("budgets").unwrap_or(&serde_json::Value::Null));
         if let Some(o) = m.as_object_mut() {
             o.insert("ledger".into(), ledger);
+            o.insert("regex".into(), crate::script::regex_diag());
         }
         m
     }
