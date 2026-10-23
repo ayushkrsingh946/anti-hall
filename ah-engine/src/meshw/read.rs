@@ -33,7 +33,7 @@ pub fn run(inv: &Inv, a: &Args, history: bool) -> R<Answer> {
     let from = ident::caller_identity_detailed(&inv.env, &cwd)?.identity;
     let st = common::open_store(inv, &repo_key)?;
     let rows = ident::rows_of(&st.reader().roster().map_err(|e| Defer(format!("registry:{e}")))?);
-    let own = resolve_mesh_target(&rows, Some(&from))?;
+    let own = resolve_mesh_target(inv, Some(&st.reader()), &rows, Some(&from))?;
     let cursor_key = own.map(|r| r.id).unwrap_or_else(|| from.clone());
     let cursor = st.reader().broadcast_cursor(&cursor_key).map_err(|e| Defer(format!("cursor:{e}")))? as f64;
     let flag_seq = defaults::text("mesh_write.flag_seq");

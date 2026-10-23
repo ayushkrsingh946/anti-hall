@@ -156,7 +156,7 @@ pub fn done_with(inv: &Inv, a: &Args, runner: &dyn Runner) -> R<Answer> {
         None => None,
     };
     let target = match &primary_mesh {
-        Some(pm) => resolve_mesh_target(&rows, Some(pm))?,
+        Some(pm) => resolve_mesh_target(inv, None, &rows, Some(pm))?,
         None => None,
     };
     if target.is_some() {

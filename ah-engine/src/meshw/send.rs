@@ -55,15 +55,67 @@ pub fn mesh_candidates(rows: &[Row], mesh_id: Option<&str>) -> R<Vec<Row>> {
     Ok(out)
 }
 
-/// `resolveMeshTarget(store, meshId)` where it does not need liveness: no candidate, or exactly one (which
-/// `pickFreshestLive` returns whether or not it is live). Two or more defer.
-pub fn resolve_mesh_target(rows: &[Row], mesh_id: Option<&str>) -> R<Option<Row>> {
+/// `resolveMeshTarget(store, meshId, home, { isLive: isRoutingLiveRowStrict })`: no candidate is `None`; one is that row (whether or
+/// not it is live); several go through `pickFreshestLive` (`liveness-select.js`). `reader` supplies the drain evidence (cursor rows);
+/// without it those signals are neutral, as in Node without a store handle.
+pub fn resolve_mesh_target(inv: &Inv, reader: Option<&crate::mesh::MeshReader>, rows: &[Row], mesh_id: Option<&str>) -> R<Option<Row>> {
     let c = mesh_candidates(rows, mesh_id)?;
     match c.len() {
         0 => Ok(None),
         1 => Ok(c.into_iter().next()),
-        _ => defer("mesh-group"),
+        _ => pick_freshest_live(inv, reader, c).map(Some),
     }
+}
+
+/// A row's drain evidence: `(has a cursor row, cursor value, has unread)`; unknown parts are `None` / -1.
+fn cursor_evidence(reader: Option<&crate::mesh::MeshReader>, id: &str) -> (Option<bool>, f64, Option<bool>) {
+    let Some(r) = reader else { return (None, -1.0, None) };
+    let value = r.cursor(id).map_or(-1.0, |v| v as f64);
+    let exists = r.has_cursor_row(id).ok();
+    let unread = r.message_count(id).ok().map(|t| t as f64 > value.max(0.0));
+    (exists, value, unread)
+}
+
+/// `pickFreshestLive(candidates, { storeHandle, home, isLive })`: among the live rows the highest `(not an alias of a group sibling,
+/// not the only un-drained row, session-authored heartbeat, updatedAt, cursor)` wins, the first on a tie; with none live, the freshest
+/// `updatedAt`, then the lowest id.
+fn pick_freshest_live(inv: &Inv, reader: Option<&crate::mesh::MeshReader>, list: Vec<Row>) -> R<Row> {
+    let now = inv.now as f64;
+    let mut live = Vec::new();
+    for d in &list {
+        live.push(crate::meshw::rosterrows::routing_live_strict(inv, now, &d.id, d.worktree_path.as_deref(), d.session_id.as_deref())?);
+    }
+    let group: std::collections::HashSet<&str> = list.iter().map(|d| d.id.as_str()).collect();
+    let any_drain = list.iter().zip(&live).any(|(d, l)| {
+        let (exists, value, _) = cursor_evidence(reader, &d.id);
+        *l && (exists == Some(true) || value > 0.0)
+    });
+    let mut best: Option<(usize, [f64; 5])> = None;
+    for (i, d) in list.iter().enumerate() {
+        if !live[i] {
+            continue;
+        }
+        let sid = d.session_id.as_deref().unwrap_or("");
+        let alias = !sid.is_empty() && sid != d.id && group.contains(sid);
+        let (exists, value, unread) = cursor_evidence(reader, &d.id);
+        let drain_bad = any_drain && exists == Some(false) && value <= 0.0 && unread == Some(true);
+        let credit = crate::meshw::rosterrows::session_authored_heartbeat(inv, &d.id) == Some(true);
+        let score = [f64::from(!alias), f64::from(!drain_bad), f64::from(credit), d.updated_at.filter(|u| u.is_finite()).unwrap_or(-1.0), if reader.is_some() { value } else { -1.0 }];
+        if best.as_ref().is_none_or(|(_, b)| score.partial_cmp(b) == Some(std::cmp::Ordering::Greater)) {
+            best = Some((i, score));
+        }
+    }
+    if let Some((i, _)) = best {
+        return Ok(list[i].clone());
+    }
+    let at = |d: &Row| d.updated_at.filter(|u| u.is_finite()).unwrap_or(-1.0);
+    let mut win = &list[0];
+    for d in &list[1..] {
+        if at(d) > at(win) || (at(d) == at(win) && d.id < win.id) {
+            win = d;
+        }
+    }
+    Ok(win.clone())
 }
 
 /// A worktree label row nobody reads: a `primary-<hash>` id with no session (or a synthetic one) and no reader of its partition. A
@@ -93,8 +145,8 @@ impl Resolved {
 
 /// `resolveSendTarget(store, arg, home, { rerouteStaleTwin: true })` where it needs no liveness and no redirect: `None` is the
 /// unregistered recipient (no row by mesh id or by id, and no retired-redirect to follow).
-fn resolve_send_target(inv: &Inv, rows: &[Row], arg: &str) -> R<Resolved> {
-    let by_mesh = resolve_mesh_target(rows, Some(arg))?;
+fn resolve_send_target(inv: &Inv, reader: Option<&crate::mesh::MeshReader>, rows: &[Row], arg: &str) -> R<Resolved> {
+    let by_mesh = resolve_mesh_target(inv, reader, rows, Some(arg))?;
     if arg.is_empty() {
         return Ok(Resolved::from_row(by_mesh));
     }
@@ -132,7 +184,7 @@ fn resolve_send_target(inv: &Inv, rows: &[Row], arg: &str) -> R<Resolved> {
             }
             // a descriptor id (the app uuid) whose worktree derives to a registered mesh label routes to that row
             if let Some(mesh) = descriptor_mesh_id(&inv.home, arg)?.filter(|m| m != arg)
-                && let Some(row) = resolve_mesh_target(rows, Some(&mesh))?
+                && let Some(row) = resolve_mesh_target(inv, reader, rows, Some(&mesh))?
             {
                 note_ref("mesh_write.ref_outcome_mesh");
                 return Ok(Resolved::Row(row));
@@ -158,7 +210,7 @@ fn resolve_send_target(inv: &Inv, rows: &[Row], arg: &str) -> R<Resolved> {
                 }
                 [only] => {
                     note_ref("mesh_write.ref_outcome_prefix");
-                    resolve_send_target(inv, rows, only)
+                    resolve_send_target(inv, reader, rows, only)
                 }
                 _ => {
                     note_ref("mesh_write.ref_outcome_ambiguous");
@@ -653,7 +705,7 @@ pub(crate) fn cmd_send_mode(inv: &Inv, a: &Args, plan: bool) -> R<Obj> {
     let target: Option<Row> = if broadcast {
         None
     } else if let Some(pm) = &primary_mesh {
-        match resolve_mesh_target(&rows, Some(pm))? {
+        match resolve_mesh_target(inv, Some(&st.reader()), &rows, Some(pm))? {
             Some(t) => Some(t),
             None => {
                 return Ok(refused(&[
@@ -663,7 +715,7 @@ pub(crate) fn cmd_send_mode(inv: &Inv, a: &Args, plan: bool) -> R<Obj> {
             }
         }
     } else {
-        match resolve_send_target(inv, &rows, to_flag.unwrap_or_default())? {
+        match resolve_send_target(inv, Some(&st.reader()), &rows, to_flag.unwrap_or_default())? {
             Resolved::Row(t) => Some(t),
             Resolved::AmbiguousPrefix(ids) => {
                 let list = ids.join(defaults::text("devswarm_cli.send_prefix_candidates_sep"));
@@ -948,5 +1000,52 @@ mod label_tests {
         assert!(!label_without_reader(&row("primary-da4fa4d6", Some("485e7152")), 0), "a Primary with a session reads its partition");
         assert!(!label_without_reader(&row("primary-da4fa4d6", None), 2), "a partition with a reader row is read");
         assert!(!label_without_reader(&row("65a53880-1438", None), 0), "a child's own id is not a label");
+    }
+
+    fn scratch_inv(tag: &str) -> Inv {
+        let home = std::env::temp_dir().join(format!("ah-pick-{tag}-{}", std::process::id()));
+        crate::discard::harmless(std::fs::remove_dir_all(&home)); // keep: a stale directory of an earlier run of this test
+        std::fs::create_dir_all(&home).unwrap();
+        Inv { home: home.clone(), write_home: home, env: Default::default(), cwd: "/".into(), now: 1_000_000, stdin: None, store_override: None }
+    }
+
+    fn crow(id: &str, session: Option<&str>, updated: f64) -> Row {
+        Row { id: id.into(), worktree_path: Some("/w".into()), session_id: session.map(str::to_string), updated_at: Some(updated) }
+    }
+
+    fn beat(inv: &Inv, id: &str, session: Option<&str>) {
+        let dir = crate::meshw::idlock::devswarm_root(&inv.home).join(defaults::text("mesh_write.dir_heartbeats"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let body = serde_json::json!({"ts": inv.now, "sessionId": session});
+        std::fs::write(dir.join(format!("{id}{}", defaults::text("mesh_write.json_suffix"))), body.to_string()).unwrap();
+    }
+
+    /// 2026-10-23: a send to a worktree carrying two registry rows deferred (exit 69); Node routes it to the freshest live row.
+    #[test]
+    fn two_rows_of_one_worktree_route_to_the_freshest_live_one() {
+        let inv = scratch_inv("fresh");
+        let rows = vec![crow("a-old", Some("s-a"), 10.0), crow("b-new", Some("s-b"), 20.0)];
+        assert_eq!(pick_freshest_live(&inv, None, rows).unwrap().id, "b-new", "both live: the newer updatedAt wins");
+        let rows = vec![crow("a-sessionless", None, 99.0), crow("b-live", Some("s-b"), 1.0)];
+        assert_eq!(pick_freshest_live(&inv, None, rows).unwrap().id, "b-live", "a row without a session is never the target while another is live");
+    }
+
+    #[test]
+    fn a_session_authored_heartbeat_outranks_recency_and_an_alias_loses() {
+        let inv = scratch_inv("credit");
+        beat(&inv, "b-beat", Some("s-b"));
+        let rows = vec![crow("a-fresh", Some("s-a"), 500.0), crow("b-beat", Some("s-b"), 10.0)];
+        assert_eq!(pick_freshest_live(&inv, None, rows).unwrap().id, "b-beat");
+        let rows = vec![crow("x-alias", Some("y-real"), 900.0), crow("y-real", Some("s-y"), 5.0)];
+        assert_eq!(pick_freshest_live(&inv, None, rows).unwrap().id, "y-real", "a row whose session is a sibling's id is an alias");
+    }
+
+    #[test]
+    fn with_no_live_row_the_freshest_then_the_lowest_id_wins() {
+        let inv = scratch_inv("none");
+        let rows = vec![crow("b", None, 5.0), crow("a", None, 5.0), crow("c", None, 1.0)];
+        assert_eq!(pick_freshest_live(&inv, None, rows).unwrap().id, "a");
+        let rows = vec![crow("b", None, 5.0), crow("c", None, 9.0)];
+        assert_eq!(pick_freshest_live(&inv, None, rows).unwrap().id, "c");
     }
 }
