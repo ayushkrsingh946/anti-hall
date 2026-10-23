@@ -28,7 +28,6 @@ const KNOWN_UNABLE: &[&str] = &[
     "inbox peek-primary", // unhandled_verb: read-primary without the ack
     "inbox pull",         // unhandled_verb: register + pullOnce
     "inbox read",         // unhandled_verb
-    "retention restore",  // restore
 ];
 /// The verbs whose next word is a subcommand.
 const WITH_SUB: &[&str] = &["inbox", "plan", "scope", "primary", "retention", "mesh"];

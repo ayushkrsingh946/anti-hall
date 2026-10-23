@@ -1326,6 +1326,10 @@ value = "run"
 doc = "The retention subcommand that restores archived bodies into their tombstoned rows."
 value = "restore"
 
+[devswarm_cli.ret_flag_month]
+doc = "The retention restore flag that names the archive month (yyyy-mm)."
+value = "month"
+
 [devswarm_cli.ret_flag_store]
 doc = "The retention flag naming one store."
 value = "store"
@@ -1335,6 +1339,35 @@ doc = "The longest store name `--store` accepts."
 value = 80
 min = 1
 max = 255
+
+[devswarm_cli.ret_msg_bad_month]
+doc = "The retention restore error for a --month that is not yyyy-mm."
+value = "--month must be yyyy-mm"
+
+[devswarm_cli.ret_msg_no_archive]
+doc = "The retention restore error for an archive file that does not exist. Placeholder: {file}, relative to the archive root."
+value = "no archive {file}"
+
+[devswarm_cli.ret_msg_no_store]
+doc = "The retention restore error for a store with no sqlite database. Placeholder: {hash}."
+value = "no sqlite store {hash}"
+
+[devswarm_cli.ret_msg_lock_busy]
+doc = "The retention restore error when another retention run holds the lock."
+value = "retention lock busy"
+
+[devswarm_cli.ret_action_restore]
+doc = "The action of a retention restore result."
+value = "retention-restore"
+
+[devswarm_cli.ret_event_restore]
+doc = "The event name a retention restore writes to the retention log."
+value = "restore"
+
+[devswarm_cli.ret_restore_hold_days]
+doc = "How many days the rows a retention restore brought back are protected from the next pruning."
+value = 7
+min = 1
 
 [devswarm_cli.ret_msg_bad_store]
 doc = "The retention error for a store name that is not a plain store key."
