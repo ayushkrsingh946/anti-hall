@@ -617,7 +617,7 @@ fn settle_target(inv: &Inv, a: &Args, id: &str) -> R<Settled> {
         if to == id || rows.iter().any(|r| r.id == id) {
             return Ok(same());
         }
-        if !is_safe_id(&to) || text_requested(&a.raw) {
+        if !is_safe_id(&to) {
             return defer("redirect-shape");
         }
         return Ok(Settled::Go { id: to, redirected_from: Some(id.to_string()), resolved_from: None });
@@ -625,7 +625,7 @@ fn settle_target(inv: &Inv, a: &Args, id: &str) -> R<Settled> {
     match crate::meshw::send::resolve_read_arg(inv, &reader, &rows, id)? {
         crate::meshw::send::ReadArg::Same => Ok(same()),
         crate::meshw::send::ReadArg::To(to) => {
-            if !is_safe_id(&to) || text_requested(&a.raw) {
+            if !is_safe_id(&to) {
                 return defer("resolved-shape");
             }
             Ok(Settled::Go { id: to, redirected_from: None, resolved_from: Some(id.to_string()) })
