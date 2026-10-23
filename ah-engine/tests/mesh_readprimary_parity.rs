@@ -241,7 +241,8 @@ fn canon_tree(home: &Path, before: &[String]) -> BTreeMap<String, Vec<u8>> {
 }
 
 fn canon_out(home: &Path, out: &str, rids: &[String]) -> String {
-    let mut t = out.replace(&home.to_string_lossy().to_string(), "<HOME>");
+    // the engine's ackCommand runs the launcher directly (no `node ` in front: the shim has no Node); Node's names the interpreter
+    let mut t = out.replace(&home.to_string_lossy().to_string(), "<HOME>").replace("\"ackCommand\":\"node ", "\"ackCommand\":\"");
     for r in rids {
         t = t.replace(r.as_str(), "<RID>");
     }
@@ -911,15 +912,7 @@ fn cases(fx: &Fx) -> Vec<Case> {
         false,
         vec!["\"count\""],
     ));
-    v.push(base(
-        "no-stable-launcher",
-        rp("child-1", &[]),
-        ack(floors("child-1", 0, 0), d_store.clone()),
-        nothing(),
-        Box::new(|_, _| {}),
-        false,
-        vec!["\"count\":2"],
-    ));
+    // (no case for a missing stable launcher any more: the ackCommand names the engine's own command, which needs no file)
     v.push(base(
         "an-old-receipt-would-be-pruned-by-node",
         rp("child-1", &[]),
