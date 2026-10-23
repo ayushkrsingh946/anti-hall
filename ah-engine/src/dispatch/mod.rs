@@ -81,10 +81,9 @@ pub fn parse_args(args: &[String]) -> Result<Args, DispatchError> {
 /// has the result).
 fn ask_daemon(meta: &Meta, raw: &str, hold_wait: bool) -> Option<Vec<(String, Answer)>> {
     let cfg = crate::config::ClientConfig::from_env();
-    let meta = serde_json::to_string(meta).ok()?;
-    let req = format!("D {}\n{meta}\n{raw}", crate::version());
-    if req.len() as u64 > defaults::num("daemon.max_request") {
-        return None; // the daemon would refuse it; Node answers instead
+    let req = request_line(meta, raw)?;
+    if request_too_big(&req) {
+        return None; // the daemon would refuse it
     }
     let reply = if hold_wait { crate::client::attempt_holding_wait(req.as_bytes(), &cfg, true) } else { crate::client::attempt(req.as_bytes(), &cfg, true) };
     // ACK(res) now: the daemon's answers are in this process, and what follows (a model call the daemon deferred, Node hooks,
@@ -92,6 +91,19 @@ fn ask_daemon(meta: &Meta, raw: &str, hold_wait: bool) -> Option<Vec<(String, An
     // undelivered verdict (live20: every slow Stop did, and the late ACK(res) met the socket the daemon had closed)
     crate::client::finish_ack();
     native::decode(&reply?)
+}
+
+/// The `D` request the daemon is sent for one event.
+fn request_line(meta: &Meta, raw: &str) -> Option<String> {
+    let meta = serde_json::to_string(meta).ok()?;
+    Some(format!("D {}\n{meta}\n{raw}", crate::version()))
+}
+
+/// True when a request is over `daemon.max_request`. The daemon refuses it, and the in-process checks decline it the same way: the
+/// interpreter's per-call heap and CPU budget (`script.call_memory_bytes`, `script.time_limit_ms`) cannot hold a payload that size
+/// (an 8 MiB command made the scripts run out of memory or CPU, and the call was refused by their crash, not by a decision).
+fn request_too_big(req: &str) -> bool {
+    req.len() as u64 > defaults::num("daemon.max_request")
 }
 
 /// [`ask_daemon`] for the event's own checks: a guard event's call waits for a daemon that is still starting instead of being
@@ -694,6 +706,8 @@ fn run_core(raw: &str, args: &Args, payload: Option<&File>, complete: bool, tele
             Vec::new()
         }
         (Some(_), _) if entries.iter().all(|e| e.check.is_none()) => Vec::new(),
+        // no answer for any check: each one's failure policy decides, as when the daemon refuses an oversize request
+        (Some(_), _) if defaults::num("dispatch.in_process") == 1 && request_line(&meta, raw).is_some_and(|r| request_too_big(&r)) => Vec::new(),
         (Some(p), _) if defaults::num("dispatch.in_process") == 1 => native::evaluate(&meta, p, &|| false, &|_, _, _| {}),
         (Some(_), _) => match ask_daemon_for(&meta, raw, guard) {
             Some(a) => a,

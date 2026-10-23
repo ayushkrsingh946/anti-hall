@@ -230,6 +230,13 @@ fn session_payload_len(len: usize) -> String {
     p
 }
 
+/// What a guard that could not answer says, read from the configured text (script.msg_fail_closed with the reason at `why_key`),
+/// for the first check every Bash/Edit/Agent PreToolUse row starts with.
+fn closed_text(why_key: &str) -> String {
+    let why = ah_engine::defaults::text(why_key);
+    ah_engine::defaults::render("script.msg_fail_closed", &[("check", &"compact-declaration-guard"), ("why", &why)])
+}
+
 fn pretool_payload_len(len: usize) -> String {
     let prefix = r#"{"session_id":"e2e","cwd":".","hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":""#;
     let suffix = r#""}}"#;
@@ -294,7 +301,7 @@ const CTX_MERGE_GATE: &str = r#"printf '{"hookSpecificOutput":{"hookEventName":"
 fn wait_for_daemon_native_block(e: &Env, args: &[&str], payload: &str, extra: &[(&str, &str)]) {
     for _ in 0..50 {
         let (code, _, err) = e.run_with(args, false, payload, true, extra);
-        if code == 2 && !err.contains("could not run the guards") {
+        if code == 2 && !err.contains(&closed_text("script.msg_unanswered")) {
             return;
         }
         std::thread::sleep(std::time::Duration::from_millis(50));
@@ -421,7 +428,7 @@ fn unparsable_spawn_payload_blocks_only_when_node_cannot_run_model_routing() {
         let args = ["hook", "--event", "PreToolUse", "--tool", tool, "--fallback-map", map.to_str().unwrap()];
         let (code, out, err) = e.run(&args, true, "{bad", false);
         assert_eq!((code, out.as_str()), (2, ""), "{tool}: {out:?} {err:?}");
-        assert!(err.contains("model-routing") && err.contains("blocked rather than allowed unguarded"), "{tool}: {err}");
+        assert!(err.contains(&closed_text("script.msg_unanswered")), "{tool}: {err}");
     }
 }
 
@@ -820,17 +827,20 @@ fn assert_env_incomplete_defers(name: &str, in_process: bool) {
     let broken = |env: &Env| env.run_with(&args, in_process, &p, true, &[("ANTIHALL_SHIPIT_GATE", "1"), ("ANTIHALL_PAD", pad.as_str())]);
     if in_process {
         let (code, _, err) = e.run_with(&args, true, &p, true, &gate);
-        assert!(code == 2 && !err.contains("could not run the guards"), "control: with a whole environment the engine answers itself: {code} {err:?}");
+        assert!(
+            code == 2 && !err.contains(&closed_text("script.msg_env_incomplete")),
+            "control: with a whole environment the engine answers itself: {code} {err:?}"
+        );
         let (code, _, err) = broken(&e);
         e.stop();
-        assert_eq!((code, err.contains("could not run the guards")), (2, true), "an incomplete environment cannot be checked: closed: {err:?}");
+        assert_eq!((code, err.contains(&closed_text("script.msg_env_incomplete"))), (2, true), "an incomplete environment cannot be checked: closed: {err:?}");
         return;
     }
     // warm the daemon: the first call goes through Node, later ones are answered by the daemon
     let mut native = false;
     for _ in 0..50 {
         let (code, _, err) = e.run_with(&args, false, &p, true, &gate);
-        if code == 2 && !err.contains("could not run the guards") {
+        if code == 2 && !err.contains(&closed_text("script.msg_unanswered")) {
             native = true;
             break;
         }
@@ -839,7 +849,11 @@ fn assert_env_incomplete_defers(name: &str, in_process: bool) {
     assert!(native, "control: the warm daemon answers the gated Edit natively");
     let (code, _, err) = broken(&e);
     e.stop();
-    assert_eq!((code, err.contains("could not run the guards")), (2, true), "daemon: an incomplete environment cannot be checked: closed: {err:?}");
+    assert_eq!(
+        (code, err.contains(&closed_text("script.msg_env_incomplete"))),
+        (2, true),
+        "daemon: an incomplete environment cannot be checked: closed: {err:?}"
+    );
 }
 
 #[test]
@@ -862,13 +876,21 @@ fn an_empty_home_defers_the_env_reading_checks_in_process_and_through_the_daemon
         if in_process {
             let extra = [("ANTIHALL_SHIPIT_GATE", "1"), ("HOME", "")];
             let (code, _, err) = e.run_with(&args, true, &p, true, &extra);
-            assert_eq!((code, err.contains("could not run the guards")), (2, true), "an empty HOME cannot be checked in-process: closed: {err:?}");
+            assert_eq!(
+                (code, err.contains(&closed_text("script.msg_env_incomplete"))),
+                (2, true),
+                "an empty HOME cannot be checked in-process: closed: {err:?}"
+            );
         } else {
             let gate = [("ANTIHALL_SHIPIT_GATE", "1")];
             wait_for_daemon_native_block(&e, &args, &p, &gate);
             let extra = [("ANTIHALL_SHIPIT_GATE", "1"), ("HOME", "")];
             let (code, _, err) = e.run_with(&args, false, &p, true, &extra);
-            assert_eq!((code, err.contains("could not run the guards")), (2, true), "an empty HOME with a healthy daemon cannot be checked: closed: {err:?}");
+            assert_eq!(
+                (code, err.contains(&closed_text("script.msg_env_incomplete"))),
+                (2, true),
+                "an empty HOME with a healthy daemon cannot be checked: closed: {err:?}"
+            );
         }
         e.stop();
     }
