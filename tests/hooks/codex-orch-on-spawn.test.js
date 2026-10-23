@@ -81,7 +81,7 @@ test('a new epoch (compaction/resume) re-arms the marker and delivers once more;
     const m2 = (() => { T.runOrch(h, start(h), SPAWN); return T.markerOf(h); })();
     assert.strictEqual(m2.decision, 'pending');
     assert.ok(spawnCtx(h).startsWith(CORE.ORCH_FULL_CODEX), 'second epoch delivers again');
-    const state = require(path.join(T.PLUGIN, 'hooks', 'lib', 'orch-full-state.js'));
+    const state = require(path.join(T.PLUGIN, '..', 'anti-hall-node', 'hooks', 'lib', 'orch-full-state.js'));
     const line = { timestamp: new Date(Date.now() + 1000).toISOString(), type: 'response_item', payload: { type: 'message', role: 'developer', content: [{ type: 'input_text', text: 'x ' + state.tokenFor(m2.epochId) }] } };
     fs.appendFileSync(h.rollout, JSON.stringify(line) + '\n');
     assert.strictEqual(state.seen(h.rollout, m2.epochId, m2.sentAt), true);

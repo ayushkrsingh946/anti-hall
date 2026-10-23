@@ -612,10 +612,10 @@ test('task-guard deference: would-block scenario + active OMC → advisory, no b
       !(r.json && r.json.decision === 'block'),
       `must not emit a block decision; stdout: ${r.stdout}`
     );
-    // Advisory text must be present (plain text line, not JSON block)
+    // Advisory text must be present (a plain stderr line, never stdout and never a JSON block)
     assert.ok(
-      /OMC|omc|deferring/i.test(r.stdout),
-      `expected advisory text in stdout; got: ${r.stdout}`
+      /OMC|omc|deferring/i.test(r.stderr),
+      `expected advisory text in stderr; got: ${r.stderr}`
     );
   } finally {
     h.cleanup();

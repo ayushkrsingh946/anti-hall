@@ -15,7 +15,7 @@ const FLAG = ['--host=claude'];
 const REP_ROOT = '/home/user/.claude/plugins/cache/anti-hall/anti-hall/0.100.0'.padEnd(64, 'x');
 
 const ctxOf = (r) => (r.json && r.json.hookSpecificOutput && r.json.hookSpecificOutput.additionalContext) || '';
-const normRoot = (t) => String(t).split(CORE.PLUGIN_ROOT).join(REP_ROOT);
+const normRoot = (t) => String(t).split(path.dirname(CORE.PROTOCOL_PATH)).join(REP_ROOT);
 const isFull = (t) => /ORCHESTRATION DISCIPLINE/.test(t);
 const isCompact = (t) => /ORCHESTRATION \(main thread/.test(t);
 

@@ -268,7 +268,7 @@ test('doctor --fix: DevSwarm INACTIVE -> ingest is GATED, no unit artifact writt
     seedUserSettings(home); // so the AUTO-SAFE statusline fix can succeed, not fail
     const r = runDoctor({ cwd, args: ['--fix'], env: { HOME: home, USERPROFILE: home } });
     assert.match(r.out, /GATED \[ingest\]/, 'ingest must be GATED when the DevSwarm gate is closed:\n' + r.out);
-    assert.match(r.out, /Run manually from the worktree: node plugins\/anti-hall\/companion\/install-devswarm-ingest\.js/);
+    assert.match(r.out, /Run manually from the worktree: node plugins\/anti-hall-node\/companion\/install-devswarm-ingest\.js/);
     const unit = ingestUnitPath(home, process.platform);
     assert.ok(!fs.existsSync(unit), 'no ingest unit artifact may be written when gated: ' + unit);
   } finally { rm(home); rm(cwd); }
@@ -1034,7 +1034,7 @@ test('doctor --fix: DevSwarm INACTIVE -> reconcile is GATED, exact manual comman
     seedUserSettings(home);
     const r = runDoctor({ cwd, args: ['--fix'], env: { HOME: home, USERPROFILE: home } });
     assert.match(r.out, /GATED \[reconcile\]/, 'reconcile must be GATED when the DevSwarm gate is closed:\n' + r.out);
-    assert.match(r.out, /Run manually from the worktree: node plugins\/anti-hall\/scripts\/devswarm\.js reconcile/);
+    assert.match(r.out, /Run manually from the worktree: node plugins\/anti-hall-node\/scripts\/devswarm\.js reconcile/);
     assert.ok(!storeDirExists(home), 'a gated repair must never open/create the shared store');
   } finally { rm(home); rm(cwd); }
 });

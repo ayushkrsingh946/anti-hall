@@ -125,7 +125,7 @@ test('doctor: Codex config.toml present in cwd -> reports detected, flags missin
     assert.strictEqual(r.code, 0, r.out);
     assert.match(r.out, /Codex \/ OMX port — detected/);
     assert.match(r.out, /Codex config\.toml \(project\) has the hooks feature enabled/);
-    assert.match(r.out, /Codex hooks\.json \(project\) missing — run plugins\/anti-hall\/codex\/install-codex\.js/);
+    assert.match(r.out, /Codex hooks\.json \(project\) missing — run plugins\/anti-hall-node\/codex\/install-codex\.js/);
   } finally {
     cleanup();
     try { fs.rmSync(cwd, { recursive: true, force: true }); } catch (_) {}
@@ -154,7 +154,7 @@ test('doctor: Codex hooks.json missing only a newly-added event (PostToolUse) ->
     const r = runDoctor({ cwd, env: { HOME: home, USERPROFILE: home } });
     assert.strictEqual(r.code, 0, r.out);
     assert.match(r.out, /Codex \/ OMX port — detected/);
-    assert.match(r.out, /Codex hooks\.json \(project\) present but no anti-hall hooks found — run plugins\/anti-hall\/codex\/install-codex\.js/, r.out);
+    assert.match(r.out, /Codex hooks\.json \(project\) present but no anti-hall hooks found — run plugins\/anti-hall-node\/codex\/install-codex\.js/, r.out);
     assert.doesNotMatch(r.out, /Codex hooks\.json \(project\) has anti-hall hooks registered/, r.out);
   } finally {
     cleanup();

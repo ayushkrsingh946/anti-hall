@@ -10,7 +10,7 @@ const T = require('../helpers/cost-trim.js');
 const { fs, path, CORE, SID } = T;
 
 const MIN = 60 * 1000;
-const hook = path.join(T.PLUGIN, 'hooks', 'orch-on-spawn.js');
+const hook = path.join(T.PLUGIN, '..', 'anti-hall-node', 'hooks', 'orch-on-spawn.js');
 
 // Spawn delivery is opt-in (orchFullOn=spawn); arm the marker the way an opted-in session would.
 const SPAWN = { env: { ANTIHALL_ORCH_FULL_ON: 'spawn' } };

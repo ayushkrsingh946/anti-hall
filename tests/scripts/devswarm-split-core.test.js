@@ -29,12 +29,13 @@ test('core.CLI_PATH is the real dispatcher script and PLUGIN_ROOT the plugin roo
   assert.strictEqual(core.CLI_PATH, DISPATCHER);
   assert.ok(fs.statSync(core.CLI_PATH).isFile());
   assert.strictEqual(core.PLUGIN_ROOT, path.join(SCRIPTS, '..'));
-  assert.ok(fs.existsSync(path.join(core.PLUGIN_ROOT, '.claude-plugin', 'plugin.json')));
+  // the manifest lives in the sibling engine plugin (Node was split out to plugins/anti-hall-node)
+  assert.ok(fs.existsSync(path.join(core.PLUGIN_ROOT, '..', 'anti-hall', '.claude-plugin', 'plugin.json')));
 });
 
 test('core.runningAntiHallVersion resolves the real plugin.json (path depth fixed)', () => {
   const core = require(CORE_PATH);
-  const want = JSON.parse(fs.readFileSync(path.join(core.PLUGIN_ROOT, '.claude-plugin', 'plugin.json'), 'utf8')).version;
+  const want = JSON.parse(fs.readFileSync(path.join(core.PLUGIN_ROOT, '..', 'anti-hall', '.claude-plugin', 'plugin.json'), 'utf8')).version;
   assert.strictEqual(core.runningAntiHallVersion(), want);
   assert.strictEqual(require(DISPATCHER).runningAntiHallVersion, core.runningAntiHallVersion);
 });

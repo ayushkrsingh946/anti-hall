@@ -275,7 +275,7 @@ test('Claude and Codex hooks.json: only the Claude verify-first-orch command car
   assert.strictEqual(withFlag.length, 1);
   assert.ok(/verify-first-orch\.js"? --host=claude$/.test(withFlag[0]));
   assert.deepStrictEqual(cmds(path.join(T.PLUGIN, 'codex', 'hooks', 'hooks.registry.json')).filter((c) => /--host=/.test(c)), []);
-  const { ANTI_HALL_HOOKS } = require(path.join(T.PLUGIN, 'codex', 'install-codex.js'));
+  const { ANTI_HALL_HOOKS } = require(path.join(T.PLUGIN, '..', 'anti-hall-node', 'codex', 'install-codex.js'));
   const inst = [];
   for (const g of Object.values(ANTI_HALL_HOOKS)) for (const x of g) for (const hk of x.hooks) inst.push(hk.command);
   assert.deepStrictEqual(inst.filter((c) => /--host=/.test(c)), []);

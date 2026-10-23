@@ -424,11 +424,11 @@ test('RESTART: the same shape inside THIS session\'s task dir still nudges (cont
 test('SHELL: a quiet background shell is reported as a shell, never as a subagent', () => {
   const h = makeHome();
   try {
-    const tp = h.writeTranscript([adoptedLine('b9hc3cu3v', 'local_bash', 'Restart the build-load throttle', path.join(h.home, 'nope.output'))]);
+    const tp = h.writeTranscript([adoptedLine('b9hc3cu3v', 'local_bash', 'Restart the build-load runner', path.join(h.home, 'nope.output'))]);
     const r = testHook(HOOK, stopPayload(tp), { home: h.home });
     assert.ok(isBlock(r), JSON.stringify(r.json));
     assert.match(r.json.reason, /of your own background shell\(s\)/);
-    assert.match(r.json.reason, /shell: Restart the build-load throttle/);
+    assert.match(r.json.reason, /shell: Restart the build-load runner/);
     assert.doesNotMatch(r.json.reason, /subagent/);
   } finally { h.cleanup(); }
 });

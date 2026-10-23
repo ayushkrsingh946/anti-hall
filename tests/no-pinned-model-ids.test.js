@@ -22,7 +22,7 @@ const EXT = new Set(['.js', '.json', '.toml']);
 const SKIP_DIRS = new Set(['node_modules', '.git']);
 // Narrow allowlist: relative path (under plugins/) -> reason. Whole-file, history text only.
 const ALLOW = {
-  'anti-hall/companion/lib/codex-models.js':
+  'anti-hall-node/companion/lib/codex-models.js':
     'header comment records the retired pinned slugs that motivated dynamic resolution (history)',
 };
 
