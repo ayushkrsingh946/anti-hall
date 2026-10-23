@@ -1053,9 +1053,13 @@ fn cf_06_07_the_users_own_config_and_settings_files() {
 }
 
 #[test]
-fn cf_08_defaults_cannot_load_at_all_hands_over_to_the_shell_doctor() {
+fn cf_08_defaults_cannot_load_at_all_hands_over_to_the_thin_clients_builtin_doctor() {
     let mut sc = Sc::new();
     sc.own_plugin();
+    // the installed thin client is what the engine hands over to
+    let client = sc.home.join(ah_engine::bootstrap::CLIENT_REL);
+    fs::create_dir_all(client.parent().unwrap()).unwrap();
+    fs::copy(crate::common::launcher_bin(), &client).unwrap();
     fs::remove_dir_all(sc.plugin.join("engine/defaults.pristine")).unwrap();
     fs::write(sc.plugin.join("engine/defaults/index.toml"), "[[[ garbage").unwrap();
     let mut c = Command::new(BIN);
@@ -1064,7 +1068,9 @@ fn cf_08_defaults_cannot_load_at_all_hands_over_to_the_shell_doctor() {
     let d = sc.finish(c);
     assert_eq!(d.code, 1, "{}\n{}", d.text, d.err);
     assert!(d.err.contains("defaults unavailable"), "the engine says why on stderr: {}", d.err);
-    d.has("bad", &["engine defaults cannot be loaded:", "hooks use the Node fallback"]);
+    // the thin client's built-in diagnosis answered (it needs neither the engine nor its defaults)
+    d.has("bad", &["no working engine"]);
+    assert!(d.text.contains("Hooks wiring"), "{}", d.text);
     assert!(d.text.contains("anti-hall doctor v"), "{}", d.text);
     assert!(!sc.state().join("defaults.error").exists(), "the doctor wrote nothing");
     // with no plugin root at all there is nobody to hand over to: a plain failure
@@ -1194,7 +1200,7 @@ fn hk_01_hooks_json_not_the_thin_form() {
     sc.own_plugin();
     sc.doctor(&[]).has("ok", &["hooks/hooks.json is the thin form"]);
     let f = sc.plugin.join("hooks/hooks.json");
-    let text = fs::read_to_string(&f).unwrap().replace("ah-hook.sh\\\" PreToolUse", "git-guard.js\\\" PreToolUse");
+    let text = fs::read_to_string(&f).unwrap().replace("hooks/install.sh\\\" PreToolUse", "hooks/git-guard.js\\\" PreToolUse");
     fs::write(&f, text).unwrap();
     let d = sc.doctor(&[]);
     d.has("bad", &["hooks/hooks.json is not the thin form: 1 event(s) differ", "PreToolUse", "ah-engine gen-hooks --host claude"]);
@@ -1208,15 +1214,15 @@ fn hk_01_hooks_json_not_the_thin_form() {
 }
 
 #[test]
-fn hk_02_03_hooks_json_missing_or_broken_and_wrapper_missing() {
+fn hk_02_03_hooks_json_missing_or_broken_and_installer_missing() {
     let mut sc = Sc::new();
     sc.own_plugin();
     fs::write(sc.plugin.join("hooks/hooks.json"), "{ nope").unwrap();
     sc.doctor(&[]).has("bad", &["hooks.json"]);
     fs::remove_file(sc.plugin.join("hooks/hooks.json")).unwrap();
     sc.doctor(&[]).has("bad", &["hooks/hooks.json is missing", "reinstall the plugin"]);
-    fs::remove_file(sc.plugin.join("hooks/ah-hook.sh")).unwrap();
-    sc.doctor(&[]).has("bad", &["ah-hook.sh is missing; every hook command fails"]);
+    fs::remove_file(sc.plugin.join("hooks/install.sh")).unwrap();
+    sc.doctor(&[]).has("bad", &["install.sh is missing; the hook commands cannot install the thin client"]);
 }
 
 // ---- ND / EV: Node, tools, HOME, PATH -------------------------------------------------------------------------------------------
@@ -1243,7 +1249,7 @@ fn nd_node_is_never_probed_and_no_engine_is_the_failure() {
 
 #[test]
 fn nd_an_engine_on_path_is_a_working_engine_when_the_home_install_is_not_executable() {
-    // the hook wrapper runs ah-engine from PATH when the home install is not executable (ah-hook.sh): both doctors count it
+    // the hook wrapper runs ah-engine from PATH when the home install is not executable (the thin client): both doctors count it
     let mut sc = Sc::new();
     sc.own_plugin();
     sc.programs(&[("ah-engine", "[ \"$1\" = version ] && echo 0.1.0\nexit 0")], &[]);

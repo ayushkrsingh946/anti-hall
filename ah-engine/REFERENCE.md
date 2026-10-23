@@ -171,8 +171,8 @@ Every `AH_ENGINE_*` variable the engine or its wrappers read. A variable that ov
 | `AH_ENGINE_ALLOCATOR` |  | Selects the daemon's allocator: jemalloc (default) or system. The client sets it from `diagnostics.allocator` on the daemon it spawns, unless it is already set; the daemon reads it before its first allocation. Environment variable the client sets on the daemon it spawns to select the allocator (the daemon reads it before its first allocation). An existing value in the client's own environment wins. |
 | `AH_ENGINE_AUTO_UPDATE` |  | Read by `ah-hook update --auto`: off, stable or dev overrides the `engine.autoUpdate` setting for one run. |
 | `AH_ENGINE_BACKUP_MS` | `schedule.backup_ms` | Interval of the backup job (D27); 0 (the default) turns it off. |
-| `AH_ENGINE_BIN` |  | Test-only: the engine binary the hook wrapper runs instead of the installed one. The wrapper unsets it unless AH_WRAPPER_TEST=1 is also set, so a stray value can never turn the safety net into a silent allow. Test-only: environment variable that replaces the engine binary (honoured only when the test flag is set). |
-| `AH_ENGINE_BOOTSTRAP` |  | Set to 0 or 1 to turn the first-run download of the sha256-pinned engine binary off or on; overrides the `engine.bootstrap` setting. Read by `ah-hook install --auto` and hooks/install.sh. |
+| `AH_ENGINE_BIN` |  | Test-only: the engine binary the thin client runs instead of the installed one. The thin client ignores it unless AH_WRAPPER_TEST=1 is also set, so a stray value can never turn the safety net into a silent allow. Test-only: environment variable that replaces the engine binary (honoured only when the test flag is set). |
+| `AH_ENGINE_BOOTSTRAP` |  | Set to 0 or 1 to turn the automatic download of the sha256-pinned engine binary off or on (default off: the explicit install is `sh hooks/install.sh --download`); overrides the `engine.bootstrap` setting. Read by `ah-hook install --auto` and hooks/install.sh. |
 | `AH_ENGINE_BREAKER_COOLDOWN_S` | `client.breaker_cooldown_s` | How long the breaker stays open once tripped. |
 | `AH_ENGINE_BREAKER_N` | `client.breaker_n` | Engine failures within the window that open the breaker (the client then skips the engine). |
 | `AH_ENGINE_BREAKER_WINDOW_S` | `client.breaker_window_s` | Window in which breaker failures are counted. |
@@ -189,7 +189,7 @@ Every `AH_ENGINE_*` variable the engine or its wrappers read. A variable that ov
 | `AH_ENGINE_DIR` |  | Overrides the state directory (default: base_dir/state_dir under the home directory). |
 | `AH_ENGINE_DISPATCH_IN_PROCESS` | `dispatch.in_process` | Run the built-in checks inside the hook client (1) instead of asking the daemon (0, the default). |
 | `AH_ENGINE_DISPATCH_MAX_TIMEOUT_S` | `dispatch.max_timeout_s` | An upper bound on any Node hook's timeout, whatever its hooks.json entry says (the default is above every real timeout, so it changes nothing; tests lower it to exercise a hook that never exits). |
-| `AH_ENGINE_DONE_FILE` |  | A file the dispatcher creates once it has dispatched an event and decided its exit code (D87). The reliability wrapper sets it, so that an engine exit code of a hook's own (1, say) is told from an engine failure and is not answered by running every hook a second time. |
+| `AH_ENGINE_DONE_FILE` |  | A file the dispatcher creates once it has dispatched an event and decided its exit code (D87). The thin client sets it, so that an engine exit code of a hook's own (1, say) is told from an engine failure and is not answered by running every hook a second time. |
 | `AH_ENGINE_DOWN_MARKER_TTL_MS` | `client.down_marker_ttl_ms` | How long other clients skip connecting after one client finds the daemon absent or failed, or hung (client.heartbeat_stale_ms) and not replaced, or after client.slow_down_n consecutive slow replies; this prevents hook pile-ups while a restart is attempted. |
 | `AH_ENGINE_EVAL_BUDGET_US` | `daemon.eval_budget_us` | HARD per-request thread CPU budget for rule evaluation: past it every remaining check gets no answer and takes its failure policy. The SOFT budget (a warning only) is daemon.eval_soft_us. 0 turns the hard budget off. |
 | `AH_ENGINE_FAIL_OPEN_FILE` |  | A file the client appends one line to (`<reason> <check>`) for every engine-level fail-open the daemon reported in a reply (GitHub #201). The launcher sets it inside its per-call run directory and counts the lines after the engine exits, so its own stats and log know the call failed open. |
@@ -203,7 +203,7 @@ Every `AH_ENGINE_*` variable the engine or its wrappers read. A variable that ov
 | `AH_ENGINE_HEARTBEAT_CONFIRM_MS` | `client.heartbeat_confirm_ms` | How long a stale daemon heartbeat (client.heartbeat_stale_ms) must stay unchanged, by the monotonic clock, before a client ends that daemon. The first stale sample only records a suspicion and fails open; any beat, a new daemon, or a wall-clock jump that only made a moving heartbeat read old resets it. Keep it at most client.down_marker_ttl_ms, so a stopped daemon is replaced by the first call after the down marker expires. |
 | `AH_ENGINE_HEARTBEAT_STALE_MS` | `client.heartbeat_stale_ms` | A hook call past client.deadline_ms keeps waiting for a late reply (client.slow_fallback_max_ms) only while the daemon's heartbeat (files.heartbeat) is younger than this. Older means the daemon may be stopped or wedged, not slow: the call fails open at once and marks it down (client.down_marker_ttl_ms). One stale sample only raises a suspicion (files.heartbeat_suspect); the client ends that daemon only once the same heartbeat stayed unchanged for client.heartbeat_confirm_ms, and only when it is the pid holding the singleton lock, verified as this engine's daemon, of this state dir, and still the process generation the heartbeat recorded (start time and executable from the operating system, re-read immediately before the signal); single-flight and under the crash-loop rule. Then it starts a new one. A heartbeat that names another pid or is missing counts as alive. Keep it well above daemon.watchdog_tick_ms and below client.slow_fallback_max_ms less client.slow_wait_margin_ms, so a stop is detected within the first slow call. 0 disables the check. |
 | `AH_ENGINE_IDLE_EXIT_S` | `daemon.idle_exit_s` | Seconds without any request after which the daemon exits cleanly (the next hook call starts a fresh one, and the scheduler catches up its missed jobs); 0 keeps it resident. Default is 1800 (about 30 minutes), so a daemon with no sessions does not linger forever. A daemon whose state dir, lock file or executable is gone still exits on its own (daemon.orphan_check_ms). |
-| `AH_ENGINE_INSTALL_LOCK_HOOK_WAIT_S` | `rollback.lock_hook_wait_s` | How long the integrity check started by the hook wrapper waits for the install lock before skipping (the next run checks). A held lock never holds a session. |
+| `AH_ENGINE_INSTALL_LOCK_HOOK_WAIT_S` | `rollback.lock_hook_wait_s` | How long the integrity check started by the thin client waits for the install lock before skipping (the next run checks). A held lock never holds a session. |
 | `AH_ENGINE_INSTALL_LOCK_STALE_S` | `rollback.lock_stale_s` | An install lock held longer than this is broken (one whose holder process is gone is broken at once). Longer than the slowest install: updater.go_live_timeout_s. |
 | `AH_ENGINE_INSTALL_LOCK_TOKEN` |  | Set by an installer (`ah-hook update`) for the integrity check: the token of the install lock it already holds, so recording the expected sha256 runs under the caller's hold instead of waiting on it. |
 | `AH_ENGINE_INSTALL_LOCK_WAIT_S` | `rollback.lock_wait_s` | How long an install, a roll-back by the updater, or the recording of the expected sha256 waits for the install lock before giving up (the installer then fails and keeps the old binary). |
@@ -225,7 +225,7 @@ Every `AH_ENGINE_*` variable the engine or its wrappers read. A variable that ov
 | `AH_ENGINE_REFRESH_MS` | `refresh.every_ms` | How often the refresh job looks for requests; a request waits at most this long (plus jitter). Cheap when there is none: it reads a few small files. 0 turns the job off. |
 | `AH_ENGINE_RELEASE_BASE` |  | Test-only: download base URL for the engine binary (http allowed). Honored by `ah-hook install` and hooks/install.sh only with AH_WRAPPER_TEST=1. |
 | `AH_ENGINE_REQUEST_PEER_PID` | `request_env.peer_pid_key` | The name under which a daemon request's sender pid (its socket peer; 0 when the socket did not say) reaches the checks. Not on the allowlist, so no client can set it; host functions that walk the process ancestry (the DevSwarm reader nonce) start there. Absent in a one-shot `ah-engine check`, which starts at itself. |
-| `AH_ENGINE_ROLLBACK_FAIL_N` | `rollback.fail_n` | Engine failures seen by the hook wrapper (timeout, signal death, no answer) within rollback.fail_window_s that roll a never-healthy binary back. The wrapper counts them because a hung binary cannot count its own. |
+| `AH_ENGINE_ROLLBACK_FAIL_N` | `rollback.fail_n` | Engine failures seen by the thin client (timeout, signal death, no answer) within rollback.fail_window_s that roll a never-healthy binary back. The thin client counts them because a hung binary cannot count its own. |
 | `AH_ENGINE_ROLLBACK_FAIL_WINDOW_S` | `rollback.fail_window_s` | Window in which the wrapper's engine failures are counted for rollback.fail_n. |
 | `AH_ENGINE_ROLLBACK_ON_MISMATCH` | `rollback.on_mismatch` | 1 = a binary whose sha256 differs from the one the installer recorded (swapped by hand) and that has never run healthy is rolled back to the known-good binary at the next check. 0 = never roll back on a mismatch alone (a local build you are developing). `accept` records the installed binary as the expected one. |
 | `AH_ENGINE_RSS_CAP_KB` | `daemon.rss_cap_kb` | Memory cap, compared with the figure `daemon.mem_metric` selects (default: the footprint, not the resident set); above it the daemon drains and exits cleanly and the next call starts a fresh one; 0 = none. The measurement below is of the resident set. Set from measurement, not guessed (DECISIONS.md 1.111, 2026-10-09): on the real-payload replay (2,113 recorded hook calls, unpaced, isolated home) the engine with 16 scripted checks sits at 69 MB after one pass and 78 MB after three (jemalloc, aarch64-apple-darwin), and at 102 MB after one pass with the system allocator (the x86_64-apple-darwin and musl builds, measured as a system-allocator build on this Mac); the live heap is 45-52 MB. The engine before the scripted checks (live4) measured 62 and 68 MB on the same replay, so the previous 64 MB cap (set from a synthetic soak with a 16-18 MB live heap) sat inside the steady state of both: the daemon restarted 4 times in 600 s and the crash-loop breaker sent every hook to Node. The cap sits above the larger figure with room for the slow growth both builds show on repeated passes (about 1.5 MB per 1,000 calls), so only real growth trips it. |
@@ -267,11 +267,11 @@ Every `AH_ENGINE_*` variable the engine or its wrappers read. A variable that ov
 | `AH_ENGINE_TIER_BUDGET_KB` | `tier.budget_kb` | Memory budget of the active key-value items; past it the least recently used item is dropped from memory (SQLite keeps it). |
 | `AH_ENGINE_UPDATE_MS` | `engine_update.every_ms` | How often the job starts the updater's automatic check; the script's own daily limit decides whether it does any work. 0 turns the job off. |
 | `AH_ENGINE_VERSION` |  | Overrides the version this build reports and compares for handoff (the plugin version in production, arbitrary in tests). |
-| `AH_ENGINE_WAIT_FILE` |  | A file the client creates while it waits on the daemon and keeps when the daemon answered BUSY/ERR, so the call is handed to its Node hooks; it removes it when the daemon answered with nothing left for Node to decide (an OK reply whose entries defer to Node hooks keeps it until the call's final result is ready), gave no reply in the wait window, or none was there. The reliability wrapper sets it, so that its watchdog can tell a call that is still deciding (give it up to client.slow_fallback_max_ms) from a hung engine (kill at the normal budget). |
+| `AH_ENGINE_WAIT_FILE` |  | A file the client creates while it waits on the daemon and keeps when the daemon answered BUSY/ERR, so the call is handed to its Node hooks; it removes it when the daemon answered with nothing left for Node to decide (an OK reply whose entries defer to Node hooks keeps it until the call's final result is ready), gave no reply in the wait window, or none was there. The thin client sets it, so that its watchdog can tell a call that is still deciding (give it up to client.slow_fallback_max_ms) from a hung engine (kill at the normal budget). |
 | `AH_ENGINE_WATCHDOG_TICK_MS` | `daemon.watchdog_tick_ms` | How often the watchdog thread wakes to look at heartbeats. |
 | `AH_ENGINE_WIRE_ACK` | `wire.ack` | 1 = the client asks the daemon for ACK(req)/ACK(res) (retry-safe requests, undelivered verdicts counted, per-phase latency); 0 = the original request/reply exchange, no acks. The client only opts in when the daemon has announced the protocol (wire.caps_file), so an older daemon is never sent an ack-mode request. |
 | `AH_ENGINE_WORKERS` | `daemon.workers` | Worker threads evaluating requests. |
-| `AH_ENGINE_WRAPPER_DIAG` |  | Test-only: absolute path of a file the hook wrapper appends its diagnostic lines to. Honored only with AH_WRAPPER_TEST=1. Test-only: environment variable naming a file the launcher appends its diagnostic lines to (an absolute path). |
+| `AH_ENGINE_WRAPPER_DIAG` |  | Test-only: absolute path of a file the thin client appends its diagnostic lines to. Honored only with AH_WRAPPER_TEST=1. Test-only: environment variable naming a file the launcher appends its diagnostic lines to (an absolute path). |
 | `AH_ENGINE_WRITE_MS` | `daemon.write_ms` | Time allowed to write a reply. |
 | `AH_ENGINE_WRITE_QUEUE` | `storage.write_queue` | Writes that may wait for the writer thread; beyond this a write is refused as busy (the client retries, then spools). |
 
@@ -420,7 +420,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `client.wrapper_default_timeout_s` | `10` |  | s | Last-resort hook budget for the hook launcher (ah-hook) when the fallback list has no row for the event: the event's hook timeout it assumes, which also caps the slow-daemon window and the cold-start wait. |
 | `client.wrapper_extra_ms` | `250` |  | ms | Extra shell watchdog budget beyond the client deadline and client slack; this lets the client write the daemon-down marker and release the single-flight spawn lock before the wrapper kills it. |
 | `client.wrapper_kill_grace_ms` | `200` |  | ms | How long the hook launcher (ah-hook) waits after SIGTERM to a timed-out engine's process group before it sends SIGKILL. The soft stop lets the client write its markers; the hard stop bounds the call. |
-| `client.wrapper_watchdog_poll_ms` | `2` |  | ms | Poll interval for the hook wrapper millisecond watchdog. |
+| `client.wrapper_watchdog_poll_ms` | `2` |  | ms | Poll interval for the thin client's millisecond watchdog. |
 
 ### engine.toml / crash
 
@@ -517,11 +517,11 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 |---|---|---|---|---|
 | `env.allocator` | `AH_ENGINE_ALLOCATOR` |  |  | Selects the daemon's allocator: jemalloc (default) or system. The client sets it from `diagnostics.allocator` on the daemon it spawns, unless it is already set; the daemon reads it before its first allocation. |
 | `env.auto_update` | `AH_ENGINE_AUTO_UPDATE` |  |  | Read by `ah-hook update --auto`: off, stable or dev overrides the `engine.autoUpdate` setting for one run. |
-| `env.bin` | `AH_ENGINE_BIN` |  |  | Test-only: the engine binary the hook wrapper runs instead of the installed one. The wrapper unsets it unless AH_WRAPPER_TEST=1 is also set, so a stray value can never turn the safety net into a silent allow. |
-| `env.bootstrap` | `AH_ENGINE_BOOTSTRAP` |  |  | Set to 0 or 1 to turn the first-run download of the sha256-pinned engine binary off or on; overrides the `engine.bootstrap` setting. Read by `ah-hook install --auto` and hooks/install.sh. |
+| `env.bin` | `AH_ENGINE_BIN` |  |  | Test-only: the engine binary the thin client runs instead of the installed one. The thin client ignores it unless AH_WRAPPER_TEST=1 is also set, so a stray value can never turn the safety net into a silent allow. |
+| `env.bootstrap` | `AH_ENGINE_BOOTSTRAP` |  |  | Set to 0 or 1 to turn the automatic download of the sha256-pinned engine binary off or on (default off: the explicit install is `sh hooks/install.sh --download`); overrides the `engine.bootstrap` setting. Read by `ah-hook install --auto` and hooks/install.sh. |
 | `env.debug` | `AH_ENGINE_DEBUG` |  |  | When set to anything but 0 or empty, turns debug mode (diagnostics.debug_mode) on for that process. |
 | `env.dir` | `AH_ENGINE_DIR` |  |  | Overrides the state directory (default: base_dir/state_dir under the home directory). |
-| `env.done_file` | `AH_ENGINE_DONE_FILE` |  |  | A file the dispatcher creates once it has dispatched an event and decided its exit code (D87). The reliability wrapper sets it, so that an engine exit code of a hook's own (1, say) is told from an engine failure and is not answered by running every hook a second time. |
+| `env.done_file` | `AH_ENGINE_DONE_FILE` |  |  | A file the dispatcher creates once it has dispatched an event and decided its exit code (D87). The thin client sets it, so that an engine exit code of a hook's own (1, say) is told from an engine failure and is not answered by running every hook a second time. |
 | `env.fail_open_file` | `AH_ENGINE_FAIL_OPEN_FILE` |  |  | A file the client appends one line to (`<reason> <check>`) for every engine-level fail-open the daemon reported in a reply (GitHub #201). The launcher sets it inside its per-call run directory and counts the lines after the engine exits, so its own stats and log know the call failed open. |
 | `env.home` | `HOME` |  |  | Home directory variable. |
 | `env.home_alt` | `USERPROFILE` |  |  | Fallback home directory variable (used by the git check when the home variable is unset). |
@@ -535,8 +535,8 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `env.test_hooks` | `AH_ENGINE_TEST_HOOKS` |  |  | When set, the daemon accepts the test-only control verbs (sleep, stall, panic). Never set in production. |
 | `env.tmpdir` | `TMPDIR` |  |  | Temporary directory variable, used for the short-path socket fallback. |
 | `env.version` | `AH_ENGINE_VERSION` |  |  | Overrides the version this build reports and compares for handoff (the plugin version in production, arbitrary in tests). |
-| `env.wait_file` | `AH_ENGINE_WAIT_FILE` |  |  | A file the client creates while it waits on the daemon and keeps when the daemon answered BUSY/ERR, so the call is handed to its Node hooks; it removes it when the daemon answered with nothing left for Node to decide (an OK reply whose entries defer to Node hooks keeps it until the call's final result is ready), gave no reply in the wait window, or none was there. The reliability wrapper sets it, so that its watchdog can tell a call that is still deciding (give it up to client.slow_fallback_max_ms) from a hung engine (kill at the normal budget). |
-| `env.wrapper_diag` | `AH_ENGINE_WRAPPER_DIAG` |  |  | Test-only: absolute path of a file the hook wrapper appends its diagnostic lines to. Honored only with AH_WRAPPER_TEST=1. |
+| `env.wait_file` | `AH_ENGINE_WAIT_FILE` |  |  | A file the client creates while it waits on the daemon and keeps when the daemon answered BUSY/ERR, so the call is handed to its Node hooks; it removes it when the daemon answered with nothing left for Node to decide (an OK reply whose entries defer to Node hooks keeps it until the call's final result is ready), gave no reply in the wait window, or none was there. The thin client sets it, so that its watchdog can tell a call that is still deciding (give it up to client.slow_fallback_max_ms) from a hung engine (kill at the normal budget). |
+| `env.wrapper_diag` | `AH_ENGINE_WRAPPER_DIAG` |  |  | Test-only: absolute path of a file the thin client appends its diagnostic lines to. Honored only with AH_WRAPPER_TEST=1. |
 
 ### engine.toml / files
 
@@ -552,7 +552,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `files.crashloop_until` | `crashloop.until` |  |  | Marker holding the time until which respawning is stopped after a crash loop. |
 | `files.daemon_down_marker` | `daemon.down.until` |  |  | Short-lived client marker: when a hook client finds the daemon absent or hung, other clients skip connecting until this expires. |
 | `files.failure` | `failure.json` |  |  | Last recorded failure, for the once-per-session advisory. |
-| `files.fallback_switch` | `fallback.node` |  |  | Marker file (state directory) of the Node fallback switch (the Node backup, stage 2): present = the launcher runs the original Node hooks directly instead of the engine. Written and removed by `ah-engine fallback node\|off`; read by hooks/ah-hook.sh and the thin launcher. |
+| `files.fallback_switch` | `fallback.node` |  |  | Marker file (state directory) of the Node fallback switch (the Node backup, stage 2): present = the launcher runs the original Node hooks directly instead of the engine. Written and removed by `ah-engine fallback node\|off`; read by the thin client (`ah-hook`). |
 | `files.healthy_binary` | `healthy.binary` |  |  | Holds the sha256 of the engine binary that last stayed up for daemon.healthy_after_s. The integrity check promotes that binary to the known-good copy; a binary with no entry here has never proven itself. |
 | `files.heartbeat` | `daemon.heartbeat` |  |  | The daemon's liveness heartbeat: names the daemon's process generation, one field per line (pid, start time and executable as the operating system reports them, and the state dir); the watchdog thread touches its modification time at the start of every daemon.watchdog_tick_ms tick, before any maintenance, apart from request handling. A client past its deadline reads it to tell a slow daemon (heartbeat fresh) from a stopped or wedged one (stale, see client.heartbeat_stale_ms). |
 | `files.heartbeat_suspect` | `daemon.heartbeat.suspect` |  |  | Client suspicion carried between hook calls: when a stale heartbeat (client.heartbeat_stale_ms) was first seen (monotonic clock), and which heartbeat (modification time and generation). A later call confirms the hang only when that same heartbeat is still unchanged client.heartbeat_confirm_ms later. |
@@ -575,7 +575,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `files.starts` | `starts` |  |  | Counter of daemon starts, surfaced as `starts` and `restarts` in status. |
 | `files.telemetry_inbox` | `telemetry-inbox.jsonl` |  |  | Events recorded by processes other than the daemon (the hook dispatcher, one-shot commands), one JSON line each, in the state directory; the daemon reads and empties it on every telemetry flush. |
 | `files.unreachable_notice` | `unreachable.notice` |  |  | Holds the session id that already got the engine-unreachable notice, so the notice is shown once per session (the next session overwrites it). |
-| `files.wrapper_fail_log` | `wrapper.fails` |  |  | Epoch seconds, one per line, of the hook wrapper's engine failures (timeout, signal death, no answer). The integrity check counts them against rollback.fail_n. |
+| `files.wrapper_fail_log` | `wrapper.fails` |  |  | Epoch seconds, one per line, of the thin client's engine failures (timeout, signal death, no answer). The integrity check counts them against rollback.fail_n. |
 
 ### engine.toml / health
 
@@ -627,6 +627,9 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `hooks_form.host_codex` | `codex` |  |  | The name of the Codex host (the value of --host). |
 | `hooks_form.node_word` | `node` |  |  | The program name that marks Node on an entry path. |
 | `hooks_form.old_markers` | `ah-hook.sh, ah-run.sh` |  |  | Text in a hook or statusLine command that marks the retired shell wrappers. |
+| `hooks_form.statusline_old_form` | `/scripts/ah-run.sh" --stdin statusline` |  |  | Texts that all appear in a statusLine command that runs the retired shell wrapper (after hooks_form.statusline_old_prefix). |
+| `hooks_form.statusline_old_prefix` | `sh ` |  |  | How a statusLine command that runs the retired shell wrapper starts. |
+| `hooks_form.statusline_template` | `"{client}" statusline` |  |  | The statusLine command in the thin-client form, which the migration (update, doctor --repair) writes in place of one that runs the retired shell wrapper. Placeholder: {client} (the installed ah-hook, absolute). |
 | `hooks_form.template` | `[ -x "$HOME/.anti-hall/ah-engine/bin/ah-hook" ] && exec "$HOME/.anti-hall/ah-...` |  |  | A hook command in the direct form: run the installed thin client, else the installer. Placeholders: {event}, {host_args}, {prefix} (the plugin root variable or path). |
 
 ### engine.toml / install
@@ -722,7 +725,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `launcher.knob_integrity_park` | `AH_INTEGRITY_PARK` |  |  | Test-only: environment variable naming a path prefix; the integrity verbs stop at their race points (`validated`, `before_break`, `after_break`) while the file <prefix>.<point> exists, and create <prefix>.<point>.parked when they arrive. Honoured only when the test flag is set. It makes the install-lock interleavings deterministic. |
 | `launcher.knob_kill_grace_s` | `AH_KILL_GRACE_S` |  |  | Test-only: environment variable that sets the kill grace in whole seconds. |
 | `launcher.knob_libc` | `AH_BOOTSTRAP_LIBC` |  |  | Test-only: environment variable that names the libc (gnu or musl) instead of detecting it. |
-| `launcher.knob_sweep_age_s` | `AH_HOOK_SWEEP_AGE_S` |  |  | Test-only: environment variable of the shell wrapper's run-directory sweep age (accepted for parity, unused by the launcher). |
+| `launcher.knob_sweep_age_s` | `AH_HOOK_SWEEP_AGE_S` |  |  | Test-only: environment variable of the retired shell wrapper's run-directory sweep age (accepted for parity, unused by the thin client). |
 | `launcher.knob_timeout_ms` | `AH_HOOK_TIMEOUT_MS` |  |  | Test-only: environment variable that sets the hook budget in milliseconds. |
 | `launcher.knob_timeout_s` | `AH_HOOK_TIMEOUT_S` |  |  | Test-only: environment variable that sets the hook budget in whole seconds. |
 | `launcher.knob_uname_m` | `AH_BOOTSTRAP_UNAME_M` |  |  | Test-only: environment variable that replaces `uname -m` for the platform detection. |
@@ -834,14 +837,14 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `rollback.expected_suffix` | `.expected` |  |  | Suffix of the file holding the sha256 the installer expects the installed binary to have (bin/ah-engine.expected). |
 | `rollback.fail_log_keep_lines` | `50` |  |  | Lines the wrapper failure log keeps when it is cut back. |
 | `rollback.fail_log_max_lines` | `200` |  |  | The wrapper failure log (files.wrapper_fail_log) is cut back to its last rollback.fail_log_keep_lines lines once it has more lines than this. |
-| `rollback.fail_n` | `3` | `AH_ENGINE_ROLLBACK_FAIL_N` |  | Engine failures seen by the hook wrapper (timeout, signal death, no answer) within rollback.fail_window_s that roll a never-healthy binary back. The wrapper counts them because a hung binary cannot count its own. |
+| `rollback.fail_n` | `3` | `AH_ENGINE_ROLLBACK_FAIL_N` |  | Engine failures seen by the thin client (timeout, signal death, no answer) within rollback.fail_window_s that roll a never-healthy binary back. The thin client counts them because a hung binary cannot count its own. |
 | `rollback.fail_window_s` | `120` | `AH_ENGINE_ROLLBACK_FAIL_WINDOW_S` | s | Window in which the wrapper's engine failures are counted for rollback.fail_n. |
 | `rollback.field_sep` | ` ` |  |  | Separator between the fields of the crash-loop binary record (files.crashloop_bin: size, modification time, sha256). |
 | `rollback.good_suffix` | `.good` |  |  | Suffix of the known-good copy of the binary (bin/ah-engine.good) and of its sha256 file (.good.sha256). Never deleted. |
 | `rollback.hash_chunk` | `65536` |  | bytes | Bytes read at a time when the engine hashes its own binary (sha256). |
 | `rollback.install_lock` | `install.lock` |  |  | Directory (inside the state directory) of the ONE lock every writer of the engine binary shares: the integrity check and roll-back, the installer's and the updater's install and roll-back, and the recording of the expected sha256. Taken and given back through `ah-hook integrity lock` and `unlock`. |
 | `rollback.line_end` | `\n` |  |  | Line terminator of the crash-loop binary record. |
-| `rollback.lock_hook_wait_s` | `2` | `AH_ENGINE_INSTALL_LOCK_HOOK_WAIT_S` | s | How long the integrity check started by the hook wrapper waits for the install lock before skipping (the next run checks). A held lock never holds a session. |
+| `rollback.lock_hook_wait_s` | `2` | `AH_ENGINE_INSTALL_LOCK_HOOK_WAIT_S` | s | How long the integrity check started by the thin client waits for the install lock before skipping (the next run checks). A held lock never holds a session. |
 | `rollback.lock_owner_file` | `owner` |  |  | Name of the file inside the install-lock directory that holds the owner token ("<pid> <epoch>" of the holder). Created only with a hard link and taken away only with a rename, so one taker wins. |
 | `rollback.lock_poll_ms` | `1000` |  | ms | How often a process waiting for the install lock looks at it again. |
 | `rollback.lock_stale_s` | `900` | `AH_ENGINE_INSTALL_LOCK_STALE_S` | s | An install lock held longer than this is broken (one whose holder process is gone is broken at once). Longer than the slowest install: updater.go_live_timeout_s. |
@@ -1318,7 +1321,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 
 | Key | Default | Env override | Unit | What it is |
 |---|---|---|---|---|
-| `docs.external_flags` | `18 items` |  |  | Flags that appear as string literals in the engine's source but belong to other programs it runs (git, gh, cargo, node, claude, hivecontrol) or to its shell wrappers, so the flag drift test does not ask for a `[flag.*]` entry. |
+| `docs.external_flags` | `18 items` |  |  | Flags that appear as string literals in the engine's source but belong to other programs it runs (git, gh, cargo, node, claude, hivecontrol) or to the thin client (`ah-hook`), so the flag drift test does not ask for a `[flag.*]` entry. |
 
 ### telemetry.toml / telemetry
 
@@ -2519,26 +2522,26 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `dispatch.failure_mode` | `3 entries` |  |  | What a GUARD event does when the engine cannot decide, per path: `budget` (the event's budget_ms passed before every hook could start), `infra` (an unreadable payload or map, an entry whose check gave no answer, a lost table row, no engine answer) and `panic` (the dispatcher hit an internal error). `closed` blocks (exit 2, dispatch.msg_fail_closed, bounded on Stop events by dispatch.stop_block_cap), `open` lets the call through with a loud stderr line (dispatch.msg_no_node_open). A panic is `open` because a bug of the engine's own must not lock the user out of every tool. |
 | `dispatch.fallback_lists` | `2 entries` |  |  | Per host, the wrapper's fallback list relative to the plugin root (the same files as dispatch.generated_files): a defaults load is rejected when a list runs hooks for an event the table has no row for, and the dispatcher answers an event without a row with the neutral no-op only when this list marks it as a thin trigger. |
 | `dispatch.gen_default_kind` | `hooks` |  |  | The file `gen-hooks` prints when `--kind` is not given. |
-| `dispatch.generated_files` | `2 entries` |  |  | Per host and kind of generated file (hooks, registry, list, map), its path relative to the repository root. `tests/hooks_files.rs` requires each committed file to equal what `gen-hooks` prints and `ah-gen-fallback-list` writes them. |
+| `dispatch.generated_files` | `2 entries` |  |  | Per host and kind of generated file (hooks, registry, list), its path relative to the repository root. `tests/hooks_files.rs` requires each committed file to equal what `gen-hooks` prints and `ah-gen-fallback-list` writes them. |
 | `dispatch.guard_events` | `PreToolUse, PermissionRequest, Stop, SubagentStop` |  |  | Events whose hooks can block (guards): PreToolUse and PermissionRequest decide a tool call (Claude ignores exit 2 on PermissionRequest, so a fail-closed exit 2 there is harmless, and the event stays listed so a hook registered on it later is guarded from the start), Stop and SubagentStop can refuse to let the agent finish. When the dispatcher cannot run the Node hook of such an event it fails CLOSED (exit 2 with dispatch.msg_fail_closed): a deferral there must never read as an allow (D74). |
 | `dispatch.hooks_claude_PostToolUse` | `9 items` |  |  | The claude PostToolUse hook entries, in dispatch order. |
-| `dispatch.hooks_claude_PostToolUseFailure` | `5 entries` |  |  | The claude PostToolUseFailure hook entries, in dispatch order. |
-| `dispatch.hooks_claude_PreCompact` | `5 entries` |  |  | The claude PreCompact hook entries, in dispatch order. |
+| `dispatch.hooks_claude_PostToolUseFailure` | `4 entries` |  |  | The claude PostToolUseFailure hook entries, in dispatch order. |
+| `dispatch.hooks_claude_PreCompact` | `4 entries` |  |  | The claude PreCompact hook entries, in dispatch order. |
 | `dispatch.hooks_claude_PreToolUse` | `24 items` |  |  | The claude PreToolUse hook entries, in dispatch order. |
-| `dispatch.hooks_claude_SessionEnd` | `5 entries` |  |  | The claude SessionEnd hook entries, in dispatch order. |
+| `dispatch.hooks_claude_SessionEnd` | `4 entries` |  |  | The claude SessionEnd hook entries, in dispatch order. |
 | `dispatch.hooks_claude_SessionStart` | `19 items` |  |  | The claude SessionStart hook entries, in dispatch order. |
 | `dispatch.hooks_claude_Stop` | `12 items` |  |  | The claude Stop hook entries, in dispatch order. |
-| `dispatch.hooks_claude_SubagentStart` | `5 entries, 5 entries` |  |  | The claude SubagentStart hook entries, in dispatch order. |
-| `dispatch.hooks_claude_SubagentStop` | `5 entries` |  |  | The claude SubagentStop hook entries, in dispatch order. |
-| `dispatch.hooks_claude_TaskCompleted` | `5 entries` |  |  | The claude TaskCompleted hook entries, in dispatch order. |
-| `dispatch.hooks_claude_TaskCreated` | `5 entries` |  |  | The claude TaskCreated hook entries, in dispatch order. |
+| `dispatch.hooks_claude_SubagentStart` | `4 entries, 4 entries` |  |  | The claude SubagentStart hook entries, in dispatch order. |
+| `dispatch.hooks_claude_SubagentStop` | `4 entries` |  |  | The claude SubagentStop hook entries, in dispatch order. |
+| `dispatch.hooks_claude_TaskCompleted` | `4 entries` |  |  | The claude TaskCompleted hook entries, in dispatch order. |
+| `dispatch.hooks_claude_TaskCreated` | `4 entries` |  |  | The claude TaskCreated hook entries, in dispatch order. |
 | `dispatch.hooks_claude_UserPromptSubmit` | `12 items` |  |  | The claude UserPromptSubmit hook entries, in dispatch order. |
-| `dispatch.hooks_codex_PostToolUse` | `5 entries, 5 entries, 5 entries, 5 entries, 5 entries` |  |  | The codex PostToolUse hook entries, in dispatch order. |
-| `dispatch.hooks_codex_PreCompact` | `5 entries` |  |  | The codex PreCompact hook entries, in dispatch order. |
+| `dispatch.hooks_codex_PostToolUse` | `4 entries, 4 entries, 4 entries, 4 entries, 4 entries` |  |  | The codex PostToolUse hook entries, in dispatch order. |
+| `dispatch.hooks_codex_PreCompact` | `4 entries` |  |  | The codex PreCompact hook entries, in dispatch order. |
 | `dispatch.hooks_codex_PreToolUse` | `12 items` |  |  | The codex PreToolUse hook entries, in dispatch order. |
 | `dispatch.hooks_codex_SessionStart` | `18 items` |  |  | The codex SessionStart hook entries, in dispatch order. |
 | `dispatch.hooks_codex_Stop` | `11 items` |  |  | The codex Stop hook entries, in dispatch order. |
-| `dispatch.hooks_codex_SubagentStop` | `5 entries` |  |  | The codex SubagentStop hook entries, in dispatch order. |
+| `dispatch.hooks_codex_SubagentStop` | `4 entries` |  |  | The codex SubagentStop hook entries, in dispatch order. |
 | `dispatch.hooks_codex_UserPromptSubmit` | `12 items` |  |  | The codex UserPromptSubmit hook entries, in dispatch order. |
 | `dispatch.in_process` | `0` | `AH_ENGINE_DISPATCH_IN_PROCESS` |  | Run the built-in checks inside the hook client (1) instead of asking the daemon (0, the default). |
 | `dispatch.list_banner` | `# Generated from the dispatch table by `ah-engine gen-hooks`. Event rows are:...` |  |  | The first line of the generated fallback list. |
@@ -2584,7 +2587,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `dispatch.msg_stop_capped` | `anti-hall: the engine could not run the guards for {event} ({why}) {cap} time...` |  |  | Printed on stderr (exit 0) when a Stop or SubagentStop would fail closed once more than dispatch.stop_block_cap times in a row. Placeholders: {event}, {cap}, {why}. |
 | `dispatch.msg_stop_uncounted` | `anti-hall: the engine could not run the guards for {event} ({why}) and cannot...` |  |  | Printed on stderr (exit 0) when a Stop or SubagentStop would fail closed but the consecutive-block count cannot be recorded, so the loop could not be bounded. Placeholders: {event}, {why}. |
 | `dispatch.msg_unknown_host` | `unknown host {host}: the dispatch table has {hosts}` |  |  | Error printed when `--host` names a host the dispatch table does not have. |
-| `dispatch.msg_unknown_kind` | `unknown kind {kind}: gen-hooks prints hooks, registry, list or map` |  |  | Error printed by `gen-hooks` when `--kind` names a file it does not generate. Placeholder: {kind}. |
+| `dispatch.msg_unknown_kind` | `unknown kind {kind}: gen-hooks prints hooks, registry or list` |  |  | Error printed by `gen-hooks` when `--kind` names a file it does not generate. Placeholder: {kind}. |
 | `dispatch.msg_unparsed` | `payload not readable as JSON ({len} bytes): the Node hooks decide` |  |  | Deferral reason (event log, counted with the other dispatch fallbacks) when the payload is not readable as JSON, so the Node hooks decide (D74). Placeholder: {len} (bytes read). |
 | `dispatch.msg_why_died` | `hook {id} was killed before it could answer` |  |  | Reason in dispatch.msg_fail_closed when a guard event's Node hook was killed by a signal. Placeholder: {id}. |
 | `dispatch.msg_why_incomplete` | `hook {id} finished with incomplete output` |  |  | Reason in dispatch.msg_fail_closed when a guard event's Node hook finished but a process it left behind kept its output open, so the output is incomplete. Placeholder: {id}. |
@@ -2607,9 +2610,8 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `dispatch.stop_state_dir` | `stop-blocks` |  |  | The directory under the state dir holding one consecutive-block counter file per event and session. |
 | `dispatch.stop_state_max_age_days` | `7` |  | days | Counter files of the Stop block counter older than this many days are removed (a session that ended while its guards were failing leaves one behind). |
 | `dispatch.stop_unknown_session` | `unknown` |  |  | Counter key for a Stop whose payload names no session (unreadable or cut off). |
-| `dispatch.thin_command` | `sh "${{var}}/hooks/ah-hook.sh" {event}{extra}` |  |  | The command of each event's thin trigger in the generated hooks.json (D87). Placeholders: {var} the host's plugin-root variable (the first of dispatch.root_vars), {event} the event, {extra} the host's dispatch.thin_host_args. The wrapper derives its engine-process deadline from client config. |
 | `dispatch.thin_events` | `2 entries` |  |  | Per host, the events that get a thin trigger in the generated hooks.json besides the events the table has entries for (D87; WorktreeCreate and WorktreeRemove are excluded on Claude because a hook there replaces the operation and cannot be a silent trigger). |
-| `dispatch.thin_host_args` | `2 entries` |  |  | Per host, the extra arguments of the thin trigger's command: the wrapper reads the host's table and fallback list from `--host` (Claude is the wrapper's default). |
+| `dispatch.thin_host_args` | `2 entries` |  |  | Per host, the extra arguments of the thin trigger's command: the thin client reads the host's table and fallback list from `--host` (Claude is its default). The command itself is hooks_form.template (engine.toml). |
 | `dispatch.thin_timeout_s` | `10` |  | s | The timeout of the thin trigger of an event the table has no entry for (an event with entries takes the longest timeout among them). |
 | `dispatch.tool_aliases` | `2 entries` |  |  | Per host, extra names a tool also answers to when matching (Codex: matcher values Edit and Write also match apply_patch). |
 
@@ -2696,7 +2698,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `verify_first.judge_child_env` | `2 entries` |  |  | Environment variable that marks the headless judge child; a hook that runs in it prints nothing. |
 | `verify_first.mn_line` | `M/N. Workers do not re-delegate; read-only research -> Explore; 3+ parallel/n...` |  |  | The model-routing and no-re-delegation line the compact SessionStart text gains when the orchestration hook is switched off (Claude). |
 | `verify_first.mn_line_codex` | `M/N. Workers do not re-delegate; read-only research -> a read-only sub-agent;...` |  |  | The same line for a Codex session. |
-| `verify_first.root_probe` | `hooks/ah-hook.sh` |  |  | File under the plugin root whose real location gives the plugin root (the directory two levels above it, symbolic links resolved). A file that stays in the published plugin, never a moved Node file. |
+| `verify_first.root_probe` | `hooks/install.sh` |  |  | File under the plugin root whose real location gives the plugin root (the directory two levels above it, symbolic links resolved). A file that stays in the published plugin, never a moved Node file. |
 | `verify_first.setting_level` | `5 entries` |  |  | Where the protocol size is read from (context.protocolLevel: compact or full, default compact). |
 | `verify_first.setting_orchestration` | `6 entries` |  |  | Where the on/off switch of the orchestration hook is read from (context.verifyFirstOrchestration, default on); when off, the compact SessionStart text carries the model-routing line itself. |
 | `verify_first.setting_session` | `6 entries` |  |  | Where the on/off switch of verify-first-full is read from (context.verifyFirstSession, default on). |
@@ -4672,7 +4674,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `migrate.gate_intents_key` | `intents` |  |  | The key of the stated-intent map a gate-loop state file gains when it lacks it. |
 | `migrate.gate_state_excluded_re` | `(?i)-replies\.json$` |  |  | A parent-gate JSON file whose name matches this is a reply-state file, not a gate-loop state file (case-insensitive). |
 | `migrate.host_settings_file` | `.claude/settings.json` |  |  | The host's settings file under the home directory, read for the plugin options it stores (never written). |
-| `migrate.ids` | `19 entries` |  |  | The step ids of the report (Node's), and the action word of the steps whose action differs from their id. |
+| `migrate.ids` | `20 entries` |  |  | The step ids of the report (Node's), and the action word of the steps whose action differs from their id. |
 | `migrate.integrations_key_prefix` | `integrations.` |  |  | The prefix of the old dotted key of a per-integration value inside the jev section. |
 | `migrate.jev_integration_ids` | `13 items` |  |  | The Jev integration ids whose per-integration value moved from the jev section to the jevIntegrations section of settings.json. |
 | `migrate.jev_triage_cache` | `cache/jev-triage.json` |  |  | The Jev triage cache under the anti-hall directory. |
@@ -4979,7 +4981,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `doctor.repair_resurrected_id` | `repair-resurrected` |  |  | The row id of the resurrected-rows repair. |
 | `doctor.repair_store_id` | `repair-test-store-{hash}` |  |  | The row id of the repair of one leaked store. Placeholder: {hash}. |
 | `doctor.repair_stores_id` | `repair-test-stores` |  |  | The row id of the leaked-store repair when it has nothing to do. |
-| `doctor.required_tools` | `19 items` |  |  | Programs the hook wrapper and bootstrap need on PATH. |
+| `doctor.required_tools` | `19 items` |  |  | Programs the hook command and the installer need on PATH. |
 | `doctor.rosetta_marker` | `/Library/Apple/usr/libexec/oah/libRosettaRuntime` |  |  | A file that exists when Rosetta is installed. |
 | `doctor.rosetta_sysctl` | `hw.optional.arm64` |  |  | The macOS sysctl that is 1 on an Apple-Silicon machine, even for a process Rosetta translates. |
 | `doctor.script_re` | `[\w-]+\.js` |  |  | The name pattern of a hook script in the registry. |
@@ -5038,7 +5040,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `doctor.why_max` | `160` |  |  | How many characters of a failing program's first message the report shows. |
 | `doctor.workflow_dir` | `.claude/workflows` |  |  | The directory of saved Workflow templates under the home directory and under the project (relative to each). |
 | `doctor.workflow_patterns` | `(?i)^deadly-loop.*\.js$, (?i)^ship-it.*\.js$` |  |  | The names of the saved Workflow templates the doctor looks for (case-insensitive patterns). |
-| `doctor.wrapper_file` | `hooks/ah-hook.sh` |  |  | The hook wrapper, relative to the plugin root. |
+| `doctor.wrapper_file` | `hooks/install.sh` |  |  | The installer every hook command falls back to while the thin client is not installed (the plugin's one shell file), relative to the plugin root. |
 | `doctor.wsl_markers` | `microsoft, wsl` |  |  | Words (lowercase) in the kernel version text that mean WSL. |
 | `doctor.wsl_mount_re` | `^/mnt/[a-zA-Z](/\|$)` |  |  | A path on a Windows drive mounted into WSL. |
 | `doctor.xml_unescape` | `&lt;\\|<, &gt;\\|>, &quot;\\|", &apos;\\|', &amp;\\|&` |  |  | The XML entities a property list value is read back through, in order, as `entity\|text`. |
@@ -5063,7 +5065,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `doctor_l.hook_files` | `{root}/hooks/hooks.json, {root}/codex/hooks/hooks.json, {home}/.codex/hooks.j...` |  |  | The hooks files the doctor looks at; {root} is the plugin root, {home} the home directory, * matches one path segment. |
 | `doctor_l.hooks_claude_rel` | `hooks/hooks.json` |  |  | Claude's hooks file, relative to the plugin root. |
 | `doctor_l.hooks_codex_rel` | `codex/hooks/hooks.json` |  |  | Codex's hooks file, relative to the plugin root. |
-| `doctor_l.install_health_fail` | `0` |  |  | 1 = a failed install-health check (old-form hook commands, Node on an entry path, extra shell files, a bad launcher shim, a missing thin client) fails the doctor; 0 = it only warns. |
+| `doctor_l.install_health_fail` | `1` |  |  | 1 = a failed install-health check (old-form hook commands, Node on an entry path, extra shell files, a bad launcher shim, a missing thin client) fails the doctor; 0 = it only warns. |
 | `doctor_l.kill_grace_s` | `1` |  | s | How long a timed-out command the doctor ran gets after TERM before it is killed. |
 | `doctor_l.line_chars` | `160` |  |  | How many characters of a command's output a finding quotes. |
 | `doctor_l.msg_builtin_daemon_note` | `the built-in doctor reads the daemon's files only; it never contacts or signa...` |  |  | Informational line of the built-in doctor. |
@@ -5090,6 +5092,11 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `doctor_l.msg_repair_hooks_nowrite` | `{file} could not be written; the backup is untouched` |  |  | Placeholder: {file}. |
 | `doctor_l.msg_repair_hooks_would` | `would rewrite {n} hook command(s) in {file} to the direct form (the previous ...` |  |  | Dry run. Placeholders: {n}, {file}. |
 | `doctor_l.msg_repair_state_dir` | `created the state directory {dir} (mode 700)` |  |  | Placeholder: {dir}. |
+| `doctor_l.msg_repair_statusline_ambiguous` | `left the statusLine in {file} as it is (its command text is not a single plai...` |  |  | The statusLine command is not one plain string the repair can replace in place, so the file is left as it is. Placeholder: {file}. |
+| `doctor_l.msg_repair_statusline_form` | `rewrote the statusLine in {file} to the thin client ({command}); the previous...` |  |  | Placeholders: {file}, {command}, {backup}. |
+| `doctor_l.msg_repair_statusline_nobackup` | `the statusLine in {file} was not changed: no backup could be kept` |  |  | Placeholder: {file}. |
+| `doctor_l.msg_repair_statusline_nowrite` | `{file} could not be written; the statusLine there is unchanged and the backup...` |  |  | Placeholder: {file}. |
+| `doctor_l.msg_repair_statusline_would` | `would rewrite the statusLine in {file} to the thin client ({command}); the pr...` |  |  | Dry run. Placeholders: {file}, {command}. |
 | `doctor_l.os_label_linux` | `linux` |  |  | The OS name printed for Linux. |
 | `doctor_l.os_label_macos` | `darwin` |  |  | The OS name printed for macOS. |
 | `doctor_l.other_arch_name` | `other` |  |  | Said of an architecture the doctor does not know. |
@@ -5177,7 +5184,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `doctor_msg.ds_scheduler_systemd` | `systemd` |  |  | The name of the Linux scheduler in the installed line. |
 | `doctor_msg.ds_turn_bad` | `devswarm-child-turn did NOT heartbeat/remind a child session (said={said}, he...` |  |  | The child-turn hook failed. Placeholders: {said}, {beat}. |
 | `doctor_msg.ds_turn_ok` | `devswarm-child-turn writes a turn-authored heartbeat + reminds the child to u...` |  |  | The child-turn hook still works. |
-| `doctor_msg.engine_on_path` | `the hooks run ah-engine from PATH ({path}) because the home install is not ex...` |  |  | The home install is not executable and the hook wrapper (the thin client) runs ah-engine from PATH instead, so that engine counts as working. The thin client's built-in doctor prints the same text. Placeholder: {path}. |
+| `doctor_msg.engine_on_path` | `the hooks run ah-engine from PATH ({path}) because the home install is not ex...` |  |  | The home install is not executable and the thin client runs ah-engine from PATH instead, so that engine counts as working. The thin client's built-in doctor prints the same text. Placeholder: {path}. |
 | `doctor_msg.engine_version` | `ah-engine {version}` |  |  | The engine version finding. Placeholder: {version}. |
 | `doctor_msg.enotdir` | `Not a directory (os error 20)` |  |  | The OS error for a path component that is a file. |
 | `doctor_msg.explicit_failed` | `FAILED ` |  |  | The mark of a failed explicit repair. |
@@ -5294,7 +5301,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `doctor_msg.orphans_would` | `[dry-run] would run: {cmd} (class {class})` |  |  | The dry run of one unload. Placeholders: {cmd}, {class}. |
 | `doctor_msg.path_empty` | `PATH is empty; no tool can be found - Fix: export PATH=/usr/bin:/bin:...` |  |  | EV-08. |
 | `doctor_msg.path_empty_entry` | `an empty` |  |  | Words for an empty PATH entry. |
-| `doctor_msg.path_lacks` | `PATH lacks {dirs}; the hook wrapper may not find its tools - Fix: add them to...` |  |  | EV-08. Placeholder: {dirs}. |
+| `doctor_msg.path_lacks` | `PATH lacks {dirs}; the hook command may not find its tools - Fix: add them to...` |  |  | EV-08. Placeholder: {dirs}. |
 | `doctor_msg.path_relative` | `PATH has {entry} entry, resolved against the current directory - Fix: remove ...` |  |  | EV-08. Placeholder: {entry}. |
 | `doctor_msg.pid_gone` | `{file} names pid {pid}, which is gone; the next daemon takes it over` |  |  | DMN-07. Placeholders: {file}, {pid}. |
 | `doctor_msg.pid_reused` | `{file} names pid {pid}, which is now another program ({cmd}), not the engine;...` |  |  | DMN-06. Placeholders: {file}, {pid}, {cmd}. |
@@ -5392,7 +5399,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `doctor_msg.witness_stale` | `the witness log has not changed for {days} days - Fix: check that node is on ...` |  |  | SH-07. Placeholder: {days}. |
 | `doctor_msg.workflow_found` | `saved workflow template(s) found: {files}` |  |  | Saved Workflow templates exist. Placeholder: {files}. |
 | `doctor_msg.workflow_missing` | `no saved deadly-loop/ship-it Workflow template found in ~/.claude/workflows/ ...` |  |  | No saved deadly-loop or ship-it Workflow template exists. |
-| `doctor_msg.wrapper_missing` | `{file} is missing; every hook command fails (non-blocking) - Fix: reinstall t...` |  |  | HK-03. Placeholder: {file}. |
+| `doctor_msg.wrapper_missing` | `{file} is missing; the hook commands cannot install the thin client - Fix: re...` |  |  | HK-03. Placeholder: {file}. |
 | `doctor_msg.wsl` | `WSL detected ({release})` |  |  | EV-09. Placeholder: {release}. |
 
 ### setup.toml / env
@@ -7154,6 +7161,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `slcfg.base_write_failed_1` | `⚠️ anti-hall · install-statusline: Could not write {path}: {msg}` |  |  | stderr: the base could not be written. Placeholders: path msg. |
 | `slcfg.base_write_failed_2` | `Why: the statusline will still work but your previous statusline will not be ...` |  |  | stderr: what that means. |
 | `slcfg.claude_dir` | `.claude` |  |  | The host's configuration directory (in the home directory and in a project). |
+| `slcfg.client_bin_rel` | `bin/ah-hook` |  |  | The thin client inside the engine state directory (paths.base_dir/paths.state_dir under the home directory): the program the migrated status line command runs. |
 | `slcfg.command_engine` | `"{engine}" statusline` |  |  | The legacy engine statusLine command recognised by uninstall/cleanup; the retired installer no longer writes it. {engine}. |
 | `slcfg.command_launcher` | `sh "{launcher}" --stdin statusline -- "{dispatcher}"` |  |  | The launcher form of the statusLine command an earlier engine installer wrote. {launcher} {dispatcher}. Legacy recognition only; no migration writes it. |
 | `slcfg.command_line` | `  command: {cmd}` |  |  | A command shown after its file. Placeholders: cmd. |
@@ -7173,8 +7181,8 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `slcfg.created` | `Created: {path}` |  |  | A local settings file was created. Placeholders: path. |
 | `slcfg.done` | `Done. {path} updated.` |  |  | The settings file was updated. Placeholders: path. |
 | `slcfg.empty_settings` | `{}\n` |  |  | What a missing project-local settings file is created with. |
-| `slcfg.engine_bin_rel` | `bin/ah-engine` |  |  | The engine executable inside the engine state directory (paths.base_dir/paths.state_dir under the home directory), where the hook wrappers look for it first. |
-| `slcfg.engine_command_re` | `^"[^"]+/ah-engine" statusline$` |  |  | Recognises a statusLine command in the engine's own form (installer, uninstaller). |
+| `slcfg.engine_bin_rel` | `bin/ah-engine` |  |  | The engine executable inside the engine state directory (paths.base_dir/paths.state_dir under the home directory), where the thin client looks for it first. |
+| `slcfg.engine_command_re` | `^"[^"]+/(?:ah-engine\|ah-hook)" statusline$` |  |  | Recognises a statusLine command in the engine's own form or the thin client's form (uninstaller, migration). |
 | `slcfg.engine_line` | `Engine:     {path}` |  |  | The first line of the installer (engine form). Placeholders: path. |
 | `slcfg.engine_not_found` | `❌ anti-hall · install-statusline: the anti-hall engine is not installed at {p...` |  |  | stderr: no engine to point the status line at. Placeholders: path. |
 | `slcfg.engine_uninstall_hint` | `  "{engine}" uninstall-statusline` |  |  | The uninstall command (engine form); also the restore hint after a failed write. Placeholders: engine. |
@@ -7206,9 +7214,14 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `slcfg.installed_dir_uninstall` | `anti-hall/` |  |  | The uninstaller treats a command (backslashes turned into slashes) that also contains this directory part as the anti-hall dispatcher. |
 | `slcfg.installed_marker` | `statusline.js` |  |  | A statusLine command that contains this names the dispatcher. |
 | `slcfg.launcher_form_re` | `^sh "(?<launcher>[^"]+)" --stdin statusline -- "(?<dispatcher>[^"]+)"$` |  |  | Recognises the launcher form an earlier engine installer wrote; named groups launcher and dispatcher (checked again against slcfg.command_launcher). |
-| `slcfg.launcher_rel` | `../scripts/ah-run.sh` |  |  | The launcher an earlier engine installer named in the statusLine command, relative to the directory of the status line dispatcher. Legacy recognition only; no migration writes it. |
+| `slcfg.launcher_rel` | `../scripts/ah-run.sh` |  |  | The launcher an earlier engine installer named in the statusLine command, relative to the directory of the status line dispatcher. Legacy recognition only (the migration rewrites it to the thin client's command, hooks_form.statusline_template). |
 | `slcfg.local_entry` | `.claude/settings.local.json` |  |  | The ignore-file line that keeps the local settings out of version control. |
 | `slcfg.local_file` | `settings.local.json` |  |  | The host's project-local settings file (highest precedence, not committed). |
+| `slcfg.mig_ambiguous` | `left the statusLine in {path} as it is (its command text is not a single plai...` |  |  | Migration row: the command appears other than once in the file's text, or the edit does not read back as intended, so the file is left exactly as it is. {path}. |
+| `slcfg.mig_backup_failed` | `left the statusLine in {path} as it is (its one-time backup could not be writ...` |  |  | Migration row: the one-time backup could not be made, so the file is left exactly as it is. {path}. |
+| `slcfg.mig_dry_run` | `would update the statusLine in {path} to run the thin client: {command}` |  |  | Migration row (dry run): what would change. {path} {command}. |
+| `slcfg.mig_fixed` | `statusLine in {path} now runs the thin client: {command}` |  |  | Migration row: an existing status line command that ran the retired shell wrapper now runs the thin client. {path} {command}. |
+| `slcfg.mig_write_failed` | `could not write {path}; the statusLine there is unchanged` |  |  | Migration row: the settings file could not be written. {path}. |
 | `slcfg.new_statusline` | `New statusLine:` |  |  | Heading of the new value. |
 | `slcfg.no_changes` | `No changes made.` |  |  | Nothing was changed. |
 | `slcfg.no_command_1` | `Existing statusLine has no command string (type: {kind})` |  |  | The existing statusLine has no command string. Placeholders: kind. |
@@ -10558,7 +10571,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `units.duty_ingest` | `devswarm_ingest` |  |  | The duty word of the DevSwarm ingest daemons: the engine runs them when devswarm_ingest.mode is engine. |
 | `units.duty_reaper` | `mcp_reaper` |  |  | The duty word of the MCP reaper: the engine runs it when the mcp_reaper job is on (maintenance.mcpReaperJob not off, job interval above 0). |
 | `units.duty_supervisor` | `devswarm_sup` |  |  | The duty word of the DevSwarm supervisor: the engine runs it when devswarm_sup.mode is engine. |
-| `units.engine_bin_rel` | `.anti-hall/ah-engine/bin/ah-engine` |  |  | The engine binary the unit runs, relative to the home directory (where the bootstrap installs it and the hook wrapper finds it). |
+| `units.engine_bin_rel` | `.anti-hall/ah-engine/bin/ah-engine` |  |  | The engine binary the unit runs, relative to the home directory (where the installer puts it and the thin client finds it). |
 | `units.exec_arg` | `"{arg}"` |  |  | One argument of the ExecStart line: double-quoted, with the systemd escapes applied. {arg}. |
 | `units.flag_bin` | `--bin` |  |  | The option that names the engine binary the unit runs (default: units.engine_bin_rel under the home directory). |
 | `units.flag_dry` | `--dry-run` |  |  | The option that reports what would be done and changes nothing. |
@@ -11111,7 +11124,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 |---|---|---|---|---|
 | `nodeback.compare_flags` | `--days, --check, --event, --daily` |  |  | The flags `shadow-compare` accepts; the first three take a value. |
 | `nodeback.day_ms` | `86400000` |  |  | Milliseconds in a day, for the shadow's end date and the `shadow-compare` window. |
-| `nodeback.fallback` | `off` |  |  | The shipped default of the fallback switch: `off` (the engine decides) or `node` (the launcher runs the original Node hooks directly). The marker file written by `ah-engine fallback node\|off` overrides it; editing this key in the plugin also turns the switch on for the full shell wrapper and `ah-engine fallback status`. |
+| `nodeback.fallback` | `off` |  |  | The shipped default of the fallback switch: `off` (the engine decides) or `node` (the launcher runs the original Node hooks directly). The marker file written by `ah-engine fallback node\|off` overrides it; editing this key in the plugin also turns the switch on for the thin client and `ah-engine fallback status`. |
 | `nodeback.fallback_choices` | `node, off, status` |  |  | The words `ah-engine fallback` accepts, in order: the switch on, the switch off, the report. |
 | `nodeback.ident_max_len` | `64` |  | bytes | Longest identifier (check, host, event, tool) a ledger row holds; longer ones are cut. |
 | `nodeback.job_max_age_s` | `600` |  | s | A shadow job file this old (its run died or never started) is removed. |
@@ -11197,7 +11210,7 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `msg.docs_flags_intro` | Introduction of the Flags section of the generated reference. |
 | `msg.docs_intro` | Opening paragraph of the generated reference. |
 | `msg.docs_rule_fields` | Paragraph listing the fields of a rule in the generated reference. |
-| `msg.engine_unreachable_notice` | Printed once per session on stderr by the hook wrapper when the engine is unreachable (not installed, crashed, did not answer in time, marked down): the call passes through unchecked because no fallback hooks exist. Placeholders: {event}, {why}. |
+| `msg.engine_unreachable_notice` | Printed once per session on stderr by the thin client when the engine is unreachable (not installed, crashed, did not answer in time, marked down): the call passes through unchecked because no fallback hooks exist. Placeholders: {event}, {why}. |
 | `msg.engine_unreachable_why_daemon` | The {why} of the engine-unreachable notice when the client could not reach the engine's daemon (down, breaker open, crash-loop stop). |
 | `msg.err_db_busy` | The storage writer queue is full. |
 | `msg.err_db_journal` | The journal mode could not be set. Placeholder: {mode}. |
@@ -11362,7 +11375,7 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `msg.restore_daemon_busy` | A restore could not stop the daemon or take its lock in time. |
 | `msg.restore_damaged` | A snapshot database failed its integrity check. Placeholders: {path}, {check}. |
 | `msg.restore_no_hot` | A snapshot directory has no hot.db. Placeholder: {path}. |
-| `msg.run_engine_missing` | Printed on stderr by the thin client (`ah-hook <verb>`, reached through hooks/ah-hook.sh) when no engine can run the command, which exits launcher.cli_no_engine_exit: nothing else runs in its place. Placeholder: {what} (the verb). |
+| `msg.run_engine_missing` | Printed on stderr by the thin client (`ah-hook <verb>`) when no engine can run the command, which exits launcher.cli_no_engine_exit: nothing else runs in its place. Placeholder: {what} (the verb). |
 | `msg.schedule_agent_planned` | Result of an agent-targeted job until mailbox delivery exists (D45). |
 | `msg.schedule_daemon_gone` | An in-process job found the daemon gone (it was exiting). |
 | `msg.schedule_exit_code` | How a subprocess job's exit is named in its failure detail. Placeholder: {code}. |

@@ -1,5 +1,5 @@
 //! The launcher proper: arguments, settings, the budgets of a call, the cold-start guard wait, the engine run and the outcome
-//! table of `hooks/ah-hook.sh`.
+//! table of the retired `hooks/ah-hook.sh` (now in `plugins/anti-hall-node/legacy-sh/`).
 //!
 //! Failure policy: anything internal that goes wrong lets the hook through (exit 0, empty stdout, one stderr line at most).
 //! The only blocks are the engine's own exit 2 and the guard events' fail-closed rows (bad budget knob, unrunnable fallback
@@ -325,13 +325,18 @@ impl L {
         if sock.as_os_str().len() as u64 > sock_max {
             return None;
         }
-        if gate::probe(
+        let probed = gate::probe(
             &sock,
             Duration::from_millis(self.s.num("launcher.connect_timeout_ms")),
-        ) == Sock::Live
-        {
+        );
+        if probed == Sock::Live {
             return None;
         }
+        // a socket file nobody listens on that is NEWER than a start request is a daemon that request started and that then died: the
+        // request is no reason to keep waiting (a daemon still starting has not bound its socket yet, so the file is older than its request)
+        let sock_ms = (probed == Sock::Stale)
+            .then(|| std::fs::metadata(&sock).ok()?.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok().map(|d| d.as_millis() as u64))
+            .flatten();
         let total_ms = self
             .event_timeout_s()
             .unwrap_or(self.timeout_s)
@@ -349,6 +354,7 @@ impl L {
             &self.key("files.launcher_spawn_lock"),
             &self.key("files.launcher_spawn_log"),
             cap,
+            sock_ms,
             self.s.num("launcher.crashloop_window_s"),
             self.s.num("launcher.crashloop_max"),
         );
@@ -933,35 +939,42 @@ pub fn run() -> i32 {
         i += 1;
     }
 
-    // the Node fallback switch is on (`ah-engine fallback node`): the launcher runs the original Node hooks itself, no engine
-    if !state_dir.as_os_str().is_empty() && state_dir.join(s.text("files.fallback_switch")).exists() {
-        let guard = s.list("dispatch.guard_events").contains(&event);
-        let tool_flag = s.text("launcher.arg_tool_from_payload");
-        let (payload, _) = proc::read_prefix(
-            0,
-            s.num("launcher.payload_prefix_bytes") as usize,
-            Duration::from_millis(s.num("launcher.stdin_idle_ms")),
-            s.num("launcher.io_chunk_bytes") as usize,
-        );
-        let list_override = if test {
-            env_nonempty(&s.text("launcher.knob_fallback_list")).map(PathBuf::from)
+    // the Node fallback switch is on (`ah-engine fallback node`): the launcher runs the original Node hooks itself, no engine. While the
+    // Node backup directory is missing the switch does nothing: one notice line, and the engine decides as it would with the switch off.
+    let switch_on = !state_dir.as_os_str().is_empty() && state_dir.join(s.text("files.fallback_switch")).exists();
+    let s = if switch_on { s.with_nodeback(&cfg_dir) } else { s };
+    if switch_on {
+        let node_dir = cfg_root.as_deref().or(root.as_deref()).map(|r| r.join(s.text("nodeback.node_dir")));
+        if let Some(d) = node_dir.as_ref().filter(|d| !d.is_dir()) {
+            say(&s.msg("nodeback.msg_no_node_dir", &[("dir", &d.display().to_string())]));
         } else {
-            None
-        };
-        let s = s.with_nodeback(&cfg_dir);
-        return nodeback::Call {
-            s: &s,
-            event: &event,
-            host: &host,
-            tool_from_payload: args.contains(&tool_flag),
-            guard,
-            plugin_root: cfg_root.as_deref().or(root.as_deref()),
-            state_dir: &state_dir,
-            list_override,
-            payload: &payload,
-            grace: Duration::from_millis(s.num("client.wrapper_kill_grace_ms")),
+            let guard = s.list("dispatch.guard_events").contains(&event);
+            let tool_flag = s.text("launcher.arg_tool_from_payload");
+            let (payload, _) = proc::read_prefix(
+                0,
+                s.num("launcher.payload_prefix_bytes") as usize,
+                Duration::from_millis(s.num("launcher.stdin_idle_ms")),
+                s.num("launcher.io_chunk_bytes") as usize,
+            );
+            let list_override = if test {
+                env_nonempty(&s.text("launcher.knob_fallback_list")).map(PathBuf::from)
+            } else {
+                None
+            };
+            return nodeback::Call {
+                s: &s,
+                event: &event,
+                host: &host,
+                tool_from_payload: args.contains(&tool_flag),
+                guard,
+                plugin_root: cfg_root.as_deref().or(root.as_deref()),
+                state_dir: &state_dir,
+                list_override,
+                payload: &payload,
+                grace: Duration::from_millis(s.num("client.wrapper_kill_grace_ms")),
+            }
+            .run();
         }
-        .run();
     }
 
     // the part of the payload the launcher keeps and inspects; the rest is streamed through later

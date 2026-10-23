@@ -7,7 +7,7 @@ description: Check and repair anti-hall (hooks, guards, legacy cleanup). Use for
 
 ## When to use
 
-Health-check AND repair anti-hall — confirm Node is found, every hook is present + syntax-valid, the guards actually fire (live behavioral self-tests on git-guard / command-guard / edit-guard / swarm-guard / model-routing-guard), legacy statusline cleanup is safe, and (with --repair) apply safe fixes. Plain doctor is read-only. Use when the user asks "is anti-hall working / active / running", "check the hooks", "anti-hall doctor", "repair anti-hall", "fix the daemon", "are the guards on", or after install/update to verify everything is live.
+Health-check AND repair anti-hall — confirm the thin client and the engine are installed and healthy, every hook command is the direct form, the guards actually fire (live behavioral self-tests on git-guard / command-guard / edit-guard / swarm-guard / model-routing-guard), legacy statusline cleanup is safe, and (with --repair) apply safe fixes. Plain doctor is read-only. Use when the user asks "is anti-hall working / active / running", "check the hooks", "anti-hall doctor", "repair anti-hall", "fix the daemon", "are the guards on", or after install/update to verify everything is live.
 
 Answers the only question that matters for a guardrail plugin: **is it actually running,
 and do the guards actually fire?** It checks presence AND behavior — not just that files
@@ -17,9 +17,8 @@ exist, but that the guards block what they should and allow what they should. It
 changes nothing.
 
 ## What it reports
-- **Environment:** Node version (and whether it's ≥ 18 — below that the hooks silently
-  no-op), platform, plugin version.
-- **Hooks:** every script registered in `hooks.json` is present and syntax-valid.
+- **Environment:** platform, plugin version, the installed thin client (`~/.anti-hall/ah-engine/bin/ah-hook`) and engine. No Node is needed on a hook path.
+- **Hooks:** every command in `hooks.json` is the direct form (thin client first, `hooks/install.sh` as the fallback), the plugin ships no shell file besides `hooks/install.sh`, and a hook command or `statusLine` that still runs a retired `ah-hook.sh`/`ah-run.sh` wrapper fails the doctor (`ah-hook doctor --repair` rewrites it, keeping a backup).
 - **Guard behavior (live self-tests):** spawns the real guards with crafted payloads and
   asserts exit codes — git-guard blocks force-push + AI self-credit and allows `git status`;
   command-guard blocks heavy commands in the coordinator but ALLOWS them in a subagent
@@ -225,7 +224,7 @@ Windows is not supported.
 
 ## How to run
 
-The doctor is a `node` script that now **writes units/settings** in repair mode (and the
+The doctor (`ah-hook doctor`) **writes units/settings** in repair mode (and the
 command-guard blocks heavy commands on the main thread), so **delegate it to a Haiku
 subagent** (`model:"haiku"` — an execution-shaped spawn with no explicit model also trips
 model-routing-guard's strict-mode block) and relay the report:

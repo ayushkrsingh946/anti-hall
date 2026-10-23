@@ -533,17 +533,30 @@ impl Doc<'_> {
             }
             return;
         };
-        let wrapper = self.s.text("doctor_l.wrapper_name");
-        let cmds: Vec<&str> = text.lines().filter(|l| l.trim_start().starts_with("\"command\"")).collect();
-        let sep = format!("{wrapper}\\\" ");
-        let thin = |l: &str| l.split(&sep).nth(1).is_some_and(|r| r.starts_with(|c: char| c.is_ascii_alphabetic()));
-        let thin_n = cmds.iter().filter(|l| thin(l)).count();
-        let first = cmds.iter().find(|l| !thin(l)).map(|l| l.trim_start().trim_start_matches("\"command\"").trim_start().trim_start_matches(':').trim_start().chars().take(self.cmd_chars()).collect::<String>()).unwrap_or_else(|| self.m("no_entry", &[]));
+        let cmds: Vec<(String, String)> = serde_json::from_str::<serde_json::Value>(&text).map(|v| Self::commands(&v)).unwrap_or_default();
+        let thin = |ev: &str, c: &str| self.is_direct_form(host, ev, c);
+        let thin_n = cmds.iter().filter(|(ev, c)| thin(ev, c)).count();
+        let first = cmds
+            .iter()
+            .find(|(ev, c)| !thin(ev, c))
+            .map(|(ev, c)| format!("{ev}: {}", c.chars().take(self.cmd_chars()).collect::<String>()))
+            .unwrap_or_else(|| self.m("no_entry", &[]));
         if !cmds.is_empty() && thin_n == cmds.len() {
             self.ok("thin_ok", &[("file", rel)]);
         } else {
             self.bad("thin_not", &[("file", rel), ("n", &(cmds.len() - thin_n).to_string()), ("first", &first), ("host", host)]);
         }
+    }
+
+    /// Whether `cmd` is exactly the direct form (`hooks_form.template`) of `event` for `host`: the installer's path in it is the only
+    /// part that varies (the host's plugin-root variable, or a literal path in a copy the host keeps).
+    fn is_direct_form(&self, host: &str, event: &str, cmd: &str) -> bool {
+        let installer = self.s.text("doctor.bootstrap_script");
+        let Some(at) = cmd.find(&installer) else { return false };
+        let Some(q) = cmd[..at].rfind('"') else { return false };
+        let prefix = cmd[q + 1..at].trim_end_matches('/');
+        let host_args = if host == self.s.text("hooks_form.host_codex") { self.s.text("hooks_form.host_args_codex") } else { String::new() };
+        cmd == fill(&self.s.text("hooks_form.template"), &[("event", event), ("host_args", &host_args), ("prefix", prefix)])
     }
 
     fn hooks_wiring(&mut self) {
@@ -862,6 +875,59 @@ impl Doc<'_> {
         n
     }
 
+    /// Whether a statusLine command still runs the retired shell wrapper (`sh "<…/scripts/ah-run.sh>" --stdin statusline …`).
+    fn statusline_retired(&self, cmd: &str) -> bool {
+        let parts = self.s.list("hooks_form.statusline_old_form");
+        !parts.is_empty() && cmd.starts_with(&self.s.text("hooks_form.statusline_old_prefix")) && parts.iter().all(|p| cmd.contains(p.as_str()))
+    }
+
+    /// Rewrite a statusLine that still runs the retired wrapper to the thin client's command, in place in the file's own text (one
+    /// string changes), after a backup; idempotent, nothing is deleted. Returns whether there was anything to do.
+    fn repair_statusline(&mut self, dry: bool) -> bool {
+        let settings = Path::new(&self.home).join(self.s.text("doctor_l.claude_settings_rel"));
+        let Ok(text) = fs::read_to_string(&settings) else { return false };
+        let Some(old) = serde_json::from_str::<serde_json::Value>(&text)
+            .ok()
+            .and_then(|v| v.get("statusLine").and_then(|s| s.get("command")).and_then(|c| c.as_str()).map(str::to_string))
+        else {
+            return false;
+        };
+        if !self.statusline_retired(&old) || !self.client.is_file() {
+            return false;
+        }
+        let shown = settings.display().to_string();
+        let new = fill(&self.s.text("hooks_form.statusline_template"), &[("client", &self.client.display().to_string())]);
+        let (old_lit, new_lit) = (serde_json::to_string(&old).unwrap_or_default(), serde_json::to_string(&new).unwrap_or_default());
+        let next = text.replacen(&old_lit, &new_lit, 1);
+        let reads_back = serde_json::from_str::<serde_json::Value>(&next)
+            .ok()
+            .and_then(|v| v.get("statusLine").and_then(|s| s.get("command")).and_then(|c| c.as_str()).map(|c| c == new))
+            .unwrap_or(false);
+        if old_lit.is_empty() || text.matches(&old_lit).count() != 1 || !reads_back {
+            let msg = self.m("x.repair_statusline_ambiguous", &[("file", &shown)]);
+            self.row_repair("repair_skipped", "statusline", &msg);
+            return true;
+        }
+        if dry {
+            let msg = self.m("x.repair_statusline_would", &[("file", &shown), ("command", &new)]);
+            self.row_repair("repair_skipped", "statusline", &msg);
+            return true;
+        }
+        let Some(backup) = self.backup(&settings) else {
+            let msg = self.m("x.repair_statusline_nobackup", &[("file", &shown)]);
+            self.row_repair("repair_failed", "statusline", &msg);
+            return true;
+        };
+        if fs::write(&settings, next).is_ok() {
+            let msg = self.m("x.repair_statusline_form", &[("file", &shown), ("command", &new), ("backup", &backup.display().to_string())]);
+            self.row_repair("repair_fixed", "statusline", &msg);
+        } else {
+            let msg = self.m("x.repair_statusline_nowrite", &[("file", &shown)]);
+            self.row_repair("repair_failed", "statusline", &msg);
+        }
+        true
+    }
+
     fn repair(&mut self, dry: bool) {
         let heading = self.m(if dry { "repair_heading_dry" } else { "repair_heading" }, &[]);
         self.out.push_str(&format!("\n{heading}\n"));
@@ -921,6 +987,8 @@ impl Doc<'_> {
                 self.row_repair("repair_failed", "hooks-form", &msg);
             }
         }
+        // a statusLine that still runs the retired wrapper
+        did |= self.repair_statusline(dry);
         if !did {
             let none = self.m("repair_none", &[]);
             self.out.push_str(&format!("  {none}\n"));

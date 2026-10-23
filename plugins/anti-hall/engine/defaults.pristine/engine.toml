@@ -19,11 +19,11 @@ doc = "Overrides the state directory (default: base_dir/state_dir under the home
 value = "AH_ENGINE_DIR"
 
 [env.done_file]
-doc = "A file the dispatcher creates once it has dispatched an event and decided its exit code (D87). The reliability wrapper sets it, so that an engine exit code of a hook's own (1, say) is told from an engine failure and is not answered by running every hook a second time."
+doc = "A file the dispatcher creates once it has dispatched an event and decided its exit code (D87). The thin client sets it, so that an engine exit code of a hook's own (1, say) is told from an engine failure and is not answered by running every hook a second time."
 value = "AH_ENGINE_DONE_FILE"
 
 [env.wait_file]
-doc = "A file the client creates while it waits on the daemon and keeps when the daemon answered BUSY/ERR, so the call is handed to its Node hooks; it removes it when the daemon answered with nothing left for Node to decide (an OK reply whose entries defer to Node hooks keeps it until the call's final result is ready), gave no reply in the wait window, or none was there. The reliability wrapper sets it, so that its watchdog can tell a call that is still deciding (give it up to client.slow_fallback_max_ms) from a hung engine (kill at the normal budget)."
+doc = "A file the client creates while it waits on the daemon and keeps when the daemon answered BUSY/ERR, so the call is handed to its Node hooks; it removes it when the daemon answered with nothing left for Node to decide (an OK reply whose entries defer to Node hooks keeps it until the call's final result is ready), gave no reply in the wait window, or none was there. The thin client sets it, so that its watchdog can tell a call that is still deciding (give it up to client.slow_fallback_max_ms) from a hung engine (kill at the normal budget)."
 value = "AH_ENGINE_WAIT_FILE"
 
 [env.fail_open_file]
@@ -47,11 +47,11 @@ doc = "Read by `ah-hook update --auto`: off, stable or dev overrides the `engine
 value = "AH_ENGINE_AUTO_UPDATE"
 
 [env.bin]
-doc = "Test-only: the engine binary the hook wrapper runs instead of the installed one. The wrapper unsets it unless AH_WRAPPER_TEST=1 is also set, so a stray value can never turn the safety net into a silent allow."
+doc = "Test-only: the engine binary the thin client runs instead of the installed one. The thin client ignores it unless AH_WRAPPER_TEST=1 is also set, so a stray value can never turn the safety net into a silent allow."
 value = "AH_ENGINE_BIN"
 
 [env.bootstrap]
-doc = "Set to 0 or 1 to turn the first-run download of the sha256-pinned engine binary off or on; overrides the `engine.bootstrap` setting. Read by `ah-hook install --auto` and hooks/install.sh."
+doc = "Set to 0 or 1 to turn the automatic download of the sha256-pinned engine binary off or on (default off: the explicit install is `sh hooks/install.sh --download`); overrides the `engine.bootstrap` setting. Read by `ah-hook install --auto` and hooks/install.sh."
 value = "AH_ENGINE_BOOTSTRAP"
 
 [env.install_lock_token]
@@ -63,7 +63,7 @@ doc = "Test-only: download base URL for the engine binary (http allowed). Honore
 value = "AH_ENGINE_RELEASE_BASE"
 
 [env.wrapper_diag]
-doc = "Test-only: absolute path of a file the hook wrapper appends its diagnostic lines to. Honored only with AH_WRAPPER_TEST=1."
+doc = "Test-only: absolute path of a file the thin client appends its diagnostic lines to. Honored only with AH_WRAPPER_TEST=1."
 value = "AH_ENGINE_WRAPPER_DIAG"
 
 [env.nospawn]
@@ -174,7 +174,7 @@ doc = "One line the integrity check writes when it rolls the engine binary back 
 value = "rollback.last"
 
 [files.wrapper_fail_log]
-doc = "Epoch seconds, one per line, of the hook wrapper's engine failures (timeout, signal death, no answer). The integrity check counts them against rollback.fail_n."
+doc = "Epoch seconds, one per line, of the thin client's engine failures (timeout, signal death, no answer). The integrity check counts them against rollback.fail_n."
 value = "wrapper.fails"
 
 [files.integrity_log]
@@ -722,7 +722,7 @@ min = 1
 unit = "s"
 
 [client.wrapper_watchdog_poll_ms]
-doc = "Poll interval for the hook wrapper millisecond watchdog."
+doc = "Poll interval for the thin client's millisecond watchdog."
 value = 2
 min = 1
 unit = "ms"
@@ -1134,7 +1134,7 @@ min = 0
 max = 1
 
 [rollback.fail_n]
-doc = "Engine failures seen by the hook wrapper (timeout, signal death, no answer) within rollback.fail_window_s that roll a never-healthy binary back. The wrapper counts them because a hung binary cannot count its own."
+doc = "Engine failures seen by the thin client (timeout, signal death, no answer) within rollback.fail_window_s that roll a never-healthy binary back. The thin client counts them because a hung binary cannot count its own."
 value = 3
 env = "AH_ENGINE_ROLLBACK_FAIL_N"
 min = 1
@@ -1184,7 +1184,7 @@ env = "AH_ENGINE_INSTALL_LOCK_WAIT_S"
 unit = "s"
 
 [rollback.lock_hook_wait_s]
-doc = "How long the integrity check started by the hook wrapper waits for the install lock before skipping (the next run checks). A held lock never holds a session."
+doc = "How long the integrity check started by the thin client waits for the install lock before skipping (the next run checks). A held lock never holds a session."
 value = 2
 env = "AH_ENGINE_INSTALL_LOCK_HOOK_WAIT_S"
 unit = "s"
@@ -1807,7 +1807,7 @@ value = "AH_UPDATE_TRIPLE"
 doc = "Test-only: environment variable that, set to 1, skips the build attestation check."
 value = "AH_UPDATE_NO_ATTEST"
 
-# ---- the direct form of a hook command (read by `ah-hook doctor --repair`; hooks.json generation follows it) -----------------------------
+# ---- the direct form of a hook command (hooks.json is generated from it by `ah-engine gen-hooks`; `ah-hook doctor --repair` rewrites old forms to it) -----------------------------
 
 [hooks_form.template]
 doc = "A hook command in the direct form: run the installed thin client, else the installer. Placeholders: {event}, {host_args}, {prefix} (the plugin root variable or path)."
@@ -1832,6 +1832,18 @@ value = "/hooks"
 [hooks_form.node_word]
 doc = "The program name that marks Node on an entry path."
 value = "node"
+
+[hooks_form.statusline_template]
+doc = "The statusLine command in the thin-client form, which the migration (update, doctor --repair) writes in place of one that runs the retired shell wrapper. Placeholder: {client} (the installed ah-hook, absolute)."
+value = "\"{client}\" statusline"
+
+[hooks_form.statusline_old_prefix]
+doc = "How a statusLine command that runs the retired shell wrapper starts."
+value = "sh "
+
+[hooks_form.statusline_old_form]
+doc = "Texts that all appear in a statusLine command that runs the retired shell wrapper (after hooks_form.statusline_old_prefix)."
+value = ["/scripts/ah-run.sh\" --stdin statusline"]
 
 [hooks_form.old_markers]
 doc = "Text in a hook or statusLine command that marks the retired shell wrappers."
@@ -2099,7 +2111,7 @@ doc = "Test-only: environment variable that sets the kill grace in whole seconds
 value = "AH_KILL_GRACE_S"
 
 [launcher.knob_sweep_age_s]
-doc = "Test-only: environment variable of the shell wrapper's run-directory sweep age (accepted for parity, unused by the launcher)."
+doc = "Test-only: environment variable of the retired shell wrapper's run-directory sweep age (accepted for parity, unused by the thin client)."
 value = "AH_HOOK_SWEEP_AGE_S"
 
 [launcher.knob_fault]
@@ -2171,7 +2183,7 @@ doc = "The ah-hook command-line verb that runs the binary integrity check and ro
 value = "integrity"
 
 [files.fallback_switch]
-doc = "Marker file (state directory) of the Node fallback switch (the Node backup, stage 2): present = the launcher runs the original Node hooks directly instead of the engine. Written and removed by `ah-engine fallback node|off`; read by hooks/ah-hook.sh and the thin launcher."
+doc = "Marker file (state directory) of the Node fallback switch (the Node backup, stage 2): present = the launcher runs the original Node hooks directly instead of the engine. Written and removed by `ah-engine fallback node|off`; read by the thin client (`ah-hook`)."
 value = "fallback.node"
 
 [launcher.arg_builtin]

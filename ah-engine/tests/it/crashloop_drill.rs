@@ -98,13 +98,13 @@ impl World {
         c
     }
 
-    /// One hook call through the shell wrapper: (exit code, seconds taken).
+    /// One hook call through the thin client: (exit code, seconds taken).
     fn hook(&self) -> (i32, f64) {
         let payload = self.root.join("payload.json");
         std::fs::write(&payload, r#"{"hook_event_name":"UserPromptSubmit","prompt":"x","session_id":"drill"}"#).unwrap();
         let t = Instant::now();
         let out =
-            self.cmd("sh").arg(self.plugin.join("hooks/ah-hook.sh")).arg("UserPromptSubmit").stdin(std::fs::File::open(&payload).unwrap()).output().unwrap();
+            self.cmd(launcher_bin().to_str().unwrap()).arg("UserPromptSubmit").arg("--plugin-root").arg(&self.plugin).stdin(std::fs::File::open(&payload).unwrap()).output().unwrap();
         (out.status.code().unwrap_or(-1), t.elapsed().as_secs_f64())
     }
 

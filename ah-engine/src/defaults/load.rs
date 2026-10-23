@@ -365,9 +365,9 @@ fn validate(file: &str, key: &str, e: &toml::Table, kinds: &HashMap<&str, Kind>,
         return Err(DefaultsError::new("type", file, key, format!("the shipped value is {}, this one is {}", s.type_str(), v.type_str())));
     }
     let row_ok =
-        |r: &toml::Value| r.as_table().is_some_and(|t| t.get("id").is_some_and(toml::Value::is_str) && t.get("command").is_some_and(toml::Value::is_str));
+        |r: &toml::Value| r.as_table().is_some_and(|t| t.get("id").is_some_and(toml::Value::is_str) && t.get("command").is_none_or(toml::Value::is_str));
     if key.starts_with(table::key("", "").trim_end_matches('_')) && !v.as_array().is_some_and(|a| a.iter().all(row_ok)) {
-        return Err(DefaultsError::new("dispatch", file, key, "a dispatch row must be a list of entry tables, each with a string id and command"));
+        return Err(DefaultsError::new("dispatch", file, key, "a dispatch row must be a list of entry tables, each with a string id"));
     }
     Ok(())
 }
@@ -815,7 +815,7 @@ fn check_rows(root: &Path, entries: &[&'static Entry]) -> Result<(), String> {
     let prefix = prefix.trim_end_matches('_');
     for e in entries.iter().filter(|e| e.key.starts_with(prefix)) {
         if table::rows_of(&e.value).is_none() {
-            return Err(format!("{} must be a list of entry tables, each with a string id and command", e.key));
+            return Err(format!("{} must be a list of entry tables, each with a string id", e.key));
         }
     }
     let lists = get("dispatch.fallback_lists").and_then(V::as_table).ok_or("dispatch.fallback_lists is missing or not a table")?;

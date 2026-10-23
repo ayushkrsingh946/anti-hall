@@ -568,6 +568,28 @@ fn many_concurrent_cold_start_hooks_ask_for_one_daemon_start() {
 }
 
 #[test]
+fn a_daemon_that_died_right_after_a_start_request_is_asked_for_again_at_once() {
+    let env = Env::new("stale");
+    std::fs::create_dir_all(&env.state).unwrap();
+    let kicks = env.path("kicks");
+    let e = env.script(
+        "stale.sh",
+        &format!(
+            "cat >/dev/null\ncase \"$*\" in *ColdStartKick*) echo kick >>{}; exit 0;; esac\nexit 0",
+            kicks.display()
+        ),
+    );
+    // a start request only a moment old (younger than client.cold_guard_wait_ms) ...
+    std::fs::write(env.state.join("launcher.spawns"), format!("{}\n", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis())).unwrap();
+    std::thread::sleep(Duration::from_millis(20));
+    // ... and the daemon it started has died since: its socket file (newer than the request) is left behind, nobody listens on it
+    drop(UnixListener::bind(env.state.join("e.sock")).unwrap());
+    let o = env.run("PreToolUse", PAYLOAD, Some(&e), &[]);
+    assert_eq!(o.code, 0, "{}", o.err);
+    assert_eq!(env.read("kicks").lines().count(), 1, "a dead daemon is asked for at once, not waited for: {}", o.err);
+}
+
+#[test]
 fn crash_loop_window_stops_the_start_requests() {
     let env = Env::new("loop");
     std::fs::create_dir_all(&env.state).unwrap();

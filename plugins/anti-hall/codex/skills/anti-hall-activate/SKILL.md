@@ -26,6 +26,14 @@ ANTI_HALL_ROOT="$(cd "$(dirname "$SKILL_FILE")/../../.." && pwd)"
 test -d "$ANTI_HALL_ROOT/.codex-plugin" || { echo "anti-hall plugin root not found relative to $SKILL_FILE — aborting" >&2; exit 1; }
 ```
 
+0. Install the thin client and the engine if `~/.anti-hall/ah-engine/bin/ah-hook` is missing (nothing is downloaded on its own:
+   `engine.bootstrap` defaults to false; ask the user first). The plugin's one shell file does it, checked against the sha256
+   pinned in `ah-engine.lock`:
+
+```bash
+test -x "$HOME/.anti-hall/ah-engine/bin/ah-hook" || sh "$ANTI_HALL_ROOT/hooks/install.sh" --download -v
+```
+
 1. Install project-local Codex hooks:
 
 ```bash

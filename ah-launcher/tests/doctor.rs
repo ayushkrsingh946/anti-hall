@@ -161,3 +161,64 @@ fn the_repair_makes_the_binaries_executable_and_creates_the_state_directory() {
     assert!(out.contains("FIXED [state-dir]"), "{out}");
     assert_eq!(std::fs::metadata(&k.e.state).unwrap().permissions().mode() & 0o777, 0o700);
 }
+
+#[test]
+fn the_hooks_wiring_check_accepts_exactly_the_direct_form_of_each_event() {
+    let k = Kit::new("dr-thin");
+    k.engine(GOOD_ENGINE);
+    k.put("hooks/install.sh", "#!/bin/sh\n");
+    let direct = |ev: &str, root: &str, host: &str| {
+        format!(
+            "[ -x \\\"$HOME/.anti-hall/ah-engine/bin/ah-hook\\\" ] && exec \\\"$HOME/.anti-hall/ah-engine/bin/ah-hook\\\" {ev}{host} || exec sh \\\"{root}/hooks/install.sh\\\" {ev}{host}"
+        )
+    };
+    let file = |cmds: &[(&str, String)]| {
+        let body: Vec<String> = cmds.iter().map(|(ev, c)| format!("\"{ev}\":[{{\"hooks\":[{{\"type\":\"command\",\"command\":\"{c}\"}}]}}]")).collect();
+        format!("{{\"hooks\":{{{}}}}}", body.join(","))
+    };
+    k.put("hooks/hooks.json", &file(&[("PreToolUse", direct("PreToolUse", "${CLAUDE_PLUGIN_ROOT}", "")), ("Stop", direct("Stop", "${CLAUDE_PLUGIN_ROOT}", ""))]));
+    k.put("codex/hooks/hooks.json", &file(&[("Stop", direct("Stop", "${PLUGIN_ROOT}", " --host codex"))]));
+    let (_, out) = k.doctor(&["--builtin"]);
+    assert!(out.contains("hooks/hooks.json is the thin form") && out.contains("codex/hooks/hooks.json is the thin form"), "{out}");
+    // a command for another event, a missing host argument and a hand-written command are all flagged
+    k.put("hooks/hooks.json", &file(&[("PreToolUse", direct("Stop", "${CLAUDE_PLUGIN_ROOT}", "")), ("Stop", direct("Stop", "${CLAUDE_PLUGIN_ROOT}", ""))]));
+    k.put("codex/hooks/hooks.json", &file(&[("Stop", direct("Stop", "${PLUGIN_ROOT}", ""))]));
+    let (code, out) = k.doctor(&["--builtin"]);
+    assert!(out.contains("hooks/hooks.json is not the thin form: 1 command(s)") || out.contains("hooks/hooks.json is not the thin form"), "{out}");
+    assert!(out.contains("codex/hooks/hooks.json is not the thin form"), "{out}");
+    assert_eq!(code, 1, "{out}");
+}
+
+#[test]
+fn a_statusline_that_runs_the_retired_wrapper_is_rewritten_to_the_thin_client_with_a_backup() {
+    let k = Kit::new("dr-statusline");
+    k.engine(GOOD_ENGINE);
+    let client = k.e.state.join("bin/ah-hook");
+    // a stand-in for the installed thin client (the doctor keeps the real path in the command)
+    let old_cmd = "sh \"/x/plugins/anti-hall/scripts/ah-run.sh\" --stdin statusline -- \"/x/plugins/anti-hall/statusline/statusline.js\"";
+    let body = format!("{{\n  \"theme\": \"dark\",\n  \"statusLine\": {{\n    \"type\": \"command\",\n    \"command\": {}\n  }}\n}}\n", serde_json::to_string(old_cmd).unwrap());
+    let settings = k.e.home.join(".claude/settings.json");
+    std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    std::fs::write(&settings, &body).unwrap();
+    // no thin client at its installed path: nothing to point the status line at, the file is left alone
+    let (_, out) = k.doctor(&["--builtin", "--repair"]);
+    assert_eq!(std::fs::read_to_string(&settings).unwrap(), body, "{out}");
+    exe(&client, "#!/bin/sh\nexit 0\n");
+    let (_, out) = k.doctor(&["--builtin", "--repair", "--dry-run"]);
+    assert!(out.contains("would rewrite the statusLine"), "{out}");
+    assert_eq!(std::fs::read_to_string(&settings).unwrap(), body, "a dry run changes nothing");
+    let (_, out) = k.doctor(&["--builtin", "--repair"]);
+    assert!(out.contains("FIXED [statusline]"), "{out}");
+    let new_cmd = format!("\"{}\" statusline", client.display());
+    let after = std::fs::read_to_string(&settings).unwrap();
+    assert_eq!(after, body.replace(&serde_json::to_string(old_cmd).unwrap(), &serde_json::to_string(&new_cmd).unwrap()), "only the command string changed");
+    let backups: Vec<_> = std::fs::read_dir(settings.parent().unwrap()).unwrap().flatten().filter(|e| e.file_name().to_string_lossy().contains(".bak-antihall-")).collect();
+    assert_eq!(backups.len(), 1, "one backup, never deleted");
+    assert_eq!(std::fs::read_to_string(backups[0].path()).unwrap(), body);
+    // idempotent: nothing left to do, no second backup
+    let (_, out) = k.doctor(&["--builtin", "--repair"]);
+    assert!(!out.contains("FIXED [statusline]"), "{out}");
+    assert_eq!(std::fs::read_to_string(&settings).unwrap(), after);
+    let n = std::fs::read_dir(settings.parent().unwrap()).unwrap().flatten().filter(|e| e.file_name().to_string_lossy().contains(".bak-antihall-")).count();
+    assert_eq!(n, 1);
+}

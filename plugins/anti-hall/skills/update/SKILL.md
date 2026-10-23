@@ -39,7 +39,7 @@ takes effect in-session — this skill does not over-promise.
 
 ## What the helper does (`skills/update/scripts/update.js`)
 
-Pure Node ≥ 22 built-ins, macOS + Linux (Windows is not supported), fail-open
+Runs inside the thin client (`ah-hook update`), macOS + Linux (Windows is not supported), fail-open
 (report-don't-break). It makes **no writes outside the marketplace clone and stdout** —
 the only filesystem mutation is copying the clone's `plugins/anti-hall/` into a **new**
 `cache/.../<newver>/` dir (it never deletes or overwrites another version dir).
@@ -187,7 +187,7 @@ Modes:
 1. Pick the mode from the user's words:
    - "is anti-hall up to date" / "check for an update" → `--check`
    - "update" / "upgrade anti-hall" → full update
-2. The helper is a `node` script (a state change — it pulls, may copy into the
+2. The helper (`ah-hook update`; a state change — it pulls, may copy into the
    cache, and runs migrations), so **run it directly in the main session, in the
    foreground, with a generous Bash `timeout`** (e.g. 600000) — never delegate it
    to a subagent: the main session holds the context needed to judge a migration

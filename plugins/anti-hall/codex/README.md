@@ -43,8 +43,8 @@ Same as on Claude Code: `codex/hooks/hooks.json` holds one thin trigger per Code
 `hooks/install.sh`, and checked against the sha256 pinned in `ah-engine.lock`. No Node runs on a hook path. With no engine,
 or when it cannot answer, the hook lets the call through and prints one notice per session. The Codex hook table, its rules, settings and texts are the plugin's `engine/` files (shared with
 Claude, hot-reloaded, with last-known-good and pristine copies). `PermissionRequest`, `PostCompact` and `SubagentStart` have a
-thin trigger but no hook entries yet, so they answer with the neutral no-op. Opt out of the download with
-the setting `engine.bootstrap` = false or `AH_ENGINE_BOOTSTRAP=0`. Full description and rollback:
+thin trigger but no hook entries yet, so they answer with the neutral no-op. The download is off by default (the setup skill or `sh hooks/install.sh --download` installs on request; the setting
+`engine.bootstrap` = true or `AH_ENGINE_BOOTSTRAP=1` makes it automatic). Full description and rollback:
 [AH-ENGINE.md](https://github.com/talas9/anti-hall/blob/main/docs/AH-ENGINE.md). Telemetry is local only and read with
 `ah-engine telemetry summary`.
 

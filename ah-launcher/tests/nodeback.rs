@@ -74,13 +74,14 @@ fn a_force_push_through_the_node_guard_blocks_and_writes_a_ledger_row() {
 }
 
 #[test]
-fn a_missing_node_directory_is_one_notice_and_the_call_goes_through() {
+fn a_missing_node_directory_is_one_notice_and_the_switch_does_nothing() {
     let fb = Fb::new("nb-nodir", "@PreToolUse\t10\nBash\t10\tnode \"x\"\n");
     std::fs::rename(&fb.node_dir, fb.env.dir.join("moved-away")).unwrap();
     let o = fb.run("PreToolUse", PUSH);
     assert_eq!(o.code, 0, "{}", o.err);
-    assert_eq!(o.err.lines().count(), 1, "{}", o.err);
-    assert!(o.err.contains("Node backup directory") && o.err.contains("anti-hall-node"), "{}", o.err);
+    // the Node notice comes first; the call then takes the normal path (no engine here, so its own single notice follows)
+    assert!(o.err.lines().next().is_some_and(|l| l.contains("Node backup directory") && l.contains("anti-hall-node")), "{}", o.err);
+    assert_eq!(o.err.matches("Node backup directory").count(), 1, "{}", o.err);
     assert!(fb.ledger().is_empty());
 }
 

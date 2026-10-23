@@ -588,8 +588,8 @@ doc = "The engine installer (the plugin's one shell file), relative to the plugi
 value = "hooks/install.sh"
 
 [doctor.wrapper_file]
-doc = "The hook wrapper, relative to the plugin root."
-value = "hooks/ah-hook.sh"
+doc = "The installer every hook command falls back to while the thin client is not installed (the plugin's one shell file), relative to the plugin root."
+value = "hooks/install.sh"
 
 [doctor.claude_hooks_file]
 doc = "The Claude hooks file, relative to a plugin's root."
@@ -669,7 +669,7 @@ doc = "Arguments that only GNU/busybox stat accepts, to tell the userland flavou
 value = ["-c", "%s", "/"]
 
 [doctor.required_tools]
-doc = "Programs the hook wrapper and bootstrap need on PATH."
+doc = "Programs the hook command and the installer need on PATH."
 value = ["sh", "ps", "tr", "sed", "awk", "od", "find", "tar", "uname", "id", "kill", "mkdir", "mv", "date", "head", "tail", "wc", "cut", "grep"]
 
 [doctor.arch_aliases]
@@ -1056,7 +1056,7 @@ value = "plugin {key} v{version} is registered and enabled"
 
 [doctor_msg.wrapper_missing]
 doc = "HK-03. Placeholder: {file}."
-value = "{file} is missing; every hook command fails (non-blocking) - Fix: reinstall the plugin"
+value = "{file} is missing; the hook commands cannot install the thin client - Fix: reinstall the plugin"
 
 [doctor_msg.thin_missing]
 doc = "HK-01. Placeholder: {file}."
@@ -1104,7 +1104,7 @@ value = "PATH has {entry} entry, resolved against the current directory - Fix: r
 
 [doctor_msg.path_lacks]
 doc = "EV-08. Placeholder: {dirs}."
-value = "PATH lacks {dirs}; the hook wrapper may not find its tools - Fix: add them to PATH"
+value = "PATH lacks {dirs}; the hook command may not find its tools - Fix: add them to PATH"
 
 [doctor_msg.tools_missing]
 doc = "EV-10. Placeholder: {tools}."
@@ -1139,7 +1139,7 @@ doc = "EV-07."
 value = "gh is not on PATH; only the optional PR/CI helpers need it"
 
 [doctor_msg.engine_on_path]
-doc = "The home install is not executable and the hook wrapper (the thin client) runs ah-engine from PATH instead, so that engine counts as working. The thin client's built-in doctor prints the same text. Placeholder: {path}."
+doc = "The home install is not executable and the thin client runs ah-engine from PATH instead, so that engine counts as working. The thin client's built-in doctor prints the same text. Placeholder: {path}."
 value = "the hooks run ah-engine from PATH ({path}) because the home install is not executable"
 
 [doctor_msg.no_engine]
@@ -2334,7 +2334,7 @@ value = "codex/hooks/hooks.json"
 
 [doctor_l.install_health_fail]
 doc = "1 = a failed install-health check (old-form hook commands, Node on an entry path, extra shell files, a bad launcher shim, a missing thin client) fails the doctor; 0 = it only warns."
-value = 0
+value = 1
 
 [doctor_l.probe_prefix]
 doc = "Prefix of the scratch file the doctor creates (and removes) to test that a directory is writable."
@@ -2450,7 +2450,7 @@ value = "{n} launcher shim(s) in {dir} are sh shims"
 
 [doctor_l.msg_health_statusline_old]
 doc = "Placeholders: {file}, {command}."
-value = "the statusLine in {file} still runs the retired shell wrapper ({command}) - Fix: ah-hook doctor --repair (a backup is kept)"
+value = "the statusLine in {file} still runs the retired shell wrapper ({command}) - Fix: ah-hook doctor --repair rewrites it to the thin client (a backup is kept)"
 
 [doctor_l.msg_repair_exec]
 doc = "Placeholder: {path}."
@@ -2467,6 +2467,26 @@ value = "would rewrite {n} hook command(s) in {file} to the direct form (the pre
 [doctor_l.msg_repair_hooks_form]
 doc = "Placeholders: {n}, {file}, {backup}."
 value = "rewrote {n} hook command(s) in {file} to the direct form; the previous file is kept as {backup}"
+
+[doctor_l.msg_repair_statusline_would]
+doc = "Dry run. Placeholders: {file}, {command}."
+value = "would rewrite the statusLine in {file} to the thin client ({command}); the previous file is kept"
+
+[doctor_l.msg_repair_statusline_form]
+doc = "Placeholders: {file}, {command}, {backup}."
+value = "rewrote the statusLine in {file} to the thin client ({command}); the previous file is kept as {backup}"
+
+[doctor_l.msg_repair_statusline_ambiguous]
+doc = "The statusLine command is not one plain string the repair can replace in place, so the file is left as it is. Placeholder: {file}."
+value = "left the statusLine in {file} as it is (its command text is not a single plain string the repair can replace in place)"
+
+[doctor_l.msg_repair_statusline_nobackup]
+doc = "Placeholder: {file}."
+value = "the statusLine in {file} was not changed: no backup could be kept"
+
+[doctor_l.msg_repair_statusline_nowrite]
+doc = "Placeholder: {file}."
+value = "{file} could not be written; the statusLine there is unchanged and the backup is untouched"
 
 [doctor_l.msg_repair_hooks_nobackup]
 doc = "Placeholder: {file}."
