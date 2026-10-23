@@ -24,6 +24,7 @@ mod launcher;
 mod limits;
 mod proc;
 mod selftest;
+mod update;
 mod util;
 
 use std::io::Write;

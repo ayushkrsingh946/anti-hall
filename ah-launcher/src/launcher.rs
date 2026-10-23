@@ -855,11 +855,15 @@ pub fn run() -> i32 {
             return 1;
         }
         Some(first) if first == s.text("launcher.cli_integrity_verb") => {
-            return crate::integrity::run(&s, &state_dir, &args[1..]);
+            return crate::integrity::run(&s, &state_dir, &cli::forwarded(&args)[1..]);
         }
         Some(first) if first == s.text("launcher.cli_install_verb") => {
             let base = home.as_ref().map(|h| h.join(s.text("paths.base_dir"))).unwrap_or_default();
-            return crate::install::run(&s, &state_dir, &base, cfg_root.as_deref().or(root.as_deref()), &args[1..]);
+            return crate::install::run(&s, &state_dir, &base, cfg_root.as_deref().or(root.as_deref()), &cli::forwarded(&args)[1..]);
+        }
+        Some(first) if first == s.text("launcher.cli_update_verb") => {
+            let base = home.as_ref().map(|h| h.join(s.text("paths.base_dir"))).unwrap_or_default();
+            return crate::update::run(&s, &state_dir, &base, cfg_root.as_deref().or(root.as_deref()), &cli::forwarded(&args)[1..]);
         }
         Some(first) if cli::is_verb(&s, first) => {
             return cli::exec_engine(&s, &args, home.as_ref(), cfg_root.as_deref().or(root.as_deref()));

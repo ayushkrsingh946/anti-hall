@@ -309,15 +309,18 @@ nothing. Every URL, command line, name and limit is in `[install.*]` of `engine/
 [RELEASING.md](../ah-engine/RELEASING.md)). This download is the only network request the engine's install makes; see
 [PRIVACY.md](../PRIVACY.md).
 
-**Updating the engine (`ah-update`).** One script, `hooks/ah-update.sh` (POSIX sh, no Node; deliberately outside the engine so a broken
-engine stays fixable), moves the binary between three sources. Every URL, timeout and channel name is in `engine/ah-update.toml`.
+**Updating the engine (`ah-hook update`).** One updater, the thin client's `update` command (no shell, no Node; deliberately outside the
+engine so a broken engine stays fixable; `ah-engine engine-update` hands off to it), moves the binaries between three sources. When the
+release archive also holds `ah-hook`, the thin client is swapped too: atomically, the old one kept as `bin/ah-hook.prev`, and put back at
+once if the new one fails its own self-test. Every URL, timeout, channel name and text is in `[updater.*]` / `msg.updater_*` of
+`engine/defaults`.
 
 | Command | What it does |
 |---|---|
-| `sh hooks/ah-update.sh --from FILE [--sha256 X]` | Offline: FILE is a release `.tar.gz` or a bare binary. The expected sha256 is `--sha256`, else the `SHA256SUMS` next to FILE, else `ah-engine.lock`; with none of them the sha is printed and `--yes` is required. A mismatch refuses. |
-| `sh hooks/ah-update.sh --channel stable` | The latest `ah-engine-v*` release, checked against its `SHA256SUMS`, this plugin's lock when the versions match, and the GitHub build attestation when `gh` is installed and logged in (skipped with a note otherwise). |
-| `sh hooks/ah-update.sh --channel dev` | The latest `ah-engine-dev-<sha8>` pre-release (built and attested by CI on each `engine-proto` push that changes `ah-engine/`). With the live kit installed it also syncs the plugin files at the commit the pre-release records, so engine and plugin do not drift. |
-| `sh hooks/ah-update.sh --rollback` | Restores the previous binary (`bin/ah-engine.prev`); run again to toggle. With the live kit, restores the previous bundle and re-applies it. |
+| `ah-hook update --from FILE [--sha256 X]` | Offline: FILE is a release `.tar.gz` or a bare binary. The expected sha256 is `--sha256`, else the `SHA256SUMS` next to FILE, else `ah-engine.lock`; with none of them the sha is printed and `--yes` is required. A mismatch refuses. |
+| `ah-hook update --channel stable` | The latest `ah-engine-v*` release, checked against its `SHA256SUMS`, this plugin's lock when the versions match, and the GitHub build attestation when `gh` is installed and logged in (skipped with a note otherwise). |
+| `ah-hook update --channel dev` | The latest `ah-engine-dev-<sha8>` pre-release (built and attested by CI on each `engine-proto` push that changes `ah-engine/`). With the live kit installed it also syncs the plugin files at the commit the pre-release records, so engine and plugin do not drift. |
+| `ah-hook update --rollback` | Restores the previous binaries (`bin/ah-engine.prev`, `bin/ah-hook.prev`); run again to toggle. With the live kit, restores the previous bundle and re-applies it. |
 
 Each update smoke-tests the new binary (`version`), swaps it in atomically (the old one is kept as `.prev`), then restarts the daemon with
 the engine's own `stop` and `serve`; any failure keeps the old binary. `--dry-run` checks everything and installs nothing. With the live
@@ -1273,7 +1276,7 @@ judgement calls do.
   stop. Events from before a trip or a reset never count toward the next one, and the stop ends early when the binary is
   replaced by a different one.
 - **Damaged binary roll-back.** The daemon records its binary's sha256 once it has stayed up `daemon.healthy_after_s`; a
-  binary that did so is copied to `bin/ah-engine.good`. The installers (bootstrap, `ah-update.sh`) record the sha256 they
+  binary that did so is copied to `bin/ah-engine.good`. The installers (`ah-hook install`, `ah-hook update`) record the sha256 they
   installed as the expected one. When the installed binary differs from the expected sha256, has never run healthy and is
   failing (a crash-loop trip, or `rollback.fail_n` hook-wrapper failures in `rollback.fail_window_s`),
   the thin client (`ah-hook integrity`) renames it to `bin/ah-engine.rolledback-<UTC time>-<sha8>` (never deleted) and restores the

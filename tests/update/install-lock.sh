@@ -1,6 +1,6 @@
 #!/bin/sh
 # shellcheck disable=SC2016 # single-quoted bodies are expanded by the inner sh, on purpose
-# The ONE install lock shared by `ah-hook integrity`, ah-update.sh and `ah-hook install`: deterministic interleavings.
+# The ONE install lock shared by `ah-hook integrity`, `ah-hook update` and `ah-hook install`: deterministic interleavings.
 # Scratch HOME and state, stub engines; the real ~/.anti-hall is never touched. The interleaving is forced, not timed: a stub
 # race point of the integrity check (AH_INTEGRITY_PARK, honoured under AH_WRAPPER_TEST=1) parks it right after it validated the
 # damaged binary, until the test lets it go.
@@ -9,7 +9,7 @@
 set -u
 repo=$(CDPATH='' cd -- "$(dirname "$0")/../.." && pwd)
 src=${1:-$repo/plugins/anti-hall}
-tmp=${TMPDIR:-/tmp}/ah-install-lock-test.$$
+tmp=/tmp/ahu-l.$$ # short: the launcher self-test needs a socket path under 100 bytes
 mkdir -p "$tmp"
 bg=
 reap() { for p in $bg; do kill "$p" 2>/dev/null; done; rm -rf "$tmp"; }
@@ -38,8 +38,6 @@ dead() { ! kill -0 "$1" 2>/dev/null; }
 
 plug=$tmp/plugin
 mkdir -p "$plug/hooks" "$plug/engine/defaults"
-cp "$src/hooks/ah-update.sh" "$plug/hooks/"
-cp "$src/engine/ah-update.toml" "$plug/engine/"
 cp "$src/engine/defaults/engine.toml" "$plug/engine/defaults/"
 cp "$src/engine/defaults/messages.toml" "$src/engine/defaults/index.toml" "$src/engine/defaults/dispatch.toml" "$plug/engine/defaults/"
 
@@ -76,7 +74,7 @@ world race
 parked_integrity check </dev/null >/dev/null 2>&1 &
 ipid=$!; bg="$bg $ipid"
 check "race: the integrity check parks after validating the damaged binary" waitfor 100 test -f "$park.validated.parked"
-HOME=$home AH_WRAPPER_TEST=1 AH_ENGINE_INSTALL_LOCK_WAIT_S=30 sh "$plug/hooks/ah-update.sh" --from "$tmp/new" --sha256 "$N" --no-restart \
+HOME=$home AH_WRAPPER_TEST=1 AH_ENGINE_INSTALL_LOCK_WAIT_S=30 "$hookbin" --plugin-root "$plug" update --from "$tmp/new" --sha256 "$N" --no-restart \
   >"$tmp/upd.out" 2>&1 &
 upid=$!; bg="$bg $upid"
 # the update either finishes (separate locks) or waits on the shared one: either way it has had its chance to act
@@ -131,7 +129,7 @@ check "stale: a dead holder's lock is broken and the record runs" test "$(sed -n
 check "stale: the break is logged" logged "event=lock_broke_stale"
 sleep 300 & holder=$!; bg="$bg $holder"
 integrity lock "$holder $(date +%s)" >/dev/null 2>&1
-HOME=$home AH_WRAPPER_TEST=1 AH_ENGINE_INSTALL_LOCK_WAIT_S=1 sh "$plug/hooks/ah-update.sh" --from "$tmp/new" --sha256 "$N" --no-restart \
+HOME=$home AH_WRAPPER_TEST=1 AH_ENGINE_INSTALL_LOCK_WAIT_S=1 "$hookbin" --plugin-root "$plug" update --from "$tmp/new" --sha256 "$N" --no-restart \
   >"$tmp/upd2.out" 2>&1; urc=$?
 check "held: the update fails while another holder keeps the lock" test "$urc" -eq 1
 check "held: the old binary is kept" test "$(sha "$bin")" = "$D"

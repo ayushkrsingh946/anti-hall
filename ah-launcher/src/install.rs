@@ -157,7 +157,7 @@ impl Cfg {
 
 // ---- running commands under a hard limit -----------------------------------------------------------------------------------
 
-enum Ran {
+pub enum Ran {
     Done(i32),
     TimedOut,
     CannotStart,
@@ -165,7 +165,7 @@ enum Ran {
 
 /// Run `argv` (stdin null; stdout and stderr to `out` when given) in its own process group with a hard limit: TERM at `limit`, KILL
 /// `grace` later. Nothing downloaded is trusted to terminate.
-fn run_limited(argv: &[String], envs: &[(&str, &Path)], out: Option<&Path>, limit: Duration, grace: Duration, poll: Duration) -> Ran {
+pub fn run_limited(argv: &[String], envs: &[(&str, &Path)], out: Option<&Path>, limit: Duration, grace: Duration, poll: Duration) -> Ran {
     let Some((prog, rest)) = argv.split_first() else { return Ran::CannotStart };
     let mut cmd = Command::new(prog);
     cmd.args(rest).stdin(Stdio::null()).process_group(0);
@@ -215,11 +215,11 @@ fn run_limited(argv: &[String], envs: &[(&str, &Path)], out: Option<&Path>, limi
     Ran::TimedOut
 }
 
-fn subst(argv: &[String], subs: &[(&str, &str)]) -> Vec<String> {
+pub fn subst(argv: &[String], subs: &[(&str, &str)]) -> Vec<String> {
     argv.iter().map(|a| fill(a, subs)).collect()
 }
 
-fn sha256_file(p: &Path) -> Option<String> {
+pub fn sha256_file(p: &Path) -> Option<String> {
     let mut f = fs::File::open(p).ok()?;
     let mut h = Sha256::new();
     let mut buf = vec![0u8; 1 << 16];
@@ -374,7 +374,7 @@ fn first_fields(p: &Path) -> Vec<String> {
     fs::read_to_string(p).map(|t| t.split_whitespace().map(str::to_string).collect()).unwrap_or_default()
 }
 
-fn make_exec(p: &Path) {
+pub fn make_exec(p: &Path) {
     let _ = fs::set_permissions(p, fs::Permissions::from_mode(0o755));
 }
 
@@ -520,7 +520,7 @@ pub fn run(s: &Settings, state: &Path, base: &Path, plugin_root: Option<&Path>, 
     let out_s = archive.display().to_string();
     let dl_subs = [("connect", connect.as_str()), ("max_time", max_time.as_str()), ("max_size", max_size.as_str()), ("out", out_s.as_str()), ("url", url.as_str())];
     let dl = if test { &c.curl_cmd_test } else { &c.curl_cmd };
-    let have = |prog: &str| std::env::var_os("PATH").is_some_and(|p| std::env::split_paths(&p).any(|d| d.join(prog).is_file()));
+    let have = on_path;
     let argv = if dl.first().is_some_and(|p| have(p)) {
         subst(dl, &dl_subs)
     } else if c.wget_cmd.first().is_some_and(|p| have(p)) {
@@ -683,4 +683,23 @@ mod tests {
         assert!(a.auto && a.verbose && a.print_target);
         assert!(parse(&[]).lock.is_none());
     }
+}
+
+/// True when an executable file `prog` is in a directory of the search path.
+pub fn on_path(prog: &str) -> bool {
+    std::env::var_os("PATH").is_some_and(|p| std::env::split_paths(&p).any(|d| d.join(prog).is_file()))
+}
+
+/// The release triple of this machine for the updater: the triple, or the "unsupported" word.
+pub fn platform_triple(s: &Settings, test: bool) -> String {
+    let Some(c) = Cfg::load(s) else { return s.text("msg.install_unsupported") };
+    let knob = |k: &str| -> Option<String> { if test { env_nonempty(&s.text(&format!("launcher.knob_{k}"))) } else { None } };
+    let probe = |argv: &[String]| -> Option<String> {
+        let tmp = std::env::temp_dir().join(format!("ah-probe-{}", std::process::id()));
+        let r = run_limited(argv, &[], Some(&tmp), Duration::from_secs(c.run_s), c.kill_grace, c.poll);
+        let out = fs::read_to_string(&tmp).ok();
+        let _ = fs::remove_file(&tmp);
+        matches!(r, Ran::Done(_)).then_some(out).flatten()
+    };
+    detect(&c, &knob, &probe).map_or_else(|_| s.text("msg.install_unsupported"), |p| p.triple)
 }

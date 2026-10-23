@@ -61,6 +61,22 @@ pub fn append(path: &Path, max: u64, keep: usize, event: &str, kv: &[(&str, &str
     }
 }
 
+/// Append one free-text line (with a time stamp) to `path`, cut back like [`append`].
+pub fn append_line(path: &Path, max: u64, keep: usize, line: &str) {
+    if fs::metadata(path).is_ok_and(|m| m.len() > max)
+        && let Ok(t) = fs::read_to_string(path)
+    {
+        let lines: Vec<&str> = t.lines().collect();
+        let from = lines.len().saturating_sub(keep);
+        let mut body = lines[from..].join("\n");
+        body.push('\n');
+        let _ = fs::write(path, body);
+    }
+    if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(f, "{} {line}", stamp_log(epoch_s()));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

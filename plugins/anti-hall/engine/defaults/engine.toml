@@ -43,7 +43,7 @@ doc = "Selects the daemon's allocator: jemalloc (default) or system. The client 
 value = "AH_ENGINE_ALLOCATOR"
 
 [env.auto_update]
-doc = "Read by hooks/ah-update.sh in auto mode: off, stable or dev overrides the `engine.autoUpdate` setting for one run."
+doc = "Read by `ah-hook update --auto`: off, stable or dev overrides the `engine.autoUpdate` setting for one run."
 value = "AH_ENGINE_AUTO_UPDATE"
 
 [env.bin]
@@ -55,7 +55,7 @@ doc = "Set to 0 or 1 to turn the first-run download of the sha256-pinned engine 
 value = "AH_ENGINE_BOOTSTRAP"
 
 [env.install_lock_token]
-doc = "Set by an installer (ah-update.sh) for the integrity check: the token of the install lock it already holds, so recording the expected sha256 runs under the caller's hold instead of waiting on it."
+doc = "Set by an installer (`ah-hook update`) for the integrity check: the token of the install lock it already holds, so recording the expected sha256 runs under the caller's hold instead of waiting on it."
 value = "AH_ENGINE_INSTALL_LOCK_TOKEN"
 
 [env.release_base]
@@ -1174,11 +1174,11 @@ doc = "A binary set aside by a roll-back is renamed bin/ah-engine.rolledback-<UT
 value = ".rolledback-"
 
 [rollback.install_lock]
-doc = "Directory (inside the state directory) of the ONE lock every writer of the engine binary shares: the integrity check and roll-back, the bootstrap's and ah-update's install and roll-back, and the recording of the expected sha256. Taken and given back through `ah-hook integrity lock` and `unlock`."
+doc = "Directory (inside the state directory) of the ONE lock every writer of the engine binary shares: the integrity check and roll-back, the installer's and the updater's install and roll-back, and the recording of the expected sha256. Taken and given back through `ah-hook integrity lock` and `unlock`."
 value = "install.lock"
 
 [rollback.lock_wait_s]
-doc = "How long an install, a roll-back by ah-update, or the recording of the expected sha256 waits for the install lock before giving up (the installer then fails and keeps the old binary)."
+doc = "How long an install, a roll-back by the updater, or the recording of the expected sha256 waits for the install lock before giving up (the installer then fails and keeps the old binary)."
 value = 60
 env = "AH_ENGINE_INSTALL_LOCK_WAIT_S"
 unit = "s"
@@ -1196,7 +1196,7 @@ min = 10
 unit = "ms"
 
 [rollback.lock_stale_s]
-doc = "An install lock held longer than this is broken (one whose holder process is gone is broken at once). Longer than the slowest install: ah-update's go_live_timeout_s."
+doc = "An install lock held longer than this is broken (one whose holder process is gone is broken at once). Longer than the slowest install: updater.go_live_timeout_s."
 value = 900
 env = "AH_ENGINE_INSTALL_LOCK_STALE_S"
 unit = "s"
@@ -1442,6 +1442,370 @@ unit = "bytes"
 [install.tar_cmd]
 doc = "The command that writes one member of the archive to stdout. Placeholders: {archive}, {member}."
 value = ["tar", "-xzOf", "{archive}", "{member}"]
+
+# ---- the updater (`ah-hook update`, ah-launcher/src/update.rs; the engine's `engine-update` hands off to it) -----------------------
+# Every URL, timeout, channel name, command line and text of the updater; it reads them at each run, so retuning it is editing this file.
+
+[updater.repo]
+doc = "The GitHub repository the releases come from."
+value = "talas9/anti-hall"
+
+[updater.api_base]
+doc = "Base URL of the GitHub API (https only; the test-only override allows http)."
+value = "https://api.github.com"
+
+[updater.download_base]
+doc = "Base URL of the release downloads: <base>/<tag>/<file>."
+value = "https://github.com/talas9/anti-hall/releases/download"
+
+[updater.git_url]
+doc = "The repository URL the live kit's plugin files are fetched from."
+value = "https://github.com/talas9/anti-hall.git"
+
+[updater.channel_stable]
+doc = "Name of the stable channel (the --channel value and the engine.autoUpdate value)."
+value = "stable"
+
+[updater.channel_dev]
+doc = "Name of the dev channel."
+value = "dev"
+
+[updater.tag_prefix_stable]
+doc = "Release tag prefix of the stable channel."
+value = "ah-engine-v"
+
+[updater.tag_prefix_dev]
+doc = "Release tag prefix of the dev channel."
+value = "ah-engine-dev-"
+
+[updater.default_channel]
+doc = "The channel an engine.autoUpdate value of true, on, yes or 1 stands for."
+value = "stable"
+
+[updater.sums_asset]
+doc = "Name of the checksum file published with every release."
+value = "SHA256SUMS"
+
+[updater.commit_asset]
+doc = "Name of the file that records the plugin commit a dev pre-release was built from."
+value = "COMMIT"
+
+[updater.list_per_page]
+doc = "How many recent releases the channel lookup reads."
+value = 30
+min = 1
+
+[updater.connect_timeout_s]
+doc = "Connect timeout of a download."
+value = 10
+unit = "s"
+
+[updater.download_timeout_s]
+doc = "Total time limit of a download."
+value = 180
+unit = "s"
+
+[updater.run_timeout_s]
+doc = "Hard limit for one command the updater runs (smoke test, extract); a child that ignores TERM is killed updater.kill_grace_s later."
+value = 20
+unit = "s"
+
+[updater.git_timeout_s]
+doc = "Hard limit for the git fetch of the live kit's plugin files."
+value = 240
+unit = "s"
+
+[updater.go_live_timeout_s]
+doc = "Hard limit for the live kit's go-live script. rollback.lock_stale_s must stay longer."
+value = 600
+unit = "s"
+
+[updater.max_download_bytes]
+doc = "Largest download accepted."
+value = 134217728
+unit = "bytes"
+
+[updater.auto_interval_s]
+doc = "engine.autoUpdate: least time between two automatic checks."
+value = 86400
+unit = "s"
+
+[updater.launcher_selftest_timeout_s]
+doc = "Hard limit for the launcher self-test of a candidate engine."
+value = 20
+unit = "s"
+
+[updater.stale_lock_s]
+doc = "The updater's own lock (one update at a time) older than this is taken over."
+value = 600
+unit = "s"
+
+[updater.kill_grace_s]
+doc = "How long a timed-out command gets after TERM before it is killed."
+value = 2
+unit = "s"
+
+[updater.poll_ms]
+doc = "How often the updater looks at a running command."
+value = 100
+unit = "ms"
+
+[updater.restart_pause_ms]
+doc = "Pause between stopping the old daemon, starting the new one and each status probe."
+value = 1000
+unit = "ms"
+
+[updater.status_tries]
+doc = "How many times the new daemon is probed with `status` after a restart."
+value = 10
+min = 1
+
+[updater.log_max_bytes]
+doc = "The update log is cut back to updater.log_keep_lines lines once it is larger than this."
+value = 65536
+unit = "bytes"
+
+[updater.log_keep_lines]
+doc = "Lines the update log keeps when it is cut back."
+value = 200
+min = 1
+
+[updater.excerpt_chars]
+doc = "How many characters of a failed command's output a log line quotes."
+value = 400
+min = 1
+
+[updater.file_lock]
+doc = "Directory (state directory) that keeps two updates from running at once."
+value = "update.lock"
+
+[updater.file_log]
+doc = "Update log, inside the state directory."
+value = "update.log"
+
+[updater.file_checked]
+doc = "Time of the last automatic check (epoch seconds), inside the state directory."
+value = "update.checked"
+
+[updater.file_installed]
+doc = "Record of the last update (epoch, source, sha256), inside the state directory."
+value = "update.installed"
+
+[updater.tmp_prefix]
+doc = "Prefix of the updater's scratch directory inside the state directory; <prefix><pid>."
+value = "update.tmp."
+
+[updater.prev_suffix]
+doc = "Suffix of the copy of the replaced binary."
+value = ".prev"
+
+[updater.kit_dir]
+doc = "The live kit directory below the base directory (~/.anti-hall); the test-only variable env.live_kit overrides it."
+value = "ah-engine-live"
+
+[updater.kit_state_file]
+doc = "File whose presence (with the script) marks a machine switched over to the live kit."
+value = "state/live.json"
+
+[updater.kit_script]
+doc = "The live kit's script that applies a bundle."
+value = "go-live.sh"
+
+[updater.kit_bundle]
+doc = "The live kit's bundle directory."
+value = "bundle"
+
+[updater.kit_bundle_plugin]
+doc = "The plugin directory inside a bundle."
+value = "plugin"
+
+[updater.kit_shell]
+doc = "The shell that runs the kit's script."
+value = "sh"
+
+[updater.kit_new]
+doc = "Infix of a staged new bundle: bundle<infix><time>."
+value = ".new-"
+
+[updater.kit_pre_update]
+doc = "Infix of the bundle an update replaced: bundle<infix><time>."
+value = ".pre-update-"
+
+[updater.kit_pre_rollback]
+doc = "Infix of the bundle a roll-back replaced."
+value = ".pre-rollback-"
+
+[updater.kit_failed]
+doc = "Infix of a bundle the kit could not apply."
+value = ".failed-"
+
+[updater.live_select_default]
+doc = "The default selection handed to the kit's script."
+value = "all-agreeing"
+
+[updater.lock_not_shipped]
+doc = "What a plugin-shipped lock inside a staged bundle is renamed to (go-live refuses it)."
+value = "ah-engine.lock.not-shipped"
+
+[updater.provenance_file]
+doc = "Name of the provenance note written into a staged bundle."
+value = "PROVENANCE.txt"
+
+[updater.installed_live]
+doc = "Word that marks an update done through the live kit in the update record."
+value = "live"
+
+[updater.and_plugin]
+doc = "Said after 'this exact engine' when the plugin matched too."
+value = " and plugin"
+
+[updater.sums_file]
+doc = "The checksum file looked for next to an offline file."
+value = "SHA256SUMS"
+
+[updater.plugin_lock_file]
+doc = "The plugin's pin of the engine release, relative to the plugin root."
+value = "ah-engine.lock"
+
+[updater.plugin_dir_in_repo]
+doc = "The plugin directory inside the repository (what the live kit's plugin files are taken from)."
+value = "plugins/anti-hall"
+
+[updater.commit_suffix]
+doc = "Suffix of the file next to --extract-to that records the pre-release's plugin commit."
+value = ".commit"
+
+[updater.src_sha_arg]
+doc = "How the --sha256 argument is named in the verified line."
+value = "--sha256"
+
+[updater.releases_url]
+doc = "The release list URL. Placeholders: {api}, {repo}, {per_page}."
+value = "{api}/repos/{repo}/releases?per_page={per_page}"
+
+[updater.asset_name]
+doc = "Name of the release archive for this platform. Placeholders: {tag}, {triple}."
+value = "{tag}-{triple}.tar.gz"
+
+[updater.download_url]
+doc = "URL of one release file. Placeholders: {base}, {tag}, {name}."
+value = "{base}/{tag}/{name}"
+
+[updater.engine_verb_stop]
+doc = "The engine verb that tells a running daemon to exit."
+value = "stop"
+
+[updater.engine_verb_serve]
+doc = "The engine verb that starts the daemon."
+value = "serve"
+
+[updater.engine_verb_status]
+doc = "The engine verb that probes the daemon."
+value = "status"
+
+[updater.engine_verb_version]
+doc = "The engine verb that prints its version (the smoke test)."
+value = "version"
+
+[updater.selftest_flag]
+doc = "The launcher argument that runs its self-test."
+value = "--selftest"
+
+[updater.selftest_engine_flag]
+doc = "The launcher argument that names the engine to self-test with."
+value = "--engine"
+
+[updater.arg_finish_restart]
+doc = "Internal argument of the detached tail of an automatic update (stop the old daemon, start the new one)."
+value = "--finish-restart"
+
+[updater.git_noprompt_env]
+doc = "Environment variable set to 0 for git so it never asks for a password."
+value = "GIT_TERMINAL_PROMPT"
+
+[updater.setting_section]
+doc = "Section of the engine.autoUpdate setting in the user settings file."
+value = "engine"
+
+[updater.setting_auto_words]
+doc = "Spellings of the engine.autoUpdate key in the settings file."
+value = ["autoUpdate", "auto_update"]
+
+[updater.words_on]
+doc = "Values of engine.autoUpdate that mean on with the default channel."
+value = ["true", "on", "yes", "1"]
+
+[updater.tar_list_cmd]
+doc = "Lists the members of an archive. Placeholder: {archive}."
+value = ["tar", "-tzf", "{archive}"]
+
+[updater.tar_cat_cmd]
+doc = "Writes one member of an archive to stdout. Placeholders: {archive}, {member}."
+value = ["tar", "-xzOf", "{archive}", "{member}"]
+
+[updater.tar_unpack_cmd]
+doc = "Unpacks a tar archive. Placeholders: {archive}, {dest}."
+value = ["tar", "-xf", "{archive}", "-C", "{dest}"]
+
+[updater.curl_cmd]
+doc = "The download command. Placeholders: {connect}, {max_time}, {max_size}, {out}, {url}."
+value = ["curl", "-fsSL", "--proto", "=https", "--tlsv1.2", "--connect-timeout", "{connect}", "--max-time", "{max_time}", "--max-filesize", "{max_size}", "-o", "{out}", "{url}"]
+
+[updater.curl_cmd_test]
+doc = "Test-only form of the download command (http and file URLs allowed); used only with the test flag."
+value = ["curl", "-fsSL", "--connect-timeout", "{connect}", "--max-time", "{max_time}", "-o", "{out}", "{url}"]
+
+[updater.wget_cmd]
+doc = "The download command when curl is not installed."
+value = ["wget", "-q", "-T", "{max_time}", "-O", "{out}", "{url}"]
+
+[updater.attest_cmd]
+doc = "Verifies the GitHub build attestation of a download. Placeholders: {asset}, {repo}."
+value = ["gh", "attestation", "verify", "{asset}", "--repo", "{repo}"]
+
+[updater.attest_auth_cmd]
+doc = "Tells whether gh is logged in."
+value = ["gh", "auth", "status"]
+
+[updater.git_init_cmd]
+doc = "Creates the scratch repository. Placeholder: {dir}."
+value = ["git", "-C", "{dir}", "init", "-q"]
+
+[updater.git_fetch_cmd]
+doc = "Fetches one commit. Placeholders: {dir}, {url}, {commit}."
+value = ["git", "-C", "{dir}", "fetch", "-q", "--depth", "1", "{url}", "{commit}"]
+
+[updater.git_archive_cmd]
+doc = "Writes the plugin directory of the fetched commit to a tar file. Placeholders: {dir}, {out}, {path}."
+value = ["git", "-C", "{dir}", "archive", "-o", "{out}", "FETCH_HEAD", "{path}"]
+
+[env.live_kit]
+doc = "Test and operator override: the live kit directory (default: updater.kit_dir below the base directory)."
+value = "AH_LIVE_KIT"
+
+[launcher.cli_update_verb]
+doc = "The ah-hook command-line verb that runs the updater (`ah-hook update --from FILE | --channel stable|dev | --rollback | --auto`)."
+value = "update"
+
+[launcher.knob_update_api_base]
+doc = "Test-only: environment variable that replaces updater.api_base (honoured only when the test flag is set)."
+value = "AH_UPDATE_API_BASE"
+
+[launcher.knob_update_download_base]
+doc = "Test-only: environment variable that replaces updater.download_base."
+value = "AH_UPDATE_DOWNLOAD_BASE"
+
+[launcher.knob_update_git_url]
+doc = "Test-only: environment variable that replaces updater.git_url."
+value = "AH_UPDATE_GIT_URL"
+
+[launcher.knob_update_triple]
+doc = "Test-only: environment variable that replaces the detected release triple."
+value = "AH_UPDATE_TRIPLE"
+
+[launcher.knob_update_no_attest]
+doc = "Test-only: environment variable that, set to 1, skips the build attestation check."
+value = "AH_UPDATE_NO_ATTEST"
 
 # ---- the hook launcher (ah-launcher, binary `ah-hook`): its own limits, names and switches ------------------------------------
 # The launcher is the bootloader in front of the engine; it reads these at start. A missing or invalid file falls back to the

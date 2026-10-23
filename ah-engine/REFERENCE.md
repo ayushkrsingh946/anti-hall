@@ -61,7 +61,7 @@ Every command accepts `--json`. Read-only commands never change state.
 | `version` | `` | yes | implemented | Print the version this build reports. |
 | `mcp-reaper` | `run [--dry-run]` | no | implemented | The standalone MCP orphan reaper as an engine command (the port of companion/mcp-reaper.js): `run` makes one sweep (the scheduled job `mcp_reaper` runs it every mcp_reaper.job_every_ms), `--dry-run` logs what it would reap and signals nothing. It does nothing while maintenance.mcpReaperJob is off, on auto until the Node reaper's opt-in was carried over (`ah-engine units heal`), and while a Node reaper unit is still installed, so the reaper never runs twice. Prints one JSON line. |
 | `refresh` | `[--force] [--home <dir>]` | no | implemented | Handle the pending session-cache refresh requests the SessionStart checks wrote (L06): the remote-latest release tag (version-alert), the Claude Code and DevSwarm CLI versions (the drift probes) and the reload repair (repair-on-reload), each as a bounded subprocess; `--force` runs every probe whether requested or not (never the repair unless requested). Prints one result per probe. The scheduler runs it every refresh.every_ms. |
-| `engine-update` | `--from <file> [--sha256 <x>] [--yes] \| --channel <stable\|dev> \| --rollback \| --auto [--dry-run] [--no-restart]` | no | implemented | Update the engine binary: runs the plugin's updater script (hooks/ah-update.sh) with the given arguments (--from FILE [--sha256 X] [--yes] \| --channel stable\|dev \| --rollback \| --auto \| --dry-run). The engine itself does no network access. |
+| `engine-update` | `--from <file> [--sha256 <x>] [--yes] \| --channel <stable\|dev> \| --rollback \| --auto [--dry-run] [--no-restart]` | no | implemented | Update the engine binary: runs the thin client's updater (ah-hook update) with the given arguments (--from FILE [--sha256 X] [--yes] \| --channel stable\|dev \| --rollback \| --auto \| --dry-run). The engine itself does no network access. |
 | `units` | `<status\|install\|heal\|uninstall> [--dry-run] [--bin <path>]` | no | implemented | The engine's service units: `status` lists the engine unit and the units the Node installers wrote, with whether the engine runs their duty; `install` writes (or refreshes) the one unit that keeps `ah-engine serve` running (launchd on macOS, a systemd user service and timer on Linux) and loads it; `heal` installs and then retires each Node unit whose duty the engine runs (the MCP reaper when its job is on, the DevSwarm supervisor and ingest when devswarm_sup.mode / devswarm_ingest.mode is engine); `uninstall` unloads the engine unit. `--dry-run` reports and changes nothing; `--bin <path>` names the engine binary the unit runs. A removed unit file is moved into the state directory, never deleted. A retired unit that comes back is recorded as a mistake and left alone. |
 | `codex-activate` | `` | no | implemented | Write the advisory Codex activation marker ~/.anti-hall/codex-activated.json ({activatedAt, scope = the working directory}) that the anti-hall-activate skill leaves after installing the hooks; it changes no real configuration and deleting it is harmless. Replaces codex/scripts/write-activation-sentinel.js. |
 | `codex-limit-status` | `` | yes | implemented | Print whether limit conservation is active, as JSON (active, reason, weekly, fiveHour, sonnetWeekly, source, stale, resetsAt): the Codex skill anti-hall-context-conserve runs it instead of codex/scripts/limit-conserve-status.js. Same decision as the limit-conserve-inject hook: the limitConserve.mode setting (on, off, auto), else the OMC usage cache with the threshold, the reset-aware and snapshot-age rules and the account-switch guard. Read-only apart from the account-switch state file the hook keeps current. Fail-open: an unreadable cache is inactive. |
@@ -169,7 +169,7 @@ Every `AH_ENGINE_*` variable the engine or its wrappers read. A variable that ov
 | `AH_ENGINE_ACK_TIMEOUT_MS` | `storage.ack_timeout_ms` | How long a request waits for its write to commit before it is answered with an error (the client then retries or spools; the write id makes a late commit harmless); kept below client.ctl_timeout_ms so the client hears the error. |
 | `AH_ENGINE_AGENT_TICK_MS` | `schedule.agent_tick_ms` | Interval of the agent_tick job; 0 turns the tracker's ticks off. |
 | `AH_ENGINE_ALLOCATOR` |  | Selects the daemon's allocator: jemalloc (default) or system. The client sets it from `diagnostics.allocator` on the daemon it spawns, unless it is already set; the daemon reads it before its first allocation. Environment variable the client sets on the daemon it spawns to select the allocator (the daemon reads it before its first allocation). An existing value in the client's own environment wins. |
-| `AH_ENGINE_AUTO_UPDATE` |  | Read by hooks/ah-update.sh in auto mode: off, stable or dev overrides the `engine.autoUpdate` setting for one run. |
+| `AH_ENGINE_AUTO_UPDATE` |  | Read by `ah-hook update --auto`: off, stable or dev overrides the `engine.autoUpdate` setting for one run. |
 | `AH_ENGINE_BACKUP_MS` | `schedule.backup_ms` | Interval of the backup job (D27); 0 (the default) turns it off. |
 | `AH_ENGINE_BIN` |  | Test-only: the engine binary the hook wrapper runs instead of the installed one. The wrapper unsets it unless AH_WRAPPER_TEST=1 is also set, so a stray value can never turn the safety net into a silent allow. Test-only: environment variable that replaces the engine binary (honoured only when the test flag is set). |
 | `AH_ENGINE_BOOTSTRAP` |  | Set to 0 or 1 to turn the first-run download of the sha256-pinned engine binary off or on; overrides the `engine.bootstrap` setting. Read by `ah-hook install --auto` and hooks/install.sh. |
@@ -204,9 +204,9 @@ Every `AH_ENGINE_*` variable the engine or its wrappers read. A variable that ov
 | `AH_ENGINE_HEARTBEAT_STALE_MS` | `client.heartbeat_stale_ms` | A hook call past client.deadline_ms keeps waiting for a late reply (client.slow_fallback_max_ms) only while the daemon's heartbeat (files.heartbeat) is younger than this. Older means the daemon may be stopped or wedged, not slow: the call fails open at once and marks it down (client.down_marker_ttl_ms). One stale sample only raises a suspicion (files.heartbeat_suspect); the client ends that daemon only once the same heartbeat stayed unchanged for client.heartbeat_confirm_ms, and only when it is the pid holding the singleton lock, verified as this engine's daemon, of this state dir, and still the process generation the heartbeat recorded (start time and executable from the operating system, re-read immediately before the signal); single-flight and under the crash-loop rule. Then it starts a new one. A heartbeat that names another pid or is missing counts as alive. Keep it well above daemon.watchdog_tick_ms and below client.slow_fallback_max_ms less client.slow_wait_margin_ms, so a stop is detected within the first slow call. 0 disables the check. |
 | `AH_ENGINE_IDLE_EXIT_S` | `daemon.idle_exit_s` | Seconds without any request after which the daemon exits cleanly (the next hook call starts a fresh one, and the scheduler catches up its missed jobs); 0 keeps it resident. Default is 1800 (about 30 minutes), so a daemon with no sessions does not linger forever. A daemon whose state dir, lock file or executable is gone still exits on its own (daemon.orphan_check_ms). |
 | `AH_ENGINE_INSTALL_LOCK_HOOK_WAIT_S` | `rollback.lock_hook_wait_s` | How long the integrity check started by the hook wrapper waits for the install lock before skipping (the next run checks). A held lock never holds a session. |
-| `AH_ENGINE_INSTALL_LOCK_STALE_S` | `rollback.lock_stale_s` | An install lock held longer than this is broken (one whose holder process is gone is broken at once). Longer than the slowest install: ah-update's go_live_timeout_s. |
-| `AH_ENGINE_INSTALL_LOCK_TOKEN` |  | Set by an installer (ah-update.sh) for the integrity check: the token of the install lock it already holds, so recording the expected sha256 runs under the caller's hold instead of waiting on it. |
-| `AH_ENGINE_INSTALL_LOCK_WAIT_S` | `rollback.lock_wait_s` | How long an install, a roll-back by ah-update, or the recording of the expected sha256 waits for the install lock before giving up (the installer then fails and keeps the old binary). |
+| `AH_ENGINE_INSTALL_LOCK_STALE_S` | `rollback.lock_stale_s` | An install lock held longer than this is broken (one whose holder process is gone is broken at once). Longer than the slowest install: updater.go_live_timeout_s. |
+| `AH_ENGINE_INSTALL_LOCK_TOKEN` |  | Set by an installer (`ah-hook update`) for the integrity check: the token of the install lock it already holds, so recording the expected sha256 runs under the caller's hold instead of waiting on it. |
+| `AH_ENGINE_INSTALL_LOCK_WAIT_S` | `rollback.lock_wait_s` | How long an install, a roll-back by the updater, or the recording of the expected sha256 waits for the install lock before giving up (the installer then fails and keeps the old binary). |
 | `AH_ENGINE_JEV_SWEEP_MS` | `schedule.jev_sweep_ms` | Interval of the jev_sweep job; 0 turns it off. |
 | `AH_ENGINE_MAINTAIN_MS` | `schedule.maintain_ms` | Interval of the maintain job (D26); 0 turns it off. |
 | `AH_ENGINE_MAX_EVENTS` | `telemetry.max_events` | Most impact events kept in memory (oldest dropped first); counts per kind are kept exactly in separate counters. |
@@ -516,7 +516,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | Key | Default | Env override | Unit | What it is |
 |---|---|---|---|---|
 | `env.allocator` | `AH_ENGINE_ALLOCATOR` |  |  | Selects the daemon's allocator: jemalloc (default) or system. The client sets it from `diagnostics.allocator` on the daemon it spawns, unless it is already set; the daemon reads it before its first allocation. |
-| `env.auto_update` | `AH_ENGINE_AUTO_UPDATE` |  |  | Read by hooks/ah-update.sh in auto mode: off, stable or dev overrides the `engine.autoUpdate` setting for one run. |
+| `env.auto_update` | `AH_ENGINE_AUTO_UPDATE` |  |  | Read by `ah-hook update --auto`: off, stable or dev overrides the `engine.autoUpdate` setting for one run. |
 | `env.bin` | `AH_ENGINE_BIN` |  |  | Test-only: the engine binary the hook wrapper runs instead of the installed one. The wrapper unsets it unless AH_WRAPPER_TEST=1 is also set, so a stray value can never turn the safety net into a silent allow. |
 | `env.bootstrap` | `AH_ENGINE_BOOTSTRAP` |  |  | Set to 0 or 1 to turn the first-run download of the sha256-pinned engine binary off or on; overrides the `engine.bootstrap` setting. Read by `ah-hook install --auto` and hooks/install.sh. |
 | `env.debug` | `AH_ENGINE_DEBUG` |  |  | When set to anything but 0 or empty, turns debug mode (diagnostics.debug_mode) on for that process. |
@@ -525,7 +525,8 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `env.fail_open_file` | `AH_ENGINE_FAIL_OPEN_FILE` |  |  | A file the client appends one line to (`<reason> <check>`) for every engine-level fail-open the daemon reported in a reply (GitHub #201). The launcher sets it inside its per-call run directory and counts the lines after the engine exits, so its own stats and log know the call failed open. |
 | `env.home` | `HOME` |  |  | Home directory variable. |
 | `env.home_alt` | `USERPROFILE` |  |  | Fallback home directory variable (used by the git check when the home variable is unset). |
-| `env.install_lock_token` | `AH_ENGINE_INSTALL_LOCK_TOKEN` |  |  | Set by an installer (ah-update.sh) for the integrity check: the token of the install lock it already holds, so recording the expected sha256 runs under the caller's hold instead of waiting on it. |
+| `env.install_lock_token` | `AH_ENGINE_INSTALL_LOCK_TOKEN` |  |  | Set by an installer (`ah-hook update`) for the integrity check: the token of the install lock it already holds, so recording the expected sha256 runs under the caller's hold instead of waiting on it. |
+| `env.live_kit` | `AH_LIVE_KIT` |  |  | Test and operator override: the live kit directory (default: updater.kit_dir below the base directory). |
 | `env.nospawn` | `AH_ENGINE_NOSPAWN` |  |  | When set, the client never starts a daemon (tests, and hosts that manage the daemon themselves). |
 | `env.plugin_root` | `AH_ENGINE_PLUGIN_ROOT` |  |  | Plugin install directory, used by built-in checks that build override commands (a rule's `options.plugin_root` wins). |
 | `env.release_base` | `AH_ENGINE_RELEASE_BASE` |  |  | Test-only: download base URL for the engine binary (http allowed). Honored by `ah-hook install` and hooks/install.sh only with AH_WRAPPER_TEST=1. |
@@ -678,6 +679,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `launcher.cli_integrity_verb` | `integrity` |  |  | The ah-hook command-line verb that runs the binary integrity check and roll-back (`ah-hook integrity record\|accept\|check\|fail\|status\|lock\|unlock`); the launcher starts itself with it in the background. |
 | `launcher.cli_lowercase_verbs` | `1` |  |  | 1: a first argument that starts with a lowercase letter is an engine command (`ah-hook <verb> [args...]` runs `ah-engine <verb> [args...]` by exec); hook event names are PascalCase, so they never match. 0: every first argument is a hook event. |
 | `launcher.cli_no_engine_exit` | `127` |  |  | Exit code of `ah-hook <verb>` when no engine can run the command (msg.run_engine_missing goes to stderr; nothing else runs). |
+| `launcher.cli_update_verb` | `update` |  |  | The ah-hook command-line verb that runs the updater (`ah-hook update --from FILE \| --channel stable\|dev \| --rollback \| --auto`). |
 | `launcher.connect_timeout_ms` | `50` |  | ms | Bound on the launcher's probe connection to the daemon socket (it only tells a live daemon from a stale socket file). |
 | `launcher.cpu_hard_s` | `5` |  | s | Hard limit on the launcher's own CPU time (RLIMIT_CPU, whole seconds): past it the launcher stops the engine and lets the hook through. The engine does not inherit it. |
 | `launcher.cpu_soft_ms` | `500` |  | ms | Soft limit on the launcher's own CPU time: past it the launcher warns and counts it (at exit). |
@@ -708,6 +710,11 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `launcher.knob_uname_m` | `AH_BOOTSTRAP_UNAME_M` |  |  | Test-only: environment variable that replaces `uname -m` for the platform detection. |
 | `launcher.knob_uname_r` | `AH_BOOTSTRAP_UNAME_R` |  |  | Test-only: environment variable that replaces `uname -r` for the platform detection. |
 | `launcher.knob_uname_s` | `AH_BOOTSTRAP_UNAME_S` |  |  | Test-only: environment variable that replaces `uname -s` for the platform detection (honoured only when the test flag is set). |
+| `launcher.knob_update_api_base` | `AH_UPDATE_API_BASE` |  |  | Test-only: environment variable that replaces updater.api_base (honoured only when the test flag is set). |
+| `launcher.knob_update_download_base` | `AH_UPDATE_DOWNLOAD_BASE` |  |  | Test-only: environment variable that replaces updater.download_base. |
+| `launcher.knob_update_git_url` | `AH_UPDATE_GIT_URL` |  |  | Test-only: environment variable that replaces updater.git_url. |
+| `launcher.knob_update_no_attest` | `AH_UPDATE_NO_ATTEST` |  |  | Test-only: environment variable that, set to 1, skips the build attestation check. |
+| `launcher.knob_update_triple` | `AH_UPDATE_TRIPLE` |  |  | Test-only: environment variable that replaces the detected release triple. |
 | `launcher.log_hard_bytes` | `1048576` |  | bytes | Size at which the launcher's failure log stops accepting lines: further lines are dropped and the drops counted. |
 | `launcher.log_line_max` | `512` |  | bytes | Longest line the launcher writes to its failure log; longer lines are cut. |
 | `launcher.log_rotate_min_s` | `60` |  | s | Fewest seconds between two rotations of the launcher's failure log. A flood of lines therefore grows the current file to launcher.log_hard_bytes (then lines are dropped and counted) instead of rotating the older history away. |
@@ -811,13 +818,13 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `rollback.field_sep` | ` ` |  |  | Separator between the fields of the crash-loop binary record (files.crashloop_bin: size, modification time, sha256). |
 | `rollback.good_suffix` | `.good` |  |  | Suffix of the known-good copy of the binary (bin/ah-engine.good) and of its sha256 file (.good.sha256). Never deleted. |
 | `rollback.hash_chunk` | `65536` |  | bytes | Bytes read at a time when the engine hashes its own binary (sha256). |
-| `rollback.install_lock` | `install.lock` |  |  | Directory (inside the state directory) of the ONE lock every writer of the engine binary shares: the integrity check and roll-back, the bootstrap's and ah-update's install and roll-back, and the recording of the expected sha256. Taken and given back through `ah-hook integrity lock` and `unlock`. |
+| `rollback.install_lock` | `install.lock` |  |  | Directory (inside the state directory) of the ONE lock every writer of the engine binary shares: the integrity check and roll-back, the installer's and the updater's install and roll-back, and the recording of the expected sha256. Taken and given back through `ah-hook integrity lock` and `unlock`. |
 | `rollback.line_end` | `\n` |  |  | Line terminator of the crash-loop binary record. |
 | `rollback.lock_hook_wait_s` | `2` | `AH_ENGINE_INSTALL_LOCK_HOOK_WAIT_S` | s | How long the integrity check started by the hook wrapper waits for the install lock before skipping (the next run checks). A held lock never holds a session. |
 | `rollback.lock_owner_file` | `owner` |  |  | Name of the file inside the install-lock directory that holds the owner token ("<pid> <epoch>" of the holder). Created only with a hard link and taken away only with a rename, so one taker wins. |
 | `rollback.lock_poll_ms` | `1000` |  | ms | How often a process waiting for the install lock looks at it again. |
-| `rollback.lock_stale_s` | `900` | `AH_ENGINE_INSTALL_LOCK_STALE_S` | s | An install lock held longer than this is broken (one whose holder process is gone is broken at once). Longer than the slowest install: ah-update's go_live_timeout_s. |
-| `rollback.lock_wait_s` | `60` | `AH_ENGINE_INSTALL_LOCK_WAIT_S` | s | How long an install, a roll-back by ah-update, or the recording of the expected sha256 waits for the install lock before giving up (the installer then fails and keeps the old binary). |
+| `rollback.lock_stale_s` | `900` | `AH_ENGINE_INSTALL_LOCK_STALE_S` | s | An install lock held longer than this is broken (one whose holder process is gone is broken at once). Longer than the slowest install: updater.go_live_timeout_s. |
+| `rollback.lock_wait_s` | `60` | `AH_ENGINE_INSTALL_LOCK_WAIT_S` | s | How long an install, a roll-back by the updater, or the recording of the expected sha256 waits for the install lock before giving up (the installer then fails and keeps the old binary). |
 | `rollback.log_keep_lines` | `200` |  |  | Lines the integrity log keeps when it is cut back. |
 | `rollback.log_max_bytes` | `65536` |  | bytes | The integrity log (files.integrity_log) is cut back to its last rollback.log_keep_lines lines once it is larger than this. |
 | `rollback.on_mismatch` | `1` | `AH_ENGINE_ROLLBACK_ON_MISMATCH` |  | 1 = a binary whose sha256 differs from the one the installer recorded (swapped by hand) and that has never run healthy is rolled back to the known-good binary at the next check. 0 = never roll back on a mismatch alone (a local build you are developing). `accept` records the installed binary as the expected one. |
@@ -831,6 +838,90 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `store.mailbox_cap` | `64` |  |  | Most pending (unconsumed) mailbox entries per project. |
 | `store.max_projects` | `256` |  |  | Most project partitions holding a key or a pending message; a write that would start one more is refused. |
 | `store.value_cap` | `65536` |  | bytes | Largest stored value. |
+
+### engine.toml / updater
+
+| Key | Default | Env override | Unit | What it is |
+|---|---|---|---|---|
+| `updater.and_plugin` | ` and plugin` |  |  | Said after 'this exact engine' when the plugin matched too. |
+| `updater.api_base` | `https://api.github.com` |  |  | Base URL of the GitHub API (https only; the test-only override allows http). |
+| `updater.arg_finish_restart` | `--finish-restart` |  |  | Internal argument of the detached tail of an automatic update (stop the old daemon, start the new one). |
+| `updater.asset_name` | `{tag}-{triple}.tar.gz` |  |  | Name of the release archive for this platform. Placeholders: {tag}, {triple}. |
+| `updater.attest_auth_cmd` | `gh, auth, status` |  |  | Tells whether gh is logged in. |
+| `updater.attest_cmd` | `gh, attestation, verify, {asset}, --repo, {repo}` |  |  | Verifies the GitHub build attestation of a download. Placeholders: {asset}, {repo}. |
+| `updater.auto_interval_s` | `86400` |  | s | engine.autoUpdate: least time between two automatic checks. |
+| `updater.channel_dev` | `dev` |  |  | Name of the dev channel. |
+| `updater.channel_stable` | `stable` |  |  | Name of the stable channel (the --channel value and the engine.autoUpdate value). |
+| `updater.commit_asset` | `COMMIT` |  |  | Name of the file that records the plugin commit a dev pre-release was built from. |
+| `updater.commit_suffix` | `.commit` |  |  | Suffix of the file next to --extract-to that records the pre-release's plugin commit. |
+| `updater.connect_timeout_s` | `10` |  | s | Connect timeout of a download. |
+| `updater.curl_cmd` | `14 items` |  |  | The download command. Placeholders: {connect}, {max_time}, {max_size}, {out}, {url}. |
+| `updater.curl_cmd_test` | `9 items` |  |  | Test-only form of the download command (http and file URLs allowed); used only with the test flag. |
+| `updater.default_channel` | `stable` |  |  | The channel an engine.autoUpdate value of true, on, yes or 1 stands for. |
+| `updater.download_base` | `https://github.com/talas9/anti-hall/releases/download` |  |  | Base URL of the release downloads: <base>/<tag>/<file>. |
+| `updater.download_timeout_s` | `180` |  | s | Total time limit of a download. |
+| `updater.download_url` | `{base}/{tag}/{name}` |  |  | URL of one release file. Placeholders: {base}, {tag}, {name}. |
+| `updater.engine_verb_serve` | `serve` |  |  | The engine verb that starts the daemon. |
+| `updater.engine_verb_status` | `status` |  |  | The engine verb that probes the daemon. |
+| `updater.engine_verb_stop` | `stop` |  |  | The engine verb that tells a running daemon to exit. |
+| `updater.engine_verb_version` | `version` |  |  | The engine verb that prints its version (the smoke test). |
+| `updater.excerpt_chars` | `400` |  |  | How many characters of a failed command's output a log line quotes. |
+| `updater.file_checked` | `update.checked` |  |  | Time of the last automatic check (epoch seconds), inside the state directory. |
+| `updater.file_installed` | `update.installed` |  |  | Record of the last update (epoch, source, sha256), inside the state directory. |
+| `updater.file_lock` | `update.lock` |  |  | Directory (state directory) that keeps two updates from running at once. |
+| `updater.file_log` | `update.log` |  |  | Update log, inside the state directory. |
+| `updater.git_archive_cmd` | `8 items` |  |  | Writes the plugin directory of the fetched commit to a tar file. Placeholders: {dir}, {out}, {path}. |
+| `updater.git_fetch_cmd` | `9 items` |  |  | Fetches one commit. Placeholders: {dir}, {url}, {commit}. |
+| `updater.git_init_cmd` | `git, -C, {dir}, init, -q` |  |  | Creates the scratch repository. Placeholder: {dir}. |
+| `updater.git_noprompt_env` | `GIT_TERMINAL_PROMPT` |  |  | Environment variable set to 0 for git so it never asks for a password. |
+| `updater.git_timeout_s` | `240` |  | s | Hard limit for the git fetch of the live kit's plugin files. |
+| `updater.git_url` | `https://github.com/talas9/anti-hall.git` |  |  | The repository URL the live kit's plugin files are fetched from. |
+| `updater.go_live_timeout_s` | `600` |  | s | Hard limit for the live kit's go-live script. rollback.lock_stale_s must stay longer. |
+| `updater.installed_live` | `live` |  |  | Word that marks an update done through the live kit in the update record. |
+| `updater.kill_grace_s` | `2` |  | s | How long a timed-out command gets after TERM before it is killed. |
+| `updater.kit_bundle` | `bundle` |  |  | The live kit's bundle directory. |
+| `updater.kit_bundle_plugin` | `plugin` |  |  | The plugin directory inside a bundle. |
+| `updater.kit_dir` | `ah-engine-live` |  |  | The live kit directory below the base directory (~/.anti-hall); the test-only variable env.live_kit overrides it. |
+| `updater.kit_failed` | `.failed-` |  |  | Infix of a bundle the kit could not apply. |
+| `updater.kit_new` | `.new-` |  |  | Infix of a staged new bundle: bundle<infix><time>. |
+| `updater.kit_pre_rollback` | `.pre-rollback-` |  |  | Infix of the bundle a roll-back replaced. |
+| `updater.kit_pre_update` | `.pre-update-` |  |  | Infix of the bundle an update replaced: bundle<infix><time>. |
+| `updater.kit_script` | `go-live.sh` |  |  | The live kit's script that applies a bundle. |
+| `updater.kit_shell` | `sh` |  |  | The shell that runs the kit's script. |
+| `updater.kit_state_file` | `state/live.json` |  |  | File whose presence (with the script) marks a machine switched over to the live kit. |
+| `updater.launcher_selftest_timeout_s` | `20` |  | s | Hard limit for the launcher self-test of a candidate engine. |
+| `updater.list_per_page` | `30` |  |  | How many recent releases the channel lookup reads. |
+| `updater.live_select_default` | `all-agreeing` |  |  | The default selection handed to the kit's script. |
+| `updater.lock_not_shipped` | `ah-engine.lock.not-shipped` |  |  | What a plugin-shipped lock inside a staged bundle is renamed to (go-live refuses it). |
+| `updater.log_keep_lines` | `200` |  |  | Lines the update log keeps when it is cut back. |
+| `updater.log_max_bytes` | `65536` |  | bytes | The update log is cut back to updater.log_keep_lines lines once it is larger than this. |
+| `updater.max_download_bytes` | `134217728` |  | bytes | Largest download accepted. |
+| `updater.plugin_dir_in_repo` | `plugins/anti-hall` |  |  | The plugin directory inside the repository (what the live kit's plugin files are taken from). |
+| `updater.plugin_lock_file` | `ah-engine.lock` |  |  | The plugin's pin of the engine release, relative to the plugin root. |
+| `updater.poll_ms` | `100` |  | ms | How often the updater looks at a running command. |
+| `updater.prev_suffix` | `.prev` |  |  | Suffix of the copy of the replaced binary. |
+| `updater.provenance_file` | `PROVENANCE.txt` |  |  | Name of the provenance note written into a staged bundle. |
+| `updater.releases_url` | `{api}/repos/{repo}/releases?per_page={per_page}` |  |  | The release list URL. Placeholders: {api}, {repo}, {per_page}. |
+| `updater.repo` | `talas9/anti-hall` |  |  | The GitHub repository the releases come from. |
+| `updater.restart_pause_ms` | `1000` |  | ms | Pause between stopping the old daemon, starting the new one and each status probe. |
+| `updater.run_timeout_s` | `20` |  | s | Hard limit for one command the updater runs (smoke test, extract); a child that ignores TERM is killed updater.kill_grace_s later. |
+| `updater.selftest_engine_flag` | `--engine` |  |  | The launcher argument that names the engine to self-test with. |
+| `updater.selftest_flag` | `--selftest` |  |  | The launcher argument that runs its self-test. |
+| `updater.setting_auto_words` | `autoUpdate, auto_update` |  |  | Spellings of the engine.autoUpdate key in the settings file. |
+| `updater.setting_section` | `engine` |  |  | Section of the engine.autoUpdate setting in the user settings file. |
+| `updater.src_sha_arg` | `--sha256` |  |  | How the --sha256 argument is named in the verified line. |
+| `updater.stale_lock_s` | `600` |  | s | The updater's own lock (one update at a time) older than this is taken over. |
+| `updater.status_tries` | `10` |  |  | How many times the new daemon is probed with `status` after a restart. |
+| `updater.sums_asset` | `SHA256SUMS` |  |  | Name of the checksum file published with every release. |
+| `updater.sums_file` | `SHA256SUMS` |  |  | The checksum file looked for next to an offline file. |
+| `updater.tag_prefix_dev` | `ah-engine-dev-` |  |  | Release tag prefix of the dev channel. |
+| `updater.tag_prefix_stable` | `ah-engine-v` |  |  | Release tag prefix of the stable channel. |
+| `updater.tar_cat_cmd` | `tar, -xzOf, {archive}, {member}` |  |  | Writes one member of an archive to stdout. Placeholders: {archive}, {member}. |
+| `updater.tar_list_cmd` | `tar, -tzf, {archive}` |  |  | Lists the members of an archive. Placeholder: {archive}. |
+| `updater.tar_unpack_cmd` | `tar, -xf, {archive}, -C, {dest}` |  |  | Unpacks a tar archive. Placeholders: {archive}, {dest}. |
+| `updater.tmp_prefix` | `update.tmp.` |  |  | Prefix of the updater's scratch directory inside the state directory; <prefix><pid>. |
+| `updater.wget_cmd` | `7 items` |  |  | The download command when curl is not installed. |
+| `updater.words_on` | `true, on, yes, 1` |  |  | Values of engine.autoUpdate that mean on with the default channel. |
 
 ### git.toml / git
 
@@ -10260,11 +10351,8 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | Key | Default | Env override | Unit | What it is |
 |---|---|---|---|---|
 | `engine_update.every_ms` | `21600000` | `AH_ENGINE_UPDATE_MS` | ms | How often the job starts the updater's automatic check; the script's own daily limit decides whether it does any work. 0 turns the job off. |
-| `engine_update.msg_no_plugin` | `engine-update: cannot find the anti-hall plugin folder, so {script} cannot be...` |  |  | Printed when the anti-hall plugin folder cannot be found, so the updater script cannot be located. Placeholders: {script} (the script's path inside the plugin). |
-| `engine_update.msg_no_script` | `engine-update: the updater script is missing: {path}\n  state: nothing change...` |  |  | Printed when the updater script is missing from the plugin root. Placeholders: {path}. |
-| `engine_update.msg_spawn_failed` | `engine-update: cannot start the updater script {path}: {why}\n  state: nothin...` |  |  | Printed when the updater script cannot be started. Placeholders: {path}, {why}. |
-| `engine_update.script` | `hooks/ah-update.sh` |  |  | The updater script, relative to the plugin root. |
-| `engine_update.shell` | `sh` |  |  | The shell that runs the updater script. |
+| `engine_update.msg_no_client` | `engine-update: the thin client is not installed: {path}\n  state: nothing cha...` |  |  | Printed when the thin client (the updater) is not installed. Placeholders: {path}. |
+| `engine_update.msg_spawn_failed` | `engine-update: cannot start the thin client {path}: {why}\n  state: nothing c...` |  |  | Printed when the thin client cannot be started. Placeholders: {path}, {why}. |
 
 ### engine_update.toml / job
 
@@ -11110,6 +11198,7 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `msg.launcher_unreachable_why_silent` | The {why} of the engine-unreachable notice when the engine exited without an answer. |
 | `msg.launcher_unreachable_why_timed_out` | The {why} of the engine-unreachable notice when the engine did not answer in time. |
 | `msg.launcher_unreachable_why_unfinished` | The {why} of the engine-unreachable notice when the engine did not finish. |
+| `msg.launcher_update_no_settings` | Printed by `ah-hook update` when the plugin's settings lack a key it needs. Placeholder: {key}. |
 | `msg.launcher_wall_hard` | Printed when the launcher passed its wall-clock backstop and let the hook through. |
 | `msg.launcher_why_timeout_ms` | Reason: the milliseconds budget knob is not a positive integer. |
 | `msg.launcher_why_timeout_s` | Reason: the seconds budget knob is not a positive integer. |
@@ -11226,6 +11315,121 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `msg.thread_panic` | Log detail when a daemon service thread panics. Placeholders: {thread}, {n}, {max}. |
 | `msg.thread_panic_restart` | Clean restart reason when a daemon service thread exceeds its panic restart cap. Placeholder: {thread}. |
 | `msg.thread_unknown` | Thread name used in panic reports for unnamed threads. |
+| `msg.updater_accepted_yes` | Said when --yes accepts an unverified file. |
+| `msg.updater_already_current` | Placeholders: {bin}, {sha}. |
+| `msg.updater_another_running` | Another update is running. Placeholder: {lock}. Three lines: what failed, what is installed now, the one next step. Placeholder {unchanged} stands for the installed engine's state line. |
+| `msg.updater_attest_failed` | Placeholders: {asset}, {repo}. Three lines: what failed, what is installed now, the one next step. Placeholder {unchanged} stands for the installed engine's state line. |
+| `msg.updater_attest_no_gh` | gh is not installed. |
+| `msg.updater_attest_not_logged_in` | gh is not logged in. |
+| `msg.updater_attest_test` | Test mode. |
+| `msg.updater_cannot_copy_new` | Placeholders: {bin}, {bindir}. Three lines: what failed, what is installed now, the one next step. Placeholder {unchanged} stands for the installed engine's state line. |
+| `msg.updater_cannot_create_bin` | Printed when the binary directory cannot be created (three lines). Placeholder: {path}. |
+| `msg.updater_cannot_create_tmp` | Placeholders: {tmp}, {dir}. Three lines: what failed, what is installed now, the one next step. Placeholder {unchanged} stands for the installed engine's state line. |
+| `msg.updater_cannot_extract` | Placeholder: {member}. Three lines: what failed, what is installed now, the one next step. Placeholder {unchanged} stands for the installed engine's state line. |
+| `msg.updater_cannot_extract_to` | Placeholder: {path}. Three lines: what failed, what is installed now, the one next step. Placeholder {unchanged} stands for the installed engine's state line. |
+| `msg.updater_cannot_keep_prev` | Placeholders: {bin}, {bindir}. Three lines: what failed, what is installed now, the one next step. Placeholder {unchanged} stands for the installed engine's state line. |
+| `msg.updater_cannot_move_new` | Placeholders: {bin}, {bindir}. Three lines: what failed, what is installed now, the one next step. Placeholder {unchanged} stands for the installed engine's state line. |
+| `msg.updater_cannot_reach` | Placeholders: {api}, {repo}, {channel}. Three lines: what failed, what is installed now, the one next step. Placeholder {unchanged} stands for the installed engine's state line. |
+| `msg.updater_cannot_read` | Placeholder: {path}. Three lines: what failed, what is installed now, the one next step. Placeholder {unchanged} stands for the installed engine's state line. |
+| `msg.updater_cannot_stage` | Placeholders: {tmp}, {dir}. Three lines: what failed, what is installed now, the one next step. Placeholder {unchanged} stands for the installed engine's state line. |
+| `msg.updater_channel_latest` | Placeholders: {channel}, {tag}, {asset}. |
+| `msg.updater_commit_note` | Placeholder: {commit}. |
+| `msg.updater_commit_paren` | Placeholder: {commit}. |
+| `msg.updater_differs_from_lock` | Placeholders: {asset}, {lock}. Three lines: what failed, what is installed now, the one next step. Placeholder {unchanged} stands for the installed engine's state line. |
+| `msg.updater_dry_rb` | Placeholders: {prev}, {version}. |
+| `msg.updater_dry_rb_live` | Placeholders: {prev}, {version}. |
+| `msg.updater_dry_run` | Placeholders: {version}, {label}, {sha}. |
+| `msg.updater_empty` | The engine file is empty. Three lines: what failed, what is installed now, the one next step. Placeholder {unchanged} stands for the installed engine's state line. |
+| `msg.updater_extracted` | Placeholders: {version}, {label}, {sha}, {path}, {commit_note}. |
+| `msg.updater_fail_frame` | The frame of every updater failure. Placeholders: {what}, {state}, {next}. |
+| `msg.updater_git_archive` | Placeholders: {path}, {commit}, {channel}. Three lines: what failed, what is installed now, the one next step. Placeholder {unchanged} stands for the installed engine's state line. |
+| `msg.updater_git_fetch` | Placeholders: {commit}, {url}, {channel}. Three lines: what failed, what is installed now, the one next step. Placeholder {unchanged} stands for the installed engine's state line. |
+| `msg.updater_git_init` | Placeholders: {dir}, {state}. Three lines: what failed, what is installed now, the one next step. Placeholder {unchanged} stands for the installed engine's state line. |
+| `msg.updater_help` | Printed by `ah-hook update --help`. |
+| `msg.updater_hook_auto_rolled_back` | Placeholder: {path}. |
+| `msg.updater_hook_rb_skipped` | Placeholder: {prev}. |
+| `msg.updater_hook_rolled_back` | Placeholder: {path}. |
+| `msg.updater_hook_skipped` | Placeholder: {path}. |
+| `msg.updater_hook_updated` | Placeholder: {path}. |
+| `msg.updater_install_lock_held` | Placeholders: {holder}, {log}. Three lines: what failed, what is installed now, the one next step. Placeholder {unchanged} stands for the installed engine's state line. |
+| `msg.updater_label_channel` | Source label of a channel build. Placeholders: {channel}, {tag}. |
+| `msg.updater_label_file` | Source label of an offline file. Placeholder: {path}. |
+| `msg.updater_launcher_not_exec` | Placeholders: {launcher}, {bin}. Three lines: what failed, what is installed now, the one next step. Placeholder {unchanged} stands for the installed engine's state line. |
+| `msg.updater_live_cannot_aside` | Placeholders: {bundle}, {kit}. Three lines: what failed, what is installed now, the one next step. Placeholder {unchanged} stands for the installed engine's state line. |
+| `msg.updater_live_cannot_copy_cur_plugin` | Placeholder: {stage}. Three lines: what failed, what is installed now, the one next step. Placeholder {unchanged} stands for the installed engine's state line. |
+| `msg.updater_live_cannot_copy_engine` | Placeholder: {stage}. Three lines: what failed, what is installed now, the one next step. Placeholder {unchanged} stands for the installed engine's state line. |
+| `msg.updater_live_cannot_copy_plugin` | Placeholder: {stage}. Three lines: what failed, what is installed now, the one next step. Placeholder {unchanged} stands for the installed engine's state line. |
+| `msg.updater_live_cannot_put` | Placeholders: {stage}, {bundle}, {kit}. Three lines: what failed, what is installed now, the one next step. Placeholder {unchanged} stands for the installed engine's state line. |
+| `msg.updater_live_cannot_stage` | Placeholders: {stage}, {kit}. Three lines: what failed, what is installed now, the one next step. Placeholder {unchanged} stands for the installed engine's state line. |
+| `msg.updater_live_current` | Placeholders: {plugin}, {sha}. |
+| `msg.updater_live_golive` | Placeholders: {bundle}, {failed}, {log}, {kit}, {select}. Three lines: what failed, what is installed now, the one next step. Placeholder {unchanged} stands for the installed engine's state line. |
+| `msg.updater_live_updated` | Placeholders: {version}, {plugin_note}, {aside}. |
+| `msg.updater_no_asset` | Placeholders: {asset}, {tag}, {triple}, {channel}. Three lines: what failed, what is installed now, the one next step. Placeholder {unchanged} stands for the installed engine's state line. |
+| `msg.updater_no_build` | Placeholders: {channel}, {prefix}, {per_page}, {repo}, {other}. Three lines: what failed, what is installed now, the one next step. Placeholder {unchanged} stands for the installed engine's state line. |
+| `msg.updater_no_commit` | Placeholders: {tag}, {commit_asset}, {channel}. Three lines: what failed, what is installed now, the one next step. Placeholder {unchanged} stands for the installed engine's state line. |
+| `msg.updater_no_downloader` | Neither curl nor wget. Three lines: what failed, what is installed now, the one next step. Placeholder {unchanged} stands for the installed engine's state line. |
+| `msg.updater_no_expected` | Placeholder: {name}. |
+| `msg.updater_no_git` | Placeholder: {channel}. Three lines: what failed, what is installed now, the one next step. Placeholder {unchanged} stands for the installed engine's state line. |
+| `msg.updater_no_home` | Printed when HOME is not set (three lines). |
+| `msg.updater_no_member` | The archive has no engine member. Three lines: what failed, what is installed now, the one next step. Placeholder {unchanged} stands for the installed engine's state line. |
+| `msg.updater_no_sums` | Placeholders: {sums}, {tag}, {channel}. Three lines: what failed, what is installed now, the one next step. Placeholder {unchanged} stands for the installed engine's state line. |
+| `msg.updater_no_tar` | tar missing. Three lines: what failed, what is installed now, the one next step. Placeholder {unchanged} stands for the installed engine's state line. |
+| `msg.updater_plugin_fetched` | Placeholders: {commit}, {path}. |
+| `msg.updater_plugin_incomplete` | Placeholders: {commit}, {channel}. Three lines: what failed, what is installed now, the one next step. Placeholder {unchanged} stands for the installed engine's state line. |
+| `msg.updater_plugin_not_synced` | Dev channel without a live kit. |
+| `msg.updater_plugin_note` | Placeholder: {commit}. |
+| `msg.updater_prev_note` | Placeholder: {bin}. |
+| `msg.updater_provenance` | The note written into a staged bundle. Placeholders: {label}, {commit_note}, {version}, {sha}, {when}. |
+| `msg.updater_rb_cannot_copy` | Placeholders: {bin}, {bindir}. Three lines: what failed, what is installed now, the one next step. Placeholder {unchanged} stands for the installed engine's state line. |
+| `msg.updater_rb_cannot_move` | Placeholders: {prev}, {bin}, {bindir}. Three lines: what failed, what is installed now, the one next step. Placeholder {unchanged} stands for the installed engine's state line. |
+| `msg.updater_rb_live_cannot_aside` | Placeholders: {bundle}, {kit}. Three lines: what failed, what is installed now, the one next step. Placeholder {unchanged} stands for the installed engine's state line. |
+| `msg.updater_rb_live_cannot_restore` | Placeholders: {prev}, {bundle}, {kit}. Three lines: what failed, what is installed now, the one next step. Placeholder {unchanged} stands for the installed engine's state line. |
+| `msg.updater_rb_live_golive` | Placeholders: {bundle}, {failed}, {log}, {kit}, {select}. Three lines: what failed, what is installed now, the one next step. Placeholder {unchanged} stands for the installed engine's state line. |
+| `msg.updater_rb_live_none` | Placeholder: {kit}. Three lines: what failed, what is installed now, the one next step. Placeholder {unchanged} stands for the installed engine's state line. |
+| `msg.updater_rb_live_prev_broken` | Placeholder: {path}. Three lines: what failed, what is installed now, the one next step. Placeholder {unchanged} stands for the installed engine's state line. |
+| `msg.updater_rb_none` | Placeholder: {prev}. Three lines: what failed, what is installed now, the one next step. Placeholder {unchanged} stands for the installed engine's state line. |
+| `msg.updater_rb_prev_broken` | Placeholder: {prev}. Three lines: what failed, what is installed now, the one next step. Placeholder {unchanged} stands for the installed engine's state line. |
+| `msg.updater_restart_scheduled` | Said by an automatic update. |
+| `msg.updater_restart_skipped` | Said when --no-restart is given. |
+| `msg.updater_restart_unconfirmed` | The new daemon did not answer status yet. |
+| `msg.updater_restarted` | Placeholder: {binary}. |
+| `msg.updater_rolled_back` | Placeholders: {bin}, {version}. |
+| `msg.updater_rolled_back_live` | Placeholders: {version}, {aside}. |
+| `msg.updater_selftest_line` | Placeholder: {output}. |
+| `msg.updater_selftest_ok` | Placeholder: {launcher}. |
+| `msg.updater_selftest_rejected` | Placeholders: {code}, {bin}, {launcher}, {stable}. Three lines: what failed, what is installed now, the one next step. Placeholder {unchanged} stands for the installed engine's state line. |
+| `msg.updater_selftest_skipped` | No launcher to test with. |
+| `msg.updater_selftest_timeout` | Placeholder: {seconds}. |
+| `msg.updater_sha_is` | Placeholders: {name}, {sha}. |
+| `msg.updater_sha_mismatch_dl` | Placeholders: {asset}, {sums}, {expected}, {got}, {repo}. Three lines: what failed, what is installed now, the one next step. Placeholder {unchanged} stands for the installed engine's state line. |
+| `msg.updater_sha_mismatch_file` | Placeholders: {name}, {expected}, {src}, {got}. Three lines: what failed, what is installed now, the one next step. Placeholder {unchanged} stands for the installed engine's state line. |
+| `msg.updater_smoke_failed` | Placeholders: {binary}, {code}, {output}. |
+| `msg.updater_smoke_not_version` | Placeholders: {binary}, {reported}. |
+| `msg.updater_smoke_ok` | Placeholder: {version}. |
+| `msg.updater_smoke_rejected` | Placeholders: {bin}, {stable}, {repo}. Three lines: what failed, what is installed now, the one next step. Placeholder {unchanged} stands for the installed engine's state line. |
+| `msg.updater_smoke_timeout` | Placeholders: {binary}, {seconds}. |
+| `msg.updater_smoke_wrong_version` | Placeholders: {reported}, {expected}. |
+| `msg.updater_stop_nothing` | Verbose line. |
+| `msg.updater_sums_no_entry` | Placeholders: {sums}, {tag}, {asset}, {channel}. Three lines: what failed, what is installed now, the one next step. Placeholder {unchanged} stands for the installed engine's state line. |
+| `msg.updater_unchanged_known` | The state line of a failure that touched nothing. Placeholder: {version}. |
+| `msg.updater_unchanged_unknown` | The state line of a failure that touched nothing, when the installed engine does not answer. |
+| `msg.updater_unknown_arg` | Usage error text. Placeholder: {arg}. |
+| `msg.updater_unsupported` | No release build for this platform. Three lines: what failed, what is installed now, the one next step. Placeholder {unchanged} stands for the installed engine's state line. |
+| `msg.updater_unverifiable_next` | Placeholder: {sha}. |
+| `msg.updater_unverifiable_state` | Placeholder: {unchanged}. |
+| `msg.updater_unverifiable_what` | Placeholder: {name}. |
+| `msg.updater_updated` | Placeholders: {bin}, {version}, {label}, {sha}, {prev_note}. |
+| `msg.updater_usage_channel` | Usage error text. Placeholders: {channel}, {stable}, {dev}. |
+| `msg.updater_usage_frame` | The frame of a usage error (exit 2). Placeholders: {what}, {usage}. |
+| `msg.updater_usage_hint` | The usage hint. Placeholders: {stable}, {dev}. |
+| `msg.updater_usage_nofile` | Usage error text. Placeholder: {path}. |
+| `msg.updater_usage_nothing` | Usage error text. |
+| `msg.updater_usage_several` | Usage error text. |
+| `msg.updater_usage_sha` | Usage error text. |
+| `msg.updater_verified_attest` | Placeholders: {asset}, {repo}. |
+| `msg.updater_verified_dl` | Placeholders: {asset}, {sums}. |
+| `msg.updater_verified_file` | Placeholders: {name}, {src}. |
+| `msg.updater_verified_lock` | Said when the download also matches the plugin lock. |
 | `git.msg_commit_credit` | Block: an inline commit message with an AI self-credit. |
 | `git.msg_commit_file_credit` | Block: a commit message read from a file or heredoc with an AI self-credit. |
 | `git.msg_commit_file_jev` | Block: Jev judged a commit message read from a file or heredoc to credit an AI assistant (paraphrased). |

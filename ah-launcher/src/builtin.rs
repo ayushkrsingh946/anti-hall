@@ -106,6 +106,12 @@ pub const STRS: &[(&str, &str)] = &[
     ("launcher.fallback_list_codex", "ah-fallback.codex.list"),
     ("launcher.cli_integrity_verb", "integrity"),
     ("launcher.cli_install_verb", "install"),
+    ("launcher.cli_update_verb", "update"),
+    ("launcher.knob_update_api_base", "AH_UPDATE_API_BASE"),
+    ("launcher.knob_update_download_base", "AH_UPDATE_DOWNLOAD_BASE"),
+    ("launcher.knob_update_git_url", "AH_UPDATE_GIT_URL"),
+    ("launcher.knob_update_triple", "AH_UPDATE_TRIPLE"),
+    ("launcher.knob_update_no_attest", "AH_UPDATE_NO_ATTEST"),
     ("launcher.arg_auto", "--auto"),
     ("launcher.knob_uname_s", "AH_BOOTSTRAP_UNAME_S"),
     ("launcher.knob_uname_m", "AH_BOOTSTRAP_UNAME_M"),
@@ -189,6 +195,10 @@ pub const STRS: &[(&str, &str)] = &[
     (
         "msg.launcher_integrity_status",
         "binary    {binary}\ninstalled {installed}\nexpected  {expected}\nhealthy   {healthy}\ngood      {good}\nlast      {last}\n",
+    ),
+    (
+        "msg.launcher_update_no_settings",
+        "ah-update: the updater's settings are missing or incomplete ({key} in engine/defaults/engine.toml)\n  state: nothing changed\n  next: reinstall the anti-hall plugin so its settings are back (claude plugin update anti-hall) and run again",
     ),
     ("msg.launcher_selftest_ok", "ok {check}"),
     (
