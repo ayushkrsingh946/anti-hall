@@ -12,7 +12,8 @@
 //! A roll-back renames the bad binary aside (never deleted) and restores the known-good copy.
 
 use crate::cfg::Settings;
-use crate::util::{env_nonempty, now_ms};
+use crate::rec::{epoch_s, pairs, stamp_log, stamp_name};
+use crate::util::env_nonempty;
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::{Read, Write};
@@ -28,8 +29,8 @@ struct Keep {
     fails_lines: usize,
 }
 
-struct Integ {
-    bin: PathBuf,
+pub struct Integ {
+    pub bin: PathBuf,
     good: PathBuf,
     good_sha_f: PathBuf,
     exp_f: PathBuf,
@@ -40,12 +41,12 @@ struct Integ {
     fails: PathBuf,
     log: PathBuf,
     lockdir: PathBuf,
-    owner_f: PathBuf,
+    pub owner_f: PathBuf,
     aside_mid: String,
     token_env: String,
     chunk: usize,
     lock_poll: Duration,
-    lock_wait: u64,
+    pub lock_wait: u64,
     hook_wait: u64,
     lock_stale: u64,
     fail_n: u64,
@@ -83,43 +84,6 @@ fn read_trim(p: &Path) -> String {
         .unwrap_or_default()
 }
 
-fn epoch_s() -> u64 {
-    now_ms() / 1000
-}
-
-/// (year, month, day, hour, minute, second) of a unix time in UTC.
-fn civil(t: u64) -> (u64, u64, u64, u64, u64, u64) {
-    let days = t / 86400;
-    let rem = t % 86400;
-    // days since 1970-01-01 to a proleptic Gregorian date (Howard Hinnant's algorithm)
-    let z = days + 719_468;
-    let era = z / 146_097;
-    let doe = z - era * 146_097;
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = yoe + era * 400 + u64::from(m <= 2);
-    (y, m, d, rem / 3600, rem % 3600 / 60, rem % 60)
-}
-
-fn stamp_log(t: u64) -> String {
-    let (y, mo, d, h, mi, s) = civil(t);
-    format!("{y:04}-{mo:02}-{d:02}T{h:02}:{mi:02}:{s:02}Z")
-}
-
-fn stamp_name(t: u64) -> String {
-    let (y, mo, d, h, mi, s) = civil(t);
-    format!("{y:04}{mo:02}{d:02}T{h:02}{mi:02}{s:02}Z")
-}
-
-/// `key=value key=value ...` of the leading pairs and then the rest.
-fn pairs(head: &[(&str, &str)], rest: &[(&str, &str)]) -> String {
-    let all: Vec<String> = head.iter().chain(rest).map(|(k, v)| format!("{k}={v}")).collect();
-    all.join(" ")
-}
-
 fn alive(pid: u32) -> bool {
     // SAFETY: signal 0 only checks that the process exists.
     unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
@@ -133,7 +97,7 @@ fn with_suffix(p: &Path, sfx: &str) -> PathBuf {
 
 impl Integ {
     /// None when the settings file lacks a key: nothing safe to do.
-    fn new(s: &Settings, state: &Path) -> Option<Integ> {
+    pub fn new(s: &Settings, state: &Path) -> Option<Integ> {
         let bin_dir = need_text(s, "rollback.bin_dir")?;
         let bin_name = need_text(s, "rollback.bin_name")?;
         let good_sfx = need_text(s, "rollback.good_suffix")?;
@@ -225,7 +189,7 @@ impl Integ {
         self.write_atomic(p, &lines[from..].join("\n"));
     }
 
-    fn sha256_of(&self, p: &Path) -> Option<String> {
+    pub fn sha256_of(&self, p: &Path) -> Option<String> {
         let mut f = fs::File::open(p).ok()?;
         let mut h = Sha256::new();
         let mut buf = vec![0u8; self.chunk];
@@ -239,7 +203,7 @@ impl Integ {
         Some(h.finalize().iter().map(|b| format!("{b:02x}")).collect())
     }
 
-    fn sha(&self, p: &Path) -> String {
+    pub fn sha(&self, p: &Path) -> String {
         self.sha256_of(p).unwrap_or_default()
     }
 
@@ -318,7 +282,7 @@ impl Integ {
     }
 
     /// True once `token` holds the install lock (also when it already did); false when another holder kept it `wait` seconds.
-    fn lock_take(&self, token: &str, wait: u64) -> bool {
+    pub fn lock_take(&self, token: &str, wait: u64) -> bool {
         let t0 = Instant::now();
         let mut first = true;
         loop {
@@ -348,7 +312,7 @@ impl Integ {
 
     /// Release the lock when `token` holds it; the owner file is renamed away first, so a breaker that took the lock over
     /// meanwhile gets its own owner file linked straight back instead of losing it.
-    fn lock_give(&self, token: &str) {
+    pub fn lock_give(&self, token: &str) {
         if read_trim(&self.owner_f) != token {
             return;
         }
@@ -380,7 +344,7 @@ impl Integ {
     // ---- the verbs ---------------------------------------------------------------------------------------------------------
 
     /// Bless the binary now in place as the expected one.
-    fn record(&self) {
+    pub fn record(&self) {
         if !self.bin.is_file() {
             return self.rec("record_no_binary", &[("path", &self.bin.display().to_string())]);
         }
@@ -579,16 +543,4 @@ pub fn run(s: &Settings, state: &Path, args: &[String]) -> i32 {
         _ => crate::util::say(&s.text("msg.launcher_integrity_usage")),
     }
     0
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn civil_time_matches_known_dates() {
-        assert_eq!(stamp_log(0), "1970-01-01T00:00:00Z");
-        assert_eq!(stamp_log(951_782_400), "2000-02-29T00:00:00Z");
-        assert_eq!(stamp_name(1_796_000_000), "20261130T00:53:20Z".replace(':', ""));
-    }
 }

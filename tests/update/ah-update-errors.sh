@@ -13,7 +13,7 @@ trap '[ -n "$server_pid" ] && kill "$server_pid" 2>/dev/null; rm -rf "$tmp"' EXI
 pass=0; fail=0
 plug=$tmp/plugin
 mkdir -p "$plug/hooks" "$plug/engine"
-cp "$src/hooks/ah-update.sh" "$src/hooks/ah-engine-bootstrap.sh" "$plug/hooks/"
+cp "$src/hooks/ah-update.sh" "$plug/hooks/"
 cp "$src/engine/ah-update.toml" "$plug/engine/"
 upd=$plug/hooks/ah-update.sh
 home=$tmp/home

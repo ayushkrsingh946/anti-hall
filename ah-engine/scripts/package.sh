@@ -12,14 +12,19 @@ version="$(sed -n 's/^version = "\(.*\)"/\1/p' "$root/Cargo.toml" | head -1)"
 bin="$root/target/$triple/release/ah-engine"
 [ -f "$bin" ] || { echo "package.sh: build $triple first ($bin missing)" >&2; exit 1; }
 
+hook="$root/../ah-launcher/target/$triple/release/ah-hook"
 name="ah-engine-v${version}-${triple}"
 mkdir -p "$out"
-python3 - "$name" "$bin" "$root/../LICENSE" "$root/README.md" "$out/$name.tar.gz" <<'PY'
+python3 - "$name" "$bin" "$root/../LICENSE" "$root/README.md" "$out/$name.tar.gz" "$hook" <<'PY'
 import gzip, sys, tarfile
-name, bin_, lic, readme, dest = sys.argv[1:]
+name, bin_, lic, readme, dest, hook = sys.argv[1:]
+import os
+members = [(f"{name}/ah-engine", bin_, 0o755), (f"{name}/LICENSE", lic, 0o644), (f"{name}/README.md", readme, 0o644)]
+if os.path.isfile(hook):  # the thin client ships in the same archive when it was built for this target
+    members.append((f"{name}/ah-hook", hook, 0o755))
 with open(dest, "wb") as raw, gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0, compresslevel=9) as gz, \
      tarfile.open(fileobj=gz, mode="w", format=tarfile.PAX_FORMAT) as tar:
-    for arc, src, mode in sorted([(f"{name}/ah-engine", bin_, 0o755), (f"{name}/LICENSE", lic, 0o644), (f"{name}/README.md", readme, 0o644)]):
+    for arc, src, mode in sorted(members):
         ti = tar.gettarinfo(src, arcname=arc)
         ti.uid = ti.gid = 0; ti.uname = ti.gname = ""; ti.mtime = 0; ti.mode = mode; ti.pax_headers = {}
         with open(src, "rb") as fh:

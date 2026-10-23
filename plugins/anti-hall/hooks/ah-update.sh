@@ -316,7 +316,7 @@ fi
 if [ "$test_mode" -eq 1 ] && [ -n "${AH_UPDATE_TRIPLE:-}" ]; then
   triple=$AH_UPDATE_TRIPLE
 else
-  triple=$(AH_ENGINE_BOOTSTRAP=1 sh "$here/ah-engine-bootstrap.sh" --print-target 2>/dev/null)
+  triple=; [ ! -x "$integ" ] || triple=$("$integ" --plugin-root "$proot" install --print-target 2>/dev/null)
 fi
 case "$triple" in ""|unsupported) [ -z "$from_file" ] && fail "no ah-engine build is published for this platform" "$(unchanged)" "install a binary you built or obtained for this platform: ah-update.sh --from FILE --sha256 <sha256 of FILE>" ;; esac
 

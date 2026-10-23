@@ -795,6 +795,22 @@ value = "anti-hall: cannot run the Node fallback wrapper: {err}; the engine answ
 doc = "Printed by --doctor when the doctor script is missing."
 value = "anti-hall: ah-doctor.sh is missing next to ah-hook.sh; reinstall the plugin"
 
+[msg.install_notice]
+doc = "The one line per session hooks/install.sh prints on stderr while the thin client is not installed (hook calls pass through unchecked)."
+value = "anti-hall: the engine is not installed, so the guards are not running. Run /anti-hall:activate to install it (a sha256-pinned download); until then every hook call passes through."
+
+[msg.install_done]
+doc = "Printed by `hooks/install.sh --download` when it installed the binaries. Placeholders: {version}, {triple}, {path}."
+value = "anti-hall: installed ah-engine {version} ({triple}) in {path}"
+
+[msg.install_failed]
+doc = "Printed on stderr by `hooks/install.sh --download` when the install did not complete. Placeholder: {why}."
+value = "anti-hall: the engine install did not complete ({why}); nothing was changed. The details are in ~/.anti-hall/ah-engine/bootstrap.log."
+
+[msg.install_unsupported]
+doc = "Printed by `ah-hook install --print-target` on a platform without a release build."
+value = "unsupported"
+
 [msg.launcher_integrity_usage]
 doc = "Printed by `ah-hook integrity` for a verb it does not know."
 value = "usage: ah-hook integrity record|accept|check|fail|status|lock TOKEN|unlock TOKEN"

@@ -68,6 +68,11 @@ const ALLOW: &[(&str, &str, &str)] = &[
         "key=value diagnostic and log records for developers and the integrity tooling, not messages shown to a user or an agent",
     ),
     (
+        "src/install.rs",
+        "std::env::var_os(\"PATH\")",
+        "PATH is the operating system's own search-path variable, not an anti-hall setting",
+    ),
+    (
         "src/launcher.rs",
         "std::env::var_os(\"PATH\")",
         "PATH is the operating system's own search-path variable, not an anti-hall setting",

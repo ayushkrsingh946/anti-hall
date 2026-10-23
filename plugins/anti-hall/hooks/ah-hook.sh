@@ -687,10 +687,10 @@ integrity_run() {
 
 [ "$event" = SessionStart ] && integrity_run check
 
-# Keep the engine installed and current: once per SessionStart, detached (never delays or fails the hook). The script
-# compares the plugin's ah-engine.lock with what is installed and does nothing when they match; see ah-engine-bootstrap.sh.
-if [ "$event" = SessionStart ] && [ -z "${AH_ENGINE_BIN:-}" ] && [ -f "$dir/../ah-engine.lock" ] && [ -f "$dir/ah-engine-bootstrap.sh" ]; then
-  { sh "$dir/ah-engine-bootstrap.sh" </dev/null >/dev/null 2>&1 & } 2>/dev/null
+# Keep the engine installed and current: once per SessionStart, detached (never delays or fails the hook). `ah-hook install --auto`
+# compares the plugin's ah-engine.lock with what is installed, does nothing when they match, and installs only on opt-in.
+if [ "$event" = SessionStart ] && [ -z "${AH_ENGINE_BIN:-}" ] && [ -f "$dir/../ah-engine.lock" ] && [ -x "${AH_ENGINE_DIR:-"$HOME/.anti-hall/ah-engine"}/bin/ah-hook" ]; then
+  { "${AH_ENGINE_DIR:-"$HOME/.anti-hall/ah-engine"}/bin/ah-hook" --plugin-root "$dir/.." install --auto </dev/null >/dev/null 2>&1 & } 2>/dev/null
 fi
 
 event_timeout() {

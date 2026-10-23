@@ -172,7 +172,7 @@ Every `AH_ENGINE_*` variable the engine or its wrappers read. A variable that ov
 | `AH_ENGINE_AUTO_UPDATE` |  | Read by hooks/ah-update.sh in auto mode: off, stable or dev overrides the `engine.autoUpdate` setting for one run. |
 | `AH_ENGINE_BACKUP_MS` | `schedule.backup_ms` | Interval of the backup job (D27); 0 (the default) turns it off. |
 | `AH_ENGINE_BIN` |  | Test-only: the engine binary the hook wrapper runs instead of the installed one. The wrapper unsets it unless AH_WRAPPER_TEST=1 is also set, so a stray value can never turn the safety net into a silent allow. Test-only: environment variable that replaces the engine binary (honoured only when the test flag is set). |
-| `AH_ENGINE_BOOTSTRAP` |  | Set to 0 or 1 to turn the first-run download of the sha256-pinned engine binary off or on; overrides the `engine.bootstrap` setting. Read by hooks/ah-engine-bootstrap.sh. |
+| `AH_ENGINE_BOOTSTRAP` |  | Set to 0 or 1 to turn the first-run download of the sha256-pinned engine binary off or on; overrides the `engine.bootstrap` setting. Read by `ah-hook install --auto` and hooks/install.sh. |
 | `AH_ENGINE_BREAKER_COOLDOWN_S` | `client.breaker_cooldown_s` | How long the breaker stays open once tripped. |
 | `AH_ENGINE_BREAKER_N` | `client.breaker_n` | Engine failures within the window that open the breaker (the client then skips the engine). |
 | `AH_ENGINE_BREAKER_WINDOW_S` | `client.breaker_window_s` | Window in which breaker failures are counted. |
@@ -223,7 +223,7 @@ Every `AH_ENGINE_*` variable the engine or its wrappers read. A variable that ov
 | `AH_ENGINE_QUEUE` | `daemon.queue` | Connections that may wait for a worker; beyond this the daemon answers BUSY and the client falls back. |
 | `AH_ENGINE_READ_MS` | `daemon.read_ms` | Total time a client has to deliver its request. |
 | `AH_ENGINE_REFRESH_MS` | `refresh.every_ms` | How often the refresh job looks for requests; a request waits at most this long (plus jitter). Cheap when there is none: it reads a few small files. 0 turns the job off. |
-| `AH_ENGINE_RELEASE_BASE` |  | Test-only: download base URL for the engine binary (http allowed). Honored by hooks/ah-engine-bootstrap.sh only with AH_WRAPPER_TEST=1. |
+| `AH_ENGINE_RELEASE_BASE` |  | Test-only: download base URL for the engine binary (http allowed). Honored by `ah-hook install` and hooks/install.sh only with AH_WRAPPER_TEST=1. |
 | `AH_ENGINE_REQUEST_PEER_PID` | `request_env.peer_pid_key` | The name under which a daemon request's sender pid (its socket peer; 0 when the socket did not say) reaches the checks. Not on the allowlist, so no client can set it; host functions that walk the process ancestry (the DevSwarm reader nonce) start there. Absent in a one-shot `ah-engine check`, which starts at itself. |
 | `AH_ENGINE_ROLLBACK_FAIL_N` | `rollback.fail_n` | Engine failures seen by the hook wrapper (timeout, signal death, no answer) within rollback.fail_window_s that roll a never-healthy binary back. The wrapper counts them because a hung binary cannot count its own. |
 | `AH_ENGINE_ROLLBACK_FAIL_WINDOW_S` | `rollback.fail_window_s` | Window in which the wrapper's engine failures are counted for rollback.fail_n. |
@@ -518,7 +518,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `env.allocator` | `AH_ENGINE_ALLOCATOR` |  |  | Selects the daemon's allocator: jemalloc (default) or system. The client sets it from `diagnostics.allocator` on the daemon it spawns, unless it is already set; the daemon reads it before its first allocation. |
 | `env.auto_update` | `AH_ENGINE_AUTO_UPDATE` |  |  | Read by hooks/ah-update.sh in auto mode: off, stable or dev overrides the `engine.autoUpdate` setting for one run. |
 | `env.bin` | `AH_ENGINE_BIN` |  |  | Test-only: the engine binary the hook wrapper runs instead of the installed one. The wrapper unsets it unless AH_WRAPPER_TEST=1 is also set, so a stray value can never turn the safety net into a silent allow. |
-| `env.bootstrap` | `AH_ENGINE_BOOTSTRAP` |  |  | Set to 0 or 1 to turn the first-run download of the sha256-pinned engine binary off or on; overrides the `engine.bootstrap` setting. Read by hooks/ah-engine-bootstrap.sh. |
+| `env.bootstrap` | `AH_ENGINE_BOOTSTRAP` |  |  | Set to 0 or 1 to turn the first-run download of the sha256-pinned engine binary off or on; overrides the `engine.bootstrap` setting. Read by `ah-hook install --auto` and hooks/install.sh. |
 | `env.debug` | `AH_ENGINE_DEBUG` |  |  | When set to anything but 0 or empty, turns debug mode (diagnostics.debug_mode) on for that process. |
 | `env.dir` | `AH_ENGINE_DIR` |  |  | Overrides the state directory (default: base_dir/state_dir under the home directory). |
 | `env.done_file` | `AH_ENGINE_DONE_FILE` |  |  | A file the dispatcher creates once it has dispatched an event and decided its exit code (D87). The reliability wrapper sets it, so that an engine exit code of a hook's own (1, say) is told from an engine failure and is not answered by running every hook a second time. |
@@ -528,7 +528,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `env.install_lock_token` | `AH_ENGINE_INSTALL_LOCK_TOKEN` |  |  | Set by an installer (ah-update.sh) for the integrity check: the token of the install lock it already holds, so recording the expected sha256 runs under the caller's hold instead of waiting on it. |
 | `env.nospawn` | `AH_ENGINE_NOSPAWN` |  |  | When set, the client never starts a daemon (tests, and hosts that manage the daemon themselves). |
 | `env.plugin_root` | `AH_ENGINE_PLUGIN_ROOT` |  |  | Plugin install directory, used by built-in checks that build override commands (a rule's `options.plugin_root` wins). |
-| `env.release_base` | `AH_ENGINE_RELEASE_BASE` |  |  | Test-only: download base URL for the engine binary (http allowed). Honored by hooks/ah-engine-bootstrap.sh only with AH_WRAPPER_TEST=1. |
+| `env.release_base` | `AH_ENGINE_RELEASE_BASE` |  |  | Test-only: download base URL for the engine binary (http allowed). Honored by `ah-hook install` and hooks/install.sh only with AH_WRAPPER_TEST=1. |
 | `env.rules` | `AH_ENGINE_RULES` |  |  | Overrides the rules file path. |
 | `env.session` | `AH_ENGINE_SESSION` |  |  | Session id a `proj` write is spooled under; spooled writes keep their order per session (D24). |
 | `env.test_hooks` | `AH_ENGINE_TEST_HOOKS` |  |  | When set, the daemon accepts the test-only control verbs (sleep, stall, panic). Never set in production. |
@@ -616,10 +616,65 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `hook.event_keys` | `hook_event_name, hookEventName, event` |  |  | Payload fields that can carry the event name, tried in order (Claude Code and Codex send `hook_event_name`). |
 | `hook.warn_prefix` | `anti-hall warning: ` |  |  | Prefix of a `warn` rule's message in agent-visible output. |
 
+### engine.toml / install
+
+| Key | Default | Env override | Unit | What it is |
+|---|---|---|---|---|
+| `install.asset_name` | `ah-engine-v{version}-{triple}.tar.gz` |  |  | Name of the release archive for this platform, also its key in the lock's asset table. Placeholders: {version}, {triple}. |
+| `install.connect_timeout_s` | `10` |  | s | Connect timeout of the download. |
+| `install.cpu_arm` | `arm64, aarch64` |  |  | uname -m spellings of the 64-bit ARM architecture. |
+| `install.cpu_arm_name` | `aarch64` |  |  | The architecture part of the release triple for ARM. |
+| `install.cpu_x86` | `x86_64, amd64` |  |  | uname -m spellings of the 64-bit x86 architecture. |
+| `install.cpu_x86_name` | `x86_64` |  |  | The architecture part of the release triple for x86. |
+| `install.curl_cmd` | `14 items` |  |  | The download command. Placeholders: {connect}, {max_time}, {max_size}, {out}, {url}. |
+| `install.curl_cmd_test` | `9 items` |  |  | Test-only form of the download command (http and file URLs allowed); used only with the test flag. |
+| `install.dir_lock` | `bootstrap.lock` |  |  | Directory (inside the state directory) that keeps two installers from downloading at once. |
+| `install.file_attempt` | `bootstrap.attempt` |  |  | Marker of the last failed attempt: <epoch> <version> <asset sha256>. Read by the retry limit. |
+| `install.file_log` | `bootstrap.log` |  |  | Install log, inside the state directory. |
+| `install.file_marker` | `bootstrap.installed` |  |  | Marker of what the installer put in place: <version> <asset sha256> <engine sha256> [<ah-hook sha256>]. A binary that does not match it (a local build) is never overwritten. |
+| `install.file_notice` | `install.notice` |  |  | Holds the id of the session that already got the one notice of hooks/install.sh (inside the state directory). |
+| `install.kill_grace_s` | `2` |  | s | How long a timed-out command gets after TERM before it is killed. |
+| `install.libc_default` | `gnu` |  |  | The libc part of the Linux triple when musl is not detected. |
+| `install.libc_musl` | `musl` |  |  | The libc part of the Linux triple on a musl system. |
+| `install.lock_schema` | `1` |  |  | The only ah-engine.lock schema this installer understands. |
+| `install.log_keep_lines` | `200` |  |  | Lines the install log keeps when it is cut back. |
+| `install.log_max_bytes` | `65536` |  | bytes | The install log is cut back to install.log_keep_lines lines once it is larger than this. |
+| `install.max_filesize` | `134217728` |  | bytes | Largest archive the download accepts. |
+| `install.max_time_s` | `120` |  | s | Total time limit of the download. |
+| `install.member_dir` | `ah-engine-v{version}-{triple}` |  |  | Directory inside the archive that holds the binaries. Placeholders: {version}, {triple}. |
+| `install.member_engine` | `ah-engine` |  |  | File name of the engine binary in the archive and in the binary directory. |
+| `install.member_hook` | `ah-hook` |  |  | File name of the thin client in the archive and in the binary directory. A release that does not ship it leaves the installed one alone. |
+| `install.musl_globs` | `/lib/ld-musl-, /usr/lib/ld-musl-` |  |  | Dynamic-loader paths whose presence means a musl system (a trailing * matches any file name). |
+| `install.musl_probe` | `ldd, --version` |  |  | A command whose output names musl on a musl system (searched case-insensitively for install.musl_word). |
+| `install.musl_word` | `musl` |  |  | The word install.musl_probe prints on a musl system. |
+| `install.os_linux` | `Linux` |  |  | uname -s of Linux (WSL included). |
+| `install.os_macos` | `Darwin` |  |  | uname -s of macOS. |
+| `install.poll_ms` | `100` |  | ms | How often the installer looks at a running command. |
+| `install.prev_suffix` | `.prev` |  |  | Suffix of the copy of the replaced binary (bin/ah-engine.prev, bin/ah-hook.prev). |
+| `install.release_base` | `https://github.com/talas9/anti-hall/releases/download` |  |  | Download base URL of the release archives: <base>/<install.release_dir>/<install.asset_name>. https only (the test-only override env.release_base also allows http and file). |
+| `install.release_dir` | `ah-engine-v{version}` |  |  | Release directory below the base URL. Placeholder: {version}. |
+| `install.retry_s` | `21600` |  | s | After a failed attempt for a version, the next automatic attempt waits this long. |
+| `install.rosetta_sysctl` | `hw.optional.arm64` |  |  | macOS sysctl that is 1 on an Apple-silicon machine, even for a process running under Rosetta (which reports x86_64). |
+| `install.run_s` | `20` |  | s | Hard limit for one command the installer runs (download, extract, the version check of the new binary); a child that ignores TERM is killed install.kill_grace_s later. |
+| `install.setting_key` | `bootstrap` |  |  | Key of the setting that turns the automatic download on (opt-in: absent means off). |
+| `install.setting_off` | `false, off, no, 0` |  |  | Spellings of the setting's value that mean off. |
+| `install.setting_on` | `true, on, yes, 1` |  |  | Spellings of the setting's value that mean on (booleans and numbers are read as such). |
+| `install.setting_section` | `engine` |  |  | Section of the setting that turns the automatic download on. |
+| `install.settings_file` | `settings.json` |  |  | The user settings file, inside the base directory (~/.anti-hall). |
+| `install.stale_lock_s` | `600` |  | s | install.dir_lock (one installer at a time) held longer than this is taken over. |
+| `install.tar_cmd` | `tar, -xzOf, {archive}, {member}` |  |  | The command that writes one member of the archive to stdout. Placeholders: {archive}, {member}. |
+| `install.tmp_prefix` | `tmp.` |  |  | Prefix of the installer's scratch directory inside the state directory; <prefix><pid>. |
+| `install.triple_linux` | `{cpu}-unknown-linux-{libc}` |  |  | Release triple on Linux. Placeholders: {cpu}, {libc}. |
+| `install.triple_macos` | `{cpu}-apple-darwin` |  |  | Release triple on macOS. Placeholder: {cpu}. |
+| `install.wget_cmd` | `7 items` |  |  | The download command when curl is not installed. Placeholders: {max_time}, {out}, {url}. |
+| `install.wsl_word` | `microsoft` |  |  | Kernel release text (case-insensitive) that marks WSL. |
+
 ### engine.toml / launcher
 
 | Key | Default | Env override | Unit | What it is |
 |---|---|---|---|---|
+| `launcher.arg_auto` | `--auto` |  |  | The argument the session start gives `ah-hook install` for the automatic form (installs only when the opt-in setting or the environment variable says so). |
+| `launcher.cli_install_verb` | `install` |  |  | The ah-hook command-line verb that installs the pinned engine (and thin client) from the release archive (`ah-hook install [--lock FILE] [--print-target] [--auto] [-v]`). |
 | `launcher.cli_integrity_verb` | `integrity` |  |  | The ah-hook command-line verb that runs the binary integrity check and roll-back (`ah-hook integrity record\|accept\|check\|fail\|status\|lock\|unlock`); the launcher starts itself with it in the background. |
 | `launcher.cli_lowercase_verbs` | `1` |  |  | 1: a first argument that starts with a lowercase letter is an engine command (`ah-hook <verb> [args...]` runs `ah-engine <verb> [args...]` by exec); hook event names are PascalCase, so they never match. 0: every first argument is a hook event. |
 | `launcher.cli_no_engine_exit` | `127` |  |  | Exit code of `ah-hook <verb>` when no engine can run the command (msg.run_engine_missing goes to stderr; nothing else runs). |
@@ -642,11 +697,17 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `launcher.knob_engine_bin` | `AH_ENGINE_BIN` |  |  | Test-only: environment variable that replaces the engine binary (honoured only when the test flag is set). |
 | `launcher.knob_fallback_list` | `AH_FALLBACK_LIST` |  |  | Test-only: environment variable that replaces the fallback list file. |
 | `launcher.knob_fault` | `AH_LAUNCHER_FAULT` |  |  | Test-only: environment variable that injects a fault into the launcher (panic, hang, spin or alloc) so its never-panic and hard-limit paths can be tested end to end. |
+| `launcher.knob_install_retry_s` | `AH_BOOTSTRAP_RETRY_S` |  |  | Test-only: environment variable that replaces install.retry_s. |
+| `launcher.knob_install_run_s` | `AH_BOOTSTRAP_RUN_S` |  |  | Test-only: environment variable that replaces install.run_s. |
 | `launcher.knob_integrity_park` | `AH_INTEGRITY_PARK` |  |  | Test-only: environment variable naming a path prefix; the integrity verbs stop at their race points (`validated`, `before_break`, `after_break`) while the file <prefix>.<point> exists, and create <prefix>.<point>.parked when they arrive. Honoured only when the test flag is set. It makes the install-lock interleavings deterministic. |
 | `launcher.knob_kill_grace_s` | `AH_KILL_GRACE_S` |  |  | Test-only: environment variable that sets the kill grace in whole seconds. |
+| `launcher.knob_libc` | `AH_BOOTSTRAP_LIBC` |  |  | Test-only: environment variable that names the libc (gnu or musl) instead of detecting it. |
 | `launcher.knob_sweep_age_s` | `AH_HOOK_SWEEP_AGE_S` |  |  | Test-only: environment variable of the shell wrapper's run-directory sweep age (accepted for parity, unused by the launcher). |
 | `launcher.knob_timeout_ms` | `AH_HOOK_TIMEOUT_MS` |  |  | Test-only: environment variable that sets the hook budget in milliseconds. |
 | `launcher.knob_timeout_s` | `AH_HOOK_TIMEOUT_S` |  |  | Test-only: environment variable that sets the hook budget in whole seconds. |
+| `launcher.knob_uname_m` | `AH_BOOTSTRAP_UNAME_M` |  |  | Test-only: environment variable that replaces `uname -m` for the platform detection. |
+| `launcher.knob_uname_r` | `AH_BOOTSTRAP_UNAME_R` |  |  | Test-only: environment variable that replaces `uname -r` for the platform detection. |
+| `launcher.knob_uname_s` | `AH_BOOTSTRAP_UNAME_S` |  |  | Test-only: environment variable that replaces `uname -s` for the platform detection (honoured only when the test flag is set). |
 | `launcher.log_hard_bytes` | `1048576` |  | bytes | Size at which the launcher's failure log stops accepting lines: further lines are dropped and the drops counted. |
 | `launcher.log_line_max` | `512` |  | bytes | Longest line the launcher writes to its failure log; longer lines are cut. |
 | `launcher.log_rotate_min_s` | `60` |  | s | Fewest seconds between two rotations of the launcher's failure log. A flood of lines therefore grows the current file to launcher.log_hard_bytes (then lines are dropped and counted) instead of rotating the older history away. |
@@ -663,7 +724,6 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `launcher.run_fail_open_file` | `fail_open` |  |  | Name, inside a per-call run directory, of the file the engine client appends the call's reported fail-opens to (see env.fail_open_file). |
 | `launcher.run_spool_file` | `payload` |  |  | Name, inside a per-call run directory, of the private copy of a large payload (see launcher.spool_max_bytes). |
 | `launcher.run_wait_file` | `wait` |  |  | Name, inside a per-call run directory, of the file the engine creates while it waits on a live daemon. |
-| `launcher.script_bootstrap` | `ah-engine-bootstrap.sh` |  |  | Bootstrap script in the plugin's hooks directory (installs the engine binary). |
 | `launcher.script_doctor` | `ah-doctor.sh` |  |  | Doctor script in the plugin's hooks directory (the --doctor mode runs it). |
 | `launcher.script_hook` | `ah-hook.sh` |  |  | The shell wrapper in the plugin's hooks directory; the launcher hands the call to it while the Node fallback switch is on (files.fallback_switch). |
 | `launcher.selftest_engine_timeout_ms` | `3000` |  | ms | How long --selftest lets the engine binary run its version check before it calls the binary broken. |
@@ -4621,7 +4681,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `doctor.bin_dir` | `bin` |  |  | The directory of the installed engine binary, under the engine state directory. |
 | `doctor.bin_label` | `ah-engine version` |  |  | The name a run of the installed engine is logged under. |
 | `doctor.bin_name` | `ah-engine` |  |  | The file name of the installed engine binary. |
-| `doctor.bootstrap_script` | `hooks/ah-engine-bootstrap.sh` |  |  | The engine bootstrap, relative to the plugin root (shown in fixes). |
+| `doctor.bootstrap_script` | `hooks/install.sh` |  |  | The engine installer (the plugin's one shell file), relative to the plugin root (shown in fixes). |
 | `doctor.class_duplicate` | `duplicate-label-same-project` |  |  | The class of two loaded units for one project. |
 | `doctor.class_healthy` | `healthy` |  |  | The class of a loaded unit that is in use. |
 | `doctor.class_no_plist` | `orphan-no-plist` |  |  | The class of a loaded unit with no unit file on disk (the only class that may be unloaded). |
@@ -4876,11 +4936,11 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 
 | Key | Default | Env override | Unit | What it is |
 |---|---|---|---|---|
-| `doctor_msg.bin_corrupt` | `{path} is not a runnable program ({why}) - Fix: reinstall: sh {bootstrap} -v` |  |  | BIN-04. Placeholders: {path}, {why}, {bootstrap}. |
+| `doctor_msg.bin_corrupt` | `{path} is not a runnable program ({why}) - Fix: reinstall: sh {bootstrap} --d...` |  |  | BIN-04. Placeholders: {path}, {why}, {bootstrap}. |
 | `doctor_msg.bin_hash_differs` | `{path} differs from the build the bootstrap installed (sha256 {have}... vs {w...` |  |  | BIN-07. Placeholders: {path}, {have}, {want}, {bootstrap}. |
 | `doctor_msg.bin_missing` | `engine binary not installed at {path} (hooks use ah-engine on PATH, else the ...` |  |  | BIN-01. Placeholders: {path}, {bootstrap}. |
 | `doctor_msg.bin_no_rosetta` | `{path} is an {bin_arch} build and Rosetta is not installed on this {host_arch...` |  |  | BIN-06c. Same placeholders. |
-| `doctor_msg.bin_no_run` | `{path} does not run: {why} - Fix: reinstall: sh {bootstrap} -v` |  |  | BIN-12. Placeholders: {path}, {why}, {bootstrap}. |
+| `doctor_msg.bin_no_run` | `{path} does not run: {why} - Fix: reinstall: sh {bootstrap} --download -v` |  |  | BIN-12. Placeholders: {path}, {why}, {bootstrap}. |
 | `doctor_msg.bin_not_bootstrapped` | `{path} was not installed by the bootstrap (a local build); the bootstrap leav...` |  |  | BIN-08. Placeholder: {path}. |
 | `doctor_msg.bin_not_exec` | `{path} is not executable (mode {mode}) - Fix: chmod u+x {path} (ah-engine doc...` |  |  | BIN-03. Placeholders: {path}, {mode}. |
 | `doctor_msg.bin_not_file` | `{path} is not a regular file ({kind}) - Fix: move it aside, then run: sh {boo...` |  |  | BIN-02. Placeholders: {path}, {kind}, {bootstrap}. |
@@ -11006,6 +11066,10 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `msg.hint_socket_path` | Self-fix hint when the socket path is too long. Placeholder: {env_dir}. |
 | `msg.hint_state_dir` | Self-fix hint when the state directory is not writable or not private. Placeholders: {state_dir}, {env_dir}. |
 | `msg.impact_no_routing` | Status shown in place of a model-routing saving figure while no routing events are recorded. |
+| `msg.install_done` | Printed by `hooks/install.sh --download` when it installed the binaries. Placeholders: {version}, {triple}, {path}. |
+| `msg.install_failed` | Printed on stderr by `hooks/install.sh --download` when the install did not complete. Placeholder: {why}. |
+| `msg.install_notice` | The one line per session hooks/install.sh prints on stderr while the thin client is not installed (hook calls pass through unchecked). |
+| `msg.install_unsupported` | Printed by `ah-hook install --print-target` on a platform without a release build. |
 | `msg.inv_busy_workers` | Invariant violation: more workers are marked busy than there are workers. Placeholder: {workers}. |
 | `msg.inv_queue_pop` | Invariant violation: after a worker took a connection, the queue-depth counter and the queue length differ. Placeholders: {depth}, {len}. |
 | `msg.inv_queue_push` | Invariant violation: after the accept loop queued a connection, the queue-depth counter and the queue length differ. Placeholders: {depth}, {len}. |

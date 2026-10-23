@@ -315,7 +315,7 @@ fn bin_01_missing() {
     let mut sc = Sc::new();
     sc.own_plugin();
     let d = sc.doctor(&[]);
-    d.has("warn", &["engine binary not installed at", "bin/ah-engine", "- Fix: sh", "ah-engine-bootstrap.sh -v"]);
+    d.has("warn", &["engine binary not installed at", "bin/ah-engine", "- Fix: sh", "install.sh --download -v"]);
     d.has("bad", &["no working engine: the anti-hall hooks do not run"]);
     assert_eq!(d.code, 1, "Node is no fallback: a missing installed engine is a failure\n{}", d.text);
 }

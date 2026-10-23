@@ -18,7 +18,7 @@ check() { # check "name" cmd...
 # A scratch plugin: the real script and settings, a controllable lock.
 plug=$tmp/plugin
 mkdir -p "$plug/hooks" "$plug/engine"
-cp "$src/hooks/ah-update.sh" "$src/hooks/ah-engine-bootstrap.sh" "$plug/hooks/"
+cp "$src/hooks/ah-update.sh" "$plug/hooks/"
 cp "$src/engine/ah-update.toml" "$plug/engine/"
 upd=$plug/hooks/ah-update.sh
 

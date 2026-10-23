@@ -1,6 +1,6 @@
 #!/bin/sh
 # shellcheck disable=SC2016 # single-quoted bodies are expanded by the inner sh, on purpose
-# The ONE install lock shared by `ah-hook integrity`, ah-update.sh and ah-engine-bootstrap.sh: deterministic interleavings.
+# The ONE install lock shared by `ah-hook integrity`, ah-update.sh and `ah-hook install`: deterministic interleavings.
 # Scratch HOME and state, stub engines; the real ~/.anti-hall is never touched. The interleaving is forced, not timed: a stub
 # race point of the integrity check (AH_INTEGRITY_PARK, honoured under AH_WRAPPER_TEST=1) parks it right after it validated the
 # damaged binary, until the test lets it go.
@@ -38,7 +38,7 @@ dead() { ! kill -0 "$1" 2>/dev/null; }
 
 plug=$tmp/plugin
 mkdir -p "$plug/hooks" "$plug/engine/defaults"
-cp "$src/hooks/ah-update.sh" "$src/hooks/ah-engine-bootstrap.sh" "$plug/hooks/"
+cp "$src/hooks/ah-update.sh" "$plug/hooks/"
 cp "$src/engine/ah-update.toml" "$plug/engine/"
 cp "$src/engine/defaults/engine.toml" "$plug/engine/defaults/"
 cp "$src/engine/defaults/messages.toml" "$src/engine/defaults/index.toml" "$src/engine/defaults/dispatch.toml" "$plug/engine/defaults/"

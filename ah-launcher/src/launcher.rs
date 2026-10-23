@@ -144,6 +144,11 @@ impl L {
         if self.knob("launcher.knob_engine_bin").is_some() {
             return; // never for a test double
         }
+        self.self_spawn(&[verb], "launcher.cli_integrity_verb");
+    }
+
+    /// This very binary, in the background, running the maintenance verb named by `verb_key` with `rest`.
+    fn self_spawn(&self, rest: &[&str], verb_key: &str) {
         // this very binary, in the background: `fail` and `check` may wait for the install lock, and the hook must not
         let Ok(me) = std::env::current_exe() else { return };
         let mut cmd = Command::new(me);
@@ -151,27 +156,13 @@ impl L {
             cmd.arg("--plugin-root").arg(r);
         }
         let _ = cmd
-            .arg(self.key("launcher.cli_integrity_verb"))
-            .arg(verb)
+            .arg(self.key(verb_key))
+            .args(rest)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .process_group(0)
             .spawn();
-    }
-
-    fn detached(&self, script_name: &str, args: &[&str]) {
-        let script = self.hooks_dir.join(script_name);
-        if script.is_file() {
-            let _ = Command::new("sh")
-                .arg(script)
-                .args(args)
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .process_group(0)
-                .spawn();
-        }
     }
 
     fn fresh_marker(&self, files_key: &str) -> bool {
@@ -866,6 +857,10 @@ pub fn run() -> i32 {
         Some(first) if first == s.text("launcher.cli_integrity_verb") => {
             return crate::integrity::run(&s, &state_dir, &args[1..]);
         }
+        Some(first) if first == s.text("launcher.cli_install_verb") => {
+            let base = home.as_ref().map(|h| h.join(s.text("paths.base_dir"))).unwrap_or_default();
+            return crate::install::run(&s, &state_dir, &base, cfg_root.as_deref().or(root.as_deref()), &args[1..]);
+        }
         Some(first) if cli::is_verb(&s, first) => {
             return cli::exec_engine(&s, &args, home.as_ref(), cfg_root.as_deref().or(root.as_deref()));
         }
@@ -1008,7 +1003,7 @@ pub fn run() -> i32 {
                 .as_ref()
                 .is_some_and(|r| r.join(l.key("launcher.engine_lock_file")).is_file())
         {
-            l.detached(&l.key("launcher.script_bootstrap"), &[]);
+            l.self_spawn(&[&l.key("launcher.arg_auto")], "launcher.cli_install_verb");
         }
     }
     let Some(engine) = find_engine(l.home.as_ref(), &l.s, l.knob("launcher.knob_engine_bin"))

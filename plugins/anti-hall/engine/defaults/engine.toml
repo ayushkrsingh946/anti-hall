@@ -51,7 +51,7 @@ doc = "Test-only: the engine binary the hook wrapper runs instead of the install
 value = "AH_ENGINE_BIN"
 
 [env.bootstrap]
-doc = "Set to 0 or 1 to turn the first-run download of the sha256-pinned engine binary off or on; overrides the `engine.bootstrap` setting. Read by hooks/ah-engine-bootstrap.sh."
+doc = "Set to 0 or 1 to turn the first-run download of the sha256-pinned engine binary off or on; overrides the `engine.bootstrap` setting. Read by `ah-hook install --auto` and hooks/install.sh."
 value = "AH_ENGINE_BOOTSTRAP"
 
 [env.install_lock_token]
@@ -59,7 +59,7 @@ doc = "Set by an installer (ah-update.sh) for the integrity check: the token of 
 value = "AH_ENGINE_INSTALL_LOCK_TOKEN"
 
 [env.release_base]
-doc = "Test-only: download base URL for the engine binary (http allowed). Honored by hooks/ah-engine-bootstrap.sh only with AH_WRAPPER_TEST=1."
+doc = "Test-only: download base URL for the engine binary (http allowed). Honored by `ah-hook install` and hooks/install.sh only with AH_WRAPPER_TEST=1."
 value = "AH_ENGINE_RELEASE_BASE"
 
 [env.wrapper_diag]
@@ -1234,6 +1234,215 @@ value = "failed printing to std"
 doc = "Text of the I/O error that marks the closed-pipe panic (see `crash.closed_pipe_prefix`)."
 value = "Broken pipe"
 
+# ---- binary install (`ah-hook install`, ah-launcher/src/install.rs; `hooks/install.sh --download` for the very first install) ----
+# The release archive holds ah-engine and (when the release ships it) ah-hook. Version and sha256 come from the plugin's
+# ah-engine.lock, never from the network; an archive whose sha256 differs is refused and nothing is installed.
+
+[install.release_base]
+doc = "Download base URL of the release archives: <base>/<install.release_dir>/<install.asset_name>. https only (the test-only override env.release_base also allows http and file)."
+value = "https://github.com/talas9/anti-hall/releases/download"
+
+[install.release_dir]
+doc = "Release directory below the base URL. Placeholder: {version}."
+value = "ah-engine-v{version}"
+
+[install.asset_name]
+doc = "Name of the release archive for this platform, also its key in the lock's asset table. Placeholders: {version}, {triple}."
+value = "ah-engine-v{version}-{triple}.tar.gz"
+
+[install.member_dir]
+doc = "Directory inside the archive that holds the binaries. Placeholders: {version}, {triple}."
+value = "ah-engine-v{version}-{triple}"
+
+[install.member_engine]
+doc = "File name of the engine binary in the archive and in the binary directory."
+value = "ah-engine"
+
+[install.member_hook]
+doc = "File name of the thin client in the archive and in the binary directory. A release that does not ship it leaves the installed one alone."
+value = "ah-hook"
+
+[install.lock_schema]
+doc = "The only ah-engine.lock schema this installer understands."
+value = 1
+
+[install.retry_s]
+doc = "After a failed attempt for a version, the next automatic attempt waits this long."
+value = 21600
+unit = "s"
+
+[install.run_s]
+doc = "Hard limit for one command the installer runs (download, extract, the version check of the new binary); a child that ignores TERM is killed install.kill_grace_s later."
+value = 20
+min = 1
+unit = "s"
+
+[install.kill_grace_s]
+doc = "How long a timed-out command gets after TERM before it is killed."
+value = 2
+unit = "s"
+
+[install.poll_ms]
+doc = "How often the installer looks at a running command."
+value = 100
+min = 10
+unit = "ms"
+
+[install.stale_lock_s]
+doc = "install.dir_lock (one installer at a time) held longer than this is taken over."
+value = 600
+unit = "s"
+
+[install.log_max_bytes]
+doc = "The install log is cut back to install.log_keep_lines lines once it is larger than this."
+value = 65536
+min = 1024
+unit = "bytes"
+
+[install.log_keep_lines]
+doc = "Lines the install log keeps when it is cut back."
+value = 200
+min = 1
+
+[install.file_log]
+doc = "Install log, inside the state directory."
+value = "bootstrap.log"
+
+[install.file_notice]
+doc = "Holds the id of the session that already got the one notice of hooks/install.sh (inside the state directory)."
+value = "install.notice"
+
+[install.file_marker]
+doc = "Marker of what the installer put in place: <version> <asset sha256> <engine sha256> [<ah-hook sha256>]. A binary that does not match it (a local build) is never overwritten."
+value = "bootstrap.installed"
+
+[install.file_attempt]
+doc = "Marker of the last failed attempt: <epoch> <version> <asset sha256>. Read by the retry limit."
+value = "bootstrap.attempt"
+
+[install.dir_lock]
+doc = "Directory (inside the state directory) that keeps two installers from downloading at once."
+value = "bootstrap.lock"
+
+[install.prev_suffix]
+doc = "Suffix of the copy of the replaced binary (bin/ah-engine.prev, bin/ah-hook.prev)."
+value = ".prev"
+
+[install.tmp_prefix]
+doc = "Prefix of the installer's scratch directory inside the state directory; <prefix><pid>."
+value = "tmp."
+
+[install.settings_file]
+doc = "The user settings file, inside the base directory (~/.anti-hall)."
+value = "settings.json"
+
+[install.setting_section]
+doc = "Section of the setting that turns the automatic download on."
+value = "engine"
+
+[install.setting_key]
+doc = "Key of the setting that turns the automatic download on (opt-in: absent means off)."
+value = "bootstrap"
+
+[install.setting_on]
+doc = "Spellings of the setting's value that mean on (booleans and numbers are read as such)."
+value = ["true", "on", "yes", "1"]
+
+[install.setting_off]
+doc = "Spellings of the setting's value that mean off."
+value = ["false", "off", "no", "0"]
+
+[install.os_macos]
+doc = "uname -s of macOS."
+value = "Darwin"
+
+[install.os_linux]
+doc = "uname -s of Linux (WSL included)."
+value = "Linux"
+
+[install.cpu_arm]
+doc = "uname -m spellings of the 64-bit ARM architecture."
+value = ["arm64", "aarch64"]
+
+[install.cpu_x86]
+doc = "uname -m spellings of the 64-bit x86 architecture."
+value = ["x86_64", "amd64"]
+
+[install.cpu_arm_name]
+doc = "The architecture part of the release triple for ARM."
+value = "aarch64"
+
+[install.cpu_x86_name]
+doc = "The architecture part of the release triple for x86."
+value = "x86_64"
+
+[install.triple_macos]
+doc = "Release triple on macOS. Placeholder: {cpu}."
+value = "{cpu}-apple-darwin"
+
+[install.triple_linux]
+doc = "Release triple on Linux. Placeholders: {cpu}, {libc}."
+value = "{cpu}-unknown-linux-{libc}"
+
+[install.libc_default]
+doc = "The libc part of the Linux triple when musl is not detected."
+value = "gnu"
+
+[install.libc_musl]
+doc = "The libc part of the Linux triple on a musl system."
+value = "musl"
+
+[install.musl_globs]
+doc = "Dynamic-loader paths whose presence means a musl system (a trailing * matches any file name)."
+value = ["/lib/ld-musl-", "/usr/lib/ld-musl-"]
+
+[install.musl_probe]
+doc = "A command whose output names musl on a musl system (searched case-insensitively for install.musl_word)."
+value = ["ldd", "--version"]
+
+[install.musl_word]
+doc = "The word install.musl_probe prints on a musl system."
+value = "musl"
+
+[install.wsl_word]
+doc = "Kernel release text (case-insensitive) that marks WSL."
+value = "microsoft"
+
+[install.rosetta_sysctl]
+doc = "macOS sysctl that is 1 on an Apple-silicon machine, even for a process running under Rosetta (which reports x86_64)."
+value = "hw.optional.arm64"
+
+[install.curl_cmd]
+doc = "The download command. Placeholders: {connect}, {max_time}, {max_size}, {out}, {url}."
+value = ["curl", "-fsSL", "--proto", "=https", "--tlsv1.2", "--connect-timeout", "{connect}", "--max-time", "{max_time}", "--max-filesize", "{max_size}", "-o", "{out}", "{url}"]
+
+[install.curl_cmd_test]
+doc = "Test-only form of the download command (http and file URLs allowed); used only with the test flag."
+value = ["curl", "-fsSL", "--connect-timeout", "{connect}", "--max-time", "{max_time}", "-o", "{out}", "{url}"]
+
+[install.wget_cmd]
+doc = "The download command when curl is not installed. Placeholders: {max_time}, {out}, {url}."
+value = ["wget", "-q", "-T", "{max_time}", "-O", "{out}", "{url}"]
+
+[install.connect_timeout_s]
+doc = "Connect timeout of the download."
+value = 10
+unit = "s"
+
+[install.max_time_s]
+doc = "Total time limit of the download."
+value = 120
+unit = "s"
+
+[install.max_filesize]
+doc = "Largest archive the download accepts."
+value = 134217728
+unit = "bytes"
+
+[install.tar_cmd]
+doc = "The command that writes one member of the archive to stdout. Placeholders: {archive}, {member}."
+value = ["tar", "-xzOf", "{archive}", "{member}"]
+
 # ---- the hook launcher (ah-launcher, binary `ah-hook`): its own limits, names and switches ------------------------------------
 # The launcher is the bootloader in front of the engine; it reads these at start. A missing or invalid file falls back to the
 # launcher's built-in copy (ah-launcher/src/builtin.rs, kept equal to this file by a test).
@@ -1435,6 +1644,38 @@ value = "AH_LAUNCHER_STATS"
 doc = "Test-only: environment variable that replaces the engine binary (honoured only when the test flag is set)."
 value = "AH_ENGINE_BIN"
 
+[launcher.cli_install_verb]
+doc = "The ah-hook command-line verb that installs the pinned engine (and thin client) from the release archive (`ah-hook install [--lock FILE] [--print-target] [--auto] [-v]`)."
+value = "install"
+
+[launcher.arg_auto]
+doc = "The argument the session start gives `ah-hook install` for the automatic form (installs only when the opt-in setting or the environment variable says so)."
+value = "--auto"
+
+[launcher.knob_uname_s]
+doc = "Test-only: environment variable that replaces `uname -s` for the platform detection (honoured only when the test flag is set)."
+value = "AH_BOOTSTRAP_UNAME_S"
+
+[launcher.knob_uname_m]
+doc = "Test-only: environment variable that replaces `uname -m` for the platform detection."
+value = "AH_BOOTSTRAP_UNAME_M"
+
+[launcher.knob_uname_r]
+doc = "Test-only: environment variable that replaces `uname -r` for the platform detection."
+value = "AH_BOOTSTRAP_UNAME_R"
+
+[launcher.knob_libc]
+doc = "Test-only: environment variable that names the libc (gnu or musl) instead of detecting it."
+value = "AH_BOOTSTRAP_LIBC"
+
+[launcher.knob_install_retry_s]
+doc = "Test-only: environment variable that replaces install.retry_s."
+value = "AH_BOOTSTRAP_RETRY_S"
+
+[launcher.knob_install_run_s]
+doc = "Test-only: environment variable that replaces install.run_s."
+value = "AH_BOOTSTRAP_RUN_S"
+
 [launcher.knob_integrity_park]
 doc = "Test-only: environment variable naming a path prefix; the integrity verbs stop at their race points (`validated`, `before_break`, `after_break`) while the file <prefix>.<point> exists, and create <prefix>.<point>.parked when they arrive. Honoured only when the test flag is set. It makes the install-lock interleavings deterministic."
 value = "AH_INTEGRITY_PARK"
@@ -1494,10 +1735,6 @@ value = "ah-fallback.codex.list"
 [launcher.cli_integrity_verb]
 doc = "The ah-hook command-line verb that runs the binary integrity check and roll-back (`ah-hook integrity record|accept|check|fail|status|lock|unlock`); the launcher starts itself with it in the background."
 value = "integrity"
-
-[launcher.script_bootstrap]
-doc = "Bootstrap script in the plugin's hooks directory (installs the engine binary)."
-value = "ah-engine-bootstrap.sh"
 
 [files.fallback_switch]
 doc = "Marker file (state directory) of the Node fallback switch (the Node backup, stage 2): present = the launcher runs the original Node hooks directly instead of the engine. Written and removed by `ah-engine fallback node|off`; read by hooks/ah-hook.sh and the thin launcher."

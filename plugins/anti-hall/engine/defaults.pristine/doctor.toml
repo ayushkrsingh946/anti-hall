@@ -584,8 +584,8 @@ doc = "The plugin's pin of the engine release, relative to the plugin root."
 value = "ah-engine.lock"
 
 [doctor.bootstrap_script]
-doc = "The engine bootstrap, relative to the plugin root (shown in fixes)."
-value = "hooks/ah-engine-bootstrap.sh"
+doc = "The engine installer (the plugin's one shell file), relative to the plugin root (shown in fixes)."
+value = "hooks/install.sh"
 
 [doctor.wrapper_file]
 doc = "The hook wrapper, relative to the plugin root."
@@ -767,15 +767,15 @@ value = "Node witness"
 
 [doctor_msg.bin_missing]
 doc = "BIN-01. Placeholders: {path}, {bootstrap}."
-value = "engine binary not installed at {path} (hooks use ah-engine on PATH, else the Node hooks) - Fix: sh {bootstrap} -v"
+value = "engine binary not installed at {path} (hooks use ah-engine on PATH, else the Node hooks) - Fix: sh {bootstrap} --download -v"
 
 [doctor_msg.bin_not_file]
 doc = "BIN-02. Placeholders: {path}, {kind}, {bootstrap}."
-value = "{path} is not a regular file ({kind}) - Fix: move it aside, then run: sh {bootstrap} -v"
+value = "{path} is not a regular file ({kind}) - Fix: move it aside, then run: sh {bootstrap} --download -v"
 
 [doctor_msg.bin_unreadable]
 doc = "The binary cannot be read. Placeholders: {path}, {err}, {bootstrap}."
-value = "{path} cannot be read ({err}) - Fix: check its permissions, or reinstall: sh {bootstrap} -v"
+value = "{path} cannot be read ({err}) - Fix: check its permissions, or reinstall: sh {bootstrap} --download -v"
 
 [doctor_msg.bin_not_exec]
 doc = "BIN-03. Placeholders: {path}, {mode}."
@@ -783,7 +783,7 @@ value = "{path} is not executable (mode {mode}) - Fix: chmod u+x {path} (ah-engi
 
 [doctor_msg.bin_corrupt]
 doc = "BIN-04. Placeholders: {path}, {why}, {bootstrap}."
-value = "{path} is not a runnable program ({why}) - Fix: reinstall: sh {bootstrap} -v"
+value = "{path} is not a runnable program ({why}) - Fix: reinstall: sh {bootstrap} --download -v"
 
 [doctor_msg.why_empty]
 doc = "BIN-04 reason."
@@ -799,19 +799,19 @@ value = "unrecognised header"
 
 [doctor_msg.bin_wrong_os]
 doc = "BIN-05. Placeholders: {path}, {bin_os}, {host_os}, {bootstrap}."
-value = "{path} was built for {bin_os} but this machine runs {host_os} - Fix: reinstall: sh {bootstrap} -v"
+value = "{path} was built for {bin_os} but this machine runs {host_os} - Fix: reinstall: sh {bootstrap} --download -v"
 
 [doctor_msg.bin_wrong_arch]
 doc = "BIN-06a. Placeholders: {path}, {bin_arch}, {host_os}, {host_arch}, {bootstrap}."
-value = "{path} was built for {bin_arch} but this {host_os} machine is {host_arch}; it cannot run - Fix: reinstall: sh {bootstrap} -v"
+value = "{path} was built for {bin_arch} but this {host_os} machine is {host_arch}; it cannot run - Fix: reinstall: sh {bootstrap} --download -v"
 
 [doctor_msg.bin_rosetta]
 doc = "BIN-06b. Same placeholders."
-value = "{path} is an {bin_arch} build running under Rosetta on this {host_arch} Mac (slower) - Fix: sh {bootstrap} -v installs the native build"
+value = "{path} is an {bin_arch} build running under Rosetta on this {host_arch} Mac (slower) - Fix: sh {bootstrap} --download -v installs the native build"
 
 [doctor_msg.bin_no_rosetta]
 doc = "BIN-06c. Same placeholders."
-value = "{path} is an {bin_arch} build and Rosetta is not installed on this {host_arch} Mac; it will not start - Fix: softwareupdate --install-rosetta --agree-to-license, or sh {bootstrap} -v for the native build"
+value = "{path} is an {bin_arch} build and Rosetta is not installed on this {host_arch} Mac; it will not start - Fix: softwareupdate --install-rosetta --agree-to-license, or sh {bootstrap} --download -v for the native build"
 
 [doctor_msg.bin_quarantined]
 doc = "BIN-11. Placeholder: {path}."
@@ -823,15 +823,15 @@ value = "{path} was not installed by the bootstrap (a local build); the bootstra
 
 [doctor_msg.bin_hash_differs]
 doc = "BIN-07. Placeholders: {path}, {have}, {want}, {bootstrap}."
-value = "{path} differs from the build the bootstrap installed (sha256 {have}... vs {want}...): a local build, or damaged - Fix: to restore the pinned build: mv {path} {path}.local && sh {bootstrap} -v"
+value = "{path} differs from the build the bootstrap installed (sha256 {have}... vs {want}...): a local build, or damaged - Fix: to restore the pinned build: mv {path} {path}.local && sh {bootstrap} --download -v"
 
 [doctor_msg.bin_version_differs]
 doc = "BIN-09. Placeholders: {have}, {want}, {bootstrap}."
-value = "engine {have} is installed but the plugin pins {want} - Fix: it updates at the next session start, or run: sh {bootstrap} -v"
+value = "engine {have} is installed but the plugin pins {want} - Fix: it updates at the next session start, or run: sh {bootstrap} --download -v"
 
 [doctor_msg.bin_no_run]
 doc = "BIN-12. Placeholders: {path}, {why}, {bootstrap}."
-value = "{path} does not run: {why} - Fix: reinstall: sh {bootstrap} -v"
+value = "{path} does not run: {why} - Fix: reinstall: sh {bootstrap} --download -v"
 
 [doctor_msg.bin_ok]
 doc = "BIN-14. Placeholders: {path}, {triple}, {ver}."
@@ -1144,7 +1144,7 @@ value = "the hooks run ah-engine from PATH ({path}) because the home install is 
 
 [doctor_msg.no_engine]
 doc = "ND-04: no working engine. The ah-doctor.sh fallback prints the same text."
-value = "no working engine: the anti-hall hooks do not run - Fix: reinstall the engine (sh hooks/ah-engine-bootstrap.sh -v)"
+value = "no working engine: the anti-hall hooks do not run - Fix: reinstall the engine (sh hooks/install.sh --download -v)"
 
 [doctor_msg.log_huge]
 doc = "LG-01. Placeholders: {file}, {mb}, {cap_mb}."

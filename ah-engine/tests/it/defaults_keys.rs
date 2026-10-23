@@ -172,6 +172,8 @@ fn every_key_the_source_reads_is_shipped_and_every_shipped_key_is_read() {
             || k == "files.unreachable_notice" // the wrapper's and the launcher's once-per-session stamp of the engine-unreachable notice
             || k == "msg.engine_unreachable_notice" // that notice's text (read by hooks/ah-hook.sh and by the launcher)
             || k == "msg.run_engine_missing" // the text the thin client (`ah-hook <verb>`) prints when no engine can run its command
+            || k.starts_with("msg.install_") // the installer's texts (hooks/install.sh and the thin client)
+            || k.starts_with("install.") // the thin client's installer (`ah-hook install`, ah-launcher/src/install.rs) and hooks/install.sh read these; the engine does not
             || k.starts_with("rollback.") // the thin client (`ah-hook integrity`, ah-launcher) reads its names and thresholds itself; the engine reads only the client name
             || k == "files.integrity_log" // written by the thin client (`ah-hook integrity`)
             || k == "files.wrapper_fail_log" // written by the thin client, from its failure reports

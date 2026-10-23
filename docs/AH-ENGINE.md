@@ -283,23 +283,31 @@ labelled with how it was measured in the README of `ah-engine/`.
 
 ## Install, go-live and rollback
 
-**Install.** The plugin ships `ah-engine.lock` (schema, engine version, tag and the sha256 of every release asset). On every
-SessionStart, `hooks/ah-hook.sh` starts `hooks/ah-engine-bootstrap.sh` detached (only when the lock file is present and the
-the wrapper's test-only binary override is unset). The script (POSIX sh, never fails a session):
+**Install.** The plugin ships `ah-engine.lock` (schema, engine version, tag and the sha256 of every release asset) and one shell
+file, `hooks/install.sh`. While `~/.anti-hall/ah-engine/bin/ah-hook` is missing, `hooks.json` runs `install.sh` for each hook
+event: it prints nothing on stdout, exits 0 and gives one notice line per session on stderr. It downloads nothing by itself unless
+you opted in (the setting `engine.bootstrap` = true, or `AH_ENGINE_BOOTSTRAP=1`; off by default). The install is a deliberate
+step: the setup skill (`/anti-hall:activate`) runs `sh hooks/install.sh --download`. From then on the thin client does the same job
+as `ah-hook install [--lock FILE] [--print-target] [--auto] [-v]` (`--auto` is the session-start form that honours the opt-in).
+Both (never fail a session):
 
-1. detects the target (macOS arm64 or x86_64, Linux x86_64 or arm64 on glibc or musl, WSL as Linux; anything else, such as
+1. detect the target (macOS arm64 or x86_64, Linux x86_64 or arm64 on glibc or musl, WSL as Linux; anything else, such as
    native Windows, is reported as unsupported and skipped);
-2. downloads `ah-engine-vX.Y.Z-<triple>.tar.gz` from the GitHub Release over HTTPS (TLS 1.2 or newer, 120 s download limit,
+2. download `ah-engine-vX.Y.Z-<triple>.tar.gz` from the GitHub Release over HTTPS (TLS 1.2 or newer, 120 s download limit,
    128 MB size cap; `curl`, or `wget` when there is no `curl`);
-3. installs it to `~/.anti-hall/ah-engine/bin/ah-engine` **only if its sha256 equals the lock's entry**. There is no trust on
-   first use: a mismatch is refused and nothing is installed. It extracts only the one expected binary from the archive and
-   runs `ah-engine version` first: a binary that does not run or reports another version is not installed;
-4. does it atomically and keeps the previous binary as `bin/ah-engine.prev`.
+3. install `ah-engine` (and `ah-hook`, when the release archive holds it) into `~/.anti-hall/ah-engine/bin/` **only if the
+   archive's sha256 equals the lock's entry**. There is no trust on first use: a mismatch is refused and nothing is installed.
+   Only the expected members are extracted, and the new engine must answer `version` with the pinned version first (`ah-hook
+   install`);
+4. do it atomically and keep the previous binaries as `bin/ah-engine.prev` and `bin/ah-hook.prev`, under the one install lock
+   that the integrity check and the updater share.
 
-It is idempotent (the same lock does nothing), rate limited (a failed attempt for a lock is retried after 6 hours), and it never
-overwrites a binary it did not install (a local build is left alone). Every outcome is written to
-`~/.anti-hall/ah-engine/bootstrap.log`. A plugin tree without `ah-engine.lock` installs nothing and stays on Node. Opt out with
-the setting `engine.bootstrap` = false (`/config`, `/anti-hall:settings`; stored in `~/.anti-hall/settings.json`) or the environment variable `AH_ENGINE_BOOTSTRAP=0`, which overrides the setting (see also [RELEASING.md](../ah-engine/RELEASING.md)). This download is the only network request the engine's install makes; see [PRIVACY.md](../PRIVACY.md).
+It is idempotent (the same lock does nothing), rate limited (a failed automatic attempt for a lock is retried after 6 hours), and
+it never overwrites a binary it did not install (a local build is left alone). Every outcome is written to
+`~/.anti-hall/ah-engine/bootstrap.log` as `event=<id> key=value` records. A plugin tree without `ah-engine.lock` installs
+nothing. Every URL, command line, name and limit is in `[install.*]` of `engine/defaults/engine.toml` (see also
+[RELEASING.md](../ah-engine/RELEASING.md)). This download is the only network request the engine's install makes; see
+[PRIVACY.md](../PRIVACY.md).
 
 **Updating the engine (`ah-update`).** One script, `hooks/ah-update.sh` (POSIX sh, no Node; deliberately outside the engine so a broken
 engine stays fixable), moves the binary between three sources. Every URL, timeout and channel name is in `engine/ah-update.toml`.
