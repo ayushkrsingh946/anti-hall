@@ -663,7 +663,9 @@ fn degraded_reasons(ev: &[Event], now: u64, window: Duration, loop_left: Option<
     let started = ev.iter().rev().find(|e| e.kind == defaults::text("health.start_kind")).map_or(0, |e| e.ts);
     let (crashy, kinds, resolved) = (crashy(), defaults::list("health.degraded_kinds"), defaults::list("health.resolved_by_start_kinds"));
     // (group, kind, code) -> (count, first_ts, last_ts, last detail)
-    let mut groups: std::collections::BTreeMap<(&str, String, String), (u64, u64, u64, String)> = std::collections::BTreeMap::new();
+    type Key<'a> = (&'a str, String, String);
+    type Tally = (u64, u64, u64, String);
+    let mut groups: std::collections::BTreeMap<Key, Tally> = std::collections::BTreeMap::new();
     for e in ev.iter().filter(|e| e.ts >= floor) {
         let group = if crashy.contains(&e.kind.as_str()) && e.kind != "crashloop" {
             defaults::text("health.group_restart")

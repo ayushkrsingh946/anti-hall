@@ -78,7 +78,7 @@ fn is_primary_label(id: &str) -> bool {
         .is_some_and(|rest| rest.len() == hex && rest.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)))
 }
 
-/// Whether the child's sender alias is already on file (writing it is Node's).
+// Whether the child's sender alias is already on file (writing it is Node's).
 
 // ---- done ---------------------------------------------------------------------------------------------------------------
 

@@ -11,6 +11,7 @@ use super::support::*;
 use std::cell::{Cell, RefCell};
 use std::path::Path;
 use std::sync::Arc;
+type Mk<'a> = Box<dyn Fn() -> Vec<String> + 'a>;
 
 fn stop(tp: &str) -> J {
     jo! {"hook_event_name": "Stop", "session_id": "sess-1", "cwd": "$PROJ", "transcript_path": tp, "stop_hook_active": false}
@@ -42,15 +43,14 @@ fn histories(tl: &Tl, works: usize) -> Vec<(String, Vec<String>)> {
             .collect()
     };
     for (name, shape) in shapes() {
-        let sites: Vec<(&str, Box<dyn Fn() -> Vec<String> + '_>)> = vec![
+        let sites: Vec<(&str, Mk)> = vec![
             ("todo", Box::new(|| tl.todo(ja![jo! {"id": "1", "content": "x", "status": shape.clone()}]))),
             ("create", Box::new(|| tl.create(1, jo! {"subject": "x", "status": shape.clone()}))),
             ("update", Box::new(|| tl.update(1, vec![("status", shape.clone())]))),
             ("create-then-update", Box::new(|| cat(vec![tl.create(1, jo! {"subject": "x"}), tl.update(1, vec![("status", shape.clone())])]))),
         ];
         for (site, mk) in sites {
-            let ends: Vec<(&str, Box<dyn Fn() -> Vec<String> + '_>)> =
-                vec![("kept", Box::new(Vec::new)), ("inprogress", Box::new(|| in_prog())), ("completed", Box::new(|| done()))];
+            let ends: Vec<(&str, Mk)> = vec![("kept", Box::new(Vec::new)), ("inprogress", Box::new(&in_prog)), ("completed", Box::new(&done))];
             for (end, tail) in ends {
                 let lines = cat(vec![vec![tl.prompt("go")], mk(), tail(), work(tl)]);
                 v.push((format!("badstatus-{site}-{name}-{end}"), lines));

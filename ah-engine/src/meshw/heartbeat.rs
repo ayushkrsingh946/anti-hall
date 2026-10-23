@@ -9,7 +9,7 @@
 //! * carries `--summary` (a mesh broadcast row and the identity families), or `--step` for a workspace that has a plan file
 //!   (Node updates the plan under its lock and records supervision metrics); `--step` for a workspace WITHOUT a plan is
 //!   answered here: Node reports `no-plan` and writes nothing beyond the heartbeat;
-//! (A heartbeat without `--session` records its caller's process line in `heartbeat-callers.log`, as Node does.)
+//!   (A heartbeat without `--session` records its caller's process line in `heartbeat-callers.log`, as Node does.)
 //! * could make Node act in a way the engine does not: a child workspace addressing another id (a stderr warning), a
 //!   Primary checkout whose anchor session would be refreshed, a `primary-<hash>` label id, a partition whose `reader_cursors` floor rows are
 //!   missing (Node imports the legacy cursors first), a store the engine will not read exactly like Node.

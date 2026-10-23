@@ -486,7 +486,7 @@ impl Shared {
         let mut health_summary = health::summary();
         let (fo_n, fo_top) = crate::failopen::window();
         let fo_unhealthy = crate::failopen::state(fo_n) != defaults::text("fail_open.state_ok");
-        health::add_fail_open_reason(&mut health_summary, fo_unhealthy.then(|| (fo_n, fo_top)));
+        health::add_fail_open_reason(&mut health_summary, fo_unhealthy.then_some((fo_n, fo_top)));
         let degraded = health::overall_degraded(&health_summary, fo_unhealthy);
         health_summary["degraded"] = serde_json::Value::Bool(degraded);
         let mut v = serde_json::json!({
