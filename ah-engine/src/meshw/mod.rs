@@ -41,6 +41,7 @@ pub mod ident;
 pub mod idlock;
 pub mod inbox;
 pub mod lifeverbs;
+pub mod meshgroup;
 pub mod mboxtool;
 pub mod orphan;
 pub mod plan;
