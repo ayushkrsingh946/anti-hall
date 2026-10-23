@@ -15,7 +15,7 @@ use crate::meshw::{cursors, ident};
 use crate::meshw::{tick, union};
 
 /// Where a count, read or ack lands: the descriptor it works on, or the refusal Node prints for an id nothing resolves.
-enum Found {
+pub(crate) enum Found {
     Go { id: String, desc: OVal, resolved_from: Option<String>, redirected_from: Option<String> },
     Out(Answer),
 }
@@ -23,7 +23,7 @@ enum Found {
 /// The descriptor of `raw` for `inbox <sub>`, as Node finds it: the dispatcher's canonical id, then (for an id with no descriptor of
 /// its own) the mesh label of a registered row, else the refusal `unregistered-workspace` / `no-inbox-path`. Anything else Node
 /// resolves (a prefix, a fold-retired redirect, an ambiguous label, a descriptor without an inbox path) is left to it.
-fn locate(inv: &Inv, sub: &str, raw: &str, ack_as_owner: bool) -> R<Found> {
+pub(crate) fn locate(inv: &Inv, sub: &str, raw: &str, ack_as_owner: bool, dispatcher: bool) -> R<Found> {
     let has_inbox = |d: &OVal| union::path_field(d, defaults::text("mesh_write.field_inbox_path")).map(|p| p.is_some());
     if let Some(desc) = ident::read_descriptor(&inv.home, raw) {
         // a descriptor with no inbox path is no inbox: Node goes on to the redirect / label / refusal steps below
@@ -31,18 +31,51 @@ fn locate(inv: &Inv, sub: &str, raw: &str, ack_as_owner: bool) -> R<Found> {
             return Ok(Found::Go { id: raw.to_string(), desc, resolved_from: None, redirected_from: None });
         }
     }
-    let action = format!("{}{sub}", defaults::text("mesh_write.act_inbox_prefix"));
-    let id = match crate::meshw::actverbs::resolve_target_id(inv, raw, &action)? {
-        Ok(id) => id,
-        Err(refused) => return Ok(Found::Out(refused)),
+    // the dispatcher resolves the target of count / read / ack to a canonical id first (`resolveTargetId`); a tick addresses its own id
+    let id = if dispatcher {
+        let action = format!("{}{sub}", defaults::text("mesh_write.act_inbox_prefix"));
+        match crate::meshw::actverbs::resolve_target_id(inv, raw, &action)? {
+            Ok(id) => id,
+            Err(refused) => return Ok(Found::Out(refused)),
+        }
+    } else {
+        raw.to_string()
     };
     if let Some(desc) = ident::read_descriptor(&inv.home, &id) {
         if has_inbox(&desc)? {
             return Ok(Found::Go { id, desc, resolved_from: None, redirected_from: None });
         }
     }
-    let Some(repo_key) = ident::resolve_context(&inv.cwd, true)?.repo_key else { return defer("no-project") };
-    let Some(reader) = tick::open_reader(inv, &repo_key)? else { return defer("no-store") };
+    // the store the probes below read: the caller's project, else the id's legacy bucket (Node's `openStore` creates it); one that
+    // cannot be opened ends in the `store-unavailable` refusal
+    let caller_key = ident::resolve_context(&inv.cwd, true)?.repo_key;
+    let repo_key = caller_key.clone().unwrap_or_else(|| crate::meshw::send::hash_from_workspace_id(&id));
+    let reader = match tick::probe_reader_creating(inv, &repo_key) {
+        tick::Probe::Open(r) => r,
+        failed => {
+            let code = match failed {
+                tick::Probe::Unreadable(c) => c,
+                _ => defaults::text("mesh_write.store_unknown_code").to_string(),
+            };
+            let q = OVal::Str(id.clone()).stringify();
+            let mut o = Obj::default();
+            o.put("ok", OVal::Bool(false))
+                .put("id", s(&id))
+                .put("reason", s(defaults::text("mesh_write.reason_store_unavailable")))
+                .put("error", s(&defaults::render("mesh_write.msg_store_unopened", &[("id", &q), ("code", &code)])))
+                .put("repoKey", caller_key.as_deref().map_or(OVal::Null, s))
+                .put("storePath", OVal::Str(union::store_dir(&inv.home, &repo_key).to_string_lossy().into_owned()))
+                .put("cwd", s(&inv.cwd))
+                .put("meshPartitionIds", OVal::Arr(vec![s(&id)]))
+                .put("known", OVal::Bool(false))
+                .put("storeUnavailable", OVal::Bool(true))
+                .put("storeUnavailableReason", s(&code))
+                .put("meshGroupUnresolved", OVal::Bool(false))
+                .put("meshGroupError", OVal::Null)
+                .put("totalsPartial", OVal::Bool(true));
+            return Ok(Found::Out(Answer { code: 2, stdout: format!("{}\n", o.done().stringify()), effect: Effect::None }));
+        }
+    };
     let rows = ident::rows_of(&reader.roster().map_err(|e| ident::Defer(format!("registry:{e}")))?);
     // a fold-retired id: its mail is its survivor's, unless the id was registered again since or the survivor has no inbox
     // (then Node leaves the redirect alone and goes on to the label / refusal steps)
@@ -132,7 +165,7 @@ fn locate(inv: &Inv, sub: &str, raw: &str, ack_as_owner: bool) -> R<Found> {
         .put("id", s(&id))
         .put("reason", s(reason))
         .put("error", s(&error))
-        .put("repoKey", s(&repo_key))
+        .put("repoKey", caller_key.as_deref().map_or(OVal::Null, s))
         .put("storePath", OVal::Str(union::store_dir(&inv.home, &repo_key).to_string_lossy().into_owned()))
         .put("cwd", s(&inv.cwd))
         .put("meshPartitionIds", OVal::Arr(vec![s(&id)]))
@@ -184,44 +217,24 @@ fn sibling_row(pid: &str, r: &serde_json::Value) -> OVal {
     o.done()
 }
 
-/// `inbox <verb> <id>`'s id, when the call has exactly that shape and no flag but the ones named (a flag the engine does not
-/// read is Node's).
-fn plain_id<'a>(a: &'a Args, allowed: &[&str]) -> R<&'a str> {
-    if a.is_help() {
-        return defer("help");
+/// `inbox <verb> <id>`'s id as the dispatcher reads it (`positionals[2]`; further words and flags the verb does not read are
+/// ignored, as in Node): a missing or unsafe id is the dispatcher's refusal (exit 2).
+fn plain_id(a: &Args) -> Result<&str, Answer> {
+    match a.positionals.get(2).map(String::as_str).filter(|i| is_safe_id(i)) {
+        Some(id) => Ok(id),
+        None => {
+            let mut o = Obj::default();
+            o.put("ok", OVal::Bool(false)).put("error", s(defaults::text("devswarm_cli.msg_bad_id")));
+            Err(Answer { code: 2, stdout: format!("{}\n", o.done().stringify()), effect: Effect::None })
+        }
     }
-    if a.positionals.len() != 3 {
-        return defer("argv-shape");
-    }
-    let Some(id) = a.positionals.get(2).map(String::as_str).filter(|i| is_safe_id(i)) else { return defer("bad-id") };
-    if a.flags.keys().any(|k| !allowed.contains(&k.as_str())) {
-        return defer("flags");
-    }
-    Ok(id)
 }
 
 /// `inboxWindowRejection` for `inbox <sub> <id>`: `--since` / `--tail` on a verb that acks or reports on a contiguous prefix is
 /// refused (printed, exit 2) before anything is read.
 fn window(inv: &Inv, a: &Args, sub: &str) -> R<Option<Answer>> {
-    if a.is_help() || a.positionals.len() != 3 {
-        return Ok(None);
-    }
     let Some(id) = a.positionals.get(2).map(String::as_str).filter(|i| is_safe_id(i)) else { return Ok(None) };
     crate::meshw::readprimary::window_refusal(inv, a, id, sub)
-}
-
-/// Node's `emitKnownWarning` for an `inbox` verb whose count is not known.
-fn warn_unknown(verb: &str, id: &str) {
-    eprintln!(
-        "{}",
-        defaults::render(
-            "mesh_write.known_warning",
-            &[
-                ("label", &format!("{} {verb} {}", defaults::text("mesh_write.verb_inbox"), OVal::Str(id.to_string()).stringify())),
-                ("reasons", &defaults::text("mesh_write.known_unknown"))
-            ]
-        )
-    );
 }
 
 /// `inbox count <id>`: the unread count of a single registered partition, read only.
@@ -229,18 +242,19 @@ pub fn run_count(inv: &Inv, a: &Args) -> R<Answer> {
     if let Some(refused) = window(inv, a, defaults::text("mesh_write.verb_count"))? {
         return Ok(refused);
     }
-    let raw = plain_id(a, &[defaults::text("mesh_write.flag_limit")])?;
-    let (id, desc, resolved_from, redirected_from) = match locate(inv, defaults::text("mesh_write.verb_count"), raw, false)? {
+    let raw = match plain_id(a) {
+        Ok(r) => r,
+        Err(refusal) => return Ok(refusal),
+    };
+    let (id, desc, resolved_from, redirected_from) = match locate(inv, defaults::text("mesh_write.verb_count"), raw, false, true)? {
         Found::Go { id, desc, resolved_from, redirected_from } => (id, desc, resolved_from, redirected_from),
         Found::Out(refused) => return Ok(refused),
     };
     let id = id.as_str();
-    let counted = tick::count_mail(inv, id, &desc, true, true, limit_of(a))?;
-    let stdout = tick::count_json(inv, id, &counted, defaults::text("mesh_write.verb_count"), false, resolved_from.as_deref(), redirected_from.as_deref())?;
-    if !counted.known {
-        warn_unknown(defaults::text("mesh_write.verb_count"), id);
-    }
-    Ok(Answer { code: 0, stdout: format!("{stdout}\n"), effect: Effect::None })
+    let counted = tick::count_mail(inv, id, &desc, limit_of(a))?;
+    let result = tick::count_obj(inv, id, &counted, defaults::text("mesh_write.verb_count"), resolved_from.as_deref(), redirected_from.as_deref()).done();
+    tick::emit_known_warning(defaults::text("mesh_write.verb_count"), &result);
+    Ok(Answer { code: 0, stdout: format!("{}\n", result.stringify()), effect: Effect::None })
 }
 
 /// `inbox read <id>`: the unread rows of both channels, read only (nothing is acked, and the result says so).
@@ -248,26 +262,26 @@ pub fn run_read(inv: &Inv, a: &Args) -> R<Answer> {
     if let Some(refused) = window(inv, a, defaults::text("mesh_write.verb_read"))? {
         return Ok(refused);
     }
-    let raw = plain_id(a, &[defaults::text("mesh_write.flag_limit")])?;
-    let (id, desc, resolved_from, redirected_from) = match locate(inv, defaults::text("mesh_write.verb_read"), raw, false)? {
+    let raw = match plain_id(a) {
+        Ok(r) => r,
+        Err(refusal) => return Ok(refusal),
+    };
+    let (id, desc, resolved_from, redirected_from) = match locate(inv, defaults::text("mesh_write.verb_read"), raw, false, true)? {
         Found::Go { id, desc, resolved_from, redirected_from } => (id, desc, resolved_from, redirected_from),
         Found::Out(refused) => return Ok(refused),
     };
     let id = id.as_str();
-    let c = tick::count_mail(inv, id, &desc, true, true, limit_of(a))?;
-    let Some(total) = c.total else { return defer("unknown-count-json") };
+    let c = tick::count_mail(inv, id, &desc, limit_of(a))?;
     let mut o = Obj::default();
-    o.put("ok", OVal::Bool(true))
-        .put("action", s(defaults::text("mesh_write.action_read")))
-        .put("id", s(id));
+    o.put("ok", OVal::Bool(true)).put("action", s(defaults::text("mesh_write.action_read"))).put("id", s(id));
     if let Some(f) = &resolved_from {
         o.put("resolvedFrom", s(f));
     }
     if let Some(f) = &redirected_from {
         o.put("redirected", OVal::Bool(true)).put("redirectedFrom", s(f));
     }
-    o.put("repoKey", s(&c.repo_key))
-        .put("storePath", OVal::Str(union::store_dir(&inv.home, &c.repo_key).to_string_lossy().into_owned()))
+    o.put("repoKey", c.repo_key.as_deref().map_or(OVal::Null, s))
+        .put("storePath", OVal::Str(union::store_dir(&inv.home, &c.store_key).to_string_lossy().into_owned()))
         .put("cwd", s(&inv.cwd))
         .put("meshPartitionIds", OVal::Arr(c.mesh_ids.iter().map(|x| s(x)).collect()))
         .put("lines", OVal::Arr(c.nd_lines.iter().map(|l| s(l)).collect()))
@@ -286,13 +300,8 @@ pub fn run_read(inv: &Inv, a: &Args) -> R<Answer> {
         .put("unreadStore", n(c.store_unread as f64))
         .put("cursorNdjson", n(c.nd_cursor))
         .put("cursorStore", n(c.store_cursor))
-        .put("total", n(total as f64))
-        .put("known", OVal::Bool(c.known))
-        .put("storeUnavailable", OVal::Bool(false))
-        .put("storeUnavailableReason", OVal::Null)
-        .put("meshGroupUnresolved", OVal::Bool(false))
-        .put("meshGroupError", OVal::Null)
-        .put("totalsPartial", OVal::Bool(false));
+        .put("total", n(c.total as f64));
+    tick::put_known_block(&mut o, &c);
     if c.gap_withheld > 0 {
         o.put("meshGapWithheld", OVal::Bool(true)).put("meshGapWithheldCount", n(c.gap_withheld as f64));
     }
@@ -306,10 +315,9 @@ pub fn run_read(inv: &Inv, a: &Args) -> R<Answer> {
         );
     }
     o.put("count", n(c.unread as f64)).put("cursor", n(c.nd_cursor)).put("storeCursor", n(c.store_cursor));
-    if !c.known {
-        warn_unknown(defaults::text("mesh_write.action_read"), id);
-    }
-    Ok(Answer { code: 0, stdout: format!("{}\n", o.done().stringify()), effect: Effect::None })
+    let result = o.done();
+    tick::emit_known_warning(defaults::text("mesh_write.action_read"), &result);
+    Ok(Answer { code: 0, stdout: format!("{}\n", result.stringify()), effect: Effect::None })
 }
 
 /// `inbox ack <id>`: consume everything this read saw, on both channels, and say where the cursors stand.
@@ -322,20 +330,21 @@ pub fn run_ack(inv: &Inv, a: &Args) -> R<Answer> {
     if let Some(refused) = window(inv, a, defaults::text("mesh_write.verb_ack"))? {
         return Ok(refused);
     }
-    let id = plain_id(a, &[defaults::text("mesh_write.flag_ack_as_owner"), defaults::text("mesh_write.flag_limit"), defaults::text("mesh_write.flag_to")])?;
-    if a.flags.get(defaults::text("mesh_write.flag_ack_as_owner")).is_some_and(|v| v.iter().any(|x| *x != crate::meshw::args::FlagVal::True)) {
-        return defer("ack-as-owner-value");
-    }
+    let id = match plain_id(a) {
+        Ok(r) => r,
+        Err(refusal) => return Ok(refusal),
+    };
+    // `!!flags['ack-as-owner']`: passed at all, with or without a value
     let ack_as_owner = a.has(defaults::text("mesh_write.flag_ack_as_owner"));
     common::seat_check(inv)?;
-    let (id, desc, resolved_from, redirected_from) = match locate(inv, defaults::text("mesh_write.verb_ack"), id, ack_as_owner)? {
+    let (id, desc, resolved_from, redirected_from) = match locate(inv, defaults::text("mesh_write.verb_ack"), id, ack_as_owner, true)? {
         Found::Go { id, desc, resolved_from, redirected_from } => (id, desc, resolved_from, redirected_from),
         Found::Out(refused) => return Ok(refused),
     };
     let id = id.as_str();
     let Some(inbox) = union::path_field(&desc, defaults::text("mesh_write.field_inbox_path"))? else { return defer("no-inbox-path") };
     let Some(cursor_file) = union::path_field(&desc, defaults::text("mesh_write.field_cursor_path"))? else { return defer("no-cursor-path") };
-    let c = tick::count_mail(inv, id, &desc, true, true, limit_of(a))?;
+    let c = tick::count_mail(inv, id, &desc, limit_of(a))?;
     let trunc = truncation(&c);
     // `--to N`: the NDJSON position alone moves to N (a number, held to the inbox's line count); the store side is left as it is
     let to_raw = a.one(defaults::text("mesh_write.flag_to"));
@@ -351,7 +360,7 @@ pub fn run_ack(inv: &Inv, a: &Args) -> R<Answer> {
             Some(x)
         }
     };
-    let st = common::open_store(inv, &c.repo_key)?;
+    let st = common::open_store(inv, &c.store_key)?;
     let rows = ident::rows_of(&st.reader().roster().map_err(|e| ident::Defer(format!("registry:{e}")))?);
     // the ownership gate: a caller that is a DIFFERENT registered row is refused (Node's); one that resolves to nothing acks the
     // NDJSON side and leaves the store side alone
@@ -364,7 +373,11 @@ pub fn run_ack(inv: &Inv, a: &Args) -> R<Answer> {
             || ident::declared_self_id(&inv.env, &inv.cwd, &rows)?.as_deref() == Some(id);
         if !owns && own_entry.is_some() {
             // refused whole, before either cursor moves
-            let cause = defaults::text(if caller.kind == defaults::text("mesh_write.kind_unresolvable") { "mesh_write.cause_unresolvable" } else { "mesh_write.cause_mismatch" });
+            let cause = defaults::text(if caller.kind == defaults::text("mesh_write.kind_unresolvable") {
+                "mesh_write.cause_unresolvable"
+            } else {
+                "mesh_write.cause_mismatch"
+            });
             let q = |t: &str| OVal::Str(t.to_string()).stringify();
             let error = defaults::render("mesh_write.msg_ack_refused", &[("cause", &cause), ("caller", &q(&caller.identity)), ("id", &q(id)), ("rawid", &id)]);
             let mut who = Obj::default();
@@ -423,7 +436,7 @@ pub fn run_ack(inv: &Inv, a: &Args) -> R<Answer> {
             cwd: None, // absent for the CLI: Node's `ctx.cwd` is unset there
             ok: nd.ok,
             err: if nd.ok { None } else { nd.error.as_deref() },
-            repo_key: Some(&c.repo_key),
+            repo_key: Some(&c.store_key),
         },
     );
     if !nd.ok {
@@ -455,7 +468,7 @@ pub fn run_ack(inv: &Inv, a: &Args) -> R<Answer> {
                 cwd: None, // absent for the CLI: Node's `ctx.cwd` is unset there
                 ok: r.ok,
                 err: if r.ok { None } else { r.error.as_deref() },
-                repo_key: Some(&c.repo_key),
+                repo_key: Some(&c.store_key),
             },
         );
         if let Some(e) = &r.error {
@@ -486,7 +499,7 @@ pub fn run_ack(inv: &Inv, a: &Args) -> R<Answer> {
                     cwd: None,
                     ok: r.ok,
                     err: if r.ok { None } else { r.error.as_deref() },
-                    repo_key: Some(&c.repo_key),
+                    repo_key: Some(&c.store_key),
                 },
             );
             if let Some(e) = &r.error {
@@ -495,7 +508,7 @@ pub fn run_ack(inv: &Inv, a: &Args) -> R<Answer> {
                 failures.push(f.done());
             }
         }
-        if let Some(why) = crate::meshw::summary::derive_after_write(&st, inv, &c.repo_key) {
+        if let Some(why) = crate::meshw::summary::derive_after_write(&st, inv, &c.store_key) {
             crate::meshw::log_summary_failure(defaults::text("mesh_write.verb_ack"), &why);
         }
     }
@@ -526,10 +539,9 @@ pub fn run_ack(inv: &Inv, a: &Args) -> R<Answer> {
     if let Some(t) = &trunc {
         t.put(&mut out, defaults::text("mesh_write.truncated_hint_ack"));
     }
-    if !c.known {
-        warn_unknown(defaults::text("mesh_write.verb_ack"), id);
-    }
-    Ok(Answer { code: 0, stdout: format!("{}\n", out.done().stringify()), effect: Effect::None })
+    let result = out.done();
+    tick::emit_known_warning(defaults::text("mesh_write.verb_ack"), &result);
+    Ok(Answer { code: 0, stdout: format!("{}\n", result.stringify()), effect: Effect::None })
 }
 
 /// `inbox pull <id>`: drain the native queue of a workspace into its durable inbox (the pull a `--child` tick runs first), and
@@ -545,11 +557,10 @@ pub fn run_pull(inv: &Inv, a: &Args) -> R<Answer> {
         }
         return Ok(refused);
     }
-    // Node reads only `--session` of a pull (the rest it ignores): that one is the engine's own case below
-    let mut accepted: Vec<&str> = a.flags.keys().map(String::as_str).collect();
-    accepted.retain(|k| *k != defaults::text("mesh_write.flag_session"));
-    accepted.push(defaults::text("mesh_write.flag_session"));
-    let id = plain_id(a, &accepted)?;
+    let id = match plain_id(a) {
+        Ok(r) => r,
+        Err(refusal) => return Ok(refusal),
+    };
     let session = a.one(defaults::text("mesh_write.flag_session")).filter(|v| !v.is_empty());
     crate::meshw::clog::ready(inv)?;
     let mut found = ident::read_descriptor(&inv.home, id);

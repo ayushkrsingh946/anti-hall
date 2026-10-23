@@ -253,7 +253,10 @@ fn tree(home: &Path) -> BTreeMap<String, String> {
             let text = if k.contains("/cursor-log/") { mask_journal(&text) } else { text };
             // the central log's entries carry the wall clock and the writer's pid
             let text = if k.ends_with("/logs/devswarm.jsonl") {
-                regex::Regex::new(r#""pid":[0-9]+"#).unwrap().replace_all(&regex::Regex::new(r#""ts":"[^"]*""#).unwrap().replace_all(&text, r#""ts":"T""#), r#""pid":0"#).into_owned()
+                regex::Regex::new(r#""pid":[0-9]+"#)
+                    .unwrap()
+                    .replace_all(&regex::Regex::new(r#""ts":"[^"]*""#).unwrap().replace_all(&text, r#""ts":"T""#), r#""pid":0"#)
+                    .into_owned()
             } else {
                 text
             };
@@ -347,7 +350,11 @@ fn run_cases(fx: &Fx, w: &W, cases: &[Lc], min_native: usize, min_deferred: usiz
             };
             let pre = snap(&homes[2]);
             let d = engine_cli(&homes[2], &cwd, &c.argv, now, &env_for(path_with(&nonode)));
-            assert_eq!(d.code, 69, "{}: a deferral the engine cannot hand to Node exits mesh_write.exit_unable, got {} / {} / {}", c.name, d.code, d.stdout, d.stderr);
+            assert_eq!(
+                d.code, 69,
+                "{}: a deferral the engine cannot hand to Node exits mesh_write.exit_unable, got {} / {} / {}",
+                c.name, d.code, d.stdout, d.stderr
+            );
             assert!(d.stdout.is_empty(), "{}: nothing is printed on a deferral: {}", c.name, d.stdout);
             assert_eq!(last_log(&homes[2].join("state"))["result"], "defer", "{}", c.name);
             assert!(pre == snap(&homes[2]), "{}: a deferral wrote", c.name);
@@ -490,7 +497,7 @@ fn child_tick_steady_state_matches_node() {
             }
         }),
         // ---- the deferrals: everything Node does that the engine does not, decided before the first write ----
-        case("defer-session-flag", &["--quiet", "--session", "s1"], false, b(vec![], vec![])),
+        case("session-flag-is-answered", &["--quiet", "--session", "s1"], true, b(vec![], vec![])),
         case("defer-unclaimed-session", &["--quiet"], false, b(vec![("sessionId", json!("unclaimed:child-1"))], vec![])),
         case("defer-owner-key-is-the-legacy-hash-bucket-rehome", &["--quiet"], false, {
             let key = hash_of("child-1");
@@ -507,7 +514,7 @@ fn child_tick_steady_state_matches_node() {
             }
         }),
         case("defer-self-heal-would-spawn-the-installer", &["--quiet"], false, b(vec![], vec![])).env("DEVSWARM_REPO_ID", "repo-1"),
-        case("defer-a-foreign-reader-wal-has-an-open-batch", &["--quiet"], false, {
+        case("a-foreign-reader-wal-with-an-open-batch-is-reported-not-adopted", &["--quiet"], true, {
             let f = b(vec![], vec![]);
             move |h| {
                 f(h);
@@ -532,7 +539,7 @@ fn child_tick_steady_state_matches_node() {
         }),
         case("defer-no-descriptor", &["--quiet"], false, |_| {}),
     ];
-    run_cases(&fx, &w, &cases, 18, 7);
+    run_cases(&fx, &w, &cases, 20, 6);
 }
 
 fn hash_of(id: &str) -> String {
@@ -1020,7 +1027,12 @@ fn a_date_form_the_engine_does_not_reproduce_is_stored_at_import_time_and_the_ba
     // only the message rows are compared, and not their `ts`: Node reads the odd form as local time, the engine stores the import time
     let norm = |h: &Path| {
         let ts = regex::Regex::new(r"\bts=i[0-9]+").unwrap();
-        mask_dump(&raw_dump(&key_db(h))).lines().filter(|l| l.contains("hash=t\"native:")).map(|l| ts.replace_all(l, "ts=<time>").into_owned()).collect::<Vec<_>>().join("\n")
+        mask_dump(&raw_dump(&key_db(h)))
+            .lines()
+            .filter(|l| l.contains("hash=t\"native:"))
+            .map(|l| ts.replace_all(l, "ts=<time>").into_owned())
+            .collect::<Vec<_>>()
+            .join("\n")
     };
     assert!(
         !norm(&ours).is_empty() && norm(&ours) == norm(&reference),
@@ -1146,7 +1158,12 @@ fn inbox_pull_matches_node_and_drains_like_the_child_tick() {
                 f(h);
                 let hash = message_hash("child-1", &m[0]);
                 put(h, "inbox/child-1.ndjson", &(json!({"_h": hash, "fromBranch": "main", "message": "seen before", "createdAt": "2026-10-09T10:00:00Z", "status": "unread", "sender": null}).to_string() + "\n"));
-                run_seed("union_seed.js", h, &rk, &json!({"legacy": [{"workspaceId": "child-1", "ts": 1_791_540_000_000_i64, "hash": hash, "body": "seen before"}]}));
+                run_seed(
+                    "union_seed.js",
+                    h,
+                    &rk,
+                    &json!({"legacy": [{"workspaceId": "child-1", "ts": 1_791_540_000_000_i64, "hash": hash, "body": "seen before"}]}),
+                );
             }
         }),
         // Node reads only --session of a pull: any other flag changes nothing

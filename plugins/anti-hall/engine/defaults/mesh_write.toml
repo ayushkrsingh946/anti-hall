@@ -2215,3 +2215,184 @@ value = "retired-redirect-unresolvable-caller"
 [mesh_write.msg_redirect_unresolvable]
 doc = "The refusal of an `inbox ack` on a retired id by a caller not verifiable as the survivor. Placeholders: {id} and {survivor} (JSON-quoted)."
 value = "inbox ack {id} was redirected to survivor {survivor} after a fold, but the caller could not be verified as that survivor — refusing so an unrelated/unresolvable caller cannot advance the survivor's NDJSON cursor (pass --ack-as-owner to override)"
+
+# ---- inbox tick: the parts around the count (cmdInboxTick) -------------------------------------------------------------------
+
+[mesh_write.tick_refused_line]
+doc = "The line `inbox tick --quiet` prints for a refused tick (inboxTickQuietLine of an ok:false result); `{error}` is the reason."
+value = "ok:false {error}"
+
+[mesh_write.id_mismatch_warning]
+doc = "The stderr warning of warnIdMismatch: a child workspace addressing an id other than its own builder id; `{id}` is the addressed id, `{env_id}` its builder id."
+value = "⚠️ anti-hall · devswarm: addressing id \"{id}\" but this workspace's real DEVSWARM_BUILDER_ID is \"{env_id}\" — addressing the meshId row counts the wrong partition; use \"{env_id}\" unless you deliberately mean a different workspace"
+
+[mesh_write.child_repos_dir]
+doc = "The DevSwarm worktree layout under the home directory: a cwd below it corroborates a child workspace (devswarm-role.js isChildWorkspaceCorroborated)."
+value = ".devswarm/repos"
+
+[mesh_write.anchor_reason_unknown]
+doc = "The reason a refused anchor refresh reports when the registration named none."
+value = "unknown"
+
+[mesh_write.armed_archived_skip]
+doc = "The watcherArmed word of a child whose own workspace is archived (its watcher stays silent on purpose)."
+value = "archived-skip"
+
+[mesh_write.armed_idle_skip]
+doc = "The watcherArmed word of a Primary with no live child workspace (devswarm.wakeWatchIdleSkip)."
+value = "idle-skip"
+
+[mesh_write.armed_limit_skip]
+doc = "The watcherArmed word while limit conservation is active."
+value = "limit-skip"
+
+[mesh_write.file_rearm_cues]
+doc = "The re-arm cue measurement under the DevSwarm state directory (core.js rearmMetricsPath)."
+value = "rearm-cues.jsonl"
+
+[mesh_write.rearm_cues_cap]
+doc = "How many lines the re-arm cue measurement keeps."
+value = 1000
+min = 1
+
+[mesh_write.rearm_trigger_tick]
+doc = "The re-arm cue bucket of a tick that found no live watcher."
+value = "tick"
+
+[mesh_write.rearm_trigger_archived]
+doc = "The re-arm cue bucket of an archived child's tick."
+value = "archived-skip"
+
+[mesh_write.rearm_trigger_idle]
+doc = "The re-arm cue bucket of a Primary's idle skip."
+value = "idle-skip"
+
+[mesh_write.rearm_trigger_limit]
+doc = "The re-arm cue bucket of a limit skip."
+value = "limit-skip"
+
+[mesh_write.wal_alert_ms]
+doc = "A pending delivery batch older than this many milliseconds is an alert (devswarm-read-wal.js PENDING_ALERT_MS)."
+value = 3600000
+min = 1
+
+[mesh_write.wal_alert_bytes]
+doc = "Pending delivery batches over this many bytes are an alert (devswarm-read-wal.js PENDING_ALERT_BYTES)."
+value = 1048576
+min = 1
+
+[mesh_write.wal_unknown_code]
+doc = "The error code the delivery-log health names for an I/O error without a well-known code."
+value = "EUNKNOWN"
+
+[mesh_write.wal_reason_unreadable]
+doc = "The health reason of a delivery log that cannot be read; `{code}` is the error code."
+value = "unreadable ({code})"
+
+[mesh_write.wal_reason_spilled]
+doc = "The health reason of spilled batches; `{n}` is how many."
+value = "{n} spilled batch(es) — WAL was not writable; destructive reads blocked"
+
+[mesh_write.wal_reason_old]
+doc = "The health reason of an old pending batch; `{minutes}` is its age."
+value = "oldest pending batch {minutes}m old"
+
+[mesh_write.wal_reason_bytes]
+doc = "The health reason of too many pending bytes; `{bytes}` is the size."
+value = "{bytes} pending bytes"
+
+[mesh_write.wal_reason_last_resort]
+doc = "The health reason of a last-resort batch; `{dir}` is the temp directory that holds it."
+value = "LAST-RESORT batch in {dir} — WAL and spill both failed; destructive reads blocked"
+
+[mesh_write.set_tick_roster]
+doc = "The setting devswarm.tickRosterEvery: every Nth quiet tick of a Primary appends the compact roster after the first line."
+value = { section = "devswarm", key = "tickRosterEvery", type = "number", min = 0, env = "ANTIHALL_DEVSWARM_TICK_ROSTER_EVERY", default = 0 }
+
+[mesh_write.tick_failed]
+doc = "The reason the quiet tick line names for a failed result that carries none."
+value = "inbox tick failed"
+
+[mesh_write.js_object_string]
+doc = "String(object) in JavaScript: what Number() converts an object (or an array holding one) from."
+value = "[object Object]"
+
+[mesh_write.store_unknown_code]
+doc = "The code a store failure reports when the error carries none (Node: EUNKNOWN)."
+value = "EUNKNOWN"
+
+[mesh_write.store_backend_code]
+doc = "The code reported for a store whose backend (the journal) this engine does not read."
+value = "EBACKEND"
+
+[mesh_write.reason_store_unavailable]
+doc = "The refusal reason of a store that could not be opened or read."
+value = "store-unavailable"
+
+[mesh_write.reason_store_open_failed]
+doc = "The refusal reason of a store whose open failed outright."
+value = "store-open-failed"
+
+[mesh_write.reason_store_read_error]
+doc = "The reason of a store whose rows could not be read."
+value = "store-read-error"
+
+[mesh_write.reason_ctx_mismatch]
+doc = "The refusal reason of an id registered under another project than the caller's."
+value = "project-context-mismatch"
+
+[mesh_write.msg_ctx_mismatch_head]
+doc = "The first part of the project-context-mismatch text; `{id}` and `{registered}` are JSON-quoted."
+value = "workspace {id} is registered under project {registered}"
+
+[mesh_write.msg_ctx_mismatch_other]
+doc = "The project-context-mismatch text when the caller's directory resolves to another project; `{caller}` is JSON-quoted."
+value = ", but the current context resolves to a DIFFERENT project {caller}"
+
+[mesh_write.msg_ctx_mismatch_none]
+doc = "The project-context-mismatch text when the caller's directory resolves to no project."
+value = ", but the current context could not resolve a project (non-git cwd?)"
+
+[mesh_write.msg_ctx_mismatch_tail]
+doc = "The end of the project-context-mismatch text."
+value = " — run this from within that project's worktree to read its inbox"
+
+[mesh_write.msg_store_unopened]
+doc = "The text of a store that could not be opened; `{id}` is JSON-quoted, `{code}` the error code."
+value = "store for workspace {id} could not be opened: {code}"
+
+[mesh_write.msg_store_unreadable]
+doc = "The text of a store that could not be read; `{id}` is JSON-quoted, `{code}` the reason."
+value = "store for workspace {id} could not be fully read ({code})"
+
+[mesh_write.msg_store_read_error]
+doc = "The text of a store read that failed; `{id}` is JSON-quoted, `{why}` the reason."
+value = "store for workspace {id} could not be read: {why}"
+
+[mesh_write.msg_mesh_unresolved]
+doc = "The meshGroupError of a mesh group that could not be resolved or read; `{id}` is JSON-quoted, `{why}` the reason."
+value = "mesh group of {id} could not be read: {why}"
+
+[mesh_write.known_reason_store]
+doc = "The known:false reason of a store that could not be used; `{code}` is the error code."
+value = "store-unavailable ({code})"
+
+[mesh_write.known_reason_flag]
+doc = "The known:false reason word of a store flagged unavailable."
+value = "storeUnavailable"
+
+[mesh_write.known_reason_kind]
+doc = "The kind appended to that word; `{kind}` is the refusal reason."
+value = " ({kind})"
+
+[mesh_write.known_reason_mesh]
+doc = "The known:false reason word of a mesh group that could not be resolved."
+value = "meshGroupUnresolved"
+
+[mesh_write.known_reason_colon]
+doc = "What joins that word to its error text."
+value = ": "
+
+[mesh_write.known_reason_partial]
+doc = "The known:false reason word of totals that are partial."
+value = "totalsPartial"
