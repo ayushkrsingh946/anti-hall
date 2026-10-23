@@ -359,8 +359,15 @@ fn cases(fx: &Fx) -> Vec<Case> {
     v.push(base("count-partly-read", cmd("count", "child-1", &[]), ack(floors("child-1", 1, 1), d_inbox.clone()), inbox(text3.clone()), true, vec!["\"action\":\"count\"", "\"cursorNdjson\":1"]));
     v.push(base("count-all-read", cmd("count", "child-1", &[]), ack(floors("child-1", 2, 3), d_inbox.clone()), inbox(text3.clone()), true, vec!["\"unreadTotal\":0"]));
     v.push(base("count-unknown-no-inbox-files", cmd("count", "child-1", &[]), ack(floors("child-1", 0, 0), d_inbox.clone()), nothing(), true, vec!["\"known\":false"]));
+    // ---- read: native ----
+    v.push(base("read-3-ndjson-and-store-unread", cmd("read", "child-1", &[]), ack(floors("child-1", 0, 0), d_inbox.clone()), inbox(text3.clone()), true, vec!["\"action\":\"read\"", "\"cursorAdvanced\":false", "first native", "\"meshMessages\":[{"]));
+    v.push(base("read-partly-read", cmd("read", "child-1", &[]), ack(floors("child-1", 1, 2), d_inbox.clone()), inbox(text3.clone()), true, vec!["\"action\":\"read\"", "legacy line without hash", "!first native"]));
+    v.push(base("read-all-read", cmd("read", "child-1", &[]), ack(floors("child-1", 2, 3), d_inbox.clone()), inbox(text3.clone()), true, vec!["\"lines\":[]", "!ackHint"]));
+    v.push(base("read-unknown-no-inbox-files", cmd("read", "child-1", &[]), ack(floors("child-1", 0, 0), d_inbox.clone()), nothing(), true, vec!["\"known\":false", "\"meshMessages\":[{"]));
     // ---- count: deferred ----
     v.push(base("count-no-descriptor", cmd("count", "ghost", &[]), ack(floors("child-1", 0, 0), d_inbox.clone()), inbox(text3.clone()), false, vec![]));
+    v.push(base("read-no-descriptor", cmd("read", "ghost", &[]), ack(floors("child-1", 0, 0), d_inbox.clone()), inbox(text3.clone()), false, vec![]));
+    v.push(base("read-limit-flag", cmd("read", "child-1", &["--limit", "1"]), ack(floors("child-1", 0, 0), d_inbox.clone()), inbox(text3.clone()), false, vec![]));
     v.push(base("count-window-flag", cmd("count", "child-1", &["--since", "1"]), ack(floors("child-1", 0, 0), d_inbox.clone()), inbox(text3.clone()), false, vec![]));
     v
 }
@@ -417,12 +424,12 @@ fn run_case_list(tag: &str, list: Vec<Case>, fx: &Fx) {
 }
 
 #[test]
-fn inbox_count_matches_node_byte_for_byte_and_defers_without_writing() {
+fn inbox_count_and_read_match_node_byte_for_byte_and_defer_without_writing() {
     if !node_sqlite_available() {
         eprintln!("SKIPPED: Node with node:sqlite is not available, so there is no Node writer to compare with");
         return;
     }
     let fx = fixture("ic");
-    let list = cases(&fx).into_iter().filter(|c| c.argv.get(1).map(String::as_str) == Some("count")).collect();
-    run_case_list("count", list, &fx);
+    let list = cases(&fx).into_iter().filter(|c| matches!(c.argv.get(1).map(String::as_str), Some("count" | "read"))).collect();
+    run_case_list("count+read", list, &fx);
 }

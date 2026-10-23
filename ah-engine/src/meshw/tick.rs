@@ -242,6 +242,10 @@ pub(crate) struct Counted {
     pub store_cursor: f64,
     /// `total` (only a known count reports a merged total).
     pub total: Option<usize>,
+    /// The unread NDJSON lines (what `inbox read` prints).
+    pub nd_lines: Vec<String>,
+    /// The unread store rows no NDJSON line covers.
+    pub store_rows: Vec<serde_json::Value>,
 }
 
 /// `count` for a single, registered partition. An unknown count (the inbox or its cursor file does not read) is the store
@@ -290,6 +294,8 @@ pub(crate) fn count_mail(inv: &Inv, id: &str, desc: &OVal, line_form: bool, full
         nd_cursor,
         store_cursor: store_base,
         total,
+        nd_lines: u.nd_unread_lines,
+        store_rows: u.store_only_unread,
     })
 }
 

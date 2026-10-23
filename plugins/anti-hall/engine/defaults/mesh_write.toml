@@ -2001,3 +2001,11 @@ value = "ack"
 [mesh_write.verb_pull]
 doc = "The pull subverb of `inbox`."
 value = "pull"
+
+[mesh_write.read_ack_hint]
+doc = "The `ackHint` of an `inbox read` that left mail unread: it advanced no cursor, and names the `inbox ack` that does. Placeholders: {total}, {nd}, {store} (unread counts) and {id}."
+value = "`inbox read` is READ-ONLY and advanced no cursor — these {total} unread row(s) ({nd} durable-NDJSON, {store} store) stay unread until `devswarm.js inbox ack {id}` consumes them. NOTE: a Primary's own `inbox read-primary` (acked via its `ackCommand`) folds ONLY its OWN descriptor's NDJSON channel, so another row's (e.g. a same-worktree twin's) durable inbox is only ever drained by acking THAT id explicitly."
+
+[mesh_write.action_read]
+doc = "The `action` of an `inbox read` result."
+value = "read"

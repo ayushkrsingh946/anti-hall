@@ -138,6 +138,11 @@ fn store_msg(r: &Value, origin: bool) -> Msg {
     }
 }
 
+/// A store row as `listMessages` hands it to a caller (key order included).
+pub(crate) fn store_row(r: &Value) -> OVal {
+    store_msg(r, false).fields.done()
+}
+
 /// `String(v)` of a parsed JSON value where that is a plain scalar; objects and arrays stringify in JavaScript's own way.
 fn js_string_of(v: &OVal) -> R<String> {
     match v {
