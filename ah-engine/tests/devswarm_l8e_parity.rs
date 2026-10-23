@@ -897,6 +897,11 @@ fn a_kill_at_every_step_loses_and_duplicates_nothing_whoever_runs_next() {
         }
         let mut finals: Vec<(String, (BTreeMap<String, String>, String))> = Vec::new();
         for (killer, next) in [(Tool::Node, Tool::Node), (Tool::Node, Tool::Engine), (Tool::Engine, Tool::Node), (Tool::Engine, Tool::Engine)] {
+            // Node never runs after the engine any more (the shim has no Node), and it hashes under the partition id where the engine
+            // hashes under the checkout's label: a batch the engine half-applied is replayed by the engine, not by Node
+            if killer == Tool::Engine && next == Tool::Node {
+                continue;
+            }
             let home = fx.root.join(format!("k{ki}-{killer:?}-then-{next:?}"));
             copy_tree(&fx.seed_home, &home);
             fs::create_dir_all(home.join(".anti-hall")).unwrap();
@@ -1005,7 +1010,7 @@ fn a_date_form_the_engine_does_not_reproduce_is_stored_at_import_time_and_the_ba
     let e = engine_cli(&ours, &fx.child, &child(&["--quiet"]), NOW, &env);
     assert_eq!(e.stdout, n.stdout, "the tick prints the same count");
     assert_eq!(last_log(&ours.join("state"))["result"], "native");
-    assert_eq!(read_inbox(&ours), read_inbox(&reference), "the inbox is the same");
+    assert_eq!(mask_native_hash(&read_inbox(&ours)), mask_native_hash(&read_inbox(&reference)), "the inbox is the same");
     assert!(wal_text(&ours).contains("\"t\":\"batch\"") && wal_text(&ours).contains("\"t\":\"done\""), "the batch is closed in the same tick");
     // the next tick finds nothing pending: the engine answers it natively and nothing is replayed or duplicated
     let again = engine_cli(&ours, &fx.child, &child(&["--quiet"]), NOW, &env);
@@ -1039,7 +1044,7 @@ fn a_date_form_the_engine_does_not_reproduce_is_stored_at_import_time_and_the_ba
     let e = engine_cli(&ours, &fx.child, &child(&["--quiet"]), NOW, &env);
     assert_eq!(e.stdout, n.stdout, "the pending-batch tick prints the same count");
     assert_eq!(last_log(&ours.join("state"))["result"], "native", "{}", e.stderr);
-    assert_eq!(read_inbox(&ours), read_inbox(&reference), "the replayed inbox is the same");
+    assert_eq!(mask_native_hash(&read_inbox(&ours)), mask_native_hash(&read_inbox(&reference)), "the replayed inbox is the same");
     assert!(wal_text(&ours).contains("\"t\":\"done\""), "the replayed batch is closed");
     assert!(
         !norm(&ours).is_empty() && norm(&ours) == norm(&reference),
@@ -1131,6 +1136,19 @@ fn inbox_pull_matches_node_and_drains_like_the_child_tick() {
             }
         }),
         pull_case("pull-replay-wal-batch-written-inbox-not", true, pending_wal(&w, "2026-10-09T10:00:00Z", false)),
+        // a machine that ran an earlier version holds the message under the partition-id hash, in the inbox AND in the store: the
+        // same message delivered again is a duplicate there, never new mail
+        pull_case("pull-old-id-scoped-hash-in-inbox-and-store", true, {
+            let f = queued("1", msgs(&[("seen before", "2026-10-09T10:00:00Z")]));
+            let m = serde_json::from_str::<Value>(&msgs(&[("seen before", "2026-10-09T10:00:00Z")])).unwrap();
+            let rk = w.repo_key.clone();
+            move |h| {
+                f(h);
+                let hash = message_hash("child-1", &m[0]);
+                put(h, "inbox/child-1.ndjson", &(json!({"_h": hash, "fromBranch": "main", "message": "seen before", "createdAt": "2026-10-09T10:00:00Z", "status": "unread", "sender": null}).to_string() + "\n"));
+                run_seed("union_seed.js", h, &rk, &json!({"legacy": [{"workspaceId": "child-1", "ts": 1_791_540_000_000_i64, "hash": hash, "body": "seen before"}]}));
+            }
+        }),
         // ---- the deferrals ----
         pull_case("pull-defer-unclaimed-session", false, b(vec![("sessionId", json!("unclaimed:child-1"))], vec![])),
         pull_case("pull-a-foreign-reader-wal-has-an-open-batch", true, {
@@ -1154,5 +1172,5 @@ fn inbox_pull_matches_node_and_drains_like_the_child_tick() {
             c
         },
     ];
-    run_cases(&fx, &w, &cases, 19, 3);
+    run_cases(&fx, &w, &cases, 20, 3);
 }
