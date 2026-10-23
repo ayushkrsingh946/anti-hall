@@ -40,7 +40,9 @@ pub mod hivecontrol;
 pub mod ident;
 pub mod idlock;
 pub mod inbox;
+pub mod inboxcmd;
 pub mod lifeverbs;
+pub mod meshgroup;
 pub mod mboxtool;
 pub mod orphan;
 pub mod plan;
@@ -177,9 +179,21 @@ pub enum Verb {
     InboxReadPrimary,
     /// Plain `roster` (no `--ack`).
     Roster,
+    /// `inbox count <id>` (see [`inboxcmd`]).
+    InboxCount,
+    /// `inbox read <id>` (see [`inboxcmd`]).
+    InboxRead,
+    /// `inbox peek-primary <id>` (see [`readprimary`]).
+    InboxPeekPrimary,
+    /// `inbox ack <id>` (see [`inboxcmd`]).
+    InboxAck,
+    /// `inbox pull <id>` (see [`inboxcmd`]).
+    InboxPull,
     /// A verb that needs no store: `help` and the unknown-command answer, `skip`, `archive-ignore`, `archive-unignore`,
     /// `gate-intent`, `notice --list` (see [`simple`]).
     Simple(simple::Simple),
+    /// `migrate`: the engine's migration pass (see [`run_migrate`]).
+    Migrate,
     /// `plan set|show <id>` (see [`planverbs`]).
     Plan,
     /// `scope add <id>` (see [`planverbs`]).
@@ -219,6 +233,9 @@ pub fn verb_of(a: &args::Args) -> Option<Verb> {
     if p0 == defaults::text("mesh_write.verb_send") {
         return Some(Verb::Send);
     }
+    if p0 == defaults::text("devswarm_cli.verb_migrate") {
+        return Some(Verb::Migrate);
+    }
     if p0 == defaults::text("devswarm_cli.verb_plan") {
         return Some(Verb::Plan);
     }
@@ -249,6 +266,21 @@ pub fn verb_of(a: &args::Args) -> Option<Verb> {
     if p0 == defaults::text("mesh_write.verb_heartbeat") {
         return Some(Verb::Heartbeat);
     }
+    if p0 == defaults::text("mesh_write.verb_inbox") && p1 == Some(defaults::text("mesh_write.verb_count")) {
+        return Some(Verb::InboxCount);
+    }
+    if p0 == defaults::text("mesh_write.verb_inbox") && p1 == Some(defaults::text("mesh_write.verb_read")) {
+        return Some(Verb::InboxRead);
+    }
+    if p0 == defaults::text("mesh_write.verb_inbox") && p1 == Some(defaults::text("mesh_write.verb_peek_primary")) {
+        return Some(Verb::InboxPeekPrimary);
+    }
+    if p0 == defaults::text("mesh_write.verb_inbox") && p1 == Some(defaults::text("mesh_write.verb_ack")) {
+        return Some(Verb::InboxAck);
+    }
+    if p0 == defaults::text("mesh_write.verb_inbox") && p1 == Some(defaults::text("mesh_write.verb_pull")) {
+        return Some(Verb::InboxPull);
+    }
     if p0 == defaults::text("mesh_write.verb_inbox") && p1 == Some(defaults::text("mesh_write.verb_tick")) {
         return Some(Verb::InboxTick);
     }
@@ -269,7 +301,13 @@ pub fn run_native(inv: &Inv, a: &args::Args) -> R<Answer> {
         Some(Verb::InboxTick) => tick::run(inv, a),
         Some(Verb::InboxReadPrimary) => readprimary::run(inv, a),
         Some(Verb::Roster) => roster::run(inv, a),
+        Some(Verb::InboxCount) => inboxcmd::run_count(inv, a),
+        Some(Verb::InboxRead) => inboxcmd::run_read(inv, a),
+        Some(Verb::InboxPeekPrimary) => readprimary::run_peek(inv, a),
+        Some(Verb::InboxAck) => inboxcmd::run_ack(inv, a),
+        Some(Verb::InboxPull) => inboxcmd::run_pull(inv, a),
         Some(Verb::Simple(v)) => simple::run(inv, a, v),
+        Some(Verb::Migrate) => Ok(run_migrate(inv)),
         Some(Verb::Plan) => planverbs::run_plan(inv, a),
         Some(Verb::Scope) => planverbs::run_scope(inv, a),
         Some(Verb::Gate) => wsverbs::run_gate(inv, a),
@@ -277,6 +315,24 @@ pub fn run_native(inv: &Inv, a: &args::Args) -> R<Answer> {
         Some(Verb::Ext(v)) => extverbs::run(inv, a, v),
         None => ident::defer("not-ported"),
     }
+}
+
+/// `devswarm.js migrate`: Node's `migrateToStore` imported descriptors into the first store layouts, which no install holds any more;
+/// what is left of it (the hash-store fold and the other persisted-state repairs) is the engine's migration pass, which is run here.
+/// The answer is that pass's report (`ok`, `action`, `version`, `error`, `repairs`), exit 0 unless a repair failed.
+fn run_migrate(inv: &Inv) -> Answer {
+    let env: std::collections::BTreeMap<String, String> = inv.env.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+    let root = crate::ops::plugin_root(&env);
+    let mut ctx = crate::migrate::Ctx::new(inv.home.to_string_lossy().into_owned(), inv.cwd.clone(), env, false, None, root.clone());
+    ctx.version = root.as_deref().and_then(|r| crate::migrate::plugin_version(&ctx, r));
+    let rows = crate::migrate::run(&ctx);
+    for n in ctx.take_notes() {
+        eprintln!("{}", defaults::render("migrate_msg.note_line", &[("note", &n)]));
+    }
+    let shown = ctx.version.clone().unwrap_or_else(|| defaults::text("migrate_msg.unknown_version").to_string());
+    let failed = rows.iter().any(|r| r.status == "failed");
+    let out = crate::checks::jsport::json::stringify(&crate::migrate::report(&shown, &rows, None));
+    Answer { code: if failed { 2 } else { 0 }, stdout: format!("{out}\n"), effect: send::Effect::None }
 }
 
 /// The invocation context of this process.

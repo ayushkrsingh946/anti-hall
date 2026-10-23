@@ -673,9 +673,17 @@ value = "verb={verb} argv=[{argv}] reason={reason}"
 doc = "How many leading positional words (the verb and subcommand, never a message body) an abandoned mesh call's log line names."
 value = 2
 
+[mesh_write.reroute_incoherent]
+doc = "Why a send was rerouted: the addressed row is live but its session runs in another checkout (`rerouteReason`)."
+value = "session-worktree-incoherent"
+
+[mesh_write.reroute_not_live]
+doc = "Why a send was rerouted: the addressed row is not live and a live row of the same session exists (`rerouteReason`)."
+value = "addressed-row-not-live"
+
 [mesh_write.msg_unable]
 doc = "stderr line when the engine cannot answer a mesh verb (an unported verb, a case it cannot do, no plugin context). Nothing was written; the exit code is mesh_write.exit_unable. Placeholders: {site}, where it gave up; {detail}, which call and why."
-value = "ah-engine mesh: ERROR: this verb or case cannot be done by the engine ({site}: {detail}); nothing was done. Run the verb by hand with the devswarm shim (~/.anti-hall/bin/devswarm.js), or report this site."
+value = "ah-engine mesh: ERROR: this verb or case cannot be done by the engine ({site}: {detail}); nothing was done. Report this site (it is logged, with the call, in the engine log)."
 
 [mesh_write.msg_disabled]
 doc = "stderr line when the mesh write verbs are switched off (mesh.engine_writes = off). Nothing was done; the exit code is mesh_write.exit_unable. Placeholder: {site}."
@@ -1020,6 +1028,60 @@ value = "repoKey"
 [mesh_write.op_own]
 doc = "The `k` of a read-receipt op that moves the caller's own partition cursor."
 value = "own"
+
+[mesh_write.gate_sibling]
+doc = "The journal `gate` of a cursor move of a sibling partition of the caller's mesh group."
+value = "sibling"
+
+[mesh_write.never_read_sibling_cap]
+doc = "How many rows of one sibling partition a read delivers at most (`NEVER_READ_SIBLING_CAP`); the rest are withheld and named in the answer."
+value = 200
+min = 1
+
+[mesh_write.consumed_hash_seed_cap]
+doc = "How many of the newest already-read rows of the caller's own partition seed the duplicate check of a mesh-group read (`CONSUMED_HASH_SEED_CAP`)."
+value = 2000
+min = 1
+
+[mesh_write.channel_sibling_seen]
+doc = "The `channel` of a cursor-write failure of the caller-scoped seen watermark of a sibling partition."
+value = "sibling-seen-watermark"
+
+[mesh_write.channel_sibling_store]
+doc = "The `channel` of a cursor-write failure of a sibling partition's store cursor."
+value = "sibling-store-cursor"
+
+[mesh_write.msg_seen_watermark_failed]
+doc = "The error of a seen watermark that could not be written."
+value = "could not write caller-scoped seen watermark"
+
+[mesh_write.log_op_sibling_dup]
+doc = "The central-log operation of a sibling row suppressed as a logical duplicate."
+value = "sibling-fold-logical-dup"
+
+[mesh_write.msg_sibling_dup]
+doc = "The central-log message of a sibling row suppressed as a logical duplicate."
+value = "suppressed a logically-duplicate sibling row (weak key match)"
+
+[mesh_write.reason_logical_dup]
+doc = "The log reason of a sibling row suppressed as a logical duplicate."
+value = "logical-dup"
+
+[mesh_write.mesh_never_read_hint]
+doc = "The hint of a read that withheld rows of sibling partitions over the cap. Placeholders: {withheld}, {n} (partitions), {cap}, {reads} (the commands)."
+value = "withheld {withheld} row(s) from {n} sibling partition(s) (cap {cap}); read them directly with: {reads}"
+
+[mesh_write.mesh_never_read_read_cmd]
+doc = "The command that reads one sibling partition directly. Placeholder: {pid}."
+value = "inbox messages {pid}"
+
+[mesh_write.mesh_never_read_read_sep]
+doc = "The separator of the direct-read commands in the never-read hint."
+value = " ; "
+
+[mesh_write.truncated_hint]
+doc = "The hint of a read that withheld rows over the limit. Placeholders: {count}, {limit}."
+value = "not all unread messages were returned ({count} withheld) — the read cursor was NOT advanced past withheld messages, so re-reading (optionally with a higher --limit than {limit}) returns them"
 
 [mesh_write.op_sibling]
 doc = "The `k` of a read-receipt op that moves a sibling partition's cursor (Node's)."
@@ -1985,3 +2047,171 @@ doc = "How many of the caller's leading arguments a line records."
 value = 4
 min = 1
 max = 64
+
+[mesh_write.verb_count]
+doc = "The count subverb of `inbox`, and the `action` of its result."
+value = "count"
+
+[mesh_write.verb_peek_primary]
+doc = "The peek-primary subverb of `inbox`."
+value = "peek-primary"
+
+[mesh_write.verb_ack]
+doc = "The ack subverb of `inbox`."
+value = "ack"
+
+[mesh_write.verb_pull]
+doc = "The pull subverb of `inbox`."
+value = "pull"
+
+[mesh_write.read_ack_hint]
+doc = "The `ackHint` of an `inbox read` that left mail unread: it advanced no cursor, and names the `inbox ack` that does. Placeholders: {total}, {nd}, {store} (unread counts) and {id}."
+value = "`inbox read` is READ-ONLY and advanced no cursor — these {total} unread row(s) ({nd} durable-NDJSON, {store} store) stay unread until `devswarm.js inbox ack {id}` consumes them. NOTE: a Primary's own `inbox read-primary` (acked via its `ackCommand`) folds ONLY its OWN descriptor's NDJSON channel, so another row's (e.g. a same-worktree twin's) durable inbox is only ever drained by acking THAT id explicitly."
+
+[mesh_write.action_read]
+doc = "The `action` of an `inbox read` result."
+value = "read"
+
+[mesh_write.action_peek_primary]
+doc = "The `action` of an `inbox peek-primary` result."
+value = "peek-primary"
+
+[mesh_write.peek_primary_unread_flags]
+doc = "The flags `inbox read-primary` accepts that a peek does not (a text rendering, an immediate ack): a peek carrying one is Node's, since Node ignores them in its own way."
+value = ["format", "ack-after-print"]
+
+[mesh_write.log_ns_nd]
+doc = "The journal `ns` of an NDJSON-namespace reader cursor move."
+value = "reader_cursors:nd"
+
+[mesh_write.gate_min_floor]
+doc = "The journal `gate` of a cursor move that names no door (the floor recompute)."
+value = "min-floor"
+
+[mesh_write.verb_log_ack_all]
+doc = "The journal `verb` of an `inbox ack` NDJSON move."
+value = "inbox-ack-all"
+
+[mesh_write.verb_log_ack]
+doc = "The journal `verb` of an `inbox ack` store move."
+value = "inbox-ack"
+
+[mesh_write.msg_pull_lock_held]
+doc = "What `inbox pull` reports when another pull holds the workspace's pull lock."
+value = "another pull holds the lock"
+
+[mesh_write.msg_pull_ensure_failed]
+doc = "What `inbox pull` reports when the ensure's writes failed and the pull was skipped."
+value = "the workspace registration could not be written"
+
+[mesh_write.msg_pull_no_descriptor]
+doc = "What `inbox pull` reports when the descriptor is gone once the lock is held. Placeholder: {id} (JSON-quoted)."
+value = "no descriptor for workspace {id}"
+
+[mesh_write.msg_pull_replay_failed]
+doc = "What `inbox pull` reports when a pending delivery-log batch could not be replayed (nothing further is read)."
+value = "WAL replay failed (batch kept pending, no new native read)"
+
+[mesh_write.msg_pull_wal_unwritable]
+doc = "What `inbox pull` reports when the delivery log cannot be appended and fsynced (the destructive read is refused). Placeholders: {why} and {wal}."
+value = "delivery WAL not writable ({why}): {wal} — destructive native read refused"
+
+[mesh_write.msg_pull_count_failed]
+doc = "What `inbox pull` reports when the message count failed without saying why."
+value = "message-count failed"
+
+[mesh_write.msg_pull_read_failed]
+doc = "What `inbox pull` reports when the native read failed without saying why."
+value = "read-messages failed"
+
+[mesh_write.pull_timeout_re]
+doc = "Case-insensitive regular expression: a failed message-count whose error matches it is a native timeout (the app did not answer), reported as `nativeTimeout`."
+value = "(?i)request timeout|timed out|ETIMEDOUT"
+
+[mesh_write.msg_verb_not_ok]
+doc = "The central-log message of a verb that returned `ok: false` without an error or a reason."
+value = "verb returned ok:false"
+
+[mesh_write.log_op_inbox_pull]
+doc = "The central-log operation of an `inbox pull` that did not succeed."
+value = "inbox-pull"
+
+[mesh_write.channel_ndjson_cursor]
+doc = "The `channel` of a cursor-write failure of the NDJSON position."
+value = "ndjson-cursor"
+
+[mesh_write.err_nd_ack_failed]
+doc = "The error text of an NDJSON position move that failed without saying why."
+value = "reader-cursors nd ack failed"
+
+[mesh_write.msg_ack_to_not_number]
+doc = "What `inbox ack --to` reports when its value is not a number."
+value = "--to must be a number"
+
+[mesh_write.cause_unresolvable]
+doc = "The reason of an `inbox ack` refused to a caller whose identity could not be resolved."
+value = "unresolvable-caller-identity"
+
+[mesh_write.cause_mismatch]
+doc = "The reason of an `inbox ack` refused to a caller registered as a different workspace."
+value = "ownership-mismatch"
+
+[mesh_write.msg_ack_refused]
+doc = "The refusal of an `inbox ack` by a caller that does not own the workspace. Placeholders: {cause}, {caller} and {id} (JSON-quoted), {rawid} (as typed)."
+value = "inbox ack refused ({cause}): caller {caller} does not own workspace {id} (pass --ack-as-owner to override, or use `inbox read {rawid}` to view without acking)"
+
+[mesh_write.verb_log_ack_to]
+doc = "The journal `verb` of an `inbox ack --to` NDJSON move."
+value = "inbox-ack-to"
+
+[mesh_write.truncated_hint_ack]
+doc = "The `truncatedHint` of an ack cut short by the per-call cap. Placeholders: {count} (rows withheld) and {limit}."
+value = "not all unread messages were acked this call ({count} withheld) — sibling cursors were NOT advanced past withheld messages, so acking again (optionally with a higher --limit than {limit}) consumes them"
+
+[mesh_write.act_inbox_prefix]
+doc = "What the `action` of an id-resolution refusal of an inbox verb starts with (the action is `inbox-<sub>`)."
+value = "inbox-"
+
+[mesh_write.reason_unregistered]
+doc = "The reason of an inbox read of an id with no descriptor, no registry row and no messages."
+value = "unregistered-workspace"
+
+[mesh_write.reason_no_inbox_path]
+doc = "The reason of an inbox read of an id that is registered (or has messages) but never got an inbox path."
+value = "no-inbox-path"
+
+[mesh_write.msg_unregistered]
+doc = "The refusal text for an unregistered id. Placeholder: {id} (JSON-quoted)."
+value = "workspace {id} is not registered and has no messages (no descriptor, no registry row, no store history) — register it first (or check the id for a typo)"
+
+[mesh_write.msg_no_inbox_path]
+doc = "The refusal text for a registered id that never got an inbox path. Placeholder: {id} (JSON-quoted)."
+value = "no inboxPath for workspace {id} (registered, but never given an --inbox path — register it first)"
+
+[mesh_write.log_ns_plain_store]
+doc = "The journal `ns` of a refused move recorded outside the reader cursors."
+value = "store"
+
+[mesh_write.gate_redirect_live]
+doc = "The journal `gate` of an `inbox ack` refused because the fold-retired id redirects to a live owner."
+value = "redirect-to-live"
+
+[mesh_write.msg_redirect_live_log]
+doc = "The journal error of an `inbox ack` refused for a live survivor. Placeholders: {id} (the retired id) and {survivor}."
+value = "refused: retired id {id} redirects to LIVE owner {survivor}"
+
+[mesh_write.reason_redirect_live]
+doc = "The reason of an `inbox ack --ack-as-owner` on a retired id whose survivor is live."
+value = "redirect-to-live-owner"
+
+[mesh_write.msg_redirect_live]
+doc = "The refusal of an `inbox ack` on a retired id whose survivor is live. Placeholders: {id} and {survivor} (JSON-quoted)."
+value = "refusing to ack retired id {id} — it redirects to {survivor}, whose owner is LIVE. Acking here would consume that live agent's mail. Ack the survivor from its own session, or read without --ack."
+
+[mesh_write.reason_redirect_unresolvable]
+doc = "The reason of an `inbox ack` on a retired id by a caller not verifiable as the survivor."
+value = "retired-redirect-unresolvable-caller"
+
+[mesh_write.msg_redirect_unresolvable]
+doc = "The refusal of an `inbox ack` on a retired id by a caller not verifiable as the survivor. Placeholders: {id} and {survivor} (JSON-quoted)."
+value = "inbox ack {id} was redirected to survivor {survivor} after a fold, but the caller could not be verified as that survivor — refusing so an unrelated/unresolvable caller cannot advance the survivor's NDJSON cursor (pass --ack-as-owner to override)"

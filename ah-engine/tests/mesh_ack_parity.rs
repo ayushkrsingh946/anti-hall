@@ -434,7 +434,7 @@ fn ack_primary_matches_node_byte_for_byte_and_defers_without_writing() {
                 json!([own(&primary, 1), {"k": "sibling", "partition": "child-1", "ackTarget": 1, "seenTarget": 1, "notAckable": false, "delivered": 1}]),
                 Value::Null,
             ))),
-            native: false,
+            native: true,
             expect: vec!["\"acked\""],
         },
         Case {
@@ -460,7 +460,7 @@ fn ack_primary_matches_node_byte_for_byte_and_defers_without_writing() {
             argv: args(&primary, "rimp1", &[]),
             extra: vec![],
             spec: one(receipt(&primary, "rimp1", &primary, Value::Null, created, json!([own(&primary, 2)]), Value::Null)),
-            native: false,
+            native: true,
             expect: vec!["\"acked\""],
         },
         Case {
@@ -538,7 +538,7 @@ fn ack_primary_matches_node_byte_for_byte_and_defers_without_writing() {
         }
     }
     eprintln!("ack-primary parity: {} cases, {native} answered by the engine and identical to Node, {deferred} deferred with nothing written", cases.len());
-    assert!(native >= 14 && deferred >= 12);
+    assert!(native >= 17 && deferred >= 11);
 }
 
 #[test]

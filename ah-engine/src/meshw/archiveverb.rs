@@ -391,12 +391,38 @@ pub fn archive(inv: &Inv, a: &Args) -> R<Answer> {
     if a.has(text("devswarm_cli.flag_force_cross_project")) {
         return defer("force-cross-project");
     }
+    // `resolveArchiveId`: a unique prefix or mesh label names the workspace; an ambiguous one archives nothing
+    let raw = id;
+    let id = match crate::meshw::actverbs::resolve_archive_id(inv, raw, false)? {
+        crate::meshw::actverbs::Resolved::Id(x) => x,
+        crate::meshw::actverbs::Resolved::Ambiguous(template, ids) => {
+            let msg = crate::checks::devswarm_role::text::fill_once(
+                template,
+                &[("id", &crate::meshw::actverbs::quote(raw)), ("n", &ids.len().to_string()), ("ids", &ids.join(text("devswarm_cli.msg_ids_join")))],
+            );
+            let mut o = Obj::default();
+            o.put("action", s(text("devswarm_cli.action_archive"))).put("id", s(raw)).put("descriptorArchived", OVal::Bool(false));
+            o.put("ok", OVal::Bool(false)).put("error", s(&msg)).put("candidates", OVal::Arr(ids.iter().map(|x| s(x)).collect()));
+            return Ok(answer(2, o.done()));
+        }
+    };
+    let id = id.as_str();
     let root = idlock::devswarm_root(&inv.home);
     let json = text("mesh_write.json_suffix");
     let active = root.join(text("mesh_write.dir_workspaces")).join(format!("{id}{json}"));
     match std::fs::symlink_metadata(&active) {
         Ok(_) => {}
-        Err(_) => return defer("not-an-active-id"),
+        Err(_) => {
+            // nothing resolved: no active and no archived descriptor is Node's "invalid or missing workspace id" refusal
+            let archived = root.join(text("mesh_write.dir_archived")).join(format!("{id}{json}"));
+            if std::fs::symlink_metadata(&archived).is_err() {
+                let mut o = Obj::default();
+                o.put("action", s(text("devswarm_cli.action_archive"))).put("id", s(raw)).put("descriptorArchived", OVal::Bool(false));
+                o.put("ok", OVal::Bool(false)).put("error", s(text("devswarm_cli.msg_bad_id")));
+                return Ok(answer(2, o.done()));
+            }
+            return defer("not-an-active-id");
+        }
     }
     let (bytes, desc, ino) = read_object(&active)?;
     if nonempty(desc.get("id")) != Some(id) {
@@ -422,6 +448,11 @@ pub fn archive(inv: &Inv, a: &Args) -> R<Answer> {
     }
     // the archived directory is a real directory and holds no marker of this id yet
     let adir = root.join(text("mesh_write.dir_archived"));
+    // `checkedArchivedDir(home, { create: true })`: the first archive of a machine creates the directory; anything else that is not a
+    // plain directory is Node's refusal
+    if std::fs::symlink_metadata(&adir).is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound) {
+        crate::discard::harmless(std::fs::create_dir_all(&adir)); // keep: the check below defers when it could not be made
+    }
     if !std::fs::symlink_metadata(&adir).is_ok_and(|m| m.is_dir() && !m.file_type().is_symlink()) {
         return defer("archived-dir");
     }

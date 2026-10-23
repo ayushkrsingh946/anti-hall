@@ -10,7 +10,7 @@
 //!   disagrees or cannot run) is Node's, decided before the first write. After the first write nothing defers any more: the
 //!   caller reports a committed failure instead of running Node.
 //!
-//! `restore` rewrites tombstoned rows from an archive and is left to Node.
+//! `restore` puts the bodies of tombstoned rows back from a month's archive ([`restore`]), under the same lock, and holds them for a week.
 use super::apply::{Pruned, Settings};
 use super::{Ended, Store, cap, dry, fold, read_settings, read_state, sqlite_stores, write_state};
 use crate::checks::guardkit::nodelock;
@@ -190,4 +190,210 @@ fn result(dry_run: bool, s_: &Settings, stores: Vec<OVal>, cap: OVal) -> OVal {
 /// Node's JSON for a value the engine builds (for comparing in tests).
 pub fn json_of(v: &OVal) -> Value {
     serde_json::from_str(&v.stringify()).unwrap_or(Value::Null)
+}
+
+/// `retention restore --store X --month yyyy-mm` (`restore` of `devswarm-retention.js`): the bodies an archive month holds are written
+/// back into the rows the pruning tombstoned (only a row whose id and hash match and whose body is still empty), and those ids are
+/// protected from the next pruning for [`restore_hold_days`](defaults) days.
+pub fn restore(ctx: &Ctx, hash: &str, month: &str) -> Result<(bool, OVal), Defer> {
+    let t = |k: &str| defaults::text(k);
+    let fail = |msg: &str| Ok((false, OVal::Obj(vec![("ok".into(), OVal::Bool(false)), ("error".into(), s(msg))])));
+    let safe = (1..=defaults::num("devswarm_cli.ret_store_name_max") as usize).contains(&hash.len())
+        && hash.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+        && !hash.starts_with('.');
+    if !safe {
+        return fail(t("devswarm_cli.ret_msg_bad_store"));
+    }
+    let ym = month.len() == 7 && month.as_bytes()[4] == b'-' && month.bytes().enumerate().all(|(i, b)| i == 4 || b.is_ascii_digit());
+    if !ym {
+        return fail(t("devswarm_cli.ret_msg_bad_month"));
+    }
+    let rel = format!("{hash}/{month}{}", t("devswarm_sup.rt_archive_ext"));
+    let file = super::apply::archive_root(ctx.home).join(&rel);
+    if !file.exists() {
+        return fail(&defaults::render("devswarm_cli.ret_msg_no_archive", &[("file", &rel)]));
+    }
+    if super::apply::store_bytes(ctx.home, hash) == 0 || std::fs::metadata(super::plan::db_path(ctx.home, hash)).map_or(0, |m| m.len()) == 0 {
+        return fail(&defaults::render("devswarm_cli.ret_msg_no_store", &[("hash", &hash)]));
+    }
+    let raw = std::fs::read(&file).map_err(|e| Defer(format!("archive-read:{e}")))?;
+    let text = super::gz::decompress(&raw)?;
+    let mut by_id: Vec<(i64, OVal)> = Vec::new();
+    let mut lines = 0u64;
+    for line in String::from_utf8_lossy(&text).split('\n') {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let Some(r @ OVal::Obj(_)) = OVal::parse(line) else { continue }; // a torn line is skipped
+        lines += 1;
+        let id = match r.get("id") {
+            Some(OVal::Num(x)) if x.is_finite() && x.fract() == 0.0 => *x as i64,
+            Some(OVal::Str(x)) if x.trim().parse::<i64>().is_ok() => x.trim().parse::<i64>().unwrap_or_default(),
+            _ => continue,
+        };
+        match by_id.iter_mut().find(|(i, _)| *i == id) {
+            Some(slot) => slot.1 = r,
+            None => by_id.push((id, r)),
+        }
+    }
+    let Some(held) = nodelock::acquire(&super::lock_path(ctx.home), super::lock_params()) else { return fail(t("devswarm_cli.ret_msg_lock_busy")) };
+    let out = restore_locked(ctx, hash, month, lines, &by_id);
+    held.release();
+    out
+}
+
+fn restore_locked(ctx: &Ctx, hash: &str, month: &str, lines: u64, by_id: &[(i64, OVal)]) -> Result<(bool, OVal), Defer> {
+    let c = super::apply::open_rw(ctx.home, hash).map_err(|e| Defer(format!("store-open:{}", e.0)))?;
+    let (mut restored, mut already, mut missing, mut mismatched) = (0u64, 0u64, 0u64, 0u64);
+    let (mut min_id, mut max_id) = (i64::MAX, i64::MIN);
+    let text_of = |v: Option<&OVal>| match v {
+        None | Some(OVal::Null) => None,
+        Some(OVal::Str(x)) => Some(x.clone()),
+        Some(o) => Some(o.stringify()),
+    };
+    let mut error: Option<String> = None;
+    let work = (|| -> rusqlite::Result<()> {
+        c.execute_batch("BEGIN IMMEDIATE;")?;
+        let r = (|| -> rusqlite::Result<()> {
+            for (id, r) in by_id {
+                let cur: Option<(Option<String>, i64)> = c
+                    .query_row(crate::sql::RT_RESTORE_GET, [id], |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, i64>(1)?)))
+                    .map(Some)
+                    .or_else(|e| if matches!(e, rusqlite::Error::QueryReturnedNoRows) { Ok(None) } else { Err(e) })?;
+                let Some((cur_hash, tomb)) = cur else {
+                    missing += 1;
+                    continue;
+                };
+                if cur_hash != text_of(r.get("hash")) {
+                    mismatched += 1;
+                    continue;
+                }
+                if tomb != 1 {
+                    already += 1;
+                    continue;
+                }
+                c.execute(crate::sql::RT_RESTORE_SET, rusqlite::params![text_of(r.get("body")).unwrap_or_default(), id])?;
+                restored += 1;
+                min_id = min_id.min(*id);
+                max_id = max_id.max(*id);
+            }
+            Ok(())
+        })();
+        match r {
+            Ok(()) => c.execute_batch("COMMIT;"),
+            Err(e) => {
+                crate::discard::harmless(c.execute_batch("ROLLBACK;")); // keep: the original error is the one reported
+                Err(e)
+            }
+        }
+    })();
+    let mut res = vec![
+        ("ok".to_string(), OVal::Bool(true)),
+        ("action".into(), s(defaults::text("devswarm_cli.ret_action_restore"))),
+        ("store".into(), s(hash)),
+        ("month".into(), s(month)),
+        ("archiveLines".into(), n(lines as f64)),
+        ("unique".into(), n(by_id.len() as f64)),
+    ];
+    if let Err(e) = work {
+        error = Some(e.to_string());
+    }
+    let mut hold_until = None;
+    if error.is_none() && restored > 0 {
+        let now = ctx.now as f64;
+        let mut st = read_state(ctx.home)?;
+        let mut list: Vec<OVal> = match st.get("holds").and_then(|h| h.get(hash)) {
+            Some(OVal::Arr(a)) => a
+                .iter()
+                .filter(|h| matches!(h, OVal::Obj(_)) && matches!(h.get("until"), Some(OVal::Num(u)) if *u > now))
+                .cloned()
+                .collect(),
+            _ => Vec::new(),
+        };
+        let until = now + defaults::num("devswarm_cli.ret_restore_hold_days") as f64 * defaults::num("devswarm_sup.rt_day_ms") as f64;
+        list.push(OVal::Obj(vec![("minId".into(), n(min_id as f64)), ("maxId".into(), n(max_id as f64)), ("until".into(), n(until)), ("month".into(), s(month))]));
+        if let Some(holds) = super::apply::obj_mut(&mut st, "holds") {
+            holds.set(hash, OVal::Arr(list));
+        }
+        write_state(ctx.home, &st);
+        hold_until = Some(until);
+    }
+    super::apply::log_event(
+        ctx.home,
+        &[
+            ("event", s(defaults::text("devswarm_cli.ret_event_restore"))),
+            ("store", s(hash)),
+            ("month", s(month)),
+            ("restored", n(restored as f64)),
+            ("alreadyPresent", n(already as f64)),
+            ("missing", n(missing as f64)),
+            ("mismatched", n(mismatched as f64)),
+        ],
+    );
+    for (k, v) in [("restored", restored), ("alreadyPresent", already), ("missing", missing), ("mismatched", mismatched)] {
+        res.push((k.into(), n(v as f64)));
+    }
+    if let Some(u) = hold_until {
+        res.push(("holdUntil".into(), n(u)));
+    }
+    if let Some(e) = error {
+        res[0].1 = OVal::Bool(false);
+        res.push(("error".into(), s(&e)));
+    }
+    let ok = matches!(res[0].1, OVal::Bool(true));
+    Ok((ok, OVal::Obj(res)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::meshw::common::Inv;
+
+    fn scratch(tag: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("ah-ret-{tag}-{}", std::process::id()));
+        crate::discard::harmless(std::fs::remove_dir_all(&d)); // keep: a stale directory of an earlier run of this test
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    /// `retention restore` puts the archived body back into a tombstoned row, leaves a present or mismatched row alone, and holds the ids.
+    #[test]
+    fn restore_writes_back_only_a_tombstone_with_the_same_hash_and_holds_it() {
+        let home = scratch("restore");
+        let hash = "abc123";
+        let db = super::super::plan::db_path(&home, hash);
+        std::fs::create_dir_all(db.parent().unwrap()).unwrap();
+        let c = rusqlite::Connection::open(&db).unwrap();
+        c.execute_batch(
+            "CREATE TABLE messages (id INTEGER PRIMARY KEY, hash TEXT, body TEXT);
+             INSERT INTO messages VALUES (1,'h1',NULL),(2,'h2','kept'),(3,'h3',NULL),(5,'h5',NULL);",
+        )
+        .unwrap();
+        drop(c);
+        let adir = super::super::apply::archive_root(&home).join(hash);
+        std::fs::create_dir_all(&adir).unwrap();
+        let lines = "{\"id\":1,\"hash\":\"h1\",\"body\":\"one\"}\n{\"id\":2,\"hash\":\"h2\",\"body\":\"two\"}\n{\"id\":3,\"hash\":\"WRONG\",\"body\":\"three\"}\n{\"id\":4,\"hash\":\"h4\",\"body\":\"four\"}\ntorn{\n";
+        std::fs::write(adir.join("2026-09.ndjson.gz"), super::super::gz::compress(lines.as_bytes()).unwrap()).unwrap();
+        let inv = Inv { home: home.clone(), write_home: home.clone(), env: Default::default(), cwd: "/".into(), now: 1_000_000, stdin: None, store_override: None };
+        let st = inv.settings();
+        let root = std::path::PathBuf::from("/");
+        let ctx = Ctx { home: &home, root: &root, st: &st, now: 1_000_000, engine_pokes: false };
+        let (ok, v) = restore(&ctx, hash, "2026-09").unwrap();
+        assert!(ok, "{}", v.stringify());
+        let n = |k: &str| match v.get(k) {
+            Some(OVal::Num(x)) => *x as i64,
+            other => panic!("{k}: {other:?}"),
+        };
+        assert_eq!((n("archiveLines"), n("unique"), n("restored"), n("alreadyPresent"), n("missing"), n("mismatched")), (4, 4, 1, 1, 1, 1));
+        let c = rusqlite::Connection::open(&db).unwrap();
+        let body = |id: i64| c.query_row("SELECT body FROM messages WHERE id=?1", [id], |r| r.get::<_, Option<String>>(0)).unwrap();
+        assert_eq!((body(1), body(2), body(3)), (Some("one".into()), Some("kept".into()), None));
+        let state = read_state(&home).unwrap();
+        assert!(matches!(state.get("holds").and_then(|h| h.get(hash)), Some(OVal::Arr(a)) if a.len() == 1));
+        // refusals keep Node's words
+        assert_eq!(restore(&ctx, "../x", "2026-09").unwrap().1.get("error"), Some(&s("bad --store")));
+        assert_eq!(restore(&ctx, hash, "2026-9").unwrap().1.get("error"), Some(&s("--month must be yyyy-mm")));
+        assert_eq!(restore(&ctx, hash, "2026-08").unwrap().1.get("error"), Some(&s("no archive abc123/2026-08.ndjson.gz")));
+        crate::discard::harmless(std::fs::remove_dir_all(home)); // keep: cleanup of a scratch directory
+    }
 }

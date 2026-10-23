@@ -310,6 +310,52 @@ pub(crate) fn session_state(home: &Path, session: &str) -> R<Option<bool>> {
     Ok(verdict)
 }
 
+/// `sessionWorktreeCoherent(sid, worktreePath, { home })`: `Some(true)` a live session record of `sid` runs in the worktree's checkout,
+/// `Some(false)` live records exist and none does (the twin shape), `None` no live record (unknown). Detect-only.
+pub(crate) fn session_worktree_coherent(home: &Path, session: &str, worktree: &str) -> R<Option<bool>> {
+    if session.is_empty() {
+        return Ok(None);
+    }
+    let target = ident::resolve_context(worktree, true)?.worktree_root;
+    let dir = home.join(defaults::text("mesh_write.claude_dir")).join(defaults::text("mesh_write.sessions_dir"));
+    let Ok(rd) = std::fs::read_dir(&dir) else { return Ok(None) };
+    let mut names: Vec<String> =
+        rd.flatten().filter_map(|e| e.file_name().into_string().ok()).filter(|n| n.ends_with(defaults::text("mesh_write.json_suffix"))).collect();
+    names.sort();
+    let mut any_live = false;
+    let mut matched = false;
+    for n in names {
+        let file = dir.join(&n);
+        let Some(rec) = std::fs::read(&file).ok().and_then(|b| OVal::parse(&String::from_utf8_lossy(&b))) else { continue };
+        if !matches!(rec, OVal::Obj(_)) {
+            continue;
+        }
+        let sid = match rec.get(defaults::text("mesh_write.field_session_id")) {
+            None | Some(OVal::Null) => continue,
+            Some(OVal::Str(s)) => s.clone(),
+            Some(OVal::Num(x)) => crate::checks::jsport::num::to_js_string(*x),
+            Some(OVal::Bool(b)) => b.to_string(),
+            Some(_) => return defer("session-record-type"),
+        };
+        if sid != session {
+            continue;
+        }
+        let since = std::fs::metadata(&file).ok().map(|m| mtime_ms(&m)).filter(|t| t.is_finite());
+        if pid_is_alive(js_pid(rec.get(defaults::text("devswarm_sup.lv_field_pid")))?, since) == Some(false) {
+            continue;
+        }
+        any_live = true;
+        let root = match rec.get("cwd") {
+            Some(OVal::Str(c)) if !c.is_empty() => ident::resolve_context(c, true)?.worktree_root,
+            _ => None,
+        };
+        if target.is_some() && root == target {
+            matched = true;
+        }
+    }
+    Ok(any_live.then_some(matched))
+}
+
 /// The mailbox facts `unionPendingFor` reports.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Pending {

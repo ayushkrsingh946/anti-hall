@@ -940,6 +940,22 @@ value = "primary-status"
 doc = "The `action` of a primary takeover result."
 value = "primary-takeover"
 
+[devswarm_cli.seat_state_own]
+doc = "Seat verdict: the Primary anchor already records the asking session."
+value = "own"
+
+[devswarm_cli.seat_state_conflict]
+doc = "Seat verdict: the recorded session of the Primary anchor is live."
+value = "conflict"
+
+[devswarm_cli.reason_no_session]
+doc = "Reason of a `primary takeover` that was asked without a session id."
+value = "no-session"
+
+[devswarm_cli.msg_primary_takeover_no_session]
+doc = "Error of a `primary takeover` that has no session id (neither the environment's nor --session)."
+value = "primary takeover needs this session's id (CLAUDE_CODE_SESSION_ID or --session)"
+
 [devswarm_cli.seat_state_na]
 doc = "The seat state of a caller that is not in the project's Primary checkout (a child worktree, or no git worktree at all)."
 value = "n/a"
@@ -1310,6 +1326,10 @@ value = "run"
 doc = "The retention subcommand that restores archived bodies into their tombstoned rows."
 value = "restore"
 
+[devswarm_cli.ret_flag_month]
+doc = "The retention restore flag that names the archive month (yyyy-mm)."
+value = "month"
+
 [devswarm_cli.ret_flag_store]
 doc = "The retention flag naming one store."
 value = "store"
@@ -1319,6 +1339,35 @@ doc = "The longest store name `--store` accepts."
 value = 80
 min = 1
 max = 255
+
+[devswarm_cli.ret_msg_bad_month]
+doc = "The retention restore error for a --month that is not yyyy-mm."
+value = "--month must be yyyy-mm"
+
+[devswarm_cli.ret_msg_no_archive]
+doc = "The retention restore error for an archive file that does not exist. Placeholder: {file}, relative to the archive root."
+value = "no archive {file}"
+
+[devswarm_cli.ret_msg_no_store]
+doc = "The retention restore error for a store with no sqlite database. Placeholder: {hash}."
+value = "no sqlite store {hash}"
+
+[devswarm_cli.ret_msg_lock_busy]
+doc = "The retention restore error when another retention run holds the lock."
+value = "retention lock busy"
+
+[devswarm_cli.ret_action_restore]
+doc = "The action of a retention restore result."
+value = "retention-restore"
+
+[devswarm_cli.ret_event_restore]
+doc = "The event name a retention restore writes to the retention log."
+value = "restore"
+
+[devswarm_cli.ret_restore_hold_days]
+doc = "How many days the rows a retention restore brought back are protected from the next pruning."
+value = 7
+min = 1
 
 [devswarm_cli.ret_msg_bad_store]
 doc = "The retention error for a store name that is not a plain store key."
@@ -1456,9 +1505,25 @@ value = ["{\"ts\":\"T\"", "\"pid\":0,\"msg\""]
 doc = "The window flags of the inbox verbs, in the order Node checks them (INBOX_WINDOW_FLAGS)."
 value = ["tail", "since"]
 
-[devswarm_cli.window_verb_read_primary]
-doc = "The verb name a refused `inbox read-primary` window names."
-value = "inbox read-primary"
+[devswarm_cli.msg_read_primary_refused]
+doc = "The error of an acking read (`read-primary`) the caller does not own. Placeholders: {verb}, {cause}, {id} (quoted), {rid} (bare)."
+value = "{verb} refused ({cause}): it drains {id}; use `inbox peek-primary {rid}` for a non-mutating view, or --ack-as-owner to override"
+
+[devswarm_cli.cause_unregistered_workspace]
+doc = "The refusal cause for a workspace id that has no descriptor, registry row or messages."
+value = "unregistered-workspace"
+
+[devswarm_cli.cause_unresolvable_caller]
+doc = "The refusal cause when the caller's own identity cannot be resolved."
+value = "unresolvable-caller-identity"
+
+[devswarm_cli.cause_caller_not_registered]
+doc = "The refusal cause when the caller has no registry row."
+value = "caller-not-registered"
+
+[devswarm_cli.cause_ownership_mismatch]
+doc = "The refusal cause when the caller owns a different registry row."
+value = "ownership-mismatch"
 
 [devswarm_cli.window_op_read_primary]
 doc = "The central-log operation of a read-primary refusal."
@@ -1615,6 +1680,14 @@ value = "hivecontrol-active.json"
 [devswarm_cli.rr_ghost_label_re]
 doc = "The shape of a worktree label (`primary-<8 hex>`): only such a row can fold into its canonical row (devswarm-sender-alias.js rosterFoldTarget)."
 value = '^primary-[0-9a-f]{8}$'
+
+[devswarm_cli.msg_read_arg_ambiguous]
+doc = "The error of a read verb whose id argument names several registry rows. Placeholders: {verb}, {id} (quoted), {candidates} (JSON list)."
+value = "inbox {verb} {id} is ambiguous between candidate rows {candidates} — address one by its exact registry id"
+
+[devswarm_cli.reason_ambiguous_target]
+doc = "The reason of a read verb refused for an ambiguous id argument."
+value = "ambiguous-target"
 
 [devswarm_cli.rr_dir_retired]
 doc = "The directory of fold tombstones under the DevSwarm root (retired/<id>.json)."
@@ -1860,6 +1933,10 @@ value = "unarchive"
 [devswarm_cli.action_unarchive]
 doc = "The `action` an unarchive result and its refusals carry."
 value = "unarchive"
+
+[devswarm_cli.verb_migrate]
+doc = "The verb that runs the persisted-state migrations (the engine's own migration pass, the one `ah-engine migrate` and the updater run; the former global-store split is part of it)."
+value = "migrate"
 
 [devswarm_cli.verb_migrate_owner_keys]
 doc = "The verb that backfills a missing ownerKey on every workspace descriptor."
@@ -3506,3 +3583,15 @@ max = 40
 [devswarm_cli.reg_retire_fields]
 doc = "The fields a registration adds when it folded other registry rows of the same worktree into its id: the retired ids, the forwarded message count, the rows left (descriptor-backed), the rows not done this pass."
 value = ["retiredDuplicates", "forwardedMessages", "leftDuplicates", "pendingDuplicates"]
+
+[devswarm_cli.window_verb_prefix]
+doc = "What a refused window flag's verb name starts with (the verb is `inbox <sub>`)."
+value = "inbox "
+
+[devswarm_cli.window_op_prefix]
+doc = "What the central-log operation of a refused window flag starts with (the operation is `inbox-<sub>`)."
+value = "inbox-"
+
+[devswarm_cli.window_logged_subs]
+doc = "The inbox subverbs whose refusals the dispatcher writes to the central log (`logVerbOutcome`); the others print the refusal and log nothing."
+value = ["pull", "messages", "read-primary", "peek-primary", "ack-primary", "drain-primary-legacy"]
