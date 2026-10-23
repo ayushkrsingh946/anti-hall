@@ -230,7 +230,7 @@ pub(crate) fn plan_ack(inv: &Inv, id: &str, rid: &str, ack_as_owner: bool, fresh
     }
     if !ack_as_owner {
         let caller = ident::caller_identity_detailed(&inv.env, &inv.cwd)?;
-        let own_entry = resolve_mesh_target(&rows, Some(caller.identity.as_str()))?;
+        let own_entry = resolve_mesh_target(inv, None, &rows, Some(caller.identity.as_str()))?;
         let owns = caller.identity == id
             || own_entry.as_ref().is_some_and(|e| e.id == id)
             || ident::declared_self_id(&inv.env, &inv.cwd, &rows)?.as_deref() == Some(id);

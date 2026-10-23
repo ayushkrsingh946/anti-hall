@@ -310,6 +310,34 @@ pub(crate) fn sibling_partition_live(inv: &Inv, now: f64, id: &str, wt: Option<&
     }
 }
 
+/// `isRoutingLiveRowStrict(row, home)`: not archived (anti-hall's marker or the app's verdict), and `isSiblingPartitionLive`. The
+/// target-selection gate of `resolveMeshTarget`: a descriptor that merely exists proves nothing. A case only Node decides is a deferral.
+pub(crate) fn routing_live_strict(inv: &Inv, now: f64, id: &str, wt: Option<&str>, session: Option<&str>) -> R<bool> {
+    let e = Eng { inv, now, repo_key: "", dormant: std::cell::OnceCell::new() };
+    if archived(&e, id, wt)? {
+        return Ok(false);
+    }
+    sibling_partition_live(inv, now, id, wt, session)
+}
+
+/// `sessionAuthoredHeartbeat(home, id)`: `Some(true)` when the heartbeat record names a real session, `Some(false)` when it names none,
+/// `None` when the file is missing or not JSON (unknown, neutral).
+pub(crate) fn session_authored_heartbeat(inv: &Inv, id: &str) -> Option<bool> {
+    if !is_safe_id(id) {
+        return None;
+    }
+    let p = devswarm_root(&inv.home).join(key("mesh_write.dir_heartbeats")).join(format!("{id}{}", key("mesh_write.json_suffix")));
+    let j = OVal::parse(&String::from_utf8_lossy(&std::fs::read(p).ok()?))?;
+    if !matches!(j, OVal::Obj(_) | OVal::Arr(_)) {
+        return None;
+    }
+    Some(match j.get(key("mesh_write.field_session_id")) {
+        None | Some(OVal::Null) => false,
+        Some(OVal::Str(t)) => !t.is_empty(),
+        Some(_) => true,
+    })
+}
+
 /// `computeRowLive(row, home, { now })`.
 fn row_live(e: &Eng, id: &str, wt: Option<&str>, session: Option<&str>) -> R<bool> {
     if fresh_beat(e, id) {

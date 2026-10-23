@@ -418,9 +418,7 @@ fn register_core(inv: &Inv, a: &Args, require_new: bool, primary: Option<&str>) 
         }
     }
     let ctx = ident::resolve_context(&inv.cwd, true)?;
-    if ctx.kind.starts_with(defaults::text("mesh_write.kind_submodule_prefix")) {
-        return defer("submodule");
-    }
+    // a submodule context keys on its outermost superproject (ident::resolve_context), which Node does too; the kind is only a label
     let Some(current) = ctx.repo_key.clone() else { return defer("no-project") };
     let fresh = |d: &OVal| -> R<Option<String>> {
         match d.get("worktreePath") {
