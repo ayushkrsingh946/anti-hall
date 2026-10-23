@@ -1,5 +1,5 @@
 'use strict';
-// SkyCrew Primary report: `read-primary` printed `from: null` for the native "DONE: <branch> ..." notices. A native
+// downstream Primary report: `read-primary` printed `from: null` for the native "DONE: <branch> ..." notices. A native
 // message names only its branch; the registry row checked out under that branch (DevSwarm: `/` -> `-` in the directory
 // name) is the sender. Stamped at write (ingest / pull); legacy null-sender rows are attributed at READ time only.
 

@@ -107,7 +107,7 @@ mod tests {
 
     #[test]
     fn the_app_row_without_a_session_is_covered_by_the_primarys_lock_on_its_checkout() {
-        // SkyCrew 2026-10-22: the DevSwarm app's own row for a Primary's checkout has `sessionId: null`; the Primary's row (with the
+        // downstream 2026-10-22: the DevSwarm app's own row for a Primary's checkout has `sessionId: null`; the Primary's row (with the
         // session) holds the live lock. The tracker asks about the app row and said "no Monitor wake-watch covers this workspace".
         let home = scratch("sessionless");
         let wt = home.join("wt").to_string_lossy().into_owned();

@@ -660,7 +660,7 @@ fn a_failed_count_names_its_exit_code_and_first_stderr_line() {
     assert_eq!(why, "count-failed (exit 3: Error: Not in a git repository)");
 }
 
-/// SkyCrew's Primary checkout has two registry rows on one worktree (its `primary-<hash>` label and the workspace's own id). The sweep's
+/// a downstream project's Primary checkout has two registry rows on one worktree (its `primary-<hash>` label and the workspace's own id). The sweep's
 /// project fold leaves the anchored one, and the pull of the real workspace must not be held for it (no row is retired or deleted).
 #[test]
 fn a_row_the_fold_left_on_the_same_worktree_does_not_hold_the_pull() {

@@ -1,5 +1,5 @@
 'use strict';
-// SkyCrew Primary report (wake-watch family):
+// downstream Primary report (wake-watch family):
 //   - a Monitor armed from the Primary's main checkout resolved as a CHILD under the DevSwarm app's own row id for that
 //     checkout, so `inbox tick <primary id>` read `watcherArmed false` while it ran, the cue sent the agent to re-arm and
 //     the re-arm hit "REFUSED TO ARM: lock-held";

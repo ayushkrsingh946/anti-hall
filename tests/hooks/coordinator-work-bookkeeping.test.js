@@ -1,6 +1,6 @@
 'use strict';
 // DevSwarm mailbox/bookkeeping calls (heartbeat, inbox pull/ack/read, send, ...) only talk to the
-// mesh store: they must not fill the main-thread WORK window (SkyCrew child report, 2026-10-09:
+// mesh store: they must not fill the main-thread WORK window (downstream child report, 2026-10-09:
 // the "N state-changing calls" nudge counted `inbox pull`/`ack` and `heartbeat`). Real work in the
 // same command still counts.
 require('../helpers/isolate-home.js');

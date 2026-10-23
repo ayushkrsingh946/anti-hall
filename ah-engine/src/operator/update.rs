@@ -776,7 +776,7 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
-    /// SkyCrew 2026-10-22: ~70 reconcile rows printed AFTER the summary and the changelog, so `| tail` lost the outcome and the action.
+    /// downstream 2026-10-22: ~70 reconcile rows printed AFTER the summary and the changelog, so `| tail` lost the outcome and the action.
     /// The tail is the outcome: details, changelog, then the head and action, then the JSON status line last.
     #[test]
     fn the_outcome_and_the_action_print_after_the_stage_rows_and_the_json_is_last() {

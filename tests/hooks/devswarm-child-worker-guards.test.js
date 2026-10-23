@@ -1,7 +1,7 @@
 'use strict';
 // A DevSwarm CHILD workspace is a worker: edit-guard (and Bash edit parity) do not
 // apply, and its own git commit/push/fetch runs inline. The Primary and a
-// non-corroborated env stay gated. (peer report, SkyCrew child, 2026-10-09)
+// non-corroborated env stay gated. (peer report, downstream child, 2026-10-09)
 const { test } = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');

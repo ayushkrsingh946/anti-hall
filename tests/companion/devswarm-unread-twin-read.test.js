@@ -1,5 +1,5 @@
 'use strict';
-// Phantom unread (SkyCrew Primary report): an app primary-builder row whose last native-drained NDJSON line
+// Phantom unread (downstream Primary report): an app primary-builder row whose last native-drained NDJSON line
 // has a store twin the store cursor already passed counted that line "unread" forever (nobody acks that
 // partition's NDJSON cursor), while `read-primary` could never show it. A line whose store twin is already
 // read is READ: the leading twin-read run is skipped, the tail stays contiguous (ack target = cursor + lines).

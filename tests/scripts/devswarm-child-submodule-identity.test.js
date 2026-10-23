@@ -2,7 +2,7 @@
 // A DevSwarm child workspace gets its submodules as `git worktree add` worktrees of the MAIN
 // checkout's submodule repos, so the submodule's common dir has core.worktree = the MAIN
 // checkout's submodule dir. The identity resolver used to hop there and resolve a child's
-// submodule cwd as the PRIMARY checkout (SkyCrew child report, 2026-10-09):
+// submodule cwd as the PRIMARY checkout (downstream child report, 2026-10-09):
 //   C  send --to-primary from the submodule cwd -> "cannot address the sender itself"
 //   D  a child row registered against the Primary's path (register/pull refused by the guard)
 //   E  --to-primary mail landing in that child instead of the Primary

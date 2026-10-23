@@ -68,7 +68,7 @@ pub fn resolve_mesh_target(rows: &[Row], mesh_id: Option<&str>) -> R<Option<Row>
 
 /// A worktree label row nobody reads: a `primary-<hash>` id with no session (or a synthetic one) and no reader of its partition. A
 /// spawn pre-registers the child's worktree under such a label and the child later registers under its own id; a message sent to the
-/// label in between waits in a partition no session reads until reconcile folds the label into the child (SkyCrew 2026-10-22: four
+/// label in between waits in a partition no session reads until reconcile folds the label into the child (downstream 2026-10-22: four
 /// minutes of silence behind "verified").
 fn label_without_reader(row: &Row, readers: usize) -> bool {
     let session = row.session_id.as_deref().unwrap_or("");
@@ -940,7 +940,7 @@ mod label_tests {
         Row { id: id.into(), worktree_path: Some("/w".into()), session_id: session.map(str::to_string), updated_at: None }
     }
 
-    /// SkyCrew 2026-10-22: a send to the spawn's worktree label (`primary-da4fa4d6`) was "verified" into a partition no session read.
+    /// downstream 2026-10-22: a send to the spawn's worktree label (`primary-da4fa4d6`) was "verified" into a partition no session read.
     #[test]
     fn a_worktree_label_nobody_reads_is_flagged_and_a_live_reader_is_not() {
         assert!(label_without_reader(&row("primary-da4fa4d6", None), 0), "a pre-registered label with no session and no reader");

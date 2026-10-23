@@ -221,7 +221,7 @@ mod tests {
         Proc { home, cwd: "/".into(), env: Default::default(), st, root: running.to_string_lossy().into_owned() }
     }
 
-    /// SkyCrew 2026-10-22: the watcher advertised 0.301.0 from the development deploy's marketplace while `update` installs from the
+    /// downstream 2026-10-22: the watcher advertised 0.301.0 from the development deploy's marketplace while `update` installs from the
     /// `anti-hall` clone (0.300.2), so the advertised update could never be installed.
     #[test]
     fn a_directory_marketplace_the_updater_does_not_use_advertises_nothing() {

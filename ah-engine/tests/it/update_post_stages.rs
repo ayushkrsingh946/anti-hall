@@ -106,8 +106,8 @@ fn seed_import(home: &Path) {
     put(home, ".anti-hall/devswarm/cursors/w1.json", "2");
     put(home, &format!(".anti-hall/devswarm/cursors/w1#inst-{short}.json"), "1");
     put(home, &format!(".anti-hall/devswarm/cursors/w1#nd-{short}.json"), "0");
-    put(home, ".anti-hall/devswarm/workspaces/w1.json", &format!(r#"{{"id":"w1","cursorPath":"{}/nd-w1.cursor"}}"#, home.display()));
-    put(home, "nd-w1.cursor", "3");
+    put(home, ".anti-hall/devswarm/workspaces/w1.json", &format!(r#"{{"id":"w1","cursorPath":"{}/nd-w1.cursor"}}"#, home.parent().unwrap().display()));
+    put(home.parent().unwrap(), "nd-w1.cursor", "3");
 }
 
 /// A partition never imported and a live harness session whose `cwd` is empty and which has no legacy file: Node's
@@ -205,8 +205,8 @@ fn seed_floors(home: &Path) {
     }
     cur(&st, "p1", "store", &live, 5);
     cur(&st, "p1", "nd", &live, 0);
-    put(home, ".anti-hall/devswarm/workspaces/p2.json", &format!(r#"{{"id":"p2","cursorPath":"{}/nd-p2.cursor"}}"#, home.display()));
-    put(home, "nd-p2.cursor", "4");
+    put(home, ".anti-hall/devswarm/workspaces/p2.json", &format!(r#"{{"id":"p2","cursorPath":"{}/nd-p2.cursor"}}"#, home.parent().unwrap().display()));
+    put(home.parent().unwrap(), "nd-p2.cursor", "4");
 }
 
 
