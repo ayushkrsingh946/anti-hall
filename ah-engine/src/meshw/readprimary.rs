@@ -645,7 +645,7 @@ fn plan(inv: &Inv, a: &Args, promoted: Option<bool>) -> R<Planned> {
     tick::single_partition(&o.rows, &desc, id)?;
     // the ownership gate of an acking read: the caller is the id, owns it by its registry row, or declared it
     let caller = ident::caller_identity_detailed(&inv.env, &inv.cwd)?;
-    let own_entry = resolve_mesh_target(&o.rows, Some(caller.identity.as_str()))?;
+    let own_entry = resolve_mesh_target(inv, None, &o.rows, Some(caller.identity.as_str()))?;
     let owns =
         caller.identity == id || own_entry.as_ref().is_some_and(|e| e.id == id) || ident::declared_self_id(&inv.env, &inv.cwd, &o.rows)?.as_deref() == Some(id);
     if !owns {

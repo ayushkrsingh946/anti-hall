@@ -992,4 +992,40 @@ mod tests {
         assert_eq!(read_or_skip(&dir.join("none.json"), "test"), None, "an absent file is Node's caught read");
         crate::discard::harmless(std::fs::remove_dir_all(dir)); // keep: cleanup of a scratch directory
     }
+
+    fn git(dir: &Path, args: &[&str]) {
+        let st = std::process::Command::new("git")
+            .current_dir(dir)
+            .args(["-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "protocol.file.allow=always", "-c", "commit.gpgsign=false"])
+            .args(args)
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .output()
+            .unwrap();
+        assert!(st.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&st.stderr));
+    }
+
+    /// A checkout inside a submodule keys the mesh on its superproject, so every verb that resolves a context may run there:
+    /// the context's key is the superproject's, and its kind only labels the nesting (2026-10-23: four verbs deferred on the label).
+    #[test]
+    fn a_submodule_checkout_resolves_to_its_superprojects_key() {
+        let root = scratch("submodule");
+        let (sup, lib) = (root.join("sup"), root.join("lib"));
+        std::fs::create_dir_all(&sup).unwrap();
+        std::fs::create_dir_all(&lib).unwrap();
+        git(&lib, &["init", "-q", "-b", "main"]);
+        std::fs::write(lib.join("f"), "x").unwrap();
+        git(&lib, &["add", "f"]);
+        git(&lib, &["commit", "-q", "-m", "l"]);
+        git(&sup, &["init", "-q", "-b", "main"]);
+        git(&sup, &["submodule", "add", "-q", lib.to_str().unwrap(), "vendor/lib"]);
+        git(&sup, &["commit", "-q", "-m", "s"]);
+        let sup_s = sup.canonicalize().unwrap().to_str().unwrap().to_string();
+        let sub = format!("{sup_s}/vendor/lib");
+        let outer = resolve_context(&sup_s, true).unwrap();
+        let inner = resolve_context(&sub, true).unwrap();
+        assert!(inner.kind.starts_with(defaults::text("mesh_write.kind_submodule_prefix")), "{}", inner.kind);
+        assert_eq!(inner.repo_key, outer.repo_key);
+        assert!(inner.repo_key.is_some());
+        crate::discard::harmless(std::fs::remove_dir_all(root)); // keep: cleanup of a scratch directory
+    }
 }

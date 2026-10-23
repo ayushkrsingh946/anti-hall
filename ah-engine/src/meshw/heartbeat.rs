@@ -182,7 +182,7 @@ fn owns(inv: &Inv, rows: &[ident::Row], caller: &str, id: &str, cwd: &str, sessi
     if caller == id {
         return Ok(());
     }
-    let own_entry = crate::meshw::send::resolve_mesh_target(rows, Some(caller))?;
+    let own_entry = crate::meshw::send::resolve_mesh_target(inv, None, rows, Some(caller))?;
     if own_entry.as_ref().is_some_and(|e| e.id == id) {
         return Ok(());
     }
