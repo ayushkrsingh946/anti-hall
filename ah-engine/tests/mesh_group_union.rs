@@ -34,11 +34,16 @@ impl Fx {
     }
 
     fn raw(&self, argv: &[&str]) -> (i32, String) {
+        self.raw_env(argv, &[])
+    }
+
+    fn raw_env(&self, argv: &[&str], envs: &[(&str, &str)]) -> (i32, String) {
         let o = Command::new(BIN)
             .arg("mesh")
             .args(argv)
             .current_dir(&self.repo)
             .env_clear()
+            .envs(envs.iter().copied())
             .env("HOME", &self.home)
             .env("PATH", "/usr/bin:/bin")
             .env("AH_ENGINE_PLUGIN_ROOT", Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().join("plugins").join("anti-hall"))
@@ -223,4 +228,99 @@ fn read_primary_text_with_ack_after_print_on_twin_rows_answers_and_acks_both_par
     let (code, again) = fx.run(&["inbox", "read-primary", &label]);
     assert_eq!(code, 0, "{again}");
     assert_eq!((again["count"].clone(), again["unreadCount"].clone()), (Value::from(0), Value::from(0)), "{again}");
+}
+
+#[test]
+fn a_legacy_forwarded_row_without_orig_hash_is_marked_with_the_hash_the_original_had() {
+    use ah_engine::meshw::store::mesh_message_hash;
+    let fx = Fx::new("legacyfwd");
+    let (label, key) = fx.twins();
+    {
+        let st = fx.store(&key);
+        // forwarded by an older build: the envelope is in the body, `origHash` was never stamped
+        st.append_mesh_row(&row(&label, 1_500, "h-fwd", "[forwarded from archived old-ws] hello", "peer-a")).unwrap();
+    }
+    let (code, v) = fx.run(&["inbox", "read-primary", &label]);
+    assert_eq!(code, 0, "{v}");
+    let m = &v["messages"][0];
+    let expect = mesh_message_hash(Some("peer-a"), Some("old-ws"), "direct", "normal", "hello", "1500", false);
+    assert_eq!((m["forwarded"].clone(), m["origHash"].as_str()), (Value::Bool(true), Some(expect.as_str())), "{v}");
+}
+
+/// A sqlite file shaped like the DevSwarm app's: one builder on `worktree` whose terminal runs Claude session `session`.
+fn app_db(path: &Path, worktree: &Path, session: &str) {
+    let c = rusqlite::Connection::open(path).unwrap();
+    c.execute_batch(
+        "CREATE TABLE builders (id TEXT, repositoryId TEXT, sourceBranch TEXT, branchName TEXT, worktreePath TEXT, terminalId TEXT, label TEXT, createdAt TEXT, lastAccessed TEXT, rank INTEGER, isHidden INTEGER, pullRequestId TEXT, builderType TEXT, isPinned INTEGER, isActive INTEGER, lastSelectedAt TEXT);
+         CREATE TABLE builder_terminals (id TEXT, builderId TEXT, terminalId TEXT, terminalType TEXT, aiAgent TEXT, ai_session_config TEXT, isActive INTEGER, panelStatus TEXT, createdAt TEXT, lastViewedAt TEXT, initialPrompt TEXT, initialPromptDeliveredAt TEXT, initialPromptWithheldAt TEXT);
+         CREATE TABLE pull_requests (id TEXT, repositoryId TEXT, branchName TEXT, number INTEGER, state TEXT, isDraft INTEGER, url TEXT, checkStatus TEXT, reviewStatus TEXT, lastSyncedAt TEXT);
+         CREATE TABLE repositories (id TEXT, path TEXT, name TEXT, defaultBaseBranch TEXT);",
+    )
+    .unwrap();
+    c.execute("INSERT INTO builders (id, worktreePath, isActive, isHidden, builderType, branchName, label) VALUES ('seat-1', ?1, 1, 0, 'standard', 'b', 'l')", [worktree.to_str().unwrap()]).unwrap();
+    c.execute("INSERT INTO builder_terminals VALUES ('t1','seat-1','term.1','ai','claude',?1,1,'idle','2026-10-01T00:00:00Z','2026-10-01T00:00:00Z','x',NULL,NULL)", [format!(r#"{{"sessionId":"{session}"}}"#)]).unwrap();
+}
+
+/// A child standing on the Primary's worktree under ANOTHER session than the anchor row records (a resumed session): who owns the
+/// anchor is the app's call when its transcript corroborates it (Node: `appSessionOnWorktree`), else liveness. Either way the read
+/// answers (it used to exit 69), and a corroborated app verdict "this worktree" lets the caller ack the anchor partition it shares
+/// with its live twin, which the liveness fallback (the caller's session is not provably alive) does not.
+#[test]
+fn a_caller_whose_session_differs_from_the_anchors_is_decided_by_the_app_record_then_liveness() {
+    let run = |with_app: bool| {
+        let fx = Fx::new(if with_app { "seat-app" } else { "seat-live" });
+        let (label, key) = fx.twins();
+        {
+            let st = fx.store(&key);
+            st.append_mesh_row(&row(&label, 1_000, "h-a1", "to label", "peer-a")).unwrap();
+        }
+        let sid = "s-resumed";
+        let db = fx.home.join("app.db");
+        if with_app {
+            app_db(&db, &fx.repo, sid);
+            // the session's own transcript records the worktree it runs in
+            let enc: String = fx.repo.to_str().unwrap().chars().map(|c| if matches!(c, '/' | '\\' | ':' | '.') { '-' } else { c }).collect();
+            let dir = fx.home.join(".claude/projects").join(enc);
+            fs::create_dir_all(&dir).unwrap();
+            fs::write(dir.join(format!("{sid}.jsonl")), format!("{{\"cwd\":{}}}\n", serde_json::to_string(fx.repo.to_str().unwrap()).unwrap())).unwrap();
+        }
+        // the label's twin is alive (a fresh heartbeat of its own session)
+        let beats = fx.home.join(".anti-hall/devswarm/heartbeats");
+        fs::create_dir_all(&beats).unwrap();
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as i64;
+        fs::write(beats.join("child-x.json"), format!(r#"{{"ts":{now},"sessionId":"s-child"}}"#)).unwrap();
+        let envs = [("DEVSWARM_BUILDER_ID", "child-x"), ("CLAUDE_CODE_SESSION_ID", sid), ("ANTIHALL_DEVSWARM_APP_DB", db.to_str().unwrap())];
+        let (code, out) = fx.raw_env(&["inbox", "read-primary", &label], &envs);
+        assert_eq!(code, 0, "{out}");
+        serde_json::from_str::<Value>(out.trim()).unwrap_or_else(|_| panic!("not JSON: {out}"))
+    };
+    let without = run(false);
+    let with = run(true);
+    assert_eq!(without["ok"], Value::Bool(true), "{without}");
+    assert_eq!(with["ok"], Value::Bool(true), "{with}");
+    assert_ne!(without["liveSiblingsSkipped"], with["liveSiblingsSkipped"], "the app record changes who owns the anchor: {without} vs {with}");
+}
+
+/// Node answers `inbox count|read|ack` for an address that resolves to a row with no inbox path with the refusal for the row it
+/// resolved to, and for a retired id whose survivor has no inbox with the refusal for the retired id itself; the engine used to
+/// exit 69 for both (and for a descriptor without an inbox path).
+#[test]
+fn an_address_that_lands_on_a_row_without_an_inbox_is_refused_like_node_not_deferred() {
+    let fx = Fx::new("noinbox");
+    let (code, v) = fx.run(&["register", "solo", "--worktree", fx.repo.to_str().unwrap(), "--session", "s-solo"]);
+    assert_eq!(code, 0, "{v}");
+    let mesh = ah_engine::meshw::ident::mesh_id_for_real_path(fx.repo.to_str().unwrap());
+    // a retired id whose survivor never had an inbox
+    let retired = fx.home.join(".anti-hall/devswarm/retired");
+    fs::create_dir_all(&retired).unwrap();
+    fs::write(retired.join("gone-ws.json"), r#"{"retiredTo":"solo"}"#).unwrap();
+    for sub in ["count", "read", "ack"] {
+        // the exact id, a unique prefix of it, and the mesh label of its worktree
+        for addr in ["solo", "sol", mesh.as_str()] {
+            let (code, v) = fx.run(&["inbox", sub, addr]);
+            assert_eq!((code, v["reason"].as_str(), v["id"].as_str()), (2, Some("no-inbox-path"), Some("solo")), "inbox {sub} {addr}: {v}");
+        }
+        let (code, v) = fx.run(&["inbox", sub, "gone-ws"]);
+        assert_eq!((code, v["reason"].as_str(), v["id"].as_str()), (2, Some("unregistered-workspace"), Some("gone-ws")), "inbox {sub} gone-ws: {v}");
+    }
 }
