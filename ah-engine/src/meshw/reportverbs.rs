@@ -1133,7 +1133,7 @@ fn safe_store_name(h: &str) -> bool {
 }
 
 /// `retention status | run [--dry-run] [--store X] | restore ...`: `status` and `run` as `ah-engine` does them under the duty's own
-/// agreement with Node's planner (see [`crate::dssup::retention::cli`]); `restore` is Node's.
+/// agreement with Node's planner (see [`crate::dssup::retention::cli`]); `restore` puts archived bodies back.
 pub fn retention(inv: &Inv, a: &Args) -> R<Answer> {
     let sub = a.positionals.get(1).map(String::as_str);
     let t = |k: &str| defaults::text(k);
@@ -1156,7 +1156,8 @@ pub fn retention(inv: &Inv, a: &Args) -> R<Answer> {
         return Ok(answer(if ok { 0 } else { 2 }, v));
     }
     if sub == Some(t("devswarm_cli.ret_sub_restore")) {
-        return defer("restore");
+        let (ok, v) = crate::dssup::retention::cli::restore(&ctx, a.one(t("devswarm_cli.ret_flag_store")).unwrap_or_default(), a.one(t("devswarm_cli.ret_flag_month")).unwrap_or_default())?;
+        return Ok(answer(if ok { 0 } else { 2 }, v));
     }
     let mut o = Obj::default();
     o.put("ok", OVal::Bool(false)).put("error", s(t("devswarm_cli.ret_msg_usage")));

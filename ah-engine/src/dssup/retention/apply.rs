@@ -153,7 +153,7 @@ pub fn store_bytes(home: &Path, hash: &str) -> u64 {
     size(&db) + size(Path::new(&wal))
 }
 
-fn archive_root(home: &Path) -> PathBuf {
+pub(super) fn archive_root(home: &Path) -> PathBuf {
     devswarm_root(home).join(defaults::text("devswarm_sup.rt_archive_dir"))
 }
 
@@ -330,7 +330,7 @@ pub struct Run<'a> {
 }
 
 /// Open the store for writing (never creating it).
-fn open_rw(home: &Path, hash: &str) -> R<Connection> {
+pub(super) fn open_rw(home: &Path, hash: &str) -> R<Connection> {
     let c = Connection::open_with_flags(plan::db_path(home, hash), OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX)
         .map_err(|e| Defer(format!("store-open:{e}")))?;
     crate::discard::harmless(c.busy_timeout(defaults::millis("devswarm_sup.rt_busy_ms"))); // keep: the default timeout only fails sooner

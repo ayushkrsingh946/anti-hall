@@ -156,7 +156,7 @@ fn js_text(v: Option<&OVal>) -> R<Option<String>> {
 }
 
 /// `seatVerdict`.
-fn seat_verdict(inv: &Inv, session: &str, now: f64) -> R<Value> {
+pub(crate) fn seat_verdict(inv: &Inv, session: &str, now: f64) -> R<Value> {
     let home = &inv.home;
     let c = ident::resolve_context(&inv.cwd, true)?;
     let Some(wt) = c.worktree_root.clone() else { return Ok(na()) };

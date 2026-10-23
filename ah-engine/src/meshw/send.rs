@@ -127,10 +127,36 @@ fn label_without_reader(row: &Row, readers: usize) -> bool {
     row.id.starts_with(defaults::text("mesh_write.primary_prefix")) && readers == 0 && (session.is_empty() || session.starts_with(defaults::text("mesh_write.synthetic_session_prefix")))
 }
 
+/// What `resolveReadArgToId` made of a read verb's id argument.
+pub(crate) enum ReadArg {
+    /// The argument itself (a registry row, or nothing resolves it).
+    Same,
+    /// A registry row's id the argument named (a mesh label or prefix).
+    To(String),
+    /// Several rows: the candidate ids.
+    Ambiguous(Vec<String>),
+}
+
+/// `resolveReadArgToId(ctx, home, arg)` over the project's registry rows: an exact row wins; else the address resolves as `send --to`
+/// does (without the stale-twin reroute).
+pub(crate) fn resolve_read_arg(inv: &Inv, reader: &crate::mesh::MeshReader, rows: &[Row], arg: &str) -> R<ReadArg> {
+    if rows.iter().any(|r| r.id == arg) {
+        return Ok(ReadArg::Same);
+    }
+    Ok(match resolve_send_target(inv, Some(reader), rows, arg)? {
+        Resolved::Unregistered => ReadArg::Same,
+        Resolved::Row(t) if t.id == arg => ReadArg::Same,
+        Resolved::Row(t) | Resolved::Rerouted(t, ..) => ReadArg::To(t.id),
+        Resolved::AmbiguousPrefix(ids) => ReadArg::Ambiguous(ids),
+    })
+}
+
 /// What `--to` named.
 enum Resolved {
     /// The recipient's registry row.
     Row(Row),
+    /// The addressed row is stale and a live row of the same session took its place: the row to deliver to, the id addressed and why.
+    Rerouted(Row, String, &'static str),
     /// No row by mesh id, id or id prefix.
     Unregistered,
     /// Several rows share the id prefix: the full ids, sorted.
@@ -175,7 +201,37 @@ fn resolve_send_target(inv: &Inv, reader: Option<&crate::mesh::MeshReader>, rows
                 note_ref("mesh_write.ref_outcome_exact");
                 return Ok(Resolved::Row(row.clone()));
             }
-            defer("stale-twin")
+            // staleTwinSuccessor: the row is delivered to as addressed unless it is stale (not live, or its session runs in another
+            // checkout) AND another live row of the same session proves a successor; only that reroute is Node's
+            let sid = sid.to_string();
+            let now = inv.now as f64;
+            let live = crate::meshw::rosterrows::routing_live_strict(inv, now, &row.id, row.worktree_path.as_deref(), row.session_id.as_deref())?;
+            let coherent = match row.worktree_path.as_deref() {
+                Some(w) if !w.is_empty() => crate::dssup::liveness::session_worktree_coherent(&inv.home, &sid, w)?,
+                _ => None,
+            };
+            if live && coherent != Some(false) {
+                note_ref("mesh_write.ref_outcome_exact");
+                return Ok(Resolved::Row(row.clone()));
+            }
+            // positive proof only: a live row of the same session whose checkout the session really runs in
+            let mut others: Vec<Row> = Vec::new();
+            for d in rows.iter().filter(|d| d.id != row.id && d.session_id.as_deref() == Some(sid.as_str())) {
+                let Some(w) = d.worktree_path.as_deref().filter(|w| !w.is_empty()) else { continue };
+                if crate::meshw::rosterrows::routing_live_strict(inv, now, &d.id, Some(w), d.session_id.as_deref())?
+                    && crate::dssup::liveness::session_worktree_coherent(&inv.home, &sid, w)? == Some(true)
+                {
+                    others.push(d.clone());
+                }
+            }
+            if others.is_empty() {
+                note_ref("mesh_write.ref_outcome_exact");
+                return Ok(Resolved::Row(row.clone()));
+            }
+            let pick = if others.len() == 1 { others.remove(0) } else { pick_freshest_live(inv, reader, others)? };
+            let why = defaults::text(if live { "mesh_write.reroute_incoherent" } else { "mesh_write.reroute_not_live" });
+            note_ref("mesh_write.ref_outcome_exact");
+            Ok(Resolved::Rerouted(pick, row.id.clone(), why))
         }
         0 => {
             if by_mesh.is_some() {
@@ -265,7 +321,7 @@ fn descriptor_mesh_id(home: &std::path::Path, id: &str) -> R<Option<String>> {
 }
 
 /// A fold-time retired-redirect file exists for `id` (its content is not read: any file at all is left to Node).
-fn retired_redirect_exists(inv: &Inv, id: &str) -> bool {
+pub(crate) fn retired_redirect_exists(inv: &Inv, id: &str) -> bool {
     crate::meshw::idlock::is_safe_id(id)
         && crate::meshw::idlock::devswarm_root(&inv.home)
             .join(defaults::text("devswarm_cli.rr_dir_retired"))
@@ -702,6 +758,7 @@ pub(crate) fn cmd_send_mode(inv: &Inv, a: &Args, plan: bool) -> R<Obj> {
         rehome_is_noop(inv, pm)?;
     }
     // target resolution (direct)
+    let mut reroute: Option<(String, &'static str)> = None;
     let target: Option<Row> = if broadcast {
         None
     } else if let Some(pm) = &primary_mesh {
@@ -717,6 +774,10 @@ pub(crate) fn cmd_send_mode(inv: &Inv, a: &Args, plan: bool) -> R<Obj> {
     } else {
         match resolve_send_target(inv, Some(&st.reader()), &rows, to_flag.unwrap_or_default())? {
             Resolved::Row(t) => Some(t),
+            Resolved::Rerouted(t, from, why) => {
+                reroute = Some((from, why));
+                Some(t)
+            }
             Resolved::AmbiguousPrefix(ids) => {
                 let list = ids.join(defaults::text("devswarm_cli.send_prefix_candidates_sep"));
                 let msg = defaults::render("devswarm_cli.msg_send_prefix_ambiguous", &[("to", &quote(to_flag.unwrap_or_default())), ("candidates", &list)]);
@@ -780,6 +841,7 @@ pub(crate) fn cmd_send_mode(inv: &Inv, a: &Args, plan: bool) -> R<Obj> {
         answers,
         candidates,
         no_reader,
+        reroute: reroute.as_ref().map(|(f, w)| (f.as_str(), *w)),
         repo_key: &repo_key,
         cwd: &cwd,
     };
@@ -864,6 +926,8 @@ struct AppendCtx<'a> {
     candidates: Option<usize>,
     /// The recipient is a label row no session reads yet (see [`label_without_reader`]).
     no_reader: bool,
+    /// The row addressed and why delivery went to its live twin (`reroutedFrom`, `rerouteReason`).
+    reroute: Option<(&'a str, &'static str)>,
     repo_key: &'a str,
     cwd: &'a str,
 }
@@ -916,8 +980,11 @@ fn do_append(c: &AppendCtx<'_>) -> R<Obj> {
         .put("type", s(mtype))
         .put("urgency", s(c.urgency))
         .put("sent", OVal::Bool(inserted))
-        .put("seq", seq.map_or(OVal::Null, |x| n(x as f64)))
-        .put("bytes", n(bytes))
+        .put("seq", seq.map_or(OVal::Null, |x| n(x as f64)));
+    if let Some((from, why)) = c.reroute {
+        out.put("rerouted", OVal::Bool(true)).put("reroutedFrom", s(from)).put("rerouteReason", s(why));
+    }
+    out.put("bytes", n(bytes))
         .put("hash", s(&hash))
         .put("needsReply", OVal::Bool(c.question))
         .put("answers", OVal::Bool(c.answers))
@@ -1047,5 +1114,33 @@ mod label_tests {
         assert_eq!(pick_freshest_live(&inv, None, rows).unwrap().id, "a");
         let rows = vec![crow("b", None, 5.0), crow("c", None, 9.0)];
         assert_eq!(pick_freshest_live(&inv, None, rows).unwrap().id, "c");
+    }
+
+    fn init_repo(dir: &std::path::Path) -> String {
+        std::fs::create_dir_all(dir).unwrap();
+        let st = std::process::Command::new("git").current_dir(dir).args(["init", "-q", "-b", "main"]).env("GIT_CONFIG_NOSYSTEM", "1").status().unwrap();
+        assert!(st.success());
+        dir.canonicalize().unwrap().to_string_lossy().into_owned()
+    }
+
+    /// Node's `staleTwinSuccessor`: the addressed row's session runs in ANOTHER checkout and a live row of that session sits there, so
+    /// the mail goes to that row and the answer says so. The same row, with its session in its own checkout, is delivered to as addressed.
+    #[test]
+    fn a_row_whose_session_runs_elsewhere_is_rerouted_to_its_live_twin() {
+        let inv = scratch_inv("twin");
+        let (w1, w2) = (init_repo(&inv.home.join("w1")), init_repo(&inv.home.join("w2")));
+        let sessions = inv.home.join(".claude").join("sessions");
+        std::fs::create_dir_all(&sessions).unwrap();
+        let record = |cwd: &str| serde_json::json!({"sessionId": "S", "pid": std::process::id(), "cwd": cwd}).to_string();
+        let row = |id: &str, w: &str, upd: f64| Row { id: id.into(), worktree_path: Some(w.into()), session_id: Some("S".into()), updated_at: Some(upd) };
+        let rows = vec![row("a-old", &w1, 1.0), row("b-new", &w2, 2.0)];
+        std::fs::write(sessions.join("s.json"), record(&w2)).unwrap();
+        match resolve_send_target(&inv, None, &rows, "a-old").unwrap() {
+            Resolved::Rerouted(t, from, why) => assert_eq!((t.id.as_str(), from.as_str(), why), ("b-new", "a-old", "session-worktree-incoherent")),
+            _ => panic!("expected a reroute"),
+        }
+        // the session runs in the addressed row's own checkout: delivered as addressed
+        std::fs::write(sessions.join("s.json"), record(&w1)).unwrap();
+        assert!(matches!(resolve_send_target(&inv, None, &rows, "a-old").unwrap(), Resolved::Row(t) if t.id == "a-old"));
     }
 }
