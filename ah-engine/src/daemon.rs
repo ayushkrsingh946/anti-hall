@@ -330,7 +330,9 @@ impl Shared {
             }),
             "mem" => self.memory_with_ledger(),
             "threads" => crate::threads::snapshot_json(),
-            "hooks" => serde_json::json!({"summary": self.telemetry.headline(), "phases": phases_json(&self.telemetry), "handback": crate::obs::counters::snapshot()}),
+            "hooks" => {
+                serde_json::json!({"summary": self.telemetry.headline(), "phases": phases_json(&self.telemetry), "handback": crate::obs::counters::snapshot()})
+            }
             "mesh" => {
                 let reply = crate::dswire::cli::ctl("");
                 serde_json::from_str(&reply).unwrap_or_else(|_| serde_json::json!({"status": reply}))
@@ -338,12 +340,19 @@ impl Shared {
             "jev" => self.telemetry.with_metrics(|m| {
                 let snap = m.snapshot("");
                 let keep = |k: &str| {
-                    snap.get(k).and_then(serde_json::Value::as_array).into_iter().flatten().filter(|r| r.get("name").and_then(serde_json::Value::as_str).is_some_and(|n| n.starts_with("jev"))).cloned().collect::<Vec<_>>()
+                    snap.get(k)
+                        .and_then(serde_json::Value::as_array)
+                        .into_iter()
+                        .flatten()
+                        .filter(|r| r.get("name").and_then(serde_json::Value::as_str).is_some_and(|n| n.starts_with("jev")))
+                        .cloned()
+                        .collect::<Vec<_>>()
                 };
                 serde_json::json!({"counters": keep("counters"), "histograms": keep("histograms")})
             }),
             "trace" => serde_json::json!({"running": true, "entries": crate::obs::trace::snapshot()}),
-            other => crate::obs::diagverbs::local(other).unwrap_or_else(|| serde_json::json!({"error": defaults::render("msg.obs_diag_unknown", &[("topic", &other)])})),
+            other => crate::obs::diagverbs::local(other)
+                .unwrap_or_else(|| serde_json::json!({"error": defaults::render("msg.obs_diag_unknown", &[("topic", &other)])})),
         }
     }
 
@@ -593,7 +602,8 @@ pub fn phases_json(t: &crate::telemetry::Telemetry) -> serde_json::Value {
     }
     // CPU per call = total / calls (the latency histogram's count is the number of calls)
     for row in checks.values_mut().filter_map(serde_json::Value::as_object_mut) {
-        if let (Some(total), Some(calls)) = (row.get("cpu_us_total").and_then(serde_json::Value::as_u64), row.get("count").and_then(serde_json::Value::as_u64)) {
+        if let (Some(total), Some(calls)) = (row.get("cpu_us_total").and_then(serde_json::Value::as_u64), row.get("count").and_then(serde_json::Value::as_u64))
+        {
             row.insert("cpu_us_per_call".to_string(), serde_json::json!(total.checked_div(calls).unwrap_or(0)));
         }
     }

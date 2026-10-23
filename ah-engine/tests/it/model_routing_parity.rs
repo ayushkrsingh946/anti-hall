@@ -529,7 +529,11 @@ fn cases() -> Vec<Case> {
     ] {
         add(&mut out, name, json!({"model":"sonnet","subagent_type":"general-purpose","description":"research task","prompt":prompt}));
     }
-    add(&mut out, "update-setting-off", json!({"model":"sonnet","description":"update","prompt":"Run node plugins/anti-hall-node/skills/update/scripts/update.js"}));
+    add(
+        &mut out,
+        "update-setting-off",
+        json!({"model":"sonnet","description":"update","prompt":"Run node plugins/anti-hall-node/skills/update/scripts/update.js"}),
+    );
     out.last_mut().unwrap().env.push(("ANTIHALL_UPDATE_IN_SESSION", "0"));
     add(&mut out, "routing-setting-off", json!({"model":"opus","prompt":"fetch and download dump, tail logs"}));
     out.last_mut().unwrap().env.push(("ANTIHALL_MODEL_ROUTING", "off"));

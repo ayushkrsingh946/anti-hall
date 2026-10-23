@@ -281,9 +281,18 @@ fn compare(sc: &Scenario) {
         // Jev only when the rule layer flagged a likely unverified claim. This reply is not flagged, so Node still asks Jev and
         // blocks on its answer, while the engine answers from its rules (allow) and asks nothing this turn. Pinned exactly: Node's
         // block must be Jev's, the engine's answer must be a plain allow, and the engine must not have written a decision row.
-        assert!(node.out.0 == 0 && node.out.1.contains("asserts a cause or outcome without citing evidence"), "{who}: node did not show Jev's block: {:?}", node.out);
+        assert!(
+            node.out.0 == 0 && node.out.1.contains("asserts a cause or outcome without citing evidence"),
+            "{who}: node did not show Jev's block: {:?}",
+            node.out
+        );
         assert_eq!(eng.out, (0, String::new(), String::new()), "{who}: the engine must allow an unflagged reply");
-        assert!(eng.requests.is_empty() && eng.rows.is_empty(), "{who}: the gate asks nothing for an unflagged reply ({} requests, {} rows)", eng.requests.len(), eng.rows.len());
+        assert!(
+            eng.requests.is_empty() && eng.rows.is_empty(),
+            "{who}: the gate asks nothing for an unflagged reply ({} requests, {} rows)",
+            eng.requests.len(),
+            eng.rows.len()
+        );
         return;
     }
     if GATE_NO_ASK.contains(&who) {
@@ -294,7 +303,9 @@ fn compare(sc: &Scenario) {
         assert_eq!(node.requests.len(), sc.requests, "{who}: node sent {} requests, expected {}", node.requests.len(), sc.requests);
         assert!(eng.requests.is_empty(), "{who}: the gate asks nothing for an unflagged reply ({} requests)", eng.requests.len());
         // the Jev decision log (the row of the ask nobody made) is the one file allowed to differ
-        let state = |side: &Side| -> Vec<String> { sc.files.iter().zip(&side.files).filter(|(name, _)| !name.ends_with("jev-judge.ndjson")).map(|(_, c)| c.clone()).collect() };
+        let state = |side: &Side| -> Vec<String> {
+            sc.files.iter().zip(&side.files).filter(|(name, _)| !name.ends_with("jev-judge.ndjson")).map(|(_, c)| c.clone()).collect()
+        };
         assert_eq!(state(&node), state(&eng), "{who}: the hook's state files differ ({:?})", sc.files);
         return;
     }

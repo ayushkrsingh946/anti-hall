@@ -543,9 +543,7 @@ impl Run<'_> {
         cleanup(self.cell, true);
         emit(&stale::handoff_line(&s.newest, s.registered, s.registered_version.as_deref()));
         let mut cmd = std::process::Command::new(exe);
-        cmd.args(std::env::args().skip(1))
-            .env(text("wake_watch.env_handoff"), &s.newest)
-            .env(defaults::env_name("plugin_root"), root);
+        cmd.args(std::env::args().skip(1)).env(text("wake_watch.env_handoff"), &s.newest).env(defaults::env_name("plugin_root"), root);
         let err = cmd.exec(); // only returns on failure
         diag(&format!("{err}\n"));
         emit(&stale::stale_line(role, &self.a.id.id, self.own_version.as_deref(), &s.newest, script));

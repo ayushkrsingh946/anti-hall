@@ -105,14 +105,32 @@ fn verify_first_matches_node() {
 fn codex_quota_detect_matches_node() {
     let _s = serial();
     let Some(hooks) = hooks_dir() else { return };
-    b78::require_tol("codex-quota-detect", "codex-quota-detect", "codex-quota-detect.js", &hooks, b78_quota_detect::scenarios(), 100, &[], b78_quota_detect::TOLERANCE);
+    b78::require_tol(
+        "codex-quota-detect",
+        "codex-quota-detect",
+        "codex-quota-detect.js",
+        &hooks,
+        b78_quota_detect::scenarios(),
+        100,
+        &[],
+        b78_quota_detect::TOLERANCE,
+    );
 }
 
 #[test]
 fn codex_availability_matches_node() {
     let _s = serial();
     let Some(hooks) = hooks_dir() else { return };
-    b78::require_tol("codex-availability", "codex-availability", "codex-availability.js", &hooks, b78_availability::scenarios(), 100, &[], b78_availability::TOLERANCE);
+    b78::require_tol(
+        "codex-availability",
+        "codex-availability",
+        "codex-availability.js",
+        &hooks,
+        b78_availability::scenarios(),
+        100,
+        &[],
+        b78_availability::TOLERANCE,
+    );
 }
 
 #[test]

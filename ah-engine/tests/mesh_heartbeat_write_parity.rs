@@ -134,7 +134,11 @@ fn tree(home: &Path) -> std::collections::BTreeMap<String, Vec<u8>> {
         .into_iter()
         .map(|(k, v)| {
             let v = normalized(home, &v);
-            let v = if k.ends_with("heartbeat-callers.log") { who.replace_all(&String::from_utf8_lossy(&v), r#""pid":0,"ppid":0,"argv":"""#).into_owned().into_bytes() } else { v };
+            let v = if k.ends_with("heartbeat-callers.log") {
+                who.replace_all(&String::from_utf8_lossy(&v), r#""pid":0,"ppid":0,"argv":"""#).into_owned().into_bytes()
+            } else {
+                v
+            };
             (k, v)
         })
         .collect()

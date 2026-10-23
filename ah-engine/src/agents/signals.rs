@@ -20,7 +20,9 @@ pub(crate) type Raised = (u64, String);
 /// The state of an agent as the tracker reads it.
 pub(crate) fn state_of(a: &Agent) -> &'static str {
     let host = |k: &str| {
-        ["agent_tracker.claude_cli", "agent_tracker.registry"].iter().any(|t| defaults::raw(t).get(k).map(V::strings).unwrap_or_default().contains(&a.host.as_str()))
+        ["agent_tracker.claude_cli", "agent_tracker.registry"]
+            .iter()
+            .any(|t| defaults::raw(t).get(k).map(V::strings).unwrap_or_default().contains(&a.host.as_str()))
     };
     if a.kind == kind_name("heartbeat") {
         return if a.flags.contains_key("heartbeat_stale") { state_name("stale") } else { state_name("running") };
@@ -280,13 +282,13 @@ fn text_for(env: &Env, a: &Agent, sig: &str, f: &Flag) -> String {
         }
         "drift" => defaults::render("msg.agent_drift", &[("agent", &who), ("step", &f.text), ("overlap", &f.evidence)]),
         "heartbeat_stale" => defaults::render("msg.agent_heartbeat_stale", &[("agent", &who), ("age", &age(f.evidence * fmtn("ms_per_s"))), ("step", &f.text)]),
-        "idle_open_task" => defaults::render(
-            "msg.agent_idle_open_task",
-            &[("agent", &who), ("kind", &kind), ("idle", &age(f.evidence * fmtn("ms_per_s"))), ("task", &f.text)],
-        ),
+        "idle_open_task" => {
+            defaults::render("msg.agent_idle_open_task", &[("agent", &who), ("kind", &kind), ("idle", &age(f.evidence * fmtn("ms_per_s"))), ("task", &f.text)])
+        }
         "watched_exit" => defaults::render("msg.agent_watched_exit", &[("agent", &who), ("kind", &kind), ("count", &f.evidence), ("task", &f.text)]),
         _ if a.ws.as_ref().is_some_and(|w| w.armed == Some(false)) => {
-            let root = env.plugin_root.as_ref().map_or_else(|| defaults::text("agent_tracker.wake_root_fallback").to_string(), |r| r.to_string_lossy().to_string());
+            let root =
+                env.plugin_root.as_ref().map_or_else(|| defaults::text("agent_tracker.wake_root_fallback").to_string(), |r| r.to_string_lossy().to_string());
             let command = defaults::render("agent_tracker.wake_command", &[("root", &root)]);
             defaults::render("msg.agent_monitor_unarmed_devswarm", &[("command", &command)])
         }

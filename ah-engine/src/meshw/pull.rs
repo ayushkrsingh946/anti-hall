@@ -500,7 +500,12 @@ impl Plan {
             return Ok(self);
         }
         self.check_wal(inv)?;
-        let c = hivecontrol::call_in(&defaults::list("mesh_write.hc_message_count"), &inv.env, Some(&inv.cwd), defaults::millis("mesh_write.hivecontrol_timeout_ms"));
+        let c = hivecontrol::call_in(
+            &defaults::list("mesh_write.hc_message_count"),
+            &inv.env,
+            Some(&inv.cwd),
+            defaults::millis("mesh_write.hivecontrol_timeout_ms"),
+        );
         self.peek = if c.ok { Peek::Count(parse_count(&c.raw)) } else { Peek::Failed };
         if let Peek::Count(n) = self.peek
             && !line_form
@@ -787,7 +792,8 @@ pub(crate) fn capture_fresh(inv: &Inv, p: &Plan, worktree: &str, at: &dyn Fn(&st
     }
     // hivecontrol names the workspace by the directory it runs in, so the call stands in the workspace's own checkout (a daemon's
     // working directory is no git repository: "Not in a git repository")
-    let full = hivecontrol::call_full(&defaults::list("mesh_write.hc_message_count"), &inv.env, Some(&inv.cwd), defaults::millis("mesh_write.hivecontrol_timeout_ms"));
+    let full =
+        hivecontrol::call_full(&defaults::list("mesh_write.hc_message_count"), &inv.env, Some(&inv.cwd), defaults::millis("mesh_write.hivecontrol_timeout_ms"));
     if !full.call.ok {
         return Fresh::CountFailed(hivecontrol::failure_detail(&full));
     }

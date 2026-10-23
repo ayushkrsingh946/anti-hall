@@ -210,7 +210,8 @@ fn an_uncertain_retry_date_still_records_the_outage() {
         let (home, tmp) = (root.join("home").to_string_lossy().to_string(), root.join("tmp").to_string_lossy().to_string());
         std::fs::create_dir_all(&tmp).unwrap();
         let path = std::env::var("PATH").unwrap_or_default();
-        let env = env_of(&[("PATH", &path), ("HOME", &home), ("ANTIHALL_TEST_ISOLATION", "1"), ("ANTIHALL_INGEST_DRY_RUN", "1"), ("TMPDIR", &tmp), ("TZ", "UTC")]);
+        let env =
+            env_of(&[("PATH", &path), ("HOME", &home), ("ANTIHALL_TEST_ISOLATION", "1"), ("ANTIHALL_INGEST_DRY_RUN", "1"), ("TMPDIR", &tmp), ("TZ", "UTC")]);
         let payload = ag(json!(format!("hit your usage limit, try again at {date}."))).to_string();
         let before = std::time::SystemTime::now();
         let r = run(ENGINE, &strs(&["check", "codex-quota-detect"]), payload.as_bytes(), &env, &root.to_string_lossy());

@@ -49,11 +49,8 @@ fn histories(tl: &Tl, works: usize) -> Vec<(String, Vec<String>)> {
             ("create-then-update", Box::new(|| cat(vec![tl.create(1, jo! {"subject": "x"}), tl.update(1, vec![("status", shape.clone())])]))),
         ];
         for (site, mk) in sites {
-            let ends: Vec<(&str, Box<dyn Fn() -> Vec<String> + '_>)> = vec![
-                ("kept", Box::new(Vec::new)),
-                ("inprogress", Box::new(|| in_prog())),
-                ("completed", Box::new(|| done())),
-            ];
+            let ends: Vec<(&str, Box<dyn Fn() -> Vec<String> + '_>)> =
+                vec![("kept", Box::new(Vec::new)), ("inprogress", Box::new(|| in_prog())), ("completed", Box::new(|| done()))];
             for (end, tail) in ends {
                 let lines = cat(vec![vec![tl.prompt("go")], mk(), tail(), work(tl)]);
                 v.push((format!("badstatus-{site}-{name}-{end}"), lines));

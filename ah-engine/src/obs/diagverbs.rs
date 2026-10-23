@@ -21,11 +21,18 @@ pub fn fs() -> Value {
     let dir = paths::dir();
     let fds = std::fs::read_dir(defaults::text("diagnostics.fd_dir")).map_or(0, std::iter::Iterator::count);
     let mut files: Vec<(u64, String, u64)> = std::fs::read_dir(&dir)
-        .map(|rd| rd.flatten().filter_map(|e| e.metadata().ok().filter(std::fs::Metadata::is_file).map(|m| (m.len(), e.file_name().to_string_lossy().into_owned(), age_s(&m)))).collect())
+        .map(|rd| {
+            rd.flatten()
+                .filter_map(|e| {
+                    e.metadata().ok().filter(std::fs::Metadata::is_file).map(|m| (m.len(), e.file_name().to_string_lossy().into_owned(), age_s(&m)))
+                })
+                .collect()
+        })
         .unwrap_or_default();
     let total: u64 = files.iter().map(|f| f.0).sum();
     files.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
-    let top: Vec<Value> = files.iter().take(defaults::num("diagnostics.diag_top") as usize).map(|(len, name, age)| json!({"file": name, "bytes": len, "age_s": age})).collect();
+    let top: Vec<Value> =
+        files.iter().take(defaults::num("diagnostics.diag_top") as usize).map(|(len, name, age)| json!({"file": name, "bytes": len, "age_s": age})).collect();
     json!({"state_dir": dir.display().to_string(), "open_fds": fds, "files": files.len(), "total_bytes": total, "largest": top, "db": crate::maintain::sizes(&dir)})
 }
 

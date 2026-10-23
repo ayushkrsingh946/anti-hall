@@ -335,7 +335,9 @@ pub fn run_front(raw: &[std::ffi::OsString]) -> i32 {
     let verb = verb_label(&a);
     let w = |k: &str| defaults::text(k).to_string();
     let Some(inv) = inv_from_process(stdin) else {
-        shadow_log(&serde_json::json!({"ts": t0, "verb": verb, "mode": w("mesh_write.mode_on"), "result": w("mesh_write.shadow_defer"), "reason": "no-context"}));
+        shadow_log(
+            &serde_json::json!({"ts": t0, "verb": verb, "mode": w("mesh_write.mode_on"), "result": w("mesh_write.shadow_defer"), "reason": "no-context"}),
+        );
         return unable("meshw:no_context");
     };
     let r = std::panic::catch_unwind(|| run_native(&inv, &a));

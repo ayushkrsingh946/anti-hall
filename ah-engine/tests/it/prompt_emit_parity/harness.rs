@@ -389,7 +389,9 @@ fn run_one(scn: &Scn, root: &Path, report: &Mutex<Report>) {
             bad.push(format!("[{}] step {i}: expected an answer but the engine deferred", scn.name));
         }
         if defer_expected && !was_deferred {
-            if let Err(w) = crate::common::not_weaker_than_node((node.code, &String::from_utf8_lossy(&node.out)), (eng.code, &String::from_utf8_lossy(&eng.out))) {
+            if let Err(w) =
+                crate::common::not_weaker_than_node((node.code, &String::from_utf8_lossy(&node.out)), (eng.code, &String::from_utf8_lossy(&eng.out)))
+            {
                 bad.push(format!("[{}] step {i}: {w}", scn.name));
             }
         } else {

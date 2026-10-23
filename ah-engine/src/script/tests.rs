@@ -167,7 +167,11 @@ fn a_worker_thread_tears_its_runtime_down_cleanly() {
                 assert!(run_forced(name, &json!({"tool_name": "Bash", "tool_input": {"command": "ls"}}), &e).is_some());
             }
             put_override(&h2, "zz-cycle", "var keep2 = [{}]; function decide() { return 'defer'; }");
-            assert_eq!(run_forced("zz-cycle", &json!({}), &e), Some(Some(Verdict::Defer)), "an explicit defer is the script's own answer (the dispatcher resolves it)");
+            assert_eq!(
+                run_forced("zz-cycle", &json!({}), &e),
+                Some(Some(Verdict::Defer)),
+                "an explicit defer is the script's own answer (the dispatcher resolves it)"
+            );
         })
         .join()
         .expect("the worker thread exits without a teardown abort");
@@ -1912,7 +1916,8 @@ fn the_speculation_judge_is_handed_to_the_dispatcher_and_blocks_there() {
     assert_eq!(in_daemon, json!({"v": "defer"}), "the daemon hands the check to the dispatcher");
     assert!(crate::discard::captured().iter().all(|(code, _)| code != "script_error"), "{:?}", crate::discard::captured());
     crate::judge::allow_blocking_calls();
-    *TEST_MODEL.lock().unwrap() = Some(Box::new(|_| crate::judge::cli::CliOutcome { result: Ok(r#"{"decision":"block","claim":"the cause is stated, not shown"}"#.into()), ms: 5 }));
+    *TEST_MODEL.lock().unwrap() =
+        Some(Box::new(|_| crate::judge::cli::CliOutcome { result: Ok(r#"{"decision":"block","claim":"the cause is stated, not shown"}"#.into()), ms: 5 }));
     let l = golden::lay(&case);
     let in_dispatcher = golden::verdict_json(&golden::run_case("speculation-judge", &l, 1).expect("a shipped script"), &l);
     *TEST_MODEL.lock().unwrap() = None;

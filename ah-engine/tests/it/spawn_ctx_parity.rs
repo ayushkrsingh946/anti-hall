@@ -350,7 +350,9 @@ fn drive(name: &str, h: Hook, cases: Vec<Case>) -> Tally {
             // the old engine handed this input to the Node hook; it now answers it itself: the answer may say less than Node's
             // (advisory text is dropped on purpose) or more, but where Node blocks the engine must block
             // (an input the check cannot read exactly is still deferred: the dispatcher then follows its infra failure mode)
-            if String::from_utf8_lossy(&eng.1).trim() != "AHFALLBACK" && let Err(w) = crate::common::not_weaker_than_node((node.0, &String::from_utf8_lossy(&node.1)), (eng.0, &String::from_utf8_lossy(&eng.1))) {
+            if String::from_utf8_lossy(&eng.1).trim() != "AHFALLBACK"
+                && let Err(w) = crate::common::not_weaker_than_node((node.0, &String::from_utf8_lossy(&node.1)), (eng.0, &String::from_utf8_lossy(&eng.1)))
+            {
                 panic!("{}", ctx(&w));
             }
             t.deferred += 1;

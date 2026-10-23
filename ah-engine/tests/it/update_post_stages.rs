@@ -209,7 +209,6 @@ fn seed_floors(home: &Path) {
     put(home.parent().unwrap(), "nd-p2.cursor", "4");
 }
 
-
 /// Rows an older build stamped `unclaimed:`: one with a real session in its heartbeat (descriptor and registry both promoted),
 /// one without a heartbeat, one whose heartbeat is itself a marker, one whose registry already holds a real value, one with no
 /// registry row at all.
@@ -320,7 +319,11 @@ fn seed_not_split(home: &Path) {
 /// A store whose sqlite side and `journal/*.ndjson` side both hold data: the split the merge repairs (Node's to do).
 fn seed_split(home: &Path) {
     seed_not_split(home);
-    put(home, &format!(".anti-hall/devswarm/store/{STORE}/journal/messages.ndjson"), "{\"workspaceId\":\"w1\",\"ts\":1,\"hash\":\"zz\",\"body\":\"only in the journal\"}\n");
+    put(
+        home,
+        &format!(".anti-hall/devswarm/store/{STORE}/journal/messages.ndjson"),
+        "{\"workspaceId\":\"w1\",\"ts\":1,\"hash\":\"zz\",\"body\":\"only in the journal\"}\n",
+    );
 }
 
 static CHILD: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
@@ -448,7 +451,11 @@ pub(super) fn picture(w: &World, answer: Value, anchor: Option<&str>) -> Value {
     let files: BTreeMap<String, String> = tree(&w.home)
         .into_iter()
         .filter(|(k, _)| {
-            k.starts_with(".anti-hall/") && !k.contains("/store/") && !k.contains("/locks/") && !k.starts_with(".anti-hall/state") && (!k.starts_with(".anti-hall/logs") || k == ".anti-hall/logs/" || k == ".anti-hall/logs/devswarm.jsonl")
+            k.starts_with(".anti-hall/")
+                && !k.contains("/store/")
+                && !k.contains("/locks/")
+                && !k.starts_with(".anti-hall/state")
+                && (!k.starts_with(".anti-hall/logs") || k == ".anti-hall/logs/" || k == ".anti-hall/logs/devswarm.jsonl")
         })
         .map(|(k, v)| {
             let v = pid.replace_all(&norm(&v, w), r#""pid":0"#).into_owned();
@@ -573,7 +580,11 @@ fn replay(c: &Case) -> (Value, World, Opt) {
         fs::create_dir_all(p.parent().unwrap()).unwrap();
         fs::write(p, format!("{}\n", serde_json::to_string_pretty(&pic).unwrap())).unwrap();
     }
-    let want: Value = serde_json::from_str(&fs::read_to_string(fixture_path(c.stage, c.name)).unwrap_or_else(|e| panic!("{}/{}: no fixture ({e}); record with AH_RECORD_UPDATE_FIXTURES=1", c.stage, c.name))).unwrap();
+    let want: Value = serde_json::from_str(
+        &fs::read_to_string(fixture_path(c.stage, c.name))
+            .unwrap_or_else(|e| panic!("{}/{}: no fixture ({e}); record with AH_RECORD_UPDATE_FIXTURES=1", c.stage, c.name)),
+    )
+    .unwrap();
     let eo = Opt { no_node: true, stage_only: Some(c.row), ..o };
     let w = world(&eo);
     (c.seed)(&w.home);
@@ -609,7 +620,13 @@ pub(super) fn diff(want: &Value, got: &Value) -> String {
             .collect::<std::collections::BTreeSet<_>>()
             .into_iter()
             .filter(|k| w.get(*k) != g.get(*k))
-            .map(|k| format!("  {k}\n    frozen: {}\n    engine: {}", w.get(k).map_or("<absent>".into(), Value::to_string), g.get(k).map_or("<absent>".into(), Value::to_string)))
+            .map(|k| {
+                format!(
+                    "  {k}\n    frozen: {}\n    engine: {}",
+                    w.get(k).map_or("<absent>".into(), Value::to_string),
+                    g.get(k).map_or("<absent>".into(), Value::to_string)
+                )
+            })
             .collect::<Vec<_>>()
             .join("\n"),
         _ => format!("  frozen: {want}\n  engine: {got}"),
@@ -641,7 +658,18 @@ macro_rules! case {
     ($fn:ident, $stage:literal, $name:literal, $row:literal, $key:literal, $func:literal, $seed:expr, live: $live:literal, markers: $markers:literal) => {
         #[test]
         fn $fn() {
-            run_case(&Case { stage: $stage, name: $name, row: $row, key: $key, func: $func, seed: $seed, live: $live, markers: $markers, nested: false, mask: &[] });
+            run_case(&Case {
+                stage: $stage,
+                name: $name,
+                row: $row,
+                key: $key,
+                func: $func,
+                seed: $seed,
+                live: $live,
+                markers: $markers,
+                nested: false,
+                mask: &[],
+            });
         }
     };
 }
@@ -692,7 +720,18 @@ fn marker_of(w: &World) -> Option<String> {
 /// A store with data but no marker is settled as sqlite and pinned by a read-write open, like Node; a preview (read-only open) pins nothing.
 #[test]
 fn a_store_without_a_marker_is_adopted_as_sqlite_and_pinned_like_node() {
-    let (_, w, o) = replay(&Case { stage: "reader-floor-repair", name: "no_marker", row: "reader-floor-repair", key: "readerFloorRepair", func: "readerFloorRepairPostUpdate", seed: seed_floors_no_marker, live: true, markers: false, nested: false, mask: &[] });
+    let (_, w, o) = replay(&Case {
+        stage: "reader-floor-repair",
+        name: "no_marker",
+        row: "reader-floor-repair",
+        key: "readerFloorRepair",
+        func: "readerFloorRepairPostUpdate",
+        seed: seed_floors_no_marker,
+        live: true,
+        markers: false,
+        nested: false,
+        mask: &[],
+    });
     assert_eq!(marker_of(&w).as_deref(), Some("sqlite"));
     assert_eq!(stage_node_calls(&w), Vec::<String>::new());
     let again = engine_answer(&w, &o, "readerFloorRepair");
@@ -701,13 +740,35 @@ fn a_store_without_a_marker_is_adopted_as_sqlite_and_pinned_like_node() {
 
 #[test]
 fn a_preview_of_a_store_without_a_marker_writes_no_marker() {
-    let (_, w, _) = replay(&Case { stage: "reader-floor-repair", name: "no_marker_dry", row: "reader-floor-repair", key: "readerFloorRepair", func: "readerFloorRepairPostUpdate", seed: seed_floors_no_marker, live: false, markers: false, nested: false, mask: &[] });
+    let (_, w, _) = replay(&Case {
+        stage: "reader-floor-repair",
+        name: "no_marker_dry",
+        row: "reader-floor-repair",
+        key: "readerFloorRepair",
+        func: "readerFloorRepairPostUpdate",
+        seed: seed_floors_no_marker,
+        live: false,
+        markers: false,
+        nested: false,
+        mask: &[],
+    });
     assert_eq!(marker_of(&w), None);
 }
 
 #[test]
 fn split_merge_pins_a_store_without_a_marker_even_in_a_preview_like_node() {
-    let (_, w, _) = replay(&Case { stage: "merge-split-backend-stores", name: "no_marker", row: "merge-split-backend-stores", key: "mergeSplitBackendStores", func: "mergeSplitBackendStoresPostUpdate", seed: seed_not_split_no_marker, live: false, markers: false, nested: false, mask: &[] });
+    let (_, w, _) = replay(&Case {
+        stage: "merge-split-backend-stores",
+        name: "no_marker",
+        row: "merge-split-backend-stores",
+        key: "mergeSplitBackendStores",
+        func: "mergeSplitBackendStoresPostUpdate",
+        seed: seed_not_split_no_marker,
+        live: false,
+        markers: false,
+        nested: false,
+        mask: &[],
+    });
     assert_eq!(marker_of(&w).as_deref(), Some("sqlite"));
 }
 
@@ -745,7 +806,19 @@ fn a_stage_switched_off_reports_itself_skipped_and_touches_nothing() {
     let out = run_engine(&w, &o, &["--post-pull-only"]);
     let status: Value = serde_json::from_str(out.stdout.lines().next().unwrap()).unwrap();
     let status = &status["status"];
-    for (key, name) in [("readerCursorsImport", "reader-cursors-import"), ("readerFloorRepair", "reader-floor-repair"), ("dualPartitionAcks", "dual-partition-acks"), ("promoteUnclaimed", "promote-unclaimed"), ("cursorHygiene", "cursor-hygiene"), ("mergeSplitBackendStores", "merge-split-backend-stores"), ("childSenderLabels", "child-sender-labels"), ("ownerKeyMigrate", "owner-key-migrate"), ("appArchivedMarkers", "app-archived-markers"), ("reRetireResurrected", "re-retire-resurrected"), ("wakeMonitor", "wake-monitor")] {
+    for (key, name) in [
+        ("readerCursorsImport", "reader-cursors-import"),
+        ("readerFloorRepair", "reader-floor-repair"),
+        ("dualPartitionAcks", "dual-partition-acks"),
+        ("promoteUnclaimed", "promote-unclaimed"),
+        ("cursorHygiene", "cursor-hygiene"),
+        ("mergeSplitBackendStores", "merge-split-backend-stores"),
+        ("childSenderLabels", "child-sender-labels"),
+        ("ownerKeyMigrate", "owner-key-migrate"),
+        ("appArchivedMarkers", "app-archived-markers"),
+        ("reRetireResurrected", "re-retire-resurrected"),
+        ("wakeMonitor", "wake-monitor"),
+    ] {
         let a = &status[key];
         assert_eq!(a["attempted"], json!(false), "{key}: {a}");
         assert_eq!(a["disabled"], json!(true), "{key}: {a}");
@@ -778,7 +851,11 @@ fn a_stage_switched_back_on_runs_on_the_next_run() {
 /// The repairs move or mark: every message, every registry row and every legacy cursor file is still there afterwards.
 #[test]
 fn the_store_stages_delete_nothing() {
-    for (seed, row, key) in [(seed_import as fn(&Path), "reader-cursors-import", "readerCursorsImport"), (seed_floors, "reader-floor-repair", "readerFloorRepair"), (seed_dual, "dual-partition-acks", "dualPartitionAcks")] {
+    for (seed, row, key) in [
+        (seed_import as fn(&Path), "reader-cursors-import", "readerCursorsImport"),
+        (seed_floors, "reader-floor-repair", "readerFloorRepair"),
+        (seed_dual, "dual-partition-acks", "dualPartitionAcks"),
+    ] {
         let o = Opt { ds: true, no_upstream_move: true, live: true, no_node: true, stage_only: Some(row), ..Opt::default() };
         let w = world(&o);
         seed(&w.home);
@@ -945,7 +1022,8 @@ fn ingest_case(name: &str, ds: bool, seed: fn(&Path)) -> (World, Opt) {
         fs::create_dir_all(p.parent().unwrap()).unwrap();
         fs::write(p, format!("{}\n", serde_json::to_string_pretty(&st["status"]["ingestHeal"]).unwrap())).unwrap();
     }
-    let want: Value = serde_json::from_str(&fs::read_to_string(ingest_fixture(name)).unwrap_or_else(|e| panic!("ingest-heal/{name}: no fixture ({e})"))).unwrap();
+    let want: Value =
+        serde_json::from_str(&fs::read_to_string(ingest_fixture(name)).unwrap_or_else(|e| panic!("ingest-heal/{name}: no fixture ({e})"))).unwrap();
     let o = ingest_opt(ds);
     let w = world(&o);
     seed(&w.home);
@@ -1015,7 +1093,6 @@ fn ingest_heal_is_disabled_in_witness_mode_and_when_switched_off() {
     assert_eq!(node_calls(&w), "", "the switched-off stage asked Node");
 }
 
-
 // ---- the git classifier of the post-update stages (roadmap #61 G3) ---------------------------------------------------------------
 
 fn git_in(dir: &Path, args: &[&str]) {
@@ -1071,7 +1148,18 @@ fn seed_dual_nested(home: &Path) {
 }
 
 fn nested_case() -> Case {
-    Case { stage: "dual-partition-acks", name: "nested_repo", row: "dual-partition-acks", key: "dualPartitionAcks", func: "dualPartitionAcksPostUpdate", seed: seed_dual_nested, live: true, markers: false, nested: true, mask: &[] }
+    Case {
+        stage: "dual-partition-acks",
+        name: "nested_repo",
+        row: "dual-partition-acks",
+        key: "dualPartitionAcks",
+        func: "dualPartitionAcksPostUpdate",
+        seed: seed_dual_nested,
+        live: true,
+        markers: false,
+        nested: true,
+        mask: &[],
+    }
 }
 
 /// A worktree nested in another checkout is classified by git as Node does: the stage answers natively, equal to the frozen Node run
@@ -1089,7 +1177,11 @@ fn the_git_classifier_mirrors_identity_js() {
     // 1. untracked nested repository
     let nested = inner();
     let on = resolve_context(&s(nested), false).unwrap();
-    assert_eq!((on.kind.as_str(), on.worktree_root.as_deref()), ("main", Some(s(nested).as_str())), "git says no superproject: the nested repo is its own root");
+    assert_eq!(
+        (on.kind.as_str(), on.worktree_root.as_deref()),
+        ("main", Some(s(nested).as_str())),
+        "git says no superproject: the nested repo is its own root"
+    );
     // 2. a nested repo registered as a gitlink in the parent's index: git names the parent as its superproject
     let top = scratch_dir("gitlink");
     git_in(&top, &["init", "-q"]);
@@ -1117,7 +1209,6 @@ fn the_git_classifier_mirrors_identity_js() {
     let on = resolve_context(&s(&wt), false).unwrap();
     assert_eq!((on.kind.as_str(), on.worktree_root.as_deref()), ("submodule-in-main", Some(s(&fs::canonicalize(&sup).unwrap()).as_str())));
 }
-
 
 // ---- owner-key-migrate (roadmap #61 G3) ------------------------------------------------------------------------------------------
 
@@ -1185,7 +1276,6 @@ fn owner_key_migrate_deletes_nothing_and_keeps_every_field() {
     }
 }
 
-
 // ---- app-archived-markers (roadmap #61 G3) ---------------------------------------------------------------------------------------
 
 const B_ARCHIVED: &str = "11111111-1111-4111-8111-111111111111";
@@ -1225,7 +1315,9 @@ fn seed_app_db(home: &Path) {
 /// a twin builder on its worktree, one already marked, one with no worktree, one that is not a descriptor.
 fn seed_app_archived(home: &Path) {
     seed_app_db(home);
-    let d = |id: &str, wt: &str| put(home, &format!(".anti-hall/devswarm/workspaces/{id}.json"), &format!(r#"{{"id":"{id}","worktreePath":"{wt}","sessionId":"s-{id}"}}"#));
+    let d = |id: &str, wt: &str| {
+        put(home, &format!(".anti-hall/devswarm/workspaces/{id}.json"), &format!(r#"{{"id":"{id}","worktreePath":"{wt}","sessionId":"s-{id}"}}"#))
+    };
     d(B_ARCHIVED, "/code/wts/archived");
     d(B_DELETED, "/code/wts/deleted");
     d(B_OPEN, "/code/wts/open");
@@ -1257,7 +1349,6 @@ fn app_markers_never_overwrite_a_marker_and_never_touch_a_descriptor() {
         }
     }
 }
-
 
 // ---- re-retire-resurrected (roadmap #61 G3) --------------------------------------------------------------------------------------
 
@@ -1318,7 +1409,6 @@ fn the_resurrected_report_removes_nothing() {
         assert!(after["files"].get(f).is_some(), "file {f} vanished");
     }
 }
-
 
 // ---- wake-monitor (roadmap #61 G3) -----------------------------------------------------------------------------------------------
 //
@@ -1385,7 +1475,18 @@ case!(wake_monitor_runs_the_same_under_the_ingest_dry_run_switch, "wake-monitor"
 /// Node's load-failure answer on one side and the engine's presence-and-exports answer on the other.
 #[test]
 fn wake_monitor_differs_from_node_only_in_shipped_for_a_watcher_that_does_not_load() {
-    let c = Case { stage: "wake-monitor", name: "unloadable_watcher", row: "wake-monitor", key: "wakeMonitor", func: "wakeMonitorPostUpdate", seed: seed_wake_unloadable, live: true, markers: false, nested: false, mask: &["shipped", "detail", "stateDirEnsured"] };
+    let c = Case {
+        stage: "wake-monitor",
+        name: "unloadable_watcher",
+        row: "wake-monitor",
+        key: "wakeMonitor",
+        func: "wakeMonitorPostUpdate",
+        seed: seed_wake_unloadable,
+        live: true,
+        markers: false,
+        nested: false,
+        mask: &["shipped", "detail", "stateDirEnsured"],
+    };
     let (got, _, _) = replay(&c);
     let want: Value = serde_json::from_str(&fs::read_to_string(fixture_path(c.stage, c.name)).unwrap()).unwrap();
     assert_eq!(want["answer"]["shipped"], json!(false), "Node reads a script that does not load as not shipped");
@@ -1407,7 +1508,11 @@ fn wake_monitor_arms_nothing_deletes_nothing_and_runs_no_node() {
     assert_eq!(stage_node_calls(&w), Vec::<String>::new());
     assert_eq!(fs::read(&lock).unwrap(), before, "the lock was rewritten");
     let after_tree = tree(&w.home);
-    let new: Vec<&String> = after_tree.keys().filter(|k| !before_tree.contains_key(*k)).filter(|k| !k.starts_with(".anti-hall/ah-engine") && !k.starts_with(".anti-hall/logs") && !k.starts_with(".anti-hall/state")).collect();
+    let new: Vec<&String> = after_tree
+        .keys()
+        .filter(|k| !before_tree.contains_key(*k))
+        .filter(|k| !k.starts_with(".anti-hall/ah-engine") && !k.starts_with(".anti-hall/logs") && !k.starts_with(".anti-hall/state"))
+        .collect();
     assert_eq!(new, vec![".anti-hall/devswarm/wake/"], "only the watcher state directory is created");
     for k in before_tree.keys().filter(|k| !k.starts_with(".anti-hall/ah-engine") && !k.starts_with(".anti-hall/logs")) {
         assert!(after_tree.contains_key(k), "{k} vanished");

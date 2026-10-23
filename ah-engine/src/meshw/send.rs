@@ -72,7 +72,9 @@ pub fn resolve_mesh_target(rows: &[Row], mesh_id: Option<&str>) -> R<Option<Row>
 /// minutes of silence behind "verified").
 fn label_without_reader(row: &Row, readers: usize) -> bool {
     let session = row.session_id.as_deref().unwrap_or("");
-    row.id.starts_with(defaults::text("mesh_write.primary_prefix")) && readers == 0 && (session.is_empty() || session.starts_with(defaults::text("mesh_write.synthetic_session_prefix")))
+    row.id.starts_with(defaults::text("mesh_write.primary_prefix"))
+        && readers == 0
+        && (session.is_empty() || session.starts_with(defaults::text("mesh_write.synthetic_session_prefix")))
 }
 
 /// What `--to` named.
@@ -696,8 +698,7 @@ pub(crate) fn cmd_send_mode(inv: &Inv, a: &Args, plan: bool) -> R<Obj> {
         return defer("plan-activity");
     }
     let partition = target.as_ref().map(|t| t.id.clone());
-    let no_reader = !broadcast
-        && target.as_ref().is_some_and(|t| label_without_reader(t, st.reader().reader_cursors(&t.id).map_or(1, |r| r.len())));
+    let no_reader = !broadcast && target.as_ref().is_some_and(|t| label_without_reader(t, st.reader().reader_cursors(&t.id).map_or(1, |r| r.len())));
     // the summary refresh after the write must be one the engine can do (else Node runs the whole verb)
     crate::meshw::summary::check(&st, inv, partition.as_deref())?;
     if plan {

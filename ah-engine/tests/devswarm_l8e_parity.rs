@@ -334,7 +334,11 @@ fn run_cases(fx: &Fx, w: &W, cases: &[Lc], min_native: usize, min_deferred: usiz
             };
             let pre = snap(&homes[2]);
             let d = engine_cli(&homes[2], &cwd, &c.argv, now, &env_for(path_with(&nonode)));
-            assert_eq!(d.code, 69, "{}: a deferral the engine cannot hand to Node exits mesh_write.exit_unable, got {} / {} / {}", c.name, d.code, d.stdout, d.stderr);
+            assert_eq!(
+                d.code, 69,
+                "{}: a deferral the engine cannot hand to Node exits mesh_write.exit_unable, got {} / {} / {}",
+                c.name, d.code, d.stdout, d.stderr
+            );
             assert!(d.stdout.is_empty(), "{}: nothing is printed on a deferral: {}", c.name, d.stdout);
             assert_eq!(last_log(&homes[2].join("state"))["result"], "defer", "{}", c.name);
             assert!(pre == snap(&homes[2]), "{}: a deferral wrote", c.name);
@@ -1002,7 +1006,12 @@ fn a_date_form_the_engine_does_not_reproduce_is_stored_at_import_time_and_the_ba
     // only the message rows are compared, and not their `ts`: Node reads the odd form as local time, the engine stores the import time
     let norm = |h: &Path| {
         let ts = regex::Regex::new(r"\bts=i[0-9]+").unwrap();
-        mask_dump(&raw_dump(&key_db(h))).lines().filter(|l| l.contains("hash=t\"native:")).map(|l| ts.replace_all(l, "ts=<time>").into_owned()).collect::<Vec<_>>().join("\n")
+        mask_dump(&raw_dump(&key_db(h)))
+            .lines()
+            .filter(|l| l.contains("hash=t\"native:"))
+            .map(|l| ts.replace_all(l, "ts=<time>").into_owned())
+            .collect::<Vec<_>>()
+            .join("\n")
     };
     assert!(
         !norm(&ours).is_empty() && norm(&ours) == norm(&reference),

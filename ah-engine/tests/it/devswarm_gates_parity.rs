@@ -339,19 +339,33 @@ macro_rules! shards {
                 super::shard($guard, $env, &$payloads, i, if i == 0 { $defers } else { 0 });
             }
             #[test]
-            fn slice_1() { run(0) }
+            fn slice_1() {
+                run(0)
+            }
             #[test]
-            fn slice_2() { run(1) }
+            fn slice_2() {
+                run(1)
+            }
             #[test]
-            fn slice_3() { run(2) }
+            fn slice_3() {
+                run(2)
+            }
             #[test]
-            fn slice_4() { run(3) }
+            fn slice_4() {
+                run(3)
+            }
             #[test]
-            fn slice_5() { run(4) }
+            fn slice_5() {
+                run(4)
+            }
             #[test]
-            fn slice_6() { run(5) }
+            fn slice_6() {
+                run(5)
+            }
             #[test]
-            fn slice_7() { run(6) }
+            fn slice_7() {
+                run(6)
+            }
         }
     };
 }
@@ -657,7 +671,12 @@ fn pg_exec(case: &PgCase) -> PgTally {
             Some(r) => (true, r.to_string()),
             None => (false, rel.clone()),
         };
-        let rel = rel.replace("{key}", &key).replace("{own}", &own).replace("{enc2}", &enc2).replace("{enc3}", &enc3).replace("{pid}", &std::process::id().to_string());
+        let rel = rel
+            .replace("{key}", &key)
+            .replace("{own}", &own)
+            .replace("{enc2}", &enc2)
+            .replace("{enc3}", &enc3)
+            .replace("{pid}", &std::process::id().to_string());
         let p = home.join(rel);
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
         std::fs::write(&p, body).unwrap();
@@ -701,7 +720,10 @@ fn pg_exec(case: &PgCase) -> PgTally {
             // (advisory text is dropped on purpose) or more, but where Node blocks the engine must block
             pg_restore(&home, &before, &times);
             let (ncode, nout, _) = node_run(&input);
-            if let Err(w) = crate::common::not_weaker_than_node((ncode, &String::from_utf8_lossy(&nout)), (ecode, &format!("{}{}", String::from_utf8_lossy(&eout), String::from_utf8_lossy(&eerr)))) {
+            if let Err(w) = crate::common::not_weaker_than_node(
+                (ncode, &String::from_utf8_lossy(&nout)),
+                (ecode, &format!("{}{}", String::from_utf8_lossy(&eout), String::from_utf8_lossy(&eerr))),
+            ) {
                 WEAKER.with(|v| v.borrow_mut().push(format!("{label}: {w}")));
             }
             t.deferred += 1;
@@ -769,7 +791,8 @@ const PG_ROW_C7: &str = r#","c-7":{"id":"c-7","worktreePath":"/nonexistent-pg/c7
 /// The Primary's own summary: its entry with `questions` (the pendingQuestions array, plus any further entry fields after it), the
 /// further registry rows `rows` (each `,"id":{...}`) and the archived registry rows (`None`: a summary that predates the field).
 fn pg_sum(questions: &str, rows: &str, archived: Option<&str>) -> String {
-    let mut s = String::from(r#"{"generatedAt":1,"workspaces":{"{own}":{"id":"{own}","worktreePath":"{cwd}","sessionId":"sess-own","unread":0,"pendingQuestions":"#);
+    let mut s =
+        String::from(r#"{"generatedAt":1,"workspaces":{"{own}":{"id":"{own}","worktreePath":"{cwd}","sessionId":"sess-own","unread":0,"pendingQuestions":"#);
     s.push_str(questions);
     s.push('}');
     s.push_str(rows);
@@ -1270,7 +1293,6 @@ fn pg_cases() -> Vec<PgCase> {
     ]
 }
 
-
 const PG_WAKE_DESC: &str = r#"{"id":"c-3","worktreePath":"{wt3}","sessionId":"sess-c3","inboxPath":"{home}/in.ndjson","cursorPath":"{home}/cur.json"}"#;
 const PG_WAKE_BLOCK: &str = "NO MAILBOX WAKE PATH";
 
@@ -1318,7 +1340,10 @@ fn parent_gate_answers_match_node_byte_for_byte() {
     let only = std::env::var("AH_PG_ONLY").ok();
     // AH_PG_ANSWERS_ONLY=1: skip the cases that expect a deferral to Node (no Node fallback is left to defer to)
     let answers_only = std::env::var_os("AH_PG_ANSWERS_ONLY").is_some();
-    for case in pg_cases().into_iter().filter(|c| only.as_deref().is_none_or(|o| o.split(',').any(|x| c.name.contains(x))) && !(answers_only && c.steps.contains(&PgWant::Defer))) {
+    for case in pg_cases()
+        .into_iter()
+        .filter(|c| only.as_deref().is_none_or(|o| o.split(',').any(|x| c.name.contains(x))) && !(answers_only && c.steps.contains(&PgWant::Defer)))
+    {
         let t = pg_exec(&case);
         cases += 1;
         sum.answered += t.answered;
@@ -1331,7 +1356,10 @@ fn parent_gate_answers_match_node_byte_for_byte() {
         sum.answered, sum.blocks, sum.escalations, sum.deferred
     );
     assert_never_weaker();
-    assert!(only.is_some() || answers_only || cases >= 50 && sum.answered >= 50 && sum.blocks >= 20 && sum.escalations >= 2, "the corpus shrank or stopped blocking");
+    assert!(
+        only.is_some() || answers_only || cases >= 50 && sum.answered >= 50 && sum.blocks >= 20 && sum.escalations >= 2,
+        "the corpus shrank or stopped blocking"
+    );
 }
 
 // ---- the child Stop gate, the drain nudge and the reply tracker: answers byte for byte ----------------------------------------
@@ -1467,8 +1495,12 @@ fn cx_exec(case: &Cx, agent: &str) -> CxTally {
     pg_git(&wt);
     let cwd = wt.canonicalize().unwrap().to_string_lossy().into_owned();
     let key = ah_engine::meshw::ident::repo_key_for_worktree(&cwd).ok().flatten().expect("a repo key for the checkout");
-    let mut dirs: Vec<String> =
-        std::env::var("PATH").unwrap_or_default().split(':').filter(|d| !d.is_empty() && !Path::new(d).join("hivecontrol").exists()).map(str::to_string).collect();
+    let mut dirs: Vec<String> = std::env::var("PATH")
+        .unwrap_or_default()
+        .split(':')
+        .filter(|d| !d.is_empty() && !Path::new(d).join("hivecontrol").exists())
+        .map(str::to_string)
+        .collect();
     if let Some((out, code)) = case.hc {
         let bin = tmp.join("bin");
         std::fs::create_dir_all(&bin).unwrap();
@@ -1582,7 +1614,10 @@ fn cx_exec(case: &Cx, agent: &str) -> CxTally {
             // (advisory text is dropped on purpose) or more, but where Node blocks the engine must block
             pg_restore(&home, &before, &times);
             let (ncode, nout, _) = node_run(&input);
-            if let Err(w) = crate::common::not_weaker_than_node((ncode, &String::from_utf8_lossy(&nout)), (ecode, &format!("{}{}", String::from_utf8_lossy(&eout), String::from_utf8_lossy(&eerr)))) {
+            if let Err(w) = crate::common::not_weaker_than_node(
+                (ncode, &String::from_utf8_lossy(&nout)),
+                (ecode, &format!("{}{}", String::from_utf8_lossy(&eout), String::from_utf8_lossy(&eerr))),
+            ) {
                 WEAKER.with(|v| v.borrow_mut().push(format!("{label}: {w}")));
             }
             t.deferred += 1;
@@ -1591,7 +1626,11 @@ fn cx_exec(case: &Cx, agent: &str) -> CxTally {
         if let Some(rel) = case.keeps {
             let rel = fill(rel);
             assert_eq!(snapshot(&home).get(&rel), before.get(&rel), "{label}: the engine rewrote {rel}, a file it could not read exactly");
-            assert!(!String::from_utf8_lossy(&eout).contains("\"decision\":\"block\""), "{label}: an unpersistable budget fails open, as Node's does: {}", String::from_utf8_lossy(&eout));
+            assert!(
+                !String::from_utf8_lossy(&eout).contains("\"decision\":\"block\""),
+                "{label}: an unpersistable budget fails open, as Node's does: {}",
+                String::from_utf8_lossy(&eout)
+            );
             t.answered += 1;
             continue;
         }
@@ -1677,8 +1716,16 @@ fn cg_cases() -> Vec<Cx> {
         cg("store-empty-asks-heartbeat", &[A]).store(0, 0).expect("Heartbeat: before you stop"),
         // #226: a durable store the host cannot read is an UNKNOWN unread count (Node blocks with the reason), never "0 unread"
         cg("store-unreadable-is-unknown", &[A, A, A, A]).store(0, 2).seed(CX_STORE_DB, "this is not a database").expect("unread count is UNKNOWN"),
-        cg("store-unreadable-reported-still-blocks", &[A]).store(0, 2).seed(CX_STORE_DB, "this is not a database").seed(CX_SUMMARY, CX_REPORTED).expect("unread count is UNKNOWN"),
-        cg("store-unreadable-fresh-tick-still-blocks", &[A]).store(0, 2).seed(CX_STORE_DB, "this is not a database").seed(CX_TICK, r#"{"ts":{now},"unreadTotal":0,"known":true}"#).expect("unread count is UNKNOWN"),
+        cg("store-unreadable-reported-still-blocks", &[A])
+            .store(0, 2)
+            .seed(CX_STORE_DB, "this is not a database")
+            .seed(CX_SUMMARY, CX_REPORTED)
+            .expect("unread count is UNKNOWN"),
+        cg("store-unreadable-fresh-tick-still-blocks", &[A])
+            .store(0, 2)
+            .seed(CX_STORE_DB, "this is not a database")
+            .seed(CX_TICK, r#"{"ts":{now},"unreadTotal":0,"known":true}"#)
+            .expect("unread count is UNKNOWN"),
         cg("reported-allows-then-next-turn-blocks", &[A, A]).seed(CX_SUMMARY, CX_REPORTED).expect("!decision"),
         cg("reported-with-unread-asks-inbox-only", &[A]).seed(CX_SUMMARY, CX_REPORTED).seed("in.ndjson", CX_INBOX2).expect("!Heartbeat: before"),
         cg("report-by-another-workspace-does-not-count", &[A]).seed(CX_SUMMARY, r#"{"recent":[{"from":"b-2","ts":{now}}]}"#).expect("Heartbeat: before"),
@@ -1693,7 +1740,10 @@ fn cg_cases() -> Vec<Cx> {
         cg("cron-recent-heartbeat-no-warning", &[A]).seed(".anti-hall/devswarm/heartbeats/b-1.json", r#"{"ts":{now}}"#),
         cg("cron-warning-text", &[A]).claude_only().seed(CX_TICK, r#"{"ts":{old},"unreadTotal":0,"known":true}"#).expect("no inbox tick for 120m"),
         cg("cron-warning-age-set-defers", &[D]).claude_only().env("ANTIHALL_DEVSWARM_CRON_MISSING_WARN_MIN", "30").seed(CX_TICK, r#"{"ts":{old}}"#),
-        cg("cron-metric-capped", &[A]).claude_only().seed(CX_TICK, r#"{"ts":{old}}"#).seed(".anti-hall/devswarm/cron-missing-warned.jsonl", &"{\"ts\":1}\n".repeat(500)),
+        cg("cron-metric-capped", &[A])
+            .claude_only()
+            .seed(CX_TICK, r#"{"ts":{old}}"#)
+            .seed(".anti-hall/devswarm/cron-missing-warned.jsonl", &"{\"ts\":1}\n".repeat(500)),
         cg("native-count-blocks-inbox", &[A]).hc("3", 0).expect("unpulled/unread parent message(s)"),
         cg("native-zero-asks-heartbeat", &[A]).hc("0", 0).expect("!Inbox:"),
         cg("native-fails-is-unknown", &[A, A, A]).hc("boom", 1).expect("NATIVE unread count is UNKNOWN"),
@@ -1702,7 +1752,9 @@ fn cg_cases() -> Vec<Cx> {
         cg("reported-native-zero-allows", &[A]).hc("0", 0).seed(CX_SUMMARY, CX_REPORTED).expect("!decision"),
         cg("reported-native-fails-warns-once", &[A, A]).hc("x", 1).seed(CX_SUMMARY, CX_REPORTED).expect("native channel is unreachable"),
         cg("strict-mode-set-defers", &[D]).env("ANTIHALL_DEVSWARM_CHILD_GATE_STRICT", "0"),
-        cg("drop-attempt-allows", &[A]).seed(CX_ATTEMPT, r#"{"ts":{now},"id":"b-1","sessionId":"sess-b1","reason":"caller-not-registered"}"#).expect("!decision"),
+        cg("drop-attempt-allows", &[A])
+            .seed(CX_ATTEMPT, r#"{"ts":{now},"id":"b-1","sessionId":"sess-b1","reason":"caller-not-registered"}"#)
+            .expect("!decision"),
         cg("drop-attempt-with-unread-names-the-reason", &[A])
             .seed(CX_ATTEMPT, r#"{"ts":{now},"id":"b-1","sessionId":"sess-b1","reason":"caller-not-registered"}"#)
             .seed("in.ndjson", CX_INBOX2)
@@ -1722,7 +1774,8 @@ fn cg_cases() -> Vec<Cx> {
             .seed(CX_DESC, r#"{"id":"b-1","worktreePath":"{wt}","inboxPath":"{home}/in.ndjson","cursorPath":"{home}/cur.json"}"#)
             .seed(CX_ATTEMPT, r#"{"ts":{now},"id":"b-9","sessionId":"sess-x","reason":"caller-not-registered"}"#),
         cg("archived-marker-defers", &[D]).seed(".anti-hall/devswarm/archived/b-1.json", r#"{"id":"b-1","worktreePath":"{wt}"}"#),
-        cg("archived-marker-other-worktree-answers", &[A]).seed(".anti-hall/devswarm/archived/b-1.json", r#"{"id":"b-1","worktreePath":"/nonexistent-cx/other"}"#),
+        cg("archived-marker-other-worktree-answers", &[A])
+            .seed(".anti-hall/devswarm/archived/b-1.json", r#"{"id":"b-1","worktreePath":"/nonexistent-cx/other"}"#),
         cg("session-from-transcript-path", &[A, A]).payload(r#"{"hook_event_name":"Stop","transcript_path":"/x/té.jsonl","cwd":"{cwd}"}"#),
         cg("session-unknown", &[A]).payload(r#"{"hook_event_name":"Stop","cwd":"{cwd}"}"#),
         cg("session-unsafe-characters", &[A]).payload(r#"{"hook_event_name":"Stop","session_id":"a/b cé","cwd":"{cwd}"}"#),
@@ -1736,11 +1789,16 @@ fn cg_cases() -> Vec<Cx> {
         // #238: a valid budget file the engine cannot read exactly (over the read cap) is never overwritten with a partial map
         cg("budget-file-over-the-read-cap-is-kept", &[A]).claude_only().keeps(CX_POLICY).seed(CX_POLICY, &big_policy()),
         cg("state-file-array", &[A]).seed(".anti-hall/devswarm/child-gate/s1.json", "[1,2]"),
-        cg("state-file-with-block-time", &[A]).seed(".anti-hall/devswarm/child-gate/s1.json", r#"{"blocks":1,"lastBlockAt":{five},"totalBlocks":4,"lastCheckAt":{five},"extra":1}"#),
+        cg("state-file-with-block-time", &[A])
+            .seed(".anti-hall/devswarm/child-gate/s1.json", r#"{"blocks":1,"lastBlockAt":{five},"totalBlocks":4,"lastCheckAt":{five},"extra":1}"#),
         cg("descriptor-not-json", &[A]).seed(CX_DESC, "{not json"),
-        cg("descriptor-without-worktree", &[A]).seed(CX_DESC, r#"{"id":"b-1","sessionId":"sess-b1","inboxPath":"{home}/in.ndjson","cursorPath":"{home}/cur.json"}"#).seed("in.ndjson", CX_INBOX2),
+        cg("descriptor-without-worktree", &[A])
+            .seed(CX_DESC, r#"{"id":"b-1","sessionId":"sess-b1","inboxPath":"{home}/in.ndjson","cursorPath":"{home}/cur.json"}"#)
+            .seed("in.ndjson", CX_INBOX2),
         cg("inbox-relative-defers", &[D]).seed(CX_DESC, r#"{"id":"b-1","worktreePath":"{wt}","inboxPath":"rel/in.ndjson"}"#),
-        cg("cursor-missing-is-not-known", &[A]).seed(CX_DESC, r#"{"id":"b-1","worktreePath":"{wt}","inboxPath":"{home}/in.ndjson","cursorPath":"{home}/none.json"}"#).seed("in.ndjson", CX_INBOX2),
+        cg("cursor-missing-is-not-known", &[A])
+            .seed(CX_DESC, r#"{"id":"b-1","worktreePath":"{wt}","inboxPath":"{home}/in.ndjson","cursorPath":"{home}/none.json"}"#)
+            .seed("in.ndjson", CX_INBOX2),
         cg("cursor-json-line", &[A]).seed("in.ndjson", CX_INBOX2).seed("cur.json", r#"{"line":2}"#),
         cg("stable-launcher-off", &[A]).env("ANTIHALL_DEVSWARM_STABLE_LAUNCHER", "0"),
         // review fixes: a probe candidate that is no regular file; a budget the disk refuses to record (Node's fail-open)
@@ -1751,14 +1809,21 @@ fn cg_cases() -> Vec<Cx> {
             .seed(CX_TICK, r#"{"ts":{old},"unreadTotal":0,"known":true}"#)
             .seed(".anti-hall/devswarm/stop-policy/s1.json/.keep", "")
             .expect("!Mailbox cron missing"),
-        cg("cron-budget-unwritable-then-inbox-store", &[A]).claude_only().store(0, 2).seed(CX_TICK, r#"{"ts":{old}}"#).seed(".anti-hall/devswarm/stop-policy/s1.json/.keep", ""),
+        cg("cron-budget-unwritable-then-inbox-store", &[A])
+            .claude_only()
+            .store(0, 2)
+            .seed(CX_TICK, r#"{"ts":{old}}"#)
+            .seed(".anti-hall/devswarm/stop-policy/s1.json/.keep", ""),
     ]
 }
 
 #[test]
 fn child_gate_answers_match_node_byte_for_byte() {
     let t = cx_report("devswarm-child-gate", cg_cases());
-    assert!(std::env::var("AH_CX_ONLY").is_ok() || t.answered >= 100 && t.blocks >= 50 && t.stderr >= 4 && t.deferred >= 10, "the corpus shrank or stopped blocking");
+    assert!(
+        std::env::var("AH_CX_ONLY").is_ok() || t.answered >= 100 && t.blocks >= 50 && t.stderr >= 4 && t.deferred >= 10,
+        "the corpus shrank or stopped blocking"
+    );
 }
 
 fn cd_cases() -> Vec<Cx> {
@@ -1781,7 +1846,9 @@ fn cd_cases() -> Vec<Cx> {
         dr("cursor-missing", &[A]).seed(CX_DESC, r#"{"id":"b-1","inboxPath":"{home}/in.ndjson"}"#).seed("in.ndjson", CX_INBOX2),
         dr("inbox-relative-defers", &[D]).seed(CX_DESC, r#"{"id":"b-1","inboxPath":"in.ndjson"}"#),
         dr("descriptor-not-json", &[A]).seed(CX_DESC, "{not json"),
-        dr("subagent-is-silent", &[A]).seed("in.ndjson", CX_INBOX2).payload(r#"{"tool_name":"Bash","agent_id":"a1","tool_input":{"command":"ls"},"cwd":"{cwd}"}"#),
+        dr("subagent-is-silent", &[A])
+            .seed("in.ndjson", CX_INBOX2)
+            .payload(r#"{"tool_name":"Bash","agent_id":"a1","tool_input":{"command":"ls"},"cwd":"{cwd}"}"#),
         dr("read-primary-is-silent", &[A])
             .seed("in.ndjson", CX_INBOX2)
             .payload(r#"{"tool_name":"Bash","tool_input":{"command":"node x/devswarm.js inbox read-primary"},"cwd":"{cwd}"}"#),

@@ -104,8 +104,12 @@ fn path_field(desc: &OVal, key: &str, dflt: String) -> R<OVal> {
 /// A truncated-id phantom descriptor that shares this worktree: Node archives it (a fold and an archive the engine leaves to Node).
 fn phantom_present(ws_dir: &Path, keep_id: &str, top: &str) -> R<bool> {
     let Ok(rd) = std::fs::read_dir(ws_dir) else { return Ok(false) };
-    let truncated = regex::RegexBuilder::new(defaults::text("devswarm_prompt.uuid_truncated_re")).case_insensitive(true).build().map_err(|_| ident::Defer("regex".into()))?;
-    let full = regex::RegexBuilder::new(defaults::text("devswarm_prompt.uuid_full_re")).case_insensitive(true).build().map_err(|_| ident::Defer("regex".into()))?;
+    let truncated = regex::RegexBuilder::new(defaults::text("devswarm_prompt.uuid_truncated_re"))
+        .case_insensitive(true)
+        .build()
+        .map_err(|_| ident::Defer("regex".into()))?;
+    let full =
+        regex::RegexBuilder::new(defaults::text("devswarm_prompt.uuid_full_re")).case_insensitive(true).build().map_err(|_| ident::Defer("regex".into()))?;
     for e in rd.flatten() {
         let name = e.file_name().to_string_lossy().to_string();
         let Some(cand) = name.strip_suffix(json_suffix()) else { continue };
@@ -143,7 +147,8 @@ fn store_is_new(inv: &Inv, key: &str) -> R<bool> {
 fn write_marker(dir: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)?;
     let marker = dir.join(defaults::text("mesh.backend_marker"));
-    let tmp = dir.join(format!("{}.{}.{}{}", defaults::text("mesh.backend_marker"), std::process::id(), common::now_ms(), defaults::text("mesh_write.tmp_suffix")));
+    let tmp =
+        dir.join(format!("{}.{}.{}{}", defaults::text("mesh.backend_marker"), std::process::id(), common::now_ms(), defaults::text("mesh_write.tmp_suffix")));
     let style = crate::atomic::Style { leave_temp_on_rename_failure: true, ..crate::atomic::Style::default() }; // Node leaves the temp file after a failed rename
     crate::atomic::stage(&tmp, defaults::text("mesh.backend_sqlite"), style)?;
     crate::atomic::replace(&tmp, marker, style)
@@ -216,7 +221,9 @@ fn perform(inv: &Inv, p: Plan) -> R<()> {
             Store::Open(_) => None,
             Store::New => {
                 let dir = crate::meshw::union::store_dir(&inv.home, key);
-                let made = write_marker(&dir).map_err(|e| e.to_string()).and_then(|()| MeshStore::open(&dir.join(defaults::text("mesh_write.store_file"))).map_err(|e| e.to_string()));
+                let made = write_marker(&dir)
+                    .map_err(|e| e.to_string())
+                    .and_then(|()| MeshStore::open(&dir.join(defaults::text("mesh_write.store_file"))).map_err(|e| e.to_string()));
                 // Node's registerStoreDescriptor swallows a store it cannot create; the next turn retries
                 made.map_err(|e| crate::discard::note("childturn.store_create", &e)).ok()
             }
@@ -273,17 +280,25 @@ fn text_of(v: Option<&OVal>) -> Value {
 fn ingest_detail(inv: &Inv, key: &str) -> R<Value> {
     let root = idlock::devswarm_root(&inv.home);
     let json_suffix = json_suffix();
-    let beat = json_of(&root.join(defaults::text("mesh_write.dir_heartbeats")).join(format!("{}{key}{json_suffix}", defaults::text("mesh_write.ingest_beat_prefix"))));
+    let beat =
+        json_of(&root.join(defaults::text("mesh_write.dir_heartbeats")).join(format!("{}{key}{json_suffix}", defaults::text("mesh_write.ingest_beat_prefix"))));
     let beat_ts = beat.as_ref().and_then(|b| finite(b.get("ts")));
     let beat_pid = beat.as_ref().and_then(|b| finite(b.get("pid")));
     let now = inv.now as f64;
     let fresh = beat_ts.is_some_and(|t| now - t <= defaults::num("mesh_write.ingest_beat_stale_ms") as f64);
-    let lock = json_of(&root.join(defaults::text("mesh_write.dir_locks")).join(format!("{}{key}{}", defaults::text("mesh_write.ingest_lock_prefix"), defaults::text("mesh_write.lock_suffix"))));
+    let lock = json_of(&root.join(defaults::text("mesh_write.dir_locks")).join(format!(
+        "{}{key}{}",
+        defaults::text("mesh_write.ingest_lock_prefix"),
+        defaults::text("mesh_write.lock_suffix")
+    )));
     let lock_pid = lock.as_ref().and_then(|l| finite(l.get("pid")));
     let live_lock = lock_pid.is_some_and(alive);
     let healthy = fresh && live_lock && beat_pid.is_some() && beat_pid == lock_pid;
     let mut fault = Value::Null;
-    if healthy && let Some(b) = &beat && let Some(consecutive) = finite(b.get("consecutiveMonitorFailures")) {
+    if healthy
+        && let Some(b) = &beat
+        && let Some(consecutive) = finite(b.get("consecutiveMonitorFailures"))
+    {
         let last_ok = finite(b.get("lastMonitorOkMs"));
         let started = finite(b.get("startedAtMs"));
         let min = crate::checks::guardkit::settings::get_number(&inv.settings(), defaults::raw("mesh_write.setting_monitor_no_ok_fail_min"));
@@ -297,7 +312,13 @@ fn ingest_detail(inv: &Inv, key: &str) -> R<Value> {
             });
         }
     }
-    let status = if !fault.is_null() { "failed" } else if healthy { "healthy" } else { "stale" };
+    let status = if !fault.is_null() {
+        "failed"
+    } else if healthy {
+        "healthy"
+    } else {
+        "stale"
+    };
     Ok(json!({"status": status, "liveLock": live_lock, "beatTs": beat_ts, "fault": fault}))
 }
 

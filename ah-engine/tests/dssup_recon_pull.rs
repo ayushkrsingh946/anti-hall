@@ -674,7 +674,10 @@ fn a_row_the_fold_left_on_the_same_worktree_does_not_hold_the_pull() {
     hc(&he, "read", &msgs(&[("only", "2026-10-09T10:00:00.000Z")]));
     let done = engine_drain(&he, &fx, &Hooks::none()).expect("the pull is not held for a row the fold left");
     assert_eq!(done["imported"].as_i64(), Some(1), "{done}");
-    let rows = rusqlite::Connection::open(key_db(&he, &fx.repo_key)).unwrap().query_row("SELECT COUNT(*) FROM registry WHERE id IN ('child-1','primary-0badc0de')", [], |r| r.get::<_, i64>(0)).unwrap();
+    let rows = rusqlite::Connection::open(key_db(&he, &fx.repo_key))
+        .unwrap()
+        .query_row("SELECT COUNT(*) FROM registry WHERE id IN ('child-1','primary-0badc0de')", [], |r| r.get::<_, i64>(0))
+        .unwrap();
     assert_eq!(rows, 2, "no registry row was retired");
 }
 

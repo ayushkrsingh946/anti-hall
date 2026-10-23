@@ -6,7 +6,7 @@
 use super::backfill::backfill;
 use super::parse::{Facts, Line, NON_STRING_ID, collect_tool_uses, is_not_found, parse_line};
 use super::tail::{lines_of, read_tail};
-use super::{Task, TaskMap, Unknown, norm_priority, number_of_digits, priority_field, is_non_string_status, kept_status};
+use super::{Task, TaskMap, Unknown, is_non_string_status, kept_status, norm_priority, number_of_digits, priority_field};
 use crate::checks::guardkit::jsre;
 use crate::checks::guardkit::text::js_trim;
 use crate::checks::taskkit::jsval::{R, Unsure, first_truthy, get, scalar_string, truthy};
@@ -295,7 +295,8 @@ fn scan_lines(lines: &[&str], truncated: bool, path: &str, window: u64, wide: u6
     }
     // end of scan: every TaskCreate gets the number its result named
     for (tid, (content, status, priority)) in &prov {
-        let key = result_ids.iter().find(|(k, _)| k == tid).map(|(_, n)| n.clone()).unwrap_or_else(|| tid.strip_prefix(NON_STRING_ID).unwrap_or(tid).to_string());
+        let key =
+            result_ids.iter().find(|(k, _)| k == tid).map(|(_, n)| n.clone()).unwrap_or_else(|| tid.strip_prefix(NON_STRING_ID).unwrap_or(tid).to_string());
         let mut ex = tasks.get(&key).cloned();
         if let Some(e) = &ex
             && e.unknown.is_some()

@@ -226,11 +226,7 @@ fn without_table_state(mut tree: BTreeMap<String, String>, drop_entry: bool, gho
             continue;
         }
         // (the clock readings are masked to `{TS}`, so the file is no longer JSON: cut the entry's text)
-        *body = if drop_entry {
-            entry.replace_all(body, "").into_owned()
-        } else {
-            entry_hash.replace_all(body, "$1").into_owned()
-        };
+        *body = if drop_entry { entry.replace_all(body, "").into_owned() } else { entry_hash.replace_all(body, "$1").into_owned() };
         if ghost_label {
             *body = any_hash.replace_all(body, "").into_owned();
         }
@@ -1229,7 +1225,6 @@ fn run_scene(s: &Scene) -> Result<bool, String> {
     }
 }
 
-
 /// A scratch Primary checkout for an engine-only test: (the scratch root, the home, the checkout).
 fn solo_primary(tag: &str) -> (PathBuf, PathBuf, PathBuf) {
     let root = std::env::var_os("AH_ENGINE_IT_ROOT").map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
@@ -1254,7 +1249,10 @@ fn the_workspace_table_is_quiet_without_live_rows_and_on_activity_flaps_alone() 
     let (base, home, cwd) = solo_primary("tbl-archived");
     rows_of(vec![("w1", json!({})), ("w2", json!({}))])(&home);
     for id in ["w1", "w2"] {
-        write(&ds(&home).join(format!("archived/{id}.json")), &json!({"worktreePath": home.join(format!("{id}-wt")), "sessionId": format!("sess-{id}")}).to_string());
+        write(
+            &ds(&home).join(format!("archived/{id}.json")),
+            &json!({"worktreePath": home.join(format!("{id}-wt")), "sessionId": format!("sess-{id}")}).to_string(),
+        );
     }
     let tp = home.join(".claude/projects/-p/t.jsonl");
     write(&tp, "");

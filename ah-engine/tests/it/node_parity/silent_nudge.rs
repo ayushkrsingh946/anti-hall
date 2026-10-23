@@ -272,9 +272,7 @@ pub(crate) fn scenarios() -> Vec<Sc> {
         "{\"nudged\":{},\"everNudged\":{\"a\":\"$BASEMS-5\",\"b\":null,\"c\":true,\"d\":[$BASEMS-6],\"e\":{},\"f\":\"\",\"g\":\"0x10\"}}",
     ));
     v.push(sc("state-corrupt-nudges", s1.clone()).lines(&one()).file(".anti-hall/silent-agent-nudge-state.json", "{oops"));
-    v.push(
-        sc("state-index-key", s1.clone()).lines(&one()).file(".anti-hall/silent-agent-nudge-state.json", "{\"nudged\":{\"7\":\"x\"},\"everNudged\":{}}"),
-    );
+    v.push(sc("state-index-key", s1.clone()).lines(&one()).file(".anti-hall/silent-agent-nudge-state.json", "{\"nudged\":{\"7\":\"x\"},\"everNudged\":{}}"));
 
     // ---- the stale-build downgrade (stop-version-gate.js)
     v.push(sc("registry-newer-is-quiet-and-keeps-state", s1.clone()).lines(&one()).registry(&newer).state(json!({"t:gone": "x"}), json!({})));

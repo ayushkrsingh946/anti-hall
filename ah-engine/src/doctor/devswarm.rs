@@ -103,7 +103,8 @@ fn hook_tests(ctx: &Ctx, root: Option<&str>) -> Vec<Verdict> {
         let builder = text("doctor.ds_builder_id");
         let wrote = write_workspace(&h.dir, builder, &[], 0);
         let env = env_for(&h.dir, &child_env, &[format!("{}={builder}", text("doctor.ds_builder_env"))]);
-        let r = selftest::run_check("devswarm-child-gate", &payload("doctor.ds_payload_stop", &[("{SID}", format!("cg-{now}")), ("{CWD}", ctx.cwd.clone())]), &env);
+        let r =
+            selftest::run_check("devswarm-child-gate", &payload("doctor.ds_payload_stop", &[("{SID}", format!("cg-{now}")), ("{CWD}", ctx.cwd.clone())]), &env);
         let ok = wrote.is_ok() && r.text().is_some_and(blocked);
         out.push(if r.text().is_none() {
             deferred("devswarm-child-gate")
@@ -142,7 +143,11 @@ fn hook_tests(ctx: &Ctx, root: Option<&str>) -> Vec<Verdict> {
         let lines = defaults::list("doctor.ds_inbox_lines");
         let wrote = write_workspace(&h.dir, text("doctor.ds_workspace_id"), &lines, 0);
         let env = env_for(&h.dir, &primary_env, &[]);
-        let r = selftest::run_check("devswarm-parent-gate", &payload("doctor.ds_payload_stop", &[("{SID}", format!("pg-{now}")), ("{CWD}", ctx.cwd.clone())]), &env);
+        let r = selftest::run_check(
+            "devswarm-parent-gate",
+            &payload("doctor.ds_payload_stop", &[("{SID}", format!("pg-{now}")), ("{CWD}", ctx.cwd.clone())]),
+            &env,
+        );
         let ok = wrote.is_ok() && r.text().is_some_and(blocked);
         out.push(if r.text().is_none() {
             deferred("devswarm-parent-gate")

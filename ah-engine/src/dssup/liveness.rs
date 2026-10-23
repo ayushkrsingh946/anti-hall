@@ -784,7 +784,8 @@ pub fn duty(ctx: &Ctx, runner: &dyn Runner) -> Value {
     // the workspaces the engine defers on (a store it will not read exactly like Node, a descriptor field of an unexpected type) are
     // held, counted, and named in the record
     if !dry && !out.full.is_empty() {
-        detail["fullHeld"] = json!({"count": out.full.len(), "held": super::tick::held("dssup:verdicts:full", defaults::text("devswarm_sup.lv_why_full"))["held"]});
+        detail["fullHeld"] =
+            json!({"count": out.full.len(), "held": super::tick::held("dssup:verdicts:full", defaults::text("devswarm_sup.lv_why_full"))["held"]});
     }
     json!({"duty": "verdicts", "outcome": if dry { "dry-run" } else { "ran" }, "detail": detail})
 }

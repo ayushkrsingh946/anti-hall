@@ -211,12 +211,7 @@ pub fn finish(armed: Option<Armed>, raw: &str, o: &Outcome) {
     });
     let wrote = {
         use std::io::Write;
-        std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode_600()
-            .open(&job)
-            .and_then(|mut f| f.write_all(body.to_string().as_bytes()))
+        std::fs::OpenOptions::new().write(true).create_new(true).mode_600().open(&job).and_then(|mut f| f.write_all(body.to_string().as_bytes()))
     };
     if wrote.is_err() {
         count("skip_job", Acct::Error, 0);
@@ -307,7 +302,7 @@ fn run_one(command: &str, payload: &[u8], env: &[(String, String)], cwd: &Path, 
                 }
                 crate::discard::harmless(child.kill()); // keep: best effort, the group kill above did the work
                 crate::discard::harmless(child.wait()); // keep: reaping only
-                break (None, true)
+                break (None, true);
             }
         }
     };

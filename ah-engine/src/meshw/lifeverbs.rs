@@ -18,11 +18,11 @@ use crate::meshw::actverbs::{Resolved, resolve_archive_id};
 use crate::meshw::args::Args;
 use crate::meshw::common::{self, Inv, Obj, s};
 use crate::meshw::cursors;
-use crate::migrate::readercur::{Cx, Handle, raise_all_loss_free};
 use crate::meshw::ident::{self, R, defer};
 use crate::meshw::idlock::{self, is_safe_id};
 use crate::meshw::send::{Answer, Effect};
 use crate::meshw::wsverbs;
+use crate::migrate::readercur::{Cx, Handle, raise_all_loss_free};
 
 fn answer(code: i32, v: OVal) -> Answer {
     Answer { code, stdout: format!("{}\n", v.stringify()), effect: Effect::None }
@@ -597,7 +597,8 @@ fn retire_duplicates(inv: &Inv, id: &str, worktree: Option<&str>) -> Option<serd
     let mut result = run.result?;
     // a unit the applier handed back (a busy lock, a drifted precondition) was not done: its row is pending, not retired
     let prefix = defaults::text("devswarm_recon.fold_unit_prefix");
-    let pending: Vec<(String, String)> = run.deferred.iter().filter_map(|(label, why)| label.strip_prefix(prefix).map(|i| (i.to_string(), why.clone()))).collect();
+    let pending: Vec<(String, String)> =
+        run.deferred.iter().filter_map(|(label, why)| label.strip_prefix(prefix).map(|i| (i.to_string(), why.clone()))).collect();
     if !pending.is_empty() {
         if let Some(serde_json::Value::Array(r)) = result.get_mut("retired") {
             r.retain(|v| !pending.iter().any(|(i, _)| v.as_str() == Some(i.as_str())));
@@ -1132,13 +1133,7 @@ fn row_oval(m: &serde_json::Value) -> OVal {
 }
 
 /// Archive, verify, then retire one partition (`cmdReapOrphans`' loop body). The inner `Err` is the `failed[]` entry.
-fn retire(
-    store: &crate::meshw::store::MeshStore,
-    inv: &Inv,
-    repo_key: &str,
-    reaped_dir: &std::path::Path,
-    c: &Candidate,
-) -> R<Result<OVal, OVal>> {
+fn retire(store: &crate::meshw::store::MeshStore, inv: &Inv, repo_key: &str, reaped_dir: &std::path::Path, c: &Candidate) -> R<Result<OVal, OVal>> {
     let n_ = crate::meshw::common::n;
     let fail = |reason: &str, extra: Vec<(&str, OVal)>| -> OVal {
         let mut o = Obj::default();
@@ -1221,9 +1216,6 @@ fn retire(
         },
     );
     let mut o = Obj::default();
-    o.put("partitionId", s(pid))
-        .put("unread", n_(unread.len() as f64))
-        .put("archivePath", s(&archive.to_string_lossy()))
-        .put("cursorAdvancedTo", n_(total));
+    o.put("partitionId", s(pid)).put("unread", n_(unread.len() as f64)).put("archivePath", s(&archive.to_string_lossy())).put("cursorAdvancedTo", n_(total));
     Ok(Ok(o.done()))
 }

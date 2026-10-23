@@ -806,12 +806,17 @@ fn spawn_cases(fx: &Fx) -> Vec<Lc> {
         p("a-prompt-that-starts-with-a-bullet", &["spawn", "b1", "-p", "- fix the thing"], true).expect(&["no-numbered-steps"]),
         p("lenient-by-setting", &["spawn", "b1", "-t"], true).setup(|h| settings(h, "\"devswarm\":{\"spawnStrictFlagValues\":false}")),
         p("a-value-with-a-next-line-character", &["spawn", "b1", "-p", "--x\u{85}y"], true),
-        p("a-create-that-names-its-worktree", &["spawn", "b1", "-t", "Lane one", "-p", "1. read\n2. write\nscope: src/**"], true)
-            .create(&made)
-            .expect(&["\"registered\":true", "\"titled\":true", "\"written\":true"]),
+        p("a-create-that-names-its-worktree", &["spawn", "b1", "-t", "Lane one", "-p", "1. read\n2. write\nscope: src/**"], true).create(&made).expect(&[
+            "\"registered\":true",
+            "\"titled\":true",
+            "\"written\":true",
+        ]),
         p("a-worktree-with-a-brief-title", &["spawn", "b1", "-p", "# own the API layer\nno steps here"], true).create(&made).expect(&["no-numbered-steps"]),
         p("plan-tracking-off", &["spawn", "b1", "-p", "1. a\n2. b"], true).create(&made).env("ANTIHALL_DEVSWARM_PLAN_TRACKING", "false"),
-        p("plan-required", &["spawn", "b1", "-p", "just do it"], true).create(&made).env("ANTIHALL_DEVSWARM_PLAN_REQUIRED", "true").expect(&["\"required\":true"]),
+        p("plan-required", &["spawn", "b1", "-p", "just do it"], true)
+            .create(&made)
+            .env("ANTIHALL_DEVSWARM_PLAN_REQUIRED", "true")
+            .expect(&["\"required\":true"]),
         p("a-failed-create", &["spawn", "b1", "-s", "dev"], true).create("echo 'no such source' >&2; exit 3").expect(&["exited 3"]),
         p("a-build-without-create", &["spawn", "b1"], true).verbs("list info").expect(&["capability dormant"]),
         p("a-submodule-worktree-the-create-could-not-add", &["spawn", "b1"], true)
@@ -882,10 +887,11 @@ fn create_fast_forwards_a_stale_default_branch_without_node() {
     let stub = stub_dir(&fx.root, "ff", &c);
     let path = format!("{}:{}", stub.display(), tools_path(&fx.root, false));
     let mut cmd = Command::new(BIN);
-    cmd.args(["devswarm", "create", "b1", "-s", "main"])
-        .current_dir(&work)
-        .env_clear()
-        .envs(base_env(&home, &home.join("state"), &[("PATH", &path), ("ANTIHALL_DEVSWARM_SPAWN_LAUNCH_WAIT_MS", "0")]));
+    cmd.args(["devswarm", "create", "b1", "-s", "main"]).current_dir(&work).env_clear().envs(base_env(
+        &home,
+        &home.join("state"),
+        &[("PATH", &path), ("ANTIHALL_DEVSWARM_SPAWN_LAUNCH_WAIT_MS", "0")],
+    ));
     let o = run(&mut cmd, None);
     let out = String::from_utf8_lossy(&o.stdout);
     assert_eq!(o.status.code(), Some(0), "stdout {out} stderr {}", String::from_utf8_lossy(&o.stderr));

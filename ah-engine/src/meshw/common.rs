@@ -196,12 +196,14 @@ pub fn init_new_store(inv: &Inv, repo_key: &str) -> R<()> {
     }
     let has_db = std::fs::metadata(dir.join(defaults::text("mesh_write.store_file"))).is_ok_and(|m| m.len() > 0);
     let has_journal = std::fs::read_dir(dir.join(defaults::text("devswarm_role.pg_journal_dir"))).is_ok_and(|mut r| r.next().is_some());
-    if has_journal || (!has_db && std::fs::metadata(dir.join(defaults::text("mesh.backend_marker"))).is_ok_and(|m| m.len() > 0) && !dir_marker_is_sqlite(&dir)) {
+    if has_journal || (!has_db && std::fs::metadata(dir.join(defaults::text("mesh.backend_marker"))).is_ok_and(|m| m.len() > 0) && !dir_marker_is_sqlite(&dir))
+    {
         return defer("store-backend");
     }
     std::fs::create_dir_all(&dir).map_err(|e| Defer(format!("store-dir:{e}")))?;
     if !dir_marker_is_sqlite(&dir) {
-        std::fs::write(dir.join(defaults::text("mesh.backend_marker")), defaults::text("mesh.backend_sqlite")).map_err(|e| Defer(format!("store-marker:{e}")))?;
+        std::fs::write(dir.join(defaults::text("mesh.backend_marker")), defaults::text("mesh.backend_sqlite"))
+            .map_err(|e| Defer(format!("store-marker:{e}")))?;
     }
     Ok(())
 }

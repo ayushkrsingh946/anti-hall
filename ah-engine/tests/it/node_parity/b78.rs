@@ -114,7 +114,8 @@ pub(crate) fn run_lane_tol(name: &str, check: &str, hook_file: &str, hooks: &Pat
     let scratch = Scratch::new(&format!("b78-{name}"));
     let tmp = scratch.path().to_path_buf();
     let only = std::env::var("AH_PARITY_ONLY").ok();
-    let mut rep = Report { n: 0, same: 0, deferred: 0, mismatch: 0, node_out: 0, node_files: 0, deferred_ids: Vec::new(), tolerated: 0, summary: String::new() };
+    let mut rep =
+        Report { n: 0, same: 0, deferred: 0, mismatch: 0, node_out: 0, node_files: 0, deferred_ids: Vec::new(), tolerated: 0, summary: String::new() };
     let mut mism: Vec<String> = Vec::new();
     for sc in scenarios {
         if only.as_ref().is_some_and(|o| !sc.id.contains(o.as_str())) {

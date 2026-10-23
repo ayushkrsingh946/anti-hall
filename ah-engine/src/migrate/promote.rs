@@ -131,7 +131,12 @@ fn promote_session(inv: &Inv, id: &str, session_id: &str) -> R<bool> {
     }
     up.apply(inv);
     let msg = defaults::render("update_post.promote_event_msg", &[("id", &id), ("marker", &marker)]);
-    crate::meshw::clog::event(inv, defaults::text("update_post.promote_event_op"), &msg, vec![("id", OVal::Str(id.to_string())), ("to", OVal::Str(session_id.to_string()))]);
+    crate::meshw::clog::event(
+        inv,
+        defaults::text("update_post.promote_event_op"),
+        &msg,
+        vec![("id", OVal::Str(id.to_string())), ("to", OVal::Str(session_id.to_string()))],
+    );
     Ok(true)
 }
 

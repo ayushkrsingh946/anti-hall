@@ -306,7 +306,11 @@ fn mask_clock(t: &str) -> String {
             digits.push(c);
             continue;
         }
-        if digits.len() >= 10 { out.push('#') } else { out.push_str(&digits) }
+        if digits.len() >= 10 {
+            out.push('#')
+        } else {
+            out.push_str(&digits)
+        }
         digits.clear();
         if c != '\0' {
             out.push(c);
@@ -909,8 +913,7 @@ fn silent_corpus() -> Vec<Sc> {
     add(sc("no-agents-at-all", h, stop_payload_for(json!("s1"))).transcript(&noise()));
     add(sc("no-transcript-path", h, json!({"hook_event_name": "Stop", "session_id": "s1"})));
     add(sc("transcript-missing", h, json!({"hook_event_name": "Stop", "session_id": "s1", "transcript_path": "$HOME/nope.jsonl"})));
-    add(sc("transcript-relative-path", h, json!({"hook_event_name": "Stop", "session_id": "s1", "transcript_path": "t/session.jsonl"}))
-        .transcript(&noise()));
+    add(sc("transcript-relative-path", h, json!({"hook_event_name": "Stop", "session_id": "s1", "transcript_path": "t/session.jsonl"})).transcript(&noise()));
     add(sc("transcript-empty", h, stop_payload_for(json!("s1"))).file("t/session.jsonl", ""));
     add(sc("finished-agent", h, stop_payload_for(json!("s1")))
         .transcript(&[stale_run("01"), vec![notif_user("a1b2c3d4e5f601", "completed", &ago(10.0))]].concat()));
@@ -918,8 +921,11 @@ fn silent_corpus() -> Vec<Sc> {
     add(old(sc("silent-agent-first-time", h, stop_payload_for(json!("s1"))).transcript(&stale_run("01")), "01"));
     add(sc("output-file-missing", h, stop_payload_for(json!("s1"))).transcript(&stale_run("01")));
     add(old(sc("silent-agent-no-session", h, stop_payload_for(json!(null))).transcript(&stale_run("01")), "01"));
-    add(old(sc("two-silent-agents", h, stop_payload_for(json!("s1"))).transcript(&[stale_run("01"), stale_run("02")].concat()), "01")
-        .aged("out-02.txt", "{}\n", 70.0));
+    add(old(sc("two-silent-agents", h, stop_payload_for(json!("s1"))).transcript(&[stale_run("01"), stale_run("02")].concat()), "01").aged(
+        "out-02.txt",
+        "{}\n",
+        70.0,
+    ));
     // already nudged: state is rewritten exactly as Node does, nothing is said
     add(sc("missing-output-already-nudged", h, stop_payload_for(json!("s1")))
         .transcript(&stale_run("01"))
@@ -930,12 +936,10 @@ fn silent_corpus() -> Vec<Sc> {
     add(sc("ever-cap-other-session-does-not-cap", h, stop_payload_for(json!("s1")))
         .transcript(&stale_run("01"))
         .file(".anti-hall/silent-agent-nudge-state.json", &state_json(json!({}), json!({"s2::a1b2c3d4e5f601": (NOW.with(|n| *n) - 1000.0).floor()}))));
-    add(sc("ever-cap-expired", h, stop_payload_for(json!("s1")))
-        .transcript(&stale_run("01"))
-        .file(
-            ".anti-hall/silent-agent-nudge-state.json",
-            &state_json(json!({}), json!({"s1::a1b2c3d4e5f601": (NOW.with(|n| *n) - 40.0 * 86_400_000.0).floor()})),
-        ));
+    add(sc("ever-cap-expired", h, stop_payload_for(json!("s1"))).transcript(&stale_run("01")).file(
+        ".anti-hall/silent-agent-nudge-state.json",
+        &state_json(json!({}), json!({"s1::a1b2c3d4e5f601": (NOW.with(|n| *n) - 40.0 * 86_400_000.0).floor()})),
+    ));
     add(sc("state-prunes-dead-keys", h, stop_payload_for(json!("s1"))).transcript(&stale_run("01"))
         .file(".anti-hall/silent-agent-nudge-state.json", &state_json(json!({"t:gone": "x", "t:a1b2c3d4e5f601": "missing", "h:old": "5"}), json!({"s1::gone": (NOW.with(|n| *n) - 1000.0).floor(), "s1::a1b2c3d4e5f601": (NOW.with(|n| *n) - 2000.0).floor(), "s0::x": (NOW.with(|n| *n) - 50.0 * 86_400_000.0).floor()}))));
     add(sc("ever-values-coerced-by-number", h, stop_payload_for(json!("s1"))).transcript(&stale_run("01"))
@@ -943,9 +947,7 @@ fn silent_corpus() -> Vec<Sc> {
     add(sc("state-corrupt-json-first-nudge", h, stop_payload_for(json!("s1")))
         .transcript(&stale_run("01"))
         .file(".anti-hall/silent-agent-nudge-state.json", "{oops"));
-    add(sc("state-not-an-object", h, stop_payload_for(json!("s1")))
-        .transcript(&stale_run("01"))
-        .file(".anti-hall/silent-agent-nudge-state.json", "[1,2]"));
+    add(sc("state-not-an-object", h, stop_payload_for(json!("s1"))).transcript(&stale_run("01")).file(".anti-hall/silent-agent-nudge-state.json", "[1,2]"));
     add(sc("state-extra-keys-dropped", h, stop_payload_for(json!("s1")))
         .transcript(&stale_run("01"))
         .file(".anti-hall/silent-agent-nudge-state.json", &json!({"nudged": {"t:a1b2c3d4e5f601": "missing"}, "everNudged": {}, "extra": 1}).to_string()));
@@ -983,7 +985,8 @@ fn silent_corpus() -> Vec<Sc> {
         .defers());
     let mut codex_deep = stop_payload_for(json!("s1"));
     codex_deep["turn_id"] = json!("t");
-    add(sc("codex-state-too-deep-defers-to-node", h, codex_deep).transcript(&stale_run("01"))
+    add(sc("codex-state-too-deep-defers-to-node", h, codex_deep)
+        .transcript(&stale_run("01"))
         .file(".anti-hall/silent-agent-nudge-state.json", &format!("{{\"nudged\":{},\"everNudged\":{{}}}}", deep(100_000)))
         .defers());
     // never weaker than Node: a relative HOME names a directory the engine cannot see, so the Node twin decides (Claude + Codex)
@@ -1096,8 +1099,13 @@ fn silent_corpus() -> Vec<Sc> {
         json!({"type": "attachment", "attachment": {"type": "task_status", "taskId": "0123456789abcdef", "status": "running", "outputFilePath": "$HOME/nope"}})
             .to_string(),
     ]));
-    add(sc("adopted-with-timestamp-missing-output", h, stop_payload_for(json!("s1")))
-        .transcript(&[task_status("0123456789abcdef", "running", "$HOME/nope", "adopted", &ago(90.0))]));
+    add(sc("adopted-with-timestamp-missing-output", h, stop_payload_for(json!("s1"))).transcript(&[task_status(
+        "0123456789abcdef",
+        "running",
+        "$HOME/nope",
+        "adopted",
+        &ago(90.0),
+    )]));
     add(sc("adopted-then-terminal", h, stop_payload_for(json!("s1"))).transcript(&[
         task_status("0123456789abcdef", "running", "$HOME/nope", "adopted", &ago(90.0)),
         task_status("0123456789abcdef", "completed", "", "", &ago(10.0)),

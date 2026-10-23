@@ -22,9 +22,9 @@ mod signals;
 mod sinks;
 mod sources;
 mod status;
-mod wake;
 #[cfg(test)]
 mod tests;
+mod wake;
 
 use crate::checks::git::util::Settings;
 use crate::defaults::{self, V};

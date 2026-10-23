@@ -667,7 +667,9 @@ fn run_guard_with(o: &Opts, hooks: &Path, scenarios: &[Scenario], golden: &Golde
                         // no hook is launched any more: what the engine cannot decide (HOME unset or empty, an unreadable payload)
                         // follows the dispatcher's infra failure mode on a guard event: the call is held with the engine's notice.
                         // Stricter than Node, never weaker; it counts as a deferral.
-                        if e.out == "AHDEFERRED" || (e.code == "2" && e.out.is_empty() && e.err.starts_with("anti-hall: the engine could not run the guards for")) {
+                        if e.out == "AHDEFERRED"
+                            || (e.code == "2" && e.out.is_empty() && e.err.starts_with("anti-hall: the engine could not run the guards for"))
+                        {
                             R::Deferred
                         } else if same(&e, &n) {
                             R::Same

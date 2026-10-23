@@ -45,22 +45,22 @@ pub mod evidence_cache;
 pub mod evidence_walk;
 pub mod host;
 pub mod host_b3;
-pub mod host_shell;
+pub mod host_childturn;
 pub mod host_d;
 mod host_io;
-pub mod host_childturn;
 pub mod host_mesh;
 pub mod host_parentinbox;
-mod host_seat;
 pub mod host_port;
 pub mod host_proc;
+mod host_seat;
+pub mod host_shell;
 pub mod host_spawn;
 pub mod host_transcript;
 pub mod host_ts;
 pub mod recache;
 pub mod sysmem;
-pub mod tool_use_scan;
 pub mod tasks_cache;
+pub mod tool_use_scan;
 
 use crate::checks::git::util::Settings;
 use crate::checks::{Exact, RouteMeta, Verdict};
@@ -932,6 +932,9 @@ mod tests_golden_e;
 #[path = "golden_f/tests.rs"]
 mod tests_golden_f;
 #[cfg(test)]
+#[path = "home_unset_tests/tests.rs"]
+mod tests_home_unset;
+#[cfg(test)]
 #[path = "host_tests/tests.rs"]
 mod tests_host;
 #[cfg(test)]
@@ -943,6 +946,3 @@ mod tests_host_e;
 #[cfg(test)]
 #[path = "host_tests_f/tests.rs"]
 mod tests_host_f;
-#[cfg(test)]
-#[path = "home_unset_tests/tests.rs"]
-mod tests_home_unset;

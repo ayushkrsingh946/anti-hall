@@ -83,7 +83,10 @@ fn hooks_dir_with(node: &str, strict: bool) -> Option<PathBuf> {
     let hooks = if moved.join("auto-handover.js").exists() { moved } else { repo_root().join("plugins/anti-hall/hooks") };
     let staged = hooks.parent().is_some_and(|r| r.ends_with("anti-hall-node")) && hooks.join("auto-handover.js").exists();
     if !hooks.join("auto-handover.js").exists() || Command::new(node).arg("--version").output().is_err() {
-        assert!(!strict, "no Node ({node}) or no Node hooks next to the engine: a parity lane fails instead of skipping (set AH_PARITY_SKIP_NODE=1 to opt out)");
+        assert!(
+            !strict,
+            "no Node ({node}) or no Node hooks next to the engine: a parity lane fails instead of skipping (set AH_PARITY_SKIP_NODE=1 to opt out)"
+        );
         eprintln!("skipped (AH_PARITY_SKIP_NODE=1): no Node or no Node hooks next to the engine");
         return None;
     }

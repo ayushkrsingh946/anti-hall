@@ -55,7 +55,12 @@ fn headless_head(path: &Path) -> bool {
 }
 
 /// Discover the transcripts in the active window. Headless runs are left out and returned by id.
-fn discover(env: &Env, sessions: &[Session], tracked: &std::collections::BTreeMap<String, Agent>, known: &std::collections::BTreeSet<String>) -> (Vec<Found>, std::collections::BTreeSet<String>) {
+fn discover(
+    env: &Env,
+    sessions: &[Session],
+    tracked: &std::collections::BTreeMap<String, Agent>,
+    known: &std::collections::BTreeSet<String>,
+) -> (Vec<Found>, std::collections::BTreeSet<String>) {
     let cutoff = env.now_ms.saturating_sub(lim("active_window_ms"));
     let ext = pth("transcript_ext");
     let dirs = defaults::raw("agent_tracker.headless").get("dir_contains").map(V::strings).unwrap_or_default();
@@ -67,7 +72,10 @@ fn discover(env: &Env, sessions: &[Session], tracked: &std::collections::BTreeMa
             let name = f.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
             if let Some(stem) = name.strip_suffix(ext) {
                 if let Some(m) = mtime_ms(&f).map(|m| m as u64).filter(|m| *m >= cutoff) {
-                    if dir_headless || known.contains(stem) || (!tracked.get(stem).is_some_and(|a| a.interactive) && !sessions.iter().any(|s| s.id == stem) && headless_head(&f)) {
+                    if dir_headless
+                        || known.contains(stem)
+                        || (!tracked.get(stem).is_some_and(|a| a.interactive) && !sessions.iter().any(|s| s.id == stem) && headless_head(&f))
+                    {
                         headless.insert(stem.to_string());
                         continue;
                     }
@@ -283,15 +291,18 @@ fn stopped_subagents(env: &Env, st: &mut State) {
     let opts = crate::checks::agent_scan::Opts { now_ms: env.now_ms as f64, ignore_unanswered_stops: true };
     let tail = defaults::num("agent_scan.tail_bytes");
     let mut ended: std::collections::HashMap<String, std::collections::HashSet<String>> = std::collections::HashMap::new();
-    let live: Vec<(String, String)> =
-        st.agents.values().filter(|a| super::is_child(a) && a.running).map(|a| (a.id.clone(), a.path.clone())).collect();
+    let live: Vec<(String, String)> = st.agents.values().filter(|a| super::is_child(a) && a.running).map(|a| (a.id.clone(), a.path.clone())).collect();
     for (id, path) in live {
         // <projects>/<dir>/<parent session>/subagents/agent-<id>.jsonl: the launching session's transcript is <dir>/<parent session>.jsonl
         let Some(session_dir) = Path::new(&path).parent().and_then(Path::parent) else { continue };
         let parent = format!("{}{}", session_dir.to_string_lossy(), pth("transcript_ext"));
-        let set = ended
-            .entry(parent.clone())
-            .or_insert_with(|| crate::checks::agent_scan::scan_transcript(&parent, tail, &opts).ok().flatten().map(|s| s.terminal.into_iter().chain(s.stopped_agents).collect()).unwrap_or_default());
+        let set = ended.entry(parent.clone()).or_insert_with(|| {
+            crate::checks::agent_scan::scan_transcript(&parent, tail, &opts)
+                .ok()
+                .flatten()
+                .map(|s| s.terminal.into_iter().chain(s.stopped_agents).collect())
+                .unwrap_or_default()
+        });
         if set.contains(&id)
             && let Some(a) = st.agents.get_mut(&id)
         {
@@ -317,7 +328,14 @@ fn off_roster(env: &Env, st: &mut State) {
         let roster = rosters.entry(a.team.clone()).or_insert_with(|| {
             let v = json_of(&env.home.join(r.str_field("dir")).join(&a.team).join(r.str_field("file")))?;
             let members = v.get(r.str_field("members"))?.as_array()?;
-            Some(members.iter().filter_map(|m| Some((m.get(r.str_field("name"))?.as_str()?.to_string(), m.get(r.str_field("joined")).and_then(Value::as_u64).unwrap_or(0)))).collect())
+            Some(
+                members
+                    .iter()
+                    .filter_map(|m| {
+                        Some((m.get(r.str_field("name"))?.as_str()?.to_string(), m.get(r.str_field("joined")).and_then(Value::as_u64).unwrap_or(0)))
+                    })
+                    .collect(),
+            )
         });
         let Some(roster) = roster else { continue };
         let started = mtime_ms(Path::new(&facts::meta_path(&a.path))).map_or(0, |m| m as u64);

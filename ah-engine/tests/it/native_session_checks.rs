@@ -47,13 +47,15 @@ impl Scene {
         if checkout {
             let repo = home.join("proj");
             assert!(Command::new("git").args(["init", "-q"]).arg(&repo).status().unwrap().success());
-            assert!(Command::new("git")
-                .arg("-C")
-                .arg(&repo)
-                .args(["-c", "user.email=a@b", "-c", "user.name=n", "commit", "-q", "--allow-empty", "-m", "x"])
-                .status()
-                .unwrap()
-                .success());
+            assert!(
+                Command::new("git")
+                    .arg("-C")
+                    .arg(&repo)
+                    .args(["-c", "user.email=a@b", "-c", "user.name=n", "commit", "-q", "--allow-empty", "-m", "x"])
+                    .status()
+                    .unwrap()
+                    .success()
+            );
         }
         Scene { dir, child, checkout }
     }

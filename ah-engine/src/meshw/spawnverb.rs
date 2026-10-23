@@ -243,7 +243,11 @@ fn source_freshness(inv: &Inv, runner: &dyn Runner, rest: &[&str]) -> SourceChec
             if !git(&with(&tl("devswarm_cli.sp_git_fetch_plain"), &[origin, &def]), long).ok() {
                 return status_obj(
                     t("devswarm_cli.sp_status_fetch_failed"),
-                    vec![("source", source), ("fetch", s(&fetch_note)), ("warning", s(&tpl("devswarm_cli.sp_warn_fetch_failed", &[("remote", &remote_ref), ("def", &def)])))],
+                    vec![
+                        ("source", source),
+                        ("fetch", s(&fetch_note)),
+                        ("warning", s(&tpl("devswarm_cli.sp_warn_fetch_failed", &[("remote", &remote_ref), ("def", &def)]))),
+                    ],
                 );
             }
             submodule_fetch = Some(t("devswarm_cli.sp_submodule_fetch_failed"));
@@ -313,7 +317,10 @@ fn source_freshness(inv: &Inv, runner: &dyn Runner, rest: &[&str]) -> SourceChec
         tpl("devswarm_cli.sp_stale_line", &[("def", &def), ("behind", &behind.to_string()), ("commits", plural(behind)), ("remote", &remote_ref)])
     );
     if ahead > 0 {
-        return refuse(format!("{stale}{}", tpl("devswarm_cli.sp_ahead_suffix", &[("ahead", &ahead.to_string()), ("commits", plural(ahead)), ("remote", &remote_ref)])));
+        return refuse(format!(
+            "{stale}{}",
+            tpl("devswarm_cli.sp_ahead_suffix", &[("ahead", &ahead.to_string()), ("commits", plural(ahead)), ("remote", &remote_ref)])
+        ));
     }
     let Some(listing) = git(&tl("devswarm_cli.sp_git_worktrees"), quick).out() else {
         return refuse(format!("{stale}{}", t("devswarm_cli.sp_no_worktree_list")));
@@ -355,7 +362,11 @@ fn source_freshness(inv: &Inv, runner: &dyn Runner, rest: &[&str]) -> SourceChec
         }
     };
     if !r.ok() {
-        let raw = if !r.stderr.is_empty() { r.stderr.clone() } else { r.error.clone().filter(|e| !e.is_empty()).unwrap_or_else(|| t("devswarm_cli.sp_unknown").to_string()) };
+        let raw = if !r.stderr.is_empty() {
+            r.stderr.clone()
+        } else {
+            r.error.clone().filter(|e| !e.is_empty()).unwrap_or_else(|| t("devswarm_cli.sp_unknown").to_string())
+        };
         let detail = js_trim(&raw).split('\n').next().unwrap_or_default().to_string();
         return refuse(format!("{stale}{}", tpl("devswarm_cli.sp_ff_failed", &[("detail", &detail)])));
     }
@@ -664,10 +675,8 @@ fn repair_one(runner: &dyn Runner, f: &Failure, text: &str, branch: &str, sub_pa
         let listing = if wl.status == Some(0) { wl.stdout.clone() } else { String::new() };
         let real_p = real_parent(p);
         let prefix = t("devswarm_cli.sp_wt_line_worktree");
-        let blocks: Vec<(String, &str)> = listing
-            .split("\n\n")
-            .map(|blk| (blk.split('\n').next().unwrap_or_default().get(prefix.len()..).unwrap_or_default().to_string(), blk))
-            .collect();
+        let blocks: Vec<(String, &str)> =
+            listing.split("\n\n").map(|blk| (blk.split('\n').next().unwrap_or_default().get(prefix.len()..).unwrap_or_default().to_string(), blk)).collect();
         if blocks.iter().any(|(d, _)| d == p || *d == real_p) {
             git_in(runner, &mod_git_s, &tl("devswarm_cli.sp_git_wt_prune"), long);
         }
@@ -710,7 +719,9 @@ fn repair_one(runner: &dyn Runner, f: &Failure, text: &str, branch: &str, sub_pa
                     continue;
                 }
                 let same = match (std::fs::symlink_metadata(&src), std::fs::symlink_metadata(&dest)) {
-                    (Ok(x), Ok(y)) if x.is_file() && y.is_file() => std::fs::read(&src).ok().is_some_and(|bx| std::fs::read(&dest).ok().is_some_and(|by| bx == by)),
+                    (Ok(x), Ok(y)) if x.is_file() && y.is_file() => {
+                        std::fs::read(&src).ok().is_some_and(|bx| std::fs::read(&dest).ok().is_some_and(|by| bx == by))
+                    }
                     _ => false,
                 };
                 if same {
@@ -721,11 +732,15 @@ fn repair_one(runner: &dyn Runner, f: &Failure, text: &str, branch: &str, sub_pa
                 }
                 let (dest_s, src_s) = (dest.to_string_lossy().to_string(), src.to_string_lossy().to_string());
                 let mut c = Obj::default();
-                c.put("file", s(&e)).put("inPlace", s(&dest_s)).put("kept", s(&src_s)).put("note", s(&tpl("devswarm_cli.sp_conflict_note", &[("in_place", &dest_s), ("kept", &src_s)])));
+                c.put("file", s(&e))
+                    .put("inPlace", s(&dest_s))
+                    .put("kept", s(&src_s))
+                    .put("note", s(&tpl("devswarm_cli.sp_conflict_note", &[("in_place", &dest_s), ("kept", &src_s)])));
                 conflicts.push(c.done());
             }
             if std::fs::remove_dir(&a).is_err() {
-                let names: Vec<String> = std::fs::read_dir(&a).map(|r| r.flatten().map(|e| e.file_name().to_string_lossy().to_string()).collect()).unwrap_or_default();
+                let names: Vec<String> =
+                    std::fs::read_dir(&a).map(|r| r.flatten().map(|e| e.file_name().to_string_lossy().to_string()).collect()).unwrap_or_default();
                 let secret = re("devswarm_cli.sp_secret_like_re", true);
                 let like: Vec<String> = names.into_iter().filter(|nm| secret.is_match(nm)).collect();
                 if !like.is_empty() {
@@ -818,7 +833,9 @@ fn created_path(raw: &str) -> Option<String> {
     let top = keys[1..].iter().find_map(|k| v.get(k).filter(|x| x.truthy()).cloned());
     let found = match top {
         Some(x) => Some(x),
-        None => v.get(keys[0]).filter(|n| matches!(n, OVal::Obj(_))).and_then(|nested| keys[1..].iter().find_map(|k| nested.get(k).filter(|x| x.truthy()).cloned())),
+        None => {
+            v.get(keys[0]).filter(|n| matches!(n, OVal::Obj(_))).and_then(|nested| keys[1..].iter().find_map(|k| nested.get(k).filter(|x| x.truthy()).cloned()))
+        }
     };
     match found {
         Some(OVal::Str(p)) if !p.is_empty() => Some(p),
@@ -868,7 +885,8 @@ fn write_plan(inv: &Inv, runner: &dyn Runner, rest: &[&str], wt: Option<&str>, m
             let head = git_in(runner, wt, &tl("devswarm_cli.sp_git_head"), tnum("devswarm_cli.sp_base_timeout_ms"));
             let base = head.ok().then(|| js_trim(&head.stdout).to_string()).filter(|x| !x.is_empty());
             let scope = re_scope(&brief);
-            let p = planverbs::new_plan(&key, mesh_id.unwrap_or_default(), Some(wt), &steps, &scope, base.as_deref(), t("devswarm_cli.sp_plan_source"), now as f64);
+            let p =
+                planverbs::new_plan(&key, mesh_id.unwrap_or_default(), Some(wt), &steps, &scope, base.as_deref(), t("devswarm_cli.sp_plan_source"), now as f64);
             let scope_globs = p.get("scope_globs").cloned().unwrap_or(OVal::Arr(Vec::new()));
             let written = plan::update_with(inv, &key, |_| Ok(((), Some(p.clone()))));
             match written {
@@ -937,7 +955,8 @@ fn check_launch(inv: &Inv, mesh_id: &str, since: i64) -> Launch {
     let started = clock(inv);
     let wall = std::time::Instant::now();
     let store = ident::resolve_context(&inv.cwd, true).ok().and_then(|c| c.repo_key).and_then(|k| common::open_store(inv, &k).ok());
-    let desc_path = devswarm_root(&inv.home).join(defaults::text("mesh_write.dir_workspaces")).join(format!("{mesh_id}{}", defaults::text("mesh_write.json_suffix")));
+    let desc_path =
+        devswarm_root(&inv.home).join(defaults::text("mesh_write.dir_workspaces")).join(format!("{mesh_id}{}", defaults::text("mesh_write.json_suffix")));
     let evidence_now = || -> Option<&'static str> {
         if crate::dssup::liveness::heartbeat_ts(&inv.home, mesh_id).is_some_and(|ts| ts.is_finite() && ts >= since as f64) {
             return Some(ev[0]);
@@ -1015,9 +1034,7 @@ fn source_note(inv: &Inv, runner: &dyn Runner, rest: &[&str]) -> Option<String> 
     let builders: Vec<(Option<String>, Option<String>, Option<String>)> = {
         let mut st = conn.prepare(t("devswarm_cli.sp_appdb_builders")).ok()?;
         let rows = st
-            .query_map([], |r| {
-                Ok((r.get::<_, rusqlite::types::Value>(0)?, r.get::<_, rusqlite::types::Value>(1)?, r.get::<_, rusqlite::types::Value>(2)?))
-            })
+            .query_map([], |r| Ok((r.get::<_, rusqlite::types::Value>(0)?, r.get::<_, rusqlite::types::Value>(1)?, r.get::<_, rusqlite::types::Value>(2)?)))
             .ok()?;
         rows.flatten().map(|(b, rid, w)| (text_of(b), text_of(rid), text_of(w).filter(|x| !x.is_empty()).map(|x| norm(&x)))).collect()
     };
@@ -1055,7 +1072,11 @@ fn wake_warning(inv: &Inv, now: i64) -> Option<String> {
                 .filter_map(|e| {
                     let d = OVal::parse(&std::fs::read_to_string(e.path()).ok()?)?;
                     match (d.get("id"), d.get("worktreePath"), d.get("sessionId")) {
-                        (Some(OVal::Str(i)), Some(OVal::Str(w)), Some(OVal::Str(sid))) if !w.is_empty() && !sid.is_empty() && crate::meshw::idlock::is_safe_id(i) => Some((i.clone(), w.clone())),
+                        (Some(OVal::Str(i)), Some(OVal::Str(w)), Some(OVal::Str(sid)))
+                            if !w.is_empty() && !sid.is_empty() && crate::meshw::idlock::is_safe_id(i) =>
+                        {
+                            Some((i.clone(), w.clone()))
+                        }
                         _ => None,
                     }
                 })
@@ -1065,7 +1086,8 @@ fn wake_warning(inv: &Inv, now: i64) -> Option<String> {
     if !descriptors.is_empty() && ident::repo_key_for_worktree(&inv.cwd).ok().flatten().is_none() {
         return None;
     }
-    let tick = OVal::parse(&std::fs::read_to_string(dir.join(defaults::text("devswarm_parent.dir_wake_tick")).join(format!("{id}{suffix}"))).unwrap_or_default());
+    let tick =
+        OVal::parse(&std::fs::read_to_string(dir.join(defaults::text("devswarm_parent.dir_wake_tick")).join(format!("{id}{suffix}"))).unwrap_or_default());
     let age = match tick.as_ref().and_then(|v| v.get("ts")) {
         Some(OVal::Num(ts)) if ts.is_finite() => Some(((now as f64 - ts) / defaults::num("devswarm_prompt.ms_per_minute") as f64).floor().max(0.0) as i64),
         _ => None,
@@ -1076,9 +1098,11 @@ fn wake_warning(inv: &Inv, now: i64) -> Option<String> {
     }
     let wanted = crate::dsact::settings::resolve(&inv.settings(), defaults::raw("wake_watch.set_enabled")).as_bool() != Some(false);
     let lock_live = |wid: &str| -> bool {
-        let p = dir
-            .join(defaults::text("devswarm_parent.dir_locks"))
-            .join(format!("{}{wid}{}", defaults::text("devswarm_parent.watch_lock_prefix"), defaults::text("devswarm_parent.watch_lock_suffix")));
+        let p = dir.join(defaults::text("devswarm_parent.dir_locks")).join(format!(
+            "{}{wid}{}",
+            defaults::text("devswarm_parent.watch_lock_prefix"),
+            defaults::text("devswarm_parent.watch_lock_suffix")
+        ));
         let Some(lock) = std::fs::read_to_string(p).ok().and_then(|x| OVal::parse(&x)) else { return false };
         let fresh = matches!(lock.get("ts"), Some(OVal::Num(ts)) if ts.is_finite() && (now as f64 - ts) <= defaults::num("wake_watch.lock_stale_ms") as f64);
         let alive = match lock.get("pid") {
@@ -1151,7 +1175,8 @@ pub fn create_with(inv: &Inv, rest: &[&str], branch: &str, runner: &dyn Runner) 
     let mut args: Vec<&str> = defaults::list("devswarm_act.argv_create");
     args.extend(rest.iter().copied().filter(|a| *a != strip));
     let started_at = clock(inv);
-    let timeout_ms = crate::dsact::settings::resolve(&inv.settings(), defaults::raw("devswarm_act.set_create_timeout_ms")).as_i64().filter(|v| *v > 0).unwrap_or(0) as u64;
+    let timeout_ms =
+        crate::dsact::settings::resolve(&inv.settings(), defaults::raw("devswarm_act.set_create_timeout_ms")).as_i64().filter(|v| *v > 0).unwrap_or(0) as u64;
     let pre_start = clock(inv);
     let preflight = preflight_submodules(runner, &inv.cwd, rest);
     let preflight_ms = clock(inv) - pre_start;
@@ -1225,7 +1250,12 @@ pub fn create_with(inv: &Inv, rest: &[&str], branch: &str, runner: &dyn Runner) 
         warnings.push(x.clone());
     }
     if !preflight.1.is_empty() {
-        let list = preflight.1.iter().map(|(p, sha, e)| format!("{p}@{}: {e}", sha.chars().take(tnum("devswarm_cli.sp_short_sha") as usize).collect::<String>())).collect::<Vec<_>>().join("; ");
+        let list = preflight
+            .1
+            .iter()
+            .map(|(p, sha, e)| format!("{p}@{}: {e}", sha.chars().take(tnum("devswarm_cli.sp_short_sha") as usize).collect::<String>()))
+            .collect::<Vec<_>>()
+            .join("; ");
         warnings.push(tpl("devswarm_cli.sp_warn_preflight", &[("count", &preflight.1.len().to_string()), ("list", &list)]));
     }
     if !repaired.is_empty() {
@@ -1308,7 +1338,10 @@ pub fn create_with(inv: &Inv, rest: &[&str], branch: &str, runner: &dyn Runner) 
         };
         let target = mesh_id.clone().unwrap_or_else(|| branch.to_string());
         let mesh = mesh_id.clone().unwrap_or_else(|| t("devswarm_cli.sp_launch_mesh_placeholder").to_string());
-        o.put("launchHint", s(&tpl("devswarm_cli.sp_launch_hint", &[("target", &target), ("waited", &launch.waited.to_string()), ("mesh", &mesh), ("note", &note)])));
+        o.put(
+            "launchHint",
+            s(&tpl("devswarm_cli.sp_launch_hint", &[("target", &target), ("waited", &launch.waited.to_string()), ("mesh", &mesh), ("note", &note)])),
+        );
     }
     o.put("timings", timings);
     if let Some(p) = plan_info {

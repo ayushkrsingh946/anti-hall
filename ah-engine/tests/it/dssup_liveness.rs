@@ -258,7 +258,10 @@ fn the_duty_runs_native_with_its_own_tail() {
     let detail = &rec["detail"];
     assert!(detail["native"].as_u64().unwrap() > 20, "{rec}");
     assert!(detail.get("node").is_none(), "no Node runs: {rec}");
-    assert!(detail["tail"].as_array().is_none_or(|t| t.is_empty()) || detail["tailWork"]["workspaces"].as_u64().is_some_and(|n| n > 0), "the tail is done natively: {rec}");
+    assert!(
+        detail["tail"].as_array().is_none_or(|t| t.is_empty()) || detail["tailWork"]["workspaces"].as_u64().is_some_and(|n| n > 0),
+        "the tail is done natively: {rec}"
+    );
     assert!(detail["stale"].as_u64().unwrap() > 0, "{rec}");
     // the engine wrote every stale verdict itself
     let after = tree(&ds(&c).join("liveness"), &[]);

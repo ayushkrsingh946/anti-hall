@@ -456,7 +456,10 @@ fn ah_hook_wrapper_failfast_no_daemon_hung_daemon_and_restart_loop() {
     println!("TIMING wrapper hung-daemon wall_ms={:.1}", dt.as_secs_f64() * 1000.0);
     // no reply in the whole wait window: the call fails open and runs no Node hook (the daemon may have processed it already)
     assert_eq!((code, out.as_str()), (0, ""), "{code} {out}");
-    assert!(dt < common::scaled(Duration::from_millis(clamped_num("client.slow_fallback_max_ms", 3000)) + Duration::from_secs(1)), "hung-daemon wrapper took {dt:?}");
+    assert!(
+        dt < common::scaled(Duration::from_millis(clamped_num("client.slow_fallback_max_ms", 3000)) + Duration::from_secs(1)),
+        "hung-daemon wrapper took {dt:?}"
+    );
     settle_after_cold_slow(&hung);
     assert!(hung.fresh_down_marker(), "a slow reply (slow_down_n = 1) did not leave a fresh daemon-down marker");
     assert_eq!(hung.spawn_attempt_count(), 0, "a slow daemon is alive: it is never restarted");

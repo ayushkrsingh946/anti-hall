@@ -375,7 +375,11 @@ pub(super) fn plan_group(cx: &Cx, sim: &mut Sim, survivor: &str, cands: &[RegRow
             };
             let mut all = vec![guard];
             all.extend(ops);
-            units.push(Unit { label: format!("{}{id}", defaults::text("devswarm_recon.fold_unit_prefix")), lock: lock_candidates.then(|| id.clone()), ops: all });
+            units.push(Unit {
+                label: format!("{}{id}", defaults::text("devswarm_recon.fold_unit_prefix")),
+                lock: lock_candidates.then(|| id.clone()),
+                ops: all,
+            });
         }
     }
     Ok((units, out))

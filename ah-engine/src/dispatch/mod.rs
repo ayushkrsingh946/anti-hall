@@ -663,15 +663,7 @@ fn run_core(raw: &str, args: &Args, payload: Option<&File>, complete: bool, tele
             if guard {
                 // a spent budget is a slow machine, not a verdict: the Node hooks decide (review finding 17)
                 let why = defaults::render("hooks.msg_budget", &[("id", &e.id)]);
-                return finish_then_defer(
-                    &args.event,
-                    parsed.as_ref(),
-                    started,
-                    vec![None; entries.len()],
-                    &shadow,
-                    false,
-                    &why,
-                );
+                return finish_then_defer(&args.event, parsed.as_ref(), started, vec![None; entries.len()], &shadow, false, &why);
             }
             tele.mark(&e.id, plan::Outcome::SkippedBudget);
             continue;
@@ -725,15 +717,7 @@ fn run_core(raw: &str, args: &Args, payload: Option<&File>, complete: bool, tele
                 // the event's budget has passed: start nothing further (a guard event fails closed, as for a hook that cannot run)
                 if guard {
                     let why = defaults::render("hooks.msg_budget", &[("id", &e.id)]);
-                    return finish_then_defer(
-                        &args.event,
-                        parsed.as_ref(),
-                        started,
-                        results.clone(),
-                        &shadow,
-                        !answers.is_empty(),
-                        &why,
-                    );
+                    return finish_then_defer(&args.event, parsed.as_ref(), started, results.clone(), &shadow, !answers.is_empty(), &why);
                 }
                 tele.mark(&e.id, plan::Outcome::SkippedBudget);
             }
@@ -1115,7 +1099,11 @@ mod tests {
         let o = finish_then_defer("PreToolUse", None, started, none.clone(), &shadow, false, "slow");
         assert!(o.code == 2 && o.err.contains("says-no"), "a genuine block among the started hooks decides: {o:?}");
         let started = vec![(0, node::start(&entry("c", "a\0b"), b"{}"))];
-        assert_eq!(finish_then_defer("PreToolUse", None, started, none, &shadow, false, "slow").code, 2, "a spawn failure started nothing: the budget mode answers");
+        assert_eq!(
+            finish_then_defer("PreToolUse", None, started, none, &shadow, false, "slow").code,
+            2,
+            "a spawn failure started nothing: the budget mode answers"
+        );
         crate::discard::harmless(std::fs::remove_dir_all(&dir));
     }
 }

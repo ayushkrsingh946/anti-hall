@@ -187,7 +187,13 @@ fn dump_db(p: &Path) -> String {
         .collect();
     out.push_str(&ddl.join("\n"));
     out.push('\n');
-    let tables: Vec<String> = c.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").unwrap().query_map([], |r| r.get(0)).unwrap().map(Result::unwrap).collect();
+    let tables: Vec<String> = c
+        .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+        .unwrap()
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
     for t in tables {
         let mut st = c.prepare(&format!("SELECT * FROM \"{t}\"")).unwrap();
         let n = st.column_count();
@@ -441,7 +447,8 @@ fn scenes() -> Vec<Scene> {
             s
         },
         {
-            let mut s = scene("codex-host-unread-and-plan", Same).seed(both(inbox(&["a", "b"], "0"), plan(json!([{"n": 1, "text": "one", "status": "blocked", "ts": 5}]))));
+            let mut s = scene("codex-host-unread-and-plan", Same)
+                .seed(both(inbox(&["a", "b"], "0"), plan(json!([{"n": 1, "text": "one", "status": "blocked", "ts": 5}]))));
             s.codex = true;
             s
         },
@@ -478,11 +485,14 @@ fn scenes() -> Vec<Scene> {
             .seed(both(archived("s1"), |h| write(&h.join(".anti-hall/settings.json"), r#"{"devswarm":{"archivedChildStop":false}}"#))),
         // orphan partitions in the summary the registration refreshes: sorted natively, or handed to Node whole
         scene("orphan-no-descriptor", Same).seed(orphan("orph-1", 2)),
-        scene("orphan-live-descriptor-not-archived", Same)
-            .seed(both(orphan("orph-1", 1), orphan_file("workspaces", "orph-1", json!({"id": "orph-1", "worktreePath": "/nonexistent/wt-a", "sessionId": "x"})))),
+        scene("orphan-live-descriptor-not-archived", Same).seed(both(
+            orphan("orph-1", 1),
+            orphan_file("workspaces", "orph-1", json!({"id": "orph-1", "worktreePath": "/nonexistent/wt-a", "sessionId": "x"})),
+        )),
         scene("orphan-archived-no-family", Same)
             .seed(both(orphan("orph-1", 3), orphan_file("archived", "orph-1", json!({"id": "orph-1", "worktreePath": "/nonexistent/wt-b", "sessionId": "x"})))),
-        scene("orphan-archived-no-worktree-field", Same).seed(both(orphan("orph-1", 1), orphan_file("archived", "orph-1", json!({"id": "orph-1", "sessionId": "x"})))),
+        scene("orphan-archived-no-worktree-field", Same)
+            .seed(both(orphan("orph-1", 1), orphan_file("archived", "orph-1", json!({"id": "orph-1", "sessionId": "x"})))),
         scene("orphan-archived-no-session", Same)
             .seed(both(orphan("orph-1", 1), orphan_file("archived", "orph-1", json!({"id": "orph-1", "worktreePath": "/nonexistent/wt-c"})))),
         scene("orphan-archived-existing-dir-no-family", Same).seed(both(orphan("orph-1", 2), |h| {
@@ -502,13 +512,20 @@ fn scenes() -> Vec<Scene> {
             both(orphan("orph-1", 2), orphan_file("workspaces", "orph-1", json!({"id": "orph-1", "worktreePath": "/nonexistent/wt-f", "sessionId": "x"}))),
             orphan_file("archived", "other-1", json!({"id": "other-1", "worktreePath": "/nonexistent/wt-f", "sessionId": "x"})),
         )),
-        scene("orphan-held", Same).seed(both(orphan("orph-1", 1), |h| write(&h.join(".anti-hall/settings.json"), r#"{"devswarm":{"heldPartitions":"orph-1, other"}}"#))),
+        scene("orphan-held", Same)
+            .seed(both(orphan("orph-1", 1), |h| write(&h.join(".anti-hall/settings.json"), r#"{"devswarm":{"heldPartitions":"orph-1, other"}}"#))),
         scene("orphan-held-and-stranded", Same).seed(both(
             both(orphan("orph-1", 1), orphan_file("archived", "orph-1", json!({"id": "orph-1", "worktreePath": "/nonexistent/wt-g", "sessionId": "x"}))),
             |h| write(&h.join(".anti-hall/settings.json"), r#"{"devswarm":{"heldPartitions":"orph-1"}}"#),
         )),
         scene("orphan-drained-is-not-listed", Same).seed(both(orphan("orph-1", 2), |h| {
-            sql(h, &[("INSERT INTO reader_cursors (partition, ns, reader, value, retired_line, updated_at) VALUES (?,?,?,?,NULL,?)", vec![t("orph-1"), t("store"), t("floor"), 2i64.into(), 1i64.into()])]);
+            sql(
+                h,
+                &[(
+                    "INSERT INTO reader_cursors (partition, ns, reader, value, retired_line, updated_at) VALUES (?,?,?,?,NULL,?)",
+                    vec![t("orph-1"), t("store"), t("floor"), 2i64.into(), 1i64.into()],
+                )],
+            );
         })),
         scene("orphans-mixed", Same).seed(both(
             both(orphan("orph-1", 1), orphan("orph-2", 4)),
@@ -517,16 +534,15 @@ fn scenes() -> Vec<Scene> {
                 orphan_file("workspaces", "orph-3", json!({"id": "orph-3", "worktreePath": "/nonexistent/wt-i"})),
             ),
         )),
-        scene("orphan-archived-family-has-a-survivor", Defer)
-            .seed(both(orphan("orph-1", 1), |h| write(&ds(h).join("archived/orph-1.json"), &json!({"id": "orph-1", "worktreePath": h.join("proj"), "sessionId": "x"}).to_string()))),
+        scene("orphan-archived-family-has-a-survivor", Defer).seed(both(orphan("orph-1", 1), |h| {
+            write(&ds(h).join("archived/orph-1.json"), &json!({"id": "orph-1", "worktreePath": h.join("proj"), "sessionId": "x"}).to_string())
+        })),
         scene("orphan-sessions-differ-needs-liveness", Defer).seed(both(
             both(orphan("orph-1", 1), orphan_file("workspaces", "orph-1", json!({"id": "orph-1", "worktreePath": "/nonexistent/wt-j", "sessionId": "live-1"}))),
             orphan_file("archived", "orph-1", json!({"id": "orph-1", "worktreePath": "/nonexistent/wt-j", "sessionId": "old-1"})),
         )),
-        scene("orphan-descriptor-session-not-text", Defer).seed(both(
-            orphan("orph-1", 1),
-            orphan_file("archived", "orph-1", json!({"id": "orph-1", "worktreePath": "/nonexistent/wt-k", "sessionId": 7})),
-        )),
+        scene("orphan-descriptor-session-not-text", Defer)
+            .seed(both(orphan("orph-1", 1), orphan_file("archived", "orph-1", json!({"id": "orph-1", "worktreePath": "/nonexistent/wt-k", "sessionId": 7})))),
         // the cases that stay with Node, each decided before anything is written
         scene("archived-marker", Defer).seed(archived("s1")),
         scene("descriptor-array", Defer).seed(descriptor("[1,2]")),
@@ -537,20 +553,18 @@ fn scenes() -> Vec<Scene> {
                 h,
                 &[(
                     "INSERT INTO registry (id, worktree_path, session_id, inbox_path, cursor_path, nudge_command, updated_at) VALUES (?,?,?,?,?,?,?)",
-                    vec![
-                        t("sib-1"),
-                        t(h.join("proj").display()),
-                        t("x"),
-                        t("/nonexistent/i"),
-                        t("/nonexistent/c"),
-                        rusqlite::types::Value::Null,
-                        1i64.into(),
-                    ],
+                    vec![t("sib-1"), t(h.join("proj").display()), t("x"), t("/nonexistent/i"), t("/nonexistent/c"), rusqlite::types::Value::Null, 1i64.into()],
                 )],
             );
         }),
         scene("declared-reader", DeferLate).seed(both(message("normal", 120_000), |h| {
-            sql(h, &[("INSERT INTO reader_cursors (partition, ns, reader, value, retired_line, updated_at) VALUES (?,?,?,?,NULL,?)", vec![t("child-1"), t("store"), t("h:1:2"), 0i64.into(), 1i64.into()])]);
+            sql(
+                h,
+                &[(
+                    "INSERT INTO reader_cursors (partition, ns, reader, value, retired_line, updated_at) VALUES (?,?,?,?,NULL,?)",
+                    vec![t("child-1"), t("store"), t("h:1:2"), 0i64.into(), 1i64.into()],
+                )],
+            );
         })),
         scene("phantom-descriptor", Defer).seed(|h| {
             let id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeee";
@@ -578,11 +592,31 @@ fn scenes() -> Vec<Scene> {
         scene("ingest-stale-minutes", Same).seed(daemon(600_000, 999_998, 999_999, json!({}))),
         scene("ingest-stale-days", Same).seed(daemon(3 * 86_400_000, 999_998, 999_999, json!({}))),
         scene("ingest-handover-in-progress", Same).seed(daemon(240_000, 999_998, std::process::id(), json!({}))),
-        scene("ingest-fault-config", Same).seed(daemon(1_000, std::process::id(), std::process::id(), json!({"consecutiveMonitorFailures": 5, "lastMonitorErrorCode": "ENOENT", "lastMonitorError": "spawn hivecontrol ENOENT"}))),
+        scene("ingest-fault-config", Same).seed(daemon(
+            1_000,
+            std::process::id(),
+            std::process::id(),
+            json!({"consecutiveMonitorFailures": 5, "lastMonitorErrorCode": "ENOENT", "lastMonitorError": "spawn hivecontrol ENOENT"}),
+        )),
         scene("ingest-fault-slow", Same).seed(daemon(1_000, std::process::id(), std::process::id(), json!({"consecutiveMonitorFailures": 3}))),
-        scene("ingest-fault-ok-stale", Same).seed(daemon(1_000, std::process::id(), std::process::id(), json!({"consecutiveMonitorFailures": 0, "lastMonitorOkMs": now_ms() - 1_200_000}))),
-        scene("ingest-fault-no-ok-since-start", Same).seed(daemon(1_000, std::process::id(), std::process::id(), json!({"consecutiveMonitorFailures": 1, "startedAtMs": now_ms() - 1_800_000}))),
-        scene("ingest-monitor-starting-up", Same).seed(daemon(1_000, std::process::id(), std::process::id(), json!({"consecutiveMonitorFailures": 1, "startedAtMs": now_ms() - 60_000}))),
+        scene("ingest-fault-ok-stale", Same).seed(daemon(
+            1_000,
+            std::process::id(),
+            std::process::id(),
+            json!({"consecutiveMonitorFailures": 0, "lastMonitorOkMs": now_ms() - 1_200_000}),
+        )),
+        scene("ingest-fault-no-ok-since-start", Same).seed(daemon(
+            1_000,
+            std::process::id(),
+            std::process::id(),
+            json!({"consecutiveMonitorFailures": 1, "startedAtMs": now_ms() - 1_800_000}),
+        )),
+        scene("ingest-monitor-starting-up", Same).seed(daemon(
+            1_000,
+            std::process::id(),
+            std::process::id(),
+            json!({"consecutiveMonitorFailures": 1, "startedAtMs": now_ms() - 60_000}),
+        )),
     ];
     v.shrink_to_fit();
     v

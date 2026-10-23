@@ -78,7 +78,8 @@ impl Env {
     }
 
     fn payload(&self, command: &str) -> String {
-        serde_json::json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": command}, "cwd": self.dir, "session_id": "nb-e2e"}).to_string()
+        serde_json::json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": command}, "cwd": self.dir, "session_id": "nb-e2e"})
+            .to_string()
     }
 
     fn ledger(&self) -> Vec<serde_json::Value> {

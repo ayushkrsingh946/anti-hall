@@ -637,7 +637,9 @@ fn killed_dispatcher_leaves_no_spool_file(signal: i32, tag: &str) {
         sent
     });
     let spooled = Instant::now();
-    while spooled.elapsed() < Duration::from_secs(10) && !std::fs::read_to_string(e.state().join(ah_engine::health::log_name())).is_ok_and(|l| l.contains("dispatch_stdin_spooled")) {
+    while spooled.elapsed() < Duration::from_secs(10)
+        && !std::fs::read_to_string(e.state().join(ah_engine::health::log_name())).is_ok_and(|l| l.contains("dispatch_stdin_spooled"))
+    {
         // the spool exists once the dispatcher has read past the cap; the log line is written after the read ends, so the wait is bounded
         if writer.is_finished() {
             break;
@@ -696,7 +698,8 @@ fn startup_sweep_removes_only_stale_dispatch_stdin_files() {
 fn dispatcher_stdin_cap_boundaries_are_exact() {
     let e = Env::new("stdin-boundaries");
     let max = ah_engine::defaults::num("client.max_stdin") as usize;
-    let spooled = |e: &Env| std::fs::read_to_string(e.state().join(ah_engine::health::log_name())).unwrap_or_default().matches("dispatch_stdin_spooled").count();
+    let spooled =
+        |e: &Env| std::fs::read_to_string(e.state().join(ah_engine::health::log_name())).unwrap_or_default().matches("dispatch_stdin_spooled").count();
     // a SessionStart cannot block: at the cap it is read whole in memory, one byte more goes to the spool and is said so
     let args = ["hook", "--event", "SessionStart"];
     let (code, _, err) = e.run(&args, true, &session_payload_len(max), true);

@@ -207,7 +207,10 @@ pub(super) fn world(o: &Opt) -> World {
         }
         let text = fs::read_to_string(&toml).unwrap();
         let keep = format!("{{ name = \"{only}\", enabled = true,");
-        let off: Vec<String> = text.lines().map(|l| if l.starts_with("  { name = \"") && !l.contains(&keep) { l.replacen("enabled = true", "enabled = false", 1) } else { l.to_string() }).collect();
+        let off: Vec<String> = text
+            .lines()
+            .map(|l| if l.starts_with("  { name = \"") && !l.contains(&keep) { l.replacen("enabled = true", "enabled = false", 1) } else { l.to_string() })
+            .collect();
         fs::write(&toml, off.join("\n") + "\n").unwrap();
     }
     let claude = if o.claude_fails {
@@ -465,8 +468,7 @@ fn fixture_path(name: &str) -> PathBuf {
 /// exit, stdout, stderr (without the `[update]` progress lines) and every file under the home, all through the parity
 /// comparison's own normalisers (`norm`, `clock`, `no_progress`), minus `VOLATILE_PREFIX`.
 fn snapshot(out: &Out, w: &World) -> serde_json::Value {
-    let files: BTreeMap<String, String> =
-        tree(&w.home).into_iter().filter(|(k, _)| !k.starts_with(VOLATILE_PREFIX)).map(|(k, v)| (k, norm(&v, w))).collect();
+    let files: BTreeMap<String, String> = tree(&w.home).into_iter().filter(|(k, _)| !k.starts_with(VOLATILE_PREFIX)).map(|(k, v)| (k, norm(&v, w))).collect();
     serde_json::json!({
         "exit": out.code,
         "stdout": norm(&out.stdout, w),
@@ -484,7 +486,10 @@ fn record_fixture(name: &str, node: &Out, w: &World) {
 /// Engine only, with no usable Node on the PATH, on the same seeded home; must equal the recorded Node answer.
 fn frozen(name: &str, o: &Opt) {
     let o = Opt { no_node: true, ..o.clone() };
-    let want: serde_json::Value = serde_json::from_str(&fs::read_to_string(fixture_path(name)).unwrap_or_else(|e| panic!("{name}: no fixture ({e}); record with AH_RECORD_UPDATE_FIXTURES=1"))).unwrap();
+    let want: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(fixture_path(name)).unwrap_or_else(|e| panic!("{name}: no fixture ({e}); record with AH_RECORD_UPDATE_FIXTURES=1")),
+    )
+    .unwrap();
     let w = world(&o);
     let out = run_engine(&w, &o, &["--check"]);
     assert_eq!(node_calls(&w), "", "{name}: the engine tried to run Node");

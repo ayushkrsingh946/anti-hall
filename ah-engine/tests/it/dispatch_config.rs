@@ -127,7 +127,11 @@ fn order_and_max_rules_decide_which_entries_run() {
     e.config("[events.PostToolUse]\norder = [\"coordinator-work-guard:post\", \"output-verify-guard\"]\nmax_rules = 3\n");
     let (code, _, err) = e.run("PostToolUse", &post("ls", &e.dir), &[]);
     assert_eq!(code, 0, "{err}");
-    assert_eq!(e.plan("ran"), ["coordinator-work-guard:post", "output-verify-guard", "merge-side-pick:post"], "listed ids first, then the table's order, cut at 3");
+    assert_eq!(
+        e.plan("ran"),
+        ["coordinator-work-guard:post", "output-verify-guard", "merge-side-pick:post"],
+        "listed ids first, then the table's order, cut at 3"
+    );
     assert_eq!(e.plan("skipped_max_rules"), ["git-guard:audit", "devswarm-parent-reply-tracker", "devswarm-child-drain", "agent-reminders"], "{}", e.log());
 }
 

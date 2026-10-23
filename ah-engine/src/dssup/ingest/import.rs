@@ -380,4 +380,3 @@ mod tests {
         crate::discard::harmless(std::fs::remove_dir_all(dir)); // keep: test cleanup; an absent directory is the goal state
     }
 }
-

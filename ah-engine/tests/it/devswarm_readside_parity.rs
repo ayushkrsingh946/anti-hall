@@ -248,7 +248,10 @@ fn exec(case: &Case) -> &'static str {
 /// Clock readings (13-digit runs: the nudge's throttle time) are each side's own.
 fn masked(t: BTreeMap<String, Vec<u8>>) -> BTreeMap<String, Vec<u8>> {
     let re = regex::Regex::new(r"\d{13}").unwrap();
-    t.into_iter().filter(|(k, _)| !k.ends_with("-wal") && !k.ends_with("-shm")).map(|(k, v)| (k, re.replace_all(&String::from_utf8_lossy(&v), "T").into_owned().into_bytes())).collect()
+    t.into_iter()
+        .filter(|(k, _)| !k.ends_with("-wal") && !k.ends_with("-shm"))
+        .map(|(k, v)| (k, re.replace_all(&String::from_utf8_lossy(&v), "T").into_owned().into_bytes()))
+        .collect()
 }
 
 fn bash(cmd: &str) -> Value {

@@ -203,7 +203,10 @@ pub(super) fn one_store(ctx: &Ctx, _runner: &dyn Runner, st: &mut OVal, s: &Sett
         Err(d) => return Ended::Fallback(d),
     };
     let (chosen, choice) = choose(&first, s, bytes_before);
-    witness_log(ctx, &json!({"ts": ctx.now, "duty": "retention", "store": hash, "native": true, "candidates": first.cands.len(), "chosen": choice.age + choice.size}));
+    witness_log(
+        ctx,
+        &json!({"ts": ctx.now, "duty": "retention", "store": hash, "native": true, "candidates": first.cands.len(), "chosen": choice.age + choice.size}),
+    );
     // the store must not have moved under the comparison
     let second = match plan::plan_store(ctx.home, hash, s.rules(), now, &holds) {
         Ok(p) => p,

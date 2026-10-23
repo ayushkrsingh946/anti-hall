@@ -362,7 +362,10 @@ fn exchange_for(sock: &Path, payload: &[u8], deadline: Duration, window: Duratio
 /// file as the launcher's, so a call that went through both is told once. The call itself passes through. Empty when this session
 /// already heard it, or when the notice cannot be written (never a second notice for a failed write).
 pub(crate) fn unreachable_notice(raw: &str, event: Option<&str>) -> String {
-    let sid = serde_json::from_str::<serde_json::Value>(raw).ok().and_then(|p| p.get("session_id").and_then(|v| v.as_str().map(str::to_owned))).unwrap_or_else(|| "none".into());
+    let sid = serde_json::from_str::<serde_json::Value>(raw)
+        .ok()
+        .and_then(|p| p.get("session_id").and_then(|v| v.as_str().map(str::to_owned)))
+        .unwrap_or_else(|| "none".into());
     let file = state_file("unreachable_notice");
     if std::fs::read_to_string(&file).is_ok_and(|t| t.trim_end() == sid) {
         return String::new();
@@ -545,7 +548,9 @@ pub fn spawn_daemon() -> Option<std::process::Child> {
     // A daemon serves every later session, so it starts from the allowlisted part of this environment and from the home
     // directory, never the starting hook's own (the daemon drops the rest itself too, see `daemonenv`; doing it here as well
     // keeps the process image, as `ps` shows it, free of the session's values).
-    cmd.env_clear().envs(std::env::vars().filter(|(k, _)| crate::daemonenv::kept(k))).current_dir(crate::daemonenv::cwd(defaults::env_var("home").map(PathBuf::from)));
+    cmd.env_clear()
+        .envs(std::env::vars().filter(|(k, _)| crate::daemonenv::kept(k)))
+        .current_dir(crate::daemonenv::cwd(defaults::env_var("home").map(PathBuf::from)));
     // The allocator is chosen before the daemon's first allocation, so the configured one travels in its environment.
     let alloc_env = defaults::text("diagnostics.allocator_env");
     if std::env::var_os(alloc_env).is_none() {

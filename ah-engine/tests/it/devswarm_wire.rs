@@ -984,7 +984,12 @@ fn a_subagent_calling_an_owner_action_is_refused_before_anything_is_read() {
         raw: rest.iter().map(|s| s.to_string()).collect(),
     };
     let sub = env_of(&[("ANTIHALL_CALLER", "agent")]);
-    for rest in [&["archive", "--id", "ws-1", "--request", "r1"][..], &["plan-prune", "--older-than", "7"], &["prune", "--confirm-ids", "a", "--plan", "n"], &["create", "b1"]] {
+    for rest in [
+        &["archive", "--id", "ws-1", "--request", "r1"][..],
+        &["plan-prune", "--older-than", "7"],
+        &["prune", "--confirm-ids", "a", "--plan", "n"],
+        &["create", "b1"],
+    ] {
         assert_eq!(cli::run_with(&p(rest), &sub), 64, "{rest:?}");
     }
     assert_eq!(cli::run_with(&p(&["bogus"]), &sub), 64);

@@ -892,7 +892,11 @@ fn an_agent_idle_for_less_than_the_window_or_with_no_open_task_wakes_nobody() {
     let done = json!({"todos": [{"content": "Port the gauge", "status": "completed", "activeForm": "Porting the gauge"}]});
     append(
         &h2.join(".claude/projects/p/parent/subagents/agent-w1.jsonl"),
-        &[tool(n - 29 * MIN, "s3", 5, "t2", "TodoWrite", done), result(n - 29 * MIN + 1000, "t2", "ok", false), asst(n - 28 * MIN, "s4", 5, 5, json!([{"type": "text", "text": "all done"}]), Some("end_turn"))],
+        &[
+            tool(n - 29 * MIN, "s3", 5, "t2", "TodoWrite", done),
+            result(n - 29 * MIN + 1000, "t2", "ok", false),
+            asst(n - 28 * MIN, "s4", 5, 5, json!([{"type": "text", "text": "all done"}]), Some("end_turn")),
+        ],
     );
     let mut st = State::default();
     ticks(&h2, &mut st, &[n, n + MIN]);
@@ -933,7 +937,10 @@ fn a_watched_background_process_that_ends_wakes_the_session_once() {
 fn a_notice_for_a_task_the_agent_did_not_start_is_not_a_watched_exit() {
     let h = home("watched-other");
     let n = now0();
-    write(&sess(&h, "s1"), &[prompt(n - 30 * MIN, "/w"), user_text(n - 5 * MIN, "<task-notification>\n<task-id>zz9</task-id>\n<status>completed</status>\n</task-notification>")]);
+    write(
+        &sess(&h, "s1"),
+        &[prompt(n - 30 * MIN, "/w"), user_text(n - 5 * MIN, "<task-notification>\n<task-id>zz9</task-id>\n<status>completed</status>\n</task-notification>")],
+    );
     let mut st = State::default();
     ticks(&h, &mut st, &[n, n + MIN]);
     assert!(wake_rows(&h, "s1").is_empty());
@@ -975,7 +982,9 @@ fn the_wake_watch_prints_each_row_once_and_marks_the_session_armed() {
     let (seen, stop) = (Arc::new(Mutex::new(Vec::<String>::new())), Arc::new(AtomicBool::new(false)));
     let t = {
         let (seen, stop, e2) = (Arc::clone(&seen), Arc::clone(&stop), env(&h, n));
-        std::thread::spawn(move || wake::pump(&e2, "parent", std::time::Duration::from_millis(20), &mut |l| seen.lock().unwrap().push(l.to_string()), &|| stop.load(Ordering::Relaxed)))
+        std::thread::spawn(move || {
+            wake::pump(&e2, "parent", std::time::Duration::from_millis(20), &mut |l| seen.lock().unwrap().push(l.to_string()), &|| stop.load(Ordering::Relaxed))
+        })
     };
     let wait = |want: usize| {
         for _ in 0..200 {
@@ -1132,8 +1141,17 @@ fn a_codex_rollout_is_a_codex_agent_running_while_it_is_written() {
 fn headless_one_shot_runs_are_not_agents_and_are_not_counted() {
     let h = home("headless");
     let n = now0();
-    let line = |ts: u64| json!({"type": "user", "timestamp": iso(ts), "cwd": "/w", "entrypoint": "sdk-cli", "message": {"role": "user", "content": "judge"}}).to_string();
-    write(&sess(&h, "judge1"), &[json!({"type": "queue-operation", "timestamp": iso(n)}).to_string(), line(n - MIN), asst(n - MIN, "j1", 5, 5, json!([{"type": "text", "text": "{}"}]), Some("end_turn"))]);
+    let line = |ts: u64| {
+        json!({"type": "user", "timestamp": iso(ts), "cwd": "/w", "entrypoint": "sdk-cli", "message": {"role": "user", "content": "judge"}}).to_string()
+    };
+    write(
+        &sess(&h, "judge1"),
+        &[
+            json!({"type": "queue-operation", "timestamp": iso(n)}).to_string(),
+            line(n - MIN),
+            asst(n - MIN, "j1", 5, 5, json!([{"type": "text", "text": "{}"}]), Some("end_turn")),
+        ],
+    );
     write(&h.join(".claude/projects/-x-double-shot-latte/judge2.jsonl"), &[prompt(n - MIN, "/w")]);
     write(&sess(&h, "real1"), &[prompt(n - MIN, "/w"), asst(n - MIN, "m1", 5, 5, json!([{"type": "text", "text": "ok"}]), None)]);
     let mut st = State::default();
@@ -1147,11 +1165,17 @@ fn headless_one_shot_runs_are_not_agents_and_are_not_counted() {
 fn the_list_is_live_agents_plus_a_short_recently_finished_window_and_the_summary_counts_live_ones() {
     let h = home("window");
     let n = now0();
-    write(&sess(&h, "parent"), &[prompt(n - 3 * 3_600_000, "/w"), asst(n - 2 * 3_600_000, "p1", 5, 5, json!([{"type": "text", "text": "x"}]), Some("end_turn"))]);
+    write(
+        &sess(&h, "parent"),
+        &[prompt(n - 3 * 3_600_000, "/w"), asst(n - 2 * 3_600_000, "p1", 5, 5, json!([{"type": "text", "text": "x"}]), Some("end_turn"))],
+    );
     register(&h, std::process::id(), "parent", "busy", n);
     let dir = h.join(".claude/projects/p/parent/subagents");
     for (id, ago) in [("old", 2 * 3_600_000), ("fresh", 5 * MIN)] {
-        write(&dir.join(format!("agent-{id}.jsonl")), &[prompt(n - ago - MIN, "/w"), asst(n - ago, "s1", 5, 5, json!([{"type": "text", "text": "x"}]), Some("end_turn"))]);
+        write(
+            &dir.join(format!("agent-{id}.jsonl")),
+            &[prompt(n - ago - MIN, "/w"), asst(n - ago, "s1", 5, 5, json!([{"type": "text", "text": "x"}]), Some("end_turn"))],
+        );
         std::fs::write(dir.join(format!("agent-{id}.meta.json")), r#"{"finished":true}"#).unwrap();
     }
     let mut st = State::default();
