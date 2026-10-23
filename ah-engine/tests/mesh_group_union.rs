@@ -205,3 +205,22 @@ fn a_tick_of_a_twin_counts_both_partitions_without_exit_69() {
     assert_eq!(v["unreadTotal"], Value::from(3), "{v}");
     assert_eq!(v["meshPartitionIds"].as_array().unwrap().len(), 3, "{v}");
 }
+
+#[test]
+fn read_primary_text_with_ack_after_print_on_twin_rows_answers_and_acks_both_partitions() {
+    // the argv a Primary runs on its hot path; it exited 69 (mesh-group) before the group read was native
+    let fx = Fx::new("textack");
+    let (label, key) = fx.twins();
+    {
+        let st = fx.store(&key);
+        st.append_mesh_row(&row(&label, 1_000, "h-a1", "to label", "peer-a")).unwrap();
+        st.append_mesh_row(&row("child-x", 2_000, "h-b1", "to child", "peer-b")).unwrap();
+    }
+    let (code, out) = fx.raw(&["inbox", "read-primary", &label, "--format", "text", "--ack-after-print"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("to label") && out.contains("to child"), "{out}");
+    // the ack ran in the same call: nothing is left unread in either partition
+    let (code, again) = fx.run(&["inbox", "read-primary", &label]);
+    assert_eq!(code, 0, "{again}");
+    assert_eq!((again["count"].clone(), again["unreadCount"].clone()), (Value::from(0), Value::from(0)), "{again}");
+}
