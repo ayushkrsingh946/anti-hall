@@ -2127,12 +2127,44 @@ doc = "The hosts the launcher serves (the --host values); the first is the defau
 value = ["claude", "codex"]
 
 [launcher.fallback_list_claude]
-doc = "File name, inside the plugin's hooks directory, of the Claude fallback list (per-event timeouts)."
-value = "ah-fallback.list"
+doc = "Path, inside the Node backup directory (nodeback.node_dir), of the Claude fallback list: the per-event timeouts and the Node hooks the launcher runs while the Node fallback switch is on."
+value = "hooks/ah-fallback.list"
+
+[launcher.fallback_map_claude]
+doc = "Path, inside the Node backup directory, of the Claude fallback map: the dispatch-table id of each fallback command, used to name its shadow-ledger row."
+value = "hooks/ah-fallback.map.json"
+
+[launcher.fallback_map_codex]
+doc = "Path, inside the Node backup directory, of the Codex fallback map."
+value = "hooks/ah-fallback.codex.map.json"
+
+[launcher.arg_tool_from_payload]
+doc = "The hook argument that makes the launcher read the tool name from the payload (implied on launcher.nodeback_tool_events)."
+value = "--tool-from-payload"
+
+[launcher.nodeback_tool_field]
+doc = "The payload field that names the tool of a tool event; the Node fallback matches the list's matchers against it."
+value = "tool_name"
+
+[launcher.nodeback_keyless_events]
+doc = "Guard events that no Node hook is registered for: the generated fallback list has no section for them, and the Node fallback answers them with the neutral no-op. A list without the section of any other guard event is damaged and fails closed."
+value = ["PermissionRequest", "SubagentStop"]
+
+[launcher.nodeback_tool_events]
+doc = "The events on which the Node fallback reads the tool name from the payload and selects the list rows by their matcher."
+value = ["PreToolUse", "PostToolUse", "PostToolUseFailure", "PermissionRequest"]
+
+[launcher.nodeback_runners]
+doc = "The programs a fallback-list command may start (looked up on PATH); the launcher starts them directly, never through a shell. A row that starts anything else is a no-op script of the dispatch table (the engine answers it in-process) and counts as having run."
+value = ["node"]
+
+[launcher.nodeback_unrunnable_markers]
+doc = "Texts that must all appear on a Node hook's stderr (exit 1) for the hook to count as unrunnable (its script or a module is missing) instead of a non-blocking failure of the hook itself."
+value = ["MODULE_NOT_FOUND", "Cannot find module"]
 
 [launcher.fallback_list_codex]
-doc = "File name, inside the plugin's hooks directory, of the Codex fallback list."
-value = "ah-fallback.codex.list"
+doc = "Path, inside the Node backup directory, of the Codex fallback list."
+value = "hooks/ah-fallback.codex.list"
 
 [launcher.cli_integrity_verb]
 doc = "The ah-hook command-line verb that runs the binary integrity check and roll-back (`ah-hook integrity record|accept|check|fail|status|lock|unlock`); the launcher starts itself with it in the background."
@@ -2141,10 +2173,6 @@ value = "integrity"
 [files.fallback_switch]
 doc = "Marker file (state directory) of the Node fallback switch (the Node backup, stage 2): present = the launcher runs the original Node hooks directly instead of the engine. Written and removed by `ah-engine fallback node|off`; read by hooks/ah-hook.sh and the thin launcher."
 value = "fallback.node"
-
-[launcher.script_hook]
-doc = "The shell wrapper in the plugin's hooks directory; the launcher hands the call to it while the Node fallback switch is on (files.fallback_switch)."
-value = "ah-hook.sh"
 
 [launcher.arg_builtin]
 doc = "The argument that makes `ah-hook doctor` run its built-in diagnosis even when the engine runs."

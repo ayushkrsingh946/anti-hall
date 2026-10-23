@@ -296,8 +296,8 @@ impl World {
         let payload = self.subst(&payload.to_string());
         let mut cmd = self.command(&self.engine, &format!("daemon-ready-{host}"));
         cmd.arg("hook").args(["--event", "PreToolUse", "--tool", "Bash", "--host", host, "--fallback-map"]).arg(match host {
-            "codex" => self.plugin.join("hooks").join("ah-fallback.codex.map.json"),
-            _ => self.plugin.join("hooks").join("ah-fallback.map.json"),
+            "codex" => plugin_src().join("../anti-hall-node/hooks").join("ah-fallback.codex.map.json"),
+            _ => plugin_src().join("../anti-hall-node/hooks").join("ah-fallback.map.json"),
         });
         if host == "codex" {
             cmd.env("PLUGIN_ROOT", &self.plugin);

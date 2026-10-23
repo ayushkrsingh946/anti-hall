@@ -13,7 +13,7 @@ use crate::proc::{self, Feed, Opts, Retry, Run};
 use crate::util::{
     env_nonempty, fill, is_exec, json_str_field, json_true_field, now_ms, positive, say, uid,
 };
-use crate::{builtin, cli, selftest};
+use crate::{builtin, cli, nodeback, selftest};
 use std::ffi::CString;
 use std::io::Write;
 use std::os::unix::ffi::OsStrExt;
@@ -847,6 +847,7 @@ pub fn run() -> i32 {
 
     match args.first().map(String::as_str) {
         Some("--selftest") => {
+            let s = s.with_nodeback(&cfg_dir);
             return selftest::run(
                 &s,
                 root.as_deref(),
@@ -887,15 +888,6 @@ pub fn run() -> i32 {
             l.append("no_event");
         }
         return 0;
-    }
-
-    // the Node fallback switch is on (`ah-engine fallback node`): the shell wrapper runs the original Node hooks instead of the engine
-    if !state_dir.as_os_str().is_empty() && state_dir.join(s.text("files.fallback_switch")).exists() {
-        let wrapper = hooks_dir.join(s.text("launcher.script_hook"));
-        if wrapper.is_file() {
-            let err = Command::new("sh").arg(wrapper).args(&args).exec();
-            say(&s.msg("msg.launcher_fallback_exec_failed", &[("err", &err.to_string())]));
-        }
     }
 
     let test = env_nonempty(&s.text("launcher.test_flag_env")).is_some_and(|v| v == "1");
@@ -939,6 +931,37 @@ pub fn run() -> i32 {
             i += 1;
         }
         i += 1;
+    }
+
+    // the Node fallback switch is on (`ah-engine fallback node`): the launcher runs the original Node hooks itself, no engine
+    if !state_dir.as_os_str().is_empty() && state_dir.join(s.text("files.fallback_switch")).exists() {
+        let guard = s.list("dispatch.guard_events").contains(&event);
+        let tool_flag = s.text("launcher.arg_tool_from_payload");
+        let (payload, _) = proc::read_prefix(
+            0,
+            s.num("launcher.payload_prefix_bytes") as usize,
+            Duration::from_millis(s.num("launcher.stdin_idle_ms")),
+            s.num("launcher.io_chunk_bytes") as usize,
+        );
+        let list_override = if test {
+            env_nonempty(&s.text("launcher.knob_fallback_list")).map(PathBuf::from)
+        } else {
+            None
+        };
+        let s = s.with_nodeback(&cfg_dir);
+        return nodeback::Call {
+            s: &s,
+            event: &event,
+            host: &host,
+            tool_from_payload: args.contains(&tool_flag),
+            guard,
+            plugin_root: cfg_root.as_deref().or(root.as_deref()),
+            state_dir: &state_dir,
+            list_override,
+            payload: &payload,
+            grace: Duration::from_millis(s.num("client.wrapper_kill_grace_ms")),
+        }
+        .run();
     }
 
     // the part of the payload the launcher keeps and inspects; the rest is streamed through later

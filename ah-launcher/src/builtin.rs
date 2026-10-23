@@ -37,6 +37,8 @@ pub const NUMS: &[(&str, u64)] = &[
     ("launcher.cli_lowercase_verbs", 1),
     ("launcher.cli_no_engine_exit", 127),
     ("paths.socket_max_len", 100),
+    ("nodeback.ledger_max_bytes", 16777216),
+    ("nodeback.ident_max_len", 64),
     ("client.deadline_ms", 300),
     ("client.deadline_slack_ms", 10),
     ("client.wrapper_extra_ms", 250),
@@ -102,8 +104,21 @@ pub const STRS: &[(&str, &str)] = &[
     ("launcher.test_flag_env", "AH_WRAPPER_TEST"),
     ("launcher.diag_env", "AH_ENGINE_WRAPPER_DIAG"),
     ("launcher.in_process_env", "AH_ENGINE_DISPATCH_IN_PROCESS"),
-    ("launcher.fallback_list_claude", "ah-fallback.list"),
-    ("launcher.fallback_list_codex", "ah-fallback.codex.list"),
+    ("launcher.fallback_list_claude", "hooks/ah-fallback.list"),
+    ("launcher.fallback_list_codex", "hooks/ah-fallback.codex.list"),
+    ("launcher.fallback_map_claude", "hooks/ah-fallback.map.json"),
+    ("launcher.fallback_map_codex", "hooks/ah-fallback.codex.map.json"),
+    ("launcher.arg_tool_from_payload", "--tool-from-payload"),
+    ("launcher.nodeback_tool_field", "tool_name"),
+    ("dispatch.context_joiner", "\n\n"),
+    ("dispatch.message_joiner", "\n"),
+    ("dispatch.exact_chars", "_- ,|"),
+    ("dispatch.list_separators", "|,"),
+    ("dispatch.list_event_mark", "@"),
+    ("dispatch.list_comment_mark", "#"),
+    ("dispatch.list_empty_word", "empty"),
+    ("nodeback.node_dir", "../anti-hall-node"),
+    ("files.shadow_ledger", "shadow.ndjson"),
     ("launcher.cli_integrity_verb", "integrity"),
     ("launcher.cli_install_verb", "install"),
     ("launcher.cli_update_verb", "update"),
@@ -122,7 +137,6 @@ pub const STRS: &[(&str, &str)] = &[
     ("launcher.knob_libc", "AH_BOOTSTRAP_LIBC"),
     ("launcher.knob_install_retry_s", "AH_BOOTSTRAP_RETRY_S"),
     ("launcher.knob_install_run_s", "AH_BOOTSTRAP_RUN_S"),
-    ("launcher.script_hook", "ah-hook.sh"),
     ("launcher.engine_lock_file", "ah-engine.lock"),
     ("launcher.engine_bin_rel", "bin/ah-engine"),
     ("launcher.engine_bin_name", "ah-engine"),
@@ -143,8 +157,23 @@ pub const STRS: &[(&str, &str)] = &[
         "anti-hall: ignoring unknown --host value",
     ),
     (
-        "msg.launcher_fallback_exec_failed",
-        "anti-hall: cannot run the Node fallback wrapper: {err}; the engine answers",
+        "nodeback.msg_no_node_dir",
+        "anti-hall: the Node backup directory {dir} is missing, so the Node shadow and fallback do nothing; the engine keeps deciding",
+    ),
+    ("msg.launcher_nodeback_why_no_list", "no fallback list"),
+    ("msg.launcher_nodeback_why_no_match", "no matching fallback hooks"),
+    ("msg.launcher_nodeback_why_not_run", "fallback hooks did not run"),
+    (
+        "msg.launcher_nodeback_why_hard",
+        "fallback hook failed before producing a complete answer",
+    ),
+    (
+        "msg.launcher_nodeback_script_missing",
+        "anti-hall: hook script not found: {path}",
+    ),
+    (
+        "msg.launcher_nodeback_merge_differs",
+        "anti-hall: fallback merge kept the first hook's other fields; a later hook set different ones",
     ),
     (
         "msg.launcher_fail_closed",
@@ -252,11 +281,46 @@ pub const LISTS: &[(&str, &[&str])] = &[
         &["CLAUDE_PLUGIN_ROOT", "PLUGIN_ROOT"],
     ),
     ("launcher.hosts", &["claude", "codex"]),
+    ("launcher.nodeback_runners", &["node"]),
+    (
+        "launcher.nodeback_unrunnable_markers",
+        &["MODULE_NOT_FOUND", "Cannot find module"],
+    ),
+    (
+        "launcher.nodeback_keyless_events",
+        &["PermissionRequest", "SubagentStop"],
+    ),
+    (
+        "launcher.nodeback_tool_events",
+        &[
+            "PreToolUse",
+            "PostToolUse",
+            "PostToolUseFailure",
+            "PermissionRequest",
+        ],
+    ),
+    ("dispatch.match_all", &["", "*"]),
+    (
+        "dispatch.plain_context_events",
+        &[
+            "UserPromptSubmit",
+            "UserPromptExpansion",
+            "SessionStart",
+            "PostModelSwitch",
+        ],
+    ),
     (
         "dispatch.guard_events",
         &["PreToolUse", "PermissionRequest", "Stop", "SubagentStop"],
     ),
 ];
+
+/// Per-field list tables (`{ <field> = [..], .. }`).
+pub type ListTable = &'static [(&'static str, &'static [&'static str])];
+pub const LIST_TABLES: &[(&str, ListTable)] = &[(
+    "dispatch.blocking_decisions",
+    &[("decision", &["block"]), ("permissionDecision", &["deny"])],
+)];
 
 /// How the launcher finds its own settings (the bootstrap that must work before any settings are read): the defaults
 /// directory below the plugin root, the file that marks a plugin root as complete, and the three files the launcher reads.
@@ -266,6 +330,9 @@ pub const CFG_ENGINE_FILE: &str = "engine.toml";
 pub const CFG_DISPATCH_FILE: &str = "dispatch.toml";
 pub const CFG_MESSAGES_FILE: &str = "messages.toml";
 pub const CFG_DOCTOR_FILE: &str = "doctor.toml";
+pub const CFG_NODEBACK_FILE: &str = "nodeback.toml";
+/// The one key of `files.*` that `nodeback.toml` (not `engine.toml`) holds.
+pub const NODEBACK_LEDGER_KEY: &str = "files.shadow_ledger";
 /// The plugin's hooks directory below the plugin root.
 pub const HOOKS_DIR: &str = "hooks";
 
@@ -283,6 +350,14 @@ pub fn table_num(key: &str, field: &str) -> Option<u64> {
 
 pub fn text(key: &str) -> Option<&'static str> {
     STRS.iter().find(|(k, _)| *k == key).map(|(_, v)| *v)
+}
+
+pub fn list_table(key: &str, field: &str) -> Option<&'static [&'static str]> {
+    LIST_TABLES
+        .iter()
+        .find(|(k, _)| *k == key)
+        .and_then(|(_, t)| t.iter().find(|(f, _)| *f == field))
+        .map(|(_, v)| *v)
 }
 
 pub fn list(key: &str) -> Option<&'static [&'static str]> {

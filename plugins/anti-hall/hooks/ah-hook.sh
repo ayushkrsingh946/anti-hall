@@ -1,8 +1,8 @@
 #!/bin/sh
-# thin launcher shim: hand the call to the Rust launcher when it is installed and the fallback switch (the fallback.node marker) is off; otherwise (or for --doctor, which the launcher
-# itself delegates back here) run this wrapper unchanged. Builtins only (no dirname/cd/pwd forks) on the hot path.
+# thin launcher shim: hand the call to the Rust launcher when it is installed (it also runs the Node fallback itself while the fallback.node marker is set);
+# otherwise (or for --doctor, which the launcher itself delegates back here) run this wrapper unchanged. Builtins only (no dirname/cd/pwd forks) on the hot path.
 ah_l=${HOME:-}/.anti-hall/ah-engine/bin/ah-hook
-if [ -x "$ah_l" ] && [ ! -e "${AH_ENGINE_DIR:-${HOME:-}/.anti-hall/ah-engine}/fallback.node" ]; then
+if [ -x "$ah_l" ]; then
   case " $* " in
     *" --doctor "*) ;;
     *)
@@ -92,8 +92,8 @@ if [ -z "${AH_ENGINE_PLUGIN_ROOT:-}" ] && [ -f "$dir/../engine/defaults/index.to
 fi
 # the per-event hook timeouts of the host (the `@<Event>` rows of its list file); no command in it is ever run
 case "$host" in
-  codex) list_default=$dir/ah-fallback.codex.list ;;
-  *) list_default=$dir/ah-fallback.list ;;
+  codex) list_default=$dir/../../anti-hall-node/hooks/ah-fallback.codex.list ;;
+  *) list_default=$dir/../../anti-hall-node/hooks/ah-fallback.list ;;
 esac
 list=${AH_FALLBACK_LIST:-"$list_default"}
 uid=$(id -u 2>/dev/null || printf '0')
@@ -1086,8 +1086,8 @@ node_fallback_on() {
 # The ledger id of a hook: the dispatch-table id the map file gives its command (the engine rows use the same ids), else the script name.
 nf_id_of() {
   nf_esc=$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g')
-  nf_map=$dir/ah-fallback.map.json
-  [ "$host" = codex ] && nf_map=$dir/ah-fallback.codex.map.json
+  nf_map=$dir/../../anti-hall-node/hooks/ah-fallback.map.json
+  [ "$host" = codex ] && nf_map=$dir/../../anti-hall-node/hooks/ah-fallback.codex.map.json
   nf_id=
   [ -r "$nf_map" ] && nf_id=$(awk -v ev="$event" -v want="$nf_esc" '
     $0 ~ "^  \"" ev "\": \\{" { in_ev = 1; next }

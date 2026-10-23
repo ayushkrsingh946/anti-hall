@@ -1074,13 +1074,15 @@ mod tests {
                 }
             }
         }
-        let root = std::env::temp_dir().join(format!("ah-defaults-load-{tag}-{}", std::process::id()));
-        crate::discard::harmless(std::fs::remove_dir_all(&root));
+        let base = std::env::temp_dir().join(format!("ah-defaults-load-{tag}-{}", std::process::id()));
+        crate::discard::harmless(std::fs::remove_dir_all(&base));
+        let root = base.join("plugin");
         let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../plugins/anti-hall");
+        let node = Path::new(env!("CARGO_MANIFEST_DIR")).join("../plugins/anti-hall-node");
         cp(&src.join(bootstrap::DEFAULTS_DIR), &root.join(bootstrap::DEFAULTS_DIR));
-        std::fs::create_dir_all(root.join("hooks")).unwrap();
+        std::fs::create_dir_all(base.join("anti-hall-node/hooks")).unwrap();
         for l in ["ah-fallback.list", "ah-fallback.codex.list"] {
-            std::fs::copy(src.join("hooks").join(l), root.join("hooks").join(l)).unwrap();
+            std::fs::copy(node.join("hooks").join(l), base.join("anti-hall-node/hooks").join(l)).unwrap();
         }
         root
     }

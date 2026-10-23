@@ -218,12 +218,12 @@ fn the_guard_is_wired_for_both_hosts_and_both_orchestration_ports() {
     use ah_engine::dispatch::table as t;
     let has = |host: &str, id: &str| t::entries(host, "PreToolUse").iter().any(|e| e.id == id);
     assert!(has("claude", "broad-kill-guard") && has("codex", "broad-kill-guard"));
-    for rel in ["hooks/hooks.registry.json", "codex/hooks/hooks.registry.json", "hooks/ah-fallback.list", "hooks/ah-fallback.codex.list"] {
+    for rel in ["hooks/hooks.registry.json", "codex/hooks/hooks.registry.json", "../anti-hall-node/hooks/ah-fallback.list", "../anti-hall-node/hooks/ah-fallback.codex.list"] {
         let text = std::fs::read_to_string(plugin().join(rel)).unwrap();
         assert!(text.contains("hooks/broad-kill-guard"), "{rel} names the fallback no-op");
     }
     let script = std::fs::read_to_string(plugin().join("hooks/broad-kill-guard")).unwrap();
     assert!(script.contains("exit 0"), "the fallback is a no-op");
-    let schema = std::fs::read_to_string(plugin().join("hooks/lib/settings-schema.js")).unwrap();
+    let schema = std::fs::read_to_string(plugin().join("../anti-hall-node/hooks/lib/settings-schema.js")).unwrap();
     assert!(schema.contains("key: 'broadKill'") && schema.contains("ANTIHALL_BROAD_KILL"), "guards.broadKill is a registered setting");
 }

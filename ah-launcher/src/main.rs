@@ -23,6 +23,7 @@ mod integrity;
 mod rec;
 mod launcher;
 mod limits;
+mod nodeback;
 mod proc;
 mod selftest;
 mod update;

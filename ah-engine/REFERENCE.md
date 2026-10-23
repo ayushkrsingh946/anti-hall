@@ -688,6 +688,7 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 |---|---|---|---|---|
 | `launcher.arg_auto` | `--auto` |  |  | The argument the session start gives `ah-hook install` for the automatic form (installs only when the opt-in setting or the environment variable says so). |
 | `launcher.arg_builtin` | `--builtin` |  |  | The argument that makes `ah-hook doctor` run its built-in diagnosis even when the engine runs. |
+| `launcher.arg_tool_from_payload` | `--tool-from-payload` |  |  | The hook argument that makes the launcher read the tool name from the payload (implied on launcher.nodeback_tool_events). |
 | `launcher.cli_doctor_verb` | `doctor` |  |  | The ah-hook command-line verb of the built-in doctor (`ah-hook doctor [--builtin] [--check] [--repair [--dry-run]]`); it hands over to the engine's doctor when the engine runs. |
 | `launcher.cli_install_verb` | `install` |  |  | The ah-hook command-line verb that installs the pinned engine (and thin client) from the release archive (`ah-hook install [--lock FILE] [--print-target] [--auto] [-v]`). |
 | `launcher.cli_integrity_verb` | `integrity` |  |  | The ah-hook command-line verb that runs the binary integrity check and roll-back (`ah-hook integrity record\|accept\|check\|fail\|status\|lock\|unlock`); the launcher starts itself with it in the background. |
@@ -704,8 +705,10 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `launcher.engine_bin_rel` | `bin/ah-engine` |  |  | Path of the installed engine binary below the engine state directory. |
 | `launcher.engine_lock_file` | `ah-engine.lock` |  |  | File name, in the plugin root, of the engine lock: when present the session start may bootstrap the engine. |
 | `launcher.err_cap_bytes` | `1048576` |  | bytes | Most engine standard error the launcher keeps (same rule as launcher.out_cap_bytes). |
-| `launcher.fallback_list_claude` | `ah-fallback.list` |  |  | File name, inside the plugin's hooks directory, of the Claude fallback list (per-event timeouts). |
-| `launcher.fallback_list_codex` | `ah-fallback.codex.list` |  |  | File name, inside the plugin's hooks directory, of the Codex fallback list. |
+| `launcher.fallback_list_claude` | `hooks/ah-fallback.list` |  |  | Path, inside the Node backup directory (nodeback.node_dir), of the Claude fallback list: the per-event timeouts and the Node hooks the launcher runs while the Node fallback switch is on. |
+| `launcher.fallback_list_codex` | `hooks/ah-fallback.codex.list` |  |  | Path, inside the Node backup directory, of the Codex fallback list. |
+| `launcher.fallback_map_claude` | `hooks/ah-fallback.map.json` |  |  | Path, inside the Node backup directory, of the Claude fallback map: the dispatch-table id of each fallback command, used to name its shadow-ledger row. |
+| `launcher.fallback_map_codex` | `hooks/ah-fallback.codex.map.json` |  |  | Path, inside the Node backup directory, of the Codex fallback map. |
 | `launcher.hosts` | `claude, codex` |  |  | The hosts the launcher serves (the --host values); the first is the default. |
 | `launcher.in_process_env` | `AH_ENGINE_DISPATCH_IN_PROCESS` |  |  | Environment variable that, set to 1, runs the engine's dispatch in process; the launcher then ignores the daemon-down marker. |
 | `launcher.io_chunk_bytes` | `65536` |  | bytes | Size of the fixed buffer the launcher moves the payload and the engine's output with. Memory stays this size however large the payload is. |
@@ -736,6 +739,11 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `launcher.log_soft_bytes` | `262144` |  | bytes | Size at which the launcher's failure log is rotated (one previous file is kept). |
 | `launcher.mem_hard_bytes` | `67108864` |  | bytes | Hard limit on the launcher's own heap, enforced by its counting allocator and checked before any buffer grows: past it the launcher stops the engine, says so on stderr and lets the hook through (exit 0). |
 | `launcher.mem_soft_bytes` | `16777216` |  | bytes | Soft limit on the launcher's own heap: past it the launcher warns and counts it (at exit). |
+| `launcher.nodeback_keyless_events` | `PermissionRequest, SubagentStop` |  |  | Guard events that no Node hook is registered for: the generated fallback list has no section for them, and the Node fallback answers them with the neutral no-op. A list without the section of any other guard event is damaged and fails closed. |
+| `launcher.nodeback_runners` | `node` |  |  | The programs a fallback-list command may start (looked up on PATH); the launcher starts them directly, never through a shell. A row that starts anything else is a no-op script of the dispatch table (the engine answers it in-process) and counts as having run. |
+| `launcher.nodeback_tool_events` | `PreToolUse, PostToolUse, PostToolUseFailure, PermissionRequest` |  |  | The events on which the Node fallback reads the tool name from the payload and selects the list rows by their matcher. |
+| `launcher.nodeback_tool_field` | `tool_name` |  |  | The payload field that names the tool of a tool event; the Node fallback matches the list's matchers against it. |
+| `launcher.nodeback_unrunnable_markers` | `MODULE_NOT_FOUND, Cannot find module` |  |  | Texts that must all appear on a Node hook's stderr (exit 1) for the hook to count as unrunnable (its script or a module is missing) instead of a non-blocking failure of the hook itself. |
 | `launcher.out_cap_bytes` | `4194304` |  | bytes | Most engine standard output the launcher keeps. A hook answer is small; more than this is treated as a failed engine and the hook is let through. |
 | `launcher.payload_prefix_bytes` | `1048576` |  | bytes | How much of the payload the launcher keeps in memory: the part it inspects (session id, stop flag) and replays to the fallback runner. The rest is streamed through and never held. |
 | `launcher.plugin_root_envs` | `CLAUDE_PLUGIN_ROOT, PLUGIN_ROOT` |  |  | Environment variables the host uses to name the plugin root, in the order the launcher tries them. |
@@ -746,7 +754,6 @@ Defaults ship with the plugin in `engine/defaults/*.toml` and are read at run ti
 | `launcher.run_fail_open_file` | `fail_open` |  |  | Name, inside a per-call run directory, of the file the engine client appends the call's reported fail-opens to (see env.fail_open_file). |
 | `launcher.run_spool_file` | `payload` |  |  | Name, inside a per-call run directory, of the private copy of a large payload (see launcher.spool_max_bytes). |
 | `launcher.run_wait_file` | `wait` |  |  | Name, inside a per-call run directory, of the file the engine creates while it waits on a live daemon. |
-| `launcher.script_hook` | `ah-hook.sh` |  |  | The shell wrapper in the plugin's hooks directory; the launcher hands the call to it while the Node fallback switch is on (files.fallback_switch). |
 | `launcher.selftest_engine_timeout_ms` | `3000` |  | ms | How long --selftest lets the engine binary run its version check before it calls the binary broken. |
 | `launcher.spawn_backoff_base_ms` | `5` |  | ms | First wait between engine start retries; each retry doubles it up to launcher.spawn_backoff_cap_ms. |
 | `launcher.spawn_backoff_cap_ms` | `40` |  | ms | Longest wait between engine start retries (before jitter). Every wait also stays inside the event's hard deadline. |
@@ -11246,12 +11253,17 @@ Text lives in `messages.toml` (and `git.toml` for the git check's block messages
 | `msg.launcher_cpu_hard` | Printed when the launcher passed its hard CPU limit and let the hook through. |
 | `msg.launcher_fail_closed` | Printed when a guard event is blocked because the launcher cannot run it safely; {event} is the event, {why} the reason. |
 | `msg.launcher_fail_open_stop` | Printed instead of blocking when the event is a stop hook that is already active; {event} and {why} as above. |
-| `msg.launcher_fallback_exec_failed` | Written when the launcher cannot hand the call to the shell wrapper while the Node fallback switch is on; the engine answers instead. Placeholder: {err}. |
 | `msg.launcher_ignored_knobs` | Printed when test-only variables are set without the test flag; {vars} lists them. |
 | `msg.launcher_integrity_status` | Printed by `ah-hook integrity status`. Placeholders: {binary}, {installed}, {expected}, {healthy}, {good}, {last} (the sha256s are empty when not known). |
 | `msg.launcher_integrity_usage` | Printed by `ah-hook integrity` for a verb it does not know. |
 | `msg.launcher_internal` | Printed (once) when the launcher itself failed and let the hook through; {what} is the failure. |
 | `msg.launcher_mem_hard` | Printed when the launcher passed its hard heap limit and let the hook through. |
+| `msg.launcher_nodeback_merge_differs` | Written when the JSON answers of several fallback hooks carry different fields besides the merged additionalContext and systemMessage; the first hook's fields are kept. |
+| `msg.launcher_nodeback_script_missing` | Written when a fallback command names a script under the plugin root that does not exist; that hook is skipped and counted as an error. Placeholder: {path}. |
+| `msg.launcher_nodeback_why_hard` | The reason a guard event fails closed when a fallback hook died or could not be started and no hook blocked. |
+| `msg.launcher_nodeback_why_no_list` | The reason a guard event fails closed while the Node fallback switch is on and the fallback list is missing or empty. |
+| `msg.launcher_nodeback_why_no_match` | The reason a guard event fails closed when no fallback hook matches its tool (the list has no neutral answer). |
+| `msg.launcher_nodeback_why_not_run` | The reason a guard event fails closed when matching fallback hooks existed but none finished. |
 | `msg.launcher_selftest_fail` | Selftest line for a failing check; {check} names it, {why} the reason. |
 | `msg.launcher_selftest_ok` | Selftest line for a passing check; {check} names it. |
 | `msg.launcher_st_cannot_start` | Selftest reason: the engine binary could not be started; {errno} is the system error number. |

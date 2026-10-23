@@ -118,10 +118,10 @@ function launchCommands(file) {
 test('every path that still launches a Node hook (dispatch.toml, fallback lists and maps) carries the flags exactly for EXPOSED_HOOKS', () => {
   const files = [
     path.join(PLUGIN, 'engine', 'defaults', 'dispatch.toml'),
-    path.join(HOOKS, 'ah-fallback.list'),
-    path.join(HOOKS, 'ah-fallback.codex.list'),
-    path.join(HOOKS, 'ah-fallback.map.json'),
-    path.join(HOOKS, 'ah-fallback.codex.map.json'),
+    path.join(NODE_PLUGIN, 'hooks', 'ah-fallback.list'),
+    path.join(NODE_PLUGIN, 'hooks', 'ah-fallback.codex.list'),
+    path.join(NODE_PLUGIN, 'hooks', 'ah-fallback.map.json'),
+    path.join(NODE_PLUGIN, 'hooks', 'ah-fallback.codex.map.json'),
   ];
   for (const f of files) {
     const cmds = launchCommands(f);

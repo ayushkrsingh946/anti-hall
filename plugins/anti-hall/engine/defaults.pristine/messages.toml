@@ -787,10 +787,6 @@ value = "anti-hall: ignoring test-only variables (need AH_WRAPPER_TEST=1): {vars
 doc = "Printed when --host names a host the launcher does not serve; the default host is used."
 value = "anti-hall: ignoring unknown --host value"
 
-[msg.launcher_fallback_exec_failed]
-doc = "Written when the launcher cannot hand the call to the shell wrapper while the Node fallback switch is on; the engine answers instead. Placeholder: {err}."
-value = "anti-hall: cannot run the Node fallback wrapper: {err}; the engine answers"
-
 [msg.install_notice]
 doc = "The one line per session hooks/install.sh prints on stderr while the thin client is not installed (hook calls pass through unchecked)."
 value = "anti-hall: the engine is not installed, so the guards are not running. Run /anti-hall:activate to install it (a sha256-pinned download); until then every hook call passes through."
@@ -1426,3 +1422,26 @@ value = "verified: sha256 of {name} matches {src}"
 doc = "Said when the download also matches the plugin lock."
 value = "verified: also matches this plugin's ah-engine.lock"
 
+[msg.launcher_nodeback_why_no_list]
+doc = "The reason a guard event fails closed while the Node fallback switch is on and the fallback list is missing or empty."
+value = "no fallback list"
+
+[msg.launcher_nodeback_why_no_match]
+doc = "The reason a guard event fails closed when no fallback hook matches its tool (the list has no neutral answer)."
+value = "no matching fallback hooks"
+
+[msg.launcher_nodeback_why_not_run]
+doc = "The reason a guard event fails closed when matching fallback hooks existed but none finished."
+value = "fallback hooks did not run"
+
+[msg.launcher_nodeback_why_hard]
+doc = "The reason a guard event fails closed when a fallback hook died or could not be started and no hook blocked."
+value = "fallback hook failed before producing a complete answer"
+
+[msg.launcher_nodeback_script_missing]
+doc = "Written when a fallback command names a script under the plugin root that does not exist; that hook is skipped and counted as an error. Placeholder: {path}."
+value = "anti-hall: hook script not found: {path}"
+
+[msg.launcher_nodeback_merge_differs]
+doc = "Written when the JSON answers of several fallback hooks carry different fields besides the merged additionalContext and systemMessage; the first hook's fields are kept."
+value = "anti-hall: fallback merge kept the first hook's other fields; a later hook set different ones"

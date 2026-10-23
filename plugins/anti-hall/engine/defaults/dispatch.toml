@@ -371,7 +371,7 @@ value = { claude = ["SessionStart", "Setup", "UserPromptSubmit", "UserPromptExpa
 
 [dispatch.generated_files]
 doc = "Per host and kind of generated file (hooks, registry, list, map), its path relative to the repository root. `tests/hooks_files.rs` requires each committed file to equal what `gen-hooks` prints and `ah-gen-fallback-list` writes them."
-value = { claude = { hooks = "plugins/anti-hall/hooks/hooks.json", registry = "plugins/anti-hall/hooks/hooks.registry.json", list = "plugins/anti-hall/hooks/ah-fallback.list", map = "plugins/anti-hall/hooks/ah-fallback.map.json" }, codex = { hooks = "plugins/anti-hall/codex/hooks/hooks.json", registry = "plugins/anti-hall/codex/hooks/hooks.registry.json", list = "plugins/anti-hall/hooks/ah-fallback.codex.list", map = "plugins/anti-hall/hooks/ah-fallback.codex.map.json" } }
+value = { claude = { hooks = "plugins/anti-hall/hooks/hooks.json", registry = "plugins/anti-hall/hooks/hooks.registry.json", list = "plugins/anti-hall-node/hooks/ah-fallback.list", map = "plugins/anti-hall-node/hooks/ah-fallback.map.json" }, codex = { hooks = "plugins/anti-hall/codex/hooks/hooks.json", registry = "plugins/anti-hall/codex/hooks/hooks.registry.json", list = "plugins/anti-hall-node/hooks/ah-fallback.codex.list", map = "plugins/anti-hall-node/hooks/ah-fallback.codex.map.json" } }
 
 [dispatch.gen_default_kind]
 doc = "The file `gen-hooks` prints when `--kind` is not given."
@@ -399,7 +399,7 @@ value = "#"
 
 [dispatch.fallback_lists]
 doc = "Per host, the wrapper's fallback list relative to the plugin root (the same files as dispatch.generated_files): a defaults load is rejected when a list runs hooks for an event the table has no row for, and the dispatcher answers an event without a row with the neutral no-op only when this list marks it as a thin trigger."
-value = { claude = "hooks/ah-fallback.list", codex = "hooks/ah-fallback.codex.list" }
+value = { claude = "../anti-hall-node/hooks/ah-fallback.list", codex = "../anti-hall-node/hooks/ah-fallback.codex.list" }
 
 [dispatch.msg_no_row]
 doc = "Deferral reason when the dispatch table has no well-formed row for an event the fallback list does not mark as a thin trigger. Placeholders: {host}, {event}."

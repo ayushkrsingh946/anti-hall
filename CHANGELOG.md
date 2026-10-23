@@ -10,6 +10,8 @@ the update.
 
 ### Added
 
+- The thin client runs the Node fallback itself (`ah-hook`, new `nodeback` module): while the `fallback.node` marker is set it reads the fallback list of the Node backup (`plugins/anti-hall-node/hooks/ah-fallback*.list`), starts each matching Node hook directly (no shell, per-row timeout, process group killed on timeout), merges their JSON answers with the dispatch joiners, and writes one shadow-ledger row per hook. A missing Node directory is one notice line and exit 0. The launcher no longer starts `sh` anywhere; the generated fallback lists and maps moved out of the published plugin into `plugins/anti-hall-node/hooks/`.
+
 - **An idle coordinating session is woken when an agent it launched goes idle with open work, loops, burns tokens or a watched process ends (#256).** New route target `wake` (config rows in `agent_tracker.targets`), the Monitor `ah-engine agents wake-watch --auto` armed at SessionStart (off switch `agents.wakeWatch`), and the config-defined signals `idle_open_task` and `watched_exit`. `monitor_unarmed` now sees a live wake-watch and is one short line.
 
 ### Fixed

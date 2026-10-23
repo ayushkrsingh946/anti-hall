@@ -48,7 +48,7 @@ pub fn cases() -> Vec<Case> {
 pub fn table() -> BTreeMap<String, BTreeMap<String, Vec<String>>> {
     let mut out = BTreeMap::new();
     for (host, file) in [("claude", "ah-fallback.list"), ("codex", "ah-fallback.codex.list")] {
-        let text = std::fs::read_to_string(harness::plugin_src().join("hooks").join(file)).unwrap();
+        let text = std::fs::read_to_string(harness::plugin_src().join("../anti-hall-node/hooks").join(file)).unwrap();
         let mut events: BTreeMap<String, Vec<String>> = BTreeMap::new();
         let mut cur = String::new();
         for line in text.lines() {

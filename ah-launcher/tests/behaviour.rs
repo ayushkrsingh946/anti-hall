@@ -393,13 +393,13 @@ fn stdin_closed_before_any_data_is_an_empty_payload() {
 }
 
 #[test]
-fn large_payload_is_replayed_whole_to_the_fallback_runner_when_the_engine_defers() {
+fn an_engine_that_hands_a_large_call_back_is_answered_with_one_notice_and_no_runner() {
     let env = Env::new("replay");
-    let got = env.path("replayed");
-    // the fake fallback runner (ah-hook.sh --fallback-only) records what it was given
+    // the retired shell wrapper must never be started: a marker would show it
+    let marker = env.path("runner-ran");
     std::fs::write(
         env.root.join("hooks/ah-hook.sh"),
-        format!("cat >{}\nexit 0\n", got.display()),
+        format!("touch {}\nexit 0\n", marker.display()),
     )
     .unwrap();
     let e = env.script("defer.sh", "exit 75"); // defers without reading anything
@@ -411,39 +411,41 @@ fn large_payload_is_replayed_whole_to_the_fallback_runner_when_the_engine_defers
         &[("AH_HOOK_TIMEOUT_MS", "5000")],
     );
     assert_eq!(o.code, 0, "{}", o.err);
+    assert!(o.out.is_empty(), "no answer is invented");
     assert_eq!(
-        std::fs::read(&got).unwrap(),
-        data,
-        "the whole payload reached the fallback runner"
+        o.err.matches("handed the call back").count(),
+        1,
+        "one notice: {}",
+        o.err
     );
+    assert!(!marker.exists(), "no shell runner is started");
 }
 
 #[test]
-fn payload_beyond_the_spool_limit_cannot_be_replayed_and_a_guard_fails_closed() {
+fn a_guard_event_the_engine_hands_back_goes_through_with_the_notice_and_starts_no_runner() {
     let env = Env::new("nospool");
-    env.set("launcher.spool_max_bytes", "1048576");
+    let marker = env.path("runner-ran");
     std::fs::write(
         env.root.join("hooks/ah-hook.sh"),
-        "cat >/dev/null\nexit 0\n",
+        format!("touch {}\nexit 0\n", marker.display()),
     )
     .unwrap();
     let e = env.script("defer.sh", "exit 75");
     let data = pattern(5 << 20);
-    let o = env.run(
-        "PreToolUse",
-        &data,
-        Some(&e),
-        &[("AH_HOOK_TIMEOUT_MS", "5000")],
-    );
-    assert_eq!(o.code, 2, "{}", o.err);
-    assert!(o.err.contains("fail closed"), "{}", o.err);
-    let o = env.run(
-        "UserPromptSubmit",
-        &data,
-        Some(&e),
-        &[("AH_HOOK_TIMEOUT_MS", "5000")],
-    );
-    assert_eq!(o.code, 0, "a non-guard event is let through");
+    for event in ["PreToolUse", "UserPromptSubmit"] {
+        let o = env.run(
+            event,
+            &data,
+            Some(&e),
+            &[("AH_HOOK_TIMEOUT_MS", "5000")],
+        );
+        assert_eq!(o.code, 0, "{event}: {}", o.err);
+        if event == "PreToolUse" {
+            // the notice is once per session
+            assert!(o.err.contains("handed the call back"), "{event}: {}", o.err);
+        }
+    }
+    assert!(!marker.exists(), "no shell runner is started");
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------
