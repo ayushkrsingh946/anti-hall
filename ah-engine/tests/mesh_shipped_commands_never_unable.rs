@@ -31,7 +31,6 @@ const KNOWN_UNABLE: &[&str] = &[
     "inbox pull",         // unhandled_verb: register + pullOnce
     "inbox read",         // unhandled_verb
     "inbox read-primary", // no-descriptor: an unregistered id
-    "migrate",            // unhandled_verb
     "primary takeover",   // primary-seat
     "respawn",            // respawn-primary
     "retention restore",  // restore

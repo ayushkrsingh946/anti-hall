@@ -1861,6 +1861,10 @@ value = "unarchive"
 doc = "The `action` an unarchive result and its refusals carry."
 value = "unarchive"
 
+[devswarm_cli.verb_migrate]
+doc = "The verb that runs the persisted-state migrations (the engine's own migration pass, the one `ah-engine migrate` and the updater run; the former global-store split is part of it)."
+value = "migrate"
+
 [devswarm_cli.verb_migrate_owner_keys]
 doc = "The verb that backfills a missing ownerKey on every workspace descriptor."
 value = "migrate-owner-keys"
