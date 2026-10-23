@@ -337,6 +337,10 @@ fn cases(fx: &Fx) -> Vec<Case> {
         let wt = wt.clone();
         move |h: &Path| vec![desc(h, "child-1", Some("inbox/child-1.ndjson"), Some("cursors-nd/child-1.txt"), &wt)]
     };
+    let d_store = {
+        let wt = wt.clone();
+        move |h: &Path| vec![desc(h, "child-1", None, None, &wt)]
+    };
     let l1 = line(Some("native:aaa"), Some(1_790_000_000_500), "first native");
     let l2 = line(Some("native:bbb"), Some(1_790_000_001_500), "second native");
     let l3 = line(None, Some(1_790_000_002_500), "legacy line without hash");
@@ -364,6 +368,18 @@ fn cases(fx: &Fx) -> Vec<Case> {
     v.push(base("read-partly-read", cmd("read", "child-1", &[]), ack(floors("child-1", 1, 2), d_inbox.clone()), inbox(text3.clone()), true, vec!["\"action\":\"read\"", "legacy line without hash", "!first native"]));
     v.push(base("read-all-read", cmd("read", "child-1", &[]), ack(floors("child-1", 2, 3), d_inbox.clone()), inbox(text3.clone()), true, vec!["\"lines\":[]", "!ackHint"]));
     v.push(base("read-unknown-no-inbox-files", cmd("read", "child-1", &[]), ack(floors("child-1", 0, 0), d_inbox.clone()), nothing(), true, vec!["\"known\":false", "\"meshMessages\":[{"]));
+    // ---- peek-primary: native ----
+    v.push(base("peek-store-only-2-unread", cmd("peek-primary", "child-1", &[]), ack(floors("child-1", 0, 0), d_store.clone()), nothing(), true, vec!["\"action\":\"peek-primary\"", "\"count\":2", "!readReceiptId"]));
+    v.push(base("peek-partly-read", cmd("peek-primary", "child-1", &[]), ack(floors("child-1", 1, 0), d_store.clone()), nothing(), true, vec!["\"count\":1"]));
+    v.push(base("peek-nothing-unread", cmd("peek-primary", "child-1", &[]), ack(floors("child-1", 2, 0), d_store.clone()), nothing(), true, vec!["\"count\":0", "\"messages\":[]"]));
+    v.push(base("peek-union-ndjson-and-store", cmd("peek-primary", "child-1", &[]), ack(floors("child-1", 0, 0), d_inbox.clone()), inbox(text3.clone()), true, vec!["\"cursorNdjson\":0", "first native", "!ackCommand"]));
+    v.push(base("peek-with-limit", cmd("peek-primary", "child-1", &["--limit", "10"]), ack(floors("child-1", 0, 0), d_store.clone()), nothing(), true, vec!["\"count\":2"]));
+    let mut from_main = base("peek-from-another-checkout", cmd("peek-primary", "child-1", &[]), ack(floors("child-1", 0, 0), d_store.clone()), nothing(), true, vec!["\"count\":2"]);
+    from_main.cwd = "main";
+    v.push(from_main);
+    // ---- peek-primary: deferred ----
+    v.push(base("peek-text-format", cmd("peek-primary", "child-1", &["--format", "text"]), ack(floors("child-1", 0, 0), d_store.clone()), nothing(), false, vec![]));
+    v.push(base("peek-no-descriptor", cmd("peek-primary", "ghost", &[]), ack(floors("child-1", 0, 0), d_store.clone()), nothing(), false, vec![]));
     // ---- count: deferred ----
     v.push(base("count-no-descriptor", cmd("count", "ghost", &[]), ack(floors("child-1", 0, 0), d_inbox.clone()), inbox(text3.clone()), false, vec![]));
     v.push(base("read-no-descriptor", cmd("read", "ghost", &[]), ack(floors("child-1", 0, 0), d_inbox.clone()), inbox(text3.clone()), false, vec![]));
@@ -424,12 +440,12 @@ fn run_case_list(tag: &str, list: Vec<Case>, fx: &Fx) {
 }
 
 #[test]
-fn inbox_count_and_read_match_node_byte_for_byte_and_defer_without_writing() {
+fn inbox_count_read_and_peek_match_node_byte_for_byte_and_defer_without_writing() {
     if !node_sqlite_available() {
         eprintln!("SKIPPED: Node with node:sqlite is not available, so there is no Node writer to compare with");
         return;
     }
     let fx = fixture("ic");
-    let list = cases(&fx).into_iter().filter(|c| matches!(c.argv.get(1).map(String::as_str), Some("count" | "read"))).collect();
-    run_case_list("count+read", list, &fx);
+    let list = cases(&fx).into_iter().filter(|c| matches!(c.argv.get(1).map(String::as_str), Some("count" | "read" | "peek-primary"))).collect();
+    run_case_list("count+read+peek", list, &fx);
 }

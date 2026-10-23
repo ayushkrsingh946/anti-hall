@@ -2009,3 +2009,11 @@ value = "`inbox read` is READ-ONLY and advanced no cursor — these {total} unre
 [mesh_write.action_read]
 doc = "The `action` of an `inbox read` result."
 value = "read"
+
+[mesh_write.action_peek_primary]
+doc = "The `action` of an `inbox peek-primary` result."
+value = "peek-primary"
+
+[mesh_write.peek_primary_unread_flags]
+doc = "The flags `inbox read-primary` accepts that a peek does not (a text rendering, an immediate ack): a peek carrying one is Node's, since Node ignores them in its own way."
+value = ["format", "ack-after-print"]

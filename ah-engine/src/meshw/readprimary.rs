@@ -557,23 +557,38 @@ struct Planned {
 /// the `unclaimed:` marker, take it off (the promotion's writes) and plan again over the row as it is now; then file the
 /// receipt.
 pub fn run(inv: &Inv, a: &Args) -> R<Answer> {
+    run_mode(inv, a, false)
+}
+
+/// Run `inbox peek-primary <id>`: the read of [`run`] without its receipt (nothing is acked, nothing is filed), from any caller.
+pub fn run_peek(inv: &Inv, a: &Args) -> R<Answer> {
+    run_mode(inv, a, true)
+}
+
+fn run_mode(inv: &Inv, a: &Args, peek: bool) -> R<Answer> {
     // `--since` / `--tail` are refused before anything is read (the shapes `plan` defers are checked there)
-    if !a.is_help()
+    if !peek
+        && !a.is_help()
         && a.positionals.len() == 3
         && let Some(id) = a.positionals.get(2).map(String::as_str).filter(|i| is_safe_id(i))
         && let Some(refused) = window_refusal(inv, a, id)?
     {
         return Ok(refused);
     }
-    let mut first = plan(inv, a, None)?;
+    let mut first = plan(inv, a, None, peek)?;
     let planned = match first.promo.take() {
         None => first,
         Some(pc) => {
             let classic = promote(inv, a, &pc.desc, pc.desc_sid.as_deref(), pc.registry_sid.as_deref(), &pc.marker, &pc.repo_key)?;
             // the writes are made: from here a deferral is a committed failure, never a second run in Node
-            plan(inv, a, classic)?
+            plan(inv, a, classic, peek)?
         }
     };
+    if peek {
+        // a peek files nothing: its answer is the read itself (the promotion, when it happened, was its only write)
+        let stdout = planned.result.stringify();
+        return Ok(Answer { code: 0, stdout: format!("{stdout}\n"), effect: Effect::None });
+    }
     // ---- the receipt: the only write of an unpromoted read ----
     let mut tmp = planned.file.as_os_str().to_os_string();
     tmp.push(defaults::text("mesh_write.tmp_suffix"));
@@ -600,7 +615,7 @@ pub fn run(inv: &Inv, a: &Args) -> R<Answer> {
 }
 
 /// The read itself (see [`run`]). `promoted` is `Some(classic)` on the pass that follows a promotion.
-fn plan(inv: &Inv, a: &Args, promoted: Option<bool>) -> R<Planned> {
+fn plan(inv: &Inv, a: &Args, promoted: Option<bool>, peek: bool) -> R<Planned> {
     if a.is_help() {
         return defer("help");
     }
@@ -609,7 +624,9 @@ fn plan(inv: &Inv, a: &Args, promoted: Option<bool>) -> R<Planned> {
     }
     let Some(id) = a.positionals.get(2).map(String::as_str).filter(|i| is_safe_id(i)) else { return defer("bad-id") };
     let allowed = defaults::list("mesh_write.read_primary_flags");
-    if a.flags.keys().any(|k| !allowed.contains(&k.as_str())) {
+    // a peek has no text rendering and no immediate ack: those flags are Node's (it ignores them in its own way)
+    let peek_off = defaults::list("mesh_write.peek_primary_unread_flags");
+    if a.flags.keys().any(|k| !allowed.contains(&k.as_str()) || (peek && peek_off.contains(&k.as_str()))) {
         return defer("flags");
     }
     let format_text = match a.flags.get(defaults::text("mesh_write.flag_format")) {
@@ -649,12 +666,16 @@ fn plan(inv: &Inv, a: &Args, promoted: Option<bool>) -> R<Planned> {
     });
     tick::single_partition(&o.rows, &desc, id)?;
     // the ownership gate of an acking read: the caller is the id, owns it by its registry row, or declared it
-    let caller = ident::caller_identity_detailed(&inv.env, &inv.cwd)?;
-    let own_entry = resolve_mesh_target(inv, None, &o.rows, Some(caller.identity.as_str()))?;
-    let owns =
-        caller.identity == id || own_entry.as_ref().is_some_and(|e| e.id == id) || ident::declared_self_id(&inv.env, &inv.cwd, &o.rows)?.as_deref() == Some(id);
-    if !owns {
-        return defer("not-owner");
+    // (a peek acks nothing, so it has no ownership gate: any caller may look)
+    if !peek {
+        let caller = ident::caller_identity_detailed(&inv.env, &inv.cwd)?;
+        let own_entry = resolve_mesh_target(inv, None, &o.rows, Some(caller.identity.as_str()))?;
+        let owns = caller.identity == id
+            || own_entry.as_ref().is_some_and(|e| e.id == id)
+            || ident::declared_self_id(&inv.env, &inv.cwd, &o.rows)?.as_deref() == Some(id);
+        if !owns {
+            return defer("not-owner");
+        }
     }
     let (store_base, nd_base) = tick::read_bases(inv, &o.reader, id, cursor_file.as_deref())?;
     let total_store = o.reader.message_count(id).map_err(|e| ident::Defer(format!("store-read:{e}")))?;
@@ -753,13 +774,19 @@ fn plan(inv: &Inv, a: &Args, promoted: Option<bool>) -> R<Planned> {
     if !rows.is_empty() && common::jev_maybe_enabled(inv) {
         return defer("jev");
     }
-    let cli = launcher_path(&inv.home)?;
+    let cli = if peek { String::new() } else { launcher_path(&inv.home)? };
     let reader = cursors::reader_key(tick::reader_nonce_cached(&inv.home).as_deref());
     let dir = devswarm_root(&inv.home).join(defaults::text("mesh_write.dir_read_receipts")).join(id);
-    nothing_to_prune(&dir, inv.now)?;
+    if !peek {
+        nothing_to_prune(&dir, inv.now)?;
+    }
     // ---- the output (everything but the receipt id is known) ----
-    let Some(rand) = random_hex(6) else { return defer("no-random") };
-    let rid = format!("{}{}{rand}", defaults::text("mesh_write.receipt_id_prefix"), base36(inv.now.max(0) as u64));
+    let rid = if peek {
+        String::new()
+    } else {
+        let Some(rand) = random_hex(6) else { return defer("no-random") };
+        format!("{}{}{rand}", defaults::text("mesh_write.receipt_id_prefix"), base36(inv.now.max(0) as u64))
+    };
     let mut ops = vec![{
         let mut op = Obj::default();
         op.put("k", s(defaults::text("mesh_write.op_own"))).put("partition", s(id)).put("target", n(own_target)).put("delivered", n(delivered as f64));
@@ -773,7 +800,7 @@ fn plan(inv: &Inv, a: &Args, promoted: Option<bool>) -> R<Planned> {
     let store_path = union::store_dir(&inv.home, &o.repo_key);
     let mut out = Obj::default();
     out.put("ok", OVal::Bool(true))
-        .put("action", s(defaults::text("mesh_write.action_read_primary")))
+        .put("action", s(defaults::text(if peek { "mesh_write.action_peek_primary" } else { "mesh_write.action_read_primary" })))
         .put("id", s(id))
         .put("repoKey", s(&o.repo_key))
         .put("storePath", OVal::Str(store_path.to_string_lossy().into_owned()))
@@ -800,6 +827,20 @@ fn plan(inv: &Inv, a: &Args, promoted: Option<bool>) -> R<Planned> {
     }
     if let Some((nd, st)) = union_cursors {
         out.put("cursorNdjson", n(nd)).put("cursorStore", n(st));
+    }
+    if peek {
+        // a peek stops at the cursors: no receipt, no ack command
+        return Ok(Planned {
+            result: out.done(),
+            text: None,
+            record: String::new(),
+            ack: None,
+            repo_key: o.repo_key.clone(),
+            dir,
+            file: PathBuf::new(),
+            rel: String::new(),
+            promo,
+        });
     }
     out.put("acked", OVal::Bool(false))
         .put("readReceiptId", s(&rid))
