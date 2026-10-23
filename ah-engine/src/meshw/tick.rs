@@ -224,6 +224,11 @@ pub(crate) fn note_own_excluded(u: &union::Unread) {
     }
 }
 
+/// `Number.isFinite(x) && x > 0 ? Math.floor(x) : 0`.
+fn nd_base_floor(x: f64) -> f64 {
+    if x.is_finite() && x > 0.0 { x.floor() } else { 0.0 }
+}
+
 /// What `count` reports for a single partition that a tick uses.
 pub(crate) struct Counted {
     /// The caller's project key.
@@ -246,6 +251,8 @@ pub(crate) struct Counted {
     pub nd_lines: Vec<String>,
     /// The unread store rows no NDJSON line covers.
     pub store_rows: Vec<serde_json::Value>,
+    /// Where an ack-all moves the NDJSON position: the base, the twin-read lines skipped and the unread lines after them.
+    pub nd_target: f64,
 }
 
 /// `count` for a single, registered partition. An unknown count (the inbox or its cursor file does not read) is the store
@@ -278,6 +285,7 @@ pub(crate) fn count_mail(inv: &Inv, id: &str, desc: &OVal, line_form: bool, full
     } else {
         None
     };
+    let nd_target = nd_base_floor(nd_base) + u.nd_skipped as f64 + u.nd_unread_lines.len() as f64;
     let nd_cursor = if !known && full {
         crate::meshw::cursors::read_cursor(Path::new(&cursor_file))
     } else if nd_base.is_finite() && nd_base > 0.0 {
@@ -296,6 +304,7 @@ pub(crate) fn count_mail(inv: &Inv, id: &str, desc: &OVal, line_form: bool, full
         total,
         nd_lines: u.nd_unread_lines,
         store_rows: u.store_only_unread,
+        nd_target: if known { nd_target } else { nd_cursor },
     })
 }
 

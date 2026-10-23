@@ -2017,3 +2017,19 @@ value = "peek-primary"
 [mesh_write.peek_primary_unread_flags]
 doc = "The flags `inbox read-primary` accepts that a peek does not (a text rendering, an immediate ack): a peek carrying one is Node's, since Node ignores them in its own way."
 value = ["format", "ack-after-print"]
+
+[mesh_write.log_ns_nd]
+doc = "The journal `ns` of an NDJSON-namespace reader cursor move."
+value = "reader_cursors:nd"
+
+[mesh_write.gate_min_floor]
+doc = "The journal `gate` of a cursor move that names no door (the floor recompute)."
+value = "min-floor"
+
+[mesh_write.verb_log_ack_all]
+doc = "The journal `verb` of an `inbox ack` NDJSON move."
+value = "inbox-ack-all"
+
+[mesh_write.verb_log_ack]
+doc = "The journal `verb` of an `inbox ack` store move."
+value = "inbox-ack"

@@ -380,6 +380,42 @@ fn cases(fx: &Fx) -> Vec<Case> {
     // ---- peek-primary: deferred ----
     v.push(base("peek-text-format", cmd("peek-primary", "child-1", &["--format", "text"]), ack(floors("child-1", 0, 0), d_store.clone()), nothing(), false, vec![]));
     v.push(base("peek-no-descriptor", cmd("peek-primary", "ghost", &[]), ack(floors("child-1", 0, 0), d_store.clone()), nothing(), false, vec![]));
+    // ---- ack: native ----
+    let pid = i64::from(std::process::id());
+    let session = json!({"sessions": [{"pid": pid, "startedAt": OLD}]});
+    let own_reader = format!("h:{pid}:{OLD}");
+    v.push(base("ack-3-ndjson-and-store-unread", cmd("ack", "child-1", &[]), ack(floors("child-1", 0, 0), d_inbox.clone()), inbox(text3.clone()), true, vec!["\"action\":\"ack\"", "\"cursor\":3"]));
+    v.push(base("ack-partly-read", cmd("ack", "child-1", &[]), ack(floors("child-1", 1, 2), d_inbox.clone()), inbox(text3.clone()), true, vec!["\"cursor\":3"]));
+    v.push(base("ack-all-read", cmd("ack", "child-1", &[]), ack(floors("child-1", 2, 3), d_inbox.clone()), inbox(text3.clone()), true, vec!["\"cursor\":3"]));
+    v.push(base("ack-empty-inbox-store-rows", cmd("ack", "child-1", &[]), ack(floors("child-1", 0, 0), d_inbox.clone()), inbox(String::new()), true, vec!["\"total\":0"]));
+    v.push(base("ack-unknown-no-inbox-files", cmd("ack", "child-1", &[]), ack(floors("child-1", 0, 0), d_inbox.clone()), nothing(), true, vec!["\"known\":false"]));
+    v.push(base("ack-as-owner-flag", cmd("ack", "child-1", &["--ack-as-owner"]), ack(floors("child-1", 0, 0), d_inbox.clone()), inbox(text3.clone()), true, vec!["\"cursor\":3"]));
+    v.push(base(
+        "ack-declared-reader",
+        cmd("ack", "child-1", &[]),
+        {
+            let session = session.clone();
+            let d = d_inbox.clone();
+            let own = own_reader.clone();
+            let mut rows = floors("child-1", 0, 0);
+            rows.push(row("child-1", "store", &own, 0));
+            rows.push(row("child-1", "nd", &own, 1));
+            Box::new(move |h| {
+                let mut v = json!({"rows": rows.clone(), "descriptors": d(h)});
+                v["sessions"] = session["sessions"].clone();
+                v
+            })
+        },
+        inbox(text3.clone()),
+        true,
+        vec!["\"cursor\":3"],
+    ));
+    // ---- ack: deferred ----
+    v.push(base("ack-to-flag", cmd("ack", "child-1", &["--to", "1"]), ack(floors("child-1", 0, 0), d_inbox.clone()), inbox(text3.clone()), false, vec![]));
+    v.push(base("ack-no-descriptor", cmd("ack", "ghost", &[]), ack(floors("child-1", 0, 0), d_inbox.clone()), inbox(text3.clone()), false, vec![]));
+    let mut other_row = base("ack-by-another-registered-row", cmd("ack", "child-1", &[]), ack(floors("child-1", 0, 0), d_inbox.clone()), inbox(text3.clone()), false, vec![]);
+    other_row.cwd = "main";
+    v.push(other_row);
     // ---- count: deferred ----
     v.push(base("count-no-descriptor", cmd("count", "ghost", &[]), ack(floors("child-1", 0, 0), d_inbox.clone()), inbox(text3.clone()), false, vec![]));
     v.push(base("read-no-descriptor", cmd("read", "ghost", &[]), ack(floors("child-1", 0, 0), d_inbox.clone()), inbox(text3.clone()), false, vec![]));
@@ -440,12 +476,12 @@ fn run_case_list(tag: &str, list: Vec<Case>, fx: &Fx) {
 }
 
 #[test]
-fn inbox_count_read_and_peek_match_node_byte_for_byte_and_defer_without_writing() {
+fn inbox_count_read_peek_and_ack_match_node_byte_for_byte_and_defer_without_writing() {
     if !node_sqlite_available() {
         eprintln!("SKIPPED: Node with node:sqlite is not available, so there is no Node writer to compare with");
         return;
     }
     let fx = fixture("ic");
-    let list = cases(&fx).into_iter().filter(|c| matches!(c.argv.get(1).map(String::as_str), Some("count" | "read" | "peek-primary"))).collect();
-    run_case_list("count+read+peek", list, &fx);
+    let list = cases(&fx).into_iter().filter(|c| matches!(c.argv.get(1).map(String::as_str), Some("count" | "read" | "peek-primary" | "ack"))).collect();
+    run_case_list("count+read+peek+ack", list, &fx);
 }
