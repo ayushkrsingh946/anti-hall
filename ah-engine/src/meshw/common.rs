@@ -263,6 +263,108 @@ pub fn jev_pending_answer(inv: &Inv, from: &str, to: &str) -> bool {
     }
 }
 
+/// `jev-triage.js` `recordAnswered({home, from, to})`: `from` is about to answer `to`. When `to` earlier sent `from` a labeled
+/// message with no answer recorded, the pair is dropped from the pending map, the time-to-answer is logged to the triage log and a
+/// joinable outcome row goes to the Jev decision log. Best effort and silent, as Node's (a failure never touches the send).
+pub fn jev_record_answered(inv: &Inv, from: &str, to: &str) {
+    let ah = inv.home.join(defaults::text("mesh_write.dir_anti_hall"));
+    let pending_path = ah.join(defaults::text("mesh_write.dir_state")).join(defaults::text("mesh_write.jev_pending_file"));
+    let Some(OVal::Obj(mut all)) = read_json(&pending_path) else { return };
+    let key = format!("{from}\u{1}{to}");
+    let Some(pending) = all.iter().rev().find(|(k, _)| *k == key).map(|(_, v)| v.clone()) else { return };
+    if !pending.truthy() {
+        return;
+    }
+    let ts = pending.get("ts");
+    let ts_num = match ts {
+        Some(OVal::Num(x)) => *x,
+        Some(OVal::Str(t)) => crate::checks::guardkit::text::js_number_of_str(t),
+        Some(OVal::Bool(b)) => f64::from(u8::from(*b)),
+        Some(OVal::Null) => 0.0,
+        _ => f64::NAN,
+    };
+    let latency = inv.now as f64 - ts_num;
+    all.retain(|(k, _)| *k != key);
+    if let Some(dir) = pending_path.parent() {
+        crate::discard::harmless(std::fs::create_dir_all(dir)); // keep: best-effort, Node's writePending swallows it
+    }
+    let tmp = format!("{}.tmp.{}", pending_path.display(), std::process::id());
+    if std::fs::write(&tmp, OVal::Obj(all).stringify()).is_ok() {
+        crate::discard::harmless(std::fs::rename(&tmp, &pending_path)); // keep: best-effort, as Node's
+    }
+    let num_or_null = |x: f64| if x.is_finite() { OVal::Num(x) } else { OVal::Null };
+    let mut row = vec![
+        ("ts".to_string(), OVal::Str(crate::checks::jsport::date::to_iso(inv.now as f64).unwrap_or_default())),
+        ("type".to_string(), OVal::Str(defaults::text("mesh_write.jev_answered_type").to_string())),
+    ];
+    for field in ["urgency", "kind"] {
+        if let Some(v) = pending.get(field) {
+            row.push((field.to_string(), v.clone()));
+        }
+    }
+    row.push(("latencyMs".to_string(), num_or_null(latency)));
+    let log = ah.join(defaults::text("mesh_write.dir_logs")).join(defaults::text("mesh_write.jev_triage_log_file"));
+    let env = crate::jev::settings::Env::from_pairs(inv.env.clone());
+    let keep = crate::jev::settings::JevSettings::resolve(&inv.home, crate::jev::settings::Sources::load(&inv.home, env.clone())).log_rotated_files;
+    let line = OVal::Obj(row).stringify();
+    if let Some(dir) = log.parent() {
+        crate::discard::harmless(std::fs::create_dir_all(dir)); // keep: the triage log is advisory
+    }
+    rotate_if_over(&log, defaults::num("mesh_write.jev_triage_log_max_bytes"), keep);
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&log) {
+        use std::io::Write;
+        crate::discard::harmless(f.write_all(format!("{line}\n").as_bytes())); // keep: the triage log is advisory
+    }
+    let ts_text = match ts {
+        Some(v) => ident::js_to_string(v),
+        None => defaults::text("mesh_write.js_undefined").to_string(),
+    };
+    let digest = ring::digest::digest(&ring::digest::SHA256, format!("{key}\u{1}{ts_text}").as_bytes());
+    let h: String = crate::meshw::store::hex(digest.as_ref()).chars().take(32).collect();
+    if let Some(lane) = crate::jev::shared::lane(&inv.home, &env) {
+        lane.record_outcome(
+            defaults::text("mesh_write.jev_outcome_id"),
+            &h,
+            defaults::text("mesh_write.jev_outcome_value"),
+            Some(defaults::text("mesh_write.jev_outcome_source")),
+            crate::jev::shared::project_for(Some(&inv.cwd)).as_deref(),
+        );
+    }
+}
+
+/// `shiftRotated(p, keep)` once `p` is over `max` bytes: `p.(keep-1)` onto `p.keep`, ..., `p` onto `p.1`.
+fn rotate_if_over(p: &Path, max: u64, keep: u64) {
+    if std::fs::metadata(p).map_or(true, |m| m.len() <= max) {
+        return;
+    }
+    let gen_path = |n: u64| PathBuf::from(format!("{}.{n}", p.display()));
+    for i in (1..keep.max(1)).rev() {
+        crate::discard::harmless(std::fs::rename(gen_path(i), gen_path(i + 1))); // keep: a gap in the chain is fine
+    }
+    crate::discard::harmless(std::fs::rename(p, gen_path(1))); // keep: on failure the row lands in the oversized file
+}
+
+/// A direct send would have queued its text for Jev arrival labelling (`enqueueArrival`). The queue was drained by a detached
+/// Node worker, which is not part of the live path, so nothing is queued; the skip is counted so it is seen.
+pub fn jev_arrival_skipped() {
+    crate::metrics::bump(defaults::text("mesh_write.metric_jev_arrival_skipped"), &[]);
+}
+
+/// A sent message is child activity: refresh the sender's plan progress clock (`planLib.noteActivity`) when the sender has a plan.
+/// Best effort like Node's `try/catch`: any failure, deferral included, is dropped and never changes the send result.
+pub fn note_sender_activity(inv: &Inv, from: &str, text: &str, now: f64) {
+    let run = || -> R<()> {
+        let Some(found) = crate::meshw::plan::find(inv, from)? else { return Ok(()) };
+        crate::meshw::plan::update_with(inv, &found.key, |cur| {
+            let Some(mut plan) = cur else { return Ok(((), None)) };
+            let refreshed = crate::meshw::plan::note_activity(&mut plan, text, now);
+            Ok(((), refreshed.then_some(plan)))
+        })?;
+        Ok(())
+    };
+    crate::discard::harmless(run()); // keep: Node's planLib update here is `catch (_) { /* best-effort */ }`
+}
+
 /// `planRefFor` + `findPlan`: whether the sender has a plan file (Node then records plan activity; the engine defers).
 pub fn sender_has_plan(inv: &Inv, from: &str) -> R<bool> {
     let mut wt: Option<String> = ident::read_descriptor(&inv.home, from).and_then(|d| match d.get(defaults::text("mesh_write.field_worktree_path")) {

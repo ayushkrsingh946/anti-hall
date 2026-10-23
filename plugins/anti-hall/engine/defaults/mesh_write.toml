@@ -1905,7 +1905,7 @@ min = 1
 max = 65536
 
 [mesh_write.file_read_max_bytes]
-doc = "Largest mesh file a read through a path from a descriptor or a session record may take (a durable inbox, a cursor file, a harness session record). A larger file, and anything that is no regular file (a FIFO, socket or device, whose read could block a worker for good), is not read: the hook's answer goes to Node."
+doc = "Soft limit on a mesh file read through a path from a descriptor or a session record (a durable inbox, a cursor file, a harness session record). A larger regular file is still read, but counted and logged (`mesh_descriptor_read_skipped`, reason `read_why_over_soft`); see `file_read_hard_max_bytes` for the hard limit."
 value = 16777216
 min = 1024
 
@@ -2215,3 +2215,53 @@ value = "retired-redirect-unresolvable-caller"
 [mesh_write.msg_redirect_unresolvable]
 doc = "The refusal of an `inbox ack` on a retired id by a caller not verifiable as the survivor. Placeholders: {id} and {survivor} (JSON-quoted)."
 value = "inbox ack {id} was redirected to survivor {survivor} after a fold, but the caller could not be verified as that survivor — refusing so an unrelated/unresolvable caller cannot advance the survivor's NDJSON cursor (pass --ack-as-owner to override)"
+
+[mesh_write.jev_triage_log_file]
+doc = "Jev triage's own log under anti-hall's logs directory (jev-triage.js logPath): one row per answered labeled message."
+value = "jev-triage.ndjson"
+
+[mesh_write.jev_triage_log_max_bytes]
+doc = "Size past which the Jev triage log is rotated before a row is appended (jev-triage.js CACHE_LOG_MAX_BYTES)."
+value = 1048576
+min = 1
+
+[mesh_write.jev_answered_type]
+doc = "The `type` of the Jev triage log row written when a labeled message is answered."
+value = "answered"
+
+[mesh_write.jev_outcome_id]
+doc = "The integration id of the Jev outcome row an answered labeled message records."
+value = "triage"
+
+[mesh_write.jev_outcome_value]
+doc = "The outcome of that row."
+value = "answered"
+
+[mesh_write.jev_outcome_source]
+doc = "The source of that row."
+value = "triage-answer-latency"
+
+[mesh_write.metric_jev_arrival_skipped]
+doc = "Counter bumped when a direct send would have queued its text for Jev arrival labelling: the queue's drain worker was a Node process, which is not part of the live path, so nothing is queued."
+value = "mesh_jev_arrival_skipped"
+
+[mesh_write.file_read_hard_max_bytes]
+doc = "Hard limit on a mesh file read through a path from a descriptor or a session record: Node's own string limit for `readFileSync(.., 'utf8')`, where its read fails too. A larger file is read as absent, counted and logged (reason `read_why_over_hard`). A FIFO, socket or device (whose read could block a worker for good) is read as absent the same way (reason `read_why_not_regular`)."
+value = 536870888
+min = 1024
+
+[mesh_write.site_read_bounded]
+doc = "The site named in the count and log of a bounded mesh file read made without a more specific site."
+value = "read_bounded"
+
+[mesh_write.read_why_not_regular]
+doc = "The reason a mesh file read was skipped: the path is no regular file (a FIFO, socket or device)."
+value = "not-a-regular-file"
+
+[mesh_write.read_why_over_hard]
+doc = "The reason a mesh file read was skipped: the file is past `file_read_hard_max_bytes`."
+value = "file-over-hard-cap"
+
+[mesh_write.read_why_over_soft]
+doc = "The reason a mesh file read was counted and logged: the file is past `file_read_max_bytes` but was read."
+value = "file-over-soft-cap"
