@@ -523,6 +523,73 @@ fn window_refusal(inv: &Inv, a: &Args, id: &str) -> R<Option<Answer>> {
     Ok(Some(Answer { code: 2, stdout: format!("{stdout}\n"), effect: Effect::None }))
 }
 
+/// `read-primary` of an id that has no descriptor, by a caller that does not own it: Node's `unregistered-workspace` (or the caller-
+/// shaped) refusal, exit 2, logged. `None` when this is not that case (the id has a descriptor, a flag or a shape the port does not
+/// answer): the read goes on and defers what it cannot do. A case that needs a redirect, a resolved other id or the empty partition of
+/// the caller's own id is Node's.
+fn unowned_refusal(inv: &Inv, a: &Args, id: &str) -> R<Option<Answer>> {
+    if a.is_help() || a.positionals.len() != 3 || ident::read_descriptor(&inv.home, id).is_some() || a.has(defaults::text("mesh_write.flag_ack_as_owner")) {
+        return Ok(None);
+    }
+    if text_requested(&a.raw) {
+        return Ok(None);
+    }
+    let root = devswarm_root(&inv.home);
+    if std::fs::symlink_metadata(root.join(defaults::text("devswarm_cli.rr_dir_retired")).join(format!("{id}{}", defaults::text("mesh_write.json_suffix")))).is_ok() {
+        return defer("retired-redirect");
+    }
+    let Some(repo_key) = ident::resolve_context(&inv.cwd, true)?.repo_key else { return defer("no-project") };
+    let reader = tick::open_reader_creating(inv, &repo_key)?;
+    let rows = ident::rows_of(&reader.roster().map_err(|e| ident::Defer(format!("registry:{e}")))?);
+    if rows.iter().any(|r| r.id == id) {
+        return Ok(None); // registered without a descriptor: the read below decides
+    }
+    // resolveReadArgToId: a mesh label or prefix that names a registered row is that row
+    if crate::meshw::send::names_another_row(inv, &reader, &rows, id)? {
+        return defer("read-arg-resolved");
+    }
+    let caller = ident::caller_identity_detailed(&inv.env, &inv.cwd)?;
+    let own_entry = resolve_mesh_target(inv, Some(&reader), &rows, Some(caller.identity.as_str()))?;
+    let owns = caller.identity == id || own_entry.as_ref().is_some_and(|e| e.id == id) || ident::declared_self_id(&inv.env, &inv.cwd, &rows)?.as_deref() == Some(id);
+    if owns {
+        return defer("unregistered-own-id");
+    }
+    let has_messages = reader.message_count(id).map_err(|e| ident::Defer(format!("store-read:{e}")))? > 0;
+    let cause = if !has_messages {
+        defaults::text("devswarm_cli.cause_unregistered_workspace")
+    } else if caller.kind == defaults::text("mesh_write.kind_unresolvable") {
+        defaults::text("devswarm_cli.cause_unresolvable_caller")
+    } else if own_entry.is_none() {
+        defaults::text("devswarm_cli.cause_caller_not_registered")
+    } else {
+        defaults::text("devswarm_cli.cause_ownership_mismatch")
+    };
+    let verb = defaults::text("mesh_write.action_read_primary");
+    let msg = fill_once(defaults::text("devswarm_cli.msg_read_primary_refused"), &[("verb", verb.to_string()), ("cause", cause.to_string()), ("id", format!("\"{id}\"")), ("rid", id.to_string())]);
+    let store_path = union::store_dir(&inv.home, &repo_key);
+    let mut o = Obj::default();
+    o.put("ok", OVal::Bool(false))
+        .put("reason", s(cause))
+        .put("error", s(&msg))
+        .put("id", s(id))
+        .put("callerIdentity", s(&caller.identity))
+        .put("identity", Obj(vec![("id".into(), s(&caller.identity)), ("kind".into(), s(&caller.kind))]).done())
+        .put("repoKey", s(&repo_key))
+        .put("storePath", OVal::Str(store_path.to_string_lossy().into_owned()))
+        .put("cwd", s(&inv.cwd))
+        .put("meshPartitionIds", OVal::Arr(vec![s(id)]))
+        .put("known", OVal::Bool(false))
+        .put("storeUnavailable", OVal::Bool(false))
+        .put("storeUnavailableReason", OVal::Null)
+        .put("meshGroupUnresolved", OVal::Bool(false))
+        .put("meshGroupError", OVal::Null)
+        .put("totalsPartial", OVal::Bool(true));
+    crate::meshw::clog::ready(inv)?;
+    crate::meshw::clog::refusal(inv, defaults::text("devswarm_cli.window_op_read_primary"), Some(&repo_key), Some(id), &msg, Some(cause));
+    crate::meshw::mark_committed();
+    Ok(Some(Answer { code: 2, stdout: format!("{}\n", o.done().stringify()), effect: Effect::None }))
+}
+
 /// What the first pass found out about a promotion the row needs (made after that pass has settled every deferral).
 struct PromoCtx {
     desc: OVal,
@@ -557,6 +624,11 @@ pub fn run(inv: &Inv, a: &Args) -> R<Answer> {
         && a.positionals.len() == 3
         && let Some(id) = a.positionals.get(2).map(String::as_str).filter(|i| is_safe_id(i))
         && let Some(refused) = window_refusal(inv, a, id)?
+    {
+        return Ok(refused);
+    }
+    if let Some(id) = a.positionals.get(2).map(String::as_str).filter(|i| is_safe_id(i))
+        && let Some(refused) = unowned_refusal(inv, a, id)?
     {
         return Ok(refused);
     }

@@ -127,6 +127,16 @@ fn label_without_reader(row: &Row, readers: usize) -> bool {
     row.id.starts_with(defaults::text("mesh_write.primary_prefix")) && readers == 0 && (session.is_empty() || session.starts_with(defaults::text("mesh_write.synthetic_session_prefix")))
 }
 
+/// Whether `arg` (not itself a registry row) resolves, as a `send --to` address would, to a DIFFERENT row, or is ambiguous: the cases
+/// of `resolveReadArgToId` that change which id a read verb reads.
+pub(crate) fn names_another_row(inv: &Inv, reader: &crate::mesh::MeshReader, rows: &[Row], arg: &str) -> R<bool> {
+    Ok(match resolve_send_target(inv, Some(reader), rows, arg)? {
+        Resolved::Unregistered => false,
+        Resolved::Row(t) => t.id != arg,
+        Resolved::Rerouted(..) | Resolved::AmbiguousPrefix(_) => true,
+    })
+}
+
 /// What `--to` named.
 enum Resolved {
     /// The recipient's registry row.

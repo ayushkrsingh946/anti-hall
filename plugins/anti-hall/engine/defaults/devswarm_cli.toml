@@ -1509,6 +1509,26 @@ value = ["tail", "since"]
 doc = "The verb name a refused `inbox read-primary` window names."
 value = "inbox read-primary"
 
+[devswarm_cli.msg_read_primary_refused]
+doc = "The error of an acking read (`read-primary`) the caller does not own. Placeholders: {verb}, {cause}, {id} (quoted), {rid} (bare)."
+value = "{verb} refused ({cause}): it drains {id}; use `inbox peek-primary {rid}` for a non-mutating view, or --ack-as-owner to override"
+
+[devswarm_cli.cause_unregistered_workspace]
+doc = "The refusal cause for a workspace id that has no descriptor, registry row or messages."
+value = "unregistered-workspace"
+
+[devswarm_cli.cause_unresolvable_caller]
+doc = "The refusal cause when the caller's own identity cannot be resolved."
+value = "unresolvable-caller-identity"
+
+[devswarm_cli.cause_caller_not_registered]
+doc = "The refusal cause when the caller has no registry row."
+value = "caller-not-registered"
+
+[devswarm_cli.cause_ownership_mismatch]
+doc = "The refusal cause when the caller owns a different registry row."
+value = "ownership-mismatch"
+
 [devswarm_cli.window_op_read_primary]
 doc = "The central-log operation of a read-primary refusal."
 value = "inbox-read-primary"

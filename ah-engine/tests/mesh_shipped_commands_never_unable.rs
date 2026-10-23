@@ -141,6 +141,10 @@ fn no_command_the_shipped_texts_name_exits_unable_without_node() {
             unable.push((key, String::from_utf8_lossy(&o.stderr).trim().to_string()));
         }
     }
+    // a workspace nothing registered: Node refuses the read (exit 2, `unregistered-workspace`), the engine must not give up (69)
+    let o = run(&["inbox".into(), "read-primary".into(), "never-registered-ws".into()]);
+    assert_eq!(o.status.code(), Some(2), "{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
+    assert!(String::from_utf8_lossy(&o.stdout).contains("\"reason\":\"unregistered-workspace\""), "{}", String::from_utf8_lossy(&o.stdout));
     let _ = fs::remove_dir_all(&scratch);
     let now: BTreeSet<&str> = unable.iter().map(|(k, _)| k.as_str()).collect();
     let known: BTreeSet<&str> = KNOWN_UNABLE.iter().copied().collect();
