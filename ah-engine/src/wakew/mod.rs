@@ -504,14 +504,13 @@ impl Run<'_> {
         let s = stale::check(p, self.own_version.as_deref())?;
         let role = a.id.role();
         if let Some(root) = s.root.as_ref() {
-            let script_s = s.script.to_string_lossy().into_owned();
             let stamp = p.env.get(text("wake_watch.env_handoff")).map(String::as_str);
             let own = self.own_version.clone().unwrap_or_default();
             if stale::can_handoff(&own, &s.newest, stamp) {
-                return Some(self.handoff(&s, root, &script_s));
+                return Some(self.handoff(&s, root));
             }
             // the guards refused the handoff: the original print-the-re-arm-line-and-exit
-            emit(&stale::stale_line(role, &a.id.id, self.own_version.as_deref(), &s.newest, &script_s));
+            emit(&stale::stale_line(role, &a.id.id, self.own_version.as_deref(), &s.newest, &p.home));
             cleanup(self.cell, false);
             return Some(Flow::Stop(0));
         }
@@ -527,7 +526,7 @@ impl Run<'_> {
     /// `attemptHandoff`: release the lock and replace this process with the engine running the newer build's plugin root
     /// (same pid, same stdio, no interpreter and no second process). The successor takes the lock itself. If the exec fails
     /// the lock is already gone, so the refusal line is printed and the watcher ends: never a silent stale watcher.
-    fn handoff(&mut self, s: &stale::Stale, root: &Path, script: &str) -> Flow {
+    fn handoff(&mut self, s: &stale::Stale, root: &Path) -> Flow {
         use std::os::unix::process::CommandExt;
         let role = self.a.id.role();
         // the successor takes the lock itself, so there is never a moment two processes believe they hold it
@@ -535,7 +534,7 @@ impl Run<'_> {
             l.release();
         }
         let Ok(exe) = std::env::current_exe() else {
-            emit(&stale::stale_line(role, &self.a.id.id, self.own_version.as_deref(), &s.newest, script));
+            emit(&stale::stale_line(role, &self.a.id.id, self.own_version.as_deref(), &s.newest, &self.p.home));
             cleanup(self.cell, false);
             return Flow::Stop(0);
         };
@@ -548,7 +547,7 @@ impl Run<'_> {
             .env(defaults::env_name("plugin_root"), root);
         let err = cmd.exec(); // only returns on failure
         diag(&format!("{err}\n"));
-        emit(&stale::stale_line(role, &self.a.id.id, self.own_version.as_deref(), &s.newest, script));
+        emit(&stale::stale_line(role, &self.a.id.id, self.own_version.as_deref(), &s.newest, &self.p.home));
         Flow::Stop(1)
     }
 }
