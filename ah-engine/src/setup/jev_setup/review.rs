@@ -220,56 +220,147 @@ fn read_line_capped(r: &mut impl BufRead, buf: &mut Vec<u8>, cap: usize) -> std:
     }
 }
 
+/// What the scan keeps of one log file between calls: the totals of its complete lines up to `parsed`, with a fingerprint of the
+/// bytes at both ends of that range so a file that was rewritten (not appended to) is read afresh. A rotation renames a file and
+/// keeps its inode, so the kept totals are found under (device, inode), not the name.
+#[derive(Clone)]
+struct FileStats {
+    parsed: u64,
+    head: u64,
+    back: u64,
+    stats: RowStats,
+}
+
+fn stats_cache() -> &'static crate::mem::BoundedCache<(u64, u64), FileStats> {
+    static CACHE: OnceLock<crate::mem::BoundedCache<(u64, u64), FileStats>> = OnceLock::new();
+    CACHE.get_or_init(|| {
+        crate::mem::BoundedCache::new(
+            crate::mem::global(),
+            crate::mem::Spec::new("jev_review_stats", "mem.jev_review_stats_soft_bytes", "mem.jev_review_stats_hard_bytes", "mem.jev_review_stats_low_water_pct")
+                .with_entries("opcli.review_stats_max_files"),
+        )
+    })
+}
+
+/// A digest of `len` bytes of `f` at `at` (`None` when they cannot be read).
+fn digest_at(f: &std::fs::File, at: u64, len: u64) -> Option<u64> {
+    use std::hash::Hasher;
+    use std::os::unix::fs::FileExt;
+    let mut b = vec![0u8; len as usize];
+    f.read_exact_at(&mut b, at).ok()?;
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    h.write(&b);
+    Some(h.finish())
+}
+
+/// Fold one log line into the per-id totals (a line that counts for nothing changes none).
+fn fold_line(buf: &[u8], stats: &mut RowStats, held: &mut usize) {
+    let text = String::from_utf8_lossy(buf);
+    let t = crate::jev::js_trim(&text);
+    if t.is_empty() {
+        return;
+    }
+    let Ok(row @ J::Obj(_)) = parse_json(t) else { return };
+    if !truthy(row.get(k("id"))) || truthy(row.get(k("type"))) {
+        return;
+    }
+    // `idStats` matches rows by a text id only; a row with another truthy id counts for no integration
+    let Some(J::Str(id)) = row.get(k("id")) else { return };
+    let ts = match row.get(k("ts")) {
+        Some(J::Str(ts)) => date_ms(ts),
+        _ => None,
+    };
+    let slot = stats.entry(id.clone()).or_insert_with(|| {
+        *held += id.len() + std::mem::size_of::<(String, (f64, f64))>();
+        (0.0, f64::INFINITY)
+    });
+    slot.0 += 1.0;
+    if let Some(t) = ts {
+        slot.1 = slot.1.min(t);
+    }
+}
+
+/// The totals of the lines of `file` from byte `from` to `len`, added to `stats`: the complete lines are folded into `stats` (and
+/// the returned offset is after the last of them), a last line with no newline yet is returned as its own totals.
+fn fold_file(mut f: std::fs::File, (from, len): (u64, u64), stats: &mut RowStats, inst: &mut crate::mem::Instance, cap: usize) -> Result<(u64, RowStats), ()> {
+    use std::io::{Read, Seek, SeekFrom};
+    if f.seek(SeekFrom::Start(from)).is_err() {
+        return Ok((from, RowStats::new()));
+    }
+    let mut r = std::io::BufReader::new(f.take(len.saturating_sub(from)));
+    let (mut held, mut off, mut buf) = (0usize, from, Vec::new());
+    let mut partial = RowStats::new();
+    loop {
+        buf.clear();
+        match read_line_capped(&mut r, &mut buf, cap) {
+            Ok(Line::Read) => {}
+            Ok(Line::End) | Err(_) => break,
+            Ok(Line::TooLong) => return Err(()),
+        }
+        if matches!(inst.report(buf.capacity() + held), crate::mem::Action::Recycle) {
+            return Err(());
+        }
+        if buf.last() == Some(&b'\n') {
+            off += buf.len() as u64;
+            fold_line(&buf, stats, &mut held);
+        } else {
+            fold_line(&buf, &mut partial, &mut held);
+        }
+    }
+    Ok((off, partial))
+}
+
 /// The decision rows of the log's retained generations (objects with an id and no type), folded per id while the files are
 /// streamed: only one line and the per-id totals are held, never the log. Holding every parsed row cost about 56 MB of heap on
 /// each SessionStart for a 12 MB log (#104). The bytes held are reported to the `jev_review_scan` holder; a scan that would
 /// pass its hard limit (a line longer than that) stops, and the review state counts as unusable (`Err`).
+///
+/// The log is append-only and the SessionStart check asks at every session start, so the totals of each file's complete lines are
+/// kept (`jev_review_stats`, one entry per file) and a call reads only the bytes appended since: a 16 MB log was parsed afresh at
+/// every start, 100 ms of CPU for an answer that had not changed. A file that is not the one kept (rewritten, shorter, other
+/// inode) is read from its start.
 fn decision_stats(home: &Path) -> Result<RowStats, String> {
+    decision_stats_with(home, true)
+}
+
+fn decision_stats_with(home: &Path, kept: bool) -> Result<RowStats, String> {
+    use std::os::unix::fs::MetadataExt;
     let mut inst = scan_budget().instance();
     let cap = inst.hard_limit();
     let over = |file: &Path| defaults::render("opcli.review_scan_over_limit", &[("file", &file.display()), ("limit", &cap)]);
-    let mut stats = RowStats::new();
-    let mut held = 0usize;
-    let mut buf = Vec::new();
-    for f in crate::jev::report::retained(&base_dir(home).join(defaults::text("jev.log_file"))) {
-        let Ok(file) = std::fs::File::open(&f) else { continue };
-        let mut r = std::io::BufReader::new(file);
-        loop {
-            buf.clear();
-            match read_line_capped(&mut r, &mut buf, cap) {
-                Ok(Line::Read) => {}
-                Ok(Line::End) | Err(_) => break,
-                Ok(Line::TooLong) => return Err(over(&f)),
-            }
-            if matches!(inst.report(buf.capacity() + held), crate::mem::Action::Recycle) {
-                return Err(over(&f));
-            }
-            let text = String::from_utf8_lossy(&buf);
-            let t = crate::jev::js_trim(&text);
-            if t.is_empty() {
-                continue;
-            }
-            let Ok(row @ J::Obj(_)) = parse_json(t) else { continue };
-            if !truthy(row.get(k("id"))) || truthy(row.get(k("type"))) {
-                continue;
-            }
-            // `idStats` matches rows by a text id only; a row with another truthy id counts for no integration
-            let Some(J::Str(id)) = row.get(k("id")) else { continue };
-            let ts = match row.get(k("ts")) {
-                Some(J::Str(ts)) => date_ms(ts),
-                _ => None,
-            };
-            let slot = stats.entry(id.clone()).or_insert_with(|| {
-                held += id.len() + std::mem::size_of::<(String, (f64, f64))>();
-                (0.0, f64::INFINITY)
-            });
-            slot.0 += 1.0;
-            if let Some(t) = ts {
-                slot.1 = slot.1.min(t);
-            }
+    let fp = defaults::num("opcli.review_stats_fingerprint_bytes").max(1);
+    let mut total = RowStats::new();
+    for path in crate::jev::report::retained(&base_dir(home).join(defaults::text("jev.log_file"))) {
+        let Ok(file) = std::fs::File::open(&path) else { continue };
+        let Ok(meta) = file.metadata() else { continue };
+        let (key, len) = ((meta.dev(), meta.ino()), meta.len());
+        let mut entry = kept
+            .then(|| stats_cache().remove(&key))
+            .flatten()
+            .filter(|e| {
+                let n = fp.min(e.parsed);
+                e.parsed <= len && digest_at(&file, 0, n) == Some(e.head) && digest_at(&file, e.parsed - n, n) == Some(e.back)
+            })
+            .unwrap_or(FileStats { parsed: 0, head: 0, back: 0, stats: RowStats::new() });
+        let from = entry.parsed;
+        let Ok((off, partial)) = fold_file(file.try_clone().map_err(|e| e.to_string())?, (from, len), &mut entry.stats, &mut inst, cap) else {
+            return Err(over(&path));
+        };
+        entry.parsed = off;
+        let n = fp.min(off);
+        if kept && let (Some(head), Some(back)) = (digest_at(&file, 0, n), digest_at(&file, off - n, n)) {
+            entry.head = head;
+            entry.back = back;
+            let weight = entry.stats.keys().map(|id| id.len() + std::mem::size_of::<(String, (f64, f64))>()).sum::<usize>() + std::mem::size_of::<FileStats>();
+            stats_cache().insert(key, entry.clone(), weight);
+        }
+        for (id, (n, first)) in entry.stats.into_iter().chain(partial) {
+            let slot = total.entry(id).or_insert((0.0, f64::INFINITY));
+            slot.0 += n;
+            slot.1 = slot.1.min(first);
         }
     }
-    Ok(stats)
+    Ok(total)
 }
 
 /// The daily rollups: objects with a text day and a list of groups, in file-name order.
@@ -558,5 +649,51 @@ mod tests {
         let first = std::fs::read(&state).unwrap();
         write_json_atomic_if_changed(&state, J::Obj(vec![("a".into(), J::Bool(false))])).unwrap();
         assert_ne!(first, std::fs::read(&state).unwrap());
+    }
+
+    fn sorted(s: RowStats) -> Vec<(String, u64, u64)> {
+        let mut v: Vec<_> = s.into_iter().map(|(id, (n, t))| (id, n as u64, if t.is_finite() { t as u64 } else { 0 })).collect();
+        v.sort();
+        v
+    }
+
+    fn row(id: &str, ts: &str) -> String {
+        format!("{{\"id\":\"{id}\",\"ts\":\"{ts}\",\"v\":1}}\n")
+    }
+
+    /// The kept totals answer as a read from the start through appends (a last line still unfinished included), a rotation (the
+    /// file renamed, its inode kept) and a rewrite of the file.
+    #[test]
+    fn kept_decision_totals_answer_as_a_fresh_read_at_every_step() {
+        use std::io::Write;
+        let h = home("stats");
+        let log = base_dir(&h).join(defaults::text("jev.log_file"));
+        std::fs::create_dir_all(log.parent().unwrap()).unwrap();
+        let same = |what: &str| {
+            let kept = sorted(decision_stats_with(&h, true).unwrap());
+            let fresh = sorted(decision_stats_with(&h, false).unwrap());
+            assert_eq!(kept, fresh, "{what}");
+            kept
+        };
+        std::fs::write(&log, row("a", "2026-10-01T00:00:00.000Z") + &row("b", "2026-10-02T00:00:00.000Z")).unwrap();
+        assert_eq!(same("first read").len(), 2);
+        let append = |text: &str| std::fs::OpenOptions::new().append(true).open(&log).unwrap().write_all(text.as_bytes()).unwrap();
+        append(&row("a", "2026-09-30T00:00:00.000Z"));
+        assert_eq!(same("appended line").iter().find(|r| r.0 == "a").unwrap().1, 2);
+        // a last line still being written counts in the answer, and once finished counts once
+        append("{\"id\":\"c\",\"ts\":\"2026-10-03T00:00:00.000Z\"");
+        same("unfinished line");
+        append("}\n");
+        assert_eq!(same("finished line").iter().find(|r| r.0 == "c").unwrap().1, 1);
+        // rotation: the live file becomes generation 1 (same inode), a new live file starts
+        std::fs::rename(&log, format!("{}.1", log.display())).unwrap();
+        std::fs::write(&log, row("b", "2026-10-04T00:00:00.000Z")).unwrap();
+        assert_eq!(same("after rotation").iter().find(|r| r.0 == "b").unwrap().1, 2);
+        // a rewrite of the live file with other content of at least the kept length
+        std::fs::write(&log, row("z", "2026-10-05T00:00:00.000Z") + &row("z", "2026-10-06T00:00:00.000Z")).unwrap();
+        assert_eq!(same("after rewrite").iter().find(|r| r.0 == "z").unwrap().1, 2);
+        // a file cut shorter than what was kept
+        std::fs::write(&log, row("y", "2026-10-07T00:00:00.000Z")).unwrap();
+        same("after truncation");
     }
 }

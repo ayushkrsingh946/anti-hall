@@ -478,8 +478,8 @@ exit 97
 """
 
 [devswarm_recon.env_strip]
-doc = "Environment variables a sweep drain removes: it speaks for no session, so it must not carry the identity of the session that started it."
-value = ["CLAUDE_CODE_SESSION_ID", "DEVSWARM_BUILDER_ID"]
+doc = "Environment variables a sweep drain removes: it speaks for no session, so it must not carry the identity of the session that started it (the builder id AND the AI pane id: hivecontrol checks the pane belongs to the targeted workspace and refuses a drain of a child run with the Primary's pane)."
+value = ["CLAUDE_CODE_SESSION_ID", "DEVSWARM_BUILDER_ID", "DEVSWARM_BUILDER_TERMINAL_ID", "DEVSWARM_BUILDER_TERMINAL_GENERATION"]
 
 [devswarm_recon.env_sweep_flag]
 doc = "The environment variable that marks a process as a reconcile sweep drain (the pull then never promotes an unclaimed session)."
@@ -637,6 +637,22 @@ unit = "ms"
 [devswarm_recon.benign_flags]
 doc = "The fields of a reconcile row any one of which makes the row count as fine for the project's ok: it drained, or it was refused for a reason that is no failure (another pull holds the lock, hivecontrol is absent, the worktree is gone or not a git root, it was skipped, the native app timed out)."
 value = ["ok", "locked", "hivecontrolMissing", "worktreeMissing", "notGitRoot", "skipped", "nativeTimeout"]
+
+[devswarm_recon.pull_skip_reasons]
+doc = "The reasons a workspace's pull is SKIPPED by construction, not held: the workspace has no native hivecontrol queue to read (`primary-label`: a Primary checkout's own label, which no DevSwarm workspace answers to), so there is nothing to abandon. Any other reason is a held decision, counted and logged."
+value = ["primary-label"]
+
+[devswarm_recon.msg_skip_no_queue]
+doc = "Why a reconcile row was skipped: the workspace has no native queue to pull (a Primary checkout's label)."
+value = "skipped: a Primary checkout has no native queue to pull"
+
+[devswarm_recon.job_pull_skip]
+doc = "The label of the witness-log line for a workspace whose pull was skipped by construction (the line names the workspace and why)."
+value = "pull-skip"
+
+[devswarm_recon.msg_pull_held_why]
+doc = "The reason logged for a held pull. {id} is the workspace, {why} the engine's reason for not draining it."
+value = "workspace {id} not drained: {why}"
 
 [devswarm_recon.job_handback]
 doc = "The label of the witness-log line for a workspace the engine did not drain itself (the line names the workspace and why)."
@@ -1179,3 +1195,29 @@ value = "recon:legacy-store"
 [devswarm_recon.reason_store_unpinned]
 doc = "The reason code of a store with no backend marker (or one naming neither backend): the engine does not open it as it cannot tell which backend it is on. The update's store stages pin a store that holds a database; until then the item is held and tried again."
 value = "store-unpinned"
+
+[devswarm_recon.fold_unit_prefix]
+doc = "The label prefix of one candidate's fold unit (the candidate id follows); a registration reads it back to report a unit the applier handed back as pending."
+value = "fold:"
+
+[devswarm_recon.why_count_failed]
+doc = "The reason a sweep drain was handed back because the non-destructive native count failed. {detail} is what the call said (`failure_detail`), so the abandoned-decision log line explains itself; the line is rate-limited per reason by diagnostics.abandoned_log_interval_ms."
+value = "count-failed ({detail})"
+
+[devswarm_recon.failure_detail]
+doc = "How a failed hivecontrol call is described: {how} (the exit or signal) and {said} (the first line it printed, stderr before stdout)."
+value = "{how}: {said}"
+
+[devswarm_recon.failure_how_exit]
+doc = "The exit part of a failed hivecontrol call's description, with {code} the exit code."
+value = "exit {code}"
+
+[devswarm_recon.failure_how_signal]
+doc = "The signal part of a failed hivecontrol call's description, with {signal} the signal name."
+value = "killed by {signal}"
+
+[devswarm_recon.failure_detail_max_chars]
+doc = "Most characters of the first output line a failed hivecontrol call's description keeps (bounds the log line and the limiter key)."
+value = 160
+min = 20
+max = 1000

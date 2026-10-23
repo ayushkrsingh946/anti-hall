@@ -177,6 +177,65 @@ pub fn fill(ctx: &Ctx, env: &Env, runner: &dyn Runner) -> bool {
     crate::atomic::write(&path, doc.stringify_pretty()).is_ok()
 }
 
+/// The gate in front of a `workspace <verb>` call that is about to run (`can('workspace.<verb>')`): fill the cache for the binary `env`
+/// resolves when it holds no current entry (`probe`), and record the verb's dormant line when the build's help lists commands but not
+/// this one (`recordDormant`), so [`crate::meshw::hivecontrol::cap_verb`] then answers from the cache. A build whose help could not
+/// be read records nothing (the call goes through). Never fails.
+pub fn ensure(home: &Path, now: i64, env: &Env, runner: &dyn Runner, verb: &str) {
+    let Ok(Some(bin)) = resolve_bin(env, home) else { return };
+    let Some(key) = cache_keys(&bin).into_iter().next() else { return };
+    let path = home
+        .join(defaults::text("mesh_write.dir_anti_hall"))
+        .join(defaults::text("mesh_write.dir_devswarm"))
+        .join(defaults::text("mesh_write.hivecontrol_cache_file"));
+    let prev = std::fs::read(&path).ok().and_then(|b| OVal::parse(&String::from_utf8_lossy(&b))).filter(|v| matches!(v, OVal::Obj(_)));
+    let same_build = prev.as_ref().and_then(|p| p.get("key")).is_some_and(|k| matches!(k, OVal::Str(x) if cache_keys(&bin).contains(x)));
+    let fresh = prev.as_ref().and_then(|p| p.get("probe")).filter(|p| same_build && p.get("present").is_some_and(OVal::truthy)).cloned();
+    let probe = fresh.clone().unwrap_or_else(|| probe(runner, home, &bin));
+    let mut dormant = match prev.as_ref().and_then(|p| p.get("dormantLog")) {
+        Some(OVal::Obj(o)) if same_build => o.clone(),
+        _ => Vec::new(),
+    };
+    let mut changed = fresh.is_none();
+    let help_parsed = probe.get("helpParsed").is_some_and(OVal::truthy);
+    if help_parsed && !probe.get("verbs").and_then(|v| v.get(verb)).is_some_and(OVal::truthy) {
+        let version = match probe.get("version") {
+            Some(OVal::Str(v)) if !v.is_empty() => Some(v.as_str()),
+            _ => None,
+        };
+        let (_, line) = crate::meshw::hivecontrol::dormant_line(verb, None, None, version, false);
+        let name = format!("{}{verb}", defaults::text("devswarm_cli.hc_cap_prefix"));
+        if !dormant.iter().any(|(k, v)| *k == name && matches!(v, OVal::Str(l) if *l == line)) {
+            match dormant.iter_mut().find(|(k, _)| *k == name) {
+                Some(slot) => slot.1 = s(&line),
+                None => dormant.push((name, s(&line))),
+            }
+            changed = true;
+        }
+    }
+    if !changed {
+        return;
+    }
+    // a fresh probe writes a new entry; recording a dormant line rewrites the cached entry as it was read (`recordDormant`)
+    let doc = match (fresh.is_some(), prev) {
+        (true, Some(OVal::Obj(mut fields))) => {
+            match fields.iter_mut().find(|(k, _)| k == "dormantLog") {
+                Some(slot) => slot.1 = OVal::Obj(dormant),
+                None => fields.push(("dormantLog".into(), OVal::Obj(dormant))),
+            }
+            OVal::Obj(fields)
+        }
+        _ => {
+            let checked = crate::jev::assist::iso_ms(now.max(0) as u64);
+            OVal::Obj(vec![("key".into(), s(&key)), ("checkedAt".into(), s(&checked)), ("probe".into(), probe), ("dormantLog".into(), OVal::Obj(dormant))])
+        }
+    };
+    if let Some(dir) = path.parent() {
+        crate::discard::logged("dssup_capprobe_dir", std::fs::create_dir_all(dir));
+    }
+    crate::discard::logged("dssup_capprobe_write", crate::atomic::write(&path, doc.stringify_pretty()));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

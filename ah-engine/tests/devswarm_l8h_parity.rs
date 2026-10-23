@@ -71,7 +71,7 @@ fn tools_path(root: &Path, with_node: bool) -> String {
 }
 
 fn node_cli(home: &Path, cwd: &Path, argv: &[String], now: i64, env: &[(&str, &str)]) -> Run {
-    let cli = plugin_root().join("scripts").join("devswarm.js");
+    let cli = node_root().join("scripts").join("devswarm.js");
     let mut c = Command::new("node");
     c.arg("-e").arg(SNIPPET).arg(&cli).arg(now.to_string()).args(argv).current_dir(cwd).env_clear().envs(base_env(home, &home.join("state"), env));
     let o = run(&mut c, None);
@@ -245,10 +245,10 @@ fn check_from(
             pending.push((c.name.clone(), homes[1].join("state")));
         } else {
             deferred += 1;
-            assert_eq!(e.code, 75, "{}: no Node to hand the verb to, the engine is unable (75)", c.name);
+            assert_eq!(e.code, 69, "{}: no Node to hand the verb to, the engine is unable (mesh_write.exit_unable)", c.name);
             let pre = (tree(&homes[2]), key_db(&homes[2]).is_file().then(|| raw_dump(&key_db(&homes[2]))));
             let d = engine_cli(&homes[2], &cwd, &c.argv, now, &to_ref(&ed));
-            assert_eq!(d.code, 75, "{}: a deferral the engine cannot hand to Node exits 75, got {} / {}", c.name, d.code, d.stdout);
+            assert_eq!(d.code, 69, "{}: a deferral the engine cannot hand to Node exits mesh_write.exit_unable, got {} / {}", c.name, d.code, d.stdout);
             assert!(d.stdout.is_empty(), "{}: nothing is printed on a deferral: {}", c.name, d.stdout);
             assert_eq!(last_log(&homes[2].join("state"))["result"], "defer", "{}", c.name);
             let post = (tree(&homes[2]), key_db(&homes[2]).is_file().then(|| raw_dump(&key_db(&homes[2]))));
@@ -593,7 +593,7 @@ fn ensure_and_register_match_node() {
         e("ens-reserved-id-is-node", &["ensure", "reg.base", "--worktree", &w2, "--session", "s"], "wt2", false),
         e("ens-without-worktree-is-node", &["ensure", "reg-nowt", "--session", "s"], "wt2", false),
         e("ens-without-session-is-node", &["ensure", "reg-nosess", "--worktree", &w2], "wt2", false),
-        e("ens-second-row-of-a-worktree-is-node", &["ensure", "reg-dup", "--worktree", &child, "--session", "s"], "wt2", false),
+        e("ens-second-row-of-a-worktree-folds-it", &["ensure", "reg-dup", "--worktree", &child, "--session", "s"], "wt2", true),
         e(
             "ens-another-project-worktree-is-node",
             &["ensure", "reg-x", "--worktree", fx.root.join("repo-other").to_str().unwrap(), "--session", "s"],
@@ -620,12 +620,12 @@ fn ensure_and_register_match_node() {
         r("reg-re-registers-the-same-descriptor", &["register", "reg-full", "--worktree", &w2, "--session", "s-full"], "wt2", true).setup(full),
         r("reg-over-an-archived-twin-revives-nothing-else", &["register", "reg-arch", "--worktree", &w2, "--session", "s"], "wt2", true).setup(archived_twin2),
         r("reg-without-session-is-node", &["register", "reg-nosess", "--worktree", &w2], "wt2", false),
-        r("reg-second-row-of-a-worktree-is-node", &["register", "reg-dup", "--worktree", &child, "--session", "s"], "wt2", false),
+        r("reg-second-row-of-a-worktree-folds-it", &["register", "reg-dup", "--worktree", &child, "--session", "s"], "wt2", true),
         r("reg-reserved-id-is-node", &["register", "x.inst-abcdef", "--worktree", &w2, "--session", "s"], "wt2", false),
         r("reg-unsafe-id", &["register", "a/b"], "wt2", true),
         r("reg-empty-flag-value-is-node", &["register", "reg-new", "--worktree", "", "--session", "s"], "wt2", false),
     ];
-    check(&fx, &cases, &extra, 16, 15);
+    check(&fx, &cases, &extra, 18, 13);
 }
 
 // ---- correct --------------------------------------------------------------------------------------------------------------

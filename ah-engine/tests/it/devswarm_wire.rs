@@ -984,14 +984,15 @@ fn a_subagent_calling_an_owner_action_is_refused_before_anything_is_read() {
         raw: rest.iter().map(|s| s.to_string()).collect(),
     };
     let sub = env_of(&[("ANTIHALL_CALLER", "agent")]);
-    for rest in [&["archive", "--id", "ws-1", "--request", "r1"][..], &["plan-prune", "--older-than", "7"], &["prune", "--confirm-ids", "a", "--plan", "n"]] {
+    for rest in [&["archive", "--id", "ws-1", "--request", "r1"][..], &["plan-prune", "--older-than", "7"], &["prune", "--confirm-ids", "a", "--plan", "n"], &["create", "b1"]] {
         assert_eq!(cli::run_with(&p(rest), &sub), 64, "{rest:?}");
     }
     assert_eq!(cli::run_with(&p(&["bogus"]), &sub), 64);
-    let main = env_of(&[]);
     let not_ported = ah_engine::defaults::num("devswarm_wire.not_ported_exit") as i32;
     assert_ne!(not_ported, 75, "an unported verb is never the silent 75 of a deferral");
-    assert_eq!(cli::run_with(&p(&["create", "--branch", "x"]), &main), not_ported, "create is not ported: a loud failure, nothing done");
+    // `create` is the spawn create path now (covered by tests/devswarm_dsB_parity.rs against a recording hivecontrol stub); it is not
+    // called here, where the real hivecontrol would be. No owner verb is left unported.
+    assert!(ah_engine::defaults::list("devswarm_wire.not_ported_verbs").is_empty(), "every owner verb runs in the engine");
     // `merge` is a devswarm.js verb the engine now runs itself (covered by tests/devswarm_dsB_parity.rs against a recording hivecontrol stub); it is not called here, where the real hivecontrol would be
 }
 

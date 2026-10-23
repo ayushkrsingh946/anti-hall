@@ -317,6 +317,20 @@ pub fn call_full(args: &[&str], env: &Env, cwd: Option<&str>, timeout: std::time
     Full { call: Call { ok: false, raw, timed_out: false, error }, stderr, code, signal, spawn_failed: None, overflow: false }
 }
 
+/// Why a failed call failed, in a line: the exit code (or signal, or spawn error) and the first line it printed, stderr before stdout,
+/// cut to `devswarm_recon.failure_detail_max_chars` (`devswarm_recon.failure_detail`).
+pub fn failure_detail(f: &Full) -> String {
+    let first = |t: &str| t.lines().map(js_trim).find(|l| !l.is_empty()).unwrap_or_default().to_string();
+    let said = Some(first(&f.stderr)).filter(|l| !l.is_empty()).unwrap_or_else(|| first(&f.call.raw));
+    let how = match (f.code, f.signal) {
+        (Some(c), _) => defaults::render("devswarm_recon.failure_how_exit", &[("code", &c)]),
+        (None, Some(s)) => defaults::render("devswarm_recon.failure_how_signal", &[("signal", &signal_name(s))]),
+        _ => f.call.error.clone(),
+    };
+    let max = defaults::num("devswarm_recon.failure_detail_max_chars") as usize;
+    defaults::render("devswarm_recon.failure_detail", &[("how", &how), ("said", &said.chars().take(max).collect::<String>())])
+}
+
 /// What the capability gate says about one workspace verb, from the cache alone.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Cap {
@@ -365,7 +379,19 @@ pub fn cap_verb(env: &Env, home: &Path, verb: &str, min_version: Option<&str>, n
     if !too_old && has_verb {
         return Cap::Ok;
     }
+    let (reason, line) = dormant_line(verb, min_version, note, version, too_old);
+    // Node records the dormant line in its cache unless the cache already holds exactly it
+    match c.get("dormantLog").and_then(|d| d.get(&name)) {
+        Some(OVal::Str(l)) if *l == line => Cap::Dormant(reason),
+        _ => Cap::Probe,
+    }
+}
+
+/// The reason a workspace verb is dormant and the line Node's `recordDormant` writes for it: `verb` with its `minVersion`, the note
+/// the line carries, the build's version and whether it is older than the minimum.
+pub fn dormant_line(verb: &str, min_version: Option<&str>, note: Option<&str>, version: Option<&str>, too_old: bool) -> (String, String) {
     let tpl = crate::meshw::extverbs::tpl;
+    let name = format!("{}{verb}", defaults::text("devswarm_cli.hc_cap_prefix"));
     let min = min_version.unwrap_or_default();
     let have = version.unwrap_or(defaults::text("devswarm_cli.hc_unknown_version"));
     let reason = if too_old {
@@ -377,9 +403,5 @@ pub fn cap_verb(env: &Env, home: &Path, verb: &str, min_version: Option<&str>, n
     let note_part = note.map_or(String::new(), |n| tpl("devswarm_cli.hc_line_note", &[("note", n)]));
     let because = if min.is_empty() { reason.clone() } else { tpl("devswarm_cli.hc_line_needs", &[("min", min), ("have", have)]) };
     let line = tpl("devswarm_cli.hc_line", &[("name", &name), ("note", &note_part), ("because", &because)]);
-    // Node records the dormant line in its cache unless the cache already holds exactly it
-    match c.get("dormantLog").and_then(|d| d.get(&name)) {
-        Some(OVal::Str(l)) if *l == line => Cap::Dormant(reason),
-        _ => Cap::Probe,
-    }
+    (reason, line)
 }

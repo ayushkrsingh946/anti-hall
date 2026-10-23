@@ -331,8 +331,8 @@ env = "AH_ENGINE_RSS_CAP_KB"
 unit = "KB"
 
 [daemon.malloc_conf]
-doc = "Allocator purge tuning handed to the daemon at start (jemalloc `malloc_conf` syntax): one arena for the four worker threads (less fragmentation) and decay 0 (freed pages go back to the OS at once; the system allocators keep them, which left RSS at 2.5x the live heap). Measured on 1000 mixed calls, this Mac: system allocator 45-48 MB RSS, jemalloc with only decay 0 37 MB, with narenas:1 as well 32 MB (live heap 16 MB), adding tcache:false 27 MB but p50 call latency 10 ms against 6.5-7 ms, so tcache stays on. empty = the allocator's own defaults. A variable the caller already set is not overridden."
-value = "narenas:1,dirty_decay_ms:0,muzzy_decay_ms:0"
+doc = "Allocator purge tuning handed to the daemon at start (jemalloc `malloc_conf` syntax): one arena for the four worker threads (less fragmentation) and decay 0 (freed pages go back to the OS at once; the system allocators keep them, which left RSS at 2.5x the live heap). Measured on 1000 mixed calls, this Mac: system allocator 45-48 MB RSS, jemalloc with only decay 0 37 MB, with narenas:1 as well 32 MB (live heap 16 MB), adding tcache:false 27 MB but p50 call latency 10 ms against 6.5-7 ms, so tcache stays on. tcache_max:1024 caches only blocks up to 1 KiB per thread: after the same 220-hook run on the shipped checks and a 300 MB transcript, footprint was 84.3-85.0 MB without it and 75.8-76.0 MB with it (tcache_max 2048: 73.2 against 79.3 on a shorter run, 512: 72.8 but p50 +1.5 ms), hook p50 11.2-13.5 ms without and 11.5-12.0 ms with it, daemon CPU 3.25-3.83 s without and 3.07-3.47 s with it. empty = the allocator's own defaults. A variable the caller already set is not overridden."
+value = "narenas:1,dirty_decay_ms:0,muzzy_decay_ms:0,tcache_max:1024"
 
 [daemon.malloc_conf_vars]
 doc = "Environment variables the allocator reads its tuning from (the crate's prefixed name and the plain one)."

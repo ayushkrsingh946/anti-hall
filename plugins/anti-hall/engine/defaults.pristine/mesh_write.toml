@@ -607,6 +607,10 @@ value = "send-not-verified"
 doc = "`error` of that send. Placeholders: {hash}, {partition} (JSON-quoted)."
 value = "send appended a row (hash {hash}) but the readback against partition {partition} did not find it — the message is NOT confirmed delivered"
 
+[mesh_write.msg_send_label_no_reader]
+doc = "`warning` of a send whose recipient is a worktree label row that no session reads yet (a spawn pre-registers the label; the child registers under its own id). Placeholder: {to}."
+value = "stored in {to}, but no session reads that partition yet: it is a worktree label, not a registered live reader. The child receives it when reconcile folds the label into its own registration; send to the child's id, or wait for it to register, if it needs this now"
+
 [mesh_write.msg_mesh_read_hint]
 doc = "`hint` of a consuming mesh read."
 value = "consumed broadcasts stay re-readable without moving any cursor: `mesh history [--last N]`, or `inbox messages <id> --with-broadcasts`"
@@ -663,7 +667,7 @@ value = "stale"
 
 [mesh_write.msg_unable]
 doc = "stderr line when the engine cannot answer a mesh verb (an unported verb, a case it cannot do, no plugin context). Nothing was written; the exit code is mesh_write.exit_unable. Placeholder: {site}, where it gave up."
-value = "ah-engine mesh: ERROR: this verb or case cannot be done by the engine ({site}); nothing was done. Run the verb by hand with node <plugin root>/scripts/devswarm.js, or report this site."
+value = "ah-engine mesh: ERROR: this verb or case cannot be done by the engine ({site}); nothing was done. Run the verb by hand with the devswarm shim (~/.anti-hall/bin/devswarm.js), or report this site."
 
 [mesh_write.msg_disabled]
 doc = "stderr line when the mesh write verbs are switched off (mesh.engine_writes = off). Nothing was done; the exit code is mesh_write.exit_unable. Placeholder: {site}."
@@ -1543,17 +1547,9 @@ value = 604800000
 doc = "The `v` of a read receipt record."
 value = 1
 
-[mesh_write.launcher_dir]
-doc = "Directory of the stable launchers under the home's `.anti-hall`."
-value = "bin"
-
-[mesh_write.launcher_devswarm]
-doc = "File name of the stable devswarm launcher (`stable-launcher.js` TARGETS.devswarm.name)."
-value = "devswarm.js"
-
 [mesh_write.ack_command]
 doc = "The `ackCommand` of a read-primary result: `{cli}` is the JSON-quoted stable launcher path, `{id}` the workspace id, `{rid}` the receipt id."
-value = "node {cli} inbox ack-primary {id} --receipt {rid}"
+value = "{cli} inbox ack-primary {id} --receipt {rid}"
 
 [mesh_write.ack_hint]
 doc = "The `ackHint` of a read-primary result."
@@ -1965,3 +1961,19 @@ value = "reader-cursors-unreadable"
 [mesh_write.unread_reason_union]
 doc = "The reason a child's unread count is UNKNOWN when the union of inbox lines and store rows cannot be computed (reader-cursors.js unknownResult)."
 value = "union-threw"
+
+[mesh_write.heartbeat_callers_log]
+doc = "The file (under the DevSwarm directory) that records the process of every heartbeat sent without --session (instrumentation: which caller refreshes a row without naming its session)."
+value = "heartbeat-callers.log"
+
+[mesh_write.heartbeat_callers_cap]
+doc = "How many of the newest lines that file keeps."
+value = 200
+min = 1
+max = 100000
+
+[mesh_write.heartbeat_callers_argv]
+doc = "How many of the caller's leading arguments a line records."
+value = 4
+min = 1
+max = 64

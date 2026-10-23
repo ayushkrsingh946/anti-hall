@@ -779,7 +779,7 @@ fn cases(fx: &Fx) -> Vec<Case> {
             ack: ack(vec![], d_inbox.clone()),
             union: inbox(text3.clone()),
             fixup: live_lock(),
-            native: false,
+            native: true,
             expect: vec!["tick child-1"],
         },
         Case {
@@ -938,5 +938,5 @@ fn tick_matches_node_byte_for_byte_and_defers_without_writing() {
         }
     }
     eprintln!("tick parity: {} cases, {native} answered by the engine and identical to Node, {deferred} deferred with nothing written", list.len());
-    assert!(native >= 34 && deferred >= 20, "{native} native, {deferred} deferred");
+    assert!(native >= 35 && deferred >= 19, "{native} native, {deferred} deferred");
 }

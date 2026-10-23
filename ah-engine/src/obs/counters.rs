@@ -254,8 +254,40 @@ fn note(kind: &str, name: &str, outcome: &str, v: Val) {
 
 /// Count one hand-back at `site` (a stable id such as `dispatch.git-guard`), and note it in the trace ring.
 pub fn handback(kind: Handback, site: &str) {
+    handback_why(kind, site, "");
+}
+
+/// Per abandoned site and reason: when its last event-log line was written and how many were counted since. Bounded: it is emptied
+/// at `diagnostics.abandoned_log_keys_max` entries.
+static LOGGED: Mutex<Option<BTreeMap<String, (u64, u64)>>> = Mutex::new(None);
+
+/// [`handback`] with the reason and the key inputs of the decision. An abandoned decision is also written to the event log, at most
+/// one line per site and reason per `diagnostics.abandoned_log_interval_ms` (the line says how many were counted since the last), so
+/// a counter that grows always has a line that says why.
+pub fn handback_why(kind: Handback, site: &str, why: &str) {
     trace::push(kind.name(), site, "", 0);
     note(kind.name(), site, "", Val { n: 1, ..Val::default() });
+    if kind != Handback::Abandoned {
+        return;
+    }
+    let (now, every) = (health::now_ms(), defaults::num("diagnostics.abandoned_log_interval_ms") as u64);
+    let n = {
+        let mut g = LOGGED.lock().unwrap_or_else(|e| e.into_inner());
+        let m = g.get_or_insert_with(BTreeMap::new);
+        if m.len() >= defaults::num("diagnostics.abandoned_log_keys_max") as usize {
+            m.clear();
+        }
+        let e = m.entry(format!("{site}\u{0}{why}")).or_insert((0, 0));
+        e.1 += 1;
+        if e.0 != 0 && now.saturating_sub(e.0) < every {
+            return;
+        }
+        let n = e.1;
+        *e = (now, 0);
+        n
+    };
+    let why = if why.is_empty() { defaults::text("diagnostics.abandoned_no_reason") } else { why };
+    health::log_event("abandoned", site, &defaults::render("diagnostics.msg_abandoned", &[("site", &site), ("n", &n), ("why", &why)]));
 }
 
 /// Count one advisory event (`flagged`, `asked`, `confirmed`, `injected`, `suppressed`, `jev_error`) of advisory `kind`; the report
@@ -365,6 +397,23 @@ mod tests {
         assert_eq!(r["accounting"]["duty"]["reconcile"]["calls"], 2);
         assert_eq!(r["accounting"]["duty"]["reconcile"]["error"], 1);
         assert_eq!(r["accounting"]["duty"]["reconcile"]["held"], 0);
+    }
+
+    /// An abandoned decision leaves one event-log line with its site and reason, and a flood of the same one stays one line.
+    #[test]
+    fn an_abandoned_decision_is_logged_with_site_and_reason_once_per_interval() {
+        let site = format!("test:abandoned-log-{}", std::process::id());
+        let why = "workspace w-1 not drained: shortfall";
+        let lines = || health::events().into_iter().filter(|e| e.kind == "abandoned" && e.code == site).collect::<Vec<_>>();
+        for _ in 0..5 {
+            handback_why(Handback::Abandoned, &site, why);
+        }
+        handback_why(Handback::StandIn, &site, why);
+        let got = lines();
+        assert_eq!(got.len(), 1, "five of the same decision in the interval are one line; a stand-in is not abandoned");
+        assert!(got[0].detail.contains(why) && got[0].detail.contains(&site), "the line carries the site and the reason: {}", got[0].detail);
+        handback_why(Handback::Abandoned, &site, "workspace w-2 not drained: path-outside-state-dir");
+        assert_eq!(lines().len(), 2, "another reason at the site is its own line");
     }
 
     #[test]

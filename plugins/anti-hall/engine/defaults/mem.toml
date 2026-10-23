@@ -43,7 +43,7 @@ min = 0
 unit = "bytes"
 
 [mem.regex_soft_bytes]
-doc = "Estimated bytes of compiled regular expressions the shared `ah.re.*` cache may hold before it evicts the least recently used down to its low-water mark (an entry weighs script.regex_entry_base_bytes plus script.regex_bytes_per_src_byte per byte of its translated source). The shipped checks reach about 47 distinct patterns on a short run (7.3 MB estimated, up to 5.3 MB measured on 4 workers) and more across a real day; at 8 MiB the working set did not fit and the cache evicted and recompiled in a cycle (live20.1: 16 evictions in 7 h, one every ~30 min, bursts under load). 16 MiB keeps them all."
+doc = "Estimated bytes of compiled regular expressions the shared `ah.re.*` cache may hold before it evicts the least recently used down to its low-water mark (an entry weighs the heap its build kept, measured by the counting allocator; where that is off, script.regex_entry_base_bytes plus script.regex_bytes_per_src_byte per byte of its translated source). The shipped checks reach about 47 distinct patterns on a short run (7.3 MB estimated, up to 5.3 MB measured on 4 workers) and more across a real day; at 8 MiB the working set did not fit and the cache evicted and recompiled in a cycle (live20.1: 16 evictions in 7 h, one every ~30 min, bursts under load). 16 MiB keeps them all."
 value = 16777216
 min = 262144
 unit = "bytes"
@@ -193,6 +193,24 @@ unit = "bytes"
 
 [mem.jev_review_scan_low_water_pct]
 doc = "Percent of mem.jev_review_scan_soft_bytes at which a scan's soft trip re-arms."
+value = 80
+min = 1
+max = 100
+
+[mem.jev_review_stats_soft_bytes]
+doc = "Bytes of kept Jev decision-log totals (per file, per integration) held before the least recently used are dropped down to the low-water mark; a few hundred bytes per file in practice."
+value = 262144
+min = 4096
+unit = "bytes"
+
+[mem.jev_review_stats_hard_bytes]
+doc = "Bytes of kept Jev decision-log totals at which an insert is refused (the scan still answers, it just reads the file again next time) and the cache is recycled."
+value = 1048576
+min = 4096
+unit = "bytes"
+
+[mem.jev_review_stats_low_water_pct]
+doc = "Percent of mem.jev_review_stats_soft_bytes the kept Jev decision-log totals are evicted down to when the soft limit is reached."
 value = 80
 min = 1
 max = 100

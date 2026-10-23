@@ -240,17 +240,9 @@ fn text_lines(rows: &[OVal]) -> String {
         .join(defaults::text("mesh_write.text_row_sep"))
 }
 
-/// `resolveStableCliPath(home, ...)`: the stable launcher when it is a file; else Node's fallback is the path of the
-/// running script, which the engine cannot name, so that defers.
+/// The command the `ackCommand` names: the engine shim (`devswarm_role.engine_cli`).
 fn launcher_path(home: &Path) -> R<String> {
-    let p = home
-        .join(defaults::text("mesh_write.dir_anti_hall"))
-        .join(defaults::text("mesh_write.launcher_dir"))
-        .join(defaults::text("mesh_write.launcher_devswarm"));
-    if std::fs::metadata(&p).is_ok_and(|m| m.is_file()) {
-        return Ok(p.to_string_lossy().into_owned());
-    }
-    defer("no-launcher")
+    Ok(crate::checks::devswarm_role::text::engine_cli(&home.to_string_lossy()))
 }
 
 /// `writeReadReceipt` prunes receipts of the id older than the keep window as it writes: a pruning write is Node's.

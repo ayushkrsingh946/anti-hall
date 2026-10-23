@@ -173,7 +173,7 @@ fn the_batch_parser_the_hash_and_the_rows_are_nodes() {
         .iter()
         .map(|raw| {
             let b = import::parse_batch(raw);
-            let rows = import::rows(ws, &b, fixed_now);
+            let rows = import::rows(ws, ws, &b, fixed_now);
             let lossy = rows.is_empty() && !raw.trim().is_empty() && !b.recognized;
             json!({"total": rows.len(), "lossy": lossy, "recognized": b.recognized,
                    "rows": rows.iter().map(|r| json!({"hash": r.hash, "ts": r.ts, "body": r.body})).collect::<Vec<_>>()})

@@ -128,7 +128,16 @@ fn no_node_path(root: &Path) -> String {
 }
 
 fn tree(home: &Path) -> std::collections::BTreeMap<String, Vec<u8>> {
-    home_files(home).into_iter().map(|(k, v)| (k, normalized(home, &v))).collect()
+    // the caller log of a session-less heartbeat names the writing process (pid, parent pid, its own argv): blanked on both sides
+    let who = regex::Regex::new(r#""pid":[0-9]+,"ppid":[0-9]+,"argv":"(?:[^"\\]|\\.)*""#).unwrap();
+    home_files(home)
+        .into_iter()
+        .map(|(k, v)| {
+            let v = normalized(home, &v);
+            let v = if k.ends_with("heartbeat-callers.log") { who.replace_all(&String::from_utf8_lossy(&v), r#""pid":0,"ppid":0,"argv":"""#).into_owned().into_bytes() } else { v };
+            (k, v)
+        })
+        .collect()
 }
 
 fn assert_same_home(name: &str, a: &Path, b: &Path, key: &str, what: &str) {
@@ -299,7 +308,7 @@ fn cases() -> Vec<Case> {
             argv: vec![s("heartbeat"), s("child-1"), s("--summary"), s("x")],
             extra: vec![],
             setup: nothing(),
-            native: false,
+            native: true,
             expect: vec!["\"meshBroadcast\""],
             code: 0,
         },
@@ -985,7 +994,7 @@ fn summary_and_plan_heartbeats_match_node_byte_for_byte_and_defer_without_writin
 
 /// A Node process that takes the plan's lock the way `updatePlan` does and holds it.
 fn hold_plan_lock(home: &Path, lock: &Path, hold_ms: u64) -> std::process::Child {
-    let lock_js = plugin_root().join("companion/lib/lock.js");
+    let lock_js = node_root().join("companion/lib/lock.js");
     let code = format!(
         "const l=require({:?});const h=l.acquire({:?},{{waitMs:0,stealDead:true,staleMs:30000,liveStaleMs:30000}});if(!h){{console.log('FAILED');process.exit(3)}}console.log('ready');setTimeout(()=>process.exit(0),{hold_ms});",
         lock_js.to_string_lossy(),

@@ -310,11 +310,14 @@ enum Msg {
 fn spawn_pool_worker(home: PathBuf, stop: Arc<dyn Fn() -> bool + Send + Sync>, rx: Arc<Mutex<mpsc::Receiver<Msg>>>, done: mpsc::Sender<String>) -> PoolWorker {
     let worker_stop = Arc::new(AtomicBool::new(false));
     let worker_stop2 = worker_stop.clone();
-    let handle = std::thread::spawn(move || {
+    // An idle worker blocks on the queue: a job, a `Stop` or the queue closing wakes it. A `Stop` goes to whichever idle worker takes it, so
+    // the worker told to retire may only learn it from its own flag at the end of the wait: that wait is `worker_idle_wait_ms`, not the
+    // 200 ms of the stop-side joins (five wake-ups a second per worker was a steady cost of an idle daemon).
+    let spawned = std::thread::Builder::new().name(defaults::text("devswarm_ingest.worker_thread_name").to_string()).spawn(move || {
         while !stop() && !worker_stop2.load(Ordering::Relaxed) {
             let msg = {
                 let rx = rx.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-                rx.recv_timeout(std::time::Duration::from_millis(defaults::num("devswarm_ingest.stop_poll_ms").max(1)))
+                rx.recv_timeout(std::time::Duration::from_millis(defaults::num("devswarm_ingest.worker_idle_wait_ms").max(1)))
             };
             match msg {
                 Ok(Msg::Run(job)) => {
@@ -334,6 +337,11 @@ fn spawn_pool_worker(home: PathBuf, stop: Arc<dyn Fn() -> bool + Send + Sync>, r
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
             }
         }
+    });
+    let handle = spawned.unwrap_or_else(|e| {
+        // a thread the system will not start does the job's work never: the manager sees it finished and counts a panic
+        crate::discard::note("ingest_worker_spawn", &e.to_string());
+        std::thread::spawn(|| {})
     });
     PoolWorker { handle, stop: worker_stop }
 }
@@ -510,7 +518,7 @@ fn live_count(running: &HashMap<String, Assignment>) -> usize {
 
 /// A sleep that wakes at once when `stop` turns true, and re-stamps the lock and heartbeat while it waits. False: the lock was lost.
 fn wait(d: &mut Drainer, ms: u64, stop: &dyn Fn() -> bool) -> bool {
-    let poll = defaults::num("devswarm_ingest.stop_poll_ms").max(1);
+    let poll = defaults::num("devswarm_ingest.idle_poll_ms").max(1);
     let beat_every = defaults::num("devswarm_ingest.beat_every_ms").max(poll);
     let (mut left, mut since) = (ms, 0u64);
     while left > 0 && !stop() {
@@ -536,7 +544,7 @@ pub fn run_project(home: &Path, st: &Settings, project: Project, runner: &dyn Ru
             Start::Refused(_) => {
                 let mut left = defaults::num("devswarm_ingest.lock_retry_ms");
                 while left > 0 && !stop() {
-                    let nap = left.min(defaults::num("devswarm_ingest.stop_poll_ms").max(1));
+                    let nap = left.min(defaults::num("devswarm_ingest.idle_poll_ms").max(1));
                     std::thread::sleep(std::time::Duration::from_millis(nap));
                     left -= nap;
                 }
@@ -752,7 +760,7 @@ pub fn start(home: &Path, state_dir: &Path, stop: Arc<dyn Fn() -> bool + Send + 
             budget.observe();
             let mut left = defaults::num("devswarm_ingest.discover_ms");
             while left > 0 && !stop_for_run() {
-                let nap = left.min(defaults::num("devswarm_ingest.stop_poll_ms").max(1));
+                let nap = left.min(defaults::num("devswarm_ingest.idle_poll_ms").max(1));
                 std::thread::sleep(std::time::Duration::from_millis(nap));
                 left -= nap;
             }

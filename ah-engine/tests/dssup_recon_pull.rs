@@ -44,6 +44,7 @@ d="$HOME/hc"
 echo "$*" >> "$d/calls.log" 2>/dev/null
 case "$2" in
 message-count)
+  if [ -f "$d/count.needcwd" ] && [ "$(pwd -P)" != "$(cat "$d/count.needcwd")" ]; then echo "Error: Not in a git repository" >&2; exit 1; fi
   rc=0; [ -f "$d/count.rc" ] && rc=$(cat "$d/count.rc")
   [ -f "$d/count.err" ] && cat "$d/count.err" >&2
   [ -f "$d/count" ] && cat "$d/count"
@@ -304,7 +305,7 @@ fn world(tag: &str) -> Option<(Fx, W)> {
 
 /// Node's own drain of `id`: the spawn `reconcile` makes (`inbox pull <id>` in the worktree), clock pinned. Returns its parsed answer.
 fn node_pull(home: &Path, cwd: &Path, now: i64) -> Value {
-    let cli = plugin_root().join("scripts").join("devswarm.js");
+    let cli = node_root().join("scripts").join("devswarm.js");
     let mut env = base_env(home, &home.join("state"), &[("ANTIHALL_RECONCILE_SWEEP", "1")]);
     env.retain(|(k, _)| k != "AH_ENGINE_NOSPAWN");
     let mut c = Command::new("node");
@@ -597,8 +598,84 @@ fn an_inbox_outside_the_state_directory_goes_to_node_before_anything_is_read() {
     base(&w, &he, &[("inboxPath", json!(elsewhere.to_string_lossy()))], &[]);
     hc(&he, "count", "1");
     hc(&he, "read", &msgs(&[("only", "2026-10-09T10:00:00.000Z")]));
-    assert_eq!(engine_drain(&he, &fx, &Hooks::none()), Err("path-outside-state-dir".to_string()));
-    assert!(he.join("hc/read").exists(), "the queue was not read");
+    assert_eq!(engine_drain(&he, &fx, &Hooks::none()), Err("path-outside-allowed-dirs".to_string()));
+    assert!(!he.join("hc/read.consumed").exists(), "the queue was not read");
+}
+
+/// A child's descriptor keeps its inbox and cursor in the worktree's own `.devswarm-temp`: those are the workspace's own paths and
+/// are drained (a path outside both the state directory and the worktree is not).
+#[test]
+fn an_inbox_inside_the_workspaces_own_worktree_is_drained() {
+    let Some((fx, w)) = world("s3owntemp") else { return };
+    let he = fx.root.join("owntemp-engine");
+    copy_tree(&fx.seed_home, &he);
+    seed_home(&he);
+    let tmp = fx.child.join(".devswarm-temp");
+    fs::create_dir_all(&tmp).unwrap();
+    let (inbox, cursor) = (tmp.join("inbox.ndjson"), tmp.join("inbox.cursor"));
+    base(&w, &he, &[("inboxPath", json!(inbox.to_string_lossy())), ("cursorPath", json!(cursor.to_string_lossy()))], &[]);
+    hc(&he, "count", "1");
+    hc(&he, "read", &msgs(&[("only", "2026-10-09T10:00:00.000Z")]));
+    let done = engine_drain(&he, &fx, &Hooks::none()).expect("a path inside the workspace's own worktree is drained");
+    assert_eq!(done["imported"].as_i64(), Some(1), "{done}");
+    assert_eq!(fs::read_to_string(&inbox).unwrap().lines().count(), 1, "the row landed in the worktree inbox");
+    // a `..` that climbs out of the worktree is not the workspace's own path
+    let he2 = fx.root.join("owntemp-escape");
+    copy_tree(&fx.seed_home, &he2);
+    seed_home(&he2);
+    let escape = tmp.join("..").join("..").join("escaped.ndjson");
+    base(&w, &he2, &[("inboxPath", json!(escape.to_string_lossy()))], &[]);
+    hc(&he2, "count", "1");
+    hc(&he2, "read", &msgs(&[("only", "2026-10-09T10:00:00.000Z")]));
+    assert_eq!(engine_drain(&he2, &fx, &Hooks::none()), Err("path-outside-allowed-dirs".to_string()));
+}
+
+/// hivecontrol names the workspace by the directory it runs in; the engine daemon's own directory is no git repository, so the sweep's
+/// count and read must run in the workspace's checkout. Live RC4: "Not in a git repository" on three workspaces.
+#[test]
+fn the_count_and_the_read_run_in_the_workspaces_own_checkout() {
+    let Some((fx, w)) = world("s3cwd") else { return };
+    let he = fx.root.join("cwd-engine");
+    copy_tree(&fx.seed_home, &he);
+    seed_home(&he);
+    base(&w, &he, &[], &[]);
+    hc(&he, "count.needcwd", &fs::canonicalize(&fx.child).unwrap().to_string_lossy());
+    hc(&he, "count", "1");
+    hc(&he, "read", &msgs(&[("only", "2026-10-09T10:00:00.000Z")]));
+    let done = engine_drain(&he, &fx, &Hooks::none()).expect("the count ran in the workspace's checkout");
+    assert_eq!(done["imported"].as_i64(), Some(1), "{done}");
+}
+
+/// A failed count says why in the reason it is handed back with: the exit code and the first line the call printed.
+#[test]
+fn a_failed_count_names_its_exit_code_and_first_stderr_line() {
+    let Some((fx, w)) = world("s3cwhy") else { return };
+    let he = fx.root.join("cwhy-engine");
+    copy_tree(&fx.seed_home, &he);
+    seed_home(&he);
+    base(&w, &he, &[], &[]);
+    hc(&he, "count.rc", "3");
+    hc(&he, "count.err", "Error: Not in a git repository\nsecond line\n");
+    let why = engine_drain(&he, &fx, &Hooks::none()).expect_err("a failed count is handed back");
+    assert_eq!(why, "count-failed (exit 3: Error: Not in a git repository)");
+}
+
+/// SkyCrew's Primary checkout has two registry rows on one worktree (its `primary-<hash>` label and the workspace's own id). The sweep's
+/// project fold leaves the anchored one, and the pull of the real workspace must not be held for it (no row is retired or deleted).
+#[test]
+fn a_row_the_fold_left_on_the_same_worktree_does_not_hold_the_pull() {
+    let Some((fx, w)) = world("s3dups") else { return };
+    let he = fx.root.join("dups-engine");
+    copy_tree(&fx.seed_home, &he);
+    seed_home(&he);
+    base(&w, &he, &[], &[]);
+    add_row(&he, &fx.repo_key, "primary-0badc0de", &fx.child.to_string_lossy(), "sess-x");
+    hc(&he, "count", "1");
+    hc(&he, "read", &msgs(&[("only", "2026-10-09T10:00:00.000Z")]));
+    let done = engine_drain(&he, &fx, &Hooks::none()).expect("the pull is not held for a row the fold left");
+    assert_eq!(done["imported"].as_i64(), Some(1), "{done}");
+    let rows = rusqlite::Connection::open(key_db(&he, &fx.repo_key)).unwrap().query_row("SELECT COUNT(*) FROM registry WHERE id IN ('child-1','primary-0badc0de')", [], |r| r.get::<_, i64>(0)).unwrap();
+    assert_eq!(rows, 2, "no registry row was retired");
 }
 
 #[test]

@@ -221,7 +221,7 @@ value = "Your parent orchestrator relies on your heartbeat and a drained inbox."
 
 [devswarm_gates.cg_wake_tick]
 doc = "The tick command of the child's mailbox-wake re-verify line: {id}."
-value = "`node \"$CLI\" inbox tick {id} --child --quiet`"
+value = "`\"$CLI\" inbox tick {id} --child --quiet`"
 
 [devswarm_gates.cg_cron_missing_tick]
 doc = "The mailbox-cron-missing text when the last tick marker is too old: {m} (its age in whole minutes); the wake re-verify line follows."
@@ -253,23 +253,23 @@ value = "Heartbeat: {drop}, THEN stop."
 
 [devswarm_gates.cg_heartbeat]
 doc = "The outbound line that asks for a heartbeat report: {cli}, {id}."
-value = "Heartbeat: before you stop, emit a heartbeat / self-report to your parent orchestrator so you do not silently drop off its radar and later read as stale. Run `node {cli} heartbeat {id} --summary \"<status>\"` with a one-line status (e.g. \"done — awaiting next task\", \"blocked on X\", or \"idle — reassign or archive me\"), THEN stop. This keeps the parent's task list honest instead of leaving you unnoticed."
+value = "Heartbeat: before you stop, emit a heartbeat / self-report to your parent orchestrator so you do not silently drop off its radar and later read as stale. Run `{cli} heartbeat {id} --summary \"<status>\"` with a one-line status (e.g. \"done — awaiting next task\", \"blocked on X\", or \"idle — reassign or archive me\"), THEN stop. This keeps the parent's task list honest instead of leaving you unnoticed."
 
 [devswarm_gates.cg_inbox_pending]
 doc = "The inbound line for known unread parent mail: {cli}, {id}."
-value = "Inbox: you have unpulled/unread parent message(s): run `node {cli} inbox pull {id}` (or `inbox read` if already pulled), then `inbox ack` once addressed — BEFORE you stop. "
+value = "Inbox: you have unpulled/unread parent message(s): run `{cli} inbox pull {id}` (or `inbox read` if already pulled), then `inbox ack` once addressed — BEFORE you stop. "
 
 [devswarm_gates.cg_inbox_native_only]
 doc = "The one-time inbound line when only the native probe is unknown and the report is satisfied: {cli}, {id}."
-value = "Inbox: the native `hivecontrol workspace message-count` probe failed or timed out, so this gate cannot prove your native queue is empty (your mesh inbox and report are fine). Try `node {cli} inbox pull {id}` once and handle any mail; if it fails the same way the native channel is unreachable from here, so you may stop — this warning will not repeat."
+value = "Inbox: the native `hivecontrol workspace message-count` probe failed or timed out, so this gate cannot prove your native queue is empty (your mesh inbox and report are fine). Try `{cli} inbox pull {id}` once and handle any mail; if it fails the same way the native channel is unreachable from here, so you may stop — this warning will not repeat."
 
 [devswarm_gates.cg_inbox_native_unknown]
 doc = "The inbound line when the native probe is unknown: {cli}, {id}."
-value = "Inbox: your NATIVE unread count is UNKNOWN (the `hivecontrol workspace message-count` probe failed or timed out), so this gate cannot prove your native queue is empty. Run `node {cli} inbox pull {id}` and handle any mail BEFORE you stop. "
+value = "Inbox: your NATIVE unread count is UNKNOWN (the `hivecontrol workspace message-count` probe failed or timed out), so this gate cannot prove your native queue is empty. Run `{cli} inbox pull {id}` and handle any mail BEFORE you stop. "
 
 [devswarm_gates.cg_inbox_durable_unknown]
 doc = "The inbound line when the child's own durable unread count is unknown (its store could not be read): {cli}, {id}, {reason}."
-value = "Inbox: your unread count is UNKNOWN ({reason}): the store could not be read, so this gate cannot prove your inbox is empty. Run `node {cli} inbox count {id}` and read any mail BEFORE you stop. "
+value = "Inbox: your unread count is UNKNOWN ({reason}): the store could not be read, so this gate cannot prove your inbox is empty. Run `{cli} inbox count {id}` and read any mail BEFORE you stop. "
 
 [devswarm_gates.cg_unknown_reason_default]
 doc = "The reason named in that line when the host cannot say why the store could not be read."
@@ -293,7 +293,7 @@ value = 600000
 
 [devswarm_gates.cd_message_unknown]
 doc = "The drain nudge when the child's unread count could not be read (a project or message store the engine cannot read exactly): {cli} (the DevSwarm CLI path), {id} (the workspace id). Shown instead of silence, throttled like the counted nudge."
-value = "⚠️ anti-hall · devswarm-inbox: the unread count of YOUR mailbox could not be read here, so messages addressed to YOU may be waiting. Drain NOW via `node {cli} inbox pull {id} && node {cli} inbox ack {id}` before continuing; a parent ruling may change what you are building."
+value = "⚠️ anti-hall · devswarm-inbox: the unread count of YOUR mailbox could not be read here, so messages addressed to YOU may be waiting. Drain NOW via `{cli} inbox pull {id} && {cli} inbox ack {id}` before continuing; a parent ruling may change what you are building."
 
 [devswarm_gates.cd_unknown_count]
 doc = "The count the drain nudge's throttle state records for an unreadable mailbox (below zero, so it never equals a real count and the nudge repeats only after devswarm_gates.cd_throttle_ms)."
@@ -313,7 +313,7 @@ value = "PostToolUse"
 
 [devswarm_gates.cd_message]
 doc = "The drain nudge: {n} (unread count), {age}, {cli} (the DevSwarm CLI path), {id} (the workspace id)."
-value = "⚠️ anti-hall · devswarm-inbox: {n} unread message(s) addressed to YOU (oldest {age}). Drain NOW via `node {cli} inbox pull {id} && node {cli} inbox ack {id}` before continuing; a parent ruling may change what you are building."
+value = "⚠️ anti-hall · devswarm-inbox: {n} unread message(s) addressed to YOU (oldest {age}). Drain NOW via `{cli} inbox pull {id} && {cli} inbox ack {id}` before continuing; a parent ruling may change what you are building."
 
 [devswarm_gates.rt_send_action]
 doc = "The `action` of a send line in the DevSwarm CLI output and of a send receipt."

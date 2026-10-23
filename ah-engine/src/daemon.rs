@@ -411,6 +411,7 @@ impl Shared {
         let ledger = crate::memdiag::live_ledger(m.get("budgets").unwrap_or(&serde_json::Value::Null));
         if let Some(o) = m.as_object_mut() {
             o.insert("ledger".into(), ledger);
+            o.insert("regex".into(), crate::script::regex_diag());
         }
         m
     }
@@ -769,7 +770,7 @@ impl crate::hookio::Observer for DaemonObserver<'_> {
         observe_check_cost_in(self.t, self.event, check, micros);
         crate::obs::trace::push("check", check, telemetry::decision_name(verdict), micros);
         if matches!(verdict, crate::checks::Verdict::Defer) {
-            crate::obs::counters::handback(crate::obs::counters::Handback::Abandoned, &format!("check:{check}"));
+            crate::obs::counters::handback_why(crate::obs::counters::Handback::Abandoned, &format!("check:{check}"), rule_id);
         }
         self.t.observe_check_in(self.event, check, rule_id, verdict, micros, self.project);
     }

@@ -889,7 +889,7 @@ fn cases(fx: &Fx) -> Vec<Case> {
         cwd: "main",
         ..base("the-caller-does-not-own-the-id", rp("child-1", &[]), ack(floors("child-1", 0, 0), d_store.clone()), nothing(), plain(), false, vec!["refused"])
     });
-    v.push(base("floor-rows-missing-need-the-import", rp("child-1", &[]), ack(vec![], d_store.clone()), nothing(), plain(), false, vec!["\"count\":2"]));
+    v.push(base("floor-rows-missing-need-the-import", rp("child-1", &[]), ack(vec![], d_store.clone()), nothing(), plain(), true, vec!["\"count\":2"]));
     v.push(base(
         "inbox-missing-the-count-is-unknown",
         rp("child-1", &[]),

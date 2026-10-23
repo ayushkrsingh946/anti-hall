@@ -351,7 +351,7 @@ enum Slot {
     /// A row decided without a pull: its result.
     Done(Value),
     /// A row to drain: the engine's staged pull (an index into the staged list), or none (held).
-    Pull { t: Target, root: String, staged: Option<usize> },
+    Pull { t: Target, root: String, staged: Option<usize>, why: Option<String> },
 }
 
 fn base_row(t: &Target) -> Map<String, Value> {
@@ -552,11 +552,11 @@ fn reconcile(ctx: &Ctx, runner: &dyn Runner, cwd: &str, o: &Opts, hooks: &Hooks)
         match pull::stage(ctx, &t.id, &root, &at) {
             Stage::Ready(s) => {
                 staged.push(*s);
-                slots.push(Slot::Pull { t: t.clone(), root, staged: Some(staged.len() - 1) });
+                slots.push(Slot::Pull { t: t.clone(), root, staged: Some(staged.len() - 1), why: None });
             }
             Stage::Node(why) => {
                 pull::note_handback(ctx, &t.id, &why);
-                slots.push(Slot::Pull { t: t.clone(), root, staged: None });
+                slots.push(Slot::Pull { t: t.clone(), root, staged: None, why: Some(why) });
             }
         }
     }
@@ -572,24 +572,34 @@ fn reconcile(ctx: &Ctx, runner: &dyn Runner, cwd: &str, o: &Opts, hooks: &Hooks)
             .any(|t| ansi.replace_all(t, "").split(['\n']).any(|l| unknown_re.as_ref().is_some_and(|r| r.is_match(js_trim(l.trim_end_matches('\r'))))))
     };
     for slot in slots {
-        let (t, _root, staged_ix) = match slot {
+        let (t, _root, staged_ix, mut why) = match slot {
             Slot::Done(v) => {
                 results.push(v);
                 continue;
             }
-            Slot::Pull { t, root, staged } => (t, root, staged),
+            Slot::Pull { t, root, staged, why } => (t, root, staged, why),
         };
         // the answer: the engine's recorded result; a workspace it did not answer is held (counted, nothing imported, a skipped row)
         let mut parsed: Option<Value> = None;
         if let Some(i) = staged_ix {
             match drained[i].take() {
                 Some(Ok(v)) => parsed = Some(v),
-                Some(Err(why)) => pull::note_handback(ctx, &t.id, &why),
+                Some(Err(e)) => {
+                    pull::note_handback(ctx, &t.id, &e);
+                    why = Some(e);
+                }
                 None => {}
             }
         }
         if parsed.is_none() {
-            crate::dssup::tick::held("dssup:recon:pull", defaults::text("devswarm_recon.why_pull_held"));
+            let why = why.unwrap_or_default();
+            // a workspace with no native queue is skipped by construction, not an abandoned decision
+            if pull::skipped_by_construction(&why) {
+                results.push(skip_row(&t, "devswarm_recon.msg_skip_no_queue", &[]));
+                continue;
+            }
+            let reason = defaults::render("devswarm_recon.msg_pull_held_why", &[("id", &t.id), ("why", &why)]);
+            crate::dssup::tick::held("dssup:recon:pull", &format!("{} ({reason})", defaults::text("devswarm_recon.why_pull_held")));
             results.push(skip_row(&t, "devswarm_recon.msg_skip_held", &[("held", json!(true))]));
             continue;
         }

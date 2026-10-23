@@ -2,7 +2,7 @@
   {
     "name": "devswarm-wake-watch",
     "command": "AH_ENGINE_PLUGIN_ROOT=\"${CLAUDE_PLUGIN_ROOT}\" exec \"$HOME/.anti-hall/ah-engine/bin/ah-engine\" devswarm wake-watch --auto",
-    "description": "DevSwarm idle-wake: watches this workspace's own mailbox (read-only, poll-based) and emits a stdout line the instant new direct mesh mail lands, waking an idle session with lower latency than the cron fallback. Additive only \u2014 never disarms or replaces the unconditional CronCreate fallback (see hooks/lib/devswarm-wake.js).",
+    "description": "DevSwarm idle-wake: watches this workspace's own mailbox (read-only, poll-based) and emits a stdout line the instant new direct mesh mail lands, waking an idle session with lower latency than the cron fallback. Additive only \u2014 never disarms or replaces the unconditional CronCreate fallback (the engine owns the cron fallback).",
     "when": "always"
   },
   {

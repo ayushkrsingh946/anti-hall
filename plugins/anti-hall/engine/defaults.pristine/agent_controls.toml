@@ -654,6 +654,13 @@ min = 0
 max = 100
 unit = "percent"
 
+[agent_scan.window_quantum_pct]
+doc = "The scan window of a transcript longer than it starts at a multiple of this percent of the window, so it is the window up to this much longer. An exact window starts one byte later with every appended byte and the kept walk is rebuilt (the whole window read and filtered) whenever the start passes a line a launch, a notice or a stop came from, which in a busy session is nearly every Stop; a start that moves once per quantum rebuilds once per quantum. A longer window only ever sees more, never less. 0 is the exact window."
+value = 10
+unit = "percent"
+min = 0
+max = 100
+
 [agent_scan.cache_idle_ms]
 doc = "How long a kept walk may sit unused before it is dropped. A walk holds a few tens of kilobytes (the memory registry's agent_scan_walk limits bound all of them); a session that stops once an hour finds its walk and reads only what was appended, instead of walking the last 64 MiB again."
 value = 21600000

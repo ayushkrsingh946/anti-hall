@@ -13,8 +13,9 @@
 //! * `reap-stale` and `reconcile-active` answer their dry runs, and a confirmed run with nothing to archive; archiving a
 //!   workspace is the `archive` verb's job (the app leg), which stays Node's, so any run that would archive defers.
 //! * `auto-archive` answers when the app database is absent; the candidate evaluation (git proofs, transcripts, mail) is Node's.
-//! * `spawn` and `respawn`: the refusals that need no `hivecontrol` call, git fetch or wall clock. The create path
-//!   (source-freshness fetch, launch poll, timings, wake coverage) and the respawn path (git park, handover, create) are Node's.
+//! * `spawn` (and `create`): the option refusals here, then the create path of [`crate::meshw::spawnverb`].
+//! * `respawn`: the refusals that need no `hivecontrol` call, git fetch or wall clock; the respawn path (git park, handover, create)
+//!   is not reproduced.
 // Discard triage (E3): every `.ok()` / `unwrap_or_default()` in this file is a deliberate keep, for these reasons:
 // - an unreadable optional file is the same as an absent one (fail-open, as Node's try/catch)
 // A failure that must be seen goes through `crate::discard` instead.
@@ -82,13 +83,8 @@ pub fn merge(inv: &Inv, a: &Args) -> R<Answer> {
             let st = common::open_store(inv, &repo_key)?;
             let rows = ident::rows_of(&st.reader().roster().map_err(|e| ident::Defer(format!("registry:{e}")))?);
             let who = ident::sender_identity_detailed(&inv.env, &inv.cwd, &rows, &inv.home)?;
-            if who.kind == text("mesh_write.kind_child") {
-                // writeAlias(...) is a no-op only when the alias already says so
-                let label = who.mesh_id.clone().unwrap_or_default();
-                if !common::read_aliases(&inv.home).into_iter().any(|(k, v)| k == label && v == who.identity) {
-                    return defer("sender-alias");
-                }
-            }
+            // writeAlias(...): a no-op when the alias already says so
+            common::ensure_alias(inv, &who, &inv.cwd);
             crate::meshw::summary::check(&st, inv, None)?;
             Some(Broadcast { repo_key, store: st, from: who.identity })
         }
@@ -541,9 +537,9 @@ pub fn auto_archive(inv: &Inv, _a: &Args) -> R<Answer> {
 // ---- spawn and respawn --------------------------------------------------------------------------------------------------
 
 /// `spawnFlagValueError(rest)`: a value-taking create option with no value, or handed what looks like the next option.
-fn spawn_flag_error(rest: &[&str]) -> R<Option<String>> {
+fn spawn_flag_error(rest: &[&str]) -> Option<String> {
     let flags = defaults::raw("devswarm_cli.spawn_value_flags").as_array().map(<[_]>::to_vec).unwrap_or_default();
-    let option_shaped = regex::Regex::new(text("devswarm_cli.spawn_option_shape")).map_err(|_| ident::Defer("spawn-pattern".into()))?;
+    let option_shaped = crate::checks::guardkit::jsre::compile(text("devswarm_cli.spawn_option_shape"), false);
     for (i, a) in rest.iter().enumerate().skip(1) {
         for f in &flags {
             let (short, long) = (f.str_field("short"), f.str_field("long"));
@@ -557,23 +553,20 @@ fn spawn_flag_error(rest: &[&str]) -> R<Option<String>> {
             };
             let label = format!("{short}/{long}");
             let Some(value) = value.filter(|v| !v.is_empty()) else {
-                return Ok(Some(tpl("devswarm_cli.msg_spawn_no_value", &[("label", &label), ("name", &name)])));
+                return Some(tpl("devswarm_cli.msg_spawn_no_value", &[("label", &label), ("name", &name)]));
             };
-            if value.chars().any(|c| text("devswarm_cli.spawn_exotic_chars").contains(c)) {
-                return defer("spawn-white-space");
-            }
             let bad = if any_dash { value.starts_with('-') } else { option_shaped.is_match(value) };
             if bad {
                 let quoted = serde_json::to_string(value).unwrap_or_default();
-                return Ok(Some(tpl("devswarm_cli.msg_spawn_bad_value", &[("label", &label), ("value", &quoted), ("name", &name), ("short", short)])));
+                return Some(tpl("devswarm_cli.msg_spawn_bad_value", &[("label", &label), ("value", &quoted), ("name", &name), ("short", short)]));
             }
             break;
         }
     }
-    Ok(None)
+    None
 }
 
-/// `spawn <branch> [create options]`: the refusals before anything is fetched or created. The create path is Node's.
+/// `spawn <branch> [create options]` (and `create`): the option refusals, then the create path ([`crate::meshw::spawnverb`]).
 pub fn spawn(inv: &Inv, a: &Args) -> R<Answer> {
     common::seat_check(inv)?;
     let rest: Vec<&str> = a.raw.iter().skip(1).map(String::as_str).collect();
@@ -581,16 +574,11 @@ pub fn spawn(inv: &Inv, a: &Args) -> R<Answer> {
         return Ok(answer(2, failure(&[("error", s(text("devswarm_cli.msg_spawn_no_branch")))]).done()));
     };
     let strict = crate::dsact::settings::resolve(&inv.settings(), defaults::raw("devswarm_cli.set_spawn_strict")).as_bool().unwrap_or(true);
-    if !strict {
-        return defer("spawn-lenient");
+    if strict && let Some(error) = spawn_flag_error(&rest) {
+        let o = failure(&[("action", s(text("devswarm_cli.action_spawn"))), ("branch", s(branch)), ("created", OVal::Bool(false)), ("error", s(&error))]);
+        return Ok(answer(2, o.done()));
     }
-    match spawn_flag_error(&rest)? {
-        Some(error) => {
-            let o = failure(&[("action", s(text("devswarm_cli.action_spawn"))), ("branch", s(branch)), ("created", OVal::Bool(false)), ("error", s(&error))]);
-            Ok(answer(2, o.done()))
-        }
-        None => defer("spawn-create"),
-    }
+    crate::meshw::spawnverb::create(inv, &rest, branch)
 }
 
 /// `respawn <id> [--dry-run]`: the usage refusal and the refusal of a caller that is not in the Primary checkout. The rest (plan,

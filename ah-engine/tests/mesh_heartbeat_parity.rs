@@ -106,7 +106,16 @@ fn seed(h: &Path, fx: &Fx, c: &Case) {
 }
 
 fn tree(home: &Path) -> std::collections::BTreeMap<String, Vec<u8>> {
-    home_files(home).into_iter().map(|(k, v)| (k, normalized(home, &v))).collect()
+    // the caller log of a session-less heartbeat names the writing process (pid, parent pid, its own argv): blanked on both sides
+    let who = regex::Regex::new(r#""pid":[0-9]+,"ppid":[0-9]+,"argv":"(?:[^"\\]|\\.)*""#).unwrap();
+    home_files(home)
+        .into_iter()
+        .map(|(k, v)| {
+            let v = normalized(home, &v);
+            let v = if k.ends_with("heartbeat-callers.log") { who.replace_all(&String::from_utf8_lossy(&v), r#""pid":0,"ppid":0,"argv":"""#).into_owned().into_bytes() } else { v };
+            (k, v)
+        })
+        .collect()
 }
 
 fn assert_same_home(name: &str, a: &Path, b: &Path, key: &str, what: &str) {
@@ -597,7 +606,7 @@ fn cases(fx: &Fx) -> Vec<Case> {
             extra: vec![],
             ack: none(),
             union: none(),
-            native: false,
+            native: true,
             expect: vec!["\"sessionId\":null"],
         },
         Case {
@@ -607,7 +616,7 @@ fn cases(fx: &Fx) -> Vec<Case> {
             extra: vec![],
             ack: none(),
             union: none(),
-            native: false,
+            native: true,
             expect: vec!["\"sessionId\":null"],
         },
         Case {
@@ -689,7 +698,7 @@ fn cases(fx: &Fx) -> Vec<Case> {
             extra: vec![],
             ack: ack(vec![], d_plain.clone(), vec![]),
             union: none(),
-            native: false,
+            native: true,
             expect: vec!["\"ok\":true"],
         },
         Case {
@@ -782,7 +791,7 @@ fn heartbeat_matches_node_byte_for_byte_and_defers_without_writing() {
         }
     }
     eprintln!("heartbeat parity: {} cases, {native} answered by the engine and identical to Node, {deferred} deferred with nothing written", list.len());
-    assert!(native >= 34 && deferred >= 9, "{native} native, {deferred} deferred");
+    assert!(native >= 37 && deferred >= 6, "{native} native, {deferred} deferred");
 }
 
 /// Input faults: whatever the engine cannot read exactly like Node, it must leave untouched for Node.

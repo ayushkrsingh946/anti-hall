@@ -8,7 +8,7 @@
 //! (`--version`, `workspace --help`), whose answer Node's capability cache already holds, and it answers `check-merge`,
 //! `merge-into-source` and `list all` from per-case shell fragments, so the argument vector and the working directory of every call are
 //! part of the home tree both sides are compared on. A case the engine must hand to Node is run a third time with no Node on the PATH:
-//! it must exit 75, print nothing and write nothing. The background Node witness of each answered call that has one (everything but
+//! it must exit `mesh_write.exit_unable` (69), print nothing and write nothing. The background Node witness of each answered call that has one (everything but
 //! `merge`) is checked at the end: it must have logged a match.
 #![allow(clippy::unwrap_used, clippy::expect_used)] // a test crate: a panic is the failure report, and E2 exempts tests
 #![allow(clippy::panic, clippy::unreachable)] // integration tests: a panic is the failure report; production crates deny these in Cargo.toml
@@ -24,6 +24,9 @@ use fx::*;
 
 const NOW: i64 = 1_795_000_000_000;
 
+/// `mesh_write.exit_unable`: the engine cannot answer and there is no Node to hand the verb to (nothing written).
+const UNABLE: i32 = 69;
+
 /// The Node program the engine's witness uses (pins the clock, loads devswarm.js as the main module).
 const SNIPPET: &str = "const c=process.argv[1],n=Number(process.argv[2]);Date.now=()=>n;process.argv=[process.argv[0],c].concat(process.argv.slice(3));require('module')._load(c,null,true);";
 
@@ -35,6 +38,8 @@ const DEFAULT_VERBS: &str = "list info create update-title check-merge merge-int
 struct Lc {
     /// The stub hivecontrol's answers (shell fragments) to `workspace check-merge`, `workspace merge-into-source ...` and `workspace list all`.
     check: String,
+    /// The stub's answer (a shell fragment) to `workspace create ...`.
+    create: String,
     merge: String,
     all: String,
     /// The verbs the stub's `workspace --help` lists (the capability probe reads them).
@@ -56,6 +61,7 @@ struct Lc {
 fn lc(name: &str, argv: &[&str], cwd: &'static str, native: bool, label: &'static str) -> Lc {
     Lc {
         check: "echo '{}'".into(),
+        create: "exit 0".into(),
         merge: "echo '{}'".into(),
         all: "echo '[]'".into(),
         verbs: DEFAULT_VERBS.into(),
@@ -74,6 +80,10 @@ fn lc(name: &str, argv: &[&str], cwd: &'static str, native: bool, label: &'stati
 impl Lc {
     fn check(mut self, body: &str) -> Lc {
         self.check = body.into();
+        self
+    }
+    fn create(mut self, body: &str) -> Lc {
+        self.create = body.into();
         self
     }
     fn merge(mut self, body: &str) -> Lc {
@@ -125,7 +135,7 @@ fn tools_path(root: &Path, with_node: bool) -> String {
 }
 
 fn node_cli(home: &Path, cwd: &Path, argv: &[String], now: i64, env: &[(&str, &str)]) -> Run {
-    let cli = plugin_root().join("scripts").join("devswarm.js");
+    let cli = node_root().join("scripts").join("devswarm.js");
     let mut c = Command::new("node");
     c.arg("-e").arg(SNIPPET).arg(&cli).arg(now.to_string()).args(argv).current_dir(cwd).env_clear().envs(base_env(home, &home.join("state"), env));
     let o = run(&mut c, None);
@@ -149,6 +159,12 @@ fn mask_log(text: &str) -> String {
     let ts = regex::Regex::new(r#"(?m)^\{"ts":"[^"]*""#).unwrap();
     let pid = regex::Regex::new(r#""pid":[0-9]+,"msg""#).unwrap();
     pid.replace_all(&ts.replace_all(text, r#"{"ts":"T""#), r#""pid":0,"msg""#).into_owned()
+}
+
+/// Node's answers name its own script where the engine (the only shipped runtime) names its own command: the one intended
+/// text difference, mapped before the comparison.
+fn engine_wording(text: &str) -> String {
+    text.replace("`devswarm.js plan set <id> --steps …`", "`ah-engine mesh plan set <id> --steps …`")
 }
 
 fn tree(home: &Path) -> BTreeMap<String, String> {
@@ -177,8 +193,9 @@ fn stub_dir(root: &Path, name: &str, c: &Lc) -> PathBuf {
     fs::write(
         &f,
         format!(
-            "#!/bin/sh\ncase \"$*\" in\n  \"--version\") echo \"hivecontrol 2.6.0\";;\n  \"workspace --help\") printf 'Commands:\\n{help}';;\n  *) printf '%s|%s\\n' \"$PWD\" \"$*\" >> \"$HOME/hc.log\"\n     case \"$*\" in\n       \"workspace check-merge\") {check};;\n       \"workspace merge-into-source\"*) {merge};;\n       \"workspace list all\") {all};;\n       *) exit 0;;\n     esac;;\nesac\n",
+            "#!/bin/sh\ncase \"$*\" in\n  \"--version\") echo \"hivecontrol 2.6.0\";;\n  \"workspace --help\") printf 'Commands:\\n{help}';;\n  *) printf '%s|%s\\n' \"$PWD\" \"$*\" >> \"$HOME/hc.log\"\n     case \"$*\" in\n       \"workspace check-merge\") {check};;\n       \"workspace merge-into-source\"*) {merge};;\n       \"workspace list all\") {all};;\n       \"workspace create\"*) {create};;\n       *) exit 0;;\n     esac;;\nesac\n",
             check = c.check,
+            create = c.create,
             merge = c.merge,
             all = c.all
         ),
@@ -191,7 +208,7 @@ fn stub_dir(root: &Path, name: &str, c: &Lc) -> PathBuf {
 
 /// Node's own capability probe of the stub, run once on a home.
 fn prime_cache(home: &Path, path: &str) {
-    let caps = plugin_root().join("companion/lib/devswarm-capabilities.js");
+    let caps = node_root().join("companion/lib/devswarm-capabilities.js");
     let src = format!("const c=require({:?});c.probe({{env:process.env,home:process.env.HOME}});", caps);
     let o = Command::new("node").args(["-e", &src]).env_clear().env("PATH", path).env("HOME", home).output().unwrap();
     assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
@@ -293,7 +310,10 @@ fn check_from(
         if c.native {
             native += 1;
             assert_eq!(log["verb"], c.label, "{}: telemetry names the verb", c.name);
-            let (es, ns) = (e.stdout.replace(homes[1].to_string_lossy().as_ref(), "<HOME>"), n.stdout.replace(homes[0].to_string_lossy().as_ref(), "<HOME>"));
+            let (es, ns) = (
+                e.stdout.replace(homes[1].to_string_lossy().as_ref(), "<HOME>"),
+                engine_wording(&n.stdout.replace(homes[0].to_string_lossy().as_ref(), "<HOME>")),
+            );
             assert_eq!((e.code, &es), (n.code, &ns), "{}: stdout/exit differ\n engine: {es:?}\n node:   {ns:?}", c.name);
             let (te, tn) = (tree(&homes[1]), tree(&homes[0]));
             for k in te.keys().chain(tn.keys()) {
@@ -308,7 +328,7 @@ fn check_from(
             }
         } else {
             deferred += 1;
-            assert_eq!(e.code, 75, "{}: no Node to hand the verb to, the engine is unable (75)", c.name);
+            assert_eq!(e.code, UNABLE, "{}: no Node to hand the verb to, the engine is unable (mesh_write.exit_unable)", c.name);
             // reconcile-registry reads `workspace list all` before it can know it must defer: the stub's own log of that read is not a write
             let strip = |mut t: BTreeMap<String, String>| {
                 if c.argv[0] == "reconcile-registry" {
@@ -318,7 +338,7 @@ fn check_from(
             };
             let pre = (strip(tree(&homes[2])), key_db(&homes[2]).is_file().then(|| raw_dump(&key_db(&homes[2]))));
             let d = engine_cli(&homes[2], &cwd, &c.argv, now, &to_ref(&ed));
-            assert_eq!(d.code, 75, "{}: a deferral the engine cannot hand to Node exits 75, got {} / {}", c.name, d.code, d.stdout);
+            assert_eq!(d.code, UNABLE, "{}: a deferral the engine cannot hand to Node exits mesh_write.exit_unable, got {} / {}", c.name, d.code, d.stdout);
             assert!(d.stdout.is_empty(), "{}: nothing is printed on a deferral: {}", c.name, d.stdout);
             assert_eq!(last_log(&homes[2].join("state"))["result"], "defer", "{}", c.name);
             let post = (strip(tree(&homes[2])), key_db(&homes[2]).is_file().then(|| raw_dump(&key_db(&homes[2]))));
@@ -439,7 +459,7 @@ fn merge_cases(fx: &Fx) -> Vec<Lc> {
         m("a-project-without-a-store", &["merge"], "other", false).check(ok_check).merge(ok_merge),
         m("a-build-without-the-merge-verb", &["merge"], "child", false).verbs("list info create").check(ok_check).merge(ok_merge),
         m("a-build-without-the-check-verb", &["merge"], "child", false).verbs("list info create merge-into-source").check(ok_check).merge(ok_merge),
-        m("a-sender-label-nobody-aliased", &["merge"], "child", false).check(ok_check).merge(ok_merge).setup(|h| {
+        m("a-sender-label-nobody-aliased-writes-the-alias", &["merge"], "child", true).check(ok_check).merge(ok_merge).setup(|h| {
             ah_engine::discard::harmless(fs::remove_file(h.join(".anti-hall/devswarm/sender-aliases.json"))); // keep: absent is the wanted state
         }),
     ]
@@ -453,7 +473,7 @@ fn merge_matches_node() {
     }
     let fx = fixture("dsbmerge");
     let cases = merge_cases(&fx);
-    check(&fx, &cases, &[], 14, 4);
+    check(&fx, &cases, &[], 16, 3);
 }
 
 // ---- reconcile-registry -------------------------------------------------------------------------------------------------
@@ -761,8 +781,10 @@ fn auto_archive_matches_node() {
 
 // ---- spawn and respawn --------------------------------------------------------------------------------------------------
 
-fn spawn_cases() -> Vec<Lc> {
+fn spawn_cases(fx: &Fx) -> Vec<Lc> {
     let p = |name: &str, argv: &[&str], native: bool| lc(name, argv, "child", native, "Spawn").env("ANTIHALL_DEVSWARM_SPAWN_LAUNCH_WAIT_MS", "0");
+    let at = |name: &str, argv: &[&str], cwd: &'static str| lc(name, argv, cwd, true, "Spawn").env("ANTIHALL_DEVSWARM_SPAWN_LAUNCH_WAIT_MS", "0");
+    let made = format!("printf '{{\"path\":\"%s\"}}' '{}'", fx.child.display());
     vec![
         p("no-branch", &["spawn"], true).expect(&["spawn requires a branch name"]),
         p("a-title-without-a-value", &["spawn", "b1", "-t"], true),
@@ -779,11 +801,48 @@ fn spawn_cases() -> Vec<Lc> {
         p("strict-by-environment-overrides-the-file", &["spawn", "b1", "-t"], true)
             .env("ANTIHALL_DEVSWARM_SPAWN_STRICT_FLAG_VALUES", "true")
             .setup(|h| settings(h, "\"devswarm\":{\"spawnStrictFlagValues\":false}")),
-        p("a-plain-spawn-is-nodes", &["spawn", "b1"], false),
-        p("a-prompt-that-starts-with-a-bullet-is-nodes", &["spawn", "b1", "-p", "- fix the thing"], false),
-        p("lenient-by-setting-is-nodes", &["spawn", "b1", "-t"], false).setup(|h| settings(h, "\"devswarm\":{\"spawnStrictFlagValues\":false}")),
-        p("a-value-with-a-next-line-character-is-nodes", &["spawn", "b1", "-p", "--x\u{85}y"], false),
+        // the create path (formerly Node's)
+        p("a-plain-spawn", &["spawn", "b1"], true).expect(&["\"created\":true", "default branch unknown"]),
+        p("a-prompt-that-starts-with-a-bullet", &["spawn", "b1", "-p", "- fix the thing"], true).expect(&["no-numbered-steps"]),
+        p("lenient-by-setting", &["spawn", "b1", "-t"], true).setup(|h| settings(h, "\"devswarm\":{\"spawnStrictFlagValues\":false}")),
+        p("a-value-with-a-next-line-character", &["spawn", "b1", "-p", "--x\u{85}y"], true),
+        p("a-create-that-names-its-worktree", &["spawn", "b1", "-t", "Lane one", "-p", "1. read\n2. write\nscope: src/**"], true)
+            .create(&made)
+            .expect(&["\"registered\":true", "\"titled\":true", "\"written\":true"]),
+        p("a-worktree-with-a-brief-title", &["spawn", "b1", "-p", "# own the API layer\nno steps here"], true).create(&made).expect(&["no-numbered-steps"]),
+        p("plan-tracking-off", &["spawn", "b1", "-p", "1. a\n2. b"], true).create(&made).env("ANTIHALL_DEVSWARM_PLAN_TRACKING", "false"),
+        p("plan-required", &["spawn", "b1", "-p", "just do it"], true).create(&made).env("ANTIHALL_DEVSWARM_PLAN_REQUIRED", "true").expect(&["\"required\":true"]),
+        p("a-failed-create", &["spawn", "b1", "-s", "dev"], true).create("echo 'no such source' >&2; exit 3").expect(&["exited 3"]),
+        p("a-build-without-create", &["spawn", "b1"], true).verbs("list info").expect(&["capability dormant"]),
+        p("a-submodule-worktree-the-create-could-not-add", &["spawn", "b1"], true)
+            .create(&format!(
+                "{made}; echo 'git worktree add -b b1 {c}/sub {z}' >&2; echo \"fatal: '{c}/sub' already exists\" >&2",
+                c = fx.child.display(),
+                z = "0".repeat(40)
+            ))
+            .expect(&["submoduleFailures"]),
+        p("from-origin-off", &["spawn", "b1"], true).setup(|h| settings(h, "\"devswarm\":{\"spawnFromOrigin\":false}")).expect(&["spawnFromOrigin=false"]),
+        at("a-default-branch-behind-and-ahead-of-origin", &["spawn", "b1", "-s", "main"], "diverged").expect(&["\"refused\"", "cannot be fast-forwarded"]),
+        at("from-local-overrides-the-refusal", &["spawn", "b1", "-s", "main", "--from-local"], "diverged").expect(&["from-local"]),
+        at("a-source-that-is-not-the-default-branch", &["spawn", "b1", "-s", "feature"], "diverged").expect(&["is not the default branch"]),
     ]
+}
+
+/// A clone whose `main` and origin's `main` have each one commit the other lacks (origin/HEAD set): `<root>/<name>/work`.
+fn diverged_repo(fx: &Fx, name: &str) -> PathBuf {
+    let base = fx.root.join(name);
+    let (origin, seedc, work) = (base.join("origin.git"), base.join("seed"), base.join("work"));
+    fs::create_dir_all(&base).unwrap();
+    git(&["init", "-q", "--bare", origin.to_str().unwrap()], &base);
+    git(&["clone", "-q", origin.to_str().unwrap(), seedc.to_str().unwrap()], &base);
+    git(&["commit", "-q", "--allow-empty", "-m", "one"], &seedc);
+    git(&["push", "-q", "origin", "HEAD:main"], &seedc);
+    git(&["clone", "-q", origin.to_str().unwrap(), work.to_str().unwrap()], &base);
+    git(&["remote", "set-head", "origin", "main"], &work);
+    git(&["commit", "-q", "--allow-empty", "-m", "local"], &work);
+    git(&["commit", "-q", "--allow-empty", "-m", "theirs"], &seedc);
+    git(&["push", "-q", "origin", "HEAD:main"], &seedc);
+    real(&work)
 }
 
 #[test]
@@ -793,8 +852,50 @@ fn spawn_matches_node() {
         return;
     }
     let fx = fixture("dsbsp");
-    let cases = spawn_cases();
-    check(&fx, &cases, &[], 13, 4);
+    let cases = spawn_cases(&fx);
+    let diverged = diverged_repo(&fx, "diverged");
+    check(&fx, &cases, &[("diverged", diverged)], 27, 0);
+}
+
+/// The engine alone (no Node on the PATH): a default branch strictly behind origin is fast-forwarded before the create, and
+/// `ah-engine devswarm create` is the same create path as `spawn`.
+#[test]
+fn create_fast_forwards_a_stale_default_branch_without_node() {
+    let fx = fixture("dsbff");
+    let base = fx.root.join("ff");
+    let (origin, seedc, work) = (base.join("origin.git"), base.join("seed"), base.join("work"));
+    fs::create_dir_all(&base).unwrap();
+    git(&["init", "-q", "--bare", origin.to_str().unwrap()], &base);
+    git(&["clone", "-q", origin.to_str().unwrap(), seedc.to_str().unwrap()], &base);
+    git(&["commit", "-q", "--allow-empty", "-m", "one"], &seedc);
+    git(&["push", "-q", "origin", "HEAD:main"], &seedc);
+    git(&["clone", "-q", origin.to_str().unwrap(), work.to_str().unwrap()], &base);
+    git(&["remote", "set-head", "origin", "main"], &work);
+    git(&["checkout", "-q", "--detach"], &work);
+    git(&["commit", "-q", "--allow-empty", "-m", "two"], &seedc);
+    git(&["push", "-q", "origin", "HEAD:main"], &seedc);
+    let work = real(&work);
+    let home = fx.root.join("ff-home");
+    fs::create_dir_all(home.join(".anti-hall")).unwrap();
+    fs::write(home.join(".anti-hall/settings.json"), "{\"mesh\":{\"engine_writes\":\"on\"}}\n").unwrap();
+    let c = lc("ff", &["create", "b1", "-s", "main"], "x", true, "Spawn");
+    let stub = stub_dir(&fx.root, "ff", &c);
+    let path = format!("{}:{}", stub.display(), tools_path(&fx.root, false));
+    let mut cmd = Command::new(BIN);
+    cmd.args(["devswarm", "create", "b1", "-s", "main"])
+        .current_dir(&work)
+        .env_clear()
+        .envs(base_env(&home, &home.join("state"), &[("PATH", &path), ("ANTIHALL_DEVSWARM_SPAWN_LAUNCH_WAIT_MS", "0")]));
+    let o = run(&mut cmd, None);
+    let out = String::from_utf8_lossy(&o.stdout);
+    assert_eq!(o.status.code(), Some(0), "stdout {out} stderr {}", String::from_utf8_lossy(&o.stderr));
+    let v: Value = serde_json::from_str(out.trim()).unwrap();
+    assert_eq!(v["created"], true, "{out}");
+    assert_eq!(v["sourceCheck"]["status"], "fast-forwarded", "{out}");
+    let rev = |r: &str| String::from_utf8(Command::new("git").args(["rev-parse", r]).current_dir(&work).output().unwrap().stdout).unwrap();
+    assert_eq!(rev("refs/heads/main"), rev("refs/remotes/origin/main"), "the local default branch was fast-forwarded");
+    let log = fs::read_to_string(home.join("hc.log")).unwrap_or_default();
+    assert!(log.contains("|workspace create b1 -s main"), "the create ran with the caller's arguments: {log}");
 }
 
 fn respawn_cases() -> Vec<Lc> {

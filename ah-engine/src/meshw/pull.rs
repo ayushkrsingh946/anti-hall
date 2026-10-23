@@ -199,6 +199,17 @@ fn foreign_open_batches(root: &Path, own: &Path, worktree: &str) -> bool {
 /// The first half of the plan: the ensure (what the descriptor, the registry and the summary become), decided without writing. The
 /// tick counts over [`Plan::ensured`], which is the descriptor Node's count reads after its own ensure.
 pub(crate) fn prepare(inv: &Inv, id: &str, desc: Option<&OVal>) -> R<Plan> {
+    prepare_with(inv, id, desc, false)
+}
+
+/// [`prepare`] for the reconcile sweep, which has already run the project-wide fold: another registry row on the workspace's worktree
+/// is then one the fold deliberately LEFT (its descriptor, a live reader or a heartbeat anchors it; nothing may retire it), so it does
+/// not stop the pull. `prepare` itself defers it, because `inbox pull` would run the fold there.
+pub(crate) fn prepare_swept(inv: &Inv, id: &str, desc: Option<&OVal>) -> R<Plan> {
+    prepare_with(inv, id, desc, true)
+}
+
+fn prepare_with(inv: &Inv, id: &str, desc: Option<&OVal>, rows_left_by_fold: bool) -> R<Plan> {
     if crate::meshw::heartbeat::is_primary_label(id) {
         return defer("primary-label");
     }
@@ -349,7 +360,7 @@ pub(crate) fn prepare(inv: &Inv, id: &str, desc: Option<&OVal>) -> R<Plan> {
     {
         return defer("registry-collision");
     }
-    if let Some(w) = desc_wt.as_deref() {
+    if let Some(w) = desc_wt.as_deref().filter(|_| !rows_left_by_fold) {
         let keep_mesh = ident::primary_workspace_id(w)?;
         if keep_mesh != id
             && let Some(keep_real) = ident::canonical_worktree_real_path(w)?
@@ -489,7 +500,7 @@ impl Plan {
             return Ok(self);
         }
         self.check_wal(inv)?;
-        let c = hivecontrol::call(&defaults::list("mesh_write.hc_message_count"), &inv.env, defaults::millis("mesh_write.hivecontrol_timeout_ms"));
+        let c = hivecontrol::call_in(&defaults::list("mesh_write.hc_message_count"), &inv.env, Some(&inv.cwd), defaults::millis("mesh_write.hivecontrol_timeout_ms"));
         self.peek = if c.ok { Peek::Count(parse_count(&c.raw)) } else { Peek::Failed };
         if let Peek::Count(n) = self.peek
             && !line_form
@@ -596,8 +607,9 @@ fn batch_lines(p: &Plan, batch: &import::Batch, seen: &mut std::collections::Has
     };
     // the registered workspace checked out under a message's branch is its sender (a child's queue keeps the Primary's id)
     let registry = if batch.messages.is_empty() { Vec::new() } else { import::registry_pairs(p.store.reader()) };
+    let scope = import::hash_scope(p.store.reader(), &p.id);
     for m in &batch.messages {
-        let h = import::message_hash(&p.id, m);
+        let h = import::message_hash(&scope, m);
         if seen.contains(&h) {
             duplicate += 1;
             continue;
@@ -656,7 +668,7 @@ fn ingest_raw(inv: &Inv, p: &Plan, raw: &str, at: &dyn Fn(&str)) -> Result<Inges
     // the store parity feed: best effort, as in Node (`try { ... } catch (_) {}`). A message whose time is a form `Date.parse`
     // accepts but the port does not reproduce is stored at the import time (`import::rows`' fallback); its body and hash are the
     // message's own, so the row is never lost or doubled and the batch closes like any other.
-    let fallbacks = import::rows(&p.id, &batch, inv.now).iter().filter(|r| r.ts_fallback).count();
+    let fallbacks = import::rows(&p.id, &import::hash_scope(p.store.reader(), &p.id), &batch, inv.now).iter().filter(|r| r.ts_fallback).count();
     if fallbacks > 0 {
         crate::metrics::bump("mesh_pull_ts_fallback", &[]);
     }
@@ -758,7 +770,8 @@ pub(crate) enum Fresh {
     /// The delivery log cannot be appended and fsynced right now: no read was made.
     Blocked,
     /// `message-count` failed (no binary, a timeout, a non-zero exit): nothing was read.
-    CountFailed,
+    /// The text is what the call said: its exit code and the first line it printed (see [`hivecontrol::failure_detail`]).
+    CountFailed(String),
     /// Nothing waits.
     Empty,
     /// `read-messages` ran. `entry` is the log entry that holds its raw bytes (`None`: empty stdout or a log write that failed).
@@ -772,15 +785,18 @@ pub(crate) fn capture_fresh(inv: &Inv, p: &Plan, worktree: &str, at: &dyn Fn(&st
     if wal::preflight(&p.wal).is_some() {
         return Fresh::Blocked;
     }
-    let c = hivecontrol::call(&defaults::list("mesh_write.hc_message_count"), &inv.env, defaults::millis("mesh_write.hivecontrol_timeout_ms"));
-    if !c.ok {
-        return Fresh::CountFailed;
+    // hivecontrol names the workspace by the directory it runs in, so the call stands in the workspace's own checkout (a daemon's
+    // working directory is no git repository: "Not in a git repository")
+    let full = hivecontrol::call_full(&defaults::list("mesh_write.hc_message_count"), &inv.env, Some(&inv.cwd), defaults::millis("mesh_write.hivecontrol_timeout_ms"));
+    if !full.call.ok {
+        return Fresh::CountFailed(hivecontrol::failure_detail(&full));
     }
+    let c = full.call;
     let native = parse_count(&c.raw);
     if native <= 0.0 {
         return Fresh::Empty;
     }
-    let r = hivecontrol::call(&defaults::list("mesh_write.hc_read_messages"), &inv.env, defaults::millis("mesh_write.pull_read_timeout_ms"));
+    let r = hivecontrol::call_in(&defaults::list("mesh_write.hc_read_messages"), &inv.env, Some(&inv.cwd), defaults::millis("mesh_write.pull_read_timeout_ms"));
     at("read:after");
     let (mut entry, mut wal_error) = (None, false);
     if !r.raw.is_empty() {
@@ -823,7 +839,7 @@ fn pull_locked(inv: &Inv, p: &Plan) -> Outcome {
         return Outcome::default();
     }
     // ONE bounded read-messages (finite timeout, never monitor)
-    let r = hivecontrol::call(&defaults::list("mesh_write.hc_read_messages"), &inv.env, defaults::millis("mesh_write.pull_read_timeout_ms"));
+    let r = hivecontrol::call_in(&defaults::list("mesh_write.hc_read_messages"), &inv.env, Some(&inv.cwd), defaults::millis("mesh_write.pull_read_timeout_ms"));
     // WAL the RAW bytes immediately, before the exit status is looked at and before any parse
     let mut entry: Option<String> = None;
     let mut wal_error = false;

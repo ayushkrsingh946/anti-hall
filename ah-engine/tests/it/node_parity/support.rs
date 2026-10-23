@@ -42,11 +42,33 @@ pub fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..")
 }
 
-/// The Node hooks directory of this checkout, when Node and the hooks are both present (the engine can be built outside
-/// the monorepo; the parity lanes are then skipped). In CI (`CI=true`) a missing Node or missing hooks FAIL instead: a
-/// parity lane that silently skips there proves nothing.
+/// The Node hooks directory of this checkout. A missing Node or missing hooks FAIL the lane: a parity lane that silently
+/// skips proves nothing. Only an explicit `AH_PARITY_SKIP_NODE=1` (an engine built outside the monorepo, no Node) skips.
 pub fn hooks_dir() -> Option<PathBuf> {
-    hooks_dir_with("node", std::env::var("CI").is_ok_and(|v| v == "true"))
+    hooks_dir_with("node", !std::env::var("AH_PARITY_SKIP_NODE").is_ok_and(|v| v == "1"))
+}
+
+/// The Node reference as a plugin root of its own: the moved tree (`plugins/anti-hall-node`) has no manifest, and the Node hooks
+/// read their running version from `../.claude-plugin/plugin.json` (stop-version-gate.js), so a copy carries the shipped manifest.
+/// Copied once per test process under a name the scratch sweep removes after the process is gone.
+fn staged_node_root(moved_root: &Path) -> PathBuf {
+    static ROOT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    ROOT.get_or_init(|| {
+        let base = if Path::new("/tmp").is_dir() { PathBuf::from("/tmp") } else { std::env::temp_dir() };
+        sweep_dead(&base);
+        let dst = base.join(format!("ah-par-noderoot-{}-0", std::process::id()));
+        std::fs::remove_dir_all(&dst).ok();
+        std::fs::create_dir_all(&dst).unwrap();
+        let ok = Command::new("cp").arg("-R").arg(format!("{}/.", moved_root.display())).arg(&dst).status().is_ok_and(|s| s.success());
+        assert!(ok, "could not stage the Node reference root");
+        let manifest = repo_root().join("plugins/anti-hall/.claude-plugin");
+        if manifest.is_dir() && !dst.join(".claude-plugin").exists() {
+            let ok = Command::new("cp").arg("-R").arg(&manifest).arg(dst.join(".claude-plugin")).status().is_ok_and(|s| s.success());
+            assert!(ok, "could not stage the plugin manifest");
+        }
+        dst
+    })
+    .clone()
 }
 
 /// The plugin root the engine reads its defaults from: the plugin the engine ships in, not the Node reference's root.
@@ -55,23 +77,27 @@ pub fn engine_plugin_root(hooks: &Path) -> PathBuf {
     if shipped.join("engine/defaults/index.toml").exists() { shipped } else { hooks.parent().expect("hooks directory has a parent").to_path_buf() }
 }
 
-fn hooks_dir_with(node: &str, ci: bool) -> Option<PathBuf> {
+fn hooks_dir_with(node: &str, strict: bool) -> Option<PathBuf> {
     // the Node reference moved to plugins/anti-hall-node; an older layout kept it beside the engine's plugin
     let moved = repo_root().join("plugins/anti-hall-node/hooks");
     let hooks = if moved.join("auto-handover.js").exists() { moved } else { repo_root().join("plugins/anti-hall/hooks") };
+    let staged = hooks.parent().is_some_and(|r| r.ends_with("anti-hall-node")) && hooks.join("auto-handover.js").exists();
     if !hooks.join("auto-handover.js").exists() || Command::new(node).arg("--version").output().is_err() {
-        assert!(!ci, "CI=true but no Node ({node}) or no plugin hooks next to the engine: the Node parity lanes cannot be skipped in CI");
-        eprintln!("skipped: no Node or no plugin hooks next to the engine");
+        assert!(!strict, "no Node ({node}) or no Node hooks next to the engine: a parity lane fails instead of skipping (set AH_PARITY_SKIP_NODE=1 to opt out)");
+        eprintln!("skipped (AH_PARITY_SKIP_NODE=1): no Node or no Node hooks next to the engine");
         return None;
+    }
+    if staged {
+        return Some(staged_node_root(hooks.parent().unwrap()).join("hooks"));
     }
     Some(hooks.canonicalize().unwrap_or(hooks))
 }
 
 #[test]
-fn a_missing_node_fails_in_ci_and_skips_elsewhere() {
+fn a_missing_node_fails_unless_the_opt_out_is_set() {
     // review P2 #10: in CI the lanes skipped silently when Node was missing
-    assert_eq!(hooks_dir_with("ah-no-such-node-binary", false), None);
-    assert!(std::panic::catch_unwind(|| hooks_dir_with("ah-no-such-node-binary", true)).is_err(), "CI must fail, not skip");
+    assert_eq!(hooks_dir_with("ah-no-such-node-binary", false), None, "the explicit opt-out skips");
+    assert!(std::panic::catch_unwind(|| hooks_dir_with("ah-no-such-node-binary", true)).is_err(), "without the opt-out a missing Node must fail, not skip");
 }
 
 /// The result of one child process. `code` is the exit status, or `sig:<n>` when the child was killed by a signal.
