@@ -35,7 +35,6 @@ meshw/ident.rs 10
 meshw/inbox.rs 27
 meshw/inboxcmd.rs 18
 meshw/lifeverbs.rs 48
-meshw/meshgroup.rs 2
 meshw/mod.rs 1
 meshw/orphan.rs 7
 meshw/plan.rs 15
@@ -58,5 +57,4 @@ script/host_childturn.rs 16
 script/host_parentinbox.rs 4
 script/host_seat.rs 1
 wakew/arch.rs 1
-wakew/mod.rs 8
 wakew/who.rs 1
