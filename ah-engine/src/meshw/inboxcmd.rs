@@ -14,6 +14,37 @@ use crate::meshw::send::{Answer, Effect, resolve_mesh_target};
 use crate::meshw::{cursors, ident};
 use crate::meshw::{tick, union};
 
+/// What a read cut short: the rows withheld and the cap that withheld them (Node's `truncated`, `truncatedCount`, `limit`).
+pub(crate) struct Truncation {
+    pub count: usize,
+    pub limit: usize,
+}
+
+impl Truncation {
+    /// The `truncated*` fields, in Node's order; `hint` is the verb's text with {count} and {limit}.
+    pub(crate) fn put(&self, o: &mut Obj, hint: &str) {
+        let text = defaults::fill(hint, &[("count", &self.count), ("limit", &self.limit)]);
+        o.put("truncated", OVal::Bool(true)).put("truncatedCount", n(self.count as f64)).put("limit", n(self.limit as f64)).put("truncatedHint", s(&text));
+    }
+}
+
+/// The per-call cap on store rows (`--limit N`: a finite positive number, floored, at least 1; anything else is ignored): the rows
+/// past it are withheld, the counts keep the real totals, and nothing past the cap is ever acked.
+pub(crate) fn apply_cap(c: &mut tick::Counted, a: &Args) -> Option<Truncation> {
+    let limit = a
+        .one(defaults::text("mesh_write.flag_limit"))
+        .map(crate::checks::guardkit::text::js_number_of_str)
+        .filter(|x| x.is_finite() && *x > 0.0)
+        .map_or(defaults::num("mesh_write.inbox_read_limit") as usize, |x| x.floor().max(1.0) as usize);
+    if c.store_rows.len() <= limit {
+        return None;
+    }
+    let count = c.store_rows.len() - limit;
+    c.store_rows.truncate(limit);
+    c.store_unread = limit;
+    Some(Truncation { count, limit })
+}
+
 /// `inbox <verb> <id>`'s id, when the call has exactly that shape and no flag but the ones named (a flag the engine does not
 /// read is Node's).
 fn plain_id<'a>(a: &'a Args, allowed: &[&str]) -> R<&'a str> {
@@ -59,10 +90,11 @@ pub fn run_count(inv: &Inv, a: &Args) -> R<Answer> {
     if let Some(refused) = window(inv, a, defaults::text("mesh_write.verb_count"))? {
         return Ok(refused);
     }
-    let id = plain_id(a, &[])?;
+    let id = plain_id(a, &[defaults::text("mesh_write.flag_limit")])?;
     let Some(desc) = ident::read_descriptor(&inv.home, id) else { return defer("no-descriptor") };
-    let counted = tick::count_mail(inv, id, &desc, true, true)?;
-    let stdout = tick::count_json(inv, id, &counted, defaults::text("mesh_write.verb_count"), false)?;
+    let mut counted = tick::count_mail(inv, id, &desc, true, true)?;
+    let trunc = apply_cap(&mut counted, a);
+    let stdout = tick::count_json(inv, id, &counted, defaults::text("mesh_write.verb_count"), false, Some(trunc.as_ref()))?;
     if !counted.known {
         warn_unknown(defaults::text("mesh_write.verb_count"), id);
     }
@@ -74,13 +106,11 @@ pub fn run_read(inv: &Inv, a: &Args) -> R<Answer> {
     if let Some(refused) = window(inv, a, defaults::text("mesh_write.verb_read"))? {
         return Ok(refused);
     }
-    let id = plain_id(a, &[])?;
+    let id = plain_id(a, &[defaults::text("mesh_write.flag_limit")])?;
     let Some(desc) = ident::read_descriptor(&inv.home, id) else { return defer("no-descriptor") };
-    let c = tick::count_mail(inv, id, &desc, true, true)?;
+    let mut c = tick::count_mail(inv, id, &desc, true, true)?;
     let Some(total) = c.total else { return defer("unknown-count-json") };
-    if c.store_unread > defaults::num("mesh_write.inbox_read_limit") as usize {
-        return defer("read-cap");
-    }
+    let trunc = apply_cap(&mut c, a);
     let mut o = Obj::default();
     o.put("ok", OVal::Bool(true))
         .put("action", s(defaults::text("mesh_write.action_read")))
@@ -103,6 +133,9 @@ pub fn run_read(inv: &Inv, a: &Args) -> R<Answer> {
         .put("meshGroupUnresolved", OVal::Bool(false))
         .put("meshGroupError", OVal::Null)
         .put("totalsPartial", OVal::Bool(false));
+    if let Some(t) = &trunc {
+        t.put(&mut o, defaults::text("mesh_write.truncated_hint_read"));
+    }
     if c.unread > 0 {
         o.put("cursorAdvanced", OVal::Bool(false)).put(
             "ackHint",
@@ -126,7 +159,7 @@ pub fn run_ack(inv: &Inv, a: &Args) -> R<Answer> {
     if let Some(refused) = window(inv, a, defaults::text("mesh_write.verb_ack"))? {
         return Ok(refused);
     }
-    let id = plain_id(a, &[defaults::text("mesh_write.flag_ack_as_owner")])?;
+    let id = plain_id(a, &[defaults::text("mesh_write.flag_ack_as_owner"), defaults::text("mesh_write.flag_limit"), defaults::text("mesh_write.flag_to")])?;
     if a.flags.get(defaults::text("mesh_write.flag_ack_as_owner")).is_some_and(|v| v.iter().any(|x| *x != crate::meshw::args::FlagVal::True)) {
         return defer("ack-as-owner-value");
     }
@@ -135,7 +168,22 @@ pub fn run_ack(inv: &Inv, a: &Args) -> R<Answer> {
     let Some(desc) = ident::read_descriptor(&inv.home, id) else { return defer("no-descriptor") };
     let Some(inbox) = union::path_field(&desc, defaults::text("mesh_write.field_inbox_path"))? else { return defer("no-inbox-path") };
     let Some(cursor_file) = union::path_field(&desc, defaults::text("mesh_write.field_cursor_path"))? else { return defer("no-cursor-path") };
-    let c = tick::count_mail(inv, id, &desc, true, true)?;
+    let mut c = tick::count_mail(inv, id, &desc, true, true)?;
+    let trunc = apply_cap(&mut c, a);
+    // `--to N`: the NDJSON position alone moves to N (a number, held to the inbox's line count); the store side is left as it is
+    let to_raw = a.one(defaults::text("mesh_write.flag_to"));
+    let explicit = match to_raw {
+        None => None,
+        Some(raw) => {
+            let x = crate::checks::guardkit::text::js_number_of_str(raw);
+            if !x.is_finite() {
+                let mut o = Obj::default();
+                o.put("ok", OVal::Bool(false)).put("error", s(defaults::text("mesh_write.msg_ack_to_not_number")));
+                return Ok(Answer { code: 2, stdout: format!("{}\n", o.done().stringify()), effect: Effect::None });
+            }
+            Some(x)
+        }
+    };
     let st = common::open_store(inv, &c.repo_key)?;
     let rows = ident::rows_of(&st.reader().roster().map_err(|e| ident::Defer(format!("registry:{e}")))?);
     // the ownership gate: a caller that is a DIFFERENT registered row is refused (Node's); one that resolves to nothing acks the
@@ -148,17 +196,28 @@ pub fn run_ack(inv: &Inv, a: &Args) -> R<Answer> {
             || own_entry.as_ref().is_some_and(|e| e.id == id)
             || ident::declared_self_id(&inv.env, &inv.cwd, &rows)?.as_deref() == Some(id);
         if !owns && own_entry.is_some() {
-            return defer("not-owner");
+            // refused whole, before either cursor moves
+            let cause = defaults::text(if caller.kind == defaults::text("mesh_write.kind_unresolvable") { "mesh_write.cause_unresolvable" } else { "mesh_write.cause_mismatch" });
+            let q = |t: &str| OVal::Str(t.to_string()).stringify();
+            let error = defaults::render("mesh_write.msg_ack_refused", &[("cause", &cause), ("caller", &q(&caller.identity)), ("id", &q(id)), ("rawid", &id)]);
+            let mut who = Obj::default();
+            who.put("id", s(&caller.identity)).put("kind", s(&caller.kind));
+            let mut o = Obj::default();
+            o.put("ok", OVal::Bool(false))
+                .put("action", s(defaults::text("mesh_write.verb_ack")))
+                .put("reason", s(cause))
+                .put("error", s(&error))
+                .put("id", s(id))
+                .put("callerIdentity", s(&caller.identity))
+                .put("identity", who.done());
+            return Ok(Answer { code: 2, stdout: format!("{}\n", o.done().stringify()), effect: Effect::None });
         }
         owns_store = owns;
-    }
-    if c.store_unread > defaults::num("mesh_write.inbox_read_limit") as usize {
-        return defer("read-cap");
     }
     if cursors::needs_import(&cursors::rows_of(&st, id).map_err(|e| ident::Defer(format!("cursor-rows:{e}")))?) {
         return defer("cursor-import");
     }
-    if owns_store {
+    if owns_store && explicit.is_none() {
         crate::meshw::summary::check(&st, inv, None)?;
     }
     // ---- writes ----
@@ -167,7 +226,7 @@ pub fn run_ack(inv: &Inv, a: &Args) -> R<Answer> {
     let mut procs = cursors::Procs::default();
     // the NDJSON side: the position the read ended at, never past the inbox as it is now
     let lines_now = union::non_empty_lines(&inbox)?.map_or(0, |l| l.len()) as f64;
-    let nd_to = c.nd_target.max(0.0).floor().min(lines_now);
+    let nd_to = explicit.unwrap_or(c.nd_target).max(0.0).floor().min(lines_now);
     let nd = cursors::ack_for(&st, &inv.home, id, defaults::text("mesh_write.cursor_ns_nd"), reader.as_deref(), nd_to, &mut procs);
     if nd.ok {
         crate::meshw::mark_committed();
@@ -183,7 +242,7 @@ pub fn run_ack(inv: &Inv, a: &Args) -> R<Answer> {
             delivered: None,
             nonce: nonce.clone(),
             gate: defaults::text("mesh_write.gate_min_floor"),
-            verb: defaults::text("mesh_write.verb_log_ack_all"),
+            verb: defaults::text(if explicit.is_some() { "mesh_write.verb_log_ack_to" } else { "mesh_write.verb_log_ack_all" }),
             cwd: None, // absent for the CLI: Node's `ctx.cwd` is unset there
             ok: nd.ok,
             err: if nd.ok { None } else { nd.error.as_deref() },
@@ -200,7 +259,7 @@ pub fn run_ack(inv: &Inv, a: &Args) -> R<Answer> {
         crate::discard::harmless(cursors::ack_to(std::path::Path::new(&cursor_file), fl as f64)); // keep: the projection is best-effort in Node
     }
     let mut failures: Vec<OVal> = Vec::new();
-    if owns_store {
+    if owns_store && explicit.is_none() {
         let max_index = c.store_rows.iter().filter_map(|r| r["index"].as_f64()).fold(None, |m: Option<f64>, i| Some(m.map_or(i, |x| x.max(i))));
         let to = max_index.map_or(c.store_cursor, |m| c.store_cursor.max(m));
         let r = cursors::ack_for(&st, &inv.home, id, defaults::text("mesh_write.ns_store"), reader.as_deref(), to, &mut procs);
@@ -243,6 +302,9 @@ pub fn run_ack(inv: &Inv, a: &Args) -> R<Answer> {
     if !failures.is_empty() {
         out.put("cursorWriteFailures", OVal::Arr(failures)).put("cursorPersisted", OVal::Bool(false));
     }
+    if let Some(t) = &trunc {
+        t.put(&mut out, defaults::text("mesh_write.truncated_hint_ack"));
+    }
     if !c.known {
         warn_unknown(defaults::text("mesh_write.verb_ack"), id);
     }
@@ -262,7 +324,9 @@ pub fn run_pull(inv: &Inv, a: &Args) -> R<Answer> {
         }
         return Ok(refused);
     }
-    let id = plain_id(a, &[])?;
+    // Node reads only `--session` of a pull (the rest it ignores): that one is the engine's own case below
+    let ignored: Vec<&str> = a.flags.keys().map(String::as_str).filter(|k| *k != defaults::text("mesh_write.flag_session")).collect();
+    let id = plain_id(a, &ignored)?;
     crate::meshw::clog::ready(inv)?;
     let found = ident::read_descriptor(&inv.home, id);
     let plan = crate::meshw::pull::prepare(inv, id, found.as_ref())?;

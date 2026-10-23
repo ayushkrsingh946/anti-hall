@@ -451,9 +451,10 @@ fn write_cron_found_mail(inv: &Inv, id: &str, unread: usize) {
 }
 
 /// The JSON form of a tick: `count`'s result with `action` renamed in place, then `idMismatch` and `watcherArmed`.
-pub(crate) fn count_json(inv: &Inv, id: &str, c: &Counted, action: &str, tick: bool) -> R<String> {
+pub(crate) fn count_json(inv: &Inv, id: &str, c: &Counted, action: &str, tick: bool, capped: Option<Option<&crate::meshw::inboxcmd::Truncation>>) -> R<String> {
     let Some(total) = c.total else { return defer("unknown-count-json") };
-    if c.store_unread > defaults::num("mesh_write.inbox_read_limit") as usize {
+    // a caller that applied the cap itself (`capped`) reports it; the tick has no way to say a count was cut
+    if capped.is_none() && c.store_unread > defaults::num("mesh_write.inbox_read_limit") as usize {
         return defer("read-cap");
     }
     let mut o = Obj::default();
@@ -475,8 +476,11 @@ pub(crate) fn count_json(inv: &Inv, id: &str, c: &Counted, action: &str, tick: b
         .put("storeUnavailableReason", OVal::Null)
         .put("meshGroupUnresolved", OVal::Bool(false))
         .put("meshGroupError", OVal::Null)
-        .put("totalsPartial", OVal::Bool(false))
-        .put("unread", n(c.unread as f64))
+        .put("totalsPartial", OVal::Bool(false));
+    if let Some(Some(t)) = capped {
+        t.put(&mut o, defaults::text("mesh_write.truncated_hint_read"));
+    }
+    o.put("unread", n(c.unread as f64))
         .put("cursor", n(c.nd_cursor))
         .put("storeCursor", n(c.store_cursor))
         .put("storeUnread", n(c.store_unread as f64));
@@ -578,7 +582,7 @@ pub fn run(inv: &Inv, a: &Args) -> R<Answer> {
         if wal_blocked {
             return defer("wal-blocked-json");
         }
-        return Ok(Answer { code: 0, stdout: format!("{}\n", count_json(inv, id, &counted, defaults::text("mesh_write.verb_tick"), true)?), effect: Effect::None });
+        return Ok(Answer { code: 0, stdout: format!("{}\n", count_json(inv, id, &counted, defaults::text("mesh_write.verb_tick"), true, None)?), effect: Effect::None });
     }
     let line = defaults::render(
         "mesh_write.tick_line",

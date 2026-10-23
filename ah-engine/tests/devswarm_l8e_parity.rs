@@ -1149,6 +1149,14 @@ fn inbox_pull_matches_node_and_drains_like_the_child_tick() {
                 run_seed("union_seed.js", h, &rk, &json!({"legacy": [{"workspaceId": "child-1", "ts": 1_791_540_000_000_i64, "hash": hash, "body": "seen before"}]}));
             }
         }),
+        // Node reads only --session of a pull: any other flag changes nothing
+        {
+            let mut c = pull_case("pull-ignores-a-flag-it-does-not-read", true, queued("1", msgs(&[("hello child", "2026-10-09T10:00:00.000Z")])));
+            c.argv.push("--json".into());
+            c.argv.push("--limit".into());
+            c.argv.push("1".into());
+            c
+        },
         // ---- the deferrals ----
         pull_case("pull-defer-unclaimed-session", false, b(vec![("sessionId", json!("unclaimed:child-1"))], vec![])),
         pull_case("pull-a-foreign-reader-wal-has-an-open-batch", true, {
@@ -1172,5 +1180,5 @@ fn inbox_pull_matches_node_and_drains_like_the_child_tick() {
             c
         },
     ];
-    run_cases(&fx, &w, &cases, 20, 3);
+    run_cases(&fx, &w, &cases, 21, 3);
 }

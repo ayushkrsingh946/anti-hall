@@ -416,11 +416,7 @@ fn cases(fx: &Fx) -> Vec<Case> {
         vec!["\"cursor\":3"],
     ));
     // ---- ack: deferred ----
-    v.push(base("ack-to-flag", cmd("ack", "child-1", &["--to", "1"]), ack(floors("child-1", 0, 0), d_inbox.clone()), inbox(text3.clone()), false, vec![]));
     v.push(base("ack-no-descriptor", cmd("ack", "ghost", &[]), ack(floors("child-1", 0, 0), d_inbox.clone()), inbox(text3.clone()), false, vec![]));
-    let mut other_row = base("ack-by-another-registered-row", cmd("ack", "child-1", &[]), ack(floors("child-1", 0, 0), d_inbox.clone()), inbox(text3.clone()), false, vec![]);
-    other_row.cwd = "main";
-    v.push(other_row);
     // ---- the window flags: refused before anything is read ----
     for (name, verb, flags) in [
         ("window-count-since", "count", vec!["--since", "1"]),
@@ -431,10 +427,24 @@ fn cases(fx: &Fx) -> Vec<Case> {
     ] {
         v.push(base(name, cmd(verb, "child-1", &flags), ack(floors("child-1", 0, 0), d_inbox.clone()), inbox(text3.clone()), true, vec!["window-flags-unsupported-on-acking-verb"]));
     }
+    // ---- --limit, --to, a caller that is another row ----
+    for (name, verb, flags) in [
+        ("count-limit-1", "count", vec!["--limit", "1"]),
+        ("read-limit-1", "read", vec!["--limit", "1"]),
+        ("ack-limit-1", "ack", vec!["--limit", "1"]),
+        ("read-limit-not-a-number-is-ignored", "read", vec!["--limit", "abc"]),
+        ("ack-to-1", "ack", vec!["--to", "1"]),
+        ("ack-to-beyond-the-inbox", "ack", vec!["--to", "99"]),
+        ("ack-to-not-a-number", "ack", vec!["--to", "abc"]),
+    ] {
+        v.push(base(name, cmd(verb, "child-1", &flags), ack(floors("child-1", 0, 0), d_inbox.clone()), inbox(text3.clone()), true, vec![if name == "ack-to-not-a-number" { "must be a number" } else { "child-1" }]));
+    }
+    let mut other_row = base("ack-by-another-registered-row", cmd("ack", "child-1", &[]), ack(floors("child-1", 0, 0), d_inbox.clone()), inbox(text3.clone()), true, vec!["ownership-mismatch"]);
+    other_row.cwd = "main";
+    v.push(other_row);
     // ---- count: deferred ----
     v.push(base("count-no-descriptor", cmd("count", "ghost", &[]), ack(floors("child-1", 0, 0), d_inbox.clone()), inbox(text3.clone()), false, vec![]));
     v.push(base("read-no-descriptor", cmd("read", "ghost", &[]), ack(floors("child-1", 0, 0), d_inbox.clone()), inbox(text3.clone()), false, vec![]));
-    v.push(base("read-limit-flag", cmd("read", "child-1", &["--limit", "1"]), ack(floors("child-1", 0, 0), d_inbox.clone()), inbox(text3.clone()), false, vec![]));
 
     v
 }

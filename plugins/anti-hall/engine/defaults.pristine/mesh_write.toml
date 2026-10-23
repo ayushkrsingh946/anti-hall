@@ -2081,3 +2081,31 @@ value = "ndjson-cursor"
 [mesh_write.err_nd_ack_failed]
 doc = "The error text of an NDJSON position move that failed without saying why."
 value = "reader-cursors nd ack failed"
+
+[mesh_write.msg_ack_to_not_number]
+doc = "What `inbox ack --to` reports when its value is not a number."
+value = "--to must be a number"
+
+[mesh_write.cause_unresolvable]
+doc = "The reason of an `inbox ack` refused to a caller whose identity could not be resolved."
+value = "unresolvable-caller-identity"
+
+[mesh_write.cause_mismatch]
+doc = "The reason of an `inbox ack` refused to a caller registered as a different workspace."
+value = "ownership-mismatch"
+
+[mesh_write.msg_ack_refused]
+doc = "The refusal of an `inbox ack` by a caller that does not own the workspace. Placeholders: {cause}, {caller} and {id} (JSON-quoted), {rawid} (as typed)."
+value = "inbox ack refused ({cause}): caller {caller} does not own workspace {id} (pass --ack-as-owner to override, or use `inbox read {rawid}` to view without acking)"
+
+[mesh_write.verb_log_ack_to]
+doc = "The journal `verb` of an `inbox ack --to` NDJSON move."
+value = "inbox-ack-to"
+
+[mesh_write.truncated_hint_read]
+doc = "The `truncatedHint` of a count or read cut short by the per-call cap. Placeholders: {count} (rows withheld) and {limit}."
+value = "not all unread messages were returned ({count} withheld) — the read cursor was NOT advanced past withheld messages, so re-reading (optionally with a higher --limit than {limit}) returns them"
+
+[mesh_write.truncated_hint_ack]
+doc = "The `truncatedHint` of an ack cut short by the per-call cap. Placeholders: {count} (rows withheld) and {limit}."
+value = "not all unread messages were acked this call ({count} withheld) — sibling cursors were NOT advanced past withheld messages, so acking again (optionally with a higher --limit than {limit}) consumes them"
