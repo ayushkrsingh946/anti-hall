@@ -188,6 +188,10 @@ node --test tests/hygiene/docs-links.test.js
 node tools/gen-protocol.js --check
 node tools/gen-agents-catalog.js --check
 node tools/gen-kb-counts.js --check
+```
+
+<!-- doc-check: skip (needs an installed engine under the real home) -->
+```sh
 ~/.anti-hall/ah-engine/bin/ah-engine doctor --check
 ```
 
