@@ -14,7 +14,6 @@ const UNABLE: i32 = 69;
 const VERBS: &[&str] = &[
     "primary", "register", "ensure", "heartbeat", "inbox", "workspaces", "gate", "done", "nudge", "archive", "reap-orphans", "reconcile-registry",
     "unarchive", "archive-ignore", "archive-unignore", "archive-request", "register-primary", "migrate", "logs", "migrate-owner-keys", "send", "relay",
-    "roster", "wake-directive", "app-state", "sync-ui", "app-sync", "diagnose", "plan", "scope", "supervision-report", "respawn", "correct",
     "healthcheck", "ready-check", "mesh", "reconcile", "reap-stale", "reconcile-active", "spawn", "merge", "skip", "auto-archive", "prune-archived",
     "gate-intent", "retention", "notice", "help", "self-heal",
 ];
@@ -29,11 +28,7 @@ const KNOWN_UNABLE: &[&str] = &[
     "inbox peek-primary", // unhandled_verb: read-primary without the ack
     "inbox pull",         // unhandled_verb: register + pullOnce
     "inbox read",         // unhandled_verb
-    "inbox read-primary", // no-descriptor: an unregistered id
-    "primary takeover",   // primary-seat
-    "respawn",            // respawn-primary
     "retention restore",  // restore
-    "roster",             // hivecontrol-probe: no hivecontrol on this PATH
 ];
 /// The verbs whose next word is a subcommand.
 const WITH_SUB: &[&str] = &["inbox", "plan", "scope", "primary", "retention", "mesh"];
@@ -101,6 +96,33 @@ fn no_command_the_shipped_texts_name_exits_unable_without_node() {
     // a PATH with git and the system tools but no node
     let path = "/usr/bin:/bin";
     assert!(!Path::new("/usr/bin/node").exists() && !Path::new("/bin/node").exists(), "this test needs a machine whose system PATH has no node");
+    // a stand-in `hivecontrol` (the real one is a Node script): the probe and the workspace list the roster reads
+    let stub = scratch.join("hivecontrol");
+    fs::write(
+        &stub,
+        "#!/bin/sh\ncase \"$1 $2\" in\n\"--version \"*) echo 2.5.7;;\n\"workspace --help\") printf 'Commands:\\n  list [options]   List workspaces\\n  archive [idOrBranch]   Archive\\n';;\n\"workspace list\") echo '[]';;\nesac\n",
+    )
+    .unwrap();
+    Command::new("chmod").arg("755").arg(&stub).status().unwrap();
+    let run = |argv: &[String]| {
+        Command::new(BIN)
+            .arg("mesh")
+            .args(argv)
+            .current_dir(&repo)
+            .env_clear()
+            .env("HOME", &home)
+            .env("PATH", path)
+            .env("ANTIHALL_DEVSWARM_HIVECONTROL", &stub)
+            .env("AH_ENGINE_PLUGIN_ROOT", root().join("plugins").join("anti-hall"))
+            .stdin(std::process::Stdio::null())
+            .output()
+            .unwrap()
+    };
+    // the workspace every command below names exists
+    let register = || {
+        let reg = run(&["register".into(), "fake-ws-1".into(), "--worktree".into(), repo.to_string_lossy().into_owned(), "--session".into(), "s1".into()]);
+        assert_ne!(reg.status.code(), Some(UNABLE), "{}", String::from_utf8_lossy(&reg.stderr));
+    };
     let mut unable = Vec::new();
     for (verb, sub) in &cmds {
         let mut argv: Vec<String> = vec![verb.clone()];
@@ -110,17 +132,8 @@ fn no_command_the_shipped_texts_name_exits_unable_without_node() {
             "help" | "self-heal" | "roster" | "workspaces" | "healthcheck" | "ready-check" | "logs" | "migrate" | "reap-orphans" | "reconcile-registry" => {}
             _ => argv.push("fake-ws-1".into()),
         }
-        let o = Command::new(BIN)
-            .arg("mesh")
-            .args(&argv)
-            .current_dir(&repo)
-            .env_clear()
-            .env("HOME", &home)
-            .env("PATH", path)
-            .env("AH_ENGINE_PLUGIN_ROOT", root().join("plugins").join("anti-hall"))
-            .stdin(std::process::Stdio::null())
-            .output()
-            .unwrap();
+        register(); // an earlier command (`archive`) may have retired it
+        let o = run(&argv);
         if o.status.code() == Some(UNABLE) {
             let key = match sub {
                 Some(s) if *verb != "send" => format!("{verb} {s}"),

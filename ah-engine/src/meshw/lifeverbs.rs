@@ -358,7 +358,7 @@ pub(crate) fn has_duplicate_rows(inv: &Inv, current: &str, id: &str, worktree: O
         return Ok(false);
     }
     let Some(keep_real) = ident::canonical_worktree_real_path(w)? else { return Ok(false) };
-    let Some(reader) = crate::meshw::tick::open_reader(inv, current)? else { return defer("no-store") };
+    let reader = crate::meshw::tick::open_reader_creating(inv, current)?;
     let rows = ident::rows_of(&reader.roster().map_err(|e| ident::Defer(format!("registry:{e}")))?);
     for r in rows.iter().filter(|r| r.id != id) {
         if let Some(rw) = r.worktree_path.as_deref().filter(|x| !x.is_empty())
@@ -503,12 +503,11 @@ fn register_core(inv: &Inv, a: &Args, require_new: bool, primary: Option<&str>) 
     };
     let reader = match crate::meshw::tick::open_reader(inv, &current)? {
         Some(r) => Some(r),
-        // the Primary's first registration of a project creates its store, as Node's `openStore` does
-        None if primary.is_some() => {
+        // the first registration in a project creates its store, as Node's `openStore` does
+        None => {
             common::init_new_store(inv, &current)?;
             None
         }
-        None => return defer("no-store"),
     };
     if !create && let Some(reader) = &reader {
         // the ensure's upsert keeps the collision guard: a row at another worktree is left alone (the descriptor is still written)
@@ -978,7 +977,7 @@ pub fn reap_orphans(inv: &Inv, a: &Args) -> R<Answer> {
         return Ok(answer(2, o.done()));
     };
     // collectOrphanCandidates opens the project's store (Node creates a missing one) and reads its summary
-    let Some(_reader) = crate::meshw::tick::open_reader(inv, &repo_key)? else { return defer("no-store") };
+    let _reader = crate::meshw::tick::open_reader_creating(inv, &repo_key)?;
     let store = common::open_store(inv, &repo_key)?;
     let refuse = |reason: &str, error: String| -> Answer { answer(2, reap_result(false, &[("reason", s(reason)), ("error", s(&error))]).done()) };
     let max_n = if apply {

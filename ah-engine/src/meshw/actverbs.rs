@@ -306,10 +306,10 @@ pub fn primary(inv: &Inv, a: &Args) -> R<Answer> {
         .filter(|x| !x.is_empty())
         .map(str::to_string)
         .or_else(|| inv.env.get(defaults::text("mesh_write.env_session_id")).filter(|x| !x.is_empty()).cloned());
-    if !seat_not_applicable(inv)? {
-        return defer("primary-seat");
-    }
     let sub = a.positionals.get(1).map(String::as_str);
+    if !seat_not_applicable(inv)? {
+        return primary_seat(inv, sub, sid.as_deref());
+    }
     if sub.is_none() || sub == Some(defaults::text("devswarm_cli.sub_status")) {
         let mut o = Obj::default();
         o.put("ok", OVal::Bool(true))
@@ -327,6 +327,88 @@ pub fn primary(inv: &Inv, a: &Args) -> R<Answer> {
         ("reason", s(defaults::text("devswarm_cli.reason_not_primary_checkout"))),
         ("error", s(defaults::text("devswarm_cli.msg_primary_takeover_na"))),
     ]))
+}
+
+/// `primary status|takeover` inside the project's Primary checkout (`cmdPrimary` over `seatVerdict`): the verdict of the seat, and the
+/// takeover of it through `register-primary --force`.
+fn primary_seat(inv: &Inv, sub: Option<&str>, sid: Option<&str>) -> R<Answer> {
+    let t = |k: &str| defaults::text(k);
+    let verdict = crate::script::host_seat::seat_verdict(inv, sid.unwrap_or_default(), inv.now as f64)?;
+    let field = |k: &str| verdict.get(k).and_then(serde_json::Value::as_str).unwrap_or_default().to_string();
+    let state = field("state");
+    let ov = |k: &str| verdict.get(k).and_then(|v| OVal::parse(&v.to_string())).unwrap_or(OVal::Null);
+    if sub.is_none() || sub == Some(t("devswarm_cli.sub_status")) {
+        // Object.assign({ ok, action, session }, v): the verdict's own key order (state first, then the base)
+        let mut o = Obj::default();
+        o.put("ok", OVal::Bool(true)).put("action", s(t("devswarm_cli.action_primary_status"))).put("session", sid.map_or(OVal::Null, s));
+        for k in ["state", "reason", "descriptorPath", "evidence", "id", "worktree", "holder", "handover", "stale"] {
+            if verdict.get(k).is_some() {
+                o.put(k, ov(k));
+            }
+        }
+        return Ok(answer(0, o.done()));
+    }
+    if sub != Some(t("devswarm_cli.sub_takeover")) {
+        let shown = quote(sub.unwrap_or_default());
+        return Ok(refusal(&[("error", s(&defaults::render("devswarm_cli.msg_primary_unknown_sub", &[("sub", &shown)])))]));
+    }
+    let action = s(t("devswarm_cli.action_primary_takeover"));
+    let Some(sid) = sid else {
+        return Ok(refusal(&[
+            ("action", action),
+            ("reason", s(t("devswarm_cli.reason_no_session"))),
+            ("error", s(t("devswarm_cli.msg_primary_takeover_no_session"))),
+        ]));
+    };
+    let id = field("id");
+    if state == t("devswarm_cli.seat_state_own") {
+        let mut o = Obj::default();
+        o.put("ok", OVal::Bool(true)).put("action", action).put("id", s(&id)).put("already", OVal::Bool(true)).put("session", s(sid));
+        return Ok(answer(0, o.done()));
+    }
+    let wt = field("worktree");
+    let desc_file = idlock::devswarm_root(&inv.home).join(t("mesh_write.dir_workspaces")).join(format!("{id}{}", t("mesh_write.json_suffix")));
+    let cursor = ident::read_bounded(&desc_file)?
+        .and_then(|b| OVal::parse(&String::from_utf8_lossy(&b)))
+        .and_then(|d| match d.get(t("mesh_write.field_cursor_path")) {
+            Some(OVal::Str(c)) if !c.is_empty() => Some(c.clone()),
+            _ => None,
+        });
+    let mut reg = Args { positionals: vec![t("devswarm_cli.verb_register_primary").to_string()], ..Args::default() };
+    let mut put = |k: &str, v: crate::meshw::args::FlagVal| {
+        reg.flags.insert(t(k).to_string(), vec![v]);
+    };
+    put("devswarm_cli.flag_worktree", crate::meshw::args::FlagVal::S(wt.clone()));
+    put("devswarm_cli.flag_session", crate::meshw::args::FlagVal::S(sid.to_string()));
+    put("devswarm_cli.flag_force", crate::meshw::args::FlagVal::True);
+    if let Some(c) = cursor {
+        put("devswarm_cli.flag_reg_cursor", crate::meshw::args::FlagVal::S(c));
+    }
+    let reg_inv = Inv { cwd: wt, ..inv.clone() };
+    let done = crate::meshw::lifeverbs::register_primary(&reg_inv, &reg)?;
+    let r = OVal::parse(done.stdout.trim()).unwrap_or(OVal::Null);
+    if !matches!(r.get("ok"), Some(OVal::Bool(true))) {
+        // Object.assign({ action }, r): the action first, then the registration's own fields
+        let mut o = Obj::default();
+        o.put("action", action);
+        if let OVal::Obj(fields) = &r {
+            for (k, v) in fields {
+                o.put(k, v.clone());
+            }
+        } else {
+            o.put("ok", OVal::Bool(false));
+        }
+        return Ok(answer(2, o.done()));
+    }
+    let conflict = state == t("devswarm_cli.seat_state_conflict");
+    let mut o = Obj::default();
+    o.put("ok", OVal::Bool(true))
+        .put("action", action)
+        .put("id", s(&id))
+        .put("from", ov("holder"))
+        .put("to", s(sid))
+        .put("demoted", if conflict { ov("holder") } else { OVal::Null });
+    Ok(answer(0, o.done()))
 }
 
 // ---- relay --------------------------------------------------------------------------------------------------------------

@@ -448,6 +448,11 @@ pub fn archive(inv: &Inv, a: &Args) -> R<Answer> {
     }
     // the archived directory is a real directory and holds no marker of this id yet
     let adir = root.join(text("mesh_write.dir_archived"));
+    // `checkedArchivedDir(home, { create: true })`: the first archive of a machine creates the directory; anything else that is not a
+    // plain directory is Node's refusal
+    if std::fs::symlink_metadata(&adir).is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound) {
+        crate::discard::harmless(std::fs::create_dir_all(&adir)); // keep: the check below defers when it could not be made
+    }
     if !std::fs::symlink_metadata(&adir).is_ok_and(|m| m.is_dir() && !m.file_type().is_symlink()) {
         return defer("archived-dir");
     }

@@ -350,7 +350,7 @@ fn prepare_with(inv: &Inv, id: &str, desc: Option<&OVal>, rows_left_by_fold: boo
     }
     // the registry: the row's worktree must be the one the upsert would write (else the collision guard decides), and no other row
     // of the same worktree may exist (retireWorktreeDuplicates would fold it)
-    let Some(reader) = tick::open_reader(inv, &current)? else { return defer("no-store") };
+    let reader = tick::open_reader_creating(inv, &current)?;
     let rows = ident::rows_of(&reader.roster().map_err(|e| ident::Defer(format!("registry:{e}")))?);
     if !create
         && let (Some(existing), Some(incoming)) = (rows.iter().find(|r| r.id == id).and_then(|r| r.worktree_path.clone()), row.worktree_path.as_deref())

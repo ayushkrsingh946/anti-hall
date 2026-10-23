@@ -940,6 +940,22 @@ value = "primary-status"
 doc = "The `action` of a primary takeover result."
 value = "primary-takeover"
 
+[devswarm_cli.seat_state_own]
+doc = "Seat verdict: the Primary anchor already records the asking session."
+value = "own"
+
+[devswarm_cli.seat_state_conflict]
+doc = "Seat verdict: the recorded session of the Primary anchor is live."
+value = "conflict"
+
+[devswarm_cli.reason_no_session]
+doc = "Reason of a `primary takeover` that was asked without a session id."
+value = "no-session"
+
+[devswarm_cli.msg_primary_takeover_no_session]
+doc = "Error of a `primary takeover` that has no session id (neither the environment's nor --session)."
+value = "primary takeover needs this session's id (CLAUDE_CODE_SESSION_ID or --session)"
+
 [devswarm_cli.seat_state_na]
 doc = "The seat state of a caller that is not in the project's Primary checkout (a child worktree, or no git worktree at all)."
 value = "n/a"

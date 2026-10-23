@@ -261,7 +261,7 @@ pub fn reconcile_registry(inv: &Inv, _a: &Args) -> R<Answer> {
         }
     }
     // the registry is read after the call, as Node does; a project with no store yet is created by Node's open
-    let Some(_reader) = crate::meshw::tick::open_reader(inv, &repo_key)? else { return defer("no-store") };
+    let _reader = crate::meshw::tick::open_reader_creating(inv, &repo_key)?;
     let st = common::open_store(inv, &repo_key)?;
     let roster = st.reader().roster().map_err(|e| ident::Defer(format!("registry:{e}")))?;
     let rows = ident::rows_of(&roster);

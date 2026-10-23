@@ -153,6 +153,16 @@ pub(crate) fn open_reader(inv: &Inv, repo_key: &str) -> R<Option<MeshReader>> {
     MeshReader::open(&db).map(Some).map_err(|e| ident::Defer(format!("store-open:{e}")))
 }
 
+/// [`open_reader`] for a verb whose Node counterpart opens (and so creates) the project's store: a project with no store yet gets a new
+/// sqlite one first. Sweeps that must not create stores use [`open_reader`].
+pub(crate) fn open_reader_creating(inv: &Inv, repo_key: &str) -> R<MeshReader> {
+    if let Some(r) = open_reader(inv, repo_key)? {
+        return Ok(r);
+    }
+    crate::meshw::common::open_store(inv, repo_key)?; // creates the directory, the marker and the database
+    open_reader(inv, repo_key)?.ok_or_else(|| ident::Defer("store-create".into()))
+}
+
 /// The reader nonce of this process, derived once (it walks the process table): the tick reads it and the background
 /// verifier is handed the same value.
 pub fn reader_nonce_cached(home: &Path) -> Option<String> {

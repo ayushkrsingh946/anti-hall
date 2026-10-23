@@ -175,7 +175,29 @@ fn resolve_send_target(inv: &Inv, reader: Option<&crate::mesh::MeshReader>, rows
                 note_ref("mesh_write.ref_outcome_exact");
                 return Ok(Resolved::Row(row.clone()));
             }
-            defer("stale-twin")
+            // staleTwinSuccessor: the row is delivered to as addressed unless it is stale (not live, or its session runs in another
+            // checkout) AND another live row of the same session proves a successor; only that reroute is Node's
+            let sid = sid.to_string();
+            let now = inv.now as f64;
+            let live = crate::meshw::rosterrows::routing_live_strict(inv, now, &row.id, row.worktree_path.as_deref(), row.session_id.as_deref())?;
+            let coherent = match row.worktree_path.as_deref() {
+                Some(w) if !w.is_empty() => crate::dssup::liveness::session_worktree_coherent(&inv.home, &sid, w)?,
+                _ => None,
+            };
+            if live && coherent != Some(false) {
+                note_ref("mesh_write.ref_outcome_exact");
+                return Ok(Resolved::Row(row.clone()));
+            }
+            for d in rows.iter().filter(|d| d.id != row.id && d.session_id.as_deref() == Some(sid.as_str())) {
+                let Some(w) = d.worktree_path.as_deref().filter(|w| !w.is_empty()) else { continue };
+                if crate::meshw::rosterrows::routing_live_strict(inv, now, &d.id, Some(w), d.session_id.as_deref())?
+                    && crate::dssup::liveness::session_worktree_coherent(&inv.home, &sid, w)? == Some(true)
+                {
+                    return defer("stale-twin-reroute");
+                }
+            }
+            note_ref("mesh_write.ref_outcome_exact");
+            Ok(Resolved::Row(row.clone()))
         }
         0 => {
             if by_mesh.is_some() {

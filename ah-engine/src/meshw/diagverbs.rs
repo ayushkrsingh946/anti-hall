@@ -157,7 +157,7 @@ pub(crate) fn pick_freshest<'a>(inv: &Inv, rd: &crate::mesh::MeshReader, cands: 
 }
 
 fn diagnose_store(inv: &Inv, repo_key: &str) -> R<Diagnosis> {
-    let Some(reader) = crate::meshw::tick::open_reader(inv, repo_key)? else { return defer("no-store") };
+    let reader = crate::meshw::tick::open_reader_creating(inv, repo_key)?;
     let rows = ident::rows_of(&reader.roster().map_err(|e| ident::Defer(format!("registry:{e}")))?);
     let st = crate::meshw::common::open_store(inv, repo_key)?;
     let sum = crate::meshw::summary::compute(&st, inv, None)?;

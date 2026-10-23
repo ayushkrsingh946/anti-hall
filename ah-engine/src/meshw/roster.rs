@@ -11,7 +11,6 @@ use crate::defaults;
 use crate::meshw::args::{Args, FlagVal};
 use crate::meshw::common::{self, Inv, Obj, s};
 use crate::meshw::ident::{self, R, defer};
-use crate::meshw::idlock::devswarm_root;
 use crate::meshw::rosterrows;
 use crate::meshw::send::{Answer, Effect};
 use crate::meshw::summary;
@@ -59,10 +58,6 @@ pub fn run(inv: &Inv, a: &Args) -> R<Answer> {
     let all_flag = bare(a, defaults::text("mesh_write.roster_flag_all"))?;
     // ---- the project and its store ----
     let Some(repo_key) = ident::repo_key_for_worktree(&inv.cwd)? else { return defer("no-project") };
-    let dir = devswarm_root(&inv.home).join(defaults::text("mesh_write.dir_store")).join(&repo_key);
-    if !dir.join(defaults::text("mesh_write.store_file")).is_file() {
-        return defer("no-store");
-    }
     let st = common::open_store(inv, &repo_key)?;
     let sum = summary::compute(&st, inv, None)?;
     let recent = match sum.get("recent") {
