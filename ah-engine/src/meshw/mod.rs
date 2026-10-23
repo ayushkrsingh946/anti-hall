@@ -40,6 +40,7 @@ pub mod hivecontrol;
 pub mod ident;
 pub mod idlock;
 pub mod inbox;
+pub mod inboxcmd;
 pub mod lifeverbs;
 pub mod mboxtool;
 pub mod orphan;
@@ -177,6 +178,8 @@ pub enum Verb {
     InboxReadPrimary,
     /// Plain `roster` (no `--ack`).
     Roster,
+    /// `inbox count <id>` (see [`inboxcmd`]).
+    InboxCount,
     /// A verb that needs no store: `help` and the unknown-command answer, `skip`, `archive-ignore`, `archive-unignore`,
     /// `gate-intent`, `notice --list` (see [`simple`]).
     Simple(simple::Simple),
@@ -249,6 +252,9 @@ pub fn verb_of(a: &args::Args) -> Option<Verb> {
     if p0 == defaults::text("mesh_write.verb_heartbeat") {
         return Some(Verb::Heartbeat);
     }
+    if p0 == defaults::text("mesh_write.verb_inbox") && p1 == Some(defaults::text("mesh_write.verb_count")) {
+        return Some(Verb::InboxCount);
+    }
     if p0 == defaults::text("mesh_write.verb_inbox") && p1 == Some(defaults::text("mesh_write.verb_tick")) {
         return Some(Verb::InboxTick);
     }
@@ -269,6 +275,7 @@ pub fn run_native(inv: &Inv, a: &args::Args) -> R<Answer> {
         Some(Verb::InboxTick) => tick::run(inv, a),
         Some(Verb::InboxReadPrimary) => readprimary::run(inv, a),
         Some(Verb::Roster) => roster::run(inv, a),
+        Some(Verb::InboxCount) => inboxcmd::run_count(inv, a),
         Some(Verb::Simple(v)) => simple::run(inv, a, v),
         Some(Verb::Plan) => planverbs::run_plan(inv, a),
         Some(Verb::Scope) => planverbs::run_scope(inv, a),

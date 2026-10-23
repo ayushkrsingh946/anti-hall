@@ -246,7 +246,7 @@ pub(crate) struct Counted {
 
 /// `count` for a single, registered partition. An unknown count (the inbox or its cursor file does not read) is the store
 /// alone, exactly as Node's union reports it; only the line form can print that, since its JSON carries more.
-fn count_mail(inv: &Inv, id: &str, desc: &OVal, line_form: bool) -> R<Counted> {
+pub(crate) fn count_mail(inv: &Inv, id: &str, desc: &OVal, line_form: bool, full: bool) -> R<Counted> {
     if !matches!(desc.get(defaults::text("mesh_write.field_id")), Some(OVal::Str(d)) if d == id) {
         return defer("descriptor-id");
     }
@@ -266,8 +266,21 @@ fn count_mail(inv: &Inv, id: &str, desc: &OVal, line_form: bool) -> R<Counted> {
     note_own_excluded(&c);
     let (store_base, nd_base, u) = (c.store_base, c.nd_base, c.union);
     let input = union::UnionIn { inbox: inbox_in, cursor_file: cursor_in, id, store: Some(&o.reader), store_base, nd_base, now: inv.now };
-    let total = if known { Some(union::merged_total(&input)?) } else { None };
-    let nd_cursor = if nd_base.is_finite() && nd_base > 0.0 { nd_base.floor() } else { 0.0 };
+    let total = if known {
+        Some(union::merged_total(&input)?)
+    } else if full {
+        // an unknown count: Node's total is the inbox's own line count (0 when it does not read) plus the store rows no line covers
+        Some(union::merged_total(&union::UnionIn { inbox: Some(&inbox), ..input })?)
+    } else {
+        None
+    };
+    let nd_cursor = if !known && full {
+        crate::meshw::cursors::read_cursor(Path::new(&cursor_file))
+    } else if nd_base.is_finite() && nd_base > 0.0 {
+        nd_base.floor()
+    } else {
+        0.0
+    };
     Ok(Counted {
         repo_key: o.repo_key,
         known,
@@ -423,14 +436,14 @@ fn write_cron_found_mail(inv: &Inv, id: &str, unread: usize) {
 }
 
 /// The JSON form of a tick: `count`'s result with `action` renamed in place, then `idMismatch` and `watcherArmed`.
-fn count_json(inv: &Inv, id: &str, c: &Counted) -> R<String> {
+pub(crate) fn count_json(inv: &Inv, id: &str, c: &Counted, action: &str, tick: bool) -> R<String> {
     let Some(total) = c.total else { return defer("unknown-count-json") };
     if c.store_unread > defaults::num("mesh_write.inbox_read_limit") as usize {
         return defer("read-cap");
     }
     let mut o = Obj::default();
     o.put("ok", OVal::Bool(true))
-        .put("action", s(defaults::text("mesh_write.verb_tick")))
+        .put("action", s(action))
         .put("id", s(id))
         .put("repoKey", s(&c.repo_key))
         .put("storePath", OVal::Str(union::store_dir(&inv.home, &c.repo_key).to_string_lossy().into_owned()))
@@ -451,9 +464,10 @@ fn count_json(inv: &Inv, id: &str, c: &Counted) -> R<String> {
         .put("unread", n(c.unread as f64))
         .put("cursor", n(c.nd_cursor))
         .put("storeCursor", n(c.store_cursor))
-        .put("storeUnread", n(c.store_unread as f64))
-        .put("idMismatch", OVal::Bool(false))
-        .put("watcherArmed", OVal::Bool(true));
+        .put("storeUnread", n(c.store_unread as f64));
+    if tick {
+        o.put("idMismatch", OVal::Bool(false)).put("watcherArmed", OVal::Bool(true));
+    }
     Ok(o.done().stringify())
 }
 
@@ -486,7 +500,7 @@ pub fn run(inv: &Inv, a: &Args) -> R<Answer> {
     let Some(desc) = prepared.as_ref().map(|p| p.ensured().clone()).or(found) else { return defer("no-descriptor") };
     // a `--child` tick's pre-count only proves the count can be answered: the pull pre-creates the inbox and cursor files that
     // make it known, and the count that is printed is taken after it
-    let counted = count_mail(inv, id, &desc, form.line || form.child)?;
+    let counted = count_mail(inv, id, &desc, form.line || form.child, false)?;
     wal_is_quiet(inv, prepared.as_ref().map(|p| p.wal_path()))?;
     let marker_file =
         devswarm_root(&inv.home).join(defaults::text("mesh_write.dir_wake_tick")).join(format!("{id}{}", defaults::text("mesh_write.json_suffix")));
@@ -509,7 +523,7 @@ pub fn run(inv: &Inv, a: &Args) -> R<Answer> {
             let out = crate::meshw::pull::execute(inv, p)?;
             // the count runs after the pull, over what the pull left (a failure here is a committed failure: exit 70)
             let after = ident::read_descriptor(&inv.home, id).unwrap_or(desc);
-            (count_mail(inv, id, &after, form.line)?, out.wal_blocked)
+            (count_mail(inv, id, &after, form.line, false)?, out.wal_blocked)
         }
         None => {
             crate::meshw::mark_committed();
@@ -549,7 +563,7 @@ pub fn run(inv: &Inv, a: &Args) -> R<Answer> {
         if wal_blocked {
             return defer("wal-blocked-json");
         }
-        return Ok(Answer { code: 0, stdout: format!("{}\n", count_json(inv, id, &counted)?), effect: Effect::None });
+        return Ok(Answer { code: 0, stdout: format!("{}\n", count_json(inv, id, &counted, defaults::text("mesh_write.verb_tick"), true)?), effect: Effect::None });
     }
     let line = defaults::render(
         "mesh_write.tick_line",

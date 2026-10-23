@@ -1985,3 +1985,19 @@ doc = "How many of the caller's leading arguments a line records."
 value = 4
 min = 1
 max = 64
+
+[mesh_write.verb_count]
+doc = "The count subverb of `inbox`, and the `action` of its result."
+value = "count"
+
+[mesh_write.verb_peek_primary]
+doc = "The peek-primary subverb of `inbox`."
+value = "peek-primary"
+
+[mesh_write.verb_ack]
+doc = "The ack subverb of `inbox`."
+value = "ack"
+
+[mesh_write.verb_pull]
+doc = "The pull subverb of `inbox`."
+value = "pull"
