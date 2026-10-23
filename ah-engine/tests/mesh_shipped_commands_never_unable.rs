@@ -25,9 +25,6 @@ const INBOX_SUBS: &[&str] = &["tick", "pull", "ack", "ack-primary", "count", "re
 const KNOWN_UNABLE: &[&str] = &[
     "inbox ack",          // unhandled_verb: cmdInbox count|read|ack (descriptor durable inbox)
     "inbox count",        // unhandled_verb
-    "inbox peek-primary", // unhandled_verb: read-primary without the ack
-    "inbox pull",         // unhandled_verb: register + pullOnce
-    "inbox read",         // unhandled_verb
 ];
 /// The verbs whose next word is a subcommand.
 const WITH_SUB: &[&str] = &["inbox", "plan", "scope", "primary", "retention", "mesh"];
