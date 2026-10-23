@@ -22,10 +22,7 @@ const INBOX_SUBS: &[&str] = &["tick", "pull", "ack", "ack-primary", "count", "re
 /// Shipped commands the engine cannot yet answer without Node (measured 2026-10-23, each with the site that gives up). This is the
 /// open work list, not an allowance: the test fails when a command is added to it without being unable, and when one listed here is
 /// answered (delete the entry). Porting every entry is tracked in the P0 mesh-defer task; the list only ever shrinks.
-const KNOWN_UNABLE: &[&str] = &[
-    "inbox ack",          // unhandled_verb: cmdInbox count|read|ack (descriptor durable inbox)
-    "inbox count",        // unhandled_verb
-];
+const KNOWN_UNABLE: &[&str] = &[];
 /// The verbs whose next word is a subcommand.
 const WITH_SUB: &[&str] = &["inbox", "plan", "scope", "primary", "retention", "mesh"];
 
@@ -142,6 +139,19 @@ fn no_command_the_shipped_texts_name_exits_unable_without_node() {
     let o = run(&["inbox".into(), "read-primary".into(), "never-registered-ws".into()]);
     assert_eq!(o.status.code(), Some(2), "{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
     assert!(String::from_utf8_lossy(&o.stdout).contains("\"reason\":\"unregistered-workspace\""), "{}", String::from_utf8_lossy(&o.stdout));
+    // a workspace registered without an inbox path (the one every command above names): Node refuses count|read|ack with
+    // `no-inbox-path` (exit 2); the engine must answer the same instead of giving up (69)
+    for sub in ["count", "read", "ack"] {
+        register();
+        let desc = home.join(".anti-hall").join("devswarm").join("workspaces").join("fake-ws-1.json");
+        let mut d: serde_json::Value = serde_json::from_str(&fs::read_to_string(&desc).unwrap()).unwrap();
+        d.as_object_mut().unwrap().remove("inboxPath");
+        fs::write(&desc, d.to_string()).unwrap();
+        let o = run(&["inbox".into(), sub.into(), "fake-ws-1".into()]);
+        let out = String::from_utf8_lossy(&o.stdout);
+        assert_eq!(o.status.code(), Some(2), "inbox {sub}: {out}{}", String::from_utf8_lossy(&o.stderr));
+        assert!(out.contains("\"reason\":\"no-inbox-path\"") && out.contains("\"id\":\"fake-ws-1\""), "inbox {sub}: {out}");
+    }
     let _ = fs::remove_dir_all(&scratch);
     let now: BTreeSet<&str> = unable.iter().map(|(k, _)| k.as_str()).collect();
     let known: BTreeSet<&str> = KNOWN_UNABLE.iter().copied().collect();

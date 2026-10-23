@@ -27,7 +27,10 @@ enum Found {
 fn locate(inv: &Inv, sub: &str, raw: &str, ack_as_owner: bool) -> R<Found> {
     let has_inbox = |d: &OVal| union::path_field(d, defaults::text("mesh_write.field_inbox_path")).map(|p| p.is_some());
     if let Some(desc) = ident::read_descriptor(&inv.home, raw) {
-        return if has_inbox(&desc)? { Ok(Found::Go { id: raw.to_string(), desc, resolved_from: None, redirected_from: None }) } else { defer("descriptor-without-inbox") };
+        // a descriptor with no inbox path is no inbox: Node goes on to the redirect / label / refusal steps below
+        if has_inbox(&desc)? {
+            return Ok(Found::Go { id: raw.to_string(), desc, resolved_from: None, redirected_from: None });
+        }
     }
     let action = format!("{}{sub}", defaults::text("mesh_write.act_inbox_prefix"));
     let id = match crate::meshw::actverbs::resolve_target_id(inv, raw, &action)? {
@@ -35,7 +38,9 @@ fn locate(inv: &Inv, sub: &str, raw: &str, ack_as_owner: bool) -> R<Found> {
         Err(refused) => return Ok(Found::Out(refused)),
     };
     if let Some(desc) = ident::read_descriptor(&inv.home, &id) {
-        return if has_inbox(&desc)? { Ok(Found::Go { id, desc, resolved_from: None, redirected_from: None }) } else { defer("descriptor-without-inbox") };
+        if has_inbox(&desc)? {
+            return Ok(Found::Go { id, desc, resolved_from: None, redirected_from: None });
+        }
     }
     let Some(repo_key) = ident::resolve_context(&inv.cwd, true)?.repo_key else { return defer("no-project") };
     let Some(reader) = tick::open_reader(inv, &repo_key)? else { return defer("no-store") };
