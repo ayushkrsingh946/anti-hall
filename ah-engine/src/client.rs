@@ -467,6 +467,27 @@ pub(crate) fn release_spawn_lock() {
     crate::discard::harmless(std::fs::remove_file(state_file("spawn_lock"))); // keep: absent lock is the desired state
 }
 
+/// Whether a daemon holds the singleton lock (`paths::lock_for`): one that is starting, serving or draining. It is the daemon's own
+/// test for "another daemon owns this socket", and unlike a ping it does not depend on the daemon having a free worker.
+fn daemon_lock_held(sock: &Path) -> bool {
+    let Ok(f) = std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(false).open(paths::lock_for(sock)) else { return false };
+    // SAFETY: `f` is an open file owned by this scope, so its descriptor is valid; `flock` takes only the descriptor and a flag.
+    unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) != 0 }
+}
+
+/// The single-flight lock, but only for a client that has to start a daemon. The lock is free once a daemon listens (it releases it
+/// then), so a client that failed against that daemon a moment earlier (a busy reply, a timeout), or that probed before it listened,
+/// can win the lock with a daemon already up. Under the lock it asks whether a daemon holds the singleton lock; one that does is
+/// not started a second time (the second `serve` would only be refused by that lock, a process started for nothing).
+fn spawn_lock_if_absent(sock: &Path) -> Option<SpawnLock> {
+    let lock = spawn_lock()?;
+    if daemon_lock_held(sock) {
+        release_spawn_lock();
+        return None;
+    }
+    Some(lock)
+}
+
 fn spawn_lock() -> Option<SpawnLock> {
     crate::discard::harmless(crate::limits::ensure_private_dir(&paths::dir())); // keep: create_new below is the real gate
     let p = state_file("spawn_lock");
@@ -645,7 +666,7 @@ fn attempt_with(payload: &[u8], cfg: &ClientConfig, answer_now: bool, hold_wait_
             note_unavailable();
             mark_daemon_down(&why);
             if !health::crashloop_tripped(cfg)
-                && let Some(_spawn_lock) = spawn_lock()
+                && let Some(_spawn_lock) = spawn_lock_if_absent(&sock)
             {
                 health::log_event("client_spawn_attempt", "singleflight", &why);
                 let _ = spawn_daemon();
@@ -709,7 +730,7 @@ fn attempt_with(payload: &[u8], cfg: &ClientConfig, answer_now: bool, hold_wait_
 fn absent_guarded(sock: &Path, payload: &[u8], cfg: &ClientConfig, hold_wait_on_ok: bool) -> Option<String> {
     let start = Instant::now();
     // the spawn lock is held until this call's wait ends, so the calls arriving meanwhile wait instead of spawning again
-    let (spawn_guard, mut child) = match spawn_lock() {
+    let (spawn_guard, mut child) = match spawn_lock_if_absent(sock) {
         Some(lock) => {
             health::log_event("client_spawn_attempt", "singleflight", "absent");
             let Some(child) = spawn_daemon() else {
@@ -774,7 +795,7 @@ fn absent_guarded(sock: &Path, payload: &[u8], cfg: &ClientConfig, hold_wait_on_
 fn absent_unguarded(sock: &Path, payload: &[u8], cfg: &ClientConfig, answer_now: bool) -> Option<String> {
     wait_marker(false);
     note_unavailable();
-    let _spawn_lock = spawn_lock()?;
+    let _spawn_lock = spawn_lock_if_absent(sock)?;
     health::log_event("client_spawn_attempt", "singleflight", "absent");
     let Some(mut child) = spawn_daemon() else {
         mark_daemon_down("spawn");
