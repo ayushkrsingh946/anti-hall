@@ -324,3 +324,45 @@ fn an_address_that_lands_on_a_row_without_an_inbox_is_refused_like_node_not_defe
         assert_eq!((code, v["reason"].as_str(), v["id"].as_str()), (2, Some("unregistered-workspace"), Some("gone-ws")), "inbox {sub} gone-ws: {v}");
     }
 }
+
+/// The SkyCrew Primary's hot path: twin rows on one worktree, each carrying an archive marker that a newer occupant of the id
+/// superseded (the live session differs from the marker's) and a caller whose session is not the anchor's. Node reads such a
+/// marker as "not archived" and answers; the engine used to defer (`marker-superseded`) the text read and the tick.
+#[test]
+fn twin_rows_with_a_superseded_archive_marker_and_an_app_session_seat_answer_read_and_tick() {
+    let fx = Fx::new("superseded");
+    let (label, key) = fx.twins();
+    {
+        let st = fx.store(&key);
+        st.append_mesh_row(&row(&label, 1_000, "h-a1", "to label", "peer-a")).unwrap();
+        st.append_mesh_row(&row("child-x", 2_000, "h-b1", "to child", "peer-b")).unwrap();
+    }
+    let archived = fx.home.join(".anti-hall/devswarm/archived");
+    fs::create_dir_all(&archived).unwrap();
+    let wt = serde_json::to_string(fx.repo.to_str().unwrap()).unwrap();
+    for id in ["child-x", label.as_str()] {
+        fs::write(archived.join(format!("{id}.json")), format!(r#"{{"id":"{id}","sessionId":"s-old-occupant","worktreePath":{wt}}}"#)).unwrap();
+    }
+    let db = fx.home.join("app.db");
+    app_db(&db, &fx.repo, "s-resumed");
+    let enc: String = fx.repo.to_str().unwrap().chars().map(|c| if matches!(c, '/' | '\\' | ':' | '.') { '-' } else { c }).collect();
+    let dir = fx.home.join(".claude/projects").join(enc);
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("s-resumed.jsonl"), format!("{{\"cwd\":{wt}}}\n")).unwrap();
+    let envs = [("DEVSWARM_BUILDER_ID", "child-x"), ("CLAUDE_CODE_SESSION_ID", "s-resumed"), ("ANTIHALL_DEVSWARM_APP_DB", db.to_str().unwrap())];
+    let (code, out) = fx.raw_env(&["inbox", "read-primary", &label, "--format", "text", "--ack-after-print"], &envs);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("to label"), "{out}");
+    // the ticking row of the group has an NDJSON inbox and a live watcher, as the Primary's has
+    let (inbox, cursor) = (fx.home.join("tick-w.ndjson"), fx.home.join("tick-w.cursor"));
+    fs::write(&inbox, "").unwrap();
+    fs::write(&cursor, "0").unwrap();
+    let (code, v) = fx.run(&["register", "tick-w", "--worktree", fx.repo.to_str().unwrap(), "--session", "s-tick", "--inbox", inbox.to_str().unwrap(), "--cursor", cursor.to_str().unwrap()]);
+    assert_eq!(code, 0, "{v}");
+    let locks = fx.home.join(".anti-hall/devswarm/locks");
+    fs::create_dir_all(&locks).unwrap();
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as i64;
+    fs::write(locks.join("wake-watch-tick-w.lock"), format!(r#"{{"pid":{},"ts":{now}}}"#, std::process::id())).unwrap();
+    let (code, out) = fx.raw_env(&["inbox", "tick", "tick-w", "--quiet"], &envs);
+    assert_eq!(code, 0, "{out}");
+}
