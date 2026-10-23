@@ -330,6 +330,10 @@ fn nothing() -> Spec {
 }
 
 
+fn d_inbox_fn(h: &Path, wt: &Path) -> Vec<Value> {
+    vec![desc(h, "child-1", Some("inbox/child-1.ndjson"), Some("cursors-nd/child-1.txt"), wt)]
+}
+
 fn cmd(verb: &str, id: &str, more: &[&str]) -> Vec<String> {
     let mut v: Vec<String> = vec!["inbox".into(), verb.into(), id.into()];
     v.extend(more.iter().map(|x| (*x).to_string()));
@@ -416,7 +420,7 @@ fn cases(fx: &Fx) -> Vec<Case> {
         vec!["\"cursor\":3"],
     ));
     // ---- ack: deferred ----
-    v.push(base("ack-no-descriptor", cmd("ack", "ghost", &[]), ack(floors("child-1", 0, 0), d_inbox.clone()), inbox(text3.clone()), false, vec![]));
+    v.push(base("ack-no-descriptor", cmd("ack", "ghost", &[]), ack(floors("child-1", 0, 0), d_inbox.clone()), inbox(text3.clone()), true, vec!["unregistered-workspace"]));
     // ---- the window flags: refused before anything is read ----
     for (name, verb, flags) in [
         ("window-count-since", "count", vec!["--since", "1"]),
@@ -442,9 +446,25 @@ fn cases(fx: &Fx) -> Vec<Case> {
     let mut other_row = base("ack-by-another-registered-row", cmd("ack", "child-1", &[]), ack(floors("child-1", 0, 0), d_inbox.clone()), inbox(text3.clone()), true, vec!["ownership-mismatch"]);
     other_row.cwd = "main";
     v.push(other_row);
+    // ---- an id with no descriptor of its own ----
+    let mesh = fx.child_mesh.clone();
+    for verb in ["count", "read", "ack"] {
+        let name: &'static str = Box::leak(format!("{verb}-by-the-mesh-label").into_boxed_str());
+        let nm: &'static str = Box::leak(format!("{verb}-registry-only-row").into_boxed_str());
+        v.push(base(name, cmd(verb, &mesh, &[]), ack(floors("child-1", 0, 0), d_inbox.clone()), inbox(text3.clone()), true, vec!["\"id\":\"child-1\""]));
+        let wt2 = wt.clone();
+        v.push(base(
+            nm,
+            cmd(verb, "regonly-1", &[]),
+            Box::new(move |h| json!({"rows": floors("child-1", 0, 0), "descriptors": d_inbox_fn(h, &wt2), "registry": [{"id": "regonly-1", "worktreePath": wt2.join("nowhere").to_string_lossy(), "sessionId": "regonly-1"}]})),
+            inbox(text3.clone()),
+            true,
+            vec!["no-inbox-path"],
+        ));
+    }
     // ---- count: deferred ----
-    v.push(base("count-no-descriptor", cmd("count", "ghost", &[]), ack(floors("child-1", 0, 0), d_inbox.clone()), inbox(text3.clone()), false, vec![]));
-    v.push(base("read-no-descriptor", cmd("read", "ghost", &[]), ack(floors("child-1", 0, 0), d_inbox.clone()), inbox(text3.clone()), false, vec![]));
+    v.push(base("count-no-descriptor", cmd("count", "ghost", &[]), ack(floors("child-1", 0, 0), d_inbox.clone()), inbox(text3.clone()), true, vec!["unregistered-workspace"]));
+    v.push(base("read-no-descriptor", cmd("read", "ghost", &[]), ack(floors("child-1", 0, 0), d_inbox.clone()), inbox(text3.clone()), true, vec!["unregistered-workspace"]));
 
     v
 }

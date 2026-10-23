@@ -265,7 +265,7 @@ fn descriptor_mesh_id(home: &std::path::Path, id: &str) -> R<Option<String>> {
 }
 
 /// A fold-time retired-redirect file exists for `id` (its content is not read: any file at all is left to Node).
-fn retired_redirect_exists(inv: &Inv, id: &str) -> bool {
+pub(crate) fn retired_redirect_exists(inv: &Inv, id: &str) -> bool {
     crate::meshw::idlock::is_safe_id(id)
         && crate::meshw::idlock::devswarm_root(&inv.home)
             .join(defaults::text("devswarm_cli.rr_dir_retired"))

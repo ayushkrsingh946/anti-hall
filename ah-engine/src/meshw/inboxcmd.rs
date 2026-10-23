@@ -10,9 +10,79 @@ use crate::meshw::args::Args;
 use crate::meshw::common::{self, Inv, Obj, n, s};
 use crate::meshw::ident::{R, defer};
 use crate::meshw::idlock::is_safe_id;
-use crate::meshw::send::{Answer, Effect, resolve_mesh_target};
+use crate::meshw::send::{Answer, Effect, resolve_mesh_target, retired_redirect_exists};
+use crate::meshw::idlock::devswarm_root;
 use crate::meshw::{cursors, ident};
 use crate::meshw::{tick, union};
+
+/// Where a count, read or ack lands: the descriptor it works on, or the refusal Node prints for an id nothing resolves.
+enum Found {
+    Go { id: String, desc: OVal, resolved_from: Option<String> },
+    Out(Answer),
+}
+
+/// The descriptor of `raw` for `inbox <sub>`, as Node finds it: the dispatcher's canonical id, then (for an id with no descriptor of
+/// its own) the mesh label of a registered row, else the refusal `unregistered-workspace` / `no-inbox-path`. Anything else Node
+/// resolves (a prefix, a fold-retired redirect, an ambiguous label, a descriptor without an inbox path) is left to it.
+fn locate(inv: &Inv, sub: &str, raw: &str) -> R<Found> {
+    let has_inbox = |d: &OVal| union::path_field(d, defaults::text("mesh_write.field_inbox_path")).map(|p| p.is_some());
+    if let Some(desc) = ident::read_descriptor(&inv.home, raw) {
+        return if has_inbox(&desc)? { Ok(Found::Go { id: raw.to_string(), desc, resolved_from: None }) } else { defer("descriptor-without-inbox") };
+    }
+    let action = format!("{}{sub}", defaults::text("mesh_write.act_inbox_prefix"));
+    let id = match crate::meshw::actverbs::resolve_target_id(inv, raw, &action)? {
+        Ok(id) => id,
+        Err(refused) => return Ok(Found::Out(refused)),
+    };
+    if let Some(desc) = ident::read_descriptor(&inv.home, &id) {
+        return if has_inbox(&desc)? { Ok(Found::Go { id, desc, resolved_from: None }) } else { defer("descriptor-without-inbox") };
+    }
+    if retired_redirect_exists(inv, &id) {
+        return defer("retired-redirect");
+    }
+    let Some(repo_key) = ident::resolve_context(&inv.cwd, true)?.repo_key else { return defer("no-project") };
+    let Some(reader) = tick::open_reader(inv, &repo_key)? else { return defer("no-store") };
+    let rows = ident::rows_of(&reader.roster().map_err(|e| ident::Defer(format!("registry:{e}")))?);
+    let exact = rows.iter().any(|r| r.id == id);
+    if !exact {
+        // a mesh label of a registered row addresses that row
+        if let Some(target) = resolve_mesh_target(inv, Some(&reader), &rows, Some(id.as_str()))? {
+            if target.id != id {
+                if let Some(desc) = ident::read_descriptor(&inv.home, &target.id)
+                    && has_inbox(&desc)?
+                {
+                    return Ok(Found::Go { id: target.id, desc, resolved_from: Some(id) });
+                }
+            }
+            return defer("resolved-without-inbox");
+        }
+        // a prefix of a registry id or a descriptor name is Node's to resolve
+        let names = std::fs::read_dir(devswarm_root(&inv.home).join(defaults::text("mesh_write.dir_workspaces"))).map(|d| d.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect::<Vec<_>>()).unwrap_or_default();
+        if rows.iter().any(|r| r.id.starts_with(&id)) || names.iter().any(|n| n.starts_with(&id)) {
+            return defer("prefix-resolution");
+        }
+    }
+    let has_messages = reader.message_count(&id).map_err(|e| ident::Defer(format!("store-read:{e}")))? > 0;
+    let reason = if exact || has_messages { defaults::text("mesh_write.reason_no_inbox_path") } else { defaults::text("mesh_write.reason_unregistered") };
+    let q = OVal::Str(id.clone()).stringify();
+    let error = defaults::render(if exact || has_messages { "mesh_write.msg_no_inbox_path" } else { "mesh_write.msg_unregistered" }, &[("id", &q)]);
+    let mut o = Obj::default();
+    o.put("ok", OVal::Bool(false))
+        .put("id", s(&id))
+        .put("reason", s(reason))
+        .put("error", s(&error))
+        .put("repoKey", s(&repo_key))
+        .put("storePath", OVal::Str(union::store_dir(&inv.home, &repo_key).to_string_lossy().into_owned()))
+        .put("cwd", s(&inv.cwd))
+        .put("meshPartitionIds", OVal::Arr(vec![s(&id)]))
+        .put("known", OVal::Bool(false))
+        .put("storeUnavailable", OVal::Bool(false))
+        .put("storeUnavailableReason", OVal::Null)
+        .put("meshGroupUnresolved", OVal::Bool(false))
+        .put("meshGroupError", OVal::Null)
+        .put("totalsPartial", OVal::Bool(true));
+    Ok(Found::Out(Answer { code: 2, stdout: format!("{}\n", o.done().stringify()), effect: Effect::None }))
+}
 
 /// What a read cut short: the rows withheld and the cap that withheld them (Node's `truncated`, `truncatedCount`, `limit`).
 pub(crate) struct Truncation {
@@ -90,11 +160,15 @@ pub fn run_count(inv: &Inv, a: &Args) -> R<Answer> {
     if let Some(refused) = window(inv, a, defaults::text("mesh_write.verb_count"))? {
         return Ok(refused);
     }
-    let id = plain_id(a, &[defaults::text("mesh_write.flag_limit")])?;
-    let Some(desc) = ident::read_descriptor(&inv.home, id) else { return defer("no-descriptor") };
+    let raw = plain_id(a, &[defaults::text("mesh_write.flag_limit")])?;
+    let (id, desc, resolved_from) = match locate(inv, defaults::text("mesh_write.verb_count"), raw)? {
+        Found::Go { id, desc, resolved_from } => (id, desc, resolved_from),
+        Found::Out(refused) => return Ok(refused),
+    };
+    let id = id.as_str();
     let mut counted = tick::count_mail(inv, id, &desc, true, true)?;
     let trunc = apply_cap(&mut counted, a);
-    let stdout = tick::count_json(inv, id, &counted, defaults::text("mesh_write.verb_count"), false, Some(trunc.as_ref()))?;
+    let stdout = tick::count_json(inv, id, &counted, defaults::text("mesh_write.verb_count"), false, Some(trunc.as_ref()), resolved_from.as_deref())?;
     if !counted.known {
         warn_unknown(defaults::text("mesh_write.verb_count"), id);
     }
@@ -106,16 +180,23 @@ pub fn run_read(inv: &Inv, a: &Args) -> R<Answer> {
     if let Some(refused) = window(inv, a, defaults::text("mesh_write.verb_read"))? {
         return Ok(refused);
     }
-    let id = plain_id(a, &[defaults::text("mesh_write.flag_limit")])?;
-    let Some(desc) = ident::read_descriptor(&inv.home, id) else { return defer("no-descriptor") };
+    let raw = plain_id(a, &[defaults::text("mesh_write.flag_limit")])?;
+    let (id, desc, resolved_from) = match locate(inv, defaults::text("mesh_write.verb_read"), raw)? {
+        Found::Go { id, desc, resolved_from } => (id, desc, resolved_from),
+        Found::Out(refused) => return Ok(refused),
+    };
+    let id = id.as_str();
     let mut c = tick::count_mail(inv, id, &desc, true, true)?;
     let Some(total) = c.total else { return defer("unknown-count-json") };
     let trunc = apply_cap(&mut c, a);
     let mut o = Obj::default();
     o.put("ok", OVal::Bool(true))
         .put("action", s(defaults::text("mesh_write.action_read")))
-        .put("id", s(id))
-        .put("repoKey", s(&c.repo_key))
+        .put("id", s(id));
+    if let Some(f) = &resolved_from {
+        o.put("resolvedFrom", s(f));
+    }
+    o.put("repoKey", s(&c.repo_key))
         .put("storePath", OVal::Str(union::store_dir(&inv.home, &c.repo_key).to_string_lossy().into_owned()))
         .put("cwd", s(&inv.cwd))
         .put("meshPartitionIds", OVal::Arr(vec![s(id)]))
@@ -165,7 +246,11 @@ pub fn run_ack(inv: &Inv, a: &Args) -> R<Answer> {
     }
     let ack_as_owner = a.has(defaults::text("mesh_write.flag_ack_as_owner"));
     common::seat_check(inv)?;
-    let Some(desc) = ident::read_descriptor(&inv.home, id) else { return defer("no-descriptor") };
+    let (id, desc, resolved_from) = match locate(inv, defaults::text("mesh_write.verb_ack"), id)? {
+        Found::Go { id, desc, resolved_from } => (id, desc, resolved_from),
+        Found::Out(refused) => return Ok(refused),
+    };
+    let id = id.as_str();
     let Some(inbox) = union::path_field(&desc, defaults::text("mesh_write.field_inbox_path"))? else { return defer("no-inbox-path") };
     let Some(cursor_file) = union::path_field(&desc, defaults::text("mesh_write.field_cursor_path"))? else { return defer("no-cursor-path") };
     let mut c = tick::count_mail(inv, id, &desc, true, true)?;
@@ -299,6 +384,9 @@ pub fn run_ack(inv: &Inv, a: &Args) -> R<Answer> {
         .put("known", OVal::Bool(c.known))
         .put("storeUnavailable", OVal::Bool(false))
         .put("storeUnavailableReason", OVal::Null);
+    if let Some(f) = &resolved_from {
+        out.put("resolvedFrom", s(f));
+    }
     if !failures.is_empty() {
         out.put("cursorWriteFailures", OVal::Arr(failures)).put("cursorPersisted", OVal::Bool(false));
     }

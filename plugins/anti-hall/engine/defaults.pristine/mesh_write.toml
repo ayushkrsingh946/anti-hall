@@ -2109,3 +2109,23 @@ value = "not all unread messages were returned ({count} withheld) — the read c
 [mesh_write.truncated_hint_ack]
 doc = "The `truncatedHint` of an ack cut short by the per-call cap. Placeholders: {count} (rows withheld) and {limit}."
 value = "not all unread messages were acked this call ({count} withheld) — sibling cursors were NOT advanced past withheld messages, so acking again (optionally with a higher --limit than {limit}) consumes them"
+
+[mesh_write.act_inbox_prefix]
+doc = "What the `action` of an id-resolution refusal of an inbox verb starts with (the action is `inbox-<sub>`)."
+value = "inbox-"
+
+[mesh_write.reason_unregistered]
+doc = "The reason of an inbox read of an id with no descriptor, no registry row and no messages."
+value = "unregistered-workspace"
+
+[mesh_write.reason_no_inbox_path]
+doc = "The reason of an inbox read of an id that is registered (or has messages) but never got an inbox path."
+value = "no-inbox-path"
+
+[mesh_write.msg_unregistered]
+doc = "The refusal text for an unregistered id. Placeholder: {id} (JSON-quoted)."
+value = "workspace {id} is not registered and has no messages (no descriptor, no registry row, no store history) — register it first (or check the id for a typo)"
+
+[mesh_write.msg_no_inbox_path]
+doc = "The refusal text for a registered id that never got an inbox path. Placeholder: {id} (JSON-quoted)."
+value = "no inboxPath for workspace {id} (registered, but never given an --inbox path — register it first)"

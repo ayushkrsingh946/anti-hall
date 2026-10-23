@@ -451,7 +451,7 @@ fn write_cron_found_mail(inv: &Inv, id: &str, unread: usize) {
 }
 
 /// The JSON form of a tick: `count`'s result with `action` renamed in place, then `idMismatch` and `watcherArmed`.
-pub(crate) fn count_json(inv: &Inv, id: &str, c: &Counted, action: &str, tick: bool, capped: Option<Option<&crate::meshw::inboxcmd::Truncation>>) -> R<String> {
+pub(crate) fn count_json(inv: &Inv, id: &str, c: &Counted, action: &str, tick: bool, capped: Option<Option<&crate::meshw::inboxcmd::Truncation>>, resolved_from: Option<&str>) -> R<String> {
     let Some(total) = c.total else { return defer("unknown-count-json") };
     // a caller that applied the cap itself (`capped`) reports it; the tick has no way to say a count was cut
     if capped.is_none() && c.store_unread > defaults::num("mesh_write.inbox_read_limit") as usize {
@@ -460,8 +460,11 @@ pub(crate) fn count_json(inv: &Inv, id: &str, c: &Counted, action: &str, tick: b
     let mut o = Obj::default();
     o.put("ok", OVal::Bool(true))
         .put("action", s(action))
-        .put("id", s(id))
-        .put("repoKey", s(&c.repo_key))
+        .put("id", s(id));
+    if let Some(f) = resolved_from {
+        o.put("resolvedFrom", s(f));
+    }
+    o.put("repoKey", s(&c.repo_key))
         .put("storePath", OVal::Str(union::store_dir(&inv.home, &c.repo_key).to_string_lossy().into_owned()))
         .put("cwd", s(&inv.cwd))
         .put("meshPartitionIds", OVal::Arr(vec![s(id)]))
@@ -582,7 +585,7 @@ pub fn run(inv: &Inv, a: &Args) -> R<Answer> {
         if wal_blocked {
             return defer("wal-blocked-json");
         }
-        return Ok(Answer { code: 0, stdout: format!("{}\n", count_json(inv, id, &counted, defaults::text("mesh_write.verb_tick"), true, None)?), effect: Effect::None });
+        return Ok(Answer { code: 0, stdout: format!("{}\n", count_json(inv, id, &counted, defaults::text("mesh_write.verb_tick"), true, None, None)?), effect: Effect::None });
     }
     let line = defaults::render(
         "mesh_write.tick_line",
