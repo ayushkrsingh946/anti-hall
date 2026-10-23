@@ -2265,3 +2265,58 @@ value = "file-over-hard-cap"
 [mesh_write.read_why_over_soft]
 doc = "The reason a mesh file read was counted and logged: the file is past `file_read_max_bytes` but was read."
 value = "file-over-soft-cap"
+
+[mesh_write.refusal_prefix]
+doc = "What starts the reason of a deferral that is really the verb's own refusal (Node's `{ ok: false, ... }` result, exit `exit_refused`): the rest of the reason is the refusal's JSON body. Such a reason is printed, never handed on."
+value = "refusal:"
+
+[mesh_write.exit_refused]
+doc = "Exit code of a verb's own refusal (Node's `{ ok: false }` result)."
+value = 2
+min = 1
+max = 255
+
+[mesh_write.result_refused]
+doc = "Log result of a call the verb refused itself."
+value = "refused"
+
+[mesh_write.reason_seat_conflict]
+doc = "The reason of a send, ack, spawn, merge or correct refused because another live session holds the Primary seat."
+value = "primary-seat-conflict"
+
+[mesh_write.reason_legacy_journal_store]
+doc = "The reason a verb refuses a project whose mesh store is pinned to (or forced onto) the legacy journal backend, which only a Node older than 22.5 wrote and which no longer has a reader."
+value = "legacy-journal-store"
+
+[mesh_write.msg_legacy_journal_store]
+doc = "The refusal text of that case: {repo_key} is the project's store."
+value = "the mesh store of project {repo_key} uses the legacy journal backend (written by a Node older than 22.5), which this version cannot read or write; nothing was done. Move its data into the sqlite store with `doctor --repair`, or remove the BACKEND marker and the journal directory if the store holds nothing you need"
+
+[mesh_write.heal_cooldown_flag]
+doc = "The self-heal result field set while the cooldown of an earlier installer attempt has not elapsed (`daemonHealCooldown`)."
+value = "daemonHealCooldown"
+
+[mesh_write.heal_retry_after]
+doc = "The self-heal result field naming the remaining cooldown in milliseconds (`retryAfterMs`)."
+value = "retryAfterMs"
+
+[mesh_write.self_heal_dir]
+doc = "Directory under the DevSwarm state directory that holds the self-heal cooldown files (register.js selfHealCooldownPath)."
+value = "self-heal"
+
+[mesh_write.self_heal_file_prefix]
+doc = "What starts the name of a project's self-heal cooldown file: `<this><repoKey>.json`."
+value = "ingest-"
+
+[mesh_write.self_heal_cooldown_ms]
+doc = "How long after an installer attempt the next one waits (register.js SELF_HEAL_COOLDOWN_MS)."
+value = 60000
+min = 1000
+
+[mesh_write.ingest_owner_file]
+doc = "The ownership marker of ingest in the DevSwarm state directory (ingest-health.js ingestOwnerPath); the same file `devswarm_ingest.owner_file` names."
+value = "ingest-owner.json"
+
+[mesh_write.ingest_owner_name]
+doc = "The `owner` word of that marker while the engine drains ingest."
+value = "engine"

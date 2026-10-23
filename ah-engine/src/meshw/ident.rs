@@ -44,6 +44,18 @@ pub fn js_to_string(v: &OVal) -> String {
     }
 }
 
+/// A refusal of the verb that no later code can undo (Node returns it as the verb's result with exit 2), carried up through the
+/// deferral channel: the reason is `mesh_write.refusal_prefix` and the refusal's JSON body (without the `action`, which the front
+/// door adds from the verb's name). The front door prints it with `mesh_write.exit_refused`; it is never a deferral to Node.
+pub fn refuse<T>(body: &str) -> Result<T, Defer> {
+    Err(Defer(format!("{}{body}", defaults::text("mesh_write.refusal_prefix"))))
+}
+
+/// The JSON body of a refusal carried by [`refuse`]; `None` for any other deferral.
+pub fn refusal_body(d: &Defer) -> Option<&str> {
+    d.0.strip_prefix(defaults::text("mesh_write.refusal_prefix"))
+}
+
 /// Result of a resolution that may defer.
 pub type R<T> = Result<T, Defer>;
 
