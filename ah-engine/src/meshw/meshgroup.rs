@@ -191,6 +191,8 @@ pub fn is_forwardable(row: &Value) -> bool {
 pub struct Folded {
     /// The rows to deliver (not seen before, before the first row the fold cannot place).
     pub delivered: Vec<Value>,
+    /// Where each delivered row stood in the partition's unread list (the read's cap bookkeeping needs it).
+    pub delivered_idx: Vec<usize>,
     /// Rows withheld because an earlier row ended the deliverable prefix (never lost: the cursor never passes them).
     pub gap_withheld: usize,
     /// How many physical rows the ack may pass: delivered, already-seen, and logically duplicate ones, up to the gap.
@@ -252,7 +254,7 @@ impl Dedup {
     pub fn fold(&mut self, inv: &Inv, rows: Vec<Value>) -> Folded {
         let mut out = Folded::default();
         let mut gap_seen = false;
-        for row in rows {
+        for (pos, row) in rows.into_iter().enumerate() {
             let was_gap = gap_seen;
             let orig = forwarded_orig_hash_of(&row);
             let hash = row["hash"].as_str().filter(|h| !h.is_empty()).map(str::to_string);
@@ -297,6 +299,7 @@ impl Dedup {
             }
             out.consumed_count += 1.0;
             out.delivered.push(row);
+            out.delivered_idx.push(pos);
             out.consumed_through.push(out.consumed_count);
         }
         out
